@@ -69,6 +69,23 @@ impl BundlePlayback {
         self.bundle.scene.output_size
     }
 
+    /// The bundle's audio tracks.
+    pub fn audio(&self) -> &[gaanim_bundle::AudioData] {
+        &self.bundle.scene.audio
+    }
+
+    /// Bytes of the embedded media `entry`; `None` while they download (they
+    /// are asked for through [`Self::take_wanted`]).
+    pub fn media(&mut self, entry: &str) -> Result<Option<Vec<u8>>, BundleError> {
+        match self.bundle.media(entry) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) => match self.want(error) {
+                None => Ok(None),
+                Some(error) => Err(error),
+            },
+        }
+    }
+
     /// Byte ranges of a downloading bundle to fetch, and whether the frame at
     /// the playhead waits for them (the rest is read-ahead).
     pub fn take_wanted(&mut self) -> (Vec<Range<u64>>, bool) {
@@ -95,7 +112,7 @@ const READ_AHEAD_CHUNKS: usize = 3;
 /// A recorded frame composed for a preview, or why there is none.
 pub enum Preview {
     /// The scene and the color to render it over.
-    Ready(vello::Scene, vello::peniko::Color),
+    Ready(Box<vello::Scene>, vello::peniko::Color),
     /// Its bytes are still downloading; ask again later.
     Pending,
     Failed,
@@ -255,6 +272,15 @@ impl BundlePlayback {
         };
         let background = self.bundle.scene.background.clone().map(|mut background| {
             background.pixel_size = (width, height);
+            // A preview rasterizes a shader background on the CPU, which
+            // blocks on the GPU; the web cannot block, so it shows the
+            // shader's color.
+            if crate::WEB {
+                background.paint = without_shader(background.paint);
+                for segment in &mut background.segment_paints {
+                    segment.paint = segment.paint.take().map(without_shader);
+                }
+            }
             background
         });
         let scene = gaanim_export::prelude::compose_bundle_frame(
@@ -272,7 +298,18 @@ impl BundlePlayback {
             .clear_color
             .map(|[r, g, b, a]| vello::peniko::Color::from_rgba8(r, g, b, a))
             .unwrap_or(vello::peniko::Color::BLACK);
-        Preview::Ready(scene, base)
+        Preview::Ready(Box::new(scene), base)
+    }
+}
+
+/// `paint`, with a shader replaced by its fallback color.
+fn without_shader(
+    paint: gaanim_renderer::background::BackgroundPaint,
+) -> gaanim_renderer::background::BackgroundPaint {
+    use gaanim_renderer::background::BackgroundPaint;
+    match paint {
+        BackgroundPaint::Shader(shader) => BackgroundPaint::solid(shader.fallback()),
+        paint => paint,
     }
 }
 

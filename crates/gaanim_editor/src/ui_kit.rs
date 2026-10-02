@@ -77,6 +77,10 @@ pub(crate) enum Icon {
     Layout,
     /// Two chain links: copy a link.
     Link,
+    /// A speaker with sound waves.
+    Volume,
+    /// A speaker with a cross: muted.
+    VolumeMuted,
 }
 
 /// How an icon button presents its state.
@@ -199,6 +203,50 @@ pub(crate) fn icon_button_sized(
 }
 
 /// Thin vertical rule used between control groups.
+/// The preview's volume: a speaker that mutes and unmutes, and a slider
+/// beside it when `slider`.
+pub(crate) fn volume_control(ui: &mut Ui, volume: &mut gaanim_media::PreviewVolume, slider: bool) {
+    let silent = volume.muted || volume.level <= 0.0;
+    let icon = if silent {
+        Icon::VolumeMuted
+    } else {
+        Icon::Volume
+    };
+    // Right to left in the bar: the slider sits left of the speaker.
+    if icon_button(ui, icon, ButtonTone::Ghost, true)
+        .on_hover_text(if silent {
+            "Activar sonido"
+        } else {
+            "Silenciar"
+        })
+        .clicked()
+    {
+        if volume.muted || volume.level > 0.0 {
+            volume.muted = !volume.muted;
+        } else {
+            // Muted by the slider: sound comes back at a usable level.
+            volume.level = 0.5;
+            volume.muted = false;
+        }
+    }
+    if slider {
+        volume_slider(ui, volume, 72.0);
+    }
+}
+
+/// The volume as a slider `width` points wide; moving it unmutes.
+pub(crate) fn volume_slider(ui: &mut Ui, volume: &mut gaanim_media::PreviewVolume, width: f32) {
+    let mut level = if volume.muted { 0.0 } else { volume.level };
+    ui.spacing_mut().slider_width = width;
+    let response = ui
+        .add(egui::Slider::new(&mut level, 0.0..=1.0).show_value(false))
+        .on_hover_text(format!("Volumen {:.0} %", level * 100.0));
+    if response.changed() {
+        volume.level = level;
+        volume.muted = false;
+    }
+}
+
 pub(crate) fn divider(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(vec2(9.0, 18.0), Sense::hover());
     ui.painter().line_segment(
@@ -523,6 +571,35 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                 tip - normal * head * 0.75,
                 tip + normal * head * 0.75,
             ]);
+        }
+        Icon::Volume | Icon::VolumeMuted => {
+            // The speaker: a box and its cone, each convex.
+            fill_poly(vec![
+                p(-0.40, -0.13),
+                p(-0.20, -0.13),
+                p(-0.20, 0.13),
+                p(-0.40, 0.13),
+            ]);
+            fill_poly(vec![
+                p(-0.20, -0.13),
+                p(0.02, -0.36),
+                p(0.02, 0.36),
+                p(-0.20, 0.13),
+            ]);
+            if icon == Icon::VolumeMuted {
+                painter.line_segment([p(0.16, -0.14), p(0.42, 0.14)], stroke);
+                painter.line_segment([p(0.16, 0.14), p(0.42, -0.14)], stroke);
+            } else {
+                for radius in [0.18_f32, 0.34] {
+                    let points: Vec<Pos2> = (0..=12)
+                        .map(|step| {
+                            let angle = (-50.0 + 100.0 * step as f32 / 12.0).to_radians();
+                            p(0.02 + radius * angle.cos(), radius * angle.sin())
+                        })
+                        .collect();
+                    painter.line(points, stroke);
+                }
+            }
         }
         Icon::Link => {
             // Two rounded links along the diagonal, overlapping in the middle.

@@ -6,12 +6,17 @@
 //! something local moves it (a key, a click, the dock, the seek bar) and
 //! applies what the other page publishes. The page carries the messages
 //! (a `BroadcastChannel`); this module only reads and writes them.
+//!
+//! In a presentation with audience polls, only the audience page talks to
+//! the relay: it tells Presenter View who is playing, and Presenter View
+//! asks it to remove a player, start a new game or download the results.
 
 use bevy::prelude::*;
 use gaanim_timeline::timeline::Timeline;
 use serde::{Deserialize, Serialize};
 
 use crate::AudienceBlank;
+use crate::presenter::AudienceView;
 
 /// Largest jump, in seconds, that playback itself can explain between two
 /// frames; a bigger one is a seek.
@@ -68,11 +73,32 @@ impl From<Blank> for AudienceBlank {
     }
 }
 
+/// What Presenter View asks of the audience page.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "request", rename_all = "lowercase")]
+pub(crate) enum AudienceRequest {
+    Kick {
+        name: String,
+    },
+    /// "New game", pressed once more.
+    Reset,
+    CancelReset,
+    /// Download the game's results.
+    SaveResults,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum LinkMessage {
     /// A Presenter View that just opened asks for the current state.
     Hello,
+    /// The audience, while a presentation with polls runs.
+    Audience {
+        view: Option<AudienceView>,
+    },
+    Request {
+        request: AudienceRequest,
+    },
     /// The sender's playhead. A heartbeat only corrects drift.
     State {
         #[serde(flatten)]
@@ -115,6 +141,12 @@ pub struct PresenterLink {
     publish: bool,
     greeted: bool,
     since_heartbeat: f64,
+    /// A Presenter View page said hello since the audience was last shared.
+    peer_hello: bool,
+    /// The audience as the audience page last told it (Presenter View).
+    audience: Option<AudienceView>,
+    /// What Presenter View asked (audience page).
+    requests: Vec<AudienceRequest>,
 }
 
 impl PresenterLink {
@@ -144,6 +176,31 @@ impl PresenterLink {
             self.outbox.push(text);
         }
     }
+
+    /// Tell Presenter View the audience (audience page).
+    pub(crate) fn send_audience(&mut self, view: Option<AudienceView>) {
+        self.send(&LinkMessage::Audience { view });
+    }
+
+    /// Whether a Presenter View page said hello since the last call.
+    pub(crate) fn take_peer_hello(&mut self) -> bool {
+        std::mem::take(&mut self.peer_hello)
+    }
+
+    /// The audience, as the audience page last told it (Presenter View).
+    pub(crate) fn audience(&self) -> Option<&AudienceView> {
+        self.audience.as_ref()
+    }
+
+    /// Ask the audience page for a change (Presenter View).
+    pub(crate) fn request(&mut self, request: AudienceRequest) {
+        self.send(&LinkMessage::Request { request });
+    }
+
+    /// What Presenter View asked since the last call (audience page).
+    pub(crate) fn take_audience_requests(&mut self) -> Vec<AudienceRequest> {
+        std::mem::take(&mut self.requests)
+    }
 }
 
 /// Apply the other page's messages before playback advances this frame.
@@ -161,7 +218,12 @@ pub(crate) fn apply_link_messages_system(
             continue;
         };
         match message {
-            LinkMessage::Hello => link.publish = true,
+            LinkMessage::Hello => {
+                link.publish = true;
+                link.peer_hello = true;
+            }
+            LinkMessage::Audience { view } => link.audience = view,
+            LinkMessage::Request { request } => link.requests.push(request),
             LinkMessage::State { state, heartbeat } => {
                 if heartbeat
                     && state.playing == timeline.is_playing
@@ -261,6 +323,53 @@ mod tests {
             .iter()
             .map(|text| serde_json::from_str(text).expect("valid message"))
             .collect()
+    }
+
+    /// Carry `from`'s messages to `to`.
+    fn carry(from: &mut App, to: &mut App) {
+        for message in from
+            .world_mut()
+            .resource_mut::<PresenterLink>()
+            .take_outgoing()
+        {
+            to.world_mut()
+                .resource_mut::<PresenterLink>()
+                .receive(message);
+        }
+    }
+
+    #[test]
+    fn presenter_view_asks_the_audience_page_which_tells_it_the_audience() {
+        let mut presenter = app(LinkRole::Presenter);
+        let mut audience = app(LinkRole::Audience);
+        presenter
+            .world_mut()
+            .resource_mut::<PresenterLink>()
+            .request(AudienceRequest::Kick { name: "Ana".into() });
+        presenter.update();
+        carry(&mut presenter, &mut audience);
+        audience.update();
+        let mut link = audience.world_mut().resource_mut::<PresenterLink>();
+        assert!(link.take_peer_hello(), "Presenter View said hello");
+        assert_eq!(
+            link.take_audience_requests(),
+            vec![AudienceRequest::Kick { name: "Ana".into() }]
+        );
+
+        let view = AudienceView {
+            code: "ABC234".into(),
+            players: 2,
+            leaderboard: vec![("Ana".into(), 900)],
+            download: true,
+            ..Default::default()
+        };
+        link.send_audience(Some(view.clone()));
+        carry(&mut audience, &mut presenter);
+        presenter.update();
+        assert_eq!(
+            presenter.world().resource::<PresenterLink>().audience(),
+            Some(&view)
+        );
     }
 
     fn state(time: f64, playing: bool) -> LinkMessage {

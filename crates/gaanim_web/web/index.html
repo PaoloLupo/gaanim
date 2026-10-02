@@ -72,6 +72,11 @@
     #present-card button { font-size: 17px; padding: 12px 28px; margin: 0; }
     #present-card p { margin: 14px 0 0; font-size: 13px; }
     #present-card a { color: var(--accent); }
+    #toast button { display: block; margin: 10px 0 0; }
+    #sound { position: fixed; right: 16px; top: 12px; padding: 4px 12px; background: var(--surface);
+      border: 1px solid rgba(255,255,255,.12); color: var(--muted); font-size: 13px; z-index: 6;
+      pointer-events: none; }
+    #sound[hidden] { display: none; }
     /* Wording for mouse or touch screens. */
     .drop strong.touch, .drop span.touch { display: none; }
     @media (pointer: coarse) {
@@ -102,6 +107,7 @@
   </div>
   <div id="fill" hidden></div>
   <div id="buffering" role="status" hidden>Cargando…</div>
+  <div id="sound" role="status" hidden>Toca la escena o pulsa una tecla para activar el sonido</div>
   <div id="present-card" hidden>
     <div class="card">
       <button type="button">Presentar</button>

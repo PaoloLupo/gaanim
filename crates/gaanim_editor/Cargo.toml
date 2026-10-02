@@ -45,6 +45,9 @@ chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
 rfd = "0.17"
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The web player hands a game's spreadsheets over in one archive; the same
+# build gaanim_bundle uses.
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 # Microphone capture for narration takes; the same build Bevy's audio uses.
 cpal = { version = "0.17", default-features = false }
 

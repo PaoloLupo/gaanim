@@ -115,7 +115,33 @@ público real:
 
 Lo que pase por un `computed` de Python muestra lo que se grabó con el
 ensayo: si quieres que algo siga en vivo en un paquete, usa directamente el
-`Parameter`. El reproductor web todavía no recibe votos.
+`Parameter`.
+
+== En el reproductor web <web>
+
+El #link("/guias/compartir/#compartir-un-enlace")[reproductor web] también
+presenta un paquete con encuestas: al presentar, la página de la presentación
+se conecta al relay que se grabó en el paquete y los teléfonos votan como con
+la aplicación. El Presenter View muestra los teléfonos y los jugadores, y
+desde él puedes quitar a un jugador o empezar una partida nueva. Los
+resultados no se guardan solos en una carpeta: *Download results* descarga
+un ZIP con `jugadores.csv`, `respuestas.csv` y `preguntas.csv`.
+
+Necesita un relay de Gaanim 0.8 o posterior: si el tuyo es anterior,
+actualízalo con `gaanim relay init --force <su carpeta>` y
+`npx wrangler deploy`. Los votos de la sesión anterior no se pierden.
+
+El primer navegador o computadora que presenta una sesión se queda con ella:
+el relay solo acepta su clave. Si la sesión ya la presentó la aplicación en tu
+computadora, pásale su clave al navegador con un enlace:
+
+```bash
+gaanim relay key mi-charla.gaanim --src https://tu-sitio.com/mi-charla.gaanim
+```
+
+El enlace que imprime termina en `#clave=…`. La página la guarda y la quita
+de la barra de direcciones. Quien tenga la clave controla las encuestas de la
+sesión: no la compartas con el público.
 
 = Privacidad y límites <privacidad>
 

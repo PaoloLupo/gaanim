@@ -117,6 +117,8 @@ pub(crate) struct PresenterThumbnailCache {
     next_generation: u64,
     error: Option<String>,
     textures: TextureSet,
+    /// The playback bar's copies, for its hover preview.
+    bar_textures: TextureSet,
     /// Captures the web player renders in its own world, lacking threads.
     in_world: Option<InWorldPlan>,
 }
@@ -488,6 +490,41 @@ impl PresenterThumbnailCache {
         }
     }
 
+    /// The playback bar's texture for `key`, uploaded into its context
+    /// `ctx` when new or changed; `None` until the preview is rendered.
+    pub(crate) fn bar_texture(
+        &mut self,
+        ctx: &egui::Context,
+        key: ThumbnailKey,
+    ) -> Option<egui::TextureHandle> {
+        let thumbnail = self.thumbnails.get(&key)?;
+        let entries = &mut self.bar_textures.entries;
+        let current = entries
+            .get(&key)
+            .is_some_and(|(_, generation)| *generation == thumbnail.generation);
+        if !current {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [thumbnail.width as usize, thumbnail.height as usize],
+                &thumbnail.rgba,
+            );
+            match entries.get_mut(&key) {
+                Some((texture, generation)) => {
+                    texture.set(image, egui::TextureOptions::LINEAR);
+                    *generation = thumbnail.generation;
+                }
+                None => {
+                    let texture = ctx.load_texture(
+                        format!("bar-cue-{}-{:?}", key.0, key.1),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    entries.insert(key, (texture, thumbnail.generation));
+                }
+            }
+        }
+        entries.get(&key).map(|(texture, _)| texture.clone())
+    }
+
     /// The preview texture for `key`, and whether it predates `revision`.
     pub(crate) fn texture(
         &self,
@@ -534,7 +571,7 @@ pub(crate) fn render_previews_in_world_system(
         return;
     };
     let (scene, base_color) = match playback.preview_scene(time, width, height) {
-        crate::bundle_player::Preview::Ready(scene, base_color) => (scene, base_color),
+        crate::bundle_player::Preview::Ready(scene, base_color) => (*scene, base_color),
         // The web player downloads the frame's chunk; capture it then.
         crate::bundle_player::Preview::Pending => {
             plan.captures.push_front((time, keys));
@@ -658,9 +695,15 @@ pub(crate) fn representative_segment_time(start_time: f64, end_time: f64) -> f64
     }
 }
 
+/// How far into a segment its entry is shown, when the instant it starts
+/// belongs to the segment before: past the first frame a bundle recorded
+/// after that instant, at 20 frames per second or more, while its
+/// animation has hardly begun.
+const ENTRY_OFFSET: f64 = 0.05;
+
 pub(crate) fn entry_segment_time(start_time: f64, end_time: f64) -> f64 {
     if end_time > start_time + 2e-4 {
-        (start_time + 1e-4).min(end_time - 1e-4)
+        start_time + ENTRY_OFFSET.min((end_time - start_time) / 2.0)
     } else {
         start_time
     }

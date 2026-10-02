@@ -12,6 +12,18 @@
 //! started with [`run`]`(true)`, which shows Presenter View alone. The two
 //! pages keep the same playhead through `gaanim_editor::presenter_link`,
 //! whose messages the pages carry over a `BroadcastChannel`.
+//!
+//! The audience page plays the bundle's audio through the browser: the
+//! player hands the page each track and its file once
+//! (`window.gaanimAudioTracks`, `window.gaanimAudioMedia`) and the playhead
+//! every frame (`window.gaanimAudioState`); the page decodes and schedules
+//! them with WebAudio.
+//!
+//! A presentation with audience polls talks to its relay from the audience
+//! page: the page makes the requests and holds the results socket for
+//! `gaanim_editor::web_relay` (`window.gaanimRelay*`), and hands back what it
+//! hears ([`relay_response`], [`relay_socket_message`],
+//! [`relay_socket_state`]).
 
 #[cfg(target_arch = "wasm32")]
 mod web {
@@ -41,6 +53,10 @@ mod web {
     static LINK: Mutex<Option<LinkTarget>> = Mutex::new(None);
     /// The page's own Present button was clicked.
     static PRESENT: AtomicBool = AtomicBool::new(false);
+    /// This page is Presenter View, which stays silent.
+    static PRESENTER_PAGE: AtomicBool = AtomicBool::new(false);
+    /// The volume the page remembered, to apply once.
+    static VOLUME: Mutex<Option<gaanim_media::PreviewVolume>> = Mutex::new(None);
     /// Messages from the other page of the presentation.
     static LINK_INBOX: Mutex<Vec<String>> = Mutex::new(Vec::new());
     /// Frames the app has updated, for the page to measure the frame rate.
@@ -84,6 +100,61 @@ mod web {
         /// `window.gaanimNotify(message)`: show a short message.
         #[wasm_bindgen(js_namespace = window, js_name = gaanimNotify)]
         fn notify(message: &str);
+        /// `window.gaanimToggleFullscreen()`: enter or leave full screen.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimToggleFullscreen)]
+        fn toggle_fullscreen();
+        /// `window.gaanimAudioTracks(json)`: the open file's audio tracks,
+        /// replacing any earlier file's.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimAudioTracks)]
+        fn audio_tracks(json: &str);
+        /// `window.gaanimAudioMedia(entry, bytes)`: an audio file of the
+        /// tracks, to decode.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimAudioMedia)]
+        fn audio_media(entry: &str, bytes: Vec<u8>);
+        /// `window.gaanimAudioState(time, playing, rate, level, muted)`: the
+        /// playhead and the listener's volume.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimAudioState)]
+        fn audio_state(time: f64, playing: bool, rate: f64, level: f32, muted: bool);
+        /// `window.gaanimRelayKey(relay, code)`: the presenter key.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimRelayKey)]
+        fn relay_key(relay: &str, code: &str) -> String;
+        /// `window.gaanimRelayRequest(id, method, url, key, type, body)`.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimRelayRequest)]
+        fn relay_request(
+            id: u32,
+            method: &str,
+            url: &str,
+            key: &str,
+            content_type: &str,
+            body: Vec<u8>,
+        );
+        /// `window.gaanimRelaySocket(url, key)`: keep the results socket open.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimRelaySocket)]
+        fn relay_socket(url: &str, key: &str);
+        /// `window.gaanimRelayClose()`: close it.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimRelayClose)]
+        fn relay_close();
+        /// `window.gaanimDownload(name, bytes)`: offer a file to save.
+        #[wasm_bindgen(js_namespace = window, js_name = gaanimDownload)]
+        fn download(name: &str, bytes: Vec<u8>);
+    }
+
+    /// The answer to relay request `id`; status 0 when it never arrived.
+    #[wasm_bindgen(js_name = relayResponse)]
+    pub fn relay_response(id: u32, status: u16, body: String) {
+        gaanim_editor::web_relay::response(id, status, body);
+    }
+
+    /// A message the relay's results socket pushed.
+    #[wasm_bindgen(js_name = relaySocketMessage)]
+    pub fn relay_socket_message(text: String) {
+        gaanim_editor::web_relay::socket_message(text);
+    }
+
+    /// The relay's results socket closed (`false`) or opened.
+    #[wasm_bindgen(js_name = relaySocketState)]
+    pub fn relay_socket_state(live: bool) {
+        gaanim_editor::web_relay::socket_state(live);
     }
 
     /// A message from the other page of the presentation.
@@ -143,6 +214,21 @@ mod web {
     #[wasm_bindgen(js_name = setLink)]
     pub fn set_link(fragment: String) {
         *lock(&LINK) = LinkTarget::parse(&fragment);
+    }
+
+    /// The volume the page remembered from an earlier visit.
+    #[wasm_bindgen(js_name = setVolume)]
+    pub fn set_volume(level: f32, muted: bool) {
+        *lock(&VOLUME) = Some(gaanim_media::PreviewVolume {
+            level: level.clamp(0.0, 1.0),
+            muted,
+        });
+    }
+
+    fn apply_remembered_volume(mut volume: ResMut<gaanim_media::PreviewVolume>) {
+        if let Some(remembered) = lock(&VOLUME).take() {
+            *volume = remembered;
+        }
     }
 
     /// Start presenting, from a click on the page's own Present button.
@@ -247,6 +333,75 @@ mod web {
         }
     }
 
+    /// Audio files still to hand to the page, for the open file.
+    #[derive(Resource, Default)]
+    struct PendingAudio(Vec<String>);
+
+    /// Hand the page the open file's audio and, every frame, the playhead.
+    fn play_audio(
+        playback: Option<ResMut<BundlePlayback>>,
+        timeline: Option<Res<gaanim_timeline::timeline::Timeline>>,
+        volume: Res<gaanim_media::PreviewVolume>,
+        mut pending: ResMut<PendingAudio>,
+    ) {
+        if PRESENTER_PAGE.load(Ordering::Relaxed) {
+            return;
+        }
+        let (Some(mut playback), Some(timeline)) = (playback, timeline) else {
+            return;
+        };
+        if playback.is_added() {
+            let tracks: Vec<serde_json::Value> = playback
+                .audio()
+                .iter()
+                .map(|track| {
+                    serde_json::json!({
+                        "media": track.media,
+                        "start": track.start_time,
+                        "duration": track.duration,
+                        "volume": track.volume,
+                        "fadeIn": track.fade_in,
+                        "fadeOut": track.fade_out,
+                        "offset": track.source_offset,
+                        "sourceDuration": track.source_duration,
+                        "speed": track.speed,
+                        "looping": track.looping,
+                    })
+                })
+                .collect();
+            audio_tracks(&serde_json::Value::Array(tracks).to_string());
+            let mut entries: Vec<String> = playback
+                .audio()
+                .iter()
+                .map(|track| track.media.clone())
+                .collect();
+            entries.sort();
+            entries.dedup();
+            pending.0 = entries;
+        }
+        let mut index = 0;
+        while index < pending.0.len() {
+            match playback.media(&pending.0[index]) {
+                Ok(Some(bytes)) => {
+                    audio_media(&pending.0[index], bytes);
+                    pending.0.remove(index);
+                }
+                Ok(None) => index += 1,
+                Err(error) => {
+                    notify(&format!("No se pudo leer un audio del archivo: {error}."));
+                    pending.0.remove(index);
+                }
+            }
+        }
+        audio_state(
+            timeline.current_time,
+            timeline.is_playing,
+            timeline.playback_rate,
+            volume.level,
+            volume.muted,
+        );
+    }
+
     fn start_presenting_on_request(world: &mut World) {
         if PRESENT.swap(false, Ordering::AcqRel) {
             gaanim_editor::start_presenting(world);
@@ -257,6 +412,15 @@ mod web {
     #[wasm_bindgen]
     pub fn run(presenter: bool) {
         console_error_panic_hook::set_once();
+        PRESENTER_PAGE.store(presenter, Ordering::Relaxed);
+        let _ = gaanim_editor::web_relay::HOOKS.set(gaanim_editor::web_relay::WebRelayHooks {
+            key: relay_key,
+            request: relay_request,
+            open_socket: relay_socket,
+            close_socket: relay_close,
+            download,
+            notify,
+        });
         let mut app = host_app(&HostOptions {
             presenter_page: presenter,
             ..Default::default()
@@ -270,18 +434,25 @@ mod web {
             open_presenter: open_presenter_page,
             copy_link,
             notify,
+            toggle_fullscreen,
         })
+        .init_resource::<PendingAudio>()
         .add_systems(
             PreUpdate,
             (
                 (open_requested_bundles, apply_page_link).chain(),
                 receive_link_messages,
                 start_presenting_on_request,
+                apply_remembered_volume,
             ),
         )
         .add_systems(
             Last,
-            (send_link_messages, request_wanted_bytes, count_frame),
+            (
+                send_link_messages,
+                (play_audio, request_wanted_bytes).chain(),
+                count_frame,
+            ),
         );
         status("ready", "");
         app.run();

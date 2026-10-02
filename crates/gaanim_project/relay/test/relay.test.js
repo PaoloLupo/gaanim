@@ -164,7 +164,7 @@ describe("pages", () => {
   });
 
   test("health reports the API version", async () => {
-    assert.deepEqual(await (await fetch(`${base}/health`)).json(), { relay: "gaanim", version: 12 });
+    assert.deepEqual(await (await fetch(`${base}/health`)).json(), { relay: "gaanim", version: 13 });
   });
 });
 
@@ -698,6 +698,49 @@ describe("presenter socket", () => {
     await until((message) => message.polls?.p?.counts?.[1] === 1);
     ws.close();
   });
+
+  test("a browser offers its key as a subprotocol", async () => {
+    const code = newCode();
+    await presenter(code).open("p", "Q", ["A", "B"]);
+    const url = `${base.replace("http", "ws")}/s/${code}/presenter`;
+    const ws = new WebSocket(url, ["gaanim-presenter", `key.${key("ab")}`]);
+    const first = await new Promise((resolve, reject) => {
+      ws.addEventListener("message", (event) => resolve(JSON.parse(event.data)), { once: true });
+      ws.addEventListener("error", () => reject(new Error("the socket failed")), { once: true });
+    });
+    assert.equal(ws.protocol, "gaanim-presenter");
+    assert.equal(first.type, "results");
+    ws.close();
+
+    const intruder = new WebSocket(url, ["gaanim-presenter", `key.${key("cd")}`]);
+    await new Promise((resolve) => {
+      intruder.addEventListener("error", resolve, { once: true });
+      intruder.addEventListener("open", () => resolve(), { once: true });
+    });
+    assert.notEqual(intruder.readyState, WebSocket.OPEN, "a wrong key is refused");
+  });
+});
+
+describe("browsers", () => {
+  test("presenter requests answer a preflight and allow any origin", async () => {
+    const code = newCode();
+    const preflight = await fetch(`${base}/s/${code}/poll`, {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://example.com",
+        "access-control-request-method": "PUT",
+        "access-control-request-headers": "authorization, content-type",
+      },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
+    assert.match(preflight.headers.get("access-control-allow-headers"), /authorization/);
+    assert.match(preflight.headers.get("access-control-allow-methods"), /PUT/);
+    const opened = await presenter(code).open("p", "Q", ["A", "B"]);
+    assert.equal(opened.headers.get("access-control-allow-origin"), "*");
+    const health = await fetch(`${base}/health`);
+    assert.equal(health.headers.get("access-control-allow-origin"), "*");
+  });
 });
 
 describe("limits", () => {
@@ -792,7 +835,7 @@ describe("report", () => {
     await host.post("reveal", { id: "q" });
 
     const game = await report();
-    like(game, { relay: "gaanim", version: 12, ask: null, teams: null });
+    like(game, { relay: "gaanim", version: 13, ask: null, teams: null });
     assert.ok(game.started > 0 && game.game);
     assert.deepEqual(game.polls.map((poll) => poll.id), ["p", "q"]);
     like(game.polls[0], { question: "¿Té o café?", options: ["Té", "Café"], correct: null,

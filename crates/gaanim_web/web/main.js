@@ -14,15 +14,31 @@
 // Presenting opens Presenter View as a second page (`?presenter=<session>`):
 // the same player showing Presenter View alone. It takes the file from this
 // page, and the two keep the same playhead over a BroadcastChannel.
+//
+// Full screen is the page's: a browser grants it only inside a click or key
+// on this page, and opening Presenter View already spends the click that
+// started the presentation.
+//
+// The audience page plays the file's audio with WebAudio, following the
+// playhead the player reports every frame.
+//
+// A presentation with audience polls talks to its relay from the audience
+// page: the player asks for requests and the results socket, and the page
+// answers. `#clave=<key>` hands it the presenter key of a session that
+// another computer claimed (`gaanim relay key`).
 import init, {
   run,
   openBundle,
   openRemote,
   addBytes,
   setLink,
+  setVolume,
   present,
   frameCount,
   linkReceive,
+  relayResponse,
+  relaySocketMessage,
+  relaySocketState,
 } from "./pkg/gaanim_web.js";
 
 // Frames the player has drawn, for measuring its frame rate from the page.
@@ -41,6 +57,13 @@ const presentCard = document.getElementById("present-card");
 
 const presenterSession = new URLSearchParams(location.search).get("presenter");
 const linkParams = new URLSearchParams(location.hash.slice(1));
+// A presenter key from the link, kept out of the address bar from now on.
+const linkKey = linkParams.get("clave");
+if (linkKey !== null) {
+  linkParams.delete("clave");
+  const rest = linkParams.toString();
+  history.replaceState(null, "", `${location.pathname}${location.search}${rest ? `#${rest}` : ""}`);
+}
 let ready = false;
 // Work that needs the player, run once it has started.
 let waiting = [];
@@ -60,8 +83,9 @@ function connect(session) {
 window.gaanimLinkSend = (message) => channel?.postMessage(message);
 
 let toastTimer = 0;
-// Show `message`, with `link` in a field ready to copy when given.
-function notify(message, link = null) {
+// Show `message`, with `link` in a field ready to copy, or a button that
+// runs `action.run`, when given.
+function notify(message, link = null, action = null) {
   toast.replaceChildren(message);
   if (link) {
     const field = document.createElement("input");
@@ -70,11 +94,62 @@ function notify(message, link = null) {
     toast.append(field);
     field.select();
   }
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.addEventListener("click", () => {
+      toast.hidden = true;
+      action.run();
+    });
+    toast.append(button);
+  }
   toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (toast.hidden = true), link ? 20000 : 8000);
+  toastTimer = setTimeout(() => (toast.hidden = true), link || action ? 20000 : 8000);
 }
 window.gaanimNotify = (message) => notify(message);
+
+// ---------------------------------------------------------------------------
+// Full screen
+// ---------------------------------------------------------------------------
+
+function fullscreenElement() {
+  return document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
+}
+
+// The whole page goes full screen, so its messages stay visible; the canvas
+// follows its size.
+function enterFullscreen() {
+  const root = document.documentElement;
+  const request = root.requestFullscreen ?? root.webkitRequestFullscreen;
+  if (!request) {
+    notify("Este navegador no permite la pantalla completa desde la página.");
+    return;
+  }
+  Promise.resolve(request.call(root)).catch(() =>
+    notify("El navegador no permitió la pantalla completa: pulsa otra vez el botón o F11."),
+  );
+}
+
+function toggleFullscreen() {
+  if (fullscreenElement()) (document.exitFullscreen ?? document.webkitExitFullscreen).call(document);
+  else enterFullscreen();
+}
+// Called by the bar's and the dock's full screen buttons.
+window.gaanimToggleFullscreen = toggleFullscreen;
+
+// F11 is handled here, inside the key event, before the player sees it.
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key !== "F11") return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    toggleFullscreen();
+  },
+  true,
+);
 
 // Called by the player when presenting starts or on P while presenting. It
 // runs a frame after the click or key, still within the browser's allowance
@@ -93,8 +168,12 @@ window.gaanimOpenPresenter = () => {
     popup.focus();
     // Opening the window spends the click that could also have made this
     // page full screen; a browser grants one of the two per gesture.
-    if (!document.fullscreenElement) {
-      notify("Presenter View se abrió en otra ventana. Lleva esta a la pantalla del público y ponla en pantalla completa con F11 o con el botón de la barra.");
+    if (!fullscreenElement()) {
+      notify(
+        "Presenter View se abrió en otra ventana. Lleva esta a la pantalla del público y ponla en pantalla completa (también con F11 o el botón del panel inferior).",
+        null,
+        { label: "Pantalla completa", run: enterFullscreen },
+      );
     }
   } else {
     notify("El navegador bloqueó la ventana de Presenter View: permite las ventanas emergentes de esta página y pulsa P.");
@@ -139,6 +218,7 @@ window.gaanimStatus = (kind, message) => {
   } else if (kind === "opened") {
     welcome.hidden = true;
     canvas.focus();
+    showSoundHint();
     if (remote) {
       remote.opened = true;
       downloads.delete(remote.name);
@@ -506,6 +586,315 @@ async function playUrl(url) {
 }
 
 // ---------------------------------------------------------------------------
+// Audio
+// ---------------------------------------------------------------------------
+
+// The open file's audio: its tracks (as the player hands them over), the
+// decoded files, and the sources playing. `anchor` says which playhead time
+// the context's clock stood for when they were scheduled.
+const audio = {
+  ctx: null,
+  // Every source goes through this: the bar's volume and mute.
+  master: null,
+  volume: null,
+  tracks: [],
+  buffers: new Map(),
+  sources: new Map(),
+  anchor: null,
+  generation: 0,
+};
+const soundHint = document.getElementById("sound");
+// Sources start this far ahead of the playhead, in timeline seconds.
+const AUDIO_HORIZON = 10;
+// A playhead further than this from the audio clock reschedules every
+// source: a seek, or drift between the two clocks. Frame jitter must stay
+// under it, or sounds would cut and restart.
+const AUDIO_TOLERANCE = 0.12;
+
+function audioContext() {
+  if (!audio.ctx) {
+    const Context = window.AudioContext ?? window.webkitAudioContext;
+    if (!Context) return null;
+    audio.ctx = new Context();
+    audio.ctx.onstatechange = showSoundHint;
+    audio.master = audio.ctx.createGain();
+    if (audio.volume) audio.master.gain.value = audio.volume.muted ? 0 : audio.volume.level;
+    audio.master.connect(audio.ctx.destination);
+  }
+  return audio.ctx;
+}
+
+// A browser starts audio only after a click or key on the page.
+function showSoundHint() {
+  soundHint.hidden = !(
+    audio.tracks.length && audio.ctx && audio.ctx.state !== "running" && welcome.hidden
+  );
+}
+for (const type of ["pointerdown", "keydown", "touchend"]) {
+  window.addEventListener(
+    type,
+    () => {
+      if (audio.ctx && audio.ctx.state === "suspended") audio.ctx.resume();
+    },
+    true,
+  );
+}
+
+function stopAudio() {
+  for (const { node, gain } of audio.sources.values()) {
+    try {
+      node.stop();
+    } catch {
+      // Not started yet, or already stopped.
+    }
+    node.disconnect();
+    gain.disconnect();
+  }
+  audio.sources.clear();
+  audio.anchor = null;
+}
+
+window.gaanimAudioTracks = (json) => {
+  stopAudio();
+  audio.generation += 1;
+  audio.tracks = JSON.parse(json);
+  audio.buffers.clear();
+  if (audio.tracks.length) audioContext();
+  showSoundHint();
+};
+
+window.gaanimAudioMedia = (entry, bytes) => {
+  const ctx = audioContext();
+  if (!ctx) return;
+  const generation = audio.generation;
+  const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  ctx.decodeAudioData(data).then(
+    (buffer) => {
+      if (audio.generation !== generation) return;
+      audio.buffers.set(entry, buffer);
+    },
+    () => notify("Este navegador no puede reproducir uno de los audios del archivo."),
+  );
+};
+
+// Seconds of the track on the timeline: one pass of its clip, and how long
+// it sounds (a looping track sounds on and on).
+function trackSpan(track, buffer) {
+  const sourceLength = track.sourceDuration ?? Math.max(0, buffer.duration - track.offset);
+  const clip = sourceLength / track.speed;
+  const active = track.duration != null ? Math.min(track.duration, clip) : clip;
+  return { sourceLength, clip, active };
+}
+
+// The track's volume at timeline time `t`, with its fades, as the desktop
+// preview computes it.
+function trackLevel(track, active, t) {
+  const elapsed = t - track.start;
+  let level = 1;
+  if (track.fadeIn > 0) level = Math.min(level, Math.max(0, Math.min(1, elapsed / track.fadeIn)));
+  if (track.fadeOut > 0) level = Math.min(level, Math.max(0, Math.min(1, (active - elapsed) / track.fadeOut)));
+  return track.volume * level;
+}
+
+// Start the sources of tracks that sound between `time` and the horizon;
+// the context's clock `now` stands for `time`, running `rate` times slower.
+function scheduleAudio(time, now, rate) {
+  const ctx = audio.ctx;
+  const at = (t) => now + (t - time) / rate;
+  audio.tracks.forEach((track, index) => {
+    if (audio.sources.has(index) || !(track.speed > 0)) return;
+    const buffer = audio.buffers.get(track.media);
+    if (!buffer) return;
+    const { sourceLength, clip, active } = trackSpan(track, buffer);
+    if (!(clip > 0)) return;
+    const end = track.looping ? Infinity : track.start + active;
+    if (end <= time + 1e-3 || track.start > time + AUDIO_HORIZON) return;
+
+    const from = Math.max(time, track.start);
+    const elapsed = from - track.start;
+    const node = ctx.createBufferSource();
+    node.buffer = buffer;
+    node.playbackRate.value = track.speed * rate;
+    if (track.looping) {
+      node.loop = true;
+      node.loopStart = track.offset;
+      node.loopEnd = track.offset + sourceLength;
+    }
+    const gain = ctx.createGain();
+    const level = gain.gain;
+    level.setValueAtTime(trackLevel(track, active, from), at(from));
+    const fadeInEnd = track.start + track.fadeIn;
+    if (track.fadeIn > 0 && fadeInEnd > from) {
+      level.linearRampToValueAtTime(trackLevel(track, active, fadeInEnd), at(fadeInEnd));
+    }
+    if (track.fadeOut > 0) {
+      const fadeOutStart = Math.max(from, track.start + active - track.fadeOut, fadeInEnd);
+      level.setValueAtTime(trackLevel(track, active, fadeOutStart), at(fadeOutStart));
+      level.linearRampToValueAtTime(0, at(track.start + active));
+    }
+    node.connect(gain).connect(audio.master);
+    const into = track.looping ? elapsed % clip : elapsed;
+    node.start(at(from), track.offset + into * track.speed);
+    if (Number.isFinite(end)) node.stop(at(end));
+    node.onended = () => {
+      if (audio.sources.get(index)?.node === node) {
+        audio.sources.delete(index);
+        gain.disconnect();
+      }
+    };
+    audio.sources.set(index, { node, gain });
+  });
+}
+
+const VOLUME_KEY = "gaanim-volume";
+
+// The volume the bar shows, as this browser remembered it.
+function rememberedVolume() {
+  try {
+    const saved = JSON.parse(storage()?.getItem(VOLUME_KEY) ?? "null");
+    if (saved && Number.isFinite(saved.level)) return { level: saved.level, muted: !!saved.muted };
+  } catch {
+    // Nothing usable saved.
+  }
+  return null;
+}
+
+// Follow the bar's volume, and remember it.
+function followVolume(level, muted) {
+  const previous = audio.volume;
+  if (previous && previous.level === level && previous.muted === muted) return;
+  audio.volume = { level, muted };
+  if (audio.master) {
+    // A short ramp, so dragging the slider does not click.
+    audio.master.gain.setTargetAtTime(muted ? 0 : level, audio.ctx.currentTime, 0.02);
+  }
+  if (previous) {
+    try {
+      storage()?.setItem(VOLUME_KEY, JSON.stringify(audio.volume));
+    } catch {
+      // Private browsing: the volume lasts this visit.
+    }
+  }
+}
+
+// Called by the player every frame with the playhead and the volume.
+window.gaanimAudioState = (time, playing, rate, level, muted) => {
+  followVolume(level, muted);
+  const ctx = audio.ctx;
+  if (!ctx || !audio.tracks.length) return;
+  if (!playing || ctx.state !== "running" || document.hidden || !(rate > 0)) {
+    if (audio.anchor) stopAudio();
+    return;
+  }
+  const now = ctx.currentTime;
+  const anchor = audio.anchor;
+  const expected = anchor && anchor.time + (now - anchor.at) * anchor.rate;
+  if (!anchor || anchor.rate !== rate || Math.abs(expected - time) > AUDIO_TOLERANCE) {
+    stopAudio();
+    audio.anchor = { time, at: now, rate };
+  }
+  // Schedule from the anchor, so sources keep the clock they started on.
+  const { time: anchorTime, at: anchorAt } = audio.anchor;
+  scheduleAudio(anchorTime + (now - anchorAt) * rate, now, rate);
+};
+
+// A hidden page stops drawing, and so stops moving the playhead.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopAudio();
+});
+
+// ---------------------------------------------------------------------------
+// Audience polls
+// ---------------------------------------------------------------------------
+
+function storage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+// The presenter key of a session: the link's, or one this browser made for
+// it. The relay accepts the first key that claims a session.
+window.gaanimRelayKey = (relay, code) => {
+  const name = `gaanim-relay-key:${relay}/s/${code}`;
+  const store = storage();
+  let key = linkKey ?? store?.getItem(name) ?? null;
+  if (!key) {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    key = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  try {
+    store?.setItem(name, key);
+  } catch {
+    // Private browsing: the key lasts this visit.
+  }
+  return key;
+};
+
+window.gaanimRelayRequest = (id, method, url, key, type, body) => {
+  const headers = { authorization: `Bearer ${key}` };
+  const init = { method, headers, cache: "no-store", keepalive: id === 0 };
+  if (body.length) {
+    headers["content-type"] = type;
+    init.body = body;
+  }
+  fetch(url, init).then(
+    async (response) => relayResponse(id, response.status, await response.text().catch(() => "")),
+    () => relayResponse(id, 0, ""),
+  );
+};
+
+// The relay pushes results on this socket; it reconnects with backoff, and
+// keeps itself alive with "ping".
+let relaySocket = null;
+window.gaanimRelaySocket = (url, key) => {
+  window.gaanimRelayClose();
+  relaySocket = { url, key, backoff: 1000, stopped: false, ws: null, timer: 0 };
+  connectRelay(relaySocket);
+};
+window.gaanimRelayClose = () => {
+  if (!relaySocket) return;
+  relaySocket.stopped = true;
+  clearTimeout(relaySocket.timer);
+  relaySocket.ws?.close();
+  relaySocket = null;
+};
+
+function connectRelay(socket) {
+  if (socket.stopped) return;
+  const ws = new WebSocket(socket.url, ["gaanim-presenter", `key.${socket.key}`]);
+  socket.ws = ws;
+  let ping = 0;
+  ws.onopen = () => {
+    socket.backoff = 1000;
+    ping = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send("ping"), 25000);
+  };
+  ws.onmessage = (event) => {
+    if (typeof event.data === "string" && event.data !== "pong") relaySocketMessage(event.data);
+  };
+  ws.onclose = () => {
+    clearInterval(ping);
+    if (socket.stopped) return;
+    relaySocketState(false);
+    socket.timer = setTimeout(() => connectRelay(socket), socket.backoff);
+    socket.backoff = Math.min(socket.backoff * 2, 30000);
+  };
+}
+
+window.gaanimDownload = (name, bytes) => {
+  const url = URL.createObjectURL(new Blob([bytes]));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+};
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -555,6 +944,8 @@ if (!navigator.gpu) {
   }
 } else {
   startPlayer();
+  const volume = rememberedVolume();
+  if (volume) whenReady(() => setVolume(volume.level, volume.muted));
   if (location.hash) whenReady(() => setLink(location.hash));
   // A new fragment, typed or from another link, moves the playhead.
   window.addEventListener("hashchange", () => whenReady(() => setLink(location.hash)));

@@ -12,6 +12,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 gaanim_bundle = { path = "../gaanim_bundle" }
 gaanim_editor = { path = "../gaanim_editor", default-features = false }
+gaanim_media = { path = "../gaanim_media" }
+gaanim_timeline = { path = "../gaanim_timeline" }
+serde_json = { workspace = true }
 bevy = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

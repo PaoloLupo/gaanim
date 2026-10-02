@@ -28,6 +28,26 @@ pub struct WebPage {
     pub copy_link: fn(&str),
     /// Tell the viewer something, briefly.
     pub notify: fn(&str),
+    /// Enter or leave full screen. The page asks the browser itself, since
+    /// Bevy's own request fails once opening Presenter View spent the click.
+    pub toggle_fullscreen: fn(),
+}
+
+/// Leave a plugin out of the web player.
+trait DisableOnWeb {
+    fn disable_on_web<T: Plugin>(self) -> Self;
+}
+
+impl DisableOnWeb for bevy::app::PluginGroupBuilder {
+    fn disable_on_web<T: Plugin>(self) -> Self {
+        // The page plays the audio with WebAudio; Bevy's output would keep a
+        // silent stream running for nothing.
+        if crate::WEB {
+            self.disable::<T>()
+        } else {
+            self
+        }
+    }
 }
 
 /// Selector of the canvas the web player renders into.
@@ -72,7 +92,8 @@ pub fn host_app(options: &HostOptions) -> App {
                 ..default()
             })
             .set(gaanim_scene::gaanim_asset_plugin())
-            .set(gaanim_scene::logging::log_plugin()),
+            .set(gaanim_scene::logging::log_plugin())
+            .disable_on_web::<bevy::audio::AudioPlugin>(),
     )
     .add_plugins(gaanim_scene::GaanimScenePlugin)
     .add_plugins(gaanim_animation::GaanimAnimationPlugin)
@@ -84,6 +105,7 @@ pub fn host_app(options: &HostOptions) -> App {
     .add_plugins(crate::GaanimEditorPlugin)
     .insert_resource(gaanim_media::VideoSamplingMode::Realtime)
     .insert_resource(gaanim_media::PreviewAudioEnabled(true))
+    .insert_resource(crate::volume::load())
     // Only the interactive preview may lower its resolution while playing.
     .insert_resource(gaanim_renderer::prelude::PreviewResolution::from_setting(
         std::env::var(gaanim_renderer::prelude::PREVIEW_RESOLUTION_ENV)
@@ -98,7 +120,13 @@ pub fn host_app(options: &HostOptions) -> App {
     .insert_resource(crate::overlays::EditorOverlays::with_preferences(
         crate::overlays::OverlayPreferences::load(),
     ))
-    .add_systems(Update, crate::overlays::save_overlay_preferences_system);
+    .add_systems(
+        Update,
+        (
+            crate::overlays::save_overlay_preferences_system,
+            crate::volume::save_volume_system,
+        ),
+    );
     if crate::frame_profile::enabled() {
         app.add_plugins(crate::frame_profile::FrameProfilePlugin);
     }

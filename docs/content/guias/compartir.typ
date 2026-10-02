@@ -136,9 +136,31 @@ Toca o arrastra el archivo; no sale de tu equipo. Es el mismo reproductor de
 escritorio compilado para la web, con la misma barra de reproducción.
 
 Es experimental: necesita un navegador con WebGPU (Chrome o Edge recientes,
-Safari 26, Firefox en Windows), descarga unos 25 MB la primera vez y todavía
-no reproduce el audio. En las miniaturas del Presenter View web no se ven los
-postprocesos ni los fondos animados por shader.
+Safari 26, Firefox en Windows) y descarga unos 25 MB la primera vez. En las
+miniaturas del Presenter View web no se ven los postprocesos ni los fondos
+animados por shader.
+
+El audio del paquete suena en la página de la presentación (el Presenter View
+queda en silencio). El navegador solo deja empezar el sonido tras un clic o
+una tecla en la página: si el paquete tiene audio, un aviso lo recuerda. Un
+audio con `speed` distinto de 1 cambia de tono, cosa que en el escritorio no
+pasa.
+
+== La barra de reproducción
+
+- *Ubicar un momento*: al pasar el cursor por la línea de tiempo, una tarjeta
+  muestra una miniatura de ese momento, el nombre del segmento, su número
+  (`12 / 61`), la pausa y el tiempo. Las miniaturas se preparan la primera vez
+  que pasas el cursor y son las mismas del Presenter View.
+- *Buscar un segmento*: haz clic en el nombre del segmento actual, junto al
+  tiempo. Se abre la lista de todos, con su número, sus pausas y cuándo
+  empiezan; escribe parte de un nombre o un número y pulsa `Enter`, o haz clic
+  en uno, para ir a él.
+- *Volumen*: el altavoz silencia y el deslizador regula el volumen; solo
+  aparecen si la escena tiene audio. El volumen se recuerda en la próxima
+  visita. En barras estrechas están en el menú *Más controles*.
+
+Lo mismo vale para la barra del editor de escritorio.
 
 == Compartir un enlace <compartir-un-enlace>
 
@@ -243,14 +265,20 @@ del móvil:
 
 == Presentar
 
-Pulsa el botón de presentar de la barra: se abre el
-Presenter View en otra ventana, el mismo que en el escritorio, con la
-diapositiva actual y la siguiente, las notas y el cronómetro. Lleva la página
-de la presentación al proyector y ponla en pantalla completa (`F11` o el
-botón de la barra); deja el Presenter View en tu pantalla. Las teclas, los clics y el dock mueven las
-dos ventanas a la vez, desde cualquiera de ellas; si cierras el Presenter
-View, `P` lo vuelve a abrir. Si el navegador bloquea la ventana, permite las
-ventanas emergentes de la página y pulsa `P`.
+Pulsa el botón de presentar de la barra: se abre el Presenter View en otra
+ventana, el mismo que en el escritorio, con la diapositiva actual y la
+siguiente, las notas y el cronómetro. Lleva la página de la presentación al
+proyector y ponla en pantalla completa: el aviso que aparece tiene el botón
+*Pantalla completa*, y también sirven `F11` y el botón del panel inferior.
+El navegador solo concede la pantalla completa a un clic o una tecla en esa
+página, y el clic que abrió el Presenter View ya se usó, por eso hace falta
+uno más. Deja el Presenter View en tu pantalla. Las teclas, los clics y el
+panel inferior mueven las dos ventanas a la vez, desde cualquiera de ellas;
+si cierras el Presenter View, `P` lo vuelve a abrir. Si el navegador bloquea
+la ventana, permite las ventanas emergentes de la página y pulsa `P`.
+
+Un paquete con encuestas recibe votos en vivo también en la web: ver
+#link("/publico/presentar/#paquetes")[Presentar con público].
 
 = Exportar el paquete a vídeo
 

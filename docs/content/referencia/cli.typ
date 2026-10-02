@@ -272,6 +272,7 @@ gaanim relay use https://…workers.dev # lo guarda para todas tus presentacione
 gaanim relay forget                   # olvida el relay guardado
 gaanim relay reset [RUTA]             # partida nueva en la sesión del proyecto de RUTA
 gaanim relay results [RUTA] [--output CARPETA]  # guarda los resultados de la partida
+gaanim relay key <ARCHIVO.gaanim|CÓDIGO> [--src URL]  # clave para presentar en la web
 ```
 
 El orden de prioridad es `GAANIM_POLL_RELAY`, luego `[polls] relay` del
@@ -289,6 +290,12 @@ proyecto, o en `--output`. Sirve si la presentación se cerró antes de
 guardarlas; el relay olvida una partida doce horas después de su última
 actividad. Ver
 #link("/publico/presentar/#resultados")[Guardar los resultados].
+
+`gaanim relay key` imprime la clave de presentador de la sesión de un paquete
+(o de un código de sesión), para presentarla desde el reproductor web en vez
+de esta computadora. Con `--src` imprime el enlace completo al reproductor,
+terminado en `#clave=…`. Ver
+#link("/publico/presentar/#web")[En el reproductor web].
 
 = `gaanim --diff`
 

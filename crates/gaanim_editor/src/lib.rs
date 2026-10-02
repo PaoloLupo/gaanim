@@ -3,7 +3,10 @@ use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, egui, input::EguiWantsInput}
 use gaanim_math::{Camera, CameraViewOverride, CameraViewport, ResolvedCamera};
 use gaanim_scene::{GlobalOpacity, Mesh3DMarker, Path2D, RenderOrder, Visible, WorldBounds};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
-use ui_kit::{ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, palette};
+use ui_kit::{
+    ButtonTone, Icon, PRIMARY_SIZE, ToggleColor, divider, icon_button, palette, volume_control,
+    volume_slider,
+};
 
 #[cfg(target_os = "linux")]
 pub mod alsa_errors;
@@ -19,10 +22,12 @@ pub mod host;
 pub mod narration;
 pub mod overlays;
 pub mod platform;
-#[cfg(not(target_arch = "wasm32"))]
 mod poll_report;
-#[cfg(not(target_arch = "wasm32"))]
 mod polls;
+/// The web player's side of the relay client: hooks into the page's
+/// `fetch` and `WebSocket`, and what they hear.
+#[cfg(target_arch = "wasm32")]
+pub use polls::web as web_relay;
 #[cfg(not(target_arch = "wasm32"))]
 pub use polls::{relay_version, reset_relay_session, save_relay_results};
 
@@ -37,6 +42,7 @@ pub mod python_plugin;
 pub mod share_link;
 mod touch;
 mod ui_kit;
+pub mod volume;
 
 /// Whether the timeline ignores its keys and its advancing click. The
 /// pointer over a panel (such as the playback bar) only blocks the click;
@@ -333,9 +339,7 @@ impl Plugin for GaanimEditorPlugin {
                 presenter::PresenterEguiPass,
                 presenter::presenter_view_system,
             );
-        // The relay client needs native networking; the web player shows
-        // polled stops as plain stops.
-        #[cfg(not(target_arch = "wasm32"))]
+        // On the web the browser makes the relay's requests.
         app.add_plugins(polls::AudiencePollsPlugin);
     }
 }
@@ -437,6 +441,10 @@ pub struct EditorState {
     pub continuous_preview: bool,
     /// Hover time on the seek bar (in seconds), used for tooltip display.
     seek_bar_hover: Option<f64>,
+    /// What the segment list searches for.
+    segment_query: String,
+    /// The segment list was open on the last frame.
+    segment_list_open: bool,
     /// Auto-hide animation progress (0.0 = hidden, 1.0 = fully visible).
     bar_visibility: f32,
     /// Whether the cursor is currently hovering the playback bar.
@@ -457,6 +465,8 @@ impl Default for EditorState {
             pinned_on_top: false,
             continuous_preview: false,
             seek_bar_hover: None,
+            segment_query: String::new(),
+            segment_list_open: false,
             bar_visibility: 1.0, // start visible
             bar_hovered: false,
             seek_bar_drag_target: None,
@@ -538,16 +548,25 @@ fn paint_viewport_letterbox(ctx: &egui::Context, viewport_frame: &ViewportFrame,
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn editor_ui_system(
     mut ctx: bevy_egui::EguiContexts,
     mut presentation_mode: ResMut<PresentationMode>,
     mut state: ResMut<EditorState>,
-    (mut export_state, mut narration_panel, narration_session, bundle_playback): (
+    (
+        mut export_state,
+        mut narration_panel,
+        narration_session,
+        bundle_playback,
+        mut volume,
+        audio_tracks,
+    ): (
         ResMut<export::ExportState>,
         ResMut<narration::NarrationPanel>,
         Res<narration::NarrationSession>,
         Option<Res<bundle_player::BundlePlayback>>,
+        ResMut<gaanim_media::PreviewVolume>,
+        Option<Res<gaanim_media::PreviewAudioTracks>>,
     ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
@@ -556,9 +575,11 @@ fn editor_ui_system(
     mut commands: Commands,
     fps_overlay: Res<fps_overlay::FpsOverlay>,
     mut render_health: Option<ResMut<gaanim_renderer::prelude::RenderHealth>>,
-    (vello_diagnostics, preview_resolution): (
+    (vello_diagnostics, preview_resolution, mut thumbnails, replay_stash): (
         Option<Res<gaanim_renderer::prelude::VelloDiagnostics>>,
         Option<Res<gaanim_renderer::prelude::PreviewResolution>>,
+        ResMut<presenter::PresenterThumbnailCache>,
+        Res<export::StashedReplay>,
     ),
     interactive: Res<PreviewInteractive>,
     viewport_frame: Res<ViewportFrame>,
@@ -592,6 +613,7 @@ fn editor_ui_system(
     let narration_open = narration_panel.open;
     // A playback bundle has no script to narrate.
     let narration_available = bundle_playback.is_none();
+    let has_audio = has_audio(audio_tracks.as_deref(), bundle_playback.as_deref());
 
     let is_exporting = export_state.active;
     let export_status = export_state.status();
@@ -730,19 +752,65 @@ fn editor_ui_system(
                             .map(|time| (time as f32 / total_f32).clamp(0.0, 1.0))
                             .collect();
 
-                        let seek_resp = paint_seek_bar(
-                            ui,
-                            frac,
-                            loop_frac,
-                            &bp_fracs,
-                            &scene_segs,
-                            &mut state.seek_bar_drag_target,
-                            total,
-                            snapping_allowed,
-                            &seek_markers,
-                            &bar_fracs,
-                            export_status.map(|status| status.fraction),
-                        );
+                        // The hover card's previews render once the pointer
+                        // first rests on the bar; Presenter View shares them.
+                        if let Some(hover) = state.seek_bar_hover {
+                            let edge = (HOVER_PREVIEW_WIDTH * ui.ctx().pixels_per_point()) as u32;
+                            let priority: Vec<_> =
+                                presenter::cue_key_at(&timeline, hover).into_iter().collect();
+                            thumbnails.update(
+                                &replay_stash,
+                                &timeline,
+                                edge.clamp(96, 480),
+                                &priority,
+                                bevy::platform::time::Instant::now(),
+                            );
+                        }
+                        let seek_resp = {
+                            let bar_ctx = ui.ctx().clone();
+                            let segment_count = timeline.segments.len();
+                            let timeline = &*timeline;
+                            let thumbnails = &mut *thumbnails;
+                            let mut hover_detail = |time: f64| {
+                                let mut detail = HoverDetail::default();
+                                if let Some(position) = timeline.segment_position_at(time)
+                                    && let Some(index) = timeline
+                                        .segments
+                                        .iter()
+                                        .position(|segment| segment.id == position.segment_id)
+                                {
+                                    let segment = &timeline.segments[index];
+                                    let name = scene_display_name(&segment.name);
+                                    detail.title = (!name.is_empty()).then(|| name.to_string());
+                                    detail.place = Some(match position.stop_index {
+                                        Some(stop) => format!(
+                                            "{} / {segment_count} · pausa {} de {}",
+                                            index + 1,
+                                            stop + 1,
+                                            segment.stops.len()
+                                        ),
+                                        None => format!("{} / {segment_count}", index + 1),
+                                    });
+                                }
+                                detail.preview = presenter::cue_key_at(timeline, time)
+                                    .and_then(|key| thumbnails.bar_texture(&bar_ctx, key));
+                                detail
+                            };
+                            paint_seek_bar(
+                                ui,
+                                frac,
+                                loop_frac,
+                                &bp_fracs,
+                                &scene_segs,
+                                &mut state.seek_bar_drag_target,
+                                total,
+                                snapping_allowed,
+                                &seek_markers,
+                                &bar_fracs,
+                                export_status.map(|status| status.fraction),
+                                &mut hover_detail,
+                            )
+                        };
                         if let Some(time) = seek_resp.marker_jump {
                             timeline.seek_request = Some(time);
                         } else if let Some(new_frac) = seek_resp.seek_to {
@@ -764,6 +832,26 @@ fn editor_ui_system(
                             }
                         }
                         state.seek_bar_hover = seek_resp.hover_time;
+
+                        // The segment list behind the scene label.
+                        let segment_rows: Vec<SegmentRow> = timeline
+                            .segments
+                            .iter()
+                            .map(|segment| SegmentRow {
+                                name: scene_display_name(&segment.name).to_string(),
+                                start: segment.start_time,
+                                entry: presenter::segment_entry_time(&timeline, segment),
+                                stops: segment.stops.len(),
+                            })
+                            .collect();
+                        let current_segment = timeline.segment_position.and_then(|position| {
+                            timeline
+                                .segments
+                                .iter()
+                                .position(|segment| segment.id == position.segment_id)
+                        });
+                        let mut segment_query = std::mem::take(&mut state.segment_query);
+                        let mut segment_list_open = state.segment_list_open;
 
                         // Row 2: transport · time · scene | toggles · window actions
                         let scene_starts: Vec<f64> =
@@ -885,15 +973,44 @@ fn editor_ui_system(
                                         ui.add_space(6.0);
                                         divider(ui);
                                         ui.add_space(6.0);
-                                        ui.add(
+                                        let listed = !segment_rows.is_empty();
+                                        let label = ui.add(
                                             egui::Label::new(
                                                 egui::RichText::new(text)
                                                     .size(13.0)
                                                     .color(palette::TEXT_MUTED),
                                             )
                                             .selectable(false)
-                                            .truncate(),
+                                            .truncate()
+                                            .sense(if listed {
+                                                egui::Sense::click()
+                                            } else {
+                                                egui::Sense::hover()
+                                            }),
                                         );
+                                        if listed {
+                                            let label = label
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                .on_hover_text("Ver y buscar los segmentos");
+                                            let shown = egui::Popup::menu(&label)
+                                                .close_behavior(
+                                                    egui::PopupCloseBehavior::CloseOnClickOutside,
+                                                )
+                                                .show(|ui| {
+                                                    let jump = segment_list(
+                                                        ui,
+                                                        &segment_rows,
+                                                        current_segment,
+                                                        &mut segment_query,
+                                                        !segment_list_open,
+                                                    );
+                                                    if let Some(time) = jump {
+                                                        actions.push(PlaybackAction::Seek(time));
+                                                        ui.close();
+                                                    }
+                                                });
+                                            segment_list_open = shown.is_some();
+                                        }
                                     }
                                     actions
                                 },
@@ -1099,6 +1216,13 @@ fn editor_ui_system(
                                             if ui.button("Presentar").clicked() {
                                                 actions.push(PlaybackAction::Present);
                                             }
+                                            if has_audio {
+                                                ui.separator();
+                                                ui.horizontal(|ui| {
+                                                    volume_control(ui, &mut volume, false);
+                                                    volume_slider(ui, &mut volume, 120.0);
+                                                });
+                                            }
                                             if WEB {
                                                 if ui.button("Copiar enlace").clicked() {
                                                     actions.push(PlaybackAction::CopyLink(false));
@@ -1114,12 +1238,15 @@ fn editor_ui_system(
                                             {
                                                 actions.push(PlaybackAction::ToggleNarration);
                                             }
-                                            if ui
-                                                .add_enabled(
-                                                    !is_exporting,
-                                                    egui::Button::new("Exportar"),
-                                                )
-                                                .clicked()
+                                            // The web player neither exports
+                                            // nor pins its page.
+                                            if !WEB
+                                                && ui
+                                                    .add_enabled(
+                                                        !is_exporting,
+                                                        egui::Button::new("Exportar"),
+                                                    )
+                                                    .clicked()
                                             {
                                                 actions.push(PlaybackAction::OpenExport);
                                             }
@@ -1145,7 +1272,7 @@ fn editor_ui_system(
                                             } else {
                                                 "Fijar ventana encima (P)"
                                             };
-                                            if ui.button(pin_label).clicked() {
+                                            if !WEB && ui.button(pin_label).clicked() {
                                                 actions.push(PlaybackAction::TogglePin);
                                             }
                                         });
@@ -1178,9 +1305,14 @@ fn editor_ui_system(
                                     {
                                         actions.push(PlaybackAction::SetRate(rate));
                                     }
+                                    if has_audio && density == PlaybackDensity::Wide {
+                                        volume_control(ui, &mut volume, true);
+                                    }
                                     actions
                                 },
                             );
+                        state.segment_query = segment_query;
+                        state.segment_list_open = segment_list_open;
                         for action in left_actions.into_iter().chain(right_actions) {
                             match action {
                                 PlaybackAction::TogglePlay => {
@@ -1213,7 +1345,9 @@ fn editor_ui_system(
                                     &presenter_windows,
                                 ),
                                 PlaybackAction::ToggleFullscreen => {
-                                    if let Ok(mut window) = windows.single_mut() {
+                                    if WEB {
+                                        commands.queue(toggle_page_fullscreen);
+                                    } else if let Ok(mut window) = windows.single_mut() {
                                         toggle_editor_fullscreen(&mut window, &mut fullscreen_state);
                                     }
                                 }
@@ -1252,6 +1386,16 @@ fn editor_ui_system(
         vello_diagnostics.as_deref(),
         preview_resolution.as_deref(),
     );
+}
+
+/// Whether the scene or bundle on screen has sound, so the bar offers its
+/// volume.
+pub(crate) fn has_audio(
+    tracks: Option<&gaanim_media::PreviewAudioTracks>,
+    bundle: Option<&bundle_player::BundlePlayback>,
+) -> bool {
+    tracks.is_some_and(|tracks| !tracks.0.is_empty())
+        || bundle.is_some_and(|bundle| !bundle.audio().is_empty())
 }
 
 /// Format seconds as `M:SS.ss` for the playback overlay.
@@ -1376,6 +1520,200 @@ struct SeekBarResponse {
     loop_drag: Option<(f32, f32)>,
     /// Exact time of a `scene.marker` the user clicked; wins over `seek_to`.
     marker_jump: Option<f64>,
+}
+
+/// What the seek bar's hover card shows besides the time.
+#[derive(Default)]
+struct HoverDetail {
+    /// The segment's name.
+    title: Option<String>,
+    /// Where it sits: `12 / 61 · pausa 2 de 3`.
+    place: Option<String>,
+    /// The cue preview for the moment, once rendered.
+    preview: Option<egui::TextureHandle>,
+}
+
+/// Width of the hover card's preview, in points.
+const HOVER_PREVIEW_WIDTH: f32 = 208.0;
+
+/// One segment in the bar's segment list.
+struct SegmentRow {
+    name: String,
+    start: f64,
+    /// Where jumping to it lands, showing it rather than the end of the
+    /// segment before.
+    entry: f64,
+    stops: usize,
+}
+
+/// The segments, searchable by name or number, the current one marked.
+/// Returns the start of the one clicked. `opened` focuses the search and
+/// scrolls to the current segment.
+fn segment_list(
+    ui: &mut egui::Ui,
+    rows: &[SegmentRow],
+    current: Option<usize>,
+    query: &mut String,
+    opened: bool,
+) -> Option<f64> {
+    ui.set_width(360.0);
+    let search = ui.add(
+        egui::TextEdit::singleline(query)
+            .hint_text(format!("Buscar entre {} segmentos…", rows.len()))
+            .desired_width(f32::INFINITY),
+    );
+    if opened {
+        search.request_focus();
+    }
+    let needle = query.trim().to_lowercase();
+    let matches = |index: usize, row: &SegmentRow| {
+        needle.is_empty()
+            || row.name.to_lowercase().contains(&needle)
+            || (index + 1).to_string() == needle
+    };
+    // Enter jumps to the first match.
+    let enter = search.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if enter
+        && let Some(row) = rows
+            .iter()
+            .enumerate()
+            .find(|(index, row)| matches(*index, row))
+            .map(|(_, row)| row)
+    {
+        return Some(row.entry);
+    }
+    ui.add_space(4.0);
+    const ROW_HEIGHT: f32 = 24.0;
+    const LIST_HEIGHT: f32 = 380.0;
+    let mut jump = None;
+    // The list keeps its height while searching, so the popup stays put.
+    let height = (rows.len() as f32 * ROW_HEIGHT).min(LIST_HEIGHT);
+    egui::ScrollArea::vertical()
+        .max_height(height)
+        .min_scrolled_height(height)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let mut shown = 0;
+            for (index, row) in rows.iter().enumerate() {
+                if !matches(index, row) {
+                    continue;
+                }
+                shown += 1;
+                let selected = current == Some(index);
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), ROW_HEIGHT),
+                    egui::Sense::click(),
+                );
+                let painter = ui.painter();
+                if selected {
+                    painter.rect_filled(rect, 0.0, palette::ACCENT.gamma_multiply(0.22));
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height())),
+                        0.0,
+                        palette::ACCENT,
+                    );
+                } else if response.hovered() {
+                    painter.rect_filled(rect, 0.0, egui::Color32::from_white_alpha(14));
+                }
+                let left = rect.min.x + 8.0;
+                let number = painter.layout_no_wrap(
+                    format!("{:>2}", index + 1),
+                    egui::FontId::monospace(11.5),
+                    palette::TEXT_FAINT,
+                );
+                painter.galley(
+                    egui::pos2(left, rect.center().y - number.size().y / 2.0),
+                    number,
+                    palette::TEXT_FAINT,
+                );
+                let mut meta = String::new();
+                match row.stops {
+                    0 => {}
+                    1 => meta.push_str("1 pausa  "),
+                    stops => meta.push_str(&format!("{stops} pausas  ")),
+                }
+                meta.push_str(&format_time(row.start));
+                let meta = painter.layout_no_wrap(
+                    meta,
+                    egui::FontId::monospace(11.0),
+                    palette::TEXT_FAINT,
+                );
+                let meta_left = rect.max.x - 8.0 - meta.size().x;
+                painter.galley(
+                    egui::pos2(meta_left, rect.center().y - meta.size().y / 2.0),
+                    meta,
+                    palette::TEXT_FAINT,
+                );
+                let name_left = left + 28.0;
+                let color = if selected || response.hovered() {
+                    palette::TEXT
+                } else {
+                    palette::TEXT_MUTED
+                };
+                let name = fit_text(
+                    painter,
+                    if row.name.is_empty() {
+                        "(sin nombre)"
+                    } else {
+                        &row.name
+                    },
+                    egui::FontId::proportional(13.0),
+                    color,
+                    meta_left - name_left - 12.0,
+                );
+                painter.galley(
+                    egui::pos2(name_left, rect.center().y - name.size().y / 2.0),
+                    name,
+                    color,
+                );
+                let response = response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(&row.name);
+                if opened && selected && needle.is_empty() {
+                    response.scroll_to_me(Some(egui::Align::Center));
+                }
+                if response.clicked() {
+                    jump = Some(row.entry);
+                }
+            }
+            if shown == 0 {
+                ui.label(
+                    egui::RichText::new("Ningún segmento coincide")
+                        .italics()
+                        .color(palette::TEXT_FAINT),
+                );
+            }
+        });
+    jump
+}
+
+/// `text` laid out on one line, cut with "…" to fit `width` points.
+fn fit_text(
+    painter: &egui::Painter,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), color);
+    if galley.size().x <= width {
+        return galley;
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut kept = chars.len();
+    loop {
+        kept = kept.saturating_sub(1);
+        let cut: String = chars[..kept]
+            .iter()
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+            + "…";
+        let galley = painter.layout_no_wrap(cut, font.clone(), color);
+        if kept == 0 || galley.size().x <= width {
+            return galley;
+        }
+    }
 }
 
 /// A `scene.marker` drawn on the seek bar.
@@ -1504,6 +1842,7 @@ fn paint_seek_bar(
     markers: &[SeekMarker],
     bars: &[f32],
     exported: Option<f32>,
+    detail: &mut dyn FnMut(f64) -> HoverDetail,
 ) -> SeekBarResponse {
     const LANE_H: f32 = 22.0;
     const LANE_GAP: f32 = 6.0;
@@ -1881,47 +2220,24 @@ fn paint_seek_bar(
             }
         }
 
-        // Tooltip: "Scene · 0:12.34", kept inside the bar horizontally.
-        let name = hovered_marker
-            .map(|i| markers[i].name.as_str())
-            .or_else(|| hovered_scene_idx.map(|i| scene_display_name(&scenes[i].name)))
-            .unwrap_or("");
-        let mut job = egui::text::LayoutJob::default();
-        if !name.is_empty() {
-            job.append(
-                &truncate_with_ellipsis(name, 40),
-                0.0,
-                egui::TextFormat::simple(egui::FontId::proportional(12.0), palette::TEXT),
-            );
-            job.append(
-                "  ",
-                0.0,
-                egui::TextFormat::simple(egui::FontId::proportional(12.0), palette::TEXT),
-            );
-        }
-        job.append(
-            &format_time(hover_secs),
-            0.0,
-            egui::TextFormat::simple(egui::FontId::monospace(12.0), palette::TEXT_MUTED),
-        );
-        let galley = painter.layout_job(job);
-        let pad = egui::vec2(9.0, 5.0);
-        let size = galley.size() + pad * 2.0;
-        let x = (pos.x - size.x / 2.0).clamp(rect.min.x, (rect.max.x - size.x).max(rect.min.x));
-        let tip = egui::Rect::from_min_size(egui::pos2(x, rect.min.y - size.y - 10.0), size);
-        painter.rect_filled(
-            tip.translate(egui::vec2(0.0, 2.0)),
-            0.0,
-            egui::Color32::from_black_alpha(80),
-        );
-        painter.rect_filled(tip, 0.0, egui::Color32::from_rgb(30, 32, 40));
-        painter.rect_stroke(
-            tip,
-            0.0,
-            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(18)),
-            egui::StrokeKind::Inside,
-        );
-        painter.galley(tip.min + pad, galley, palette::TEXT);
+        // Hover card: the moment's preview, its segment and where it sits,
+        // kept inside the bar horizontally and above everything else.
+        let card = match hovered_marker {
+            Some(index) => HoverDetail {
+                title: Some(markers[index].name.clone()),
+                ..Default::default()
+            },
+            None => {
+                let mut card = detail(hover_secs);
+                if card.title.is_none() {
+                    card.title = hovered_scene_idx
+                        .map(|index| scene_display_name(&scenes[index].name).to_string())
+                        .filter(|name| !name.is_empty());
+                }
+                card
+            }
+        };
+        paint_hover_card(ui, &response, rect, pos.x, hover_secs, card);
     }
 
     // ── Playhead ────────────────────────────────────────────────────────
@@ -2031,6 +2347,100 @@ fn paint_seek_bar(
         loop_drag,
         marker_jump,
     }
+}
+
+/// Paint the seek bar's hover card above `bar`, centered on `x`: the
+/// preview, the name, then where it sits and the time.
+fn paint_hover_card(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    bar: egui::Rect,
+    x: f32,
+    time: f64,
+    card: HoverDetail,
+) {
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        response.id.with("hover-card"),
+    ));
+    let title = card.title.map(|title| {
+        painter.layout_no_wrap(
+            truncate_with_ellipsis(&title, 36),
+            egui::FontId::proportional(13.0),
+            palette::TEXT,
+        )
+    });
+    let mut meta = egui::text::LayoutJob::default();
+    if let Some(place) = &card.place {
+        meta.append(
+            &format!("{place}  ·  "),
+            0.0,
+            egui::TextFormat::simple(egui::FontId::proportional(11.5), palette::TEXT_MUTED),
+        );
+    }
+    meta.append(
+        &format_time(time),
+        0.0,
+        egui::TextFormat::simple(egui::FontId::monospace(11.5), palette::TEXT_MUTED),
+    );
+    let meta = painter.layout_job(meta);
+    let image = card.preview.map(|texture| {
+        let size = texture.size_vec2();
+        let height = HOVER_PREVIEW_WIDTH * size.y / size.x.max(1.0);
+        (texture, egui::vec2(HOVER_PREVIEW_WIDTH, height))
+    });
+
+    let pad = egui::vec2(8.0, 6.0);
+    let gap = 4.0;
+    let text_width = title
+        .as_ref()
+        .map_or(0.0, |title| title.size().x)
+        .max(meta.size().x);
+    let width = image
+        .as_ref()
+        .map_or(text_width, |(_, size)| size.x.max(text_width));
+    let height = image.as_ref().map_or(0.0, |(_, size)| size.y + gap + 2.0)
+        + title.as_ref().map_or(0.0, |title| title.size().y + 2.0)
+        + meta.size().y;
+    let size = egui::vec2(width, height) + pad * 2.0;
+    let left = (x - size.x / 2.0).clamp(bar.min.x, (bar.max.x - size.x).max(bar.min.x));
+    let frame = egui::Rect::from_min_size(egui::pos2(left, bar.min.y - size.y - 10.0), size);
+    painter.rect_filled(
+        frame.translate(egui::vec2(0.0, 3.0)),
+        0.0,
+        egui::Color32::from_black_alpha(90),
+    );
+    painter.rect_filled(frame, 0.0, egui::Color32::from_rgb(30, 32, 40));
+    painter.rect_stroke(
+        frame,
+        0.0,
+        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(22)),
+        egui::StrokeKind::Inside,
+    );
+    let mut y = frame.min.y + pad.y;
+    if let Some((texture, image_size)) = image {
+        let image_rect = egui::Rect::from_min_size(
+            egui::pos2(frame.center().x - image_size.x / 2.0, y),
+            image_size,
+        );
+        painter.image(
+            texture.id(),
+            image_rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        y += image_size.y + gap + 2.0;
+    }
+    if let Some(title) = title {
+        let height = title.size().y;
+        painter.galley(egui::pos2(frame.min.x + pad.x, y), title, palette::TEXT);
+        y += height + 2.0;
+    }
+    painter.galley(
+        egui::pos2(frame.min.x + pad.x, y),
+        meta,
+        palette::TEXT_MUTED,
+    );
 }
 
 /// Truncate text to `max_chars` characters, appending "…" if truncated.
@@ -2201,8 +2611,12 @@ fn start_presentation(
         return;
     };
     fullscreen_state.previous_mode = None;
-    window.mode =
-        bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current);
+    // The web page opens Presenter View with this click, which leaves none
+    // for full screen: the page offers it once the window is open.
+    if !WEB {
+        window.mode =
+            bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current);
+    }
     presentation_mode.active = true;
     if presenter_windows.is_empty() {
         presenter::spawn_presenter_window(commands);
@@ -2244,6 +2658,13 @@ fn toggle_pinned_on_top(
     }
 }
 
+/// Ask the web page to enter or leave full screen.
+pub(crate) fn toggle_page_fullscreen(world: &mut World) {
+    if let Some(page) = world.get_resource::<host::WebPage>() {
+        (page.toggle_fullscreen)();
+    }
+}
+
 fn toggle_editor_fullscreen(window: &mut Window, state: &mut EditorFullscreenState) {
     if matches!(window.mode, bevy::window::WindowMode::Windowed) {
         state.previous_mode = Some(window.mode);
@@ -2275,7 +2696,9 @@ fn editor_fullscreen_keys_system(
     if let Ok(mut window) = windows.single_mut() {
         let escape_from_fullscreen = keys.just_pressed(KeyCode::Escape)
             && !matches!(window.mode, bevy::window::WindowMode::Windowed);
-        if keys.just_pressed(KeyCode::F11) || escape_from_fullscreen {
+        // On the web the page handles F11 inside the key event, as full
+        // screen requires.
+        if !WEB && (keys.just_pressed(KeyCode::F11) || escape_from_fullscreen) {
             toggle_editor_fullscreen(&mut window, &mut state);
         }
     }
