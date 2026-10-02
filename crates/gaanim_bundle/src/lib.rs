@@ -75,9 +75,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// and media stays as authored. Version 1 (Gaanim 0.6.0) left compression
 /// to the archive.
 pub const VERSION: u32 = 2;
-/// Zstandard level of data entries: slow to write, still fast to read.
+/// Zstandard level of data entries, still fast to read. Level 17 made
+/// entries about 8% smaller and compressed nearly four times slower.
 #[cfg(not(target_arch = "wasm32"))]
-const ZSTD_LEVEL: i32 = 17;
+const ZSTD_LEVEL: i32 = 15;
 /// File extension of playback bundles.
 pub const EXTENSION: &str = "gaanim";
 /// Optional cover image: a PNG stored as-is, which file managers show

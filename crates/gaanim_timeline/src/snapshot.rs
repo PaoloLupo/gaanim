@@ -190,6 +190,53 @@ pub(crate) fn restore_parent(world: &mut World, entity: Entity, parent: Option<E
     }
 }
 
+/// Components of an [`EntitySnapshot`] a restore rewrites: all of them, or
+/// only the ones changed since the world last matched the snapshot's replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RestoredParts(u32);
+
+impl RestoredParts {
+    pub(crate) const NONE: Self = Self(0);
+    /// Every component, the hierarchy, and what no single component change
+    /// selects: visibility, scene membership, groups and traced paths.
+    pub(crate) const ALL: Self = Self(u32::MAX);
+    pub(crate) const TRANSFORM: Self = Self(1 << 0);
+    pub(crate) const OPACITY: Self = Self(1 << 1);
+    pub(crate) const RENDER_ORDER: Self = Self(1 << 2);
+    pub(crate) const RENDER_LAYER: Self = Self(1 << 3);
+    pub(crate) const FILL: Self = Self(1 << 4);
+    pub(crate) const STROKE: Self = Self(1 << 5);
+    pub(crate) const TAG: Self = Self(1 << 6);
+    pub(crate) const PATH: Self = Self(1 << 7);
+    pub(crate) const PATH_SOURCE: Self = Self(1 << 8);
+    pub(crate) const FILL_DRAW_PROGRESS: Self = Self(1 << 9);
+    pub(crate) const FILL_LEVEL: Self = Self(1 << 10);
+    pub(crate) const MEDIA_FRAME: Self = Self(1 << 11);
+    pub(crate) const COORDINATE_VIEW_ROLE: Self = Self(1 << 12);
+    pub(crate) const SURROUNDING_RECT: Self = Self(1 << 13);
+    pub(crate) const WRITE_TIP_GLOW: Self = Self(1 << 14);
+    pub(crate) const PATH_REVEAL: Self = Self(1 << 15);
+    pub(crate) const PATH_TRIM_WINDOW: Self = Self(1 << 16);
+    pub(crate) const FLOAT_SIGNAL: Self = Self(1 << 17);
+    pub(crate) const MATERIAL_3D: Self = Self(1 << 18);
+    /// Local bounds, with the world bounds derived from them.
+    pub(crate) const BOUNDS: Self = Self(1 << 19);
+
+    pub(crate) fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    fn has(self, part: Self) -> bool {
+        self.0 & part.0 != 0
+    }
+}
+
+impl std::ops::BitOrAssign for RestoredParts {
+    fn bitor_assign(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+}
+
 /// Insert or update all components of an `EntitySnapshot` onto a Bevy entity.
 ///
 /// Restoration remains complete and deterministic, while equal renderer-invalidating
@@ -199,83 +246,149 @@ pub(crate) fn insert_snapshot_components(
     snap: &EntitySnapshot,
     restore_scene_visibility: bool,
 ) {
-    let global_transform = snap
-        .global_transform
-        .unwrap_or_else(|| GlobalSpatialTransform::from_local(&snap.transform));
-    let global_opacity = snap.global_opacity.unwrap_or(GlobalOpacity(snap.opacity));
+    insert_snapshot_parts(
+        entity_mut,
+        snap,
+        restore_scene_visibility,
+        RestoredParts::ALL,
+    );
+}
 
+/// [`insert_snapshot_components`] limited to `parts`.
+fn insert_snapshot_parts(
+    entity_mut: &mut EntityWorldMut<'_>,
+    snap: &EntitySnapshot,
+    restore_scene_visibility: bool,
+    parts: RestoredParts,
+) {
+    let all = parts == RestoredParts::ALL;
     // Restoring local transforms/opacity must wake the propagation systems.
     // Their derived global values are intentionally recomputed after every
     // exact seek, even when the authored local value itself is unchanged.
     // Unlike path/style changes this does not invalidate retained geometry.
-    entity_mut.insert(snap.transform);
-    entity_mut.insert(Opacity(snap.opacity));
-    insert_if_changed(
-        entity_mut,
-        RenderOrder {
-            z_index: snap.render_order,
-            creation_order: snap.creation_order,
-        },
-    );
-    insert_if_changed(entity_mut, snap.render_layer);
-    insert_if_changed(entity_mut, global_transform);
-    insert_if_changed(entity_mut, global_opacity);
+    if parts.has(RestoredParts::TRANSFORM) {
+        entity_mut.insert(snap.transform);
+        insert_if_changed(
+            entity_mut,
+            snap.global_transform
+                .unwrap_or_else(|| GlobalSpatialTransform::from_local(&snap.transform)),
+        );
+    }
+    if parts.has(RestoredParts::OPACITY) {
+        entity_mut.insert(Opacity(snap.opacity));
+        insert_if_changed(
+            entity_mut,
+            snap.global_opacity.unwrap_or(GlobalOpacity(snap.opacity)),
+        );
+    }
+    if parts.has(RestoredParts::RENDER_ORDER) {
+        insert_if_changed(
+            entity_mut,
+            RenderOrder {
+                z_index: snap.render_order,
+                creation_order: snap.creation_order,
+            },
+        );
+    }
+    if parts.has(RestoredParts::RENDER_LAYER) {
+        insert_if_changed(entity_mut, snap.render_layer);
+    }
 
-    sync_optional(
-        entity_mut,
-        snap.has_fill_component
-            .then(|| FillBrush(snap.fill.clone())),
-    );
-    sync_optional(
-        entity_mut,
-        snap.stroke_style.as_ref().map(|style| StrokeBrush {
-            brush: snap.stroke.clone(),
-            style: style.clone(),
-        }),
-    );
+    if parts.has(RestoredParts::FILL) {
+        sync_optional(
+            entity_mut,
+            snap.has_fill_component
+                .then(|| FillBrush(snap.fill.clone())),
+        );
+    }
+    if parts.has(RestoredParts::STROKE) {
+        sync_optional(
+            entity_mut,
+            snap.stroke_style.as_ref().map(|style| StrokeBrush {
+                brush: snap.stroke.clone(),
+                style: style.clone(),
+            }),
+        );
+    }
     // Timeline seeks resolve scene visibility after replaying membership and
     // transition events. Restoring it here would move every inactive slide's
     // entities between archetypes twice per frame just to hide them again.
-    if restore_scene_visibility || snap.scene.is_none() {
+    if all && (restore_scene_visibility || snap.scene.is_none()) {
         sync_optional(entity_mut, snap.visible.then_some(Visible));
     }
-    sync_optional(entity_mut, snap.tags.first().cloned().map(ObjectTag));
-    sync_optional(entity_mut, snap.path2d.clone().map(Path2D));
-    sync_optional(entity_mut, snap.path_source.clone().map(PathSource));
-    sync_optional(
-        entity_mut,
-        snap.fill_draw_progress
-            .map(gaanim_animation::FillDrawProgress),
-    );
-    sync_optional(entity_mut, snap.fill_level.map(FillLevel));
-    sync_optional(entity_mut, snap.media_frame);
-    sync_optional(entity_mut, snap.coordinate_view_role);
-    sync_optional(entity_mut, snap.surrounding_rect.clone());
-    if let Some(progress) = snap.connector_progress
+    if parts.has(RestoredParts::TAG) {
+        sync_optional(entity_mut, snap.tags.first().cloned().map(ObjectTag));
+    }
+    if parts.has(RestoredParts::PATH) {
+        sync_optional(entity_mut, snap.path2d.clone().map(Path2D));
+    }
+    if parts.has(RestoredParts::PATH_SOURCE) {
+        sync_optional(entity_mut, snap.path_source.clone().map(PathSource));
+    }
+    if parts.has(RestoredParts::FILL_DRAW_PROGRESS) {
+        sync_optional(
+            entity_mut,
+            snap.fill_draw_progress
+                .map(gaanim_animation::FillDrawProgress),
+        );
+    }
+    if parts.has(RestoredParts::FILL_LEVEL) {
+        sync_optional(entity_mut, snap.fill_level.map(FillLevel));
+    }
+    if parts.has(RestoredParts::MEDIA_FRAME) {
+        sync_optional(entity_mut, snap.media_frame);
+    }
+    if parts.has(RestoredParts::COORDINATE_VIEW_ROLE) {
+        sync_optional(entity_mut, snap.coordinate_view_role);
+    }
+    if parts.has(RestoredParts::SURROUNDING_RECT) {
+        sync_optional(entity_mut, snap.surrounding_rect.clone());
+    }
+    // Only connector-grow clips move a connector's progress, and a seek
+    // restores their targets whole.
+    if all
+        && let Some(progress) = snap.connector_progress
         && let Some(mut connector) =
             entity_mut.get_mut::<gaanim_animation::updaters::TrackingConnector>()
         && connector.progress != progress
     {
         connector.progress = progress;
     }
-    sync_optional(entity_mut, snap.write_tip_glow.clone());
-    sync_optional(
-        entity_mut,
-        snap.path_reveal.map(gaanim_animation::PathReveal),
-    );
-    sync_optional(entity_mut, snap.path_trim_window);
-    match snap.float_signal {
-        Some(value)
-            if entity_mut
-                .get::<gaanim_animation::FloatSignal>()
-                .is_none_or(|signal| signal.value != value) =>
-        {
-            entity_mut.insert(gaanim_animation::FloatSignal::new(value));
-        }
-        None => remove_if_present::<gaanim_animation::FloatSignal>(entity_mut),
-        _ => {}
+    if parts.has(RestoredParts::WRITE_TIP_GLOW) {
+        sync_optional(entity_mut, snap.write_tip_glow.clone());
     }
-    sync_optional(entity_mut, snap.material_3d);
+    if parts.has(RestoredParts::PATH_REVEAL) {
+        sync_optional(
+            entity_mut,
+            snap.path_reveal.map(gaanim_animation::PathReveal),
+        );
+    }
+    if parts.has(RestoredParts::PATH_TRIM_WINDOW) {
+        sync_optional(entity_mut, snap.path_trim_window);
+    }
+    if parts.has(RestoredParts::FLOAT_SIGNAL) {
+        match snap.float_signal {
+            Some(value)
+                if entity_mut
+                    .get::<gaanim_animation::FloatSignal>()
+                    .is_none_or(|signal| signal.value != value) =>
+            {
+                entity_mut.insert(gaanim_animation::FloatSignal::new(value));
+            }
+            None => remove_if_present::<gaanim_animation::FloatSignal>(entity_mut),
+            _ => {}
+        }
+    }
+    if parts.has(RestoredParts::MATERIAL_3D) {
+        sync_optional(entity_mut, snap.material_3d);
+    }
+    if parts.has(RestoredParts::BOUNDS) {
+        sync_optional(entity_mut, snap.local_bounds);
+        sync_optional(entity_mut, snap.world_bounds);
+    }
+    if !all {
+        return;
+    }
 
     if let Some(points) = &snap.traced_path_points
         && let Some(mut traced_path) = entity_mut.get_mut::<gaanim_animation::TracedPath>()
@@ -306,8 +419,6 @@ pub(crate) fn insert_snapshot_components(
         entity_mut,
         snap.is_group.then_some(gaanim_scene::GroupMarker),
     );
-    sync_optional(entity_mut, snap.local_bounds);
-    sync_optional(entity_mut, snap.world_bounds);
     sync_optional(entity_mut, snap.scene.map(SceneMember));
 }
 
@@ -499,7 +610,7 @@ impl WorldSnapshot {
 
     /// Restores the states stored in this snapshot back to the Bevy `World`.
     pub fn restore(&self, world: &mut World) {
-        let _ = self.restore_with_entity_map(world, true, |_, _, _| true);
+        let _ = self.restore_with_entity_map(world, true, |_, _, _| RestoredParts::ALL);
     }
 
     /// Like [`Self::restore`], rewriting only the existing entities that
@@ -507,9 +618,15 @@ impl WorldSnapshot {
     pub fn restore_selected(
         &self,
         world: &mut World,
-        selected: impl FnMut(&World, ObjectId, Entity) -> bool,
+        mut selected: impl FnMut(&World, ObjectId, Entity) -> bool,
     ) {
-        let _ = self.restore_with_entity_map(world, true, selected);
+        let _ = self.restore_with_entity_map(world, true, |world, id, entity| {
+            if selected(world, id, entity) {
+                RestoredParts::ALL
+            } else {
+                RestoredParts::NONE
+            }
+        });
     }
 
     /// Restore a snapshot and return the identity map built as part of the work.
@@ -517,13 +634,14 @@ impl WorldSnapshot {
     /// querying every Mobject twice on full seeks.
     /// When the caller resolves scene visibility after replay, leave that
     /// component alone for scene members until their final visibility is known.
-    /// `needs_restore` selects the existing entities whose components are
-    /// rewritten; entities spawned from the snapshot are always restored.
+    /// `needs_restore` selects the parts of each existing entity that are
+    /// rewritten; entities spawned from the snapshot are always restored
+    /// whole. Only a whole restore rewrites an entity's parent.
     pub(crate) fn restore_with_entity_map(
         &self,
         world: &mut World,
         restore_scene_visibility: bool,
-        mut needs_restore: impl FnMut(&World, ObjectId, Entity) -> bool,
+        mut needs_restore: impl FnMut(&World, ObjectId, Entity) -> RestoredParts,
     ) -> ObjectEntityMap {
         if let Some(camera) = self.camera
             && world.get_resource::<gaanim_math::Camera>() != Some(&camera)
@@ -547,15 +665,16 @@ impl WorldSnapshot {
                 let previous = entity_map.insert(id, entity);
                 if let Some(previous) = previous {
                     // The last entity with an id wins, as a map rebuild would.
-                    restored.retain(|&(_, restored_entity)| restored_entity != previous);
+                    restored.retain(|&(_, restored_entity, _)| restored_entity != previous);
                 }
                 match self.entities.get(&id) {
                     None if visible => hidden.push(entity),
                     None => {}
                     Some(snap) => {
                         matched += usize::from(previous.is_none());
-                        if needs_restore(world, id, entity) {
-                            restored.push((snap, entity));
+                        let parts = needs_restore(world, id, entity);
+                        if !parts.is_empty() {
+                            restored.push((snap, entity, parts));
                         }
                     }
                 }
@@ -584,12 +703,15 @@ impl WorldSnapshot {
                 entity_map.insert(*obj_id, new_entity);
                 // Report the new entity to the caller's restore bookkeeping.
                 let _ = needs_restore(world, *obj_id, new_entity);
-                restored.push((snap, new_entity));
+                restored.push((snap, new_entity, RestoredParts::ALL));
             }
         }
 
-        // 3. Set parent-child relationships for restored entities
-        for &(snap, entity) in &restored {
+        // 3. Set parent-child relationships for wholly restored entities
+        for &(snap, entity, parts) in &restored {
+            if parts != RestoredParts::ALL {
+                continue;
+            }
             if let Some(parent_id) = snap.parent {
                 if let Some(&parent_entity) = entity_map.get(&parent_id) {
                     restore_parent(world, entity, Some(parent_entity));
@@ -600,9 +722,9 @@ impl WorldSnapshot {
         }
 
         // 4. Overwrite all properties (including transforms) with correct snapshot values
-        for &(snap, entity) in &restored {
+        for &(snap, entity, parts) in &restored {
             let mut entity_mut = world.entity_mut(entity);
-            insert_snapshot_components(&mut entity_mut, snap, restore_scene_visibility);
+            insert_snapshot_parts(&mut entity_mut, snap, restore_scene_visibility, parts);
         }
 
         entity_map

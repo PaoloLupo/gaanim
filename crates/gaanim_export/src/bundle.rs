@@ -428,6 +428,67 @@ fn capture(
     })
 }
 
+/// What a recording keeps of its frames: the bundle they go into, the
+/// fragments their digests compose, and the cover image candidate.
+struct SinkState {
+    writer: BundleWriter<std::io::BufWriter<std::fs::File>>,
+    fragments: gaanim_renderer::fragment::FragmentStore,
+    cover: Option<ThumbnailPicker>,
+}
+
+/// Frames a recording captured in flight to a thread that digests, encodes
+/// and compresses them, in order, while the world steps the next frames.
+struct FrameSink {
+    sender: std::sync::mpsc::SyncSender<Frame>,
+    worker: std::thread::JoinHandle<Result<SinkState>>,
+}
+
+impl FrameSink {
+    /// Captured frames waiting for the worker; enough to absorb a chunk
+    /// being compressed without holding many frames in memory.
+    const QUEUE: usize = 8;
+
+    fn spawn(mut state: SinkState, background: Option<CanvasBackground>) -> Self {
+        let (sender, frames) = std::sync::mpsc::sync_channel::<Frame>(Self::QUEUE);
+        let worker = std::thread::Builder::new()
+            .name("gaanim-bundle-writer".into())
+            .spawn(move || {
+                for frame in frames {
+                    let digest = gaanim_bundle::frame_digest(
+                        &frame,
+                        background.as_ref(),
+                        &mut state.fragments,
+                    );
+                    if let Some(cover) = &mut state.cover {
+                        cover.offer(&frame);
+                    }
+                    state
+                        .writer
+                        .push_frame(&frame, digest)
+                        .map_err(bundle_error)?;
+                    state.fragments.end_frame();
+                }
+                Ok(state)
+            })
+            .expect("could not start the bundle writer thread");
+        Self { sender, worker }
+    }
+
+    /// Hand `frame` to the worker; `false` once the worker stopped on an
+    /// error, which [`Self::finish`] returns.
+    fn push(&self, frame: Frame) -> bool {
+        self.sender.send(frame).is_ok()
+    }
+
+    /// Wait until the worker has written every frame it was handed.
+    fn finish(self) -> Result<SinkState> {
+        drop(self.sender);
+        self.worker
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    }
+}
+
 /// Record the scene that `setup_world_fn` builds into a bundle.
 ///
 /// Callbacks and updaters can keep state that depends on every instant the
@@ -506,7 +567,7 @@ where
         telemetry.set_total_frames(work);
     }
     let progress = RecordingProgress::new(work, telemetry);
-    let mut cover = config.thumbnail.then(|| {
+    let cover = config.thumbnail.then(|| {
         ThumbnailPicker::new(ThumbnailPick::new(
             config.thumbnail_time,
             &segments,
@@ -514,27 +575,33 @@ where
             duration,
         ))
     });
-    let mut fragments = gaanim_renderer::fragment::FragmentStore::default();
-    let mut push = |writer: &mut BundleWriter<_>, frame: Frame| -> Result<()> {
-        let digest = gaanim_bundle::frame_digest(&frame, background.as_ref(), &mut fragments);
-        if let Some(cover) = &mut cover {
-            cover.offer(&frame);
-        }
-        writer.push_frame(&frame, digest).map_err(bundle_error)?;
-        fragments.end_frame();
-        Ok(())
-    };
+    let mut sink = FrameSink::spawn(
+        SinkState {
+            writer,
+            fragments: gaanim_renderer::fragment::FragmentStore::default(),
+            cover,
+        },
+        background.clone(),
+    );
 
     let first_world_times = if single_world {
         plan.times()
     } else {
         plan.grid.clone()
     };
-    for time in first_world_times {
-        let frame = record_frame(&mut app, time, config.fps, &post_shaders)?;
-        push(&mut writer, frame)?;
-        progress.advance();
-    }
+    let recorded = (|| -> Result<()> {
+        for time in first_world_times {
+            let frame = record_frame(&mut app, time, config.fps, &post_shaders)?;
+            if !sink.push(frame) {
+                break;
+            }
+            progress.advance();
+        }
+        Ok(())
+    })();
+    let state = sink.finish();
+    recorded?;
+    let mut state = state?;
     let clear_color = app.world().get_resource::<ClearColor>().map(|clear| {
         let rgba = clear.0.to_srgba();
         [
@@ -548,26 +615,35 @@ where
     // Name the elements drawn from live poll data, so presenting the bundle
     // can redraw them at the live votes.
     let (poll_bars, poll_texts, poll_readouts) =
-        crate::live_polls::record(app.world_mut(), &mut writer);
+        crate::live_polls::record(app.world_mut(), &mut state.writer);
 
     if !single_world {
         drop(app);
-        writer.start_pass().map_err(bundle_error)?;
+        state.writer.start_pass().map_err(bundle_error)?;
         let mut app = recording_app(setup_world_fn)?;
         if let Some(mut background) = app.world_mut().get_resource_mut::<CanvasBackground>() {
             background.pixel_size = (config.width, config.height);
         }
-        let mut grid = plan.grid.iter().copied().peekable();
-        for &extra in &plan.extras {
-            // Visit the grid up to the instant as the first world did.
-            while let Some(time) = grid.next_if(|time| *time < extra) {
-                step_frame(&mut app, time, config.fps)?;
+        sink = FrameSink::spawn(state, background.clone());
+        let recorded = (|| -> Result<()> {
+            let mut grid = plan.grid.iter().copied().peekable();
+            for &extra in &plan.extras {
+                // Visit the grid up to the instant as the first world did.
+                while let Some(time) = grid.next_if(|time| *time < extra) {
+                    step_frame(&mut app, time, config.fps)?;
+                    progress.advance();
+                }
+                let frame = record_frame(&mut app, extra, config.fps, &post_shaders)?;
+                if !sink.push(frame) {
+                    break;
+                }
                 progress.advance();
             }
-            let frame = record_frame(&mut app, extra, config.fps, &post_shaders)?;
-            push(&mut writer, frame)?;
-            progress.advance();
-        }
+            Ok(())
+        })();
+        let finished = sink.finish();
+        recorded?;
+        state = finished?;
     }
     progress.finish();
 
@@ -592,6 +668,9 @@ where
         poll_texts,
         poll_readouts,
     };
+    let SinkState {
+        mut writer, cover, ..
+    } = state;
     if let Some(frame) = cover.and_then(ThumbnailPicker::into_frame) {
         match render_thumbnail(&scene, &frame) {
             Ok(png) => writer.set_thumbnail(&png).map_err(bundle_error)?,

@@ -3,7 +3,8 @@ use bevy::ecs::change_detection::Tick;
 use bevy::ecs::entity::EntityHashMap;
 use bevy::ecs::world::WorldId;
 use bevy::prelude::{
-    BuildChildrenTransformExt, Changed, ChildOf, Entity, Or, Resource, Transform, With, World,
+    BuildChildrenTransformExt, Changed, ChildOf, Component, Entity, EntityRef, Or, Resource,
+    Transform, With, World,
 };
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
@@ -11,7 +12,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, SceneId, Track, TrackId};
 use crate::scene::{SceneMember, SceneMetadata};
-use crate::snapshot::{ObjectEntityMap, WorldSnapshot};
+use crate::snapshot::{ObjectEntityMap, RestoredParts, WorldSnapshot};
 use crate::transition::{SceneConnection, TransitionType};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::{
@@ -99,20 +100,146 @@ type RestoredComponentChanged = Or<(
     )>,
 )>;
 
+/// The parts of `entity` that must be restored because something other than
+/// the seek wrote them since `last`: the components of
+/// [`RestoredComponentChanged`] it changed, or all of it when one of them is
+/// structural (visibility, membership, hierarchy, groups, traced paths).
+fn changed_parts(entity: EntityRef<'_>, last: Tick, this: Tick) -> RestoredParts {
+    fn changed<T: Component>(entity: EntityRef<'_>, last: Tick, this: Tick) -> bool {
+        entity
+            .get_change_ticks::<T>()
+            .is_some_and(|ticks| ticks.is_changed(last, this))
+    }
+    if changed::<gaanim_scene::Visible>(entity, last, this)
+        || changed::<gaanim_scene::GroupMarker>(entity, last, this)
+        || changed::<SceneMember>(entity, last, this)
+        || changed::<ChildOf>(entity, last, this)
+        || changed::<Transform>(entity, last, this)
+        || changed::<gaanim_animation::TracedPath>(entity, last, this)
+        || changed::<gaanim_animation::TracedPath3D>(entity, last, this)
+        || changed::<LineListData>(entity, last, this)
+    {
+        return RestoredParts::ALL;
+    }
+    let mut parts = RestoredParts::NONE;
+    for (changed, part) in [
+        (
+            changed::<SpatialTransform>(entity, last, this),
+            RestoredParts::TRANSFORM,
+        ),
+        (
+            changed::<Opacity>(entity, last, this),
+            RestoredParts::OPACITY,
+        ),
+        (
+            changed::<gaanim_scene::RenderOrder>(entity, last, this),
+            RestoredParts::RENDER_ORDER,
+        ),
+        (
+            changed::<gaanim_scene::RenderLayer>(entity, last, this),
+            RestoredParts::RENDER_LAYER,
+        ),
+        (
+            changed::<FillBrush>(entity, last, this),
+            RestoredParts::FILL,
+        ),
+        (
+            changed::<StrokeBrush>(entity, last, this),
+            RestoredParts::STROKE,
+        ),
+        (
+            changed::<gaanim_scene::ObjectTag>(entity, last, this),
+            RestoredParts::TAG,
+        ),
+        (changed::<Path2D>(entity, last, this), RestoredParts::PATH),
+        (
+            changed::<gaanim_scene::PathSource>(entity, last, this),
+            RestoredParts::PATH_SOURCE,
+        ),
+        (
+            changed::<gaanim_animation::FillDrawProgress>(entity, last, this),
+            RestoredParts::FILL_DRAW_PROGRESS,
+        ),
+        (
+            changed::<gaanim_scene::FillLevel>(entity, last, this),
+            RestoredParts::FILL_LEVEL,
+        ),
+        (
+            changed::<gaanim_scene::MediaFrame>(entity, last, this),
+            RestoredParts::MEDIA_FRAME,
+        ),
+        (
+            changed::<gaanim_scene::CoordinateViewRole>(entity, last, this),
+            RestoredParts::COORDINATE_VIEW_ROLE,
+        ),
+        (
+            changed::<gaanim_animation::SurroundingRect>(entity, last, this),
+            RestoredParts::SURROUNDING_RECT,
+        ),
+        (
+            changed::<gaanim_animation::WriteTipGlow>(entity, last, this),
+            RestoredParts::WRITE_TIP_GLOW,
+        ),
+        (
+            changed::<gaanim_animation::PathReveal>(entity, last, this),
+            RestoredParts::PATH_REVEAL,
+        ),
+        (
+            changed::<gaanim_animation::PathTrimWindow>(entity, last, this),
+            RestoredParts::PATH_TRIM_WINDOW,
+        ),
+        (
+            changed::<gaanim_animation::FloatSignal>(entity, last, this),
+            RestoredParts::FLOAT_SIGNAL,
+        ),
+        (
+            changed::<gaanim_scene::Material3D>(entity, last, this),
+            RestoredParts::MATERIAL_3D,
+        ),
+        (
+            changed::<gaanim_scene::LocalBounds>(entity, last, this),
+            RestoredParts::BOUNDS,
+        ),
+    ] {
+        if changed {
+            parts |= part;
+        }
+    }
+    parts
+}
+
 /// Entities that must be restored from the keyframe before an incremental replay.
 struct DirtyEntities {
+    /// Targets of clips that are not absolute: restored whole.
     objects: bevy::platform::collections::HashSet<gaanim_core::ObjectId>,
+    /// Entities that systems outside the seek wrote since the previous one,
+    /// with the parts they wrote. Layout, bindings and other derived state
+    /// rewrite theirs on every frame, so restoring only those parts keeps
+    /// the rest of each entity at what the previous replay left.
+    changed: bevy::platform::collections::HashMap<gaanim_core::ObjectId, RestoredParts>,
     archetypes: EntityHashMap<ArchetypeId>,
 }
 
 impl DirtyEntities {
-    fn needs_restore(&self, world: &World, id: gaanim_core::ObjectId, entity: Entity) -> bool {
-        self.objects.contains(&id)
+    fn needs_restore(
+        &self,
+        world: &World,
+        id: gaanim_core::ObjectId,
+        entity: Entity,
+    ) -> RestoredParts {
+        if self.objects.contains(&id)
             || world
                 .get_entity(entity)
                 .ok()
                 .map(|entity| entity.archetype().id())
                 != self.archetypes.get(&entity).copied()
+        {
+            return RestoredParts::ALL;
+        }
+        self.changed
+            .get(&id)
+            .copied()
+            .unwrap_or(RestoredParts::NONE)
     }
 }
 
@@ -1687,12 +1814,18 @@ impl Timeline {
             }
         }
 
+        let mut changed = bevy::platform::collections::HashMap::new();
         world.last_change_tick_scope(baseline.tick, |world| {
-            let mut changed = world.query_filtered::<&MobjectId, RestoredComponentChanged>();
-            objects.extend(changed.iter(world).map(|id| id.0));
+            let this = world.read_change_tick();
+            let mut query =
+                world.query_filtered::<(EntityRef, &MobjectId), RestoredComponentChanged>();
+            for (entity, id) in query.iter(world) {
+                changed.insert(id.0, changed_parts(entity, baseline.tick, this));
+            }
         });
         Some(DirtyEntities {
             objects,
+            changed,
             archetypes: baseline.archetypes,
         })
     }
@@ -1883,11 +2016,13 @@ impl Timeline {
                             world,
                             restore_scene_visibility,
                             |world, id, entity| {
-                                let needs_restore = dirty.needs_restore(world, id, entity);
-                                if needs_restore {
+                                let parts = dirty.needs_restore(world, id, entity);
+                                // A partly restored entity may have lost the
+                                // values its future clips hold, as a whole one.
+                                if !parts.is_empty() {
                                     restored.insert(id);
                                 }
-                                needs_restore
+                                parts
                             },
                         );
                         restored_objects = Some(restored);
@@ -1896,7 +2031,7 @@ impl Timeline {
                     None => snapshot.restore_with_entity_map(
                         world,
                         restore_scene_visibility,
-                        |_, _, _| true,
+                        |_, _, _| RestoredParts::ALL,
                     ),
                 });
                 self.last_restore_kf_time = Some(kf_time);
@@ -2296,26 +2431,34 @@ impl Timeline {
         if !self.scenes.is_empty() {
             let active_scene = self.scene_at(self.current_time);
 
-            // Collect entities with SceneMember to avoid borrow conflicts
-            let scene_entities: Vec<(Entity, SceneId)> = {
-                let mut q = world.query::<(Entity, &SceneMember)>();
-                q.iter(world).map(|(e, sm)| (e, sm.0)).collect()
+            // Collect entities with SceneMember to avoid borrow conflicts,
+            // with whether they are visible: a presentation has thousands.
+            let scene_entities: Vec<(Entity, SceneId, bool)> = {
+                let mut q = world.query::<(
+                    Entity,
+                    &SceneMember,
+                    bevy::prelude::Has<gaanim_scene::Visible>,
+                )>();
+                q.iter(world)
+                    .map(|(e, sm, visible)| (e, sm.0, visible))
+                    .collect()
             };
 
             // Determine which scenes should be visible
-            let visible_scenes: std::collections::HashSet<SceneId> =
-                if let Some((_, _, from, to)) = active_transition {
-                    // During a transition, BOTH scenes are visible
-                    [from, to].into_iter().collect()
-                } else if let Some(scene) = active_scene {
-                    std::iter::once(scene).collect()
-                } else {
-                    std::collections::HashSet::new()
-                };
+            let visible_scenes: Vec<SceneId> = if let Some((_, _, from, to)) = active_transition {
+                // During a transition, BOTH scenes are visible
+                vec![from, to]
+            } else {
+                active_scene.into_iter().collect()
+            };
 
             // Apply transition effects if active (before visibility toggle)
             if let Some((transition_type, t, from, to)) = active_transition {
-                apply_transition(world, &scene_entities, transition_type, t, from, to);
+                let members: Vec<(Entity, SceneId)> = scene_entities
+                    .iter()
+                    .map(|&(entity, scene, _)| (entity, scene))
+                    .collect();
+                apply_transition(world, &members, transition_type, t, from, to);
             }
             let overlays = self.active_transition_overlays();
             crate::transition_mask::finish_transition_frame(
@@ -2325,17 +2468,20 @@ impl Timeline {
             );
 
             // Toggle visibility: entities belonging to non-visible scenes get hidden
-            for (entity, scene_id) in &scene_entities {
-                if visible_scenes.contains(scene_id) {
-                    if world.get::<gaanim_scene::Visible>(*entity).is_none()
-                        && let Ok(mut em) = world.get_entity_mut(*entity)
-                    {
-                        em.insert(gaanim_scene::Visible);
-                    }
+            for &(entity, scene_id, visible) in &scene_entities {
+                // A transition may have changed what was collected.
+                let visible = if active_transition.is_some() {
+                    world.get::<gaanim_scene::Visible>(entity).is_some()
                 } else {
-                    if world.get::<gaanim_scene::Visible>(*entity).is_some()
-                        && let Ok(mut em) = world.get_entity_mut(*entity)
-                    {
+                    visible
+                };
+                let shown = visible_scenes.contains(&scene_id);
+                if shown != visible
+                    && let Ok(mut em) = world.get_entity_mut(entity)
+                {
+                    if shown {
+                        em.insert(gaanim_scene::Visible);
+                    } else {
                         em.remove::<gaanim_scene::Visible>();
                     }
                 }
@@ -6316,6 +6462,7 @@ mod tests {
                     Opacity(1.0),
                     Path2D(Arc::new(path.clone())),
                     PathSource(Arc::new(path.clone())),
+                    gaanim_scene::LocalBounds::default(),
                 ))
                 .id()
         });
@@ -6497,6 +6644,97 @@ mod tests {
                 .iter(&world)
                 .any(|entity| entity == entities[2])
         );
+    }
+
+    /// What layout, connectors and bindings do after every seek: derive the
+    /// bounds of each entity from its pose, and redraw one path from its
+    /// opacity.
+    fn derive_layout(world: &mut World, entities: &[Entity; 3]) {
+        for &entity in entities {
+            let x = world.get::<SpatialTransform>(entity).unwrap().translation.x;
+            world.get_mut::<gaanim_scene::LocalBounds>(entity).unwrap().0 =
+                gaanim_math::Bounds3D::new_2d(x, 0.0, x + 10.0, 1.0);
+        }
+        let opacity = f64::from(world.get::<Opacity>(entities[1]).unwrap().0);
+        let rect = gaanim_core::kurbo::Rect::new(0.0, 0.0, 1.0 + 10.0 * opacity, 2.0);
+        world.get_mut::<Path2D>(entities[1]).unwrap().0 =
+            Arc::new(gaanim_core::kurbo::Shape::to_path(&rect, 0.1));
+    }
+
+    #[test]
+    fn derived_writes_restore_only_their_components_and_match_full_restore() {
+        for with_scenes in [false, true] {
+            let (mut world, mut timeline, entities) = incremental_replay_fixture(with_scenes);
+            let (mut reference_world, mut reference, reference_entities) =
+                incremental_replay_fixture(with_scenes);
+            let same = |world: &World, reference_world: &World, time: f64, stage: &str| {
+                for (&entity, &reference_entity) in entities.iter().zip(&reference_entities) {
+                    let context = format!("{stage} at t={time}, scenes={with_scenes}");
+                    assert_eq!(
+                        world.get::<SpatialTransform>(entity),
+                        reference_world.get::<SpatialTransform>(reference_entity),
+                        "transform {context}"
+                    );
+                    assert_eq!(
+                        world.get::<Opacity>(entity),
+                        reference_world.get::<Opacity>(reference_entity),
+                        "opacity {context}"
+                    );
+                    assert_eq!(
+                        world.get::<Path2D>(entity),
+                        reference_world.get::<Path2D>(reference_entity),
+                        "path {context}"
+                    );
+                    assert_eq!(
+                        world.get::<gaanim_scene::LocalBounds>(entity),
+                        reference_world.get::<gaanim_scene::LocalBounds>(reference_entity),
+                        "bounds {context}"
+                    );
+                    assert_eq!(
+                        world.get::<gaanim_scene::Visible>(entity).is_some(),
+                        reference_world
+                            .get::<gaanim_scene::Visible>(reference_entity)
+                            .is_some(),
+                        "visibility {context}"
+                    );
+                }
+            };
+            let times = (0..=48)
+                .map(|step| f64::from(step) / 16.0)
+                .chain([0.8, 0.9, 1.7, 2.2, 2.9]);
+            for time in times {
+                timeline.seek(&mut world, time);
+                reference.replay_baseline = None;
+                reference.seek(&mut reference_world, time);
+                same(&world, &reference_world, time, "after the seek");
+                derive_layout(&mut world, &entities);
+                derive_layout(&mut reference_world, &reference_entities);
+                same(&world, &reference_world, time, "after layout");
+            }
+
+            // Once settled, a seek after layout restores the bounds layout
+            // wrote and leaves the rest of the entity alone.
+            let settled = if with_scenes { 2.6 } else { 1.2 };
+            for time in [settled, settled + 0.05] {
+                timeline.seek(&mut world, time);
+                derive_layout(&mut world, &entities);
+            }
+            world.clear_trackers();
+            derive_layout(&mut world, &entities);
+            timeline.seek(&mut world, settled + 0.1);
+            let changed = |world: &mut World, entity| {
+                let mut query = world.query_filtered::<Entity, Or<(
+                    Changed<SpatialTransform>,
+                    Changed<Opacity>,
+                    Changed<PathSource>,
+                )>>();
+                query.iter(world).any(|changed| changed == entity)
+            };
+            assert!(
+                !changed(&mut world, entities[2]),
+                "scenes={with_scenes}: only the derived bounds are restored"
+            );
+        }
     }
 
     /// Four segments starting at 0, 1, 2 and 3; a clip runs across 3. With
