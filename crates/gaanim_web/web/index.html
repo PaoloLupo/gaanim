@@ -55,6 +55,23 @@
       background: var(--surface); border: 1px solid rgba(255,255,255,.12); color: var(--text);
       font-size: 14px; z-index: 10; }
     #toast[hidden] { display: none; }
+    #toast input { display: block; width: min(560px, calc(100vw - 64px)); margin-top: 8px; padding: 6px 8px;
+      font: 13px/1.4 ui-monospace, monospace; color: var(--text); background: var(--ink);
+      border: 1px solid rgba(255,255,255,.18); }
+    /* How much of a file opened from a link has downloaded. */
+    #fill { position: fixed; left: 0; top: 0; height: 2px; width: 0; background: var(--loop);
+      opacity: .7; z-index: 5; transition: width .2s; pointer-events: none; }
+    #fill[hidden] { display: none; }
+    #buffering { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); padding: 4px 12px;
+      background: var(--surface); border: 1px solid rgba(255,255,255,.12); color: var(--muted);
+      font-size: 13px; z-index: 6; pointer-events: none; }
+    #buffering[hidden] { display: none; }
+    #present-card { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+      background: rgba(15,16,21,.72); z-index: 8; }
+    #present-card[hidden] { display: none; }
+    #present-card button { font-size: 17px; padding: 12px 28px; margin: 0; }
+    #present-card p { margin: 14px 0 0; font-size: 13px; }
+    #present-card a { color: var(--accent); }
     /* Wording for mouse or touch screens. */
     .drop strong.touch, .drop span.touch { display: none; }
     @media (pointer: coarse) {
@@ -81,6 +98,14 @@
       <progress id="progress" max="1" value="0" hidden></progress>
       <div id="status" role="status"></div>
       <p class="links"><a href="../">Documentación de Gaanim</a> · <a href="../guias/compartir/">Cómo compartir un .gaanim</a></p>
+    </div>
+  </div>
+  <div id="fill" hidden></div>
+  <div id="buffering" role="status" hidden>Cargando…</div>
+  <div id="present-card" hidden>
+    <div class="card">
+      <button type="button">Presentar</button>
+      <p>Presenter View se abrirá en otra ventana. <a href="#">Ver sin presentar</a></p>
     </div>
   </div>
   <div id="toast" role="status" hidden></div>

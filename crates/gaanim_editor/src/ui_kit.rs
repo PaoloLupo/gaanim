@@ -75,6 +75,8 @@ pub(crate) enum Icon {
     Thirds,
     /// A box holding two boxes: layout inspector.
     Layout,
+    /// Two chain links: copy a link.
+    Link,
 }
 
 /// How an icon button presents its state.
@@ -521,6 +523,23 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                 tip - normal * head * 0.75,
                 tip + normal * head * 0.75,
             ]);
+        }
+        Icon::Link => {
+            // Two rounded links along the diagonal, overlapping in the middle.
+            let k = std::f32::consts::FRAC_1_SQRT_2;
+            let (half_length, radius) = (0.13, 0.14);
+            for center in [-0.15_f32, 0.15] {
+                let mut points = Vec::with_capacity(35);
+                for (end, start) in [(half_length, -90.0_f32), (-half_length, 90.0)] {
+                    for step in 0..=16 {
+                        let angle = (start + 180.0 * step as f32 / 16.0).to_radians();
+                        let (u, v) = (center + end + radius * angle.cos(), radius * angle.sin());
+                        points.push(p((u - v) * k, -(u + v) * k));
+                    }
+                }
+                points.push(points[0]);
+                painter.line(points, stroke);
+            }
         }
         Icon::Layout => {
             painter.rect_stroke(

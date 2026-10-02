@@ -23,6 +23,11 @@ pub struct HostOptions {
 pub struct WebPage {
     /// Open the Presenter View page next to this one.
     pub open_presenter: fn(),
+    /// Copy a link to the open file, ending in this fragment (see
+    /// [`crate::share_link`]); empty for the start.
+    pub copy_link: fn(&str),
+    /// Tell the viewer something, briefly.
+    pub notify: fn(&str),
 }
 
 /// Selector of the canvas the web player renders into.

@@ -23,14 +23,22 @@
 //!   to redraw them, only when the scene has polls. Readers that predate
 //!   it ignore it, so it needs no new format version.
 //!
+//! A bundle opens from its bytes whole or in pieces ([`BundleSource`]): the
+//! web player opens one from the end of the file, which holds the archive's
+//! directory and every table, and downloads frame chunks as playback needs
+//! them.
+//!
 //! [`FragmentRecipe`]: gaanim_renderer::fragment::FragmentRecipe
 
+mod archive;
 mod codec;
 mod digest;
 mod model;
+mod source;
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -46,10 +54,12 @@ use gaanim_timeline::timeline::{
 };
 use serde::{Deserialize, Serialize};
 
+use archive::Archive;
 use codec::{Reader, Writer};
 pub use digest::scene_digest;
 use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, Tables};
 pub use model::{EntityKeys, Frame, PostPass};
+pub use source::BundleSource;
 
 /// The entity that stands for element key `key` in decoded frames.
 pub fn element_entity(key: u32) -> Result<bevy::prelude::Entity> {
@@ -95,6 +105,9 @@ pub enum BundleError {
     UnsupportedVersion { found: u32, generator: String },
     #[error("{0}")]
     Unsupported(String),
+    /// Reading needs bytes of the file that have not arrived yet.
+    #[error("the bundle is still downloading")]
+    Incomplete { missing: Vec<Range<u64>> },
 }
 
 type Result<T> = std::result::Result<T, BundleError>;
@@ -1236,7 +1249,7 @@ impl<W: Write + Seek> BundleWriter<W> {
 
 /// An open bundle. Frames are decoded chunk by chunk on demand.
 pub struct Bundle {
-    archive: zip::ZipArchive<std::io::Cursor<Arc<[u8]>>>,
+    archive: Archive,
     pub manifest: Manifest,
     pub scene: SceneData,
     tables: DecodedTables,
@@ -1330,17 +1343,8 @@ fn zstd_entry(name: &str) -> bool {
     name != "manifest.json" && name != THUMBNAIL && !name.starts_with("media/")
 }
 
-fn read_entry<R: Read + Seek>(
-    archive: &mut zip::ZipArchive<R>,
-    manifest: Option<&Manifest>,
-    name: &str,
-) -> Result<Vec<u8>> {
-    let mut file = archive
-        .by_name(name)
-        .map_err(|_| BundleError::Corrupt(format!("missing entry {name}")))?;
-    let mut bytes = Vec::with_capacity(file.size().min(1 << 30) as usize);
-    file.read_to_end(&mut bytes)?;
-    drop(file);
+fn read_entry(archive: &Archive, manifest: Option<&Manifest>, name: &str) -> Result<Vec<u8>> {
+    let mut bytes = archive.read(name)?;
     if let Some(manifest) = manifest {
         if zstd_entry(name) {
             bytes = decompress(name, &bytes)?;
@@ -1358,6 +1362,17 @@ fn read_entry<R: Read + Seek>(
     Ok(bytes)
 }
 
+/// Entries a bundle reads as it opens: everything but frame chunks, Lottie
+/// frames, media and the cover. The first chunk comes along, since a player
+/// shows it next.
+fn read_on_open(name: &str) -> bool {
+    name == "frames/000000.bin"
+        || !(name.starts_with("frames/")
+            || name.starts_with("scenes/")
+            || name.starts_with("media/")
+            || name == THUMBNAIL)
+}
+
 impl Bundle {
     /// Open and validate a bundle file.
     pub fn open(path: &Path) -> Result<Self> {
@@ -1366,9 +1381,27 @@ impl Bundle {
     }
 
     pub fn from_bytes(bytes: Arc<[u8]>) -> Result<Self> {
-        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
+        Self::from_source(BundleSource::whole(bytes))
+    }
+
+    /// Open and validate a bundle whose bytes may still be arriving. Until
+    /// the end of the file and the tables have arrived this fails with
+    /// [`BundleError::Incomplete`], naming the byte ranges to add to
+    /// `source` before trying again; frames then decode as their chunks
+    /// arrive.
+    pub fn from_source(source: BundleSource) -> Result<Self> {
+        let archive = Archive::open(source)?;
+        let mut missing: Vec<Range<u64>> = archive
+            .spans()
+            .filter(|(name, _)| read_on_open(name))
+            .flat_map(|(_, span)| archive.source().missing(span))
+            .collect();
+        if !missing.is_empty() {
+            missing.sort_by_key(|range| range.start);
+            return Err(BundleError::Incomplete { missing });
+        }
         let manifest: Manifest =
-            serde_json::from_slice(&read_entry(&mut archive, None, "manifest.json")?)
+            serde_json::from_slice(&read_entry(&archive, None, "manifest.json")?)
                 .map_err(|error| BundleError::Corrupt(format!("manifest.json: {error}")))?;
         if manifest.format != FORMAT {
             return Err(BundleError::Corrupt(format!(
@@ -1389,49 +1422,49 @@ impl Bundle {
             recipes: Vec::new(),
             strings: Vec::new(),
         };
-        let paths = read_entry(&mut archive, Some(&manifest), "tables/paths.bin")?;
+        let paths = read_entry(&archive, Some(&manifest), "tables/paths.bin")?;
         let mut r = Reader::new(&paths);
         for _ in 0..r.len()? {
             tables.paths.push(Arc::new(codec::read_path(&mut r)?));
         }
-        let images = read_entry(&mut archive, Some(&manifest), "tables/images.bin")?;
+        let images = read_entry(&archive, Some(&manifest), "tables/images.bin")?;
         let mut r = Reader::new(&images);
         for _ in 0..r.len()? {
             tables.images.push(codec::read_image_data(&mut r)?);
         }
-        let strings = read_entry(&mut archive, Some(&manifest), "tables/strings.bin")?;
+        let strings = read_entry(&archive, Some(&manifest), "tables/strings.bin")?;
         let mut r = Reader::new(&strings);
         for _ in 0..r.len()? {
             tables.strings.push(Arc::from(r.str()?));
         }
-        let recipes = read_entry(&mut archive, Some(&manifest), "tables/recipes.bin")?;
+        let recipes = read_entry(&archive, Some(&manifest), "tables/recipes.bin")?;
         let mut r = Reader::new(&recipes);
         let mut encoded = Vec::new();
         for _ in 0..r.len()? {
             encoded.push(r.bytes()?.to_vec());
         }
         model::decode_recipes(&encoded, &mut tables)?;
-        let scene_bytes = read_entry(&mut archive, Some(&manifest), "scene.bin")?;
+        let scene_bytes = read_entry(&archive, Some(&manifest), "scene.bin")?;
         let mut scene = SceneData::read(&mut Reader::new(&scene_bytes), &tables)?;
         if manifest.entries.contains_key(POLLS) {
-            let polls = read_entry(&mut archive, Some(&manifest), POLLS)?;
+            let polls = read_entry(&archive, Some(&manifest), POLLS)?;
             read_polls(&polls, &mut scene, |name| {
-                read_entry(&mut archive, Some(&manifest), name)
+                read_entry(&archive, Some(&manifest), name)
             })?;
         }
         if manifest.entries.contains_key(LIVE) {
             scene.live_zones =
-                serde_json::from_slice(&read_entry(&mut archive, Some(&manifest), LIVE)?)
+                serde_json::from_slice(&read_entry(&archive, Some(&manifest), LIVE)?)
                     .map_err(|error| BundleError::Corrupt(format!("{LIVE}: {error}")))?;
         }
         if manifest.entries.contains_key(REHEARSAL) {
             scene.rehearsal = Some(
-                serde_json::from_slice(&read_entry(&mut archive, Some(&manifest), REHEARSAL)?)
+                serde_json::from_slice(&read_entry(&archive, Some(&manifest), REHEARSAL)?)
                     .map_err(|error| BundleError::Corrupt(format!("{REHEARSAL}: {error}")))?,
             );
         }
 
-        let index = read_entry(&mut archive, Some(&manifest), "index.bin")?;
+        let index = read_entry(&archive, Some(&manifest), "index.bin")?;
         let mut r = Reader::new(&index);
         let count = r.len()?;
         let mut times = Vec::with_capacity(count.min(1 << 24));
@@ -1450,7 +1483,7 @@ impl Bundle {
         {
             return Err(BundleError::Corrupt("frame index is inconsistent".into()));
         }
-        let digest_bytes = read_entry(&mut archive, Some(&manifest), "digests.bin")?;
+        let digest_bytes = read_entry(&archive, Some(&manifest), "digests.bin")?;
         if digest_bytes.len() != times.len() * 32 {
             return Err(BundleError::Corrupt(
                 "frame digests are inconsistent".into(),
@@ -1476,7 +1509,7 @@ impl Bundle {
             .chunks
             .get(chunk)
             .ok_or_else(|| BundleError::Corrupt("chunk index out of range".into()))?;
-        let bytes = read_entry(&mut self.archive, Some(&self.manifest), &info.entry)?;
+        let bytes = read_entry(&self.archive, Some(&self.manifest), &info.entry)?;
         Ok(ChunkCursor {
             chunk,
             bytes,
@@ -1537,7 +1570,7 @@ impl Bundle {
             .expect("chunk cached")
             .decode_through(index - info.first_frame, &info.entry)?;
         let (archive, manifest, tables, scenes) = (
-            &mut self.archive,
+            &self.archive,
             &self.manifest,
             &self.tables,
             &mut self.scenes,
@@ -1557,6 +1590,30 @@ impl Bundle {
             scenes.insert(index, Arc::clone(&scene));
             Ok(Some(scene))
         })
+    }
+
+    /// The bytes the bundle is read from.
+    pub fn source(&self) -> &BundleSource {
+        self.archive.source()
+    }
+
+    /// Byte ranges still missing to decode frame `index` and the frames of
+    /// the `ahead` chunks recorded after its own, nearest first. Lottie
+    /// frames are left out: a frame names them only once it decodes.
+    pub fn missing_around(&self, index: usize, ahead: usize) -> Vec<Range<u64>> {
+        let chunk = self
+            .manifest
+            .chunks
+            .partition_point(|info| info.first_frame <= index)
+            .saturating_sub(1);
+        self.manifest
+            .chunks
+            .iter()
+            .skip(chunk)
+            .take(ahead + 1)
+            .filter_map(|info| self.archive.span(&info.entry))
+            .flat_map(|span| self.archive.source().missing(span))
+            .collect()
     }
 
     /// [`frame_digest`] recorded for frame `index`.
@@ -1585,12 +1642,12 @@ impl Bundle {
         if !self.manifest.entries.contains_key(THUMBNAIL) {
             return Ok(None);
         }
-        read_entry(&mut self.archive, Some(&self.manifest), THUMBNAIL).map(Some)
+        read_entry(&self.archive, Some(&self.manifest), THUMBNAIL).map(Some)
     }
 
     /// Bytes of an embedded media entry.
     pub fn media(&mut self, entry: &str) -> Result<Vec<u8>> {
-        read_entry(&mut self.archive, Some(&self.manifest), entry)
+        read_entry(&self.archive, Some(&self.manifest), entry)
     }
 
     /// Write the embedded media into `dir` (content-addressed, so repeated
@@ -1726,6 +1783,61 @@ mod tests {
             assert_eq!(decoded.camera, frame(time).camera, "frame {index}");
         }
         assert!(bundle.cached.len() <= CACHED_CHUNKS);
+    }
+
+    #[test]
+    fn a_bundle_opens_from_its_end_and_decodes_chunks_as_they_arrive() {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for index in 0..200 {
+            writer
+                .push_frame(&frame(f64::from(index) / 60.0), [0; 32])
+                .unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: 200.0 / 60.0,
+            ..Default::default()
+        };
+        let bytes: Arc<[u8]> = writer.finish(&scene).unwrap().into_inner().into();
+        let len = bytes.len() as u64;
+        let add = |source: &BundleSource, ranges: &[Range<u64>]| {
+            for range in ranges {
+                source.insert(
+                    range.start,
+                    Arc::from(&bytes[range.start as usize..range.end as usize]),
+                );
+            }
+        };
+
+        // From the last bytes, opening asks for the directory, then for the
+        // tables and the first chunk, not the later chunks.
+        let source = BundleSource::new(len);
+        add(&source, &[len - 22..len]);
+        let mut bundle = None;
+        for _ in 0..4 {
+            match Bundle::from_source(source.clone()) {
+                Ok(opened) => {
+                    bundle = Some(opened);
+                    break;
+                }
+                Err(BundleError::Incomplete { missing }) => add(&source, &missing),
+                Err(error) => panic!("{error}"),
+            }
+        }
+        let mut bundle = bundle.expect("opens once the asked bytes arrive");
+        assert!(!source.is_complete());
+        bundle.frame(0).unwrap();
+
+        let last = bundle.frame_count() - 1;
+        let ahead = bundle.missing_around(last - 70, 1);
+        assert!(!ahead.is_empty());
+        let Err(BundleError::Incomplete { missing }) = bundle.frame(last) else {
+            panic!("the last chunk has not arrived");
+        };
+        add(&source, &missing);
+        add(&source, &ahead);
+        assert_eq!(bundle.frame(last).unwrap().time, bundle.times()[last]);
+        assert!(bundle.missing_around(last - 70, 1).is_empty());
     }
 
     #[test]
