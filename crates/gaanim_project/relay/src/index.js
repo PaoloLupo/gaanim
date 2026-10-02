@@ -96,7 +96,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
  * lasts between SESSION_TTL_MS minus this and SESSION_TTL_MS after its last
  * activity. */
 const ALARM_SLACK_MS = 30 * 60 * 1000;
-const API_VERSION = 10;
+const API_VERSION = 11;
 /** A poll picture's name: a hash of its bytes. */
 const IMAGE = /^[0-9a-f]{16}$/;
 /** Largest picture the presenter may store. */
@@ -113,6 +113,14 @@ const PODIUM = 3;
 /** How long changes gather before the presenter's socket hears of them, so
  * a burst of votes is one message. */
 const PUSH_MS = 250;
+/** Players a game takes, and phones a poll counts: anyone with the code can
+ * join, so a script cannot grow a session without end. */
+const MAX_PLAYERS = 500;
+const MAX_VOTERS = 1000;
+/** Messages a phone's socket may send per RATE_WINDOW_MS; a phone sends a
+ * few per question. */
+const RATE_MESSAGES = 20;
+const RATE_WINDOW_MS = 10_000;
 
 /** Headers every page and API response carries. */
 const SECURITY_HEADERS = {
@@ -282,7 +290,13 @@ export class PollSession extends DurableObject {
       alarmAt: await this.ctx.storage.getAlarm(),
     };
     const byPoll = (map, id) => map.get(id) ?? map.set(id, new Map()).get(id);
-    for (const [key, value] of await this.ctx.storage.list()) {
+    // Everything but the pictures, which are large and read when a phone
+    // asks for one: the keys before "image:" and from "image;" on.
+    const rows = [
+      ...(await this.ctx.storage.list({ end: "image:" })),
+      ...(await this.ctx.storage.list({ start: "image;" })),
+    ];
+    for (const [key, value] of rows) {
       const [kind, id, voter] = key.split(":");
       switch (kind) {
         case "key":
@@ -383,15 +397,36 @@ export class PollSession extends DurableObject {
     // The presentation's socket only listens.
     if (this.ctx.getTags(socket).includes("presenter")) return;
     const send = (value) => socket.send(JSON.stringify(value));
+    // The socket's phone and its recent messages, kept with the socket so
+    // they survive hibernation.
+    const attachment = socket.deserializeAttachment() ?? {};
+    const now = Date.now();
+    const fresh = !(now - attachment.since < RATE_WINDOW_MS);
+    const since = fresh ? now : attachment.since;
+    const count = fresh ? 1 : (attachment.count ?? 0) + 1;
+    socket.serializeAttachment({ ...attachment, since, count });
+    if (count > 3 * RATE_MESSAGES) return socket.close(1008, "too many messages");
     let input;
+    let invalid = false;
     try {
       if (typeof message !== "string" || message.length > MAX_BODY) throw new Error();
       input = JSON.parse(message);
     } catch {
-      return send({ type: "error", status: 400, error: "invalid message" });
+      invalid = true;
+    }
+    const poll = input?.type === "vote" ? { poll: input.poll } : {};
+    if (count > RATE_MESSAGES) {
+      return send({ type: "error", status: 429, error: "too many messages", ...poll });
+    }
+    if (invalid) return send({ type: "error", status: 400, error: "invalid message" });
+    // A socket speaks for one phone: the first voter id it gives.
+    if (attachment.voter && input?.voter !== undefined && input.voter !== attachment.voter) {
+      return send({ type: "error", status: 400, error: "another phone's voter", ...poll });
     }
     const remember = (voter) => {
-      if (typeof voter === "string" && VOTER.test(voter)) socket.serializeAttachment({ voter });
+      if (!attachment.voter && typeof voter === "string" && VOTER.test(voter)) {
+        socket.serializeAttachment({ voter, since, count });
+      }
     };
     switch (input?.type) {
       case "hello": {
@@ -543,6 +578,9 @@ export class PollSession extends DurableObject {
       return fail(409, "name taken");
     }
     const previous = s.players.get(voter);
+    if (!previous && s.players.size >= MAX_PLAYERS) {
+      return fail(503, "the game is full");
+    }
     const avatar = checkAvatar(input.avatar) ?? previous?.avatar ?? defaultAvatar(voter);
     // A team: kept once dealt; a chosen one may change until the player
     // answers a question.
@@ -597,6 +635,9 @@ export class PollSession extends DurableObject {
     const previous = votes.get(voter);
     if (previous !== undefined && sameChoice(previous, option)) {
       return ok({ ok: true });
+    }
+    if (previous === undefined && votes.size >= MAX_VOTERS) {
+      return fail(503, "the poll is full");
     }
     await this.ctx.storage.put(`vote:${id}:${voter}`, option);
     if (previous !== undefined) {

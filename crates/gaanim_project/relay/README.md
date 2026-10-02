@@ -62,7 +62,12 @@ can fill a waiting room before the first question.
 
 ## Deploy
 
-Requires Node.js 20+ and a free Cloudflare account.
+With a free Cloudflare account, the button deploys it in a few clicks: it
+copies the relay into a repository of yours and publishes it from there.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PaoloLupo/gaanim/tree/main/crates/gaanim_project/relay)
+
+Or from this folder, which `gaanim relay init` writes, with Node.js 20+:
 
 ```sh
 npm install
@@ -84,7 +89,14 @@ or, for one project, in its `gaanim.toml`:
 relay = "https://gaanim-relay.<account>.workers.dev"
 ```
 
-`GAANIM_POLL_RELAY` overrides both.
+`GAANIM_POLL_RELAY` overrides both. `gaanim relay` shows the relay in use
+and whether it speaks this Gaanim's protocol; a presentation warns when it
+does not. To update a relay, write it again over its folder and deploy:
+
+```sh
+gaanim relay init --force gaanim-relay
+cd gaanim-relay && npx wrangler deploy
+```
 
 ## Develop
 
@@ -93,9 +105,22 @@ npm run dev             # http://localhost:8787
 npm test                # end-to-end tests against a local relay
 ```
 
-`GAANIM_POLL_RELAY=http://localhost:8787 gaanim --present <project>` presents
-against the local relay; phones cannot reach `localhost`, so use a deployed
-relay in a real room.
+`GAANIM_POLL_RELAY=http://127.0.0.1:8787 gaanim --present <project>` presents
+against the local relay; phones cannot reach it, so use a deployed relay in a
+real room. (On Windows, `localhost` tries IPv6 first and each request waits
+for it.)
+
+## Limits
+
+Anyone with a session's code can open its page, so a session bounds what a
+phone can make it do:
+
+- a game takes 500 players and a poll 1,000 phones; more get 503;
+- a phone's WebSocket speaks for the first voter id it gives, sends at most
+  20 messages each 10 seconds (more are refused with 429) and is closed past
+  60;
+- a question has 2 to 6 answers of up to 120 characters, a nickname 2 to 20
+  letters, and a picture up to 600 KB of PNG, JPEG or WebP.
 
 ## API
 
@@ -107,21 +132,24 @@ question or answers starts it from zero. One poll is open at a time.
 
 | Request | Who | Body / reply |
 | --- | --- | --- |
-| `PUT /s/<code>/poll` | presenter | `{id, question, options, correct?, time?, points?}` → `{id}`; opens that poll, a quiz with `correct` (time 5–300 s, default 20; points 100–10000, default 1000) |
+| `PUT /s/<code>/poll` | presenter | `{id, question, options, multiple?, image?, correct?, time?, points?}` → `{id}`; opens that poll, a quiz with `correct` (an index, or a list for multiple choice; time 5–300 s, default 20; points 100–10000, default 1000); `image` names a picture stored with `PUT image` |
 | `DELETE /s/<code>/poll` | presenter | closes the open poll |
 | `POST /s/<code>/reveal` | presenter | `{id}`: shows a quiz's answer; it takes no more answers |
 | `POST /s/<code>/kick` | presenter | `{name}`: removes a player and bans its phone |
 | `POST /s/<code>/reset` | presenter | forgets every poll, vote, player and ban; the lobby stays |
 | `POST /s/<code>/lobby` | presenter | `{open}`: phones ask for a nickname as soon as they open the page |
+| `POST /s/<code>/teams` | presenter | `{names, colors, choose}`: play in 2 to 6 teams, `#rrggbb` colors; phones choose theirs with `choose`, or are dealt to the smallest; `{names: []}` plays alone |
+| `PUT /s/<code>/image/<hash>` | presenter | a question's picture, its bytes with its `content-type`; `<hash>` is 16 hex digits; kept across games |
 | `POST /s/<code>/stage` | presenter | `{stage}`: `"play"`, `"podium"` once the questions are over, `"end"` when the presentation ends; after `"end"`, the next `poll`, `lobby` or `stage` starts a new game, as `reset` does |
-| `GET /s/<code>/results` | presenter | `{current, connected, now, polls: {<id>: {open, counts, total, quiz?}}, players, playerCount, audience}`; `connected` counts the phones' sockets, `players` is the leaderboard (top 100), `audience` the players in joining order as `{name, joined}` (first 200) |
+| `GET /s/<code>/results` | presenter | `{current, latest, game, connected, now, polls: {<id>: {open, counts, total, respondents, answers?, quiz?}}, players, playerCount, audience, teams}`; `connected` counts the phones' sockets, `answers` each player's `{name, options, elapsed, points, right}` (every poll here, the open one in pushes), `players` the leaderboard (top 100) with `{name, score, correct, answered, streak, avatar, team}`, `audience` the players in joining order (first 200), `teams` each team's `{score, players}` |
 | `GET /s/<code>/presenter` | presenter | WebSocket that pushes `{type: "results", ...}`, the body of `GET results`, on connect and whenever it changes (at most every 250 ms) |
 | `GET /s/<code>/ws` | phones | WebSocket, see below |
 | `GET /s/<code>/poll?voter=<id>` | phones | `{lobby, stage, joined, open: false, podium?}` or `{lobby, stage, joined, open, id, question, options, chosen}`; `chosen` is that phone's vote or answer, or `null`; `joined` whether it plays in this game; `podium` the top three once the stage is not `"play"` |
 | `POST /s/<code>/vote` | phones | `{poll, option, voter}`; 409 unless that poll is open (and, for a quiz, before its time is up and only once) |
-| `POST /s/<code>/join` | phones | `{voter, name}` → `{player}`; 409 for a name in use |
+| `POST /s/<code>/join` | phones | `{voter, name, avatar?, team?}` → `{player}`; 409 for a name in use, 400 `choose a team` when teams are chosen |
+| `GET /s/<code>/image/<hash>` | phones | a question's picture |
 | `GET /s/<code>/player?voter=<id>` | phones | `{player}`: name, score, place and last result, or `null`; the score leaves out a quiz not revealed yet |
-| `GET /health` | anyone | `{relay: "gaanim", version: 8}` |
+| `GET /health` | anyone | `{relay: "gaanim", version: 11}` |
 
 On the WebSocket the relay sends `{type: "poll", ...}` (the same body as
 `GET /poll`, with `quiz: {time, deadline, now, revealed}` for a quiz) on

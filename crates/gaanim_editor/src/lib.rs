@@ -22,7 +22,7 @@ pub mod platform;
 #[cfg(not(target_arch = "wasm32"))]
 mod polls;
 #[cfg(not(target_arch = "wasm32"))]
-pub use polls::reset_relay_session;
+pub use polls::{relay_version, reset_relay_session};
 
 /// Built for the web player: no native windows, file system or FFmpeg, so
 /// pinning, exporting and the separate Presenter View window are left out.
@@ -3820,13 +3820,28 @@ mod tests {
     #[test]
     fn the_pointer_over_a_panel_blocks_the_click_but_not_the_keys() {
         // Pointer over the playback bar: arrows still move between stops.
-        assert_eq!(timeline_input_ignored(false, false, true, false), (false, true));
+        assert_eq!(
+            timeline_input_ignored(false, false, true, false),
+            (false, true)
+        );
         // A focused text field takes the keys.
-        assert_eq!(timeline_input_ignored(false, true, false, false), (true, false));
+        assert_eq!(
+            timeline_input_ignored(false, true, false, false),
+            (true, false)
+        );
         // Interactive preview: clicks drag the camera.
-        assert_eq!(timeline_input_ignored(false, false, false, true), (false, true));
-        assert_eq!(timeline_input_ignored(true, false, false, false), (true, true));
-        assert_eq!(timeline_input_ignored(false, false, false, false), (false, false));
+        assert_eq!(
+            timeline_input_ignored(false, false, false, true),
+            (false, true)
+        );
+        assert_eq!(
+            timeline_input_ignored(true, false, false, false),
+            (true, true)
+        );
+        assert_eq!(
+            timeline_input_ignored(false, false, false, false),
+            (false, false)
+        );
     }
 
     #[test]

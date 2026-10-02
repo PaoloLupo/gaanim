@@ -716,7 +716,9 @@ document.addEventListener("DOMContentLoaded", () => {
       nameError.textContent = t("teamRequired");
       return;
     }
-    nameError.textContent = statusCode === 409 ? t("nameTaken") : t("nameInvalid");
+    if (statusCode === 503) nameError.textContent = t("gameFull");
+    else if (statusCode === 429) nameError.textContent = t("slowDown");
+    else nameError.textContent = statusCode === 409 ? t("nameTaken") : t("nameInvalid");
   }
 
   joinForm.addEventListener("submit", async (event) => {
@@ -762,6 +764,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (error === "time is up") return "timeUp";
     if (error === "already answered") return "answered";
     if (statusCode === 409) return "closed";
+    if (statusCode === 503) return "full";
+    if (statusCode === 429) return "slow";
     return "failed";
   }
 
@@ -801,6 +805,12 @@ document.addEventListener("DOMContentLoaded", () => {
         break;
       case "closed":
         setStatus(t("closed"));
+        break;
+      case "full":
+        setStatus(t("pollFull"));
+        break;
+      case "slow":
+        setStatus(t("slowDown"));
         break;
       default:
         setStatus(t("failed"));

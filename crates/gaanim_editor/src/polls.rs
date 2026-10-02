@@ -390,9 +390,21 @@ impl PollClient {
         }
         let thread_snapshot = snapshot.clone();
         let pushed = socket.live.clone();
+        let checked = relay.clone();
         std::thread::Builder::new()
             .name("gaanim-polls".into())
-            .spawn(move || run_relay_session(api, receiver, thread_snapshot, pushed))
+            .spawn(move || {
+                // An outdated relay fails in odd ways: say so once, up front.
+                match relay_version(&checked) {
+                    Ok(version) => {
+                        if let Some(advice) = gaanim_project::relay::version_advice(version) {
+                            gaanim_core::console::warn("polls", advice);
+                        }
+                    }
+                    Err(error) => gaanim_core::console::warn("polls", error),
+                }
+                run_relay_session(api, receiver, thread_snapshot, pushed)
+            })
             .map_err(|error| format!("could not start the poll client: {error}"))?;
         gaanim_core::console::info("polls", format!("votes go to {relay}/s/{}", session.code));
         Ok(Self {
@@ -729,6 +741,20 @@ impl RelayApi {
         let received = Instant::now();
         let results: Results = response.into_json().map_err(|error| error.to_string())?;
         Ok(Snapshot::from_results(results, received))
+    }
+}
+
+/// The protocol version the relay at `relay` reports on `/health`.
+pub fn relay_version(relay: &str) -> Result<u64, String> {
+    let health: serde_json::Value = https_agent()?
+        .get(&format!("{relay}/health"))
+        .call()
+        .map_err(|error| format!("could not reach the relay at {relay}: {}", describe(error)))?
+        .into_json()
+        .map_err(|_| format!("{relay} is not a Gaanim relay"))?;
+    match (health["relay"].as_str(), health["version"].as_u64()) {
+        (Some("gaanim"), Some(version)) => Ok(version),
+        _ => Err(format!("{relay} is not a Gaanim relay")),
     }
 }
 
@@ -1337,8 +1363,8 @@ mod tests {
         panic!("the relay did not answer in time: {:?}", client.results());
     }
 
-    /// Talks to a real relay: `npm run dev` in the relay repository, then
-    /// `GAANIM_TEST_RELAY=http://localhost:8787 cargo test -p gaanim_editor
+    /// Talks to a real relay: `npm run dev` in `gaanim_project/relay`, then
+    /// `GAANIM_TEST_RELAY=http://127.0.0.1:8787 cargo test -p gaanim_editor
     /// polls -- --ignored`.
     #[test]
     #[ignore = "needs a running relay in GAANIM_TEST_RELAY"]

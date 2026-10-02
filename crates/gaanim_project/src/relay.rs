@@ -22,9 +22,12 @@ pub const SESSION_ENV: &str = "GAANIM_POLL_SESSION";
 /// random byte maps to one without bias. The relay accepts the same set.
 pub const CODE_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 pub const CODE_LENGTH: usize = 6;
+/// The relay protocol this Gaanim speaks: `API_VERSION` in the template's
+/// `src/index.js`, which a relay reports on `/health`.
+pub const API_VERSION: u64 = 11;
 
 /// Files of the relay template, relative to the directory it is written to.
-const TEMPLATE: [(&str, &[u8]); 19] = [
+const TEMPLATE: [(&str, &[u8]); 20] = [
     ("wrangler.toml", include_bytes!("../relay/wrangler.toml")),
     ("package.json", include_bytes!("../relay/package.json")),
     ("README.md", include_bytes!("../relay/README.md")),
@@ -73,6 +76,10 @@ const TEMPLATE: [(&str, &[u8]); 19] = [
         include_bytes!("../relay/public/vote.html"),
     ),
     ("public/vote.js", include_bytes!("../relay/public/vote.js")),
+    (
+        "test/relay.test.js",
+        include_bytes!("../relay/test/relay.test.js"),
+    ),
     (".gitignore", b"node_modules/\n.wrangler/\n.dev.vars\n"),
 ];
 
@@ -98,6 +105,21 @@ pub fn write_template(directory: &Path, force: bool) -> Result<Vec<PathBuf>, Str
             .map_err(|error| format!("could not write {}: {error}", path.display()))?;
     }
     Ok(files.into_iter().map(|(path, _)| path).collect())
+}
+
+/// What to tell the user about a relay whose `/health` reports `version`,
+/// or `None` when it speaks this Gaanim's protocol.
+pub fn version_advice(version: u64) -> Option<String> {
+    use std::cmp::Ordering;
+    match version.cmp(&API_VERSION) {
+        Ordering::Equal => None,
+        Ordering::Less => Some(format!(
+            "the relay is version {version} and this Gaanim needs {API_VERSION}: update it with              `gaanim relay init --force <its folder>` and deploy it again (`npx wrangler deploy`)"
+        )),
+        Ordering::Greater => Some(format!(
+            "the relay is version {version}, newer than this Gaanim's {API_VERSION}:              update Gaanim if polls misbehave"
+        )),
+    }
 }
 
 /// Check a relay address and drop its trailing slash.
@@ -323,6 +345,22 @@ fn session_in(file: &Path, scope: &str, fixed_code: Option<&str>) -> Result<Poll
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_template_speaks_this_gaanims_protocol() {
+        let source = std::str::from_utf8(include_bytes!("../relay/src/index.js")).unwrap();
+        let declared = format!("const API_VERSION = {};", super::API_VERSION);
+        assert!(
+            source.contains(&declared),
+            "the relay must declare `{declared}`"
+        );
+        assert_eq!(super::version_advice(super::API_VERSION), None);
+        assert!(
+            super::version_advice(super::API_VERSION - 1)
+                .unwrap()
+                .contains("--force")
+        );
+    }
+
     use super::*;
 
     #[test]

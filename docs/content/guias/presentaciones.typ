@@ -538,6 +538,11 @@ aíslan a los dispositivos entre sí y con datos móviles. La página de votaci�
 está pensada para el teléfono: respuestas grandes con color, letra y forma,
 tema claro u oscuro y español o inglés según el teléfono.
 
+La forma más corta es el botón
+#link("https://deploy.workers.cloudflare.com/?url=https://github.com/PaoloLupo/gaanim/tree/main/crates/gaanim_project/relay")[Deploy to Cloudflare]:
+copia el relay a un repositorio tuyo y lo publica desde ahí. También puedes
+desplegarlo desde tu equipo:
+
 ```bash
 gaanim relay init            # escribe el relay en ./gaanim-relay
 cd gaanim-relay
@@ -546,7 +551,10 @@ npx wrangler deploy          # imprime https://gaanim-relay.<tú>.workers.dev
 gaanim relay use https://gaanim-relay.<tú>.workers.dev
 ```
 
-`gaanim relay` sin argumentos muestra el relay en uso. Un proyecto puede usar
+`gaanim relay` sin argumentos muestra el relay en uso y si habla el mismo
+protocolo que tu versión de Gaanim; al presentar, Gaanim avisa si no. Para
+actualizarlo, vuelve a escribirlo sobre su carpeta con
+`gaanim relay init --force gaanim-relay` y despliégalo otra vez. Un proyecto puede usar
 otro con `[polls] relay` en su
 #link("/referencia/gaanim-toml/")[`gaanim.toml`], y la variable
 `GAANIM_POLL_RELAY` tiene prioridad sobre ambos. Sin relay, `scene.poll`
@@ -556,7 +564,9 @@ así que si cambias de relay vuelve a exportar.
 Los votos son anónimos: el teléfono guarda un identificador al azar y el relay
 no pide nombres ni cuentas. Lo que cada teléfono votó lo recuerda el relay, no
 el teléfono, así que una partida nueva empieza limpia en todos. El relay borra la sesión y sus votos doce horas
-después de su última actividad. Si pierde la conexión, la presentación sigue
+después de su última actividad. Para que nadie con el código pueda inflarla, una
+partida admite 500 jugadores y una encuesta 1000 teléfonos, y cada teléfono
+puede enviar unos pocos mensajes por segundo. Si pierde la conexión, la presentación sigue
 y la terminal avisa mientras reintenta.
 
 = Revisar sin pausas

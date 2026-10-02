@@ -131,6 +131,17 @@ fn run_thumbnail(args: &[String]) -> ! {
 /// `gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH]]`:
 /// set up the relay that carries audience poll votes to a presentation, or
 /// start a new game on a project's session.
+/// Say whether the relay at `url` answers and speaks this Gaanim's protocol.
+fn report_relay_version(url: &str) {
+    match gaanim_editor::relay_version(url) {
+        Ok(version) => match gaanim_project::relay::version_advice(version) {
+            None => console::info("relay", format!("version {version}, up to date")),
+            Some(advice) => console::warn("relay", advice),
+        },
+        Err(error) => console::warn("relay", error),
+    }
+}
+
 fn run_relay(args: &[String]) -> ! {
     use gaanim_project::relay::{self, RelaySource};
     let usage = || -> ! {
@@ -154,6 +165,7 @@ fn run_relay(args: &[String]) -> ! {
                     RelaySource::User => "gaanim relay use",
                 };
                 console::info("relay", format!("{url} (from {from})"));
+                report_relay_version(&url);
                 console::hint("A project's `[polls] relay` in gaanim.toml overrides it.");
             }
             None => {
@@ -188,6 +200,7 @@ fn run_relay(args: &[String]) -> ! {
                 .unwrap_or_else(|error| fail(error))
                 .expect("a saved relay has an address");
             console::success("relay", format!("Audience polls use {url}"));
+            report_relay_version(&url);
         }
         ["forget"] => {
             relay::save(None).unwrap_or_else(|error| fail(error));
