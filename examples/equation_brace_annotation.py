@@ -35,6 +35,6 @@ scene.wait(1.0)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:
-    scene.snapshots(snapshot_dir, [0.0, 1.4, 2.4, 3.2, 4.4, 5.2, 6.4])
+    scene.snapshots(snapshot_dir, [0.0, 1.4, 1.6, 2.4, 3.2, 4.4, 5.2, 6.4])
 
 scene.render()

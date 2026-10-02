@@ -110,6 +110,8 @@ cambia*: lee «Al actualizar».
   número crece.
 - Una caja dentro de otra dibuja su fondo aunque su único contenido sea un
   readout.
+- `highlight` sobre una parte de un texto la agranda en su sitio; antes la
+  desplazaba sobre sus vecinas.
 - Una fila con `width="fill"` dentro de una columna que se ajusta a su
   contenido toma el ancho de la caja que la contiene, y una fila cuyo texto se
   reparte en líneas mide el alto de todas ellas.

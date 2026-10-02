@@ -4256,37 +4256,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let half = anim.duration * 0.5;
 
         // 1. Pulse the target around its visual center.
+        self.pivot_on_visual_center(anim.target);
         let root_state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => return,
         };
-        // A glyph's bounds may already be shifted into its parent's coordinate
-        // system, while its path remains in local coordinates. Use the path's
-        // actual visual center as the pivot; using `state.bounds.center()` here
-        // creates the diagonal down-right drift seen in equation selections.
-        if root_state.transform.anchor == DVec3::ZERO {
-            let pivot = if root_state.path.elements().is_empty() {
-                root_state.bounds.center()
-            } else {
-                let bounds = root_state.path.bounding_box();
-                DVec3::new(
-                    (bounds.x0 + bounds.x1) * 0.5,
-                    (bounds.y0 + bounds.y1) * 0.5,
-                    0.0,
-                )
-            };
-            root_state.transform.anchor = pivot;
-            // Only the pivot changes: the entity's spawned transform is the
-            // state before any clip, and an object that enters later (spun in
-            // from nothing, grown from its center) must stay hidden until then.
-            self.commands.entity(root_state.entity).queue(
-                move |mut entity: bevy::prelude::EntityWorldMut| {
-                    if let Some(mut transform) = entity.get_mut::<SpatialTransform>() {
-                        transform.anchor = pivot;
-                    }
-                },
-            );
-        }
         // Grow in place around the pivot; translating here would make the
         // target drift away from its baseline instead of pulsing.
         let scale_from = root_state.transform.scale;
@@ -6394,11 +6368,50 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let _ = radius; // reserved for future "radial line" geometry
     }
 
+    /// Scale `target` about the center of what it draws from now on, unless
+    /// it already has a pivot.
+    ///
+    /// A glyph's bounds may already be shifted into its parent's coordinate
+    /// system, while its path remains in local coordinates. Use the path's
+    /// actual visual center as the pivot; scaling about the glyph's origin
+    /// makes it drift: a highlighted term slid across its neighbors.
+    fn pivot_on_visual_center(&mut self, target: ObjectId) {
+        let Some(state) = self.states.get_mut(target) else {
+            return;
+        };
+        if state.transform.anchor != DVec3::ZERO {
+            return;
+        }
+        let pivot = if state.path.elements().is_empty() {
+            state.bounds.center()
+        } else {
+            let bounds = state.path.bounding_box();
+            DVec3::new(
+                (bounds.x0 + bounds.x1) * 0.5,
+                (bounds.y0 + bounds.y1) * 0.5,
+                0.0,
+            )
+        };
+        state.transform.anchor = pivot;
+        // Only the pivot changes: the entity's spawned transform is the
+        // state before any clip, and an object that enters later (spun in
+        // from nothing, grown from its center) must stay hidden until then.
+        self.commands.entity(state.entity).queue(
+            move |mut entity: bevy::prelude::EntityWorldMut| {
+                if let Some(mut transform) = entity.get_mut::<SpatialTransform>() {
+                    transform.anchor = pivot;
+                }
+            },
+        );
+    }
+
     fn play_circumscribe_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let color = match &anim.anim_type {
             AnimationType::Circumscribe { color } => *color,
             _ => None,
         };
+        // Grow in place, as `indicate` does.
+        self.pivot_on_visual_center(anim.target);
 
         let state = match self.states.get(anim.target) {
             Some(s) => s,
@@ -9427,8 +9440,23 @@ mod tests {
         assert_eq!(selected_text, "theta");
     }
 
+    /// `indicate` and `highlight` (circumscribe) pulse a glyph in place: a
+    /// highlighted term slid across its neighbors when it scaled about its
+    /// origin.
     #[test]
     fn indicate_scales_in_place_around_visual_center() {
+        for anim_type in [
+            AnimationType::Indicate {
+                color: None,
+                scale_factor: 1.1,
+            },
+            AnimationType::Circumscribe { color: None },
+        ] {
+            assert_pulses_in_place(anim_type);
+        }
+    }
+
+    fn assert_pulses_in_place(anim_type: AnimationType) {
         let world = World::new();
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &world);
@@ -9462,10 +9490,7 @@ mod tests {
 
         builder.play(AnimationBuilder {
             target: target_id,
-            anim_type: AnimationType::Indicate {
-                color: None,
-                scale_factor: 1.1,
-            },
+            anim_type,
             duration: 1.0,
             delay: 0.0,
             rate_func: gaanim_math::RateFunc::ThereAndBack,
@@ -9484,7 +9509,7 @@ mod tests {
                 }) if *target == target_id
             )
         });
-        assert!(!translates, "Indicate must not move the target");
+        assert!(!translates, "a pulse must not move the target");
 
         let scales: Vec<_> = builder
             .timeline
