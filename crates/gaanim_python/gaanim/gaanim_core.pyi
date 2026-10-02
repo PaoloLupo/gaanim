@@ -3115,6 +3115,22 @@ class Drawable:
         ``padding`` and shifted by ``offset``; ``fit`` scales it to the target.
         """
         ...
+    def hidden(self) -> Self:
+        """Start hidden until an animation in ``scene.play`` shows it, and return it.
+
+        A drawable created after a segment's first ``play`` without an
+        entrance is part of the segment's starting state, so it is visible from
+        the segment's start. ``hidden()`` keeps it out of sight until ``create``,
+        ``write``, ``fade_in``, a move or another animation shows it; a
+        template that only gives ``transform_to`` its shape never shows. Call it
+        right after creating the drawable; once it has been shown or cut,
+        raises ``ValueError``: hide it with ``fade_out`` or ``opacity(0)``.
+
+        Example:
+            target = scene.text("Paso 2").move_to(0, 1).hidden()
+            scene.play(step.animate.transform_to(target))
+        """
+        ...
     def named(self, name: str) -> Self:
         """Name this drawable and return it.
 
@@ -6584,17 +6600,26 @@ class Geometry:
                 head_width=0.15, body_width=0.036, max_head_ratio=0.3)
         """
         ...
+    @overload
+    def dashed_line(
+        self, p1: Endpoint, p2: Endpoint, *, dash_length: float = 0.16, gap_length: float = 0.10
+    ) -> Drawable: ...
+    @overload
     def dashed_line(
         self, x1: float, y1: float, x2: float, y2: float, *, dash_length: float = 0.16, gap_length: float = 0.10
     ) -> Drawable:
-        """Create a dashed line from ``(x1, y1)`` to ``(x2, y2)`` in scene units.
+        """Create a dashed line between the same endpoints ``line`` takes.
 
-        Dashes are ``dash_length`` long and ``gap_length`` apart. Unlike
-        ``line``, it takes four fixed coordinates. ``create()`` draws the
-        dashes one after another from the start point.
+        Endpoints are 2D/3D tuples, drawables, ``PointRef`` or ``AnchorPoint``
+        values, or four coordinates. A line between drawables or reference
+        points follows them every frame. Dashes are ``dash_length`` long and
+        ``gap_length`` apart in scene units, from the start; ``create()`` draws
+        them one after another. Non-positive lengths raise ``ValueError``;
+        other endpoint shapes raise ``TypeError``.
 
         Example:
             guide = scene.geometry.dashed_line(-3, 0, 3, 0, dash_length=0.2)
+            link = scene.geometry.dashed_line(card.anchor_point(Anchor.RIGHT), planet)
         """
         ...
     def double_arrow(
@@ -7705,7 +7730,7 @@ class Visualization:
         omitted axes retain the default ``Re`` and ``Im`` titles.
         """
         ...
-    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Readout:
+    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None) -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
         The label, equality sign, number, and unit all use ``font_size``;
@@ -7718,15 +7743,21 @@ class Visualization:
         digits; ``","`` also turns ``,`` grouping into ``.`` (``1.234,50``).
         It must be one character that is not a digit, sign, space, ``e`` or
         ``%``; otherwise ``ValueError`` is raised.
+
+        ``spacing`` is the space between the label, ``=``, number and unit, in
+        scene units; by default a thin space that grows with ``font_size``
+        (0.1 at the default size). A ``prefix`` or ``suffix`` belongs to the
+        number, so ``suffix=" m"`` keeps its space and ``suffix="%"`` none. A
+        negative or non-finite spacing raises ``ValueError``.
         """
         ...
-    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".") -> Variable:
+    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None) -> Variable:
         """Create an animatable scalar displayed as an aligned equation row.
 
         Every visible term uses ``font_size``, or 0.48 units when omitted.
         ``color`` applies to every visible term, including the changing value.
-        ``decimal_separator`` works as in ``readout`` (for example ``","``
-        shows ``3,14``).
+        ``decimal_separator`` and ``spacing`` work as in ``readout`` (for
+        example ``","`` shows ``3,14``).
         """
         ...
     def number_line(
@@ -7787,6 +7818,7 @@ class SlideKit:
         logo: Optional[str] = None,
         footer: Optional[str] = None,
         slide_numbers: bool = True,
+        number_anchor: Optional[Anchor] = None,
         rule: bool = True,
         show_on_cover: bool = False,
         logo_scale: float = 1.0,
@@ -7795,7 +7827,10 @@ class SlideKit:
 
         The logo (SVG or raster) is fitted to 0.6 scene units tall and then
         multiplied by ``logo_scale``; it sits in the top-right safe corner
-        above the slide content.
+        above the slide content. The slide number follows the footer at the
+        bottom left; ``number_anchor`` puts it on its own at that point of the
+        safe frame instead, such as ``Anchor.BOTTOM_RIGHT`` beside a progress
+        bar along the bottom.
 
         Example:
             scene.slides.brand(logo="assets/logo.svg", footer="LAB · 2026")

@@ -397,6 +397,10 @@ const DIFF: Page = Page {
                     "--from <NAME>",
                     "With --capture-stops, stops from this segment on",
                 ),
+                (
+                    "--height <PX>",
+                    "Capture frames this tall (default 1920 on the long edge)",
+                ),
             ],
         ),
         Block::Rows(

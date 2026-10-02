@@ -1285,6 +1285,8 @@ pub struct DimensionLabelPlacement {
 pub struct TrackingLine {
     pub from: TrackingEndpoint,
     pub to: TrackingEndpoint,
+    /// Dash and gap lengths, for a dashed line.
+    pub dashes: Option<(f64, f64)>,
 }
 
 /// Filled arrow following a polyline of reactive world-space endpoints.
@@ -1655,7 +1657,17 @@ pub fn surrounding_rect_system(world: &mut World) {
 
 impl TrackingLine {
     pub fn new(from: TrackingEndpoint, to: TrackingEndpoint) -> Self {
-        Self { from, to }
+        Self {
+            from,
+            to,
+            dashes: None,
+        }
+    }
+
+    /// The same line, dashed: `dash` long and `gap` apart.
+    pub fn dashed(mut self, dash: f64, gap: f64) -> Self {
+        self.dashes = Some((dash, gap));
+        self
     }
 }
 
@@ -1709,9 +1721,19 @@ pub fn tracking_line_system(world: &mut World) {
                 .inverse();
             let from = inverse.transform_point3(from);
             let to = inverse.transform_point3(to);
-            let mut path = BezPath::new();
-            path.move_to(gaanim_core::kurbo::Point::new(from.x, from.y));
-            path.line_to(gaanim_core::kurbo::Point::new(to.x, to.y));
+            let (from, to) = (
+                gaanim_core::kurbo::Point::new(from.x, from.y),
+                gaanim_core::kurbo::Point::new(to.x, to.y),
+            );
+            let path = match line.dashes {
+                Some((dash, gap)) => gaanim_objects::primitives::dash_path(from, to, dash, gap),
+                None => {
+                    let mut path = BezPath::new();
+                    path.move_to(from);
+                    path.line_to(to);
+                    path
+                }
+            };
             updates.push((entity, path));
         }
     }

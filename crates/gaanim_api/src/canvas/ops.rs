@@ -643,6 +643,8 @@ pub(crate) enum Op {
         target: ObjectId,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
+        /// Dash and gap lengths, for a dashed line.
+        dashes: Option<(f64, f64)>,
     },
     /// Filled arrow following endpoints and optional intermediate points.
     AttachTrackingConnector {

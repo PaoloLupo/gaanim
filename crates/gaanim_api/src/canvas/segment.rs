@@ -11,6 +11,9 @@ pub struct PresentationBrand {
     pub logo: Option<PathBuf>,
     pub footer: Option<String>,
     pub slide_numbers: bool,
+    /// Where the slide number goes on its own, a point of the safe frame;
+    /// `None` keeps it in the footer.
+    pub number_anchor: Option<gaanim_layout::Anchor>,
     pub rule: bool,
     pub show_on_cover: bool,
     pub logo_scale: f64,
@@ -22,6 +25,7 @@ impl Default for PresentationBrand {
             logo: None,
             footer: None,
             slide_numbers: true,
+            number_anchor: None,
             rule: true,
             show_on_cover: false,
             logo_scale: 1.0,

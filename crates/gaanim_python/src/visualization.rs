@@ -426,6 +426,9 @@ fn parse_decimal_separator(value: &str) -> PyResult<char> {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// The space between a readout's terms at the default text size.
+const READOUT_SPACING: f64 = 0.1;
+
 fn build_readout_parts(
     canvas: &mut ApiCanvas,
     source: ScalarSource,
@@ -438,6 +441,7 @@ fn build_readout_parts(
     color: Option<PyColor>,
     invalid: String,
     decimal_separator: char,
+    spacing: Option<f64>,
 ) -> (
     gaanim_api::canvas::DrawableHandle,
     Option<PyDrawable>,
@@ -490,9 +494,19 @@ fn build_readout_parts(
         equals_part.as_ref().map(|part| &part.0),
         &number_part.0,
         unit_part.as_ref().map(|part| &part.0),
-        0.1,
+        // A thin space, growing with the text: 0.1 at the default size.
+        spacing.unwrap_or(READOUT_SPACING * font_size / DEFAULT_REACTIVE_TEXT_SIZE),
     );
     (group, label_part, equals_part, number_part, unit_part)
+}
+
+fn check_readout_spacing(spacing: Option<f64>) -> PyResult<()> {
+    if spacing.is_some_and(|spacing| !spacing.is_finite() || spacing < 0.0) {
+        return Err(PyValueError::new_err(
+            "spacing must be a finite non-negative number",
+        ));
+    }
+    Ok(())
 }
 
 fn sampling(samples: Option<usize>, tolerance: f64) -> PyResult<Sampling> {
@@ -2894,7 +2908,7 @@ impl PyVisualization {
         Ok(PyParameter { inner })
     }
 
-    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator="."))]
+    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None))]
     #[allow(clippy::too_many_arguments)]
     fn readout<'py>(
         &self,
@@ -2910,9 +2924,11 @@ impl PyVisualization {
         color: Option<PyColor>,
         invalid: &str,
         decimal_separator: &str,
+        spacing: Option<f64>,
     ) -> PyResult<Py<PyReadout>> {
         crate::custom::ensure_authoring_allowed()?;
         let decimal_separator = parse_decimal_separator(decimal_separator)?;
+        check_readout_spacing(spacing)?;
         let source = if source.is_callable() {
             callable_source(py, source.unbind(), inputs, &self.inner)?
         } else {
@@ -2935,6 +2951,7 @@ impl PyVisualization {
             color,
             invalid.to_owned(),
             decimal_separator,
+            spacing,
         );
         Py::new(
             py,
@@ -2942,7 +2959,7 @@ impl PyVisualization {
         )
     }
 
-    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator="."))]
+    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None))]
     #[allow(clippy::too_many_arguments)]
     fn variable<'py>(
         &self,
@@ -2957,9 +2974,11 @@ impl PyVisualization {
         color: Option<PyColor>,
         invalid: &str,
         decimal_separator: &str,
+        spacing: Option<f64>,
     ) -> PyResult<Py<PyVariable>> {
         crate::custom::ensure_authoring_allowed()?;
         let decimal_separator = parse_decimal_separator(decimal_separator)?;
+        check_readout_spacing(spacing)?;
         let mut canvas = self.inner.lock().expect("scene canvas poisoned");
         let parameter = PyParameter {
             inner: canvas.parameter(initial).map_err(value_error)?,
@@ -2976,6 +2995,7 @@ impl PyVisualization {
             color,
             invalid.to_owned(),
             decimal_separator,
+            spacing,
         );
         Py::new(
             py,
@@ -3298,6 +3318,7 @@ mod tests {
                 None,
                 "—".to_owned(),
                 '.',
+                None,
             );
 
             for part in [label.as_ref(), equals.as_ref(), unit.as_ref()] {

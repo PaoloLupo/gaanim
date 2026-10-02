@@ -28,7 +28,7 @@ static PLUGIN: PythonPlugin = PythonPlugin {
 
 /// The plugin's interface; see [`gaanim_editor::python_plugin::ENTRY_POINT`].
 #[unsafe(no_mangle)]
-pub extern "C" fn gaanim_python_plugin_v1() -> *const PythonPlugin {
+pub extern "C" fn gaanim_python_plugin_v2() -> *const PythonPlugin {
     &PLUGIN
 }
 

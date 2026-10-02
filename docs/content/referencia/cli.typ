@@ -315,6 +315,7 @@ en el navegador. Las capturas de
   [`--capture-stops`], [Captura el fotograma de cada `scene.stop()` en lugar de los tiempos de `scene.snapshots`; el script no necesita cambios.],
   [`--stops <LISTA>`], [Con `--capture-stops`, solo esas pausas: números y rangos contados desde 1, como `3-7,12`.],
   [`--sections <LISTA>`, `--from <NOMBRE>`], [Con `--capture-stops`, solo las pausas de esos segmentos, con las mismas reglas que al previsualizar.],
+  [`--height <PX>`], [Captura los fotogramas con esa altura en píxeles (de 16 a 8192); el ancho sigue la proporción de la escena. Por defecto, 1920 en el lado largo. Una captura más chica es más rápida para revisar muchas pausas; si su tamaño no coincide con el de la baseline, `--diff` lo dice en vez de comparar. No se aplica a paquetes `.gaanim`.],
   [`--tests-root <DIR>`], [Carpeta raíz de las capturas; por defecto `tests/visual`.],
   [`-b`, `--baseline <DIR>`, `-c`, `--current <DIR>`], [Modo manual: compara dos carpetas cualesquiera.],
   [`-o`, `--output <DIR>`], [Carpeta del informe.],

@@ -299,7 +299,12 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
 ///
 /// A host channel is installed so a trailing `scene.render()` remains valid,
 /// but its payload is intentionally discarded: this command is headless.
-pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Result<(), String> {
+/// Frames are `height` pixels tall when given, or the preview size.
+pub fn capture_script_snapshots(
+    script_path: &Path,
+    snapshot_dir: &Path,
+    height: Option<u32>,
+) -> Result<(), String> {
     let snapshot_dir = snapshot_dir
         .to_str()
         .ok_or_else(|| "snapshot directory is not UTF-8".to_string())?;
@@ -314,7 +319,7 @@ pub fn capture_script_snapshots(script_path: &Path, snapshot_dir: &Path) -> Resu
                 handler_dir.display()
             ));
         }
-        gaanim_diff::capture_canvas(canvas, &handler_dir, times)
+        gaanim_diff::capture_canvas_sized(canvas, &handler_dir, times, height)
             .map(|manifest| manifest.snapshots.len())
             .map_err(|error| error.to_string())
     })));

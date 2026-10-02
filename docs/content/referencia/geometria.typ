@@ -266,13 +266,15 @@ scene.render()
 #api-entry(
   name: "Geometry.dashed_line",
   kind: "factory",
-  desc: [Línea discontinua para guías y aristas ocultas. `create()` dibuja los guiones uno tras otro desde el inicio.],
+  desc: [Línea discontinua para guías y aristas ocultas. Acepta los mismos extremos que `line`: dos puntos, objetos, `PointRef` o `AnchorPoint`, o cuatro coordenadas; entre objetos, los sigue en cada cuadro. Los guiones miden `dash_length` y los separa `gap_length` (0.16 y 0.10 por defecto). `create()` los dibuja uno tras otro desde el inicio.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 guide = scene.geometry.dashed_line(-1.75, 0, 1.75, 0, dash_length=0.15, gap_length=0.1).stroke(WHITE, 0.025)
-scene.play([guide.animate.create().duration(0.8)])
+dot = scene.geometry.dot(0.1).move_to(-1, 1.5)
+link = scene.geometry.dashed_line(dot, (1.75, 0)).stroke(GOLD, 0.02)
+scene.play([guide.animate.create().duration(0.8), dot.animate.shift_by(2, 0)])
 ```
 ]
 

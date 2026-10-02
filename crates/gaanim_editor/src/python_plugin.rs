@@ -17,7 +17,7 @@ use gaanim_api::host::ReloadPayload;
 pub const LIBRARY_NAME: &str = "gaanim_python_plugin";
 
 /// Symbol of the plugin's [`EntryPointFn`]; its suffix is the interface version.
-pub const ENTRY_POINT: &[u8] = b"gaanim_python_plugin_v1";
+pub const ENTRY_POINT: &[u8] = b"gaanim_python_plugin_v2";
 
 /// Returns the plugin's interface, which lives as long as the process.
 pub type EntryPointFn = unsafe extern "C" fn() -> *const PythonPlugin;
@@ -35,7 +35,8 @@ pub struct PythonPlugin {
     /// Run a script once and return the scene its `scene.render()` submitted.
     pub load_script_canvas: fn(script: &Path) -> Result<SceneModel, String>,
     /// Run a script that calls `scene.snapshots(...)` into `dir`.
-    pub capture_script_snapshots: fn(script: &Path, dir: &Path) -> Result<(), String>,
+    pub capture_script_snapshots:
+        fn(script: &Path, dir: &Path, height: Option<u32>) -> Result<(), String>,
     /// Run an API contract validator against the builtin module.
     pub validate_python_api: fn(validator: &Path) -> Result<(), String>,
     /// Run a script on its own thread, sending each rendered scene to

@@ -1730,6 +1730,32 @@ fn layout_box_path(
     segments.join(" > ")
 }
 
+/// The first words of the text `id` holds, itself or in its boxes, to
+/// recognize it in a diagnostic.
+fn layout_text_excerpt(tree: &CompiledLayoutTree, id: gaanim_layout::LayoutId) -> Option<String> {
+    const CHARS: usize = 32;
+    let mut pending = vec![id];
+    while let Some(id) = pending.pop() {
+        if let Some(text) = tree.texts.get(&id) {
+            let text = text.spec.plain_text();
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            if text.is_empty() {
+                continue;
+            }
+            return Some(if text.chars().count() > CHARS {
+                let head: String = text.chars().take(CHARS).collect();
+                format!("{}…", head.trim_end())
+            } else {
+                text
+            });
+        }
+        if let Some(children) = tree.children_by_id.get(&id) {
+            pending.extend(children.iter().rev());
+        }
+    }
+    None
+}
+
 fn outermost_layout_source(
     source: ObjectId,
     snapshots: &HashMap<ObjectId, LayoutTreeSnapshot>,
@@ -4347,6 +4373,20 @@ impl SceneModel {
                         };
                         const OVERFLOW: &str = "content leaves its box";
                         const OVERLAP: &str = "overlaps the box before it";
+                        // Where to look: the box, the text it holds, and the
+                        // segment and time it is laid out at.
+                        let at = format!(
+                            "in segment \"{}\" at {:.1} s",
+                            seg.name,
+                            (builder.current_time - scene_start).max(0.0)
+                        );
+                        let name = |child: gaanim_layout::LayoutId| {
+                            let path = layout_box_path(&tree, layout_snapshots, child);
+                            match layout_text_excerpt(&tree, child) {
+                                Some(text) => format!("{path} \"{text}\""),
+                                None => path,
+                            }
+                        };
                         let kind = layout_snapshots
                             .get(source)
                             .map(|snapshot| snapshot.spec.kind.clone());
@@ -4386,9 +4426,9 @@ impl SceneModel {
                                         _ => format!("{y:.2} tall"),
                                     };
                                     reports.push(format!(
-                                        "{}: {OVERFLOW} by {by} scene units; give the box more \
-                                         room, let it grow or shorten its content",
-                                        layout_box_path(&tree, layout_snapshots, *child)
+                                        "{} {at}: {OVERFLOW} by {by} scene units; give the box \
+                                         more room, let it grow or shorten its content",
+                                        name(*child)
                                     ));
                                 }
                             }
@@ -4408,9 +4448,9 @@ impl SceneModel {
                                     before.max.y.min(after.max.y) - before.min.y.max(after.min.y);
                                 if x > LAYOUT_SLACK && y > LAYOUT_SLACK {
                                     reports.push(format!(
-                                        "{}: it {OVERLAP} by {x:.2} by {y:.2} scene units; \
+                                        "{} {at}: it {OVERLAP} by {x:.2} by {y:.2} scene units; \
                                          check the gap and the size of the boxes around it",
-                                        layout_box_path(&tree, layout_snapshots, child)
+                                        name(child)
                                     ));
                                 }
                             }
@@ -5994,14 +6034,28 @@ impl SceneModel {
                     }
                 }
 
-                Op::AttachTrackingLine { target, from, to } => {
+                Op::AttachTrackingLine {
+                    target,
+                    from,
+                    to,
+                    dashes,
+                } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let line = TrackingLine::new(
+                        let mut line = TrackingLine::new(
                             compile_tracking_endpoint(from, id_map, &builder.states),
                             compile_tracking_endpoint(to, id_map, &builder.states),
                         );
+                        if let Some((dash, gap)) = *dashes {
+                            line = line.dashed(dash, gap);
+                            // The dashes draw along the line, as those of a
+                            // fixed dashed line do.
+                            builder
+                                .commands
+                                .entity(st.entity)
+                                .insert(gaanim_scene::PathRevealOrder::Sequential);
+                        }
                         builder.commands.entity(st.entity).insert(line);
                     }
                 }
@@ -18572,7 +18626,8 @@ mod tests {
         assert!(
             tight
                 .iter()
-                .any(|message| message.contains("content leaves its box by")),
+                .any(|message| message.contains("content leaves its box by")
+                    && message.contains("in segment \"")),
             "two boxes of height 1 do not fit in 1.5: {tight:?}"
         );
         let roomy = report(2.5);

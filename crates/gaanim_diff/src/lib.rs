@@ -60,12 +60,30 @@ pub fn capture_canvas(
     output_dir: impl AsRef<Path>,
     times: &[f64],
 ) -> Result<SnapshotManifest> {
+    capture_canvas_sized(canvas, output_dir, times, None)
+}
+
+/// [`capture_canvas`] at `height` pixels, the width following the scene's
+/// aspect; `None` captures at the preview size (1920 on the long edge).
+pub fn capture_canvas_sized(
+    canvas: SceneModel,
+    output_dir: impl AsRef<Path>,
+    times: &[f64],
+    height: Option<u32>,
+) -> Result<SnapshotManifest> {
     let ids: Vec<String> = times
         .iter()
         .enumerate()
         .map(|(index, time)| format!("seek_{index:04}_t_{}", time_slug(*time)))
         .collect();
-    capture_canvas_as(canvas, output_dir, times, &ids)
+    capture_canvas_as(canvas, output_dir, times, &ids, height)
+}
+
+/// The frame size of the snapshots in `directory`, from its manifest.
+pub fn snapshot_size(directory: &Path) -> Option<(u32, u32)> {
+    let manifest: SnapshotManifest =
+        serde_json::from_slice(&fs::read(directory.join(MANIFEST_FILE)).ok()?).ok()?;
+    Some((manifest.width, manifest.height))
 }
 
 /// Capture `times[i]` as the snapshot `ids[i]`; ids name files and manifest entries.
@@ -74,6 +92,7 @@ pub(crate) fn capture_canvas_as(
     output_dir: impl AsRef<Path>,
     times: &[f64],
     ids: &[String],
+    height: Option<u32>,
 ) -> Result<SnapshotManifest> {
     debug_assert_eq!(times.len(), ids.len());
     if times.is_empty() {
@@ -86,7 +105,15 @@ pub(crate) fn capture_canvas_as(
     fs::create_dir_all(output_dir)?;
 
     let mut config = ExportConfig::new("snapshots.png");
-    (config.width, config.height) = canvas.frame.preview_pixel_size();
+    (config.width, config.height) = match height {
+        Some(height) => (
+            (f64::from(height) * canvas.frame.aspect_ratio())
+                .round()
+                .max(1.0) as u32,
+            height,
+        ),
+        None => canvas.frame.preview_pixel_size(),
+    };
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.headless = true;
 

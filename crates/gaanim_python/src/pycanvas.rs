@@ -2787,12 +2787,14 @@ impl PyScene {
 #[pymethods]
 impl PySlideKit {
     /// Configure a reusable logo, footer, rule, and slide numbering treatment.
-    #[pyo3(signature = (*, logo=None, footer=None, slide_numbers=true, rule=true, show_on_cover=false, logo_scale=1.0))]
+    #[pyo3(signature = (*, logo=None, footer=None, slide_numbers=true, number_anchor=None, rule=true, show_on_cover=false, logo_scale=1.0))]
+    #[allow(clippy::too_many_arguments)]
     fn brand(
         &self,
         logo: Option<String>,
         footer: Option<String>,
         slide_numbers: bool,
+        number_anchor: Option<crate::pylayout::PyAnchor>,
         rule: bool,
         show_on_cover: bool,
         logo_scale: f64,
@@ -2810,6 +2812,7 @@ impl PySlideKit {
                 logo: logo.map(PathBuf::from),
                 footer,
                 slide_numbers,
+                number_anchor: number_anchor.map(|anchor| anchor.0),
                 rule,
                 show_on_cover,
                 logo_scale,
@@ -3430,13 +3433,13 @@ impl PyGeometry {
             .map(PyDrawable)
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
-    #[pyo3(signature = (x1, y1, x2, y2, *, dash_length=0.16, gap_length=0.10))]
+    #[pyo3(signature = (p1, p2, x2=None, y2=None, *, dash_length=0.16, gap_length=0.10))]
     fn dashed_line(
         &self,
-        x1: f64,
-        y1: f64,
-        x2: f64,
-        y2: f64,
+        p1: Bound<'_, PyAny>,
+        p2: Bound<'_, PyAny>,
+        x2: Option<f64>,
+        y2: Option<f64>,
         dash_length: f64,
         gap_length: f64,
     ) -> PyResult<PyDrawable> {
@@ -3450,11 +3453,38 @@ impl PyGeometry {
                 "dash_length and gap_length must be finite positive numbers",
             ));
         }
+        // The same endpoints `line` takes: two points or drawables, or four
+        // coordinates.
+        let (from, to) = match (x2, y2) {
+            (None, None) => (resolve_endpoint(&p1)?, resolve_endpoint(&p2)?),
+            (Some(x2), Some(y2)) => {
+                let coordinate = |value: &Bound<'_, PyAny>| {
+                    value.extract::<f64>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "dashed_line(x1, y1, x2, y2) requires four numeric coordinates",
+                        )
+                    })
+                };
+                (
+                    CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
+                        coordinate(&p1)?,
+                        coordinate(&p2)?,
+                        0.0,
+                    )),
+                    CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(x2, y2, 0.0)),
+                )
+            }
+            _ => {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "dashed_line() expects two endpoints or four numeric coordinates",
+                ));
+            }
+        };
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .dashed_line(x1, y1, x2, y2, dash_length, gap_length),
+                .dashed_line_between(from, to, dash_length, gap_length),
         ))
     }
 

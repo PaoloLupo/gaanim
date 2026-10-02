@@ -21,6 +21,8 @@ pub struct DiffModeArgs {
     pub stops: Option<Vec<usize>>,
     /// With `--capture-stops`, only stops inside these segments or sections.
     pub selection: gaanim_timeline::selection::SegmentSelection,
+    /// Capture frames this many pixels tall instead of the preview size.
+    pub height: Option<u32>,
 }
 
 /// Run `gaanim --diff` with the arguments after `--diff` and exit.
@@ -80,6 +82,11 @@ pub fn run_diff(args: &[String], capture_script: impl FnOnce(&DiffModeArgs, &Pat
     if parsed.capture_only {
         println!("Snapshots captured: {}", parsed.current.display());
         std::process::exit(0);
+    }
+
+    if let Some(error) = size_mismatch(&parsed.baseline, &parsed.current) {
+        console::error("diff", error);
+        std::process::exit(2);
     }
 
     match comparison_blocker(&parsed.baseline, parsed.capture_stops) {
@@ -162,6 +169,22 @@ pub fn comparison_blocker(baseline: &Path, capture_stops: bool) -> Option<Result
     })
 }
 
+/// Why `baseline` and `current` cannot be compared frame by frame: they
+/// were captured at different sizes.
+fn size_mismatch(baseline: &Path, current: &Path) -> Option<String> {
+    let (baseline_size, current_size) = (
+        gaanim_diff::snapshot_size(baseline)?,
+        gaanim_diff::snapshot_size(current)?,
+    );
+    (baseline_size != current_size).then(|| {
+        format!(
+            "the baseline is {}x{} and this capture {}x{}; capture both at the same size \
+             (--height {}) or pass --capture-only",
+            baseline_size.0, baseline_size.1, current_size.0, current_size.1, baseline_size.1
+        )
+    })
+}
+
 pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, String> {
     let mut baseline = None;
     let mut current = None;
@@ -175,6 +198,7 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
     let mut capture_stops = false;
     let mut stops = None;
     let mut selection = gaanim_timeline::selection::SegmentSelection::default();
+    let mut height = None;
     let mut index = 0;
 
     while index < args.len() {
@@ -218,6 +242,17 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
                 selection.set_sections(value(&mut index)?)?;
             }
             "--from" => selection.from = Some(value(&mut index)?.to_string()),
+            "--height" => {
+                height = Some(
+                    value(&mut index)?
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|height| (16..=8192).contains(height))
+                        .ok_or_else(|| {
+                            "--height must be a whole number of pixels from 16 to 8192".to_string()
+                        })?,
+                );
+            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(format!("unknown option `{flag}`")),
         }
@@ -244,6 +279,15 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
     if (capture_stops || bundle) && capture == Some(false) {
         return Err("--capture-stops cannot be combined with --no-capture".to_string());
     }
+    if height.is_some() && bundle {
+        return Err(
+            "--height captures scripts; a bundle's frames have the size it was recorded at"
+                .to_string(),
+        );
+    }
+    if height.is_some() && (example.is_none() || capture == Some(false)) {
+        return Err("--height needs a capture: --example without --no-capture".to_string());
+    }
 
     if let Some(example) = example {
         // A bundle records no `scene.snapshots` request: its stops are the
@@ -262,6 +306,7 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
             capture_stops,
             stops,
             selection,
+            height,
         }));
     }
 
@@ -291,6 +336,7 @@ pub fn parse_diff_mode_args(args: &[String]) -> Result<Option<DiffModeArgs>, Str
         capture_stops: false,
         stops: None,
         selection,
+        height: None,
     }))
 }
 
@@ -390,6 +436,51 @@ mod tests {
         assert!(parsed.capture_only);
         assert!(!parsed.bless);
         assert_eq!(parsed.current, PathBuf::from("target/performance/seek"));
+    }
+
+    /// `--height` sizes a script's capture; bundles keep their size, and
+    /// captures of different sizes are not compared (#305).
+    #[test]
+    fn height_sizes_script_captures_only() {
+        let parse = |args: &[&str]| {
+            parse_diff_mode_args(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>())
+        };
+        let parsed = parse(&["--example", "examples/demo.py", "--height", "540"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.height, Some(540));
+        assert!(parse(&["--example", "examples/demo.py", "--height", "0"]).is_err());
+        assert!(parse(&["--example", "examples/demo.py", "--height", "big"]).is_err());
+        assert!(parse(&["--example", "deck.gaanim", "--height", "540"]).is_err());
+        assert!(parse(&["--baseline", "a", "--current", "b", "--height", "540"]).is_err());
+
+        let root = std::env::temp_dir().join(format!("gaanim-diff-size-{}", std::process::id()));
+        let manifest = |dir: &str, width: u32, height: u32| {
+            let dir = root.join(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let manifest = gaanim_diff::SnapshotManifest {
+                schema_version: 1,
+                width,
+                height,
+                snapshots: Vec::new(),
+            };
+            std::fs::write(
+                dir.join(gaanim_diff::MANIFEST_FILE),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            dir
+        };
+        let baseline = manifest("baseline", 1920, 1080);
+        let same = manifest("same", 1920, 1080);
+        let small = manifest("small", 960, 540);
+        assert_eq!(size_mismatch(&baseline, &same), None);
+        let error = size_mismatch(&baseline, &small).unwrap();
+        assert!(
+            error.contains("1920x1080") && error.contains("--height 1080"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
