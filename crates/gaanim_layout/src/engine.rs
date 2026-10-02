@@ -552,51 +552,76 @@ pub fn resolve_layout(
     let mut tree: TaffyTree<LayoutId> = TaffyTree::new();
     tree.disable_rounding();
     let available = DVec2::new(viewport.width(), viewport.height()).max(DVec2::ZERO);
-    let root_id = build_node(&mut tree, root, None, None, None, available)?;
+    let mut hugging = Vec::new();
+    let root_id = build_node(&mut tree, root, available, &mut hugging)?;
 
     let mut failure = None;
-    tree.compute_layout_with_measure(
-        root_id,
-        // A root that hugs its content is sized to its max-content (capped at
-        // the viewport by its max size): with definite space Taffy would
-        // size an auto-width grid like a block and stretch its auto tracks.
-        taffy::Size {
-            width: root_space(root.style.width, available.x),
-            height: root_space(root.style.height, available.y),
-        },
-        |known, space, _, context, _| {
-            let Some(id) = context.copied() else {
-                return taffy::Size::ZERO;
-            };
-            let width_sensitive = measurer.is_width_sensitive(id);
-            // Only wrapping content adapts to the space offered; any other
-            // leaf keeps its intrinsic size and overflows a smaller box, as
-            // replaced content does in CSS.
-            let width = match (known.width, space.width) {
-                (Some(value), _) => f64::from(value),
-                (None, AvailableSpace::Definite(value)) if width_sensitive => f64::from(value),
-                (None, AvailableSpace::MinContent) if width_sensitive => 0.0,
-                (None, _) => f64::INFINITY,
-            };
-            let height = known.height.map_or(f64::INFINITY, f64::from);
-            let max = DVec2::new(width, height);
-            let constraints = BoxConstraints {
-                min: DVec2::ZERO,
-                max,
-            };
-            match measurer.measure(id, constraints) {
-                Ok(size) => taffy::Size {
-                    width: known.width.unwrap_or(size.x as f32),
-                    height: known.height.unwrap_or(size.y as f32),
-                },
-                Err(error) => {
-                    failure.get_or_insert(error);
-                    taffy::Size::ZERO
-                }
+    // A root that hugs its content is sized to its max-content (capped at
+    // the viewport by its max size): with definite space Taffy would size an
+    // auto-width grid like a block and stretch its auto tracks.
+    let space = taffy::Size {
+        width: root_space(root.style.width, available.x),
+        height: root_space(root.style.height, available.y),
+    };
+    let mut measure = |known: taffy::Size<Option<f32>>,
+                       space: taffy::Size<AvailableSpace>,
+                       _: NodeId,
+                       context: Option<&mut LayoutId>,
+                       _: &Style| {
+        let Some(id) = context.copied() else {
+            return taffy::Size::ZERO;
+        };
+        let width_sensitive = measurer.is_width_sensitive(id);
+        // Only wrapping content adapts to the space offered; any other
+        // leaf keeps its intrinsic size and overflows a smaller box, as
+        // replaced content does in CSS.
+        let width = match (known.width, space.width) {
+            (Some(value), _) => f64::from(value),
+            (None, AvailableSpace::Definite(value)) if width_sensitive => f64::from(value),
+            (None, AvailableSpace::MinContent) if width_sensitive => 0.0,
+            (None, _) => f64::INFINITY,
+        };
+        let height = known.height.map_or(f64::INFINITY, f64::from);
+        let max = DVec2::new(width, height);
+        let constraints = BoxConstraints {
+            min: DVec2::ZERO,
+            max,
+        };
+        match measurer.measure(id, constraints) {
+            Ok(size) => taffy::Size {
+                width: known.width.unwrap_or(size.x as f32),
+                height: known.height.unwrap_or(size.y as f32),
+            },
+            Err(error) => {
+                failure.get_or_insert(error);
+                taffy::Size::ZERO
             }
-        },
-    )
-    .map_err(|error| LayoutError::Engine(error.to_string()))?;
+        }
+    };
+    tree.compute_layout_with_measure(root_id, space, &mut measure)
+        .map_err(|error| LayoutError::Engine(error.to_string()))?;
+    // Taffy sizes a box that hugs its content before the box around it knows
+    // its own width, so a text that wraps once that width is known can end
+    // up taller than the height its box kept. CSS settles the widths first;
+    // so does a second pass with each hugging box held at its final width.
+    if has_wrapping_leaf(root, measurer) && !hugging.is_empty() {
+        for node in &hugging {
+            let width = tree
+                .layout(*node)
+                .map_err(|error| LayoutError::Engine(error.to_string()))?
+                .size
+                .width;
+            let mut style = tree
+                .style(*node)
+                .map_err(|error| LayoutError::Engine(error.to_string()))?
+                .clone();
+            style.size.width = Dimension::length(width);
+            tree.set_style(*node, style)
+                .map_err(|error| LayoutError::Engine(error.to_string()))?;
+        }
+        tree.compute_layout_with_measure(root_id, space, &mut measure)
+            .map_err(|error| LayoutError::Engine(error.to_string()))?;
+    }
     if let Some(error) = failure {
         return Err(error);
     }
@@ -757,30 +782,64 @@ fn anchor_alignment(anchor: Anchor) -> (AlignSelf, AlignSelf) {
 fn build_node(
     tree: &mut TaffyTree<LayoutId>,
     node: &LayoutNode,
-    parent: Option<&LayoutNodeKind>,
-    parent_style: Option<&LayoutStyle>,
-    item: Option<&LayoutItemStyle>,
     viewport: DVec2,
+    hugging: &mut Vec<NodeId>,
 ) -> Result<NodeId, LayoutError> {
-    build_item(tree, node, parent, parent_style, item, false, viewport)
+    build_item(
+        tree,
+        node,
+        None,
+        ItemContext {
+            slack_grows: false,
+            parent_hugs: (false, false),
+        },
+        viewport,
+        hugging,
+    )
 }
 
-/// [`build_node`] for a child whose siblings may include one that grows:
-/// `slack_grows`.
+/// What a child needs to know about its parent and siblings.
+#[derive(Clone, Copy)]
+struct ItemContext {
+    /// A sibling grows.
+    slack_grows: bool,
+    /// The parent's width and height come from its content: it hugs it, or
+    /// fills a parent that does.
+    parent_hugs: (bool, bool),
+}
+
+/// The parent node, its style and this child's item style.
+type ParentItem<'a> = (&'a LayoutNodeKind, &'a LayoutStyle, &'a LayoutItemStyle);
+
+/// [`build_node`] for one child. Records in `hugging` the containers whose
+/// width hugs their content.
 fn build_item(
     tree: &mut TaffyTree<LayoutId>,
     node: &LayoutNode,
-    parent: Option<&LayoutNodeKind>,
-    parent_style: Option<&LayoutStyle>,
-    item: Option<&LayoutItemStyle>,
-    slack_grows: bool,
+    parent_item: Option<ParentItem<'_>>,
+    context: ItemContext,
     viewport: DVec2,
+    hugging: &mut Vec<NodeId>,
 ) -> Result<NodeId, LayoutError> {
+    let parent = parent_item.map(|(kind, ..)| kind);
+    let parent_style = parent_item.map(|(_, style, _)| style);
+    let item = parent_item.map(|(.., item)| item);
     let mut style = node.style.sanitized();
     if let Some(item) = item {
         style.width = item.width.unwrap_or(style.width).sanitize();
         style.height = item.height.unwrap_or(style.height).sanitize();
     }
+    // A box filling a parent that hugs its content is as large as that
+    // content too; the root fills the viewport.
+    let sized_by_content = |rule: SizeRule, parent_hugs: bool| match rule {
+        SizeRule::Hug => true,
+        SizeRule::Fill(_) => parent.is_some() && parent_hugs,
+        SizeRule::Fixed(_) | SizeRule::Percent(_) => false,
+    };
+    let hugs = (
+        sized_by_content(style.width, context.parent_hugs.0),
+        sized_by_content(style.height, context.parent_hugs.1),
+    );
     let mut taffy_style = Style {
         size: taffy::Size {
             width: dimension(style.width),
@@ -911,16 +970,11 @@ fn build_item(
             // growing item counts its content, or the parent would measure
             // as if every one of them were empty and its content would
             // overflow it.
-            let parent_hugs = parent_style.is_some_and(|parent| {
-                matches!(
-                    if horizontal {
-                        parent.width
-                    } else {
-                        parent.height
-                    },
-                    SizeRule::Hug
-                )
-            });
+            let parent_hugs = if horizontal {
+                context.parent_hugs.0
+            } else {
+                context.parent_hugs.1
+            };
             taffy_style.flex_basis = match item.basis {
                 // Not even with a basis: Taffy would size the parent by the
                 // item's basis, so a paragraph with `basis=0` would break
@@ -935,7 +989,7 @@ fn build_item(
             // Then a growing item takes the slack both ways: when the parent
             // is narrower than its content, it shrinks and the others keep
             // their size, as they would beside it in a sized parent.
-            if parent_hugs && slack_grows && grow == 0.0 {
+            if parent_hugs && context.slack_grows && grow == 0.0 {
                 taffy_style.flex_shrink = 0.0;
             }
             if let Some(align) = item.align {
@@ -1013,6 +1067,7 @@ fn build_item(
     let result = if matches!(node.kind, LayoutNodeKind::Leaf) {
         tree.new_leaf_with_context(taffy_style, node.id)
     } else {
+        let hugs_width = style.width == SizeRule::Hug;
         let horizontal = matches!(node.kind, LayoutNodeKind::Row { .. });
         let slack_grows = node.children.iter().any(|child| {
             let main = if horizontal {
@@ -1029,17 +1084,34 @@ fn build_item(
                 build_item(
                     tree,
                     &child.node,
-                    Some(&node.kind),
-                    Some(&node.style),
-                    Some(&child.style),
-                    slack_grows,
+                    Some((&node.kind, &node.style, &child.style)),
+                    ItemContext {
+                        slack_grows,
+                        parent_hugs: hugs,
+                    },
                     viewport,
+                    hugging,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        tree.new_with_children(taffy_style, &children)
+        let id = tree.new_with_children(taffy_style, &children);
+        if hugs_width && let Ok(id) = id {
+            hugging.push(id);
+        }
+        id
     };
     result.map_err(|error| LayoutError::Engine(error.to_string()))
+}
+
+/// Whether some leaf of `node` wraps to the width it is offered.
+fn has_wrapping_leaf(node: &LayoutNode, measurer: &impl IntrinsicMeasure) -> bool {
+    match node.kind {
+        LayoutNodeKind::Leaf => measurer.is_width_sensitive(node.id),
+        _ => node
+            .children
+            .iter()
+            .any(|child| has_wrapping_leaf(&child.node, measurer)),
+    }
 }
 
 /// Record the scene bounds of `node` and its subtree. `top_left` is the
@@ -1417,6 +1489,95 @@ mod tests {
         assert!((row.width() - 200.0).abs() < EPSILON, "{row:?} {text:?}");
         assert!((text.width() - 180.0).abs() < EPSILON, "{text:?}");
         assert!((text.height() - 3000.0 / 180.0).abs() < EPSILON, "{text:?}");
+    }
+
+    /// `L.box(L.column(L.row(icon, text, width=...), footer), width=200)`:
+    /// the column between the card and the row hugs its content, so the
+    /// row, filled or hugging, is as wide as the card and the text wraps in
+    /// what the icon leaves, as tall as its lines.
+    fn paragraph_row_in_a_hugging_column(row_width: SizeRule) -> ResolvedLayout {
+        let mut icon = LayoutNode::leaf(LayoutId(4));
+        icon.style.width = SizeRule::Fixed(20.0);
+        icon.style.height = SizeRule::Fixed(10.0);
+        let text = LayoutChild {
+            node: Box::new(LayoutNode::leaf(LayoutId(5))),
+            style: LayoutItemStyle {
+                grow: 1.0,
+                shrink: 1.0,
+                basis: Some(0.0),
+                ..LayoutItemStyle::default()
+            },
+        };
+        let mut row = LayoutNode::container(
+            LayoutId(3),
+            LayoutNodeKind::Row { wrap: false },
+            vec![
+                LayoutChild {
+                    node: Box::new(icon),
+                    style: LayoutItemStyle::default(),
+                },
+                text,
+            ],
+        );
+        row.style.width = row_width;
+        let mut footer = LayoutNode::leaf(LayoutId(6));
+        footer.style.width = SizeRule::Fixed(50.0);
+        footer.style.height = SizeRule::Fixed(10.0);
+        let column = LayoutNode::container(
+            LayoutId(2),
+            LayoutNodeKind::Column { wrap: false },
+            vec![
+                LayoutChild {
+                    node: Box::new(row),
+                    style: LayoutItemStyle::default(),
+                },
+                LayoutChild {
+                    node: Box::new(footer),
+                    style: LayoutItemStyle::default(),
+                },
+            ],
+        );
+        let mut card = LayoutNode::container(
+            LayoutId(1),
+            LayoutNodeKind::Column { wrap: false },
+            vec![LayoutChild {
+                node: Box::new(column),
+                style: LayoutItemStyle::default(),
+            }],
+        );
+        card.style.width = SizeRule::Fixed(200.0);
+        resolve_layout(
+            &card,
+            Bounds3D::new_2d(-500.0, -500.0, 500.0, 500.0),
+            &Wrapping,
+            &[],
+        )
+        .unwrap()
+    }
+
+    fn assert_paragraph_row_wraps(layout: &ResolvedLayout) {
+        let row = layout.boxes[&LayoutId(3)].bounds;
+        let text = layout.boxes[&LayoutId(5)].bounds;
+        let footer = layout.boxes[&LayoutId(6)].bounds;
+        assert!((row.width() - 200.0).abs() < EPSILON, "{row:?} {text:?}");
+        assert!((text.width() - 180.0).abs() < EPSILON, "{text:?}");
+        assert!((text.height() - 3000.0 / 180.0).abs() < EPSILON, "{text:?}");
+        assert!(
+            (row.height() - text.height()).abs() < EPSILON,
+            "{row:?} {text:?}"
+        );
+        // y points up: the footer starts below the text's last line.
+        assert!(footer.max.y <= row.min.y + EPSILON, "{footer:?} {row:?}");
+    }
+
+    #[test]
+    fn a_filled_row_in_a_hugging_column_is_as_wide_as_the_card() {
+        assert_paragraph_row_wraps(&paragraph_row_in_a_hugging_column(SizeRule::Fill(1.0)));
+    }
+
+    #[test]
+    fn a_hugging_row_in_a_hugging_column_is_as_tall_as_its_wrapped_text() {
+        assert_paragraph_row_wraps(&paragraph_row_in_a_hugging_column(SizeRule::Hug));
     }
 
     #[test]
