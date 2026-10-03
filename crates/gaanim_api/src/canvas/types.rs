@@ -1040,6 +1040,7 @@ pub struct EchoSpec {
     delay: f64,
     decay: f32,
     hold: bool,
+    window: Option<(f64, f64)>,
 }
 
 impl EchoSpec {
@@ -1064,7 +1065,38 @@ impl EchoSpec {
             delay,
             decay: decay as f32,
             hold: false,
+            window: None,
         })
+    }
+
+    /// Record the drawable only between the scene seconds `start` and `end`
+    /// (open when `None`): a copy shows it as it was inside that interval
+    /// and is hidden otherwise, so the trail grows from `start` and drains
+    /// after `end`.
+    pub fn with_window(mut self, start: Option<f64>, end: Option<f64>) -> Result<Self, String> {
+        if start.is_none() && end.is_none() {
+            self.window = None;
+            return Ok(self);
+        }
+        let start = start.unwrap_or(0.0);
+        let end = end.unwrap_or(f64::INFINITY);
+        if !start.is_finite() || start < 0.0 || end.is_nan() {
+            return Err(format!(
+                "echo start must be a non-negative number of seconds, got {start}"
+            ));
+        }
+        if end <= start {
+            return Err(format!(
+                "echo end ({end}) must come after its start ({start})"
+            ));
+        }
+        self.window = Some((start, end));
+        Ok(self)
+    }
+
+    /// The scene seconds the copies record, when limited.
+    pub fn window(&self) -> Option<(f64, f64)> {
+        self.window
     }
 
     /// Whether the copies freeze where they are when the drawable stops

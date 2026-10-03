@@ -10498,6 +10498,7 @@ impl SceneModel {
                             rank: copy,
                             hold: echo.hold(),
                             motion_sources: motion_sources.clone(),
+                            window: echo.window(),
                         },
                     ))
                     .id();
@@ -15741,6 +15742,48 @@ mod tests {
                 "{held:?}"
             );
         }
+    }
+
+    #[test]
+    fn echo_with_a_window_records_only_inside_it() {
+        let mut canvas = SceneModel::new(640, 360);
+        let ball = canvas.circle(0.5).move_to(-3.0, 0.0).echo(Some(
+            super::super::types::EchoSpec::new(2, 0.1, 0.5)
+                .unwrap()
+                .with_window(Some(1.0), Some(1.5))
+                .unwrap(),
+        ));
+        canvas.play(vec![ball.animate().move_to(0.0, 0.0).duration(1.0)]);
+        canvas.play(vec![ball.animate().move_to(3.0, 0.0).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let mut copies: Vec<(Entity, f64)> = world
+            .query::<(Entity, &gaanim_animation::EchoGhost)>()
+            .iter(&world)
+            .map(|(entity, echo)| (entity, echo.lag))
+            .collect();
+        copies.sort_by(|left, right| left.1.total_cmp(&right.1));
+        let shown =
+            |world: &World, copy: Entity| world.get::<gaanim_scene::Visible>(copy).is_some();
+        // Moving before the window: no trail.
+        timeline.seek(&mut world, 0.5);
+        assert!(copies.iter().all(|&(copy, _)| !shown(&world, copy)));
+        // Inside it, the copies whose delayed time is inside it show.
+        timeline.seek(&mut world, 1.15);
+        assert!(shown(&world, copies[0].0), "1.05 is recorded");
+        assert!(!shown(&world, copies[1].0), "0.95 is before the window");
+        timeline.seek(&mut world, 1.4);
+        assert!(copies.iter().all(|&(copy, _)| shown(&world, copy)));
+        // After it the trail drains: 1.55 - 0.1 is still inside.
+        timeline.seek(&mut world, 1.55);
+        assert!(shown(&world, copies[0].0) && shown(&world, copies[1].0));
+        timeline.seek(&mut world, 1.8);
+        assert!(copies.iter().all(|&(copy, _)| !shown(&world, copy)));
+        assert!(
+            super::super::types::EchoSpec::new(2, 0.1, 0.5)
+                .unwrap()
+                .with_window(Some(2.0), Some(1.0))
+                .is_err()
+        );
     }
 
     #[test]

@@ -31,4 +31,7 @@ pub struct EchoGhost {
     /// The echoed subtree, whose animation clips make up the motion a held
     /// copy follows.
     pub motion_sources: Vec<ObjectId>,
+    /// Scene seconds the copy records, when limited: it shows the source
+    /// only as it was inside them, and is hidden otherwise.
+    pub window: Option<(f64, f64)>,
 }

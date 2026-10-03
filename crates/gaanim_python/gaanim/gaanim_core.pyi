@@ -3405,7 +3405,16 @@ class Drawable:
             hud = scene.text("t = 0").move_to(-6, 4).motion_blur(False)
         """
         ...
-    def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6, hold: bool = False) -> Drawable:
+    def echo(
+        self,
+        count: int = 5,
+        *,
+        delay: float = 0.04,
+        decay: float = 0.6,
+        hold: bool = False,
+        start: Optional[float] = None,
+        end: Optional[float] = None,
+    ) -> Drawable:
         """Trail this drawable with ``count`` copies of itself as it was earlier.
 
         Copy ``k`` shows the drawable ``k * delay`` seconds ago with ``decay ** k``
@@ -3425,6 +3434,12 @@ class Drawable:
         ``hold=True`` they are delayed along its motion instead of the clock:
         when its animations stop, the copies freeze where they were (an onion
         skin of ``count`` frozen poses) and move on when it moves again.
+
+        ``start`` and ``end`` (scene seconds) limit what the copies record:
+        a copy shows the drawable only as it was between them and is hidden
+        otherwise, so the trail grows from ``start`` and drains after
+        ``end``, while the drawable moves freely the rest of the time. Either
+        may be left open; ``end`` must come after ``start``.
 
         Example:
             ball = scene.geometry.circle(0.4).fill(CORAL).echo(6, delay=0.05)
@@ -4663,7 +4678,16 @@ class Text(Drawable):
             title.motion_blur(False).move_to(0.0, 3.0)
         """
         ...
-    def echo(self, count: int = 5, *, delay: float = 0.04, decay: float = 0.6, hold: bool = False) -> Self:
+    def echo(
+        self,
+        count: int = 5,
+        *,
+        delay: float = 0.04,
+        decay: float = 0.6,
+        hold: bool = False,
+        start: Optional[float] = None,
+        end: Optional[float] = None,
+    ) -> Self:
         """Trail the text with fading copies of itself, preserving Text chaining.
 
         See ``Drawable.echo``; each glyph's copy replays that glyph's own

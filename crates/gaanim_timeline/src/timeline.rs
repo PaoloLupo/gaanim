@@ -2629,22 +2629,27 @@ impl Timeline {
             let source_visible = entity_map
                 .get(&echo.source)
                 .is_some_and(|&source| world.get::<gaanim_scene::Visible>(source).is_some());
-            let parent = (source_visible && time >= 0.0 && segment(time) == current_segment)
-                .then(|| {
-                    // Copies stay out of scene membership: their visibility is decided here.
-                    self.replay_source_into(
-                        world,
-                        echo.source,
-                        clips_of(&echo.source),
-                        time,
-                        ghost,
-                        |state| {
-                            state.scene = None;
-                            state.visible = true;
-                        },
-                    )
-                })
-                .flatten();
+            // A copy limited to an interval shows only what happened in it.
+            let recorded = echo
+                .window
+                .is_none_or(|(start, end)| start - 1e-9 <= time && time <= end + 1e-9);
+            let parent =
+                (source_visible && recorded && time >= 0.0 && segment(time) == current_segment)
+                    .then(|| {
+                        // Copies stay out of scene membership: their visibility is decided here.
+                        self.replay_source_into(
+                            world,
+                            echo.source,
+                            clips_of(&echo.source),
+                            time,
+                            ghost,
+                            |state| {
+                                state.scene = None;
+                                state.visible = true;
+                            },
+                        )
+                    })
+                    .flatten();
             let Some(parent) = parent else {
                 if world.get::<gaanim_scene::Visible>(ghost).is_some() {
                     world.entity_mut(ghost).remove::<gaanim_scene::Visible>();
@@ -5288,6 +5293,7 @@ mod tests {
                         rank,
                         hold: false,
                         motion_sources: Vec::new(),
+                        window: None,
                     },
                 ))
                 .id()
