@@ -3062,6 +3062,59 @@ impl SceneModel {
                 .insert(gaanim_animation::RollingTweens(windows));
         }
 
+        // Parameter-driven procedural layers integrate their signal from the
+        // layer's start, so they need its whole schedule.
+        for (target, signal, start, base) in std::mem::take(&mut builder.procedural_signal_tracks) {
+            let tweens: Vec<gaanim_animation::SignalTween> = builder
+                .timeline
+                .clips
+                .values()
+                .filter_map(|clip| match &clip.payload {
+                    gaanim_timeline::clip::ClipPayload::Animation(animation)
+                        if animation.target == signal
+                            && (clip.start >= start || clip.end() > start) =>
+                    {
+                        match animation.lens {
+                            gaanim_timeline::clip::PropertyLensSpec::SignalFloat { from, to } => {
+                                Some(gaanim_animation::SignalTween {
+                                    start: clip.start,
+                                    duration: clip.duration,
+                                    from,
+                                    to,
+                                    rate: animation.rate_func.clone(),
+                                })
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+                .collect();
+            let track = std::sync::Arc::new(gaanim_animation::SignalTrack::new(base, tweens));
+            builder.commands.entity(target).queue(
+                move |mut entity: bevy::prelude::EntityWorldMut| {
+                    let Some(mut motion) = entity.get_mut::<gaanim_animation::ProceduralMotion>()
+                    else {
+                        return;
+                    };
+                    for scheduled in &mut motion.layers {
+                        if scheduled.start.to_bits() != start.to_bits() {
+                            continue;
+                        }
+                        for param in scheduled.layer.params_mut() {
+                            if let gaanim_animation::LayerParam::Signal {
+                                id, track: slot, ..
+                            } = param
+                                && *id == signal
+                            {
+                                *slot = Some(track.clone());
+                            }
+                        }
+                    }
+                },
+            );
+        }
+
         for (i, seg) in segments.iter().enumerate() {
             if let Some(prev) = seg.prev_segment
                 && prev < i
@@ -5919,9 +5972,29 @@ impl SceneModel {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let layer = layer.clone();
+                        let target_entity = st.entity;
+                        let mut layer = layer.clone();
                         let start = builder.current_time;
-                        builder.commands.entity(st.entity).queue(
+                        // Point parameter-driven numbers at their compiled
+                        // signals; their tracks are filled in once every
+                        // tween is scheduled.
+                        for param in layer.params_mut() {
+                            if let gaanim_animation::LayerParam::Signal { id, entity, .. } = param
+                                && let Some(compiled) = id_map.get(id).copied()
+                            {
+                                *id = compiled;
+                                *entity = builder.states.get(compiled).map(|state| state.entity);
+                                let base =
+                                    builder.float_signals.get(&compiled).copied().unwrap_or(0.0);
+                                builder.procedural_signal_tracks.push((
+                                    target_entity,
+                                    compiled,
+                                    start,
+                                    base,
+                                ));
+                            }
+                        }
+                        builder.commands.entity(target_entity).queue(
                             move |mut entity: bevy::prelude::EntityWorldMut| {
                                 if let Some(mut motion) =
                                     entity.get_mut::<gaanim_animation::ProceduralMotion>()
@@ -16684,6 +16757,42 @@ mod tests {
                 "DashOffsetLens { from: 2.0, to: 3.0 }",
             ]
         );
+    }
+
+    #[test]
+    fn parameter_driven_spin_integrates_the_parameter_tweens() {
+        let mut canvas = SceneModel::new(640, 360);
+        let wheel = canvas.circle(1.0);
+        let speed = canvas.parameter(1.0).unwrap();
+        canvas.wait(1.0);
+        wheel.add_updater(crate::canvas::UpdaterPreset::Procedural(
+            gaanim_animation::ProceduralLayer::Spin {
+                speed: gaanim_animation::LayerParam::signal(speed.drawable().id),
+            },
+        ));
+        canvas.wait(1.0);
+        canvas.play(vec![speed.animate().set(3.0).duration(2.0)]);
+        canvas.wait(1.0);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        let entity = entity_of(&mut world, &wheel);
+        let motion = world
+            .get::<gaanim_animation::ProceduralMotion>(entity)
+            .unwrap();
+        // 1 rad/s over [1, 2], a symmetric ease from 1 to 3 rad/s over
+        // [2, 4] (2 rad/s on average), then 3 rad/s.
+        assert!((motion.offset_at(2.0).rotation - 1.0).abs() < 1e-9);
+        assert!((motion.offset_at(4.0).rotation - 5.0).abs() < 1e-6);
+        assert!((motion.offset_at(5.0).rotation - 8.0).abs() < 1e-6);
     }
 
     #[test]

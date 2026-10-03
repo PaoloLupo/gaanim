@@ -2178,10 +2178,20 @@ scene.wait(2)
 #api-entry(
   name: "Updater.rotate",
   kind: "factory",
-  params: ((name: "speed", type: "float", default: none, desc: [Radianes por segundo.]),),
+  params: ((name: "speed", type: "float | Parameter", default: none, desc: [Radianes por segundo. Con un `Parameter`, animarlo acelera o frena el giro sin saltos.]),),
   returns: (type: "Updater", desc: [Giro continuo alrededor de Z.]),
-  none,
-)
+  desc: [Con un `Parameter`, el ángulo es la integral de su valor desde que se añade el updater, así que un seek o una exportación desde la mitad caen en el mismo ángulo que la reproducción, y `remove_updater()` lo deja en el ángulo alcanzado. Para un `Parameter` movido por `drive_from_samples` o `add_updater_fn` se usa su valor de cada fotograma.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.regular_polygon(6, 1.5).no_fill().stroke(GOLD, 0.03)
+speed = scene.viz.parameter(0.5)
+circle.add_updater(Updater.rotate(speed))
+scene.play([speed.animate.set(6.0).duration(2)])  # el clímax: gira cada vez más rápido
+scene.play([speed.animate.set(0.5).duration(1)])
+```
+]
 
 #api-entry(
   name: "Updater.pulse",
@@ -2209,15 +2219,15 @@ scene.wait(2)
   name: "Updater.wiggle",
   kind: "factory",
   params: (
-    (name: "position", type: "float", default: "0.08", desc: [Amplitud del ruido de posición, en unidades de escena.]),
-    (name: "rotation", type: "float", default: "0.0", desc: [Amplitud de giro, en radianes.]),
-    (name: "scale", type: "float", default: "0.0", desc: [Amplitud de escala, como fracción.]),
-    (name: "frequency", type: "float", default: "2.0", desc: [Rapidez del temblor.]),
+    (name: "position", type: "float | Parameter", default: "0.08", desc: [Amplitud del ruido de posición, en unidades de escena.]),
+    (name: "rotation", type: "float | Parameter", default: "0.0", desc: [Amplitud de giro, en radianes.]),
+    (name: "scale", type: "float | Parameter", default: "0.0", desc: [Amplitud de escala, como fracción.]),
+    (name: "frequency", type: "float | Parameter", default: "2.0", desc: [Rapidez del temblor.]),
     (name: "octaves", type: "int", default: "2", desc: [Capas de detalle, de 1 a 8.]),
     (name: "seed", type: "int", default: "0", desc: [Semilla del ruido.]),
   ),
   returns: (type: "Updater", desc: [Temblor orgánico con semilla.]),
-  desc: [Es una capa sobre la animación del objeto: empieza en cero, es función pura del tiempo de la línea de tiempo y se suma a `animate.move_to` y a otros clips en lugar de sustituirlos. Un seek cae en el mismo fotograma que la reproducción. Valores inválidos lanzan `ValueError`.],
+  desc: [Es una capa sobre la animación del objeto: empieza en cero, es función pura del tiempo de la línea de tiempo y se suma a `animate.move_to` y a otros clips en lugar de sustituirlos. Un seek cae en el mismo fotograma que la reproducción. Las amplitudes y la frecuencia aceptan un `Parameter`: animar la amplitud a 0 apaga el temblor poco a poco en lugar de cortarlo con `remove_updater()`, y cambiar la frecuencia cambia el ritmo sin saltos. Valores inválidos lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -2225,6 +2235,18 @@ scene.wait(2)
 >>>logo = scene.media.image("assets/logo.webp").scale_to(0.25)
 logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, seed=1))
 scene.play([logo.animate.move_to(3, 0).duration(2)])  # sigue temblando mientras se mueve
+```
+
+Para atenuarlo, pasa la amplitud como `Parameter`:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>logo = scene.geometry.star(5, 1.0, 0.45).fill(GOLD)
+shake = scene.viz.parameter(0.15)
+logo.add_updater(Updater.wiggle(position=shake, frequency=3.0, seed=2))
+scene.wait(1)
+scene.play([shake.animate.set(0).duration(1.5)])  # el temblor se calma
 ```
 ]
 

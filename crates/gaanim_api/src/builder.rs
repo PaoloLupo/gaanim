@@ -798,6 +798,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     /// Continuous rolling displays and the parameter signals whose tweens settle them.
     pub rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
+    /// Procedural layers driven by a parameter: `(target, signal, layer
+    /// start, signal value at the start)`, given their signal track once
+    /// every tween is scheduled.
+    pub procedural_signal_tracks: Vec<(Entity, ObjectId, f64, f64)>,
     /// Time maps of the next play's animations, from `Op::TimeMaps`.
     pub(crate) pending_time_maps: Vec<Option<std::sync::Arc<gaanim_math::TimeMap>>>,
     /// Local baselines of reactive numbers, which readouts align their row on.
@@ -882,6 +886,7 @@ pub(crate) struct SceneBuilderState {
     states: MobjectStateMap,
     text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
+    procedural_signal_tracks: Vec<(Entity, ObjectId, f64, f64)>,
     readout_baselines: HashMap<ObjectId, f64>,
     default_track: TrackId,
     mobject_tracks: HashMap<ObjectId, TrackId>,
@@ -918,6 +923,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states: self.states.clone(),
             text_metrics: self.text_metrics.clone(),
             rolling_tween_sources: self.rolling_tween_sources.clone(),
+            procedural_signal_tracks: self.procedural_signal_tracks.clone(),
             readout_baselines: self.readout_baselines.clone(),
             default_track: self.default_track,
             mobject_tracks: self.mobject_tracks.clone(),
@@ -961,6 +967,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states,
             text_metrics,
             rolling_tween_sources,
+            procedural_signal_tracks,
             readout_baselines,
             default_track,
             mobject_tracks,
@@ -997,6 +1004,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states,
             text_metrics,
             rolling_tween_sources,
+            procedural_signal_tracks,
             readout_baselines,
             readout_reserves: HashMap::new(),
             pending_time_maps: Vec::new(),
@@ -1304,6 +1312,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             states: MobjectStateMap::new(),
             text_metrics: HashMap::new(),
             rolling_tween_sources: Vec::new(),
+            procedural_signal_tracks: Vec::new(),
             readout_baselines: HashMap::new(),
             readout_reserves: HashMap::new(),
             pending_time_maps: Vec::new(),

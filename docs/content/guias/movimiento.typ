@@ -336,6 +336,26 @@ scene.play(logo.animate.move_to(-4, -1).duration(1.0))
 scene.render()
 ```
 
+Las amplitudes y la frecuencia de `wiggle`, y la velocidad de
+`Updater.rotate`, aceptan un `Parameter`. Animarlo cambia el updater mientras
+corre: `temblor.animate.set(0)` calma un temblor poco a poco en lugar de
+cortarlo, y una velocidad que sube acelera un giro sin saltos. Un seek cae en
+el mismo fotograma que la reproducción.
+
+```python
+from gaanim import GOLD, Scene, Updater
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+circulo = scene.geometry.regular_polygon(6, 2.0).no_fill().stroke(GOLD, 0.04)
+velocidad = scene.viz.parameter(0.5)
+temblor = scene.viz.parameter(0.0)
+circulo.add_updater(Updater.rotate(velocidad))
+circulo.add_updater(Updater.wiggle(position=temblor, frequency=4.0, seed=3))
+scene.play([velocidad.animate.set(8.0).duration(2), temblor.animate.set(0.12).duration(2)])
+scene.play([velocidad.animate.set(0.5).duration(1.5), temblor.animate.set(0.0).duration(1.5)])
+scene.render()
+```
+
 No confundas `Updater.wiggle` con `animate.wiggle()`: el segundo es un énfasis
 breve para señalar un error, no una capa continua.
 

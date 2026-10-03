@@ -2712,20 +2712,28 @@ class Updater:
         """
         ...
     @staticmethod
-    def rotate(speed: float) -> Updater:
-        """Create an updater that will rotate the drawable each frame.
+    def rotate(speed: float | Parameter) -> Updater:
+        """Turn the drawable about z at ``speed`` radians per second.
+
+        A ``Parameter`` speed can be animated to speed the turn up or slow it
+        down without jumps: the angle is its integral from when the updater is
+        added, so seeks and exports land on the same angle as playback, and
+        ``remove_updater()`` keeps the angle reached. A parameter driven by
+        ``drive_from_samples`` or ``add_updater_fn`` uses each frame's value.
 
         Example:
-            result = Updater.rotate(1.0)
+            speed = scene.viz.parameter(0.5)
+            circle.add_updater(Updater.rotate(speed))
+            scene.play([speed.animate.set(6.0).duration(2)])
         """
         ...
     @staticmethod
     def wiggle(
         *,
-        position: float = 0.08,
-        rotation: float = 0.0,
-        scale: float = 0.0,
-        frequency: float = 2.0,
+        position: float | Parameter = 0.08,
+        rotation: float | Parameter = 0.0,
+        scale: float | Parameter = 0.0,
+        frequency: float | Parameter = 2.0,
         octaves: int = 2,
         seed: int = 0,
     ) -> Updater:
@@ -2736,10 +2744,16 @@ class Updater:
         jitter changes and ``octaves`` (1 to 8) adds finer detail. The offset
         starts at zero, is a pure function of timeline time, and adds to
         ``animate.move_to`` and other clips instead of replacing them.
-        ``remove_updater()`` ends it. Invalid values raise ``ValueError``.
+        ``remove_updater()`` ends it. The amplitudes and ``frequency`` accept a
+        ``Parameter``: animating an amplitude to 0 calms the jitter instead of
+        cutting it, and a changing frequency changes the pace without jumps.
+        Invalid values raise ``ValueError``.
 
         Example:
             logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, frequency=2.0, seed=1))
+            shake = scene.viz.parameter(0.15)
+            logo.add_updater(Updater.wiggle(position=shake))
+            scene.play([shake.animate.set(0).duration(1.5)])
         """
         ...
     @staticmethod
@@ -5912,7 +5926,7 @@ class Parameter:
         ``times`` are relative to the timeline cursor where this call is made.
 
         Example:
-            phase = scene.parameter(0.0)
+            phase = scene.viz.parameter(0.0)
             phase.drive_from_samples(times, values, scale=2.0 * math.pi)
         """
         ...

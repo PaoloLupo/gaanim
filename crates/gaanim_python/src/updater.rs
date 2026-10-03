@@ -3,8 +3,30 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
-use gaanim_animation::{OscillatedChannel, ProceduralLayer, Waveform};
+use gaanim_animation::{LayerParam, OscillatedChannel, ProceduralLayer, Waveform};
 use gaanim_api::canvas::UpdaterPreset;
+
+use crate::visualization::PyParameter;
+
+/// A number of an updater: a float, or a `Parameter` whose animation
+/// changes the updater while it runs. `check` validates a float.
+fn layer_param(
+    name: &str,
+    value: &Bound<'_, PyAny>,
+    check: impl Fn(f64) -> Result<(), String>,
+) -> PyResult<LayerParam> {
+    if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
+        return Ok(LayerParam::signal(parameter.inner.drawable().id));
+    }
+    let value: f64 = value.extract().map_err(|_| {
+        pyo3::exceptions::PyTypeError::new_err(format!("{name} must be a number or a Parameter"))
+    })?;
+    if !value.is_finite() {
+        return Err(PyValueError::new_err(format!("{name} must be finite")));
+    }
+    check(value).map_err(PyValueError::new_err)?;
+    Ok(LayerParam::Fixed(value))
+}
 
 /// Preset updater that can be attached to a DrawableHandle via `add_updater()`.
 ///
@@ -47,49 +69,61 @@ impl PyUpdater {
         })
     }
 
-    /// Continuous Z-axis rotation.
+    /// Continuous Z-axis rotation; a `Parameter` speed can be animated.
     #[staticmethod]
-    fn rotate(speed: f64) -> Self {
-        Self(UpdaterPreset::Rotate { speed })
+    fn rotate(speed: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self(match layer_param("speed", speed, |_| Ok(()))? {
+            LayerParam::Fixed(speed) => UpdaterPreset::Rotate { speed },
+            speed => UpdaterPreset::Procedural(ProceduralLayer::Spin { speed }),
+        }))
     }
 
     /// Organic jitter layered over the drawable's animation.
     #[staticmethod]
-    #[pyo3(signature = (*, position=0.08, rotation=0.0, scale=0.0, frequency=2.0, octaves=2, seed=0))]
+    #[pyo3(signature = (*, position=None, rotation=None, scale=None, frequency=None, octaves=2, seed=0))]
     fn wiggle(
-        position: f64,
-        rotation: f64,
-        scale: f64,
-        frequency: f64,
+        position: Option<&Bound<'_, PyAny>>,
+        rotation: Option<&Bound<'_, PyAny>>,
+        scale: Option<&Bound<'_, PyAny>>,
+        frequency: Option<&Bound<'_, PyAny>>,
         octaves: u32,
         seed: u64,
     ) -> PyResult<Self> {
-        for (name, value) in [
-            ("position", position),
-            ("rotation", rotation),
-            ("scale", scale),
-            ("frequency", frequency),
-        ] {
-            if !value.is_finite() {
-                return Err(PyValueError::new_err(format!("{name} must be finite")));
-            }
-        }
-        if position < 0.0 || rotation < 0.0 || scale < 0.0 {
-            return Err(PyValueError::new_err(
-                "position, rotation and scale amplitudes must be non-negative",
-            ));
-        }
-        if frequency <= 0.0 {
-            return Err(PyValueError::new_err("frequency must be positive"));
-        }
+        let amplitude = |name: &str, value: Option<&Bound<'_, PyAny>>, default: f64| {
+            value.map_or(Ok(LayerParam::Fixed(default)), |value| {
+                layer_param(name, value, |value| {
+                    if value < 0.0 {
+                        Err("position, rotation and scale amplitudes must be non-negative".into())
+                    } else {
+                        Ok(())
+                    }
+                })
+            })
+        };
+        let position = amplitude("position", position, 0.08)?;
+        let rotation = amplitude("rotation", rotation, 0.0)?;
+        let scale = amplitude("scale", scale, 0.0)?;
+        let frequency = frequency.map_or(Ok(LayerParam::Fixed(2.0)), |value| {
+            layer_param("frequency", value, |value| {
+                if value <= 0.0 {
+                    Err("frequency must be positive".into())
+                } else {
+                    Ok(())
+                }
+            })
+        })?;
         if !(1..=8).contains(&octaves) {
             return Err(PyValueError::new_err("octaves must be between 1 and 8"));
         }
+        // A fixed frequency lives in the noise; a parameter one advances a
+        // unit-frequency noise by its integral.
+        let noise_frequency = frequency.fixed().unwrap_or(1.0);
         Ok(Self(UpdaterPreset::Procedural(ProceduralLayer::Wiggle {
-            noise: gaanim_math::Noise::new(seed, frequency, 1.0, octaves),
+            noise: gaanim_math::Noise::new(seed, noise_frequency, 1.0, octaves),
             position,
             rotation,
             scale,
+            frequency,
         })))
     }
 
