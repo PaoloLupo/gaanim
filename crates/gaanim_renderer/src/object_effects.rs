@@ -68,8 +68,9 @@ pub struct MatteSource;
 /// with a rounded rim `bevel` scene units wide: across the rim, what is
 /// behind bends by up to `refraction` scene units, splits into its colors
 /// by `dispersion` (0 to 1) and catches a light from the top left as bright
-/// as `edge` (0 to 1). The drawable itself is drawn above, so a translucent
-/// fill tints the glass.
+/// as `edge` (0 to 1). `transparency` (0 to 1) is how clear the glass is:
+/// 1 shows what is behind it, 0 turns it into milky white. The drawable
+/// itself is drawn above, so a translucent fill tints the glass.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct Glass {
     pub blur: f64,
@@ -78,6 +79,7 @@ pub struct Glass {
     pub edge: f64,
     pub dispersion: f64,
     pub bevel: f64,
+    pub transparency: f64,
 }
 
 impl Default for Glass {
@@ -90,6 +92,7 @@ impl Default for Glass {
             edge: 0.3,
             dispersion: 0.0,
             bevel: 0.12,
+            transparency: 1.0,
         }
     }
 }
@@ -102,8 +105,9 @@ impl Glass {
         saturation: 1.4,
         refraction: 0.4,
         edge: 0.8,
-        dispersion: 0.12,
+        dispersion: 0.4,
         bevel: 0.4,
+        transparency: 1.0,
     };
 
     /// How far beyond its outline the glass reads what is behind it.
@@ -187,6 +191,9 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     var color = vec3<f32>(red.r, green.g, blue.b);
     let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     color = mix(vec3<f32>(luma), color, gaanim_uniforms.saturation);
+    // Less transparent glass turns milky: white with a hint of what is behind.
+    let milk = mix(vec3<f32>(0.96), color, 0.12);
+    color = mix(milk, color, gaanim_uniforms.transparency);
     // A thin bright line along the outline, strongest where it faces the
     // light from the top left or the opposite corner, and a faint glow
     // inside the rim.
@@ -217,7 +224,14 @@ pub fn glass_passes(glass: &Glass, density: f64) -> Vec<(PostProcessShader, Vec<
         .ok()?;
         let finish = PostProcessShader::with_uniforms(
             format!("{GLASS_COMMON}{GLASS_FINISH}"),
-            ["bevel", "refraction", "dispersion", "saturation", "edge"],
+            [
+                "bevel",
+                "refraction",
+                "dispersion",
+                "saturation",
+                "edge",
+                "transparency",
+            ],
         )
         .ok()?;
         Some((blur, finish))
@@ -237,6 +251,7 @@ pub fn glass_passes(glass: &Glass, density: f64) -> Vec<(PostProcessShader, Vec<
                 glass.dispersion.clamp(0.0, 1.0) as f32,
                 glass.saturation.max(0.0) as f32,
                 glass.edge.clamp(0.0, 1.0) as f32,
+                glass.transparency.clamp(0.0, 1.0) as f32,
             ],
         ),
     ]

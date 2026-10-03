@@ -3275,7 +3275,7 @@ impl PyDrawable {
         same_drawable(slf, result)
     }
     /// Frosted glass; see `gaanim_core.pyi`.
-    #[pyo3(signature = (blur=0.25, *, saturation=1.4, refraction=0.08, edge=0.3, dispersion=0.0, bevel=0.12))]
+    #[pyo3(signature = (blur=0.25, *, saturation=1.4, refraction=0.08, edge=0.3, dispersion=0.0, bevel=0.12, transparency=1.0))]
     #[allow(clippy::too_many_arguments)]
     fn glass<'py>(
         slf: &Bound<'py, Self>,
@@ -3285,6 +3285,7 @@ impl PyDrawable {
         edge: f64,
         dispersion: f64,
         bevel: f64,
+        transparency: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
         crate::custom::ensure_authoring_allowed()?;
         let glass = gaanim_api::canvas::Glass {
@@ -3294,24 +3295,36 @@ impl PyDrawable {
             edge,
             dispersion,
             bevel,
+            transparency,
         };
-        let values = [blur, saturation, refraction, edge, dispersion, bevel];
+        let values = [
+            blur,
+            saturation,
+            refraction,
+            edge,
+            dispersion,
+            bevel,
+            transparency,
+        ];
         if values
             .iter()
             .any(|value| !value.is_finite() || *value < 0.0)
         {
             return Err(PyValueError::new_err(
-                "glass needs finite, non-negative blur, saturation, refraction, edge, dispersion and bevel",
+                "glass needs finite, non-negative blur, saturation, refraction, edge, dispersion, bevel and transparency",
             ));
         }
-        if edge > 1.0 || dispersion > 1.0 {
-            return Err(PyValueError::new_err("edge and dispersion go from 0 to 1"));
+        if edge > 1.0 || dispersion > 1.0 || transparency > 1.0 {
+            return Err(PyValueError::new_err(
+                "edge, dispersion and transparency go from 0 to 1",
+            ));
         }
         let handle = slf.borrow().0.clone();
         same_drawable(slf, Ok(Self(handle.glass(Some(glass)))))
     }
     /// Clear lens-like glass; see `gaanim_core.pyi`.
-    #[pyo3(signature = (*, refraction=0.4, dispersion=0.12, bevel=0.4, blur=0.02, edge=0.8, saturation=1.4))]
+    #[pyo3(signature = (*, refraction=0.4, dispersion=0.4, bevel=0.4, blur=0.02, edge=0.8, saturation=1.4, transparency=1.0))]
+    #[allow(clippy::too_many_arguments)]
     fn liquid_glass<'py>(
         slf: &Bound<'py, Self>,
         refraction: f64,
@@ -3320,8 +3333,18 @@ impl PyDrawable {
         blur: f64,
         edge: f64,
         saturation: f64,
+        transparency: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
-        Self::glass(slf, blur, saturation, refraction, edge, dispersion, bevel)
+        Self::glass(
+            slf,
+            blur,
+            saturation,
+            refraction,
+            edge,
+            dispersion,
+            bevel,
+            transparency,
+        )
     }
     /// A plain blur of what is behind; see `gaanim_core.pyi`.
     #[pyo3(signature = (radius=0.25, *, saturation=1.0))]
@@ -3330,7 +3353,7 @@ impl PyDrawable {
         radius: f64,
         saturation: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
-        Self::glass(slf, radius, saturation, 0.0, 0.0, 0.0, 0.12)
+        Self::glass(slf, radius, saturation, 0.0, 0.0, 0.0, 0.12, 1.0)
     }
     /// Remove the glass or backdrop blur.
     fn no_glass<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {

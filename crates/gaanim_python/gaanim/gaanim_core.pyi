@@ -3231,6 +3231,7 @@ class Drawable:
         edge: float = 0.3,
         dispersion: float = 0.0,
         bevel: float = 0.12,
+        transparency: float = 1.0,
     ) -> Self:
         """Turn this drawable into glass over what is drawn behind it.
 
@@ -3241,12 +3242,15 @@ class Drawable:
         bends in by up to ``refraction`` scene units (most at the outline,
         none in the flat middle), splits into its colors by ``dispersion``
         (0 to 1), and a thin line along the outline catches a light from the
-        top left as bright as ``edge`` (0 to 1). The rim follows the real outline of any
+        top left as bright as ``edge`` (0 to 1). ``transparency`` (0 to 1)
+        is how clear the glass is: 1 shows what is behind it, lower values
+        turn it milky, and 0 is opaque white. The rim follows the real outline of any
         shape, metaballs included. The drawable itself is drawn on top, so a
         translucent fill tints the glass and a stroke frames it; the glass
         fades with it. It is declaration state for the whole timeline and
         works in previews, exports and ``.gaanim`` bundles. Negative or
-        non-finite values, or ``edge`` or ``dispersion`` above 1, raise
+        non-finite values, or ``edge``, ``dispersion`` or ``transparency``
+        above 1, raise
         ``ValueError``.
 
         Example:
@@ -3258,17 +3262,19 @@ class Drawable:
         self,
         *,
         refraction: float = 0.4,
-        dispersion: float = 0.12,
+        dispersion: float = 0.4,
         bevel: float = 0.4,
         blur: float = 0.02,
         edge: float = 0.8,
         saturation: float = 1.4,
+        transparency: float = 1.0,
     ) -> Self:
         """Turn this drawable into liquid glass: clear, with a thick lens rim.
 
         ``glass`` with Liquid Glass defaults: almost no blur, a flat middle
         and a wide rim, steep at the outline, that bends what is behind
-        strongly with a hint of color split, and a thin bright line along
+        strongly and splits it into red, green and blue fringes (chromatic
+        aberration, ``dispersion``), and a thin bright line along
         the outline. A light fill (``"#ffffff30"``) frosts it like iOS. On ``scene.geometry.metaballs`` the drops keep
         their lens as they melt together.
 

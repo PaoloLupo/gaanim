@@ -1276,6 +1276,7 @@ impl DrawableHandle {
                 edge: finite(glass.edge, 0.0).min(1.0),
                 dispersion: finite(glass.dispersion, 0.0).min(1.0),
                 bevel: finite(glass.bevel, 0.0),
+                transparency: finite(glass.transparency, 1.0).min(1.0),
             }
         });
         self.state

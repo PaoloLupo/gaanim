@@ -60,6 +60,8 @@ expect("vidrio con blur negativo", ValueError, lambda: fresh()[1].glass(blur=-0.
 expect("edge mayor que 1", ValueError, lambda: fresh()[1].glass(edge=1.5))
 expect("dispersion mayor que 1", ValueError, lambda: fresh()[1].liquid_glass(dispersion=2))
 expect("bevel negativo", ValueError, lambda: fresh()[1].liquid_glass(bevel=-0.1))
+expect("transparency mayor que 1", ValueError, lambda: fresh()[1].glass(transparency=1.5))
+expect("transparency 0: vidrio lechoso", None, lambda: fresh()[1].liquid_glass(transparency=0))
 expect("blur infinito", ValueError, lambda: fresh()[1].glass(blur=float("inf")))
 expect("liquid_glass sobre metaballs", None,
        lambda: (lambda s, b: s.geometry.metaballs([b]).liquid_glass())(*fresh()))
@@ -103,11 +105,11 @@ for i in range(14):
     scene.geometry.rect(0.5, 3.6).fill([BLUE, GOLD, CORAL, "#22d3ee"][i % 4]).no_stroke().move_to(-7.15 + 1.1 * i, -2.2)
 scene.text("lo que hay detrás").fill(WHITE).scale_to(0.55).move_to(-1.5, -3.1)
 card = scene.geometry.rounded_rect(3.6, 2.2, 0.4).fill("#ffffff1a").stroke("#ffffff55", 0.03).move_to(-5.0, -2.0)
-card.glass(blur=0.22, refraction=0.14, edge=0.35)
+card.glass(blur=0.22, refraction=0.14, edge=0.35, transparency=0.7)
 beads = [scene.geometry.circle(0.85).move_to(0.2, -1.9), scene.geometry.circle(0.65).move_to(3.3, -2.3)]
 lens = scene.geometry.metaballs(beads, smoothness=0.9).fill("#ffffff10").liquid_glass()
 panel = scene.geometry.circle(0.9).fill("#ffffff10").move_to(5.9, -2.0).backdrop_blur(0.3)
-label("glass(), liquid_glass() sobre metaballs y backdrop_blur()", 0, -0.15)
+label("glass(transparency=0.7), liquid_glass() sobre metaballs y backdrop_blur()", 0, -0.15)
 
 ok = sum(passed for _, passed in checks)
 failed = [name for name, passed in checks if not passed]

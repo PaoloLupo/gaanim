@@ -1269,6 +1269,7 @@ impl DeltaEncoder {
                 glass.edge,
                 glass.dispersion,
                 glass.bevel,
+                glass.transparency,
             ] {
                 w.f64(value);
             }
@@ -1363,6 +1364,7 @@ impl DeltaDecoder {
                     edge: r.f64()?,
                     dispersion: r.f64()?,
                     bevel: r.f64()?,
+                    transparency: r.f64()?,
                 },
             ));
         }
