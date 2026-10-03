@@ -61,6 +61,8 @@ expect("edge mayor que 1", ValueError, lambda: fresh()[1].glass(edge=1.5))
 expect("dispersion mayor que 1", ValueError, lambda: fresh()[1].liquid_glass(dispersion=2))
 expect("bevel negativo", ValueError, lambda: fresh()[1].liquid_glass(bevel=-0.1))
 expect("transparency mayor que 1", ValueError, lambda: fresh()[1].glass(transparency=1.5))
+expect("twist fuera de -2..2", ValueError, lambda: fresh()[1].liquid_glass(twist=3))
+expect("twist negativo gira al revés", None, lambda: fresh()[1].liquid_glass(twist=-0.6))
 expect("transparency 0: vidrio lechoso", None, lambda: fresh()[1].liquid_glass(transparency=0))
 expect("blur infinito", ValueError, lambda: fresh()[1].glass(blur=float("inf")))
 expect("liquid_glass sobre metaballs", None,

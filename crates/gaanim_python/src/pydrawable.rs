@@ -3275,7 +3275,7 @@ impl PyDrawable {
         same_drawable(slf, result)
     }
     /// Frosted glass; see `gaanim_core.pyi`.
-    #[pyo3(signature = (blur=0.25, *, saturation=1.4, refraction=0.08, edge=0.3, dispersion=0.0, bevel=0.12, transparency=1.0))]
+    #[pyo3(signature = (blur=0.25, *, saturation=1.4, refraction=0.08, edge=0.3, dispersion=0.0, bevel=0.12, transparency=1.0, twist=0.0))]
     #[allow(clippy::too_many_arguments)]
     fn glass<'py>(
         slf: &Bound<'py, Self>,
@@ -3286,8 +3286,12 @@ impl PyDrawable {
         dispersion: f64,
         bevel: f64,
         transparency: f64,
+        twist: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
         crate::custom::ensure_authoring_allowed()?;
+        if !twist.is_finite() || twist.abs() > 2.0 {
+            return Err(PyValueError::new_err("twist goes from -2 to 2"));
+        }
         let glass = gaanim_api::canvas::Glass {
             blur,
             saturation,
@@ -3296,6 +3300,7 @@ impl PyDrawable {
             dispersion,
             bevel,
             transparency,
+            twist,
         };
         let values = [
             blur,
@@ -3323,7 +3328,7 @@ impl PyDrawable {
         same_drawable(slf, Ok(Self(handle.glass(Some(glass)))))
     }
     /// Clear lens-like glass; see `gaanim_core.pyi`.
-    #[pyo3(signature = (*, refraction=0.5, dispersion=0.4, bevel=0.3, blur=0.02, edge=0.8, saturation=1.4, transparency=1.0))]
+    #[pyo3(signature = (*, refraction=1.0, dispersion=0.12, bevel=0.6, blur=0.04, edge=0.8, saturation=1.4, transparency=0.92, twist=0.6))]
     #[allow(clippy::too_many_arguments)]
     fn liquid_glass<'py>(
         slf: &Bound<'py, Self>,
@@ -3334,6 +3339,7 @@ impl PyDrawable {
         edge: f64,
         saturation: f64,
         transparency: f64,
+        twist: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
         Self::glass(
             slf,
@@ -3344,6 +3350,7 @@ impl PyDrawable {
             dispersion,
             bevel,
             transparency,
+            twist,
         )
     }
     /// A plain blur of what is behind; see `gaanim_core.pyi`.
@@ -3353,7 +3360,7 @@ impl PyDrawable {
         radius: f64,
         saturation: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
-        Self::glass(slf, radius, saturation, 0.0, 0.0, 0.0, 0.12, 1.0)
+        Self::glass(slf, radius, saturation, 0.0, 0.0, 0.0, 0.12, 1.0, 0.0)
     }
     /// Remove the glass or backdrop blur.
     fn no_glass<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {

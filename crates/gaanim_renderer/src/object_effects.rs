@@ -11,8 +11,9 @@
 //! pixels, as shader backgrounds do. A renderer that does not run the
 //! effects composes the drawables plainly instead.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use bevy::prelude::{Component, Entity};
 use gaanim_core::kurbo;
@@ -68,7 +69,10 @@ pub struct MatteSource;
 /// with a rounded rim `bevel` scene units wide: across the rim, what is
 /// behind bends by up to `refraction` scene units, splits into its colors
 /// by `dispersion` (0 to 1) and catches a light from the top left as bright
-/// as `edge` (0 to 1). `transparency` (0 to 1) is how clear the glass is:
+/// as `edge` (0 to 1). `twist` also slides what the rim shows along the
+/// outline, clockwise for positive values (to the right along the top, to
+/// the left along the bottom), as a share of the bend.
+/// `transparency` (0 to 1) is how clear the glass is:
 /// 1 shows what is behind it, 0 turns it into milky white. The drawable
 /// itself is drawn above, so a translucent fill tints the glass.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
@@ -80,6 +84,7 @@ pub struct Glass {
     pub dispersion: f64,
     pub bevel: f64,
     pub transparency: f64,
+    pub twist: f64,
 }
 
 impl Default for Glass {
@@ -93,6 +98,7 @@ impl Default for Glass {
             dispersion: 0.0,
             bevel: 0.12,
             transparency: 1.0,
+            twist: 0.0,
         }
     }
 }
@@ -101,18 +107,20 @@ impl Glass {
     /// Clear glass that bends and splits what is behind it along a wide
     /// rounded rim, like Apple's Liquid Glass.
     pub const LIQUID: Self = Self {
-        blur: 0.02,
+        blur: 0.04,
         saturation: 1.4,
-        refraction: 0.5,
+        refraction: 1.0,
         edge: 0.8,
-        dispersion: 0.4,
-        bevel: 0.3,
-        transparency: 1.0,
+        dispersion: 0.12,
+        bevel: 0.6,
+        transparency: 0.92,
+        twist: 0.6,
     };
 
     /// How far beyond its outline the glass reads what is behind it.
     pub fn reach(&self) -> f64 {
-        3.0 * self.blur.max(0.0) + self.refraction.max(0.0) * (1.0 + self.dispersion.max(0.0))
+        let bend = self.refraction.max(0.0) * (1.0 + self.twist.abs().min(2.0));
+        3.0 * self.blur.max(0.0) + bend * (1.0 + self.dispersion.max(0.0))
     }
 }
 
@@ -185,9 +193,12 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     let bend = gaanim_uniforms.refraction * (1.0 - depth);
     let split = gaanim_uniforms.dispersion;
     // The rim shows what lies outside the glass, pulled in like a lens.
-    let red = glass_sample(p - inward * bend * (1.0 + split), resolution, true);
-    let green = glass_sample(p - inward * bend, resolution, true);
-    let blue = glass_sample(p - inward * bend * (1.0 - split), resolution, true);
+    // Along the outline too: clockwise for a positive twist.
+    let along = vec2<f32>(-inward.y, inward.x);
+    let shift = (-inward + along * gaanim_uniforms.twist) * bend;
+    let red = glass_sample(p + shift * (1.0 + split), resolution, true);
+    let green = glass_sample(p + shift, resolution, true);
+    let blue = glass_sample(p + shift * (1.0 - split), resolution, true);
     var color = vec3<f32>(red.r, green.g, blue.b);
     let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     color = mix(vec3<f32>(luma), color, gaanim_uniforms.saturation);
@@ -231,6 +242,7 @@ pub fn glass_passes(glass: &Glass, density: f64) -> Vec<(PostProcessShader, Vec<
                 "saturation",
                 "edge",
                 "transparency",
+                "twist",
             ],
         )
         .ok()?;
@@ -255,6 +267,7 @@ pub fn glass_passes(glass: &Glass, density: f64) -> Vec<(PostProcessShader, Vec<
                 glass.saturation.max(0.0) as f32,
                 glass.edge.clamp(0.0, 1.0) as f32,
                 glass.transparency.clamp(0.0, 1.0) as f32,
+                glass.twist.clamp(-2.0, 2.0) as f32,
             ],
         ),
     ]
@@ -299,12 +312,21 @@ pub fn effect_texture_size(bounds: kurbo::Rect, pixels_per_unit: f64) -> Option<
 
 /// The image drawn in place of the drawable `key` at this size. The same
 /// key and size return the same image, so Vello refreshes one atlas slot.
+/// Images are kept per thread: two scenes composed at once, such as an
+/// export and a recording, share entity keys but never images.
 pub fn effect_image(key: u64, width: u32, height: u32) -> ImageData {
-    static IMAGES: OnceLock<Mutex<HashMap<u64, ImageData>>> = OnceLock::new();
-    let mut images = IMAGES
-        .get_or_init(Default::default)
-        .lock()
-        .expect("effect images poisoned");
+    thread_local! {
+        static IMAGES: RefCell<HashMap<u64, ImageData>> = RefCell::new(HashMap::new());
+    }
+    IMAGES.with_borrow_mut(|images| effect_image_in(images, key, width, height))
+}
+
+fn effect_image_in(
+    images: &mut HashMap<u64, ImageData>,
+    key: u64,
+    width: u32,
+    height: u32,
+) -> ImageData {
     if let Some(image) = images.get(&key)
         && image.width == width
         && image.height == height
@@ -338,6 +360,9 @@ pub struct ObjectEffects {
     device: Option<wgpu::Device>,
     /// Textures by image id.
     slots: HashMap<u64, Slot>,
+    /// Textures of images no longer drawn, kept for a new image of their
+    /// size: an image's identity can change while its drawable does not.
+    spare: Vec<Slot>,
 }
 
 impl ObjectEffects {
@@ -357,33 +382,51 @@ impl ObjectEffects {
                 renderer.override_image(&slot.image, None);
             }
             self.slots.clear();
+            self.spare.clear();
             self.device = Some(device.clone());
         }
-        self.slots.retain(|id, slot| {
-            let keep = layers.iter().any(|layer| layer.image.data.id() == *id);
-            if !keep {
+        let gone: Vec<u64> = self
+            .slots
+            .keys()
+            .copied()
+            .filter(|id| !layers.iter().any(|layer| layer.image.data.id() == *id))
+            .collect();
+        for id in gone {
+            if let Some(slot) = self.slots.remove(&id) {
                 renderer.override_image(&slot.image, None);
+                self.spare.push(slot);
             }
-            keep
-        });
+        }
         for layer in layers {
+            let spare = &mut self.spare;
             let slot = self.slots.entry(layer.image.data.id()).or_insert_with(|| {
-                let texture = effect_texture(device, layer.image.width, layer.image.height);
+                let (width, height) = (layer.image.width, layer.image.height);
+                let mut slot = match spare
+                    .iter()
+                    .position(|slot| (slot.image.width, slot.image.height) == (width, height))
+                {
+                    Some(index) => spare.swap_remove(index),
+                    None => {
+                        let texture = effect_texture(device, width, height);
+                        Slot {
+                            image: layer.image.clone(),
+                            view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                            texture,
+                            post: GpuPostProcess::default(),
+                        }
+                    }
+                };
+                slot.image = layer.image.clone();
                 renderer.override_image(
-                    &layer.image,
+                    &slot.image,
                     Some(wgpu::TexelCopyTextureInfoBase {
-                        texture: texture.clone(),
+                        texture: slot.texture.clone(),
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     }),
                 );
-                Slot {
-                    image: layer.image.clone(),
-                    view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
-                    texture,
-                    post: GpuPostProcess::default(),
-                }
+                slot
             });
             let mut placed = Scene::new();
             placed.append(&layer.scene, Some(layer.to_pixels));
@@ -413,6 +456,9 @@ impl ObjectEffects {
             // it), so it is copied for the next render too.
             renderer.mark_override_image_dirty(&slot.image);
         }
+        // Spare textures last one frame: a drawable that changed its image
+        // has taken one back by now.
+        self.spare.clear();
         // Each render consumes the pending copies of overridden images, so
         // the images are marked only once every texture is drawn: the frame
         // then copies all of them.
