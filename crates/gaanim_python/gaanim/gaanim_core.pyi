@@ -3238,9 +3238,10 @@ class Drawable:
         show blurred by ``blur`` scene units, with their colors saturated by
         ``saturation`` (1 keeps them). The outline is a lens with a rounded
         rim ``bevel`` scene units wide: across it, what lies just outside
-        bends in by up to ``refraction`` scene units, splits into its colors
-        by ``dispersion`` (0 to 1) and catches a light from the top left as
-        bright as ``edge`` (0 to 1). The rim follows the real outline of any
+        bends in by up to ``refraction`` scene units (most at the outline,
+        none in the flat middle), splits into its colors by ``dispersion``
+        (0 to 1), and a thin line along the outline catches a light from the
+        top left as bright as ``edge`` (0 to 1). The rim follows the real outline of any
         shape, metaballs included. The drawable itself is drawn on top, so a
         translucent fill tints the glass and a stroke frames it; the glass
         fades with it. It is declaration state for the whole timeline and
@@ -3256,18 +3257,19 @@ class Drawable:
     def liquid_glass(
         self,
         *,
-        refraction: float = 0.3,
-        dispersion: float = 0.3,
-        bevel: float = 0.35,
-        blur: float = 0.03,
-        edge: float = 0.7,
-        saturation: float = 1.25,
+        refraction: float = 0.4,
+        dispersion: float = 0.12,
+        bevel: float = 0.4,
+        blur: float = 0.02,
+        edge: float = 0.8,
+        saturation: float = 1.4,
     ) -> Self:
         """Turn this drawable into liquid glass: clear, with a thick lens rim.
 
-        ``glass`` with Liquid Glass defaults: almost no blur, a wide rim that
-        bends what is behind strongly and splits it into its colors, and a
-        bright highlight. On ``scene.geometry.metaballs`` the drops keep
+        ``glass`` with Liquid Glass defaults: almost no blur, a flat middle
+        and a wide rim, steep at the outline, that bends what is behind
+        strongly with a hint of color split, and a thin bright line along
+        the outline. A light fill (``"#ffffff30"``) frosts it like iOS. On ``scene.geometry.metaballs`` the drops keep
         their lens as they melt together.
 
         Example:

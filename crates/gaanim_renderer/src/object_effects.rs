@@ -98,12 +98,12 @@ impl Glass {
     /// Clear glass that bends and splits what is behind it along a wide
     /// rounded rim, like Apple's Liquid Glass.
     pub const LIQUID: Self = Self {
-        blur: 0.03,
-        saturation: 1.25,
-        refraction: 0.3,
-        edge: 0.7,
-        dispersion: 0.3,
-        bevel: 0.35,
+        blur: 0.02,
+        saturation: 1.4,
+        refraction: 0.4,
+        edge: 0.8,
+        dispersion: 0.12,
+        bevel: 0.4,
     };
 
     /// How far beyond its outline the glass reads what is behind it.
@@ -147,13 +147,17 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
         sum += glass_sample(p + offset, resolution, top) * weight;
         total += weight;
     }
-    return sum / total;
+    if (top) {
+        return sum / total;
+    }
+    // The outline keeps its sharp copy in red and its rim in alpha.
+    return vec4<f32>(glass_sample(p, resolution, false).rgb, sum.a / total);
 }
 "#;
 
 const GLASS_FINISH: &str = r#"
-fn glass_height(p: vec2<f32>, resolution: vec2<f32>) -> f32 {
-    return glass_sample(p + vec2<f32>(0.0, 0.5 * resolution.y), resolution, false).a;
+fn glass_outline(p: vec2<f32>, resolution: vec2<f32>) -> vec4<f32> {
+    return glass_sample(p + vec2<f32>(0.0, 0.5 * resolution.y), resolution, false);
 }
 
 fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
@@ -161,18 +165,20 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     if (p.y >= 0.5 * resolution.y) {
         return gaanim_scene(uv);
     }
-    // The blurred outline is the height of the lens: 1 inside, 0 outside,
-    // sloping across the rim; its slope points inward.
+    // The blurred outline is the height of the lens: 1/2 on the outline,
+    // rising to 1 inside across the rim; its slope points inward.
     let bevel = max(gaanim_uniforms.bevel, 1.0);
     let h = max(1.0, 0.5 * bevel);
     let slope = vec2<f32>(
-        glass_height(p + vec2<f32>(h, 0.0), resolution) - glass_height(p - vec2<f32>(h, 0.0), resolution),
-        glass_height(p + vec2<f32>(0.0, h), resolution) - glass_height(p - vec2<f32>(0.0, h), resolution),
-    ) / (2.0 * h);
-    // About 1 on the outline, fading to 0 inside and outside.
-    let rim = clamp(length(slope) * bevel * 2.5, 0.0, 1.0);
+        glass_outline(p + vec2<f32>(h, 0.0), resolution).a - glass_outline(p - vec2<f32>(h, 0.0), resolution).a,
+        glass_outline(p + vec2<f32>(0.0, h), resolution).a - glass_outline(p - vec2<f32>(0.0, h), resolution).a,
+    );
     let inward = select(vec2<f32>(0.0), normalize(slope), length(slope) > 1e-6);
-    let bend = gaanim_uniforms.refraction * rim;
+    // 0 on the outline, 1 where the flat middle of the lens starts.
+    let depth = clamp(2.0 * glass_outline(p, resolution).a - 1.0, 0.0, 1.0);
+    // Like the steep side of a dome, the rim bends most at the outline and
+    // leaves the middle untouched.
+    let bend = gaanim_uniforms.refraction * pow(1.0 - depth, 1.5);
     let split = gaanim_uniforms.dispersion;
     // The rim shows what lies outside the glass, pulled in like a lens.
     let red = glass_sample(p - inward * bend * (1.0 + split), resolution, true);
@@ -181,10 +187,17 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     var color = vec3<f32>(red.r, green.g, blue.b);
     let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     color = mix(vec3<f32>(luma), color, gaanim_uniforms.saturation);
-    // A light from the top left on the rim, and its glint opposite.
-    let light = normalize(vec2<f32>(-1.0, -1.0));
-    let facing = dot(-inward, light);
-    let shine = gaanim_uniforms.edge * rim * (0.25 + 0.75 * pow(max(facing, 0.0), 2.0) + 0.4 * pow(max(-facing, 0.0), 4.0));
+    // A thin bright line along the outline, strongest where it faces the
+    // light from the top left or the opposite corner, and a faint glow
+    // inside the rim.
+    let e = 1.5;
+    let sharp = vec2<f32>(
+        glass_outline(p + vec2<f32>(e, 0.0), resolution).r - glass_outline(p - vec2<f32>(e, 0.0), resolution).r,
+        glass_outline(p + vec2<f32>(0.0, e), resolution).r - glass_outline(p - vec2<f32>(0.0, e), resolution).r,
+    );
+    let line = clamp(length(sharp) * 1.5, 0.0, 1.0);
+    let facing = abs(dot(inward, normalize(vec2<f32>(-1.0, -1.0))));
+    let shine = gaanim_uniforms.edge * (line * (0.45 + 0.55 * facing) + 0.05 * pow(1.0 - depth, 4.0));
     color = clamp(color + vec3<f32>(shine), vec3<f32>(0.0), vec3<f32>(1.0));
     return vec4<f32>(color, green.a);
 }
