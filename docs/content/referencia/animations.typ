@@ -2913,6 +2913,53 @@ scene.wait(1)
 ]
 
 #api-entry(
+  name: "Transition.shader",
+  kind: "factory",
+  params: (
+    (name: "source", type: "str | os.PathLike", default: none, desc: [WGSL en línea o un archivo `.wgsl` (ruta tal cual) que define `fn transition(uv: vec2<f32>) -> vec4<f32>`.]),
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "uniforms", type: "dict[str, float] | None", default: "None", desc: [Campos fijos de `gaanim_uniforms`.]),
+  ),
+  returns: (type: "Transition", desc: [Transición por shader.]),
+  desc: [Dibuja cada segmento por separado, con su fondo, y los mezcla en la GPU, como gl-transitions. La función lee `gaanim_from(uv)` (saliente), `gaanim_to(uv)` (entrante), `progress` (de 0 a 1, lineal salvo `easing=`), `gaanim_resolution()` y `gaanim_time()`; `uv` vale (0, 0) arriba a la izquierda del cuadro. Los objetos persistentes y el `overlay` quedan nítidos encima. WGSL o nombres de uniform inválidos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("antes")
+>>>scene.wait(1)
+mezcla = Transition.shader(
+    "fn transition(uv: vec2<f32>) -> vec4<f32> { return mix(gaanim_from(uv), gaanim_to(uv), progress); }",
+    0.6,
+)
+scene.segment("despues", mezcla)
+scene.wait(1)
+```
+]
+
+#api-entry(
+  name: "Transition.preset",
+  kind: "factory",
+  params: (
+    (name: "name", type: "str", default: none, desc: [`"cross_zoom"`, `"directional_warp"`, `"ripple"`, `"glitch_displace"` o `"luma"`.]),
+    (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
+    (name: "image / invert", type: "str | os.PathLike | None / bool", default: "None / False", desc: [Solo `luma`: mapa en escala de grises (ruta tal cual, reducido a 256 px como mucho); el segmento entrante aparece primero donde es más oscuro, o más claro con `invert=True`.]),
+    (name: "**settings", type: "float", default: none, desc: [`cross_zoom`: `strength=0.4`. `directional_warp`: `dx=1`, `dy=0` (y hacia arriba), `smoothness=0.5`. `ripple`: `amplitude=100`, `speed=50`. `glitch_displace`: `strength=0.5`, `bands=24`, `seed=0`. `luma`: `softness=0.1`.]),
+  ),
+  returns: (type: "Transition", desc: [Transición por shader incorporada.]),
+  desc: [Un nombre o un ajuste desconocidos, `image` en otro preset o `luma` sin imagen lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("antes")
+>>>scene.wait(1)
+scene.segment("despues", Transition.preset("directional_warp", 0.8, dx=0, dy=1))
+scene.wait(1)
+```
+]
+
+#api-entry(
   name: "Transition.zoom_through",
   kind: "factory",
   params: (

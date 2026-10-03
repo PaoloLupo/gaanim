@@ -419,6 +419,9 @@ impl VelloFrameStats {
 struct ExtractedCanvas {
     image: Option<AssetId<Image>>,
     scene: Option<(Arc<Scene>, Mat4)>,
+    /// A shader transition's incoming segment and layer above, drawn with
+    /// the scene's transform into their own targets.
+    transition: Option<(Arc<Scene>, Arc<Scene>)>,
     /// Preview resolution scale; see [`PreviewResolution`].
     scale: f32,
 }
@@ -579,8 +582,18 @@ fn extract_canvas(
     canvas: Extract<Res<VelloCanvas>>,
     preview: Extract<Option<Res<PreviewResolution>>>,
     scenes: Extract<Query<(&VelloScene2d, &Transform), With<MainVelloScene>>>,
+    layers: Extract<Option<Res<crate::pipeline::TransitionLayers>>>,
     mut extracted: ResMut<ExtractedCanvas>,
 ) {
+    extracted.transition = layers
+        .as_ref()
+        .and_then(|layers| layers.0.as_ref())
+        .map(|layers| {
+            (
+                Arc::new(layers.incoming.clone()),
+                Arc::new(layers.above.clone()),
+            )
+        });
     extracted.image = (canvas.image != Handle::default()).then(|| canvas.image.id());
     extracted.scale = preview.as_ref().map_or(1.0, |preview| preview.scale);
     extracted.scene = scenes
@@ -639,6 +652,14 @@ type CanvasViews<'w, 's> = Query<
     (With<Camera2d>, With<VelloView>),
 >;
 
+/// What else draws into the canvas this frame: post-processing, a shader
+/// background and a shader transition's targets.
+type CanvasEffects<'w> = (
+    Option<Res<'w, crate::post_process_gpu::ExtractedPostProcess>>,
+    Option<Res<'w, crate::background_gpu::ExtractedShaderBackground>>,
+    Option<Res<'w, crate::post_process_gpu::CanvasTransitionTargets>>,
+);
+
 /// Rasterizes the extracted scene into the canvas texture before the camera
 /// passes sample it. A frame identical to the one the texture holds is skipped.
 #[allow(clippy::too_many_arguments)]
@@ -650,10 +671,7 @@ fn render_canvas(
     queue: Res<RenderQueue>,
     renderer: Res<VelloRenderer>,
     stats: Res<VelloFrameStats>,
-    effects: (
-        Option<Res<crate::post_process_gpu::ExtractedPostProcess>>,
-        Option<Res<crate::background_gpu::ExtractedShaderBackground>>,
-    ),
+    effects: CanvasEffects,
     mut rendered: ResMut<RenderedCanvas>,
 ) {
     let Some(target) = extracted.image.and_then(|image| images.get(image)) else {
@@ -679,9 +697,10 @@ fn render_canvas(
     };
     // Post-processing rewrites the texture in place, and shader backgrounds
     // animate outside the scene encoding: frames with either are always drawn.
-    let (post, shader) = effects;
+    let (post, shader, transition_targets) = effects;
     let volatile = post.is_some_and(|post| post.is_active())
-        || shader.is_some_and(|shader| shader.is_active());
+        || shader.is_some_and(|shader| shader.is_active())
+        || extracted.transition.is_some();
     if !volatile && rendered.0.as_ref().is_some_and(|last| last.same(&current)) {
         return;
     }
@@ -710,6 +729,7 @@ fn render_canvas(
     let Ok(mut renderer) = renderer.lock() else {
         return;
     };
+    let placement = current.scene.as_ref().map(|(_, affine)| *affine);
     match renderer.render_to_texture(
         device.wgpu_device(),
         &queue,
@@ -725,6 +745,34 @@ fn render_canvas(
     ) {
         Ok(()) => rendered.0 = (!volatile).then_some(current),
         Err(error) => error!("Vello failed to render the canvas: {error}"),
+    }
+
+    // A shader transition draws its other layers with the same placement;
+    // the post-process pass blends them into the canvas.
+    let layers = extracted.transition.as_ref().zip(placement).zip(
+        transition_targets
+            .as_deref()
+            .and_then(|targets| targets.views()),
+    );
+    if let Some((((incoming, above), affine), (incoming_view, above_view))) = layers {
+        for (scene, view) in [(incoming, incoming_view), (above, above_view)] {
+            let mut placed = Scene::new();
+            placed.append(scene, Some(affine));
+            if let Err(error) = renderer.render_to_texture(
+                device.wgpu_device(),
+                &queue,
+                &placed,
+                view,
+                &RenderParams {
+                    base_color: vello::peniko::Color::TRANSPARENT,
+                    width: pixels.x,
+                    height: pixels.y,
+                    antialiasing_method: CANVAS_ANTIALIASING,
+                },
+            ) {
+                error!("Vello failed to render a transition layer: {error}");
+            }
+        }
     }
 }
 

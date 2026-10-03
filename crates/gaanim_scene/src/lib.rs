@@ -22,7 +22,8 @@ pub use systems::{
     transform_propagation_system, world_hud_pin,
 };
 pub use transition_frame::{
-    SceneTransitionFrame, TransitionMask, TransitionOverlayLayer, TransitionSide,
+    SceneTransitionFrame, TransitionMask, TransitionOverlayLayer, TransitionShader,
+    TransitionShaderFrame, TransitionSide,
 };
 
 /// Asset configuration used by official Gaanim hosts.

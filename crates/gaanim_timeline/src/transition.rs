@@ -72,6 +72,13 @@ pub enum TransitionType {
         duration: f64,
         direction: SlideDirection,
     },
+    /// Each segment is rendered alone and `shader` blends them, like the
+    /// gl-transitions `transition(uv)` with `getFromColor`/`getToColor`.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    Shader {
+        duration: f64,
+        shader: std::sync::Arc<gaanim_scene::TransitionShader>,
+    },
     /// Another transition shaped by an easing curve, decorated by an
     /// overlay drawn above the cut and/or accompanied by a sound effect that
     /// starts with the transition.
@@ -98,6 +105,7 @@ impl TransitionType {
             | Self::Iris { duration, .. }
             | Self::Blinds { duration, .. }
             | Self::Push { duration, .. } => *duration,
+            Self::Shader { duration, .. } => *duration,
             Self::Styled { base, .. } => base.duration(),
         }
     }
@@ -128,8 +136,8 @@ impl TransitionType {
 
     /// Eased progress of the effect at linear progress `t` in `[0, 1]`.
     ///
-    /// Without an explicit easing, the original transitions stay linear and
-    /// the vector reveals (wipes, iris, blinds, push) use `Smooth`. The result
+    /// Without an explicit easing, the original transitions and shaders stay
+    /// linear and the vector reveals (wipes, iris, blinds, push) use `Smooth`. The result
     /// may overshoot `[0, 1]` for springs and back curves.
     pub fn eased_progress(&self, t: f64) -> f64 {
         match self {

@@ -10,7 +10,10 @@ use gaanim_renderer::effects::{
 };
 use gaanim_renderer::fragment::FragmentRecipe;
 use gaanim_renderer::pipeline::{CapturedElement, CapturedTransition, CapturedView, FrameCapture};
-use gaanim_scene::{RasterImage, RenderOrder, StrokeBrush, TransitionMask, TransitionSide};
+use gaanim_scene::{
+    RasterImage, RenderOrder, StrokeBrush, TransitionMask, TransitionShader, TransitionShaderFrame,
+    TransitionSide,
+};
 
 use crate::BundleError;
 use crate::codec::{self, Interner, Reader, Resolver, Writer};
@@ -91,6 +94,8 @@ pub struct Tables {
     recipe_by_hash: HashMap<blake3::Hash, u32>,
     pub(crate) strings: Vec<Arc<str>>,
     string_index: HashMap<Arc<str>, u32>,
+    /// Shader transitions the frames blend with, deduplicated.
+    pub(crate) transition_shaders: Vec<Arc<TransitionShader>>,
 }
 
 impl Interner for Tables {
@@ -135,6 +140,18 @@ impl Interner for Tables {
 }
 
 impl Tables {
+    pub fn transition_shader(&mut self, shader: &Arc<TransitionShader>) -> u32 {
+        let index = self
+            .transition_shaders
+            .iter()
+            .position(|known| Arc::ptr_eq(known, shader) || **known == **shader)
+            .unwrap_or_else(|| {
+                self.transition_shaders.push(Arc::clone(shader));
+                self.transition_shaders.len() - 1
+            });
+        index as u32
+    }
+
     pub fn string(&mut self, value: &Arc<str>) -> u32 {
         if let Some(index) = self.string_index.get(value) {
             return *index;
@@ -177,6 +194,8 @@ pub struct DecodedTables {
     pub images: Vec<peniko::ImageData>,
     pub recipes: Vec<Arc<FragmentRecipe>>,
     pub strings: Vec<Arc<str>>,
+    /// Shared by every frame of one transition, so its shader is built once.
+    pub transition_shaders: Vec<Arc<TransitionShader>>,
 }
 
 impl Resolver for DecodedTables {
@@ -444,6 +463,60 @@ fn write_transition(w: &mut Writer, tables: &mut Tables, transition: &CapturedTr
             codec::write_brush(w, tables, brush);
         }
     }
+    w.option(transition.shader.as_ref(), |w, frame| {
+        w.var(u64::from(tables.transition_shader(&frame.shader)));
+        w.f32(frame.progress);
+    });
+}
+
+/// Write a shader transition table entry.
+pub(crate) fn write_transition_shader(w: &mut Writer, shader: &TransitionShader) {
+    w.str(&shader.source);
+    w.len(shader.uniforms.len());
+    for uniform in &shader.uniforms {
+        w.str(uniform);
+    }
+    w.len(shader.values.len());
+    for value in &shader.values {
+        w.f32(*value);
+    }
+    w.option(shader.data.as_ref(), |w, data| {
+        w.len(data.len());
+        for texel in data {
+            for value in texel {
+                w.f32(*value);
+            }
+        }
+    });
+}
+
+/// Read an entry [`write_transition_shader`] wrote.
+pub(crate) fn read_transition_shader(r: &mut Reader<'_>) -> Result<TransitionShader> {
+    let source = r.str()?.to_owned();
+    let count = r.len()?;
+    let mut uniforms = Vec::with_capacity(count.min(64));
+    for _ in 0..count {
+        uniforms.push(r.str()?.to_owned());
+    }
+    let count = r.len()?;
+    let mut values = Vec::with_capacity(count.min(64));
+    for _ in 0..count {
+        values.push(r.f32()?);
+    }
+    let data = r.option(|r| {
+        let count = r.len()?;
+        let mut data = Vec::with_capacity(count.min(1 << 20));
+        for _ in 0..count {
+            data.push([r.f32()?, r.f32()?, r.f32()?, r.f32()?]);
+        }
+        Ok(data)
+    })?;
+    Ok(TransitionShader {
+        source,
+        uniforms,
+        values,
+        data,
+    })
 }
 
 fn read_transition(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTransition> {
@@ -462,11 +535,24 @@ fn read_transition(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<Capture
         }
         overlays.push(gaanim_scene::TransitionOverlayLayer { blend, clip, fills });
     }
+    let shader = r.option(|r| {
+        let index = r.u32()? as usize;
+        let shader = tables
+            .transition_shaders
+            .get(index)
+            .cloned()
+            .ok_or_else(|| corrupt("transition shader index out of range"))?;
+        Ok(TransitionShaderFrame {
+            shader,
+            progress: r.f32()?,
+        })
+    })?;
     Ok(CapturedTransition {
         outgoing_mask,
         incoming_mask,
         backgrounds,
         overlays,
+        shader,
     })
 }
 

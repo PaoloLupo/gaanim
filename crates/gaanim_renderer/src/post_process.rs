@@ -71,6 +71,71 @@ fn gaanim_apply_post(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 "#;
 
+const TRANSITION_PREAMBLE: &str = r#"
+@group(0) @binding(7)
+var gaanim_post_incoming: texture_2d<f32>;
+
+@group(0) @binding(8)
+var gaanim_post_above: texture_2d<f32>;
+
+/// Eased progress of the transition, from 0 (outgoing) to 1 (incoming).
+var<private> progress: f32;
+
+fn gaanim_frame_sample(source: texture_2d<f32>, uv: vec2<f32>) -> vec4<f32> {
+    let frame = gaanim_post_params.frame;
+    let pixel = clamp(
+        frame.xy + uv * frame.zw,
+        frame.xy + vec2<f32>(0.5),
+        frame.xy + frame.zw - vec2<f32>(0.5),
+    );
+    return textureSampleLevel(source, gaanim_post_sampler, pixel / gaanim_post_params.canvas.xy, 0.0);
+}
+
+/// The outgoing segment alone at `uv`.
+fn gaanim_from(uv: vec2<f32>) -> vec4<f32> {
+    return gaanim_frame_sample(gaanim_post_source, uv);
+}
+
+/// The incoming segment alone at `uv`.
+fn gaanim_to(uv: vec2<f32>) -> vec4<f32> {
+    return gaanim_frame_sample(gaanim_post_incoming, uv);
+}
+
+/// Camera frame size in pixels.
+fn gaanim_resolution() -> vec2<f32> {
+    return gaanim_post_params.frame.zw;
+}
+
+/// Absolute timeline seconds.
+fn gaanim_time() -> f32 {
+    return gaanim_post_params.canvas.z;
+}
+"#;
+
+const TRANSITION_ENTRY_POINT: &str = r#"
+@compute @workgroup_size(8, 8, 1)
+fn gaanim_apply_post(@builtin(global_invocation_id) id: vec3<u32>) {
+    let region = gaanim_post_params.region;
+    if (id.x >= region.z || id.y >= region.w) {
+        return;
+    }
+    progress = gaanim_post_params.canvas.w;
+    let frame = gaanim_post_params.frame;
+    let pixel = vec2<f32>(region.xy + id.xy) + vec2<f32>(0.5);
+    let uv = (pixel - frame.xy) / frame.zw;
+    let blended = clamp(transition(uv), vec4<f32>(0.0), vec4<f32>(1.0));
+    // Drawables of neither segment and the overlays stay sharp above the
+    // blend: straight-alpha source-over.
+    let above = textureLoad(gaanim_post_above, vec2<i32>(region.xy + id.xy), 0);
+    let alpha = above.a + blended.a * (1.0 - above.a);
+    var rgb = vec3<f32>(0.0);
+    if (alpha > 0.0) {
+        rgb = (above.rgb * above.a + blended.rgb * blended.a * (1.0 - above.a)) / alpha;
+    }
+    textureStore(gaanim_post_output, id.xy, vec4<f32>(rgb, alpha));
+}
+"#;
+
 const PARAMS_SIZE: u64 = 48;
 
 /// Most named uniforms one post-process pass may declare.
@@ -96,6 +161,9 @@ pub struct PostProcessShader {
     /// Whether the pass first builds a bloom mip chain from its input and
     /// reads it with `gaanim_bloom(uv)`.
     bloom: bool,
+    /// Whether this is a scene transition: `transition(uv)` blends the
+    /// outgoing and incoming segments, see [`Self::transition`].
+    transition: bool,
     /// The complete module: the preamble, `source` and the entry point.
     complete: Arc<str>,
 }
@@ -130,7 +198,27 @@ impl PostProcessShader {
         source: impl Into<Arc<str>>,
         uniforms: impl IntoIterator<Item = N>,
     ) -> Result<Self, PostProcessError> {
-        Self::build(source.into(), uniforms, None, false)
+        Self::build(source.into(), uniforms, None, false, false)
+    }
+
+    /// A scene transition. `source` defines
+    /// `fn transition(uv: vec2<f32>) -> vec4<f32>`, which may read
+    /// `gaanim_from(uv)` (the outgoing segment alone), `gaanim_to(uv)` (the
+    /// incoming one), the eased `progress` from 0 to 1, `gaanim_resolution()`
+    /// and `gaanim_time()`, plus `gaanim_uniforms` and `gaanim_data` as a
+    /// post-process pass does. `uv` has (0, 0) at the top-left corner of the
+    /// camera frame. Drawables of neither segment are composited above.
+    pub fn transition<N: AsRef<str>>(
+        source: impl Into<Arc<str>>,
+        uniforms: impl IntoIterator<Item = N>,
+        data: Option<Arc<[[f32; 4]]>>,
+    ) -> Result<Self, PostProcessError> {
+        if data.as_ref().is_some_and(|data| data.is_empty()) {
+            return Err(PostProcessError::InvalidWgsl(
+                "transition data must not be empty".to_string(),
+            ));
+        }
+        Self::build(source.into(), uniforms, data, false, true)
     }
 
     /// A shader that composites a bloom of its input, read with
@@ -141,7 +229,7 @@ impl PostProcessShader {
         source: impl Into<Arc<str>>,
         uniforms: impl IntoIterator<Item = N>,
     ) -> Result<Self, PostProcessError> {
-        let shader = Self::build(source.into(), uniforms, None, true)?;
+        let shader = Self::build(source.into(), uniforms, None, true, false)?;
         for name in ["threshold", "radius"] {
             if !shader.uniforms.iter().any(|uniform| &**uniform == name) {
                 return Err(PostProcessError::InvalidUniforms(format!(
@@ -165,7 +253,7 @@ impl PostProcessShader {
                 "post-process data must not be empty".to_string(),
             ));
         }
-        Self::build(source.into(), uniforms, Some(data), false)
+        Self::build(source.into(), uniforms, Some(data), false, false)
     }
 
     fn build<N: AsRef<str>>(
@@ -173,19 +261,22 @@ impl PostProcessShader {
         uniforms: impl IntoIterator<Item = N>,
         data: Option<Arc<[[f32; 4]]>>,
         bloom: bool,
+        transition: bool,
     ) -> Result<Self, PostProcessError> {
         let uniforms = uniforms
             .into_iter()
             .map(|name| Arc::<str>::from(name.as_ref()))
             .collect::<Arc<[_]>>();
         validate_uniform_names(&uniforms)?;
-        let complete: Arc<str> = complete_shader(&source, &uniforms, data.is_some(), bloom).into();
-        validate_post_source(&source, &complete)?;
+        let complete: Arc<str> =
+            complete_shader(&source, &uniforms, data.is_some(), bloom, transition).into();
+        validate_post_source(&source, &complete, transition)?;
         Ok(Self {
             source,
             uniforms,
             data,
             bloom,
+            transition,
             complete,
         })
     }
@@ -228,15 +319,53 @@ impl PostProcessShader {
         self.bloom
     }
 
+    /// Whether the shader is a scene transition.
+    pub fn is_transition(&self) -> bool {
+        self.transition
+    }
+
     /// Rebuild a shader from the parts [`Self::source`], [`Self::uniforms`],
-    /// [`Self::data`] and [`Self::bloom`] return.
+    /// [`Self::data`], [`Self::bloom`] and [`Self::is_transition`] return.
     pub fn from_parts(
         source: impl Into<Arc<str>>,
         uniforms: &[Arc<str>],
         data: Option<Arc<[[f32; 4]]>>,
         bloom: bool,
+        transition: bool,
     ) -> Result<Self, PostProcessError> {
-        Self::build(source.into(), uniforms.iter(), data, bloom)
+        Self::build(source.into(), uniforms.iter(), data, bloom, transition)
+    }
+
+    /// The transition a [`gaanim_scene::TransitionShader`] describes, built
+    /// once per description and reused.
+    pub fn for_transition(
+        description: &Arc<gaanim_scene::TransitionShader>,
+    ) -> Result<Self, PostProcessError> {
+        type Built = Vec<(
+            std::sync::Weak<gaanim_scene::TransitionShader>,
+            PostProcessShader,
+        )>;
+        static BUILT: std::sync::Mutex<Built> = std::sync::Mutex::new(Vec::new());
+        let mut built = BUILT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        built.retain(|(weak, _)| weak.strong_count() > 0);
+        if let Some((_, shader)) = built
+            .iter()
+            .find(|(weak, _)| std::ptr::eq(weak.as_ptr(), Arc::as_ptr(description)))
+        {
+            return Ok(shader.clone());
+        }
+        let shader = Self::transition(
+            description.source.as_str(),
+            description.uniforms.iter(),
+            description
+                .data
+                .as_ref()
+                .map(|data| Arc::<[[f32; 4]]>::from(data.as_slice())),
+        )?;
+        built.push((Arc::downgrade(description), shader.clone()));
+        Ok(shader)
     }
 
     /// Value of the uniform `name` among `values`, given in declaration order.
@@ -391,6 +520,7 @@ impl CanvasPostProcess {
             passes,
             frame,
             time,
+            transition: None,
         })
     }
 
@@ -409,6 +539,61 @@ pub struct PostProcessRequest {
     pub frame: kurbo::Rect,
     /// Timeline seconds.
     pub time: f32,
+    /// A scene transition blended before the passes; the target then holds
+    /// the outgoing segment, see [`TransitionInputs`].
+    pub transition: Option<TransitionPass>,
+}
+
+/// The shader transition of one frame.
+#[derive(Clone, Debug)]
+pub struct TransitionPass {
+    pub shader: PostProcessShader,
+    pub values: Vec<f32>,
+    /// Eased progress from 0 to 1.
+    pub progress: f32,
+}
+
+impl PostProcessRequest {
+    /// Add the shader transition of `frame`, starting an empty chain when
+    /// `request` is `None`. A shader that fails to build is logged and left
+    /// out, so the frame shows the outgoing segment.
+    pub fn with_transition(
+        request: Option<Self>,
+        transition: Option<&gaanim_scene::TransitionShaderFrame>,
+        frame: kurbo::Rect,
+        time: f32,
+    ) -> Option<Self> {
+        let Some(transition) = transition else {
+            return request;
+        };
+        let shader = match PostProcessShader::for_transition(&transition.shader) {
+            Ok(shader) => shader,
+            Err(error) => {
+                bevy::log::error!("transition shader failed; cutting instead: {error}");
+                return request;
+            }
+        };
+        let mut request = request.unwrap_or(Self {
+            passes: Vec::new(),
+            frame,
+            time,
+            transition: None,
+        });
+        request.transition = Some(TransitionPass {
+            shader,
+            values: transition.shader.values.clone(),
+            progress: transition.progress,
+        });
+        Some(request)
+    }
+}
+
+/// The extra textures a shader transition reads: the incoming segment and
+/// the layer composited above the blend. Both match the target's size.
+#[derive(Clone, Copy)]
+pub struct TransitionInputs<'a> {
+    pub incoming: &'a wgpu::Texture,
+    pub above: &'a wgpu::Texture,
 }
 
 struct PostPipeline {
@@ -461,13 +646,15 @@ impl GpuPostProcess {
     /// Prepare `request` for `target`, which must be an `Rgba8Unorm` texture
     /// with `TEXTURE_BINDING` and `COPY_DST` usage. Returns whether
     /// [`Self::encode`] will draw a pass. A pass whose shader fails to build
-    /// is skipped.
+    /// is skipped. A transition in `request` runs first, reading `target` as
+    /// the outgoing segment and `inputs`; without `inputs` it is skipped.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         target: &wgpu::Texture,
         request: Option<&PostProcessRequest>,
+        inputs: Option<TransitionInputs<'_>>,
     ) -> bool {
         self.frame = None;
         if self.device.as_ref() != Some(device) {
@@ -482,15 +669,25 @@ impl GpuPostProcess {
         let Some(region) = frame_region(request.frame, target.width(), target.height()) else {
             return false;
         };
+        // The transition runs first, then the chain; without its inputs it
+        // cannot run.
+        let jobs: Vec<(&PostProcessShader, &[f32])> = request
+            .transition
+            .as_ref()
+            .filter(|_| inputs.is_some())
+            .map(|transition| (&transition.shader, transition.values.as_slice()))
+            .into_iter()
+            .chain(
+                request
+                    .passes
+                    .iter()
+                    .map(|(shader, values)| (shader, values.as_slice())),
+            )
+            .collect();
         // Keep only the pipelines of the current chain; a hot reload replaces them.
-        self.pipelines.retain(|complete, _| {
-            request
-                .passes
-                .iter()
-                .any(|(shader, _)| shader.complete == *complete)
-        });
-        let pipelines: Vec<_> = request
-            .passes
+        self.pipelines
+            .retain(|complete, _| jobs.iter().any(|(shader, _)| shader.complete == *complete));
+        let pipelines: Vec<_> = jobs
             .iter()
             .map(|(shader, _)| self.pipeline(device, shader))
             .collect();
@@ -553,12 +750,17 @@ impl GpuPostProcess {
 
         let source_view = target.create_view(&Default::default());
         let output_view = scratch.create_view(&Default::default());
-        self.buffers
-            .resize_with(request.passes.len(), PassBuffers::default);
-        let mut passes = Vec::with_capacity(request.passes.len());
-        for (((shader, values), pipeline), buffers) in request
-            .passes
+        let input_views = inputs.map(|inputs| {
+            (
+                inputs.incoming.create_view(&Default::default()),
+                inputs.above.create_view(&Default::default()),
+            )
+        });
+        self.buffers.resize_with(jobs.len(), PassBuffers::default);
+        let mut passes = Vec::with_capacity(jobs.len());
+        for (((shader, values), pipeline), buffers) in jobs
             .iter()
+            .copied()
             .zip(pipelines)
             .zip(self.buffers.iter_mut())
         {
@@ -661,6 +863,19 @@ impl GpuPostProcess {
                     resource: wgpu::BindingResource::TextureView(view),
                 });
             }
+            if shader.transition {
+                let Some((incoming, above)) = &input_views else {
+                    continue;
+                };
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(incoming),
+                });
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(above),
+                });
+            }
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("gaanim-post-process-bind-group"),
                 layout: &pipeline.layout,
@@ -735,6 +950,7 @@ impl GpuPostProcess {
                 !shader.uniforms.is_empty(),
                 shader.data.is_some(),
                 shader.bloom,
+                shader.transition,
             ));
             let cached = match crate::gpu_scope::check(error_scope) {
                 ScopeCheck::Pending(scope) => CachedPipeline::Checking(pipeline, scope),
@@ -775,7 +991,14 @@ fn validated(pipeline: Arc<PostPipeline>, outcome: ScopeCheck) -> Option<Arc<Pos
 }
 
 impl PostPipeline {
-    fn new(device: &wgpu::Device, complete: &str, uniforms: bool, data: bool, bloom: bool) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        complete: &str,
+        uniforms: bool,
+        data: bool,
+        bloom: bool,
+        transition: bool,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gaanim-post-process-shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(complete)),
@@ -827,15 +1050,17 @@ impl PostPipeline {
                 },
             ));
         }
+        let texture = wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        };
         if bloom {
-            entries.push(entry(
-                6,
-                wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-            ));
+            entries.push(entry(6, texture));
+        }
+        if transition {
+            entries.push(entry(7, texture));
+            entries.push(entry(8, texture));
         }
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gaanim-post-process-layout"),
@@ -881,7 +1106,10 @@ fn params_bytes(
         width as f32,
         height as f32,
         request.time,
-        0.0,
+        request
+            .transition
+            .as_ref()
+            .map_or(0.0, |transition| transition.progress),
     ];
     let mut bytes = [0_u8; PARAMS_SIZE as usize];
     for (chunk, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(floats) {
@@ -903,7 +1131,13 @@ fn uniform_bytes(values: &[f32]) -> Vec<u8> {
     bytes
 }
 
-fn complete_shader(source: &str, uniforms: &[Arc<str>], data: bool, bloom: bool) -> String {
+fn complete_shader(
+    source: &str,
+    uniforms: &[Arc<str>],
+    data: bool,
+    bloom: bool,
+    transition: bool,
+) -> String {
     let mut declarations = String::new();
     if !uniforms.is_empty() {
         declarations.push_str("struct GaanimUniforms {\n");
@@ -921,6 +1155,10 @@ fn complete_shader(source: &str, uniforms: &[Arc<str>], data: bool, bloom: bool)
     }
     if bloom {
         declarations.push_str(BLOOM_COMPOSITE_PREAMBLE);
+    }
+    if transition {
+        declarations.push_str(TRANSITION_PREAMBLE);
+        return format!("{SHADER_PREAMBLE}\n{declarations}\n{source}\n{TRANSITION_ENTRY_POINT}");
     }
     format!("{SHADER_PREAMBLE}\n{declarations}\n{source}\n{SHADER_ENTRY_POINT}")
 }
@@ -954,8 +1192,17 @@ fn validate_uniform_names(names: &[Arc<str>]) -> Result<(), PostProcessError> {
     Ok(())
 }
 
-fn validate_post_source(source: &str, complete: &str) -> Result<(), PostProcessError> {
-    if !source.contains("gaanim_post") {
+fn validate_post_source(
+    source: &str,
+    complete: &str,
+    transition: bool,
+) -> Result<(), PostProcessError> {
+    if transition && !source.contains("fn transition") {
+        return Err(PostProcessError::InvalidWgsl(
+            "a transition must define fn transition(uv: vec2<f32>) -> vec4<f32>".to_string(),
+        ));
+    }
+    if !transition && !source.contains("gaanim_post") {
         return Err(PostProcessError::InvalidWgsl(
             "source must define gaanim_post(uv, resolution, time)".to_string(),
         ));
@@ -1117,7 +1364,7 @@ mod tests {
         .request(1.0, frame)
         .unwrap();
         let mut post = GpuPostProcess::default();
-        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request)));
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         post.encode(&mut encoder);
         gpu.queue.submit(Some(encoder.finish()));
@@ -1133,7 +1380,125 @@ mod tests {
         // The last column clamps its sample to the frame edge (x = 39).
         assert_eq!(at(39, 27), &[255 - 156, 255 - 64, 255 - 200, 255]);
 
-        assert!(!post.prepare(&gpu.device, &gpu.queue, &target, None));
+        assert!(!post.prepare(&gpu.device, &gpu.queue, &target, None, None));
+    }
+
+    const MIX: &str = "fn transition(uv: vec2<f32>) -> vec4<f32> {\n\
+         return mix(gaanim_from(uv), gaanim_to(uv), progress * gaanim_uniforms.gain);\n}";
+
+    #[test]
+    fn transitions_require_their_function_and_validate() {
+        let shader = PostProcessShader::transition(MIX, ["gain"], None).unwrap();
+        assert!(shader.is_transition());
+        assert!(matches!(
+            PostProcessShader::transition(INVERT, std::iter::empty::<&str>(), None),
+            Err(PostProcessError::InvalidWgsl(_))
+        ));
+        assert!(matches!(
+            PostProcessShader::transition(
+                "fn transition(uv: vec2<f32>) -> f32 { return 1.0; }",
+                std::iter::empty::<&str>(),
+                None
+            ),
+            Err(PostProcessError::InvalidWgsl(_))
+        ));
+        let rebuilt =
+            PostProcessShader::from_parts(shader.source(), shader.uniforms(), None, false, true)
+                .unwrap();
+        assert_eq!(rebuilt, shader);
+    }
+
+    #[test]
+    fn gpu_transition_blends_both_segments_under_the_layer_above() {
+        let Some(gpu) = test_gpu() else {
+            return;
+        };
+        let (width, height) = (16_u32, 8_u32);
+        let texture = |rgba: [u8; 4], left_only: bool| {
+            let pixels: Vec<u8> = (0..height)
+                .flat_map(|_| {
+                    (0..width).flat_map(move |x| {
+                        if left_only && x >= 4 {
+                            [0, 0, 0, 0]
+                        } else {
+                            rgba
+                        }
+                    })
+                })
+                .collect();
+            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            gpu.queue.write_texture(
+                texture.as_image_copy(),
+                &pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: None,
+                },
+                texture.size(),
+            );
+            texture
+        };
+        let target = texture([200, 0, 0, 255], false);
+        let incoming = texture([0, 0, 200, 255], false);
+        let above = texture([0, 255, 0, 255], true);
+        let shader = Arc::new(gaanim_scene::TransitionShader {
+            source: MIX.to_string(),
+            uniforms: vec!["gain".to_string()],
+            values: vec![1.0],
+            data: None,
+        });
+        let frame = kurbo::Rect::new(0.0, 0.0, 12.0, f64::from(height));
+        let request = PostProcessRequest::with_transition(
+            None,
+            Some(&gaanim_scene::TransitionShaderFrame {
+                shader,
+                progress: 0.25,
+            }),
+            frame,
+            0.0,
+        )
+        .unwrap();
+        let mut post = GpuPostProcess::default();
+        assert!(post.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &target,
+            Some(&request),
+            Some(TransitionInputs {
+                incoming: &incoming,
+                above: &above,
+            }),
+        ));
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        post.encode(&mut encoder);
+        gpu.queue.submit(Some(encoder.finish()));
+        let out = gpu.read(&target);
+        let at = |x: u32, y: u32| &out[((y * width + x) * 4) as usize..][..4];
+        // The layer above covers the left columns.
+        assert_eq!(at(1, 3), &[0, 255, 0, 255]);
+        // A quarter of the way from the outgoing red to the incoming blue.
+        assert_eq!(at(8, 3), &[150, 0, 50, 255]);
+        // Outside the camera frame the outgoing segment stays.
+        assert_eq!(at(14, 3), &[200, 0, 0, 255]);
+
+        // Without its inputs the transition does not run.
+        assert!(!post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
     }
 
     const TINT: &str = "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
@@ -1266,7 +1631,7 @@ mod tests {
         .request(0.0, kurbo::Rect::new(0.0, 0.0, 16.0, 8.0))
         .unwrap();
         let mut post = GpuPostProcess::default();
-        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request)));
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         post.encode(&mut encoder);
         gpu.queue.submit(Some(encoder.finish()));
@@ -1338,7 +1703,7 @@ mod tests {
         let mut post = GpuPostProcess::default();
         // Twice, to reuse the chain's textures on the second frame.
         for _ in 0..2 {
-            assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request)));
+            assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
             let mut encoder = gpu.device.create_command_encoder(&Default::default());
             post.encode(&mut encoder);
             gpu.queue.submit(Some(encoder.finish()));
@@ -1353,7 +1718,7 @@ mod tests {
                 target.size(),
             );
         }
-        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request)));
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         post.encode(&mut encoder);
         gpu.queue.submit(Some(encoder.finish()));

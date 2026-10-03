@@ -579,6 +579,32 @@ pub(crate) fn apply_vector_transition(
     true
 }
 
+/// Publish a shader transition: each side's members and the eased progress.
+/// Nothing moves or fades; the renderer draws each side alone and the shader
+/// blends them.
+pub(crate) fn apply_shader_transition(
+    world: &mut World,
+    scene_entities: &[(Entity, SceneId)],
+    shader: &std::sync::Arc<gaanim_scene::TransitionShader>,
+    t: f64,
+    from: SceneId,
+    to: SceneId,
+) {
+    let mut frame = SceneTransitionFrame::default();
+    for (entity, scene) in scene_entities {
+        if *scene == from {
+            frame.outgoing.insert(*entity);
+        } else if *scene == to {
+            frame.incoming.insert(*entity);
+        }
+    }
+    frame.shader = Some(gaanim_scene::TransitionShaderFrame {
+        shader: shader.clone(),
+        progress: t as f32,
+    });
+    world.insert_resource(frame);
+}
+
 /// Record the segment-background times and overlay layers of this seek.
 pub(crate) fn finish_transition_frame(
     world: &mut World,
@@ -589,7 +615,7 @@ pub(crate) fn finish_transition_frame(
     let Some(mut frame) = world.get_resource_mut::<SceneTransitionFrame>() else {
         return;
     };
-    if frame.incoming_mask.is_some() || frame.outgoing_mask.is_some() {
+    if frame.incoming_mask.is_some() || frame.outgoing_mask.is_some() || frame.shader.is_some() {
         frame.backgrounds = span.map(|(start, end)| (start - 1e-4, end));
     }
     if let Some(view) = view {
@@ -793,6 +819,74 @@ mod tests {
         timeline.seek(&mut world, 1.9);
         let frame = world.resource::<SceneTransitionFrame>();
         assert!(frame.overlays.is_empty() && frame.incoming_mask.is_some());
+
+        timeline.seek(&mut world, 2.5);
+        assert!(world.resource::<SceneTransitionFrame>().is_empty());
+    }
+
+    #[test]
+    fn shader_transitions_publish_sides_and_progress_without_fading() {
+        use crate::clip::ClipPayload;
+        use crate::scene::SceneMember;
+        use crate::timeline::Timeline;
+        use gaanim_core::ObjectId;
+
+        let mut world = World::new();
+        let mut timeline = Timeline::default();
+        let track = timeline.add_track("main", 0);
+        let first = timeline.add_scene("first");
+        let second = timeline.add_scene("second");
+        timeline.index_scene(first, 0.0);
+        timeline.index_scene(second, 1.0);
+        timeline.add_clip(track, 0.0, 0.0, ClipPayload::SceneStart(first));
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::SceneEnd(first));
+        timeline.add_clip(track, 1.0, 0.0, ClipPayload::SceneStart(second));
+        timeline.add_clip(track, 3.0, 0.0, ClipPayload::SceneEnd(second));
+        let shader = std::sync::Arc::new(gaanim_scene::TransitionShader {
+            source: "fn transition(uv: vec2<f32>) -> vec4<f32> { return gaanim_to(uv); }"
+                .to_string(),
+            uniforms: Vec::new(),
+            values: Vec::new(),
+            data: None,
+        });
+        timeline.connect(
+            first,
+            second,
+            TransitionType::Shader {
+                duration: 1.0,
+                shader: shader.clone(),
+            },
+        );
+        let mut spawn = |raw, scene| {
+            world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(raw)),
+                    SpatialTransform::default(),
+                    gaanim_scene::Opacity(1.0),
+                    SceneMember(scene),
+                ))
+                .id()
+        };
+        let outgoing = spawn(1, first);
+        let incoming = spawn(2, second);
+
+        timeline.seek(&mut world, 1.25);
+        let frame = world.resource::<SceneTransitionFrame>();
+        assert!(frame.incoming.contains(&incoming) && frame.outgoing.contains(&outgoing));
+        let published = frame.shader.as_ref().expect("shader frame");
+        assert!(std::sync::Arc::ptr_eq(&published.shader, &shader));
+        // Shaders keep their progress linear unless an easing is given.
+        assert_eq!(published.progress, 0.25);
+        assert_eq!(frame.backgrounds, Some((1.0 - 1e-4, 2.0)));
+        assert!(frame.incoming_mask.is_none() && !frame.is_empty());
+        assert_eq!(
+            frame.side_of(incoming, |_| None),
+            gaanim_scene::TransitionSide::Incoming
+        );
+        // Both sides draw fully; the shader alone blends them.
+        for entity in [outgoing, incoming] {
+            assert_eq!(world.get::<gaanim_scene::Opacity>(entity).unwrap().0, 1.0);
+        }
 
         timeline.seek(&mut world, 2.5);
         assert!(world.resource::<SceneTransitionFrame>().is_empty());

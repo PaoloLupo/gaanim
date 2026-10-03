@@ -1996,6 +1996,15 @@ pub fn compile_scene_from_world(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
 ) -> vello::Scene {
+    compile_scene_with_pins(world, camera, None).flattened()
+}
+
+/// [`compile_scene_from_world`] keeping a shader transition's segments
+/// apart, for a renderer that blends them on the GPU.
+pub fn compile_frame_from_world(
+    world: &mut World,
+    camera: Option<&gaanim_math::Camera>,
+) -> ComposedFrame {
     compile_scene_with_pins(world, camera, None)
 }
 
@@ -2016,6 +2025,15 @@ pub fn compile_scene_pinned(
     camera: Option<&gaanim_math::Camera>,
     pins: &mut PinnedElements,
 ) -> vello::Scene {
+    compile_scene_with_pins(world, camera, Some(pins)).flattened()
+}
+
+/// [`compile_scene_pinned`] keeping a shader transition's segments apart.
+pub fn compile_frame_pinned(
+    world: &mut World,
+    camera: Option<&gaanim_math::Camera>,
+    pins: &mut PinnedElements,
+) -> ComposedFrame {
     compile_scene_with_pins(world, camera, Some(pins))
 }
 
@@ -2023,10 +2041,10 @@ fn compile_scene_with_pins(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
     pins: Option<&mut PinnedElements>,
-) -> vello::Scene {
+) -> ComposedFrame {
     let extraction = extract_world(world, camera, pins, true);
     let background = world.get_resource::<CanvasBackground>();
-    let mut scene = compose_elements(
+    let mut frame = compose_frame(
         &extraction.elements,
         extraction.transition.as_ref(),
         background.map(|background| (background, background.pixel_size)),
@@ -2035,9 +2053,9 @@ fn compile_scene_with_pins(
         None,
     );
     if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
-        append_live_overlay(&mut scene, overlay);
+        append_live_overlay(frame.top_mut(), overlay);
     }
-    scene
+    frame
 }
 
 /// Draw what live zones show above the scene, in scene units: each zone's
@@ -2759,6 +2777,145 @@ fn compose_elements(
     main_scene
 }
 
+/// A composed frame. Under a shader transition `scene` holds the outgoing
+/// segment alone and `transition` the rest, which a GPU renderer blends with
+/// [`crate::post_process::TransitionInputs`]; otherwise `scene` is the
+/// whole frame.
+#[derive(Clone, Default)]
+pub struct ComposedFrame {
+    pub scene: vello::Scene,
+    pub transition: Option<TransitionScenes>,
+}
+
+/// The parts of a frame under a shader transition besides the outgoing
+/// segment.
+#[derive(Clone)]
+pub struct TransitionScenes {
+    /// The incoming segment alone, over its background.
+    pub incoming: vello::Scene,
+    /// Drawables of neither segment and the transition overlays, over a
+    /// transparent background: composited above the blend.
+    pub above: vello::Scene,
+    pub shader: gaanim_scene::TransitionShaderFrame,
+}
+
+impl ComposedFrame {
+    /// The scene drawn last: above the blend under a shader transition.
+    pub fn top_mut(&mut self) -> &mut vello::Scene {
+        match &mut self.transition {
+            Some(transition) => &mut transition.above,
+            None => &mut self.scene,
+        }
+    }
+
+    /// One scene for a renderer without the GPU blend: the shader is
+    /// approximated by a cross-fade at its progress.
+    pub fn flattened(self) -> vello::Scene {
+        let Some(transition) = self.transition else {
+            return self.scene;
+        };
+        let mut scene = self.scene;
+        let everywhere = kurbo::Rect::new(-1.0e7, -1.0e7, 1.0e7, 1.0e7);
+        scene.push_layer(
+            peniko::Fill::NonZero,
+            peniko::BlendMode::default(),
+            transition.shader.progress.clamp(0.0, 1.0),
+            kurbo::Affine::IDENTITY,
+            &everywhere,
+        );
+        scene.append(&transition.incoming, None);
+        scene.pop_layer();
+        scene.append(&transition.above, None);
+        scene
+    }
+
+    /// Apply `transform` to every part, as `vello::Scene::append` would.
+    pub fn transformed(self, transform: kurbo::Affine) -> Self {
+        let place = |source: &vello::Scene| {
+            let mut scene = vello::Scene::new();
+            scene.append(source, Some(transform));
+            scene
+        };
+        Self {
+            scene: place(&self.scene),
+            transition: self.transition.map(|transition| TransitionScenes {
+                incoming: place(&transition.incoming),
+                above: place(&transition.above),
+                shader: transition.shader,
+            }),
+        }
+    }
+}
+
+/// [`compose_elements`], keeping a shader transition's segments apart: each
+/// side over its own background, and drawables of neither side with the
+/// overlays above.
+fn compose_frame(
+    elements: &[ExtractedElement],
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+    background: Option<(&CanvasBackground, (u32, u32))>,
+    time_seconds: f64,
+    rest: f64,
+    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+) -> ComposedFrame {
+    let Some((frame, shader)) = transition
+        .filter(|frame| !frame.is_empty())
+        .and_then(|frame| Some((frame, frame.shader.clone()?)))
+    else {
+        return ComposedFrame {
+            scene: compose_elements(elements, transition, background, time_seconds, rest, gpu),
+            transition: None,
+        };
+    };
+    let side = |side: gaanim_scene::TransitionSide| -> Vec<ExtractedElement> {
+        elements
+            .iter()
+            .filter(|element| element.transition_side == side)
+            .cloned()
+            .collect()
+    };
+    let (outgoing_time, incoming_time) = frame.backgrounds.unwrap_or((time_seconds, time_seconds));
+    let mut outgoing = vello::Scene::new();
+    let outgoing_paint = background.map(|(canvas, pixel_size)| {
+        fill_canvas_background(&mut outgoing, canvas, pixel_size, outgoing_time, rest, gpu)
+    });
+    append_extracted_elements(
+        &mut outgoing,
+        &side(gaanim_scene::TransitionSide::Outgoing),
+        None,
+        outgoing_paint.as_ref(),
+    );
+    let mut incoming = vello::Scene::new();
+    let incoming_paint = background.map(|(canvas, pixel_size)| {
+        fill_canvas_background(&mut incoming, canvas, pixel_size, incoming_time, rest, None)
+    });
+    append_extracted_elements(
+        &mut incoming,
+        &side(gaanim_scene::TransitionSide::Incoming),
+        None,
+        incoming_paint.as_ref(),
+    );
+    let mut above = vello::Scene::new();
+    let overlays = gaanim_scene::SceneTransitionFrame {
+        overlays: frame.overlays.clone(),
+        ..Default::default()
+    };
+    append_extracted_elements(
+        &mut above,
+        &side(gaanim_scene::TransitionSide::None),
+        Some(&overlays),
+        outgoing_paint.as_ref(),
+    );
+    ComposedFrame {
+        scene: outgoing,
+        transition: Some(TransitionScenes {
+            incoming,
+            above,
+            shader,
+        }),
+    }
+}
+
 /// One drawable of a [`FrameCapture`]: what its fragment is built from and
 /// how the frame composites it.
 #[derive(Clone)]
@@ -2815,6 +2972,8 @@ pub struct CapturedTransition {
     pub incoming_mask: Option<gaanim_scene::TransitionMask>,
     pub backgrounds: Option<(f64, f64)>,
     pub overlays: Vec<gaanim_scene::TransitionOverlayLayer>,
+    /// A shader transition blending the two sides.
+    pub shader: Option<gaanim_scene::TransitionShaderFrame>,
 }
 
 impl CapturedTransition {
@@ -2824,6 +2983,7 @@ impl CapturedTransition {
             incoming_mask: self.incoming_mask.clone(),
             backgrounds: self.backgrounds,
             overlays: self.overlays.clone(),
+            shader: self.shader.clone(),
             ..Default::default()
         }
     }
@@ -2868,6 +3028,7 @@ fn capture_extraction(extraction: WorldExtraction) -> FrameCapture {
                 incoming_mask: frame.incoming_mask,
                 backgrounds: frame.backgrounds,
                 overlays: frame.overlays,
+                shader: frame.shader,
             }),
         elements: extraction
             .elements
@@ -2923,7 +3084,7 @@ pub fn compose_captured(
     pixels_per_unit: Option<f64>,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
 ) -> vello::Scene {
-    compose_captured_at(frame, store, background, pixels_per_unit, gpu, 0.0)
+    compose_captured_frame(frame, store, background, pixels_per_unit, gpu, 0.0).flattened()
 }
 
 /// [`compose_captured`] with a shader background animated `rest` seconds
@@ -2936,6 +3097,18 @@ pub fn compose_captured_at(
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
     rest: f64,
 ) -> vello::Scene {
+    compose_captured_frame(frame, store, background, pixels_per_unit, gpu, rest).flattened()
+}
+
+/// [`compose_captured_at`] keeping a shader transition's segments apart.
+pub fn compose_captured_frame(
+    frame: &FrameCapture,
+    store: &mut crate::fragment::FragmentStore,
+    background: Option<(&CanvasBackground, (u32, u32))>,
+    pixels_per_unit: Option<f64>,
+    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    rest: f64,
+) -> ComposedFrame {
     let margin = antialias_margin(pixels_per_unit);
     let elements: Vec<ExtractedElement> = frame
         .elements
@@ -2988,7 +3161,7 @@ pub fn compose_captured_at(
         })
         .collect();
     let transition = frame.transition.as_ref().map(CapturedTransition::frame);
-    compose_elements(
+    compose_frame(
         &elements,
         transition.as_ref(),
         background,
@@ -2996,6 +3169,29 @@ pub fn compose_captured_at(
         rest,
         gpu,
     )
+}
+
+/// Resource: what the canvas blends over the main scene under a shader
+/// transition; `None` the rest of the time. Written with the main scene by
+/// [`gaanim_render_system`] and [`external_frame_system`].
+#[derive(Resource, Default, Clone)]
+pub struct TransitionLayers(pub Option<TransitionScenes>);
+
+/// Publish this frame's transition layers, keeping the resource unchanged
+/// while no transition runs.
+fn publish_transition_layers(
+    commands: &mut Commands,
+    layers: Option<&mut TransitionLayers>,
+    transition: Option<TransitionScenes>,
+) {
+    match layers {
+        Some(layers) => {
+            if layers.0.is_some() || transition.is_some() {
+                layers.0 = transition;
+            }
+        }
+        None => commands.insert_resource(TransitionLayers(transition)),
+    }
 }
 
 /// Resource: a captured frame to show instead of the world's drawables.
@@ -3017,10 +3213,11 @@ pub fn external_frame_system(
     mut external: ResMut<ExternalFrame>,
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     canvas_bg: Option<Res<CanvasBackground>>,
-    (mut shader_frame, preview, ambient): (
+    (mut shader_frame, preview, ambient, mut transition_layers): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
         Option<Res<gaanim_animation::AmbientClock>>,
+        Option<ResMut<TransitionLayers>>,
     ),
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     live: Option<Res<gaanim_animation::live::LiveOverlay>>,
@@ -3045,7 +3242,7 @@ pub fn external_frame_system(
         _ => None,
     });
     let mut shader_request = None;
-    let mut main_scene = compose_captured_at(
+    let mut composed = compose_captured_frame(
         &frame,
         &mut external.store,
         background,
@@ -3054,8 +3251,14 @@ pub fn external_frame_system(
         ambient.map_or(0.0, |clock| clock.rest),
     );
     if let Some(overlay) = live.as_deref() {
-        append_live_overlay(&mut main_scene, overlay);
+        append_live_overlay(composed.top_mut(), overlay);
     }
+    let main_scene = composed.scene;
+    publish_transition_layers(
+        &mut commands,
+        transition_layers.as_deref_mut(),
+        composed.transition,
+    );
     external.store.end_frame();
     if let Some(frame) = shader_frame.as_mut() {
         frame.0 = shader_request;
@@ -3183,11 +3386,12 @@ pub fn gaanim_render_system(
         Option<Ref<ChalkBrush>>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
-    (mut shader_frame, preview, live, ambient): (
+    (mut shader_frame, preview, live, ambient, mut transition_layers): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
         Option<Res<gaanim_animation::live::LiveOverlay>>,
         Option<Res<gaanim_animation::AmbientClock>>,
+        Option<ResMut<TransitionLayers>>,
     ),
     (camera_screens, camera_sources, hud_query, layer_query, float_signals): CameraViewQueries,
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
@@ -3567,7 +3771,7 @@ pub fn gaanim_render_system(
             ),
         )
     });
-    let mut main_scene = compose_elements(
+    let mut composed = compose_frame(
         local_extracted.as_slice(),
         transition_frame.as_deref(),
         background,
@@ -3579,8 +3783,14 @@ pub fn gaanim_render_system(
         frame.0 = shader_request;
     }
     if let Some(overlay) = live.as_deref() {
-        append_live_overlay(&mut main_scene, overlay);
+        append_live_overlay(composed.top_mut(), overlay);
     }
+    let mut main_scene = composed.scene;
+    publish_transition_layers(
+        &mut commands,
+        transition_layers.as_deref_mut(),
+        composed.transition,
+    );
     local_extracted.clear();
 
     // Hand the composited encoding to the single global scene entity.
@@ -4848,6 +5058,67 @@ mod tests {
         // Inverted masks depend on each element's bounds and stay separate.
         assert_eq!(shared_clip_run_end(&elements, 3), 4);
         assert_eq!(shared_clip_run_end(&elements, 5), 6);
+    }
+
+    #[test]
+    fn shader_transitions_compose_each_side_apart_with_neither_side_above() {
+        use gaanim_math::SpatialTransform;
+        let mut world = World::new();
+        let mut spawn = |raw: u64, corners: usize| {
+            let mut path = kurbo::BezPath::new();
+            path.move_to((0.0, 0.0));
+            for index in 1..corners {
+                path.line_to((index as f64, (index % 2) as f64));
+            }
+            path.close_path();
+            world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(raw)),
+                    SpatialTransform::default(),
+                    GlobalSpatialTransform::default(),
+                    GlobalOpacity(1.0),
+                    RenderOrder::default(),
+                    RenderLayer::Vello2D,
+                    Path2D(Arc::new(path)),
+                    FillBrush(Some(peniko::Brush::Solid(peniko::Color::WHITE))),
+                    Visible,
+                ))
+                .id()
+        };
+        let outgoing = spawn(1, 3);
+        let incoming = spawn(2, 5);
+        let _persistent = spawn(3, 7);
+        let shader = gaanim_scene::TransitionShaderFrame {
+            shader: Arc::new(gaanim_scene::TransitionShader {
+                source: String::new(),
+                uniforms: Vec::new(),
+                values: Vec::new(),
+                data: None,
+            }),
+            progress: 0.4,
+        };
+        let mut frame = gaanim_scene::SceneTransitionFrame {
+            shader: Some(shader.clone()),
+            ..Default::default()
+        };
+        frame.outgoing.insert(outgoing);
+        frame.incoming.insert(incoming);
+        world.insert_resource(frame);
+
+        let composed = compile_frame_from_world(&mut world, None);
+        let segments = |scene: &vello::Scene| scene.encoding().n_path_segments;
+        let transition = composed.transition.clone().expect("shader layers");
+        assert_eq!(transition.shader, shader);
+        // A triangle, a pentagon and a heptagon, one per scene.
+        assert_eq!(segments(&composed.scene), 3);
+        assert_eq!(segments(&transition.incoming), 5);
+        assert_eq!(segments(&transition.above), 7);
+        // Without the GPU blend, all three draw in one scene, the incoming
+        // side inside a cross-fade layer (its clip is a rectangle).
+        assert_eq!(
+            segments(&compile_scene_from_world(&mut world, None)),
+            15 + 4
+        );
     }
 
     #[test]

@@ -2602,6 +2602,46 @@ def validate_transition_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_shader_transition_contract(module: object) -> list[str]:
+    """Shader transitions: custom WGSL and the built-in presets."""
+    failures: list[str] = []
+    T = module.Transition
+    mix = "fn transition(uv: vec2<f32>) -> vec4<f32> { return mix(gaanim_from(uv), gaanim_to(uv), progress * gaanim_uniforms.gain); }"
+    built = [
+        T.shader(mix, 0.6, uniforms={"gain": 1.0}),
+        T.preset("cross_zoom", 0.8, strength=0.6),
+        T.preset("directional_warp", 0.8, dx=0, dy=1, easing=module.Easing.SMOOTH),
+        T.preset("ripple", 0.8),
+        T.preset("glitch_displace", 0.5, strength=0.8, seed=3),
+    ]
+    if not all(isinstance(value, T) and "shader" in repr(value) for value in built):
+        failures.append("shader transitions must return Transition")
+    for label, factory in [
+        ("WGSL without transition()", lambda: T.shader("fn other() {}", 0.5)),
+        ("undeclared uniform", lambda: T.shader(mix, 0.5)),
+        ("shader duration", lambda: T.shader(mix, 0.0, uniforms={"gain": 1.0})),
+        ("preset name", lambda: T.preset("dissolve", 0.5)),
+        ("preset setting", lambda: T.preset("ripple", 0.5, strength=1.0)),
+        ("luma without image", lambda: T.preset("luma", 0.5)),
+        ("image on another preset", lambda: T.preset("ripple", 0.5, image="map.png")),
+        ("missing luma image", lambda: T.preset("luma", 0.5, image="missing-map.png")),
+    ]:
+        try:
+            factory()
+        except ValueError:
+            pass
+        else:
+            failures.append(f"Transition accepted an invalid {label}")
+    scene = module.Scene(frame=(16, 9))
+    scene.segment("first")
+    scene.wait(0.5)
+    scene.segment("second", built[1])
+    scene.wait(0.5)
+    if abs(scene.cursor - 1.0) > 1e-9:
+        failures.append("shader transitions must not change segment durations")
+    return failures
+
+
 def validate_magic_move_contract(module: object) -> list[str]:
     """Keyed magic move as an animation and as a segment transition."""
     failures: list[str] = []
@@ -2771,6 +2811,7 @@ def main() -> int:
     missing.extend(validate_text_animator_contract(module))
     missing.extend(validate_transition_contract(module))
     missing.extend(validate_magic_move_contract(module))
+    missing.extend(validate_shader_transition_contract(module))
     missing.extend(validate_text_scene_unit_defaults(module))
     missing.extend(validate_runtime_type_aliases(module))
     missing.extend(documented_text_api_failures(tree))

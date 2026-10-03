@@ -405,6 +405,136 @@ impl PyTransitionType {
         ))
     }
 
+    /// A WGSL transition: `source` (inline text or an os.PathLike `.wgsl`
+    /// file) defines `fn transition(uv: vec2<f32>) -> vec4<f32>` over
+    /// `gaanim_from(uv)`, `gaanim_to(uv)` and `progress`.
+    #[staticmethod]
+    #[pyo3(signature = (source, duration, *, uniforms=None, easing=None, overlay=None, sound=None))]
+    fn shader(
+        source: &Bound<'_, PyAny>,
+        duration: f64,
+        uniforms: Option<&Bound<'_, pyo3::types::PyDict>>,
+        easing: Option<PyEasing>,
+        overlay: Option<PyOverlay>,
+        sound: Option<String>,
+    ) -> PyResult<Self> {
+        positive_duration(duration)?;
+        let source = if let Ok(source) = source.extract::<String>() {
+            source
+        } else {
+            let path = source.extract::<std::path::PathBuf>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "source must be inline WGSL text or an os.PathLike .wgsl file",
+                )
+            })?;
+            std::fs::read_to_string(&path).map_err(|error| {
+                PyValueError::new_err(format!(
+                    "could not read the transition WGSL {}: {error}",
+                    path.display()
+                ))
+            })?
+        };
+        let mut names = Vec::new();
+        let mut values = Vec::new();
+        if let Some(uniforms) = uniforms {
+            for (name, value) in uniforms.iter() {
+                names.push(name.extract::<String>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err("uniform names must be strings")
+                })?);
+                let value: f64 = value.extract().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err("uniform values must be numbers")
+                })?;
+                finite("uniform values", value)?;
+                values.push(value as f32);
+            }
+        }
+        gaanim_api::canvas::PostProcessShader::transition(source.as_str(), &names, None)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let shader = gaanim_scene::TransitionShader {
+            source,
+            uniforms: names,
+            values,
+            data: None,
+        };
+        Ok(Self::styled(
+            TransitionType::Shader {
+                duration,
+                shader: std::sync::Arc::new(shader),
+            },
+            easing,
+            overlay,
+            sound_cue(sound)?,
+        ))
+    }
+
+    /// A built-in shader transition: `cross_zoom`, `directional_warp`,
+    /// `ripple`, `glitch_displace` or `luma`, tuned by keyword settings.
+    #[staticmethod]
+    #[pyo3(signature = (name, duration, *, image=None, invert=false, easing=None, overlay=None, sound=None, **settings))]
+    #[allow(clippy::too_many_arguments)]
+    fn preset(
+        name: &str,
+        duration: f64,
+        image: Option<std::path::PathBuf>,
+        invert: bool,
+        easing: Option<PyEasing>,
+        overlay: Option<PyOverlay>,
+        sound: Option<String>,
+        settings: Option<&Bound<'_, pyo3::types::PyDict>>,
+    ) -> PyResult<Self> {
+        use gaanim_api::canvas::TransitionPreset;
+        positive_duration(duration)?;
+        let preset = TransitionPreset::from_name(name).ok_or_else(|| {
+            let names: Vec<&str> = TransitionPreset::ALL.iter().map(|p| p.name()).collect();
+            PyValueError::new_err(format!(
+                "unknown transition preset {name:?}; expected one of {}",
+                names.join(", ")
+            ))
+        })?;
+        let mut values = Vec::new();
+        if let Some(settings) = settings {
+            for (key, value) in settings.iter() {
+                let key = key.extract::<String>()?;
+                let value: f64 = value.extract().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!("{key} must be a number"))
+                })?;
+                finite(&key, value)?;
+                values.push((key, value as f32));
+            }
+        }
+        let map = match (preset, image) {
+            (TransitionPreset::Luma, Some(path)) => Some(
+                gaanim_api::canvas::luma_map_from_file(&path, invert)
+                    .map_err(PyValueError::new_err)?,
+            ),
+            (TransitionPreset::Luma, None) => {
+                return Err(PyValueError::new_err(
+                    "the luma transition needs image=, a grayscale reveal map",
+                ));
+            }
+            (_, Some(_)) => {
+                return Err(PyValueError::new_err(
+                    "image= only applies to the luma transition",
+                ));
+            }
+            (_, None) => None,
+        };
+        let values: Vec<(&str, f32)> = values
+            .iter()
+            .map(|(key, value)| (key.as_str(), *value))
+            .collect();
+        let shader = preset.shader(&values, map).map_err(PyValueError::new_err)?;
+        Ok(Self::styled(
+            TransitionType::Shader {
+                duration,
+                shader: std::sync::Arc::new(shader),
+            },
+            easing,
+            overlay,
+            sound_cue(sound)?,
+        ))
+    }
+
     fn __repr__(&self) -> String {
         let base = match self.0.base() {
             TransitionType::Cut => "Transition.cut(".to_string(),
@@ -454,6 +584,9 @@ impl PyTransitionType {
                 duration,
                 direction,
             } => format!("Transition.push({}, {:?}", duration, direction),
+            TransitionType::Shader { duration, .. } => {
+                format!("Transition.shader({}", duration)
+            }
             TransitionType::Styled { .. } => "Transition(".to_string(),
         };
         let mut extras = String::new();
