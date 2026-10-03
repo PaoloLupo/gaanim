@@ -102,8 +102,10 @@ fn unit_math(unit: &str) -> Result<String, String> {
             .collect::<Result<Vec<_>, _>>()?;
         parts.push(factors.join(" thin "));
     }
-    // An escaped slash stays a slash instead of building a fraction.
-    Ok(parts.join(" \\/ "))
+    // An escaped slash stays a slash instead of building a fraction. Typst
+    // spaces a word like `kg` from the atom after it; the empty spaces keep
+    // the slash tight on both sides, as in "kg/m³".
+    Ok(parts.join("#h(0pt)\\/#h(0pt)"))
 }
 
 fn factor_math(factor: &str) -> Result<String, String> {
@@ -158,7 +160,7 @@ mod tests {
         assert_eq!(q(Integer(1), "m^3"), r#"1 thin upright("m")^(3)"#);
         assert_eq!(
             q(Float(9.81), "m/s^2"),
-            r#"9.81 thin upright("m") \/ upright("s")^(2)"#
+            r#"9.81 thin upright("m")#h(0pt)\/#h(0pt)upright("s")^(2)"#
         );
         assert_eq!(
             q(Integer(3), "kg m s^-1"),

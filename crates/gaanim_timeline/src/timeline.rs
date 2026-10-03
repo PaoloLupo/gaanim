@@ -2611,6 +2611,9 @@ impl Timeline {
             .collect();
         // Scratch entity for rebuilding followers behind echo copies.
         let mut scratch: Option<Entity> = None;
+        // Whether each shown copy draws exactly what its source draws now,
+        // and the copy of its parent within the echoed subtree.
+        let mut coinciding: HashMap<Entity, (bool, Option<Entity>)> = HashMap::new();
 
         for (ghost, echo) in ghosts {
             let time = if echo.hold {
@@ -2652,10 +2655,13 @@ impl Timeline {
                 .parent
                 .or_else(|| parent.and_then(|parent| entity_map.get(&parent).copied()));
             crate::snapshot::restore_parent(world, ghost, parent);
+            let source_entity = entity_map.get(&echo.source).copied();
             if let Some(mut opacity) = world.get_mut::<Opacity>(ghost) {
                 opacity.0 *= echo.opacity;
             }
-            // A follower's clips do not move it: rebuild its position then.
+            // A follower's clips do not move it: rebuild its position then,
+            // and now, to compare the two.
+            let mut source_position = None;
             if entity_map
                 .get(&echo.source)
                 .is_some_and(|&source| follows_binding(world, source))
@@ -2677,11 +2683,23 @@ impl Timeline {
                         transform.translation = position;
                     }
                 }
+                source_position = self
+                    .delayed_world_matrix(world, &context, echo.source, self.current_time, 0)
+                    .map(|matrix| {
+                        let world_position =
+                            matrix.transform_point3(gaanim_core::glam::DVec3::ZERO);
+                        parent_local_point(world, ghost, world_position)
+                    });
+            }
+            if let Some(source) = source_entity {
+                let same = echo_matches_source(world, ghost, source, echo.opacity, source_position);
+                coinciding.insert(ghost, (same, echo.parent));
             }
         }
         if let Some(scratch) = scratch {
             world.despawn(scratch);
         }
+        hide_coinciding_echoes(world, &coinciding);
 
         for (entity, id, squash) in squashes {
             let probe = match squash
@@ -4952,6 +4970,89 @@ fn morph_fit_affine(
         * Affine::translate(-Vec2::new(from.center().x, from.center().y))
 }
 
+/// Whether the echo copy `ghost` draws what `source` draws: the same
+/// transform, path and opacity (`echo_opacity` aside). A copy that caught
+/// up with a resting source would only stack its translucent parts.
+///
+/// `source_position` replaces the source's translation for a follower, whose
+/// binding, not its transform, places it.
+fn echo_matches_source(
+    world: &World,
+    ghost: Entity,
+    source: Entity,
+    echo_opacity: f32,
+    source_position: Option<gaanim_core::glam::DVec3>,
+) -> bool {
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * (1.0 + a.abs().max(b.abs()));
+    let same_transform = match (
+        world.get::<SpatialTransform>(ghost),
+        world
+            .get::<SpatialTransform>(source)
+            .copied()
+            .map(|mut transform| {
+                if let Some(position) = source_position {
+                    transform.translation = position;
+                }
+                transform
+            }),
+    ) {
+        (Some(a), Some(b)) => {
+            let vectors = [
+                (a.translation, b.translation),
+                (a.scale, b.scale),
+                (a.anchor, b.anchor),
+            ];
+            vectors
+                .iter()
+                .all(|(a, b)| close(a.x, b.x) && close(a.y, b.y) && close(a.z, b.z))
+                && close(a.skew.x, b.skew.x)
+                && close(a.skew.y, b.skew.y)
+                && a.rotation.dot(b.rotation).abs() >= 1.0 - 1e-12
+        }
+        (None, None) => true,
+        _ => false,
+    };
+    let same_path = match (
+        world.get::<gaanim_scene::Path2D>(ghost),
+        world.get::<gaanim_scene::Path2D>(source),
+    ) {
+        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(&a.0, &b.0) || a.0 == b.0,
+        (None, None) => true,
+        _ => false,
+    };
+    let opacity = |entity| {
+        world
+            .get::<Opacity>(entity)
+            .map_or(1.0, |opacity| opacity.0)
+    };
+    same_transform && same_path && (opacity(ghost) - opacity(source) * echo_opacity).abs() <= 1e-6
+}
+
+/// Hide every echoed subtree whose copies all coincide with their sources.
+fn hide_coinciding_echoes(world: &mut World, coinciding: &HashMap<Entity, (bool, Option<Entity>)>) {
+    let root_of = |mut ghost: Entity| {
+        while let Some(parent) = coinciding.get(&ghost).and_then(|(_, parent)| *parent) {
+            if !coinciding.contains_key(&parent) {
+                break;
+            }
+            ghost = parent;
+        }
+        ghost
+    };
+    let mut moving: HashSet<Entity> = HashSet::new();
+    for (&ghost, &(same, _)) in coinciding {
+        if !same {
+            moving.insert(root_of(ghost));
+        }
+    }
+    for &ghost in coinciding.keys() {
+        if !moving.contains(&root_of(ghost)) && world.get::<gaanim_scene::Visible>(ghost).is_some()
+        {
+            world.entity_mut(ghost).remove::<gaanim_scene::Visible>();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5221,6 +5322,15 @@ mod tests {
                 assert!((world.get::<Opacity>(copy).unwrap().0 - expected).abs() < 1e-6);
             }
         }
+
+        // At rest, a copy that caught up with its source would only stack
+        // on it: it is hidden, and shown again once the source moves.
+        timeline.cached_duration = 4.0;
+        timeline.seek(&mut world, 3.5);
+        assert!(world.get::<gaanim_scene::Visible>(near).is_none());
+        assert!(world.get::<gaanim_scene::Visible>(far).is_none());
+        timeline.seek(&mut world, 1.2);
+        assert!(world.get::<gaanim_scene::Visible>(near).is_some());
 
         // Copies are not keyframed and disappear with their source.
         let snapshot = WorldSnapshot::capture(&mut world);

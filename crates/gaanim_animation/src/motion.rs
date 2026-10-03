@@ -32,7 +32,12 @@ pub type Stops<T> = Option<Vec<Option<T>>>;
 pub struct Keyframes {
     /// Stop instants as fractions of the clip, from `0` to `1`.
     pub times: Vec<f64>,
+    /// Translation of the drawable's origin, like `move_to` on an object
+    /// created at the origin.
     pub position: Stops<DVec3>,
+    /// Displacement from the translation the clip starts at; `None` stops
+    /// keep that translation. Exclusive with `position`.
+    pub offset: Stops<DVec3>,
     /// Absolute rotation about Z, in radians.
     pub rotation: Stops<f64>,
     pub scale: Stops<DVec3>,
@@ -48,7 +53,7 @@ impl Keyframes {
     /// The channels these keyframes write.
     pub fn channels(&self) -> Vec<CustomChannel> {
         let mut channels = Vec::new();
-        if self.position.is_some() {
+        if self.position.is_some() || self.offset.is_some() {
             channels.push(CustomChannel::Position);
         }
         if self.rotation.is_some() {
@@ -75,6 +80,7 @@ impl Keyframes {
         let stops = self.times.len();
         let lengths = [
             ("position", self.position.as_ref().map(Vec::len)),
+            ("offset", self.offset.as_ref().map(Vec::len)),
             ("rotation", self.rotation.as_ref().map(Vec::len)),
             ("scale", self.scale.as_ref().map(Vec::len)),
             ("opacity", self.opacity.as_ref().map(Vec::len)),
@@ -83,6 +89,9 @@ impl Keyframes {
         ];
         if lengths.iter().all(|(_, length)| length.is_none()) {
             return Err("keyframes() requires at least one channel".into());
+        }
+        if self.position.is_some() && self.offset.is_some() {
+            return Err("keyframes() takes position= or offset=, not both".into());
         }
         for (name, length) in lengths {
             if let Some(length) = length
@@ -101,6 +110,7 @@ impl Keyframes {
                 .all(|value| value.is_finite())
         };
         if !finite(&self.position)
+            || !finite(&self.offset)
             || !finite(&self.scale)
             || self
                 .rotation
@@ -151,7 +161,15 @@ impl Keyframes {
                     .collect::<Vec<_>>()
             })
         };
-        let position = filled(&self.position, start.transform.translation);
+        let origin = start.transform.translation;
+        let position = filled(&self.position, origin).or_else(|| {
+            self.offset.as_ref().map(|stops| {
+                stops
+                    .iter()
+                    .map(|value| origin + value.unwrap_or(DVec3::ZERO))
+                    .collect()
+            })
+        });
         let scale = filled(&self.scale, start.transform.scale);
         let turn = z_rotation(start.transform.rotation);
         let rotation = self.rotation.as_ref().map(|stops| {
@@ -648,6 +666,26 @@ mod tests {
             assert!(close(at(1.0).position.unwrap(), DVec3::new(4.0, 0.0, 0.0)));
             assert!(at(0.5).rotation.is_none());
         }
+    }
+
+    #[test]
+    fn offsets_move_from_where_the_clip_starts() {
+        let keyframes = Keyframes {
+            times: vec![0.0, 0.5, 1.0],
+            offset: Some(vec![None, Some(DVec3::new(3.0, 0.0, 0.0)), None]),
+            ..Default::default()
+        };
+        let animation = keyframes
+            .animation(&baseline(DVec3::new(0.0, 2.27, 0.0)))
+            .unwrap();
+        let at = |alpha| animation.evaluate(alpha).unwrap().position.unwrap();
+        assert!(close(at(0.5), DVec3::new(3.0, 2.27, 0.0)));
+        assert!(close(at(1.0), DVec3::new(0.0, 2.27, 0.0)));
+        let both = Keyframes {
+            position: Some(vec![None, None, None]),
+            ..keyframes
+        };
+        assert!(both.validate().unwrap_err().contains("not both"));
     }
 
     #[test]

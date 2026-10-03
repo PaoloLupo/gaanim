@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300" viewBox="-240 -150 480 300">
+  <!-- Every part sits under a transform or the offset view box: gradients,
+       clips and strokes must follow them. -->
+  <defs>
+    <radialGradient id="brillo"><stop offset="0" stop-color="#fde68a"/><stop offset="1" stop-color="#b45309"/></radialGradient>
+    <linearGradient id="franja" gradientUnits="userSpaceOnUse" x1="-60" y1="0" x2="60" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <clipPath id="ventana"><rect x="-30" y="-30" width="60" height="60" rx="10"/></clipPath>
+    <clipPath id="globo"><circle r="34"/></clipPath>
+  </defs>
+  <g id="medalla" transform="translate(-150 -40) scale(1.2)">
+    <circle r="50" fill="url(#brillo)"/>
+  </g>
+  <g id="cinta" transform="translate(-150 95) rotate(-12)">
+    <rect x="-60" y="-14" width="120" height="28" rx="6" fill="url(#franja)"/>
+  </g>
+  <g id="recorte" transform="translate(0 -40)" clip-path="url(#ventana)">
+    <circle r="45" fill="#34d399"/>
+    <circle r="18" fill="#065f46"/>
+  </g>
+  <circle id="anillo" cx="0" cy="90" r="36" fill="#1e293b" stroke="#f8fafc" stroke-width="14"/>
+  <g id="ojo" transform="translate(150 0)">
+    <circle r="34" fill="#f8fafc"/>
+    <circle id="pupila" r="14" fill="#1d4ed8"/>
+    <g id="parpado" clip-path="url(#globo)"><rect x="-40" y="-40" width="80" height="80" fill="#f59e0b"/></g>
+    <ellipse id="sombra" cy="44" rx="34" ry="8" fill="#000000" fill-opacity="0.35"/>
+  </g>
+</svg>

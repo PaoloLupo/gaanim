@@ -75,7 +75,7 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// Every data entry holds a Zstandard frame; `manifest.json` stays Deflate
 /// and media stays as authored. Version 1 (Gaanim 0.6.0) left compression
 /// to the archive; version 2 (up to Gaanim 0.8) had no shader transitions
-/// (`tables/transitions.bin`).
+/// (`tables/transitions.bin`) nor the opacity of each element's group.
 pub const VERSION: u32 = 3;
 /// Zstandard level of data entries, still fast to read. Level 17 made
 /// entries about 8% smaller and compressed nearly four times slower.

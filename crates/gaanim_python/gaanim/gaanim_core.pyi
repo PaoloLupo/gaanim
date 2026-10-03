@@ -2181,6 +2181,7 @@ class Anim:
         times: Sequence[float],
         *,
         position: Optional[Sequence[Optional[tuple[float, float] | tuple[float, float, float]]]] = None,
+        offset: Optional[Sequence[Optional[tuple[float, float] | tuple[float, float, float]]]] = None,
         rotation: Optional[Sequence[Optional[float]]] = None,
         scale: Optional[Sequence[Optional[float | tuple[float, float] | tuple[float, float, float]]]] = None,
         opacity: Optional[Sequence[Optional[float]]] = None,
@@ -2196,7 +2197,12 @@ class Anim:
         ``1`` and increase. Each channel gives one value per time; ``None``
         keeps the value the drawable has when the animation starts, so
         ``position=[None, (0, 2), (3, 0)]`` starts from wherever it is.
-        ``position`` is ``(x, y)`` or ``(x, y, z)``, ``rotation`` an absolute
+        ``position`` is ``(x, y)`` or ``(x, y, z)``: the drawable's origin,
+        not its visual center as in ``move_to``. They coincide for a shape
+        created at the origin, but not for an SVG or text drawn elsewhere.
+        ``offset`` takes displacements from where the clip starts instead
+        (``offset=[None, (3, 0), None]`` goes 3 to the right and back), and
+        excludes ``position``. ``rotation`` an absolute
         angle in radians, ``scale`` a factor or ``(sx, sy[, sz])``,
         ``opacity`` within ``[0, 1]``, ``fill``/``stroke`` paints (a ``None``
         first paint needs the drawable to have one).
@@ -3050,6 +3056,20 @@ class Drawable:
     def part(self, id: str) -> Drawable:
         """Return a named SVG part by unique name or canonical path."""
         ...
+    def copy(self) -> Drawable:
+        """An independent drawable declared like this one.
+
+        The copy has the same shape, style, effects and position, with
+        copies of its members and, for an imported SVG, of its named parts
+        (``copy.part("cabeza")`` is the copy's head). Animations and
+        updaters are not copied, and later changes to either drawable do
+        not reach the other. It draws above the drawables declared before
+        it. A ``Text`` copy is a ``Text``.
+
+        Example:
+            ghost = head.copy().opacity(0.3).shift(-0.4, 0)
+        """
+        ...
 
     def parts(self) -> tuple[str, ...]: ...
     def animations(self) -> tuple[str, ...]:
@@ -3228,7 +3248,12 @@ class Drawable:
         """Apply shadow to this drawable and return the result.
 
         The shadow is ``color`` blurred by ``blur`` scene units and offset by
-        ``(x, y)``; the color's alpha scales its opacity continuously.
+        ``(x, y)``; the color's alpha scales its opacity continuously. On a
+        text or group, a blurred shadow is drawn once from the silhouette of
+        its filled members, beneath all of them, like CSS ``drop-shadow`` on
+        a group: overlaps do not darken and the cost does not grow with each
+        glyph. Members that are clipped, blended or only stroked cast their
+        own.
 
         Example:
             result = drawable.shadow(BLUE)
@@ -3394,7 +3419,9 @@ class Drawable:
         state: it applies for the whole timeline. Lottie and video frames are
         not copied.
 
-        By default the copies catch up with the drawable when it stops. With
+        By default the copies catch up with the drawable when it stops, and
+        a copy that draws exactly what the drawable draws is not drawn, so
+        translucent parts at rest do not stack. With
         ``hold=True`` they are delayed along its motion instead of the clock:
         when its animations stop, the copies freeze where they were (an onion
         skin of ``count`` frozen poses) and move on when it moves again.
@@ -4257,7 +4284,7 @@ class TextFlow:
         *,
         wrap: TextWrap = "auto",
         align: TextAlign = "left",
-        line_spacing: float = 1.2,
+        line_spacing: float = 1.0,
         max_lines: Optional[int] = None,
         overflow: TextOverflow = "clip",
         direction: TextDirection = "auto",
@@ -4276,6 +4303,8 @@ class TextFlow:
 
         ``line_spacing`` is the distance between baselines in multiples of the
         font size, like CSS ``line-height``: 1.2 puts them 1.2 sizes apart.
+        The default 1.0 puts them one size apart, tight but without overlap;
+        raise it for long paragraphs.
 
         ``text_box`` is the box a layout measures and places the text by, like
         CSS ``text-box``: ``"line"`` spans full lines (ascent to descent),
@@ -4575,6 +4604,13 @@ class TextAnimatorAnimation:
 
 class Text(Drawable):
     """Structured, layout-measurable vector text and mathematics."""
+    def copy(self) -> Text:
+        """An independent copy of the text, still a ``Text``; see ``Drawable.copy``.
+
+        Example:
+            shadow = title.copy().fill(BLACK).opacity(0.3).shift_by(0.05, -0.05)
+        """
+        ...
     def glow(self, color: ColorLike, radius: float = 0.16, intensity: float = 1.0) -> Self:
         """Apply glow while preserving Text chaining and typographic placement.
 

@@ -15288,12 +15288,20 @@ mod tests {
         for time in [1.5, 0.35, 0.95, 0.25, 2.0, 0.6, 1.5] {
             timeline.seek(&mut world, time);
             for &(copy, lag) in &copies {
+                let expected = position_at(time - lag);
+                // A copy that caught up with the resting drawable is hidden.
+                if (expected - position_at(time)).length() < 1e-9 {
+                    assert!(
+                        world.get::<gaanim_scene::Visible>(copy).is_none(),
+                        "copy {lag} shown at rest at {time}"
+                    );
+                    continue;
+                }
                 assert!(
                     world.get::<gaanim_scene::Visible>(copy).is_some(),
                     "copy {lag} hidden at {time}"
                 );
                 let actual = world.get::<SpatialTransform>(copy).unwrap().translation;
-                let expected = position_at(time - lag);
                 assert!(
                     (actual - expected).length() < 1e-9,
                     "copy {lag} at {time}: {actual:?}, expected {expected:?}"
@@ -15772,10 +15780,15 @@ mod tests {
                 })
                 .collect();
             timeline.seek(&mut world, time);
+            let now = transform_of(&mut world, &ball).translation.x;
             for ((copy, echo), expected) in copies.iter().zip(expected) {
                 let visible = world.get::<gaanim_scene::Visible>(*copy).is_some();
                 match expected {
                     None => assert!(!visible, "copy {} at {time}", echo.rank),
+                    // A copy that caught up with the resting ball is hidden.
+                    Some(x) if (x - now).abs() < 1e-9 => {
+                        assert!(!visible, "copy {} at rest at {time}", echo.rank);
+                    }
                     Some(x) => {
                         assert!(visible, "copy {} at {time}", echo.rank);
                         let actual = world.get::<SpatialTransform>(*copy).unwrap().translation.x;

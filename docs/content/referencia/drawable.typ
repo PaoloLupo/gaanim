@@ -166,7 +166,7 @@ scene.render()
   name: "Drawable.opacity",
   kind: "method",
   params: ((name: "op", type: "float | Parameter | Variable | Computed | TimeInput", default: none, desc: [Opacidad de 0 a 1, o una fuente reactiva.]),),
-  desc: [La opacidad se multiplica por la jerarquía: la de un grupo escala la de sus miembros sin cambiar sus valores propios. Con una fuente reactiva el canal queda vinculado desde el cursor; un número termina el vínculo con un corte reversible. Mientras esté vinculado, anima la fuente: animar el canal directamente lanza un error.],
+  desc: [La opacidad se multiplica por la jerarquía: la de un grupo escala la de sus miembros sin cambiar sus valores propios. Un grupo o un SVG translúcido se compone como una sola capa, como `opacity` en CSS: al fundirlo, lo que una pieza tapa sigue tapado (los ojos no asoman bajo los párpados) y las piezas translúcidas no se marcan más. Con una fuente reactiva el canal queda vinculado desde el cursor; un número termina el vínculo con un corte reversible. Mientras esté vinculado, anima la fuente: animar el canal directamente lanza un error.],
 )[
 ```python
 >>>from gaanim import *
@@ -388,6 +388,21 @@ scene.render()
   none,
 )
 
+#api-entry(
+  name: "Drawable.copy",
+  kind: "method",
+  returns: (type: "Drawable", desc: [Un objeto nuevo e independiente; la copia de un `Text` es un `Text`.]),
+  desc: [Copia el objeto tal como está declarado: forma, estilo, efectos y posición, con copias de sus miembros y, en un SVG importado, de sus partes con nombre (`copia.part("cabeza")` es la cabeza de la copia). No copia animaciones ni updaters, y los cambios posteriores de uno no llegan al otro. La copia se dibuja encima de lo declarado antes. Sirve para fantasmas o reflejos de un personaje sin importar el SVG varias veces.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+robot = scene.media.svg("assets/robot.svg").scale_to(2)
+ghost = robot.copy().opacity(0.3).shift_by(-1.5, 0)
+ghost.part("head").fill(GOLD)
+```
+]
+
 == Posición relativa
 
 Coloca un objeto libre respecto a otro o a los bordes del área segura. Los hijos
@@ -548,7 +563,7 @@ blob = scene.geometry.circle(2).fill("#1E3A8A").blur(0.15)
   name: "Drawable.shadow",
   kind: "method",
   params: ((name: "color", type: "Color", default: none, desc: [Color de la sombra; su alfa escala la opacidad.]), (name: "x / y", type: "float", default: "0.08 / -0.08", desc: [Desplazamiento en unidades de escena.]), (name: "blur", type: "float", default: "0.06", desc: [Desenfoque en unidades de escena.])),
-  desc: [Sombra proyectada desplazada y desenfocada.],
+  desc: [Sombra proyectada desplazada y desenfocada. En un texto o un grupo, una sombra desenfocada se dibuja una sola vez a partir de la silueta de sus miembros rellenos y debajo de todos, como `drop-shadow` de CSS sobre un grupo: los solapes no se oscurecen y el coste no crece con cada glifo. Los miembros recortados, con mezcla o solo con trazo proyectan la suya.],
 )[
 ```python
 >>>from gaanim import *
@@ -608,7 +623,7 @@ scene.render()
     (name: "count", type: "int", default: "5", desc: [Copias, de 1 a 32; `0` quita el eco.]),
     (name: "delay", type: "float", default: "0.04", desc: [Segundos entre copias; positivo.]),
     (name: "decay", type: "float", default: "0.6", desc: [Opacidad de cada copia respecto a la anterior, en `(0, 1]`.]),
-    (name: "hold", type: "bool", default: "False", desc: [Con `True` las copias se retrasan a lo largo del movimiento y no del reloj: cuando el objeto se detiene, quedan congeladas donde estaban (papel cebolla) y siguen cuando vuelve a moverse. Sin él, alcanzan al objeto al detenerse.]),
+    (name: "hold", type: "bool", default: "False", desc: [Con `True` las copias se retrasan a lo largo del movimiento y no del reloj: cuando el objeto se detiene, quedan congeladas donde estaban (papel cebolla) y siguen cuando vuelve a moverse. Sin él, alcanzan al objeto al detenerse y dejan de dibujarse: una copia que coincide con el objeto no se apila sobre él, así que un objeto translúcido en reposo se ve igual que sin eco.]),
   ),
   desc: [Copias que siguen al objeto en el tiempo, como el efecto Echo de After Effects: la copia `k` lo muestra como estaba hace `k * delay` segundos, con `decay ** k` de su opacidad y debajo de él. Cada copia repite las animaciones del propio objeto (`animate`, `create`, fundidos, color y forma) con ese retraso, así que es exacta en cualquier búsqueda y en todas las exportaciones, SVG incluido. Se ocultan mientras el objeto está oculto y no cruzan un corte de segmento. No retrasan el movimiento de los _updaters_, de las posiciones reactivas ni de un grupo padre que se mueve, ni copian Lottie o vídeo. En un `Text`, cada glifo repite sus propias animaciones. Se declara una vez y vale para toda la línea de tiempo.],
 )[

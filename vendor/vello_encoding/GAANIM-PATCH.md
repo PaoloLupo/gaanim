@@ -46,6 +46,13 @@ frame are enough, because `tile_alloc` allocates every tile of each path's box.
   `tiles` to the tiles those boxes cover in the viewport and reserves the
   per-tile command-list space of large viewports. Scenes that fit the upstream
   sizes keep them. The walk costs about 4 ns per path tag.
+- The same walk estimates the lines `flatten` makes of every segment
+  (Wang's bound at Vello's 0.25 px tolerance, doubled for strokes) and the
+  tile segments those lines cross. `RenderConfig::new` sizes `lines`,
+  `seg_counts` and `segments` from it, so a frame of many curves (dozens of
+  formulas, roughened chalk outlines) no longer exceeds the upstream 2M
+  lines. This mattered most in the preview, which, unlike the exporter,
+  cannot see that a frame was skipped and retry it.
 - `set_bump_buffer_scale` multiplies every bump buffer and
   `set_max_bump_buffer_bytes` caps each one (default 128 MiB, wgpu's default
   `max_storage_buffer_binding_size`). Both are per thread, so the exporter
@@ -56,7 +63,8 @@ frame are enough, because `tile_alloc` allocates every tile of each path's box.
 Regression checks:
 
 - `cargo test -p vello_encoding --lib`: `buffer_budget` tests for path
-  bounds, tile sizing, unchanged small scenes, and per-thread scale/limits.
+  bounds, tile sizing, line sizing for many curves, unchanged small scenes,
+  and per-thread scale/limits.
 - `just test-package gaanim_export --lib gpu::`: 600 frame-spanning paths
   render without a retry; 1000 frame-sized translucent layers render after
   one.

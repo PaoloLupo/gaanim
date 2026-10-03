@@ -26,8 +26,11 @@ cover = scene.media.image("cover.png")
 pulse = scene.media.lottie("pulse.json")
 ```
 
-Una ruta relativa se resuelve desde la carpeta de recursos de la escena; sin
-ella, desde el directorio de trabajo del proceso. Una ruta absoluta se usa tal
+Una ruta relativa se resuelve desde la carpeta de recursos de la escena. Sin
+ella, se busca en el directorio de trabajo del proceso, después en la carpeta
+`assets/` junto al script que creó la escena y por último en la carpeta del
+script, así que `scene.media.svg("logo.svg")` encuentra `assets/logo.svg` sin
+configurar nada. Una ruta absoluta se usa tal
 cual. Todas las fábricas usan archivos locales: no descargan URLs ni aceptan
 bytes o arrays.
 

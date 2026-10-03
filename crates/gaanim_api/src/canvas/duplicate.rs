@@ -1,6 +1,8 @@
 //! Repeaters and duplicators: copies of a drawable placed by a cumulative
 //! transform or a distribution, gathered in one group.
 
+use std::collections::HashMap;
+
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec2;
 
@@ -413,6 +415,16 @@ impl SceneModel {
 /// A new drawable declared like `spec`, with copies of its members, in the
 /// scene `state` belongs to.
 pub(crate) fn clone_spec_in(state: &SharedCanvasState, spec: &ObjectSpec) -> DrawableHandle {
+    clone_spec_recording(state, spec, &mut HashMap::new())
+}
+
+/// [`clone_spec_in`], recording the copy of every drawable it copies by the
+/// original's id.
+pub(crate) fn clone_spec_recording(
+    state: &SharedCanvasState,
+    spec: &ObjectSpec,
+    copies: &mut HashMap<ObjectId, DrawableHandle>,
+) -> DrawableHandle {
     let mut members = Vec::new();
     let kind = match &spec.kind {
         SpawnKind::Group(ids) | SpawnKind::GroupNoCenter(ids) => {
@@ -425,7 +437,7 @@ pub(crate) fn clone_spec_in(state: &SharedCanvasState, spec: &ObjectSpec) -> Dra
                     .cloned();
                 if let Some(member) = member {
                     let member_spec = member.lock().expect("object spec poisoned").clone();
-                    members.push(clone_spec_in(state, &member_spec));
+                    members.push(clone_spec_recording(state, &member_spec, copies));
                 }
             }
             let ids: Vec<ObjectId> = members.iter().map(|member| member.id).collect();
@@ -447,6 +459,7 @@ pub(crate) fn clone_spec_in(state: &SharedCanvasState, spec: &ObjectSpec) -> Dra
         // The copy is placed explicitly, not by the source's layout.
         target.layout_owner = None;
     }
+    copies.insert(spec.id, handle.clone());
     if members.is_empty() {
         handle
     } else {

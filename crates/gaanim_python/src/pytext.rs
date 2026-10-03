@@ -216,7 +216,7 @@ pub struct PyTextFlow(pub TextFlow);
 #[pymethods]
 impl PyTextFlow {
     #[new]
-    #[pyo3(signature = (*, wrap=None, align="left", line_spacing=1.2, max_lines=None, overflow="clip", direction="auto", hyphenate=false, lang=None, text_box="line"))]
+    #[pyo3(signature = (*, wrap=None, align="left", line_spacing=1.0, max_lines=None, overflow="clip", direction="auto", hyphenate=false, lang=None, text_box="line"))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         wrap: Option<&Bound<'_, PyAny>>,
@@ -1182,6 +1182,20 @@ impl PyText {
     #[getter]
     fn content(&self) -> String {
         self.content_text()
+    }
+
+    /// An independent copy of the text, still a `Text`.
+    fn copy(&self, py: Python<'_>) -> PyResult<Py<Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self.handle.copy();
+        Py::new(
+            py,
+            PyClassInitializer::from(PyDrawable(handle.clone())).add_subclass(Self {
+                handle,
+                spec: self.spec.clone(),
+                derive_align: self.derive_align,
+            }),
+        )
     }
 
     /// Apply a fill while preserving the specialized Text handle.

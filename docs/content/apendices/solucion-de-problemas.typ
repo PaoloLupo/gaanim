@@ -36,7 +36,8 @@ están explicados en la sección de problemas de
   `scene.text.equation`… La tabla de equivalencias está en
   #link("/apendices/novedades/")[Novedades].
 - *No se encuentra una imagen, un SVG o un modelo:* las rutas relativas se
-  resuelven desde el directorio de trabajo salvo que cargues el proyecto con
+  buscan en el directorio de trabajo, en la carpeta `assets/` del script y en
+  la carpeta del script, salvo que cargues el proyecto con
   `scene.assets.load_project()` (busca el `gaanim.toml` más cercano, desde la
   carpeta del script hacia arriba) o fijes
   una carpeta absoluta con

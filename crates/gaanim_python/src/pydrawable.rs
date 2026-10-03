@@ -3147,6 +3147,12 @@ impl PyDrawable {
         same_drawable(slf, result)
     }
 
+    /// An independent copy declared like this drawable; see `gaanim_core.pyi`.
+    fn copy(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.copy()))
+    }
+
     fn parts(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(PyTuple::new(py, self.0.parts())?.unbind())

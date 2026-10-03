@@ -904,6 +904,63 @@ impl DrawableHandle {
         }
     }
 
+    /// An independent drawable declared like this one: its shape, style,
+    /// effects and placement, with copies of its members and, for an
+    /// imported SVG, of its named parts. Animations and updaters are not
+    /// copied. The copy draws above the drawables declared before it.
+    pub fn copy(&self) -> DrawableHandle {
+        let spec = self.spec.lock().expect("object spec poisoned").clone();
+        let mut copies = HashMap::new();
+        let copy = super::duplicate::clone_spec_recording(&self.state, &spec, &mut copies);
+        // Clips are operations, not declaration: clip the copies by the
+        // copies of their masks (an SVG clip path is a member).
+        {
+            let mut state = self.state.lock().expect("canvas state poisoned");
+            let clips: Vec<Op> = state
+                .segments
+                .iter()
+                .flat_map(|segment| &segment.ops)
+                .filter_map(|op| match op {
+                    Op::SetClip {
+                        target,
+                        mask,
+                        rule,
+                        invert,
+                    } => Some(Op::SetClip {
+                        target: copies.get(target)?.id,
+                        mask: mask.map(|mask| copies.get(&mask).map_or(mask, |copy| copy.id)),
+                        rule: *rule,
+                        invert: *invert,
+                    }),
+                    _ => None,
+                })
+                .collect();
+            state.active_mut().ops.extend(clips);
+        }
+        let Some(parts) = &self.named_parts else {
+            return copy;
+        };
+        // Members of the copy still name the original SVG as their owner.
+        for member in copies.values() {
+            let mut member = member.spec.lock().expect("object spec poisoned");
+            if member.svg_owner == Some(self.id) {
+                member.svg_owner = Some(copy.id);
+            }
+        }
+        let parts = parts
+            .iter()
+            .filter_map(|(name, part)| {
+                let part = if part.id == self.id {
+                    copy.clone()
+                } else {
+                    copies.get(&part.id)?.clone()
+                };
+                Some((name.clone(), part))
+            })
+            .collect();
+        copy.with_svg_parts(parts)
+    }
+
     /// Resolve a named source group or path from an imported SVG.
     pub fn part(&self, id: &str) -> Result<DrawableHandle, SvgPartError> {
         let Some(parts) = &self.named_parts else {

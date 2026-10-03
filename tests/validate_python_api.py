@@ -2117,6 +2117,30 @@ def validate_audio_signals_contract(module):
     return failures
 
 
+def validate_copy_and_offset_contract(module):
+    failures = []
+    assets = Path(__file__).resolve().parent.parent / "docs/fixtures/assets"
+    scene = module.Scene(frame=(16, 9))
+    robot = scene.media.svg(str(assets / "robot.svg"))
+    copy = robot.copy()
+    if copy.parts() != robot.parts():
+        failures.append("Drawable.copy lost the SVG parts")
+    head = robot.part("head").bounds().center
+    copy.part("head").shift_by(1, 0)
+    if robot.part("head").bounds().center != head:
+        failures.append("Drawable.copy shares parts with the original")
+    if not isinstance(scene.text("a").copy(), module.Text):
+        failures.append("Text.copy is not a Text")
+    dot = scene.geometry.circle(0.2)
+    dot.animate.keyframes([0, 0.5, 1], offset=[None, (1, 0), None])
+    if not raises_error(ValueError, lambda: dot.animate.keyframes(
+            [0, 1], position=[None, (1, 0)], offset=[None, (1, 0)])):
+        failures.append("keyframes accepted position and offset together")
+    if "#h(0pt)" not in module.quantity(1600, "kg/m^3"):
+        failures.append("quantity leaves a gap around the unit slash")
+    return failures
+
+
 def raises_error(expected, operation):
     try:
         operation()
@@ -2835,6 +2859,7 @@ def main() -> int:
     missing.extend(validate_reactive_fill_level_contract(module))
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_audio_signals_contract(module))
+    missing.extend(validate_copy_and_offset_contract(module))
     missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))

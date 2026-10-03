@@ -68,6 +68,51 @@ pub(crate) struct FragmentParts<'a> {
 }
 
 /// The recipe of a drawable's components.
+/// A blurred drop shadow of a filled vector region, cast by a member of a
+/// group. The composition draws it once for a run of members that share
+/// it, from the union of their outlines, instead of once per member: one
+/// blur instead of a pair of layers per glyph of a text, and one silhouette
+/// whose overlaps do not darken.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupShadow {
+    pub shadow: DropShadow,
+    /// Outline casting the shadow, in the member's local coordinates.
+    pub path: Arc<kurbo::BezPath>,
+}
+
+/// The [`GroupShadow`] of a fragment with these parts, when `shareable` (a
+/// group member drawn plainly: no clip, blend or screen) and its shadow is
+/// a blurred one cast by a visible filled outline.
+pub(crate) fn group_shadow(parts: &FragmentParts<'_>, shareable: bool) -> Option<GroupShadow> {
+    let shadow = parts
+        .shadow
+        .filter(|shadow| shareable && shadow.blur_radius.is_finite() && shadow.blur_radius > 0.0)?;
+    if parts.raster.is_some_and(|raster| raster.image.is_some())
+        || parts.lottie
+        || parts.fill.and_then(|fill| fill.0.as_ref()).is_none()
+    {
+        return None;
+    }
+    if parts
+        .tip_glow
+        .is_some_and(|tip| tip.completion <= f64::EPSILON)
+    {
+        return None;
+    }
+    let path = &parts.path?.0;
+    if path.elements().is_empty() {
+        return None;
+    }
+    // A closed outline being drawn casts the shadow of its stroke.
+    let trimmed_closed = parts.source.is_some_and(|source| {
+        *source.0 != **path && source.0.elements().contains(&kurbo::PathEl::ClosePath)
+    });
+    (!trimmed_closed).then(|| GroupShadow {
+        shadow: shadow.clone(),
+        path: Arc::clone(path),
+    })
+}
+
 pub(crate) fn fragment_recipe(parts: FragmentParts<'_>) -> FragmentRecipe {
     FragmentRecipe {
         path: parts.path.map(|path| Arc::clone(&path.0)),
