@@ -2659,7 +2659,9 @@ impl Timeline {
             if let Some(mut opacity) = world.get_mut::<Opacity>(ghost) {
                 opacity.0 *= echo.opacity;
             }
-            // A follower's clips do not move it: rebuild its position then.
+            // A follower's clips do not move it: rebuild its position then,
+            // and now, to compare the two.
+            let mut source_position = None;
             if entity_map
                 .get(&echo.source)
                 .is_some_and(|&source| follows_binding(world, source))
@@ -2681,9 +2683,16 @@ impl Timeline {
                         transform.translation = position;
                     }
                 }
+                source_position = self
+                    .delayed_world_matrix(world, &context, echo.source, self.current_time, 0)
+                    .map(|matrix| {
+                        let world_position =
+                            matrix.transform_point3(gaanim_core::glam::DVec3::ZERO);
+                        parent_local_point(world, ghost, world_position)
+                    });
             }
             if let Some(source) = source_entity {
-                let same = echo_matches_source(world, ghost, source, echo.opacity);
+                let same = echo_matches_source(world, ghost, source, echo.opacity, source_position);
                 coinciding.insert(ghost, (same, echo.parent));
             }
         }
@@ -4964,11 +4973,28 @@ fn morph_fit_affine(
 /// Whether the echo copy `ghost` draws what `source` draws: the same
 /// transform, path and opacity (`echo_opacity` aside). A copy that caught
 /// up with a resting source would only stack its translucent parts.
-fn echo_matches_source(world: &World, ghost: Entity, source: Entity, echo_opacity: f32) -> bool {
+///
+/// `source_position` replaces the source's translation for a follower, whose
+/// binding, not its transform, places it.
+fn echo_matches_source(
+    world: &World,
+    ghost: Entity,
+    source: Entity,
+    echo_opacity: f32,
+    source_position: Option<gaanim_core::glam::DVec3>,
+) -> bool {
     let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * (1.0 + a.abs().max(b.abs()));
     let same_transform = match (
         world.get::<SpatialTransform>(ghost),
-        world.get::<SpatialTransform>(source),
+        world
+            .get::<SpatialTransform>(source)
+            .copied()
+            .map(|mut transform| {
+                if let Some(position) = source_position {
+                    transform.translation = position;
+                }
+                transform
+            }),
     ) {
         (Some(a), Some(b)) => {
             let vectors = [

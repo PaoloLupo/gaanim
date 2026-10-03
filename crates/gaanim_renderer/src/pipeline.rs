@@ -1340,7 +1340,7 @@ fn append_camera_view(
 /// frame `rect`, but a camera that pans or zooms out past the frame still
 /// sees it, with the paint's edges extended, instead of a bare strip.
 fn background_cover(rect: kurbo::Rect) -> kurbo::Rect {
-    let reach = 64.0 * rect.width().max(rect.height());
+    let reach = 4.0 * rect.width().max(rect.height());
     rect.inflate(reach, reach)
 }
 

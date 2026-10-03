@@ -10,13 +10,16 @@
       <stop offset=".55" stop-color="#173b69"/>
       <stop offset="1" stop-color="#341c59"/>
     </linearGradient>
-    <radialGradient id="orb-gradient" gradientUnits="userSpaceOnUse" cx="108" cy="110" r="44" fx="94" fy="96">
+    <linearGradient id="card-panel" href="#panel" x1="-150" y1="-82" x2="150" y2="82"/>
+    <radialGradient id="orb-gradient" gradientUnits="userSpaceOnUse" cx="-72" cy="0" r="44" fx="-86" fy="-14">
       <stop offset="0" stop-color="#fff7c2"/>
       <stop offset=".55" stop-color="#f9c74f"/>
       <stop offset="1" stop-color="#f97316"/>
     </radialGradient>
+    <!-- The clip and the card's gradients are in the user space of the
+         card, which its transform translates. -->
     <clipPath id="rounded-card">
-      <rect x="30" y="28" width="300" height="164" rx="22"/>
+      <rect x="-150" y="-82" width="300" height="164" rx="22"/>
     </clipPath>
     <filter id="soft-shadow">
       <feDropShadow dx="0" dy="8" stdDeviation="7" flood-color="#020617" flood-opacity=".65"/>
@@ -26,7 +29,7 @@
     <rect class="frame" x="30" y="28" width="300" height="164" rx="22"/>
   </g>
   <g id="card" clip-path="url(#rounded-card)" transform="translate(180 110)">
-    <rect class="frame" x="-150" y="-82" width="300" height="164" rx="22"/>
+    <rect class="frame" x="-150" y="-82" width="300" height="164" rx="22" style="fill: url(#card-panel)"/>
     <circle id="orb" cx="-72" cy="0" r="40" fill="url(#orb-gradient)" stroke="#ffffff" stroke-width="4"/>
     <path id="play" fill="#48cae4" stroke="#ffffff" stroke-width="4" d="M-18,-38 L72,0 L-18,38 Z"/>
     <g id="spark-top" transform="translate(106 -50) scale(.56)" opacity=".92">
