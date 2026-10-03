@@ -90,6 +90,9 @@ pub enum FalloffExpr {
         /// How fast the field drifts, in noise units per second.
         speed: f64,
     },
+    /// A function of the time alone, the same for every instance, such as
+    /// an audio signal.
+    Source(crate::ScalarSource),
     /// Maps `[0, 1]` to `[low, high]`.
     Remap {
         input: Box<FalloffExpr>,
@@ -165,6 +168,7 @@ impl FalloffExpr {
                 );
                 0.5 + 0.5 * sample
             }
+            Self::Source(source) => source.evaluate(input.time, |_| None).unwrap_or(0.0),
             Self::Remap {
                 input: inner,
                 low,
@@ -196,7 +200,7 @@ impl FalloffExpr {
                 a.resolve_targets(resolve);
                 b.resolve_targets(resolve);
             }
-            Self::Constant(_) | Self::Index { .. } | Self::Noise { .. } => {}
+            Self::Constant(_) | Self::Index { .. } | Self::Noise { .. } | Self::Source(_) => {}
         }
     }
 
@@ -217,7 +221,7 @@ impl FalloffExpr {
                 a.objects(out);
                 b.objects(out);
             }
-            Self::Constant(_) | Self::Index { .. } | Self::Noise { .. } => {}
+            Self::Constant(_) | Self::Index { .. } | Self::Noise { .. } | Self::Source(_) => {}
         }
     }
 }

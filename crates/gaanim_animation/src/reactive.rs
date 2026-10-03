@@ -151,6 +151,18 @@ impl ReactiveFunction {
         self
     }
 
+    /// [`Self::with_recipe`] for a recipe that can change after the function
+    /// is built, e.g. once an audio clip is played; `recipe` returns `None`
+    /// while the callback cannot be described.
+    #[doc(hidden)]
+    pub fn with_recipe_fn(
+        mut self,
+        recipe: impl Fn() -> Option<Arc<str>> + Send + Sync + 'static,
+    ) -> Self {
+        self.recipe = Some(Recipe(Arc::new(recipe)));
+        self
+    }
+
     pub fn coordinate_arity(&self) -> usize {
         self.coordinate_arity
     }

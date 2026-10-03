@@ -156,6 +156,103 @@ Con `video.segment(start=..., end=...)`, cada fragmento genera una pista finita:
 las pausas entre fragmentos son silenciosas aunque el último fotograma siga
 visible, y `speed` conserva el tono. Consulta #link("/referencia/medios/")[Medios].
 
+== Audio que anima la escena
+
+Los datos de una pista animan cualquier cosa. `level`, `band` y `pulse`
+devuelven un `Computed` del tiempo, entre 0 y 1, que se usa donde se acepta
+un número reactivo:
+- `scale_to`, `opacity`, `move_to` y `rotate_to`;
+- la cámara (`bind_2d`) y los uniforms de los shaders;
+- `computed`, `scene.viz.readout` y `fill_level`;
+- `Updater.rotate` y `Updater.wiggle`;
+- los colores, con `Falloff.source` y `drive("fill", ...)`.
+
+El archivo se analiza una sola vez: los WAV directamente y los demás formatos
+con FFmpeg. Cada señal consulta ese análisis donde suena la pista, según su
+inicio, así que un salto en la línea de tiempo o una exportación leen lo
+mismo que la reproducción. Antes de que la pista suene y después de que
+termine, las señales valen 0.
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+musica = scene.media.audio("assets/ritmo.ogg")
+bajo = musica.band(20, 150, smoothing=0.5)
+golpe = musica.pulse(decay=0.12)
+
+logo = scene.geometry.star(5, 1, 0.45).fill(GOLD)
+logo.scale_to(computed(lambda b: 0.8 + 0.5 * b, inputs=[bajo]))
+logo.add_updater(Updater.wiggle(position=computed(lambda p: 0.15 * p, inputs=[golpe])))
+puntos = scene.geometry.group([scene.geometry.circle(0.2).move_to(x, -2) for x in range(-3, 4)])
+puntos.drive("fill", Falloff.source(bajo).gradient(BLUE, GOLD))
+
+scene.play(musica)
+scene.wait(musica.duration)
+scene.render()
+```
+
+`scene.play(musica)` sin `duration` no alarga el lote: `scene.wait(musica.duration)`
+mantiene la escena mientras suena. El ejemplo completo está en
+`examples/audio_reactive.py`.
+
+#api-entry(
+  name: "Audio.level",
+  kind: "method",
+  params: ((name: "smoothing", type: "float", default: "0.0", desc: [En `[0, 1)`: cada cuadro conserva esa parte del anterior, así que cerca de 1 cambia despacio.]),),
+  returns: (type: "Computed", desc: [El volumen donde suena la pista: 0 en silencio, 1 en su parte fuerte.]),
+  desc: [Envolvente de volumen (RMS), normalizada al percentil 99 del archivo para que unos pocos picos no aplasten el resto. Un `smoothing` fuera de rango lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Audio.band",
+  kind: "method",
+  params: ((name: "low / high", type: "float", default: none, desc: [Banda de frecuencias en Hz: `band(20, 150)` sigue el bajo y `band(2000, 8000)`, los platillos y las sibilantes.]), (name: "smoothing", type: "float", default: "0.0", desc: [Como en `level`.])),
+  returns: (type: "Computed", desc: [La amplitud de la banda, de 0 a 1, cada banda respecto a su propia parte fuerte.]),
+  desc: [El análisis llega hasta 11 kHz. Una banda con `low >= high`, negativa o por encima de ese rango lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Audio.pulse",
+  kind: "method",
+  params: ((name: "decay", type: "float", default: "0.15", desc: [Segundos en que el pulso cae a un tercio.]),),
+  returns: (type: "Computed", desc: [1 en cada golpe y bajando hasta 0.]),
+  desc: [La forma más directa de reaccionar al ritmo: `scale_to(computed(lambda p: 1 + 0.2 * p, inputs=[musica.pulse()]))`. Un golpe es un *onset*: donde empieza un sonido (un bombo, una nota, una sílaba). Un `decay` no positivo lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Audio.beats",
+  kind: "method",
+  returns: (type: "list[float]", desc: [Segundos desde el inicio de la pista en que empieza un sonido, en orden.]),
+  desc: [Son onsets, no una rejilla de tempo; para una rejilla regular usa `scene.tempo`. Suma `musica.start` cuando la pista ya sonó para obtener segundos de la línea de tiempo, por ejemplo para colocar marcas o animaciones en cada golpe.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>musica = scene.media.audio("assets/ritmo.ogg")
+scene.play(musica)
+golpes = [musica.start + t for t in musica.beats()]
+```
+]
+
+#api-entry(
+  name: "Audio.start / duration",
+  kind: "property",
+  desc: [`start` es el segundo de la línea de tiempo en que la pista empezó a sonar por última vez, o `None` antes de reproducirla. `duration` son los segundos que suena: su `duration`, o el archivo entero.],
+  none,
+)
+
+#api-entry(
+  name: "Falloff.source",
+  kind: "factory",
+  params: ((name: "value", type: "Computed", default: none, desc: [Un `Computed` que depende solo del tiempo: una señal de audio, `scene.noise` o `scene.time`.]),),
+  returns: (type: "Falloff", desc: [Su valor, el mismo para todos los miembros.]),
+  desc: [Lleva las señales de audio a `drive`, que es como cambian los colores: `drive("fill", Falloff.source(bajo).gradient(BLUE, GOLD))`. Un `Computed` que lee un `Parameter` lanza `ValueError`. Ver #link("/referencia/animations/")[Animaciones].],
+  none,
+)
+
 == Narración
 
 Gaanim graba tu voz sin salir del editor y la sincroniza con la escena, sin

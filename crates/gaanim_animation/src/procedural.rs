@@ -128,6 +128,51 @@ pub enum LayerParam {
         /// The signal's values from the layer's start, for integrals.
         track: Option<Arc<SignalTrack>>,
     },
+    /// A function of the scene time alone, such as an audio signal.
+    Source(Arc<SourceParam>),
+}
+
+/// A time-only [`ScalarSource`] with its running integral, tabulated from
+/// scene second 0 at a fixed step so every frame and seek integrates alike.
+#[derive(Debug)]
+pub struct SourceParam {
+    source: crate::ScalarSource,
+    /// `∫₀^(i·STEP) value dt` for each `i` computed so far.
+    sums: std::sync::Mutex<Vec<f64>>,
+}
+
+impl SourceParam {
+    const STEP: f64 = 1.0 / 240.0;
+    /// Integrals reach at most this many seconds (an hour).
+    const LIMIT: f64 = 3600.0;
+
+    /// `source` must not read parameters: only the time drives it.
+    pub fn new(source: crate::ScalarSource) -> Self {
+        Self {
+            source,
+            sums: std::sync::Mutex::new(vec![0.0]),
+        }
+    }
+
+    pub fn value(&self, time: f64) -> f64 {
+        self.source.evaluate(time, |_| None).unwrap_or(0.0)
+    }
+
+    /// `∫₀^time value dt`, by the trapezoid rule on the table.
+    fn cumulative(&self, time: f64) -> f64 {
+        let time = time.clamp(0.0, Self::LIMIT);
+        let position = time / Self::STEP;
+        let index = position.floor() as usize;
+        let mut sums = self.sums.lock().expect("source integral poisoned");
+        while sums.len() <= index + 1 {
+            let i = sums.len();
+            let (a, b) = ((i - 1) as f64 * Self::STEP, i as f64 * Self::STEP);
+            let next = sums[i - 1] + (self.value(a) + self.value(b)) * 0.5 * Self::STEP;
+            sums.push(next);
+        }
+        let fraction = position - index as f64;
+        sums[index] + (sums[index + 1] - sums[index]) * fraction
+    }
 }
 
 impl PartialEq for LayerParam {
@@ -154,6 +199,7 @@ impl PartialEq for LayerParam {
                         _ => false,
                     }
             }
+            (Self::Source(a), Self::Source(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -178,7 +224,7 @@ impl LayerParam {
     pub fn fixed(&self) -> Option<f64> {
         match self {
             Self::Fixed(value) => Some(*value),
-            Self::Signal { .. } => None,
+            Self::Signal { .. } | Self::Source(_) => None,
         }
     }
 
@@ -190,6 +236,7 @@ impl LayerParam {
                 .and_then(live)
                 .or_else(|| track.as_ref().map(|track| track.value_at(time)))
                 .unwrap_or(0.0),
+            Self::Source(source) => source.value(time),
         }
     }
 
@@ -201,6 +248,7 @@ impl LayerParam {
                 track: Some(track), ..
             } => track.integral(from, to),
             Self::Signal { .. } => self.value(to, live) * (to - from),
+            Self::Source(source) => source.cumulative(to) - source.cumulative(from),
         }
     }
 }
@@ -382,9 +430,7 @@ impl ProceduralMotion {
                 } => {
                     let x = match frequency {
                         LayerParam::Fixed(_) => local,
-                        LayerParam::Signal { .. } => {
-                            frequency.integral(scheduled.start, time, live)
-                        }
+                        _ => frequency.integral(scheduled.start, time, live),
                     };
                     // Subtracting the value at the layer's start avoids a jump.
                     let channel = |index| noise.at_time(x, index) - noise.at_time(0.0, index);
@@ -685,6 +731,15 @@ mod tests {
         let split = track.integral(0.0, 3.3) + track.integral(3.3, 7.0);
         assert!((split - track.integral(0.0, 7.0)).abs() < 1e-9);
         assert_eq!(track.integral(3.0, 3.0), 0.0);
+
+        // A time-only source integrates by its table: ∫ t dt over [1, 3] = 4.
+        let ramp = crate::ScalarSource::Time;
+        let param = LayerParam::Source(Arc::new(SourceParam::new(ramp)));
+        let integral = param.integral(1.0, 3.0, &|_| None);
+        assert!((integral - 4.0).abs() < 1e-6, "{integral}");
+        assert_eq!(param.value(2.5, &|_| None), 2.5);
+        let split = param.integral(1.0, 2.2, &|_| None) + param.integral(2.2, 3.0, &|_| None);
+        assert!((split - integral).abs() < 1e-9);
     }
 
     #[test]

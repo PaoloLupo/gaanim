@@ -16,8 +16,9 @@ instalar una versión nueva, sigue
 Publicada el 3 de octubre de 2026. Transiciones por shader: cada segmento se
 dibuja por separado y la GPU los mezcla con una función WGSL, como en
 gl-transitions. Llegan cinco listas para usar y la posibilidad de escribir las
-tuyas. Lee «Al actualizar»: los paquetes `.gaanim` de 0.8 deben grabarse de
-nuevo.
+tuyas. Y el audio anima la escena: el volumen, las bandas de frecuencia y los
+golpes de una pista mueven, giran y tiñen cualquier objeto. Lee «Al
+actualizar»: los paquetes `.gaanim` de 0.8 deben grabarse de nuevo.
 
 == Cambios
 
@@ -31,6 +32,13 @@ nuevo.
   overlays quedan nítidos por encima de la mezcla. Funcionan en la vista
   previa, la exportación, los paquetes y el reproductor web, y un seek cae en
   el mismo fotograma que la reproducción.
+- Una pista de audio da señales de 0 a 1 que animan cualquier cosa que acepte
+  un número, y siguen a la pista donde suena: `level()` (el volumen),
+  `band(low, high)` (una banda de frecuencias) y `pulse(decay)` (los golpes).
+  `beats()` da los instantes de los golpes y `duration`, lo que dura la pista.
+- `Updater.rotate`, `Updater.wiggle` y el nuevo `Falloff.source` aceptan una
+  señal del tiempo, así que el audio también gira, hace temblar y tiñe con
+  `drive("fill", ...)`. Lee #link("/referencia/audio/")[Audio].
 
 == Al actualizar
 

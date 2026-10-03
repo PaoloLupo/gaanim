@@ -37,6 +37,8 @@ pub use types::{
 /// Raster image handle; remains compatible with every DrawableHandle consumer.
 pub type ImageHandle = DrawableHandle;
 
+mod audio_signals;
+pub use gaanim_media::analysis::AnalysisError as AudioAnalysisError;
 mod bar_race;
 pub use bar_race::{
     BAR_RACE_PALETTE, BarRace, BarRaceBar, BarRaceLabels, BarRaceOptions, MAX_AUTO_FONT_FRACTION,
