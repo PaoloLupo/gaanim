@@ -41,7 +41,7 @@ el origen y la y hacia arriba. Un punto `(px, py)` de un documento de
 `ancho × alto` píxeles, escalado por `ESCALA`, queda en
 
 ```python
-((px - ancho / 2) / 100 * ESCALA, (alto / 2 - py) / 100 * ESCALA)
+<<< ((px - ancho / 2) / 100 * ESCALA, (alto / 2 - py) / 100 * ESCALA)
 ```
 
 Usa `with_pivot(0, 0)` antes de `scale_to`, para que el SVG escale desde el

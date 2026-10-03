@@ -96,7 +96,7 @@ scene.render()
 >>>scene = Scene(frame=(16, 9))
 >>>head = scene.geometry.circle(1).no_fill().stroke(WHITE, 0.04)
 >>>brow = scene.geometry.line(-0.5, 0.4, -0.1, 0.5).stroke(WHITE, 0.04)
-face = scene.group([head, brow]).scale_stroke_with_object()
+face = scene.geometry.group([head, brow]).scale_stroke_with_object()
 face.scale_to(1.18)
 ```
 ]

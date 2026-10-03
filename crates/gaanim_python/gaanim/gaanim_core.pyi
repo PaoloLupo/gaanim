@@ -3004,7 +3004,7 @@ class Drawable:
         and is not animated.
 
         Example:
-            face = scene.group([head, brows, nose]).scale_stroke_with_object()
+            face = scene.geometry.group([head, brows, nose]).scale_stroke_with_object()
             face.scale_to(1.18)  # The brows thicken with the head.
         """
         ...
@@ -7202,7 +7202,7 @@ class Geometry:
         reveal those deferred descendants.
 
         Example:
-            result = scene.group([drawable])
+            result = scene.geometry.group([drawable])
         """
         ...
     def repeat(
