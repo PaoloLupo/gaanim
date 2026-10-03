@@ -697,28 +697,27 @@ where
             continue;
         }
 
-        let (vello_scene, post_process) = {
+        let (vello_scene, layers, post_process) = {
             let resolved_camera = frame_camera(app.world());
-            let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(
+            let composed = gaanim_renderer::pipeline::compile_frame_from_world(
                 app.world_mut(),
                 resolved_camera.as_ref().map(|resolved| &resolved.camera),
             );
-
-            let mut scene = vello::Scene::new();
             let camera_to_vello = capture_camera_to_vello_transform(
                 resolved_camera.as_ref(),
                 config.width,
                 config.height,
                 config.fit,
             );
-            scene.append(&raw_scene, Some(camera_to_vello));
+            let composed = composed.transformed(camera_to_vello);
             let frame = capture_camera_frame(
                 resolved_camera.as_ref(),
                 config.width,
                 config.height,
                 config.fit,
             );
-            (scene, export_post_process(app.world(), frame))
+            let post = export_post_process(app.world(), frame, composed.transition.as_ref());
+            (composed.scene, composed.transition, post)
         };
 
         let bg_color = app
@@ -737,7 +736,12 @@ where
 
         let render_started_at = Instant::now();
         let frame_data = gpu
-            .render_frame(&vello_scene, bg_color, post_process.as_ref())
+            .render_frame_layers(
+                &vello_scene,
+                layers.as_ref(),
+                bg_color,
+                post_process.as_ref(),
+            )
             .map_err(|error| frame_render_error(error, current_time))?;
         render_gpu_time += render_started_at.elapsed();
 
@@ -1021,7 +1025,7 @@ impl FrameRasterizer {
     ) -> Result<Vec<u8>> {
         let resolved =
             gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
-        let scene = compose_bundle_frame(
+        let composed = compose_bundle_layers(
             frame,
             self.background.as_ref(),
             &mut self.store,
@@ -1030,6 +1034,7 @@ impl FrameRasterizer {
             self.fit,
             overlay,
         );
+        let camera_frame = capture_camera_frame(Some(&resolved), self.width, self.height, self.fit);
         let post = (!frame.post.is_empty())
             .then(|| {
                 let passes = frame
@@ -1047,14 +1052,22 @@ impl FrameRasterizer {
                     passes,
                     ..Default::default()
                 }
-                .request(
-                    frame.time,
-                    capture_camera_frame(Some(&resolved), self.width, self.height, self.fit),
-                )
+                .request(frame.time, camera_frame)
             })
             .flatten();
+        let post = gaanim_renderer::post_process::PostProcessRequest::with_transition(
+            post,
+            composed.transition.as_ref().map(|layers| &layers.shader),
+            camera_frame,
+            frame.time as f32,
+        );
         self.gpu
-            .render_frame(&scene, self.bg_color, post.as_ref())
+            .render_frame_layers(
+                &composed.scene,
+                composed.transition.as_ref(),
+                self.bg_color,
+                post.as_ref(),
+            )
             .map_err(|error| frame_render_error(error, time))
     }
 }
@@ -1071,34 +1084,44 @@ pub fn compose_bundle_frame(
     fit: crate::config::OutputFit,
     overlay: Option<&gaanim_animation::live::LiveOverlay>,
 ) -> vello::Scene {
+    compose_bundle_layers(frame, background, store, width, height, fit, overlay).flattened()
+}
+
+/// [`compose_bundle_frame`] keeping a shader transition's segments apart,
+/// for [`GpuContext::render_frame_layers`].
+pub fn compose_bundle_layers(
+    frame: &gaanim_bundle::Frame,
+    background: Option<&gaanim_renderer::pipeline::CanvasBackground>,
+    store: &mut gaanim_renderer::fragment::FragmentStore,
+    width: u32,
+    height: u32,
+    fit: crate::config::OutputFit,
+    overlay: Option<&gaanim_animation::live::LiveOverlay>,
+) -> gaanim_renderer::pipeline::ComposedFrame {
     let resolved =
         gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
     // Pad opacity layers for this output, as a direct export does.
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
     });
-    let mut raw_scene = gaanim_renderer::pipeline::compose_captured(
+    let mut composed = gaanim_renderer::pipeline::compose_captured_frame(
         &frame.capture,
         store,
         background.map(|background| (background, background.pixel_size)),
         pixels_per_unit,
         None,
+        0.0,
     );
     store.end_frame();
     if let Some(overlay) = overlay {
-        gaanim_renderer::pipeline::append_live_overlay(&mut raw_scene, overlay);
+        gaanim_renderer::pipeline::append_live_overlay(composed.top_mut(), overlay);
     }
-    let mut scene = vello::Scene::new();
-    scene.append(
-        &raw_scene,
-        Some(capture_camera_to_vello_transform(
-            Some(&resolved),
-            width,
-            height,
-            fit,
-        )),
-    );
-    scene
+    composed.transformed(capture_camera_to_vello_transform(
+        Some(&resolved),
+        width,
+        height,
+        fit,
+    ))
 }
 
 /// Render the frames of the bundle at `bundle_path` shown at `times`, handing
@@ -1280,19 +1303,16 @@ where
 
         let phase_started = Instant::now();
         let resolved_camera = frame_camera(app.world());
-        let raw_scene = gaanim_renderer::pipeline::compile_scene_from_world(
+        let composed = gaanim_renderer::pipeline::compile_frame_from_world(
             app.world_mut(),
             resolved_camera.as_ref().map(|resolved| &resolved.camera),
-        );
-
-        let mut scene = vello::Scene::new();
-        let camera_to_vello = capture_camera_to_vello_transform(
+        )
+        .transformed(capture_camera_to_vello_transform(
             resolved_camera.as_ref(),
             config.width,
             config.height,
             config.fit,
-        );
-        scene.append(&raw_scene, Some(camera_to_vello));
+        ));
         let post_process = export_post_process(
             app.world(),
             capture_camera_frame(
@@ -1301,6 +1321,7 @@ where
                 config.height,
                 config.fit,
             ),
+            composed.transition.as_ref(),
         );
         scene_compile += phase_started.elapsed();
 
@@ -1320,7 +1341,12 @@ where
 
         let phase_started = Instant::now();
         let rgba = gpu
-            .render_frame(&scene, background, post_process.as_ref())
+            .render_frame_layers(
+                &composed.scene,
+                composed.transition.as_ref(),
+                background,
+                post_process.as_ref(),
+            )
             .map_err(|error| frame_render_error(error, time))?;
         render_readback += phase_started.elapsed();
         let flow = on_frame(CapturedFrame {
@@ -1363,21 +1389,17 @@ fn render_updated_world(
     pins: &mut gaanim_renderer::pipeline::PinnedElements,
 ) -> Result<Vec<u8>> {
     let resolved_camera = frame_camera(app.world());
-    let raw_scene = gaanim_renderer::pipeline::compile_scene_pinned(
+    let composed = gaanim_renderer::pipeline::compile_frame_pinned(
         app.world_mut(),
         resolved_camera.as_ref().map(|resolved| &resolved.camera),
         pins,
-    );
-    let mut scene = vello::Scene::new();
-    scene.append(
-        &raw_scene,
-        Some(capture_camera_to_vello_transform(
-            resolved_camera.as_ref(),
-            config.width,
-            config.height,
-            config.fit,
-        )),
-    );
+    )
+    .transformed(capture_camera_to_vello_transform(
+        resolved_camera.as_ref(),
+        config.width,
+        config.height,
+        config.fit,
+    ));
     let post_process = export_post_process(
         app.world(),
         capture_camera_frame(
@@ -1386,6 +1408,7 @@ fn render_updated_world(
             config.height,
             config.fit,
         ),
+        composed.transition.as_ref(),
     );
     let background = app
         .world()
@@ -1400,8 +1423,13 @@ fn render_updated_world(
             )
         })
         .unwrap_or(vello::peniko::Color::BLACK);
-    gpu.render_frame(&scene, background, post_process.as_ref())
-        .map_err(|error| frame_render_error(error, time))
+    gpu.render_frame_layers(
+        &composed.scene,
+        composed.transition.as_ref(),
+        background,
+        post_process.as_ref(),
+    )
+    .map_err(|error| frame_render_error(error, time))
 }
 
 /// Render the frame at `time`, which the world was just updated to, as the
@@ -1538,20 +1566,30 @@ fn linear_to_srgb_u8(linear: f32) -> u8 {
 }
 
 /// Post-process of the frame just updated in `world`, with the camera frame
-/// in output pixels.
+/// in output pixels, blending a shader transition's `layers` first.
 fn export_post_process(
     world: &World,
     frame: kurbo::Rect,
+    layers: Option<&gaanim_renderer::pipeline::TransitionScenes>,
 ) -> Option<gaanim_renderer::post_process::PostProcessRequest> {
-    let post = world.get_resource::<gaanim_renderer::post_process::CanvasPostProcess>()?;
     let time = world
         .get_resource::<gaanim_animation::PlaybackState>()
         .map_or(0.0, |state| state.current_time);
-    post.request_with(time, frame, |entity| {
-        world
-            .get::<gaanim_animation::FloatSignal>(entity)
-            .map(|signal| signal.value)
-    })
+    let request = world
+        .get_resource::<gaanim_renderer::post_process::CanvasPostProcess>()
+        .and_then(|post| {
+            post.request_with(time, frame, |entity| {
+                world
+                    .get::<gaanim_animation::FloatSignal>(entity)
+                    .map(|signal| signal.value)
+            })
+        });
+    gaanim_renderer::post_process::PostProcessRequest::with_transition(
+        request,
+        layers.map(|layers| &layers.shader),
+        frame,
+        time as f32,
+    )
 }
 
 /// A `frame_width`x`frame_height` rectangle centered in the output and moved

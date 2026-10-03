@@ -283,6 +283,17 @@ pub fn luma_map(image: &image::DynamicImage, invert: bool) -> LumaMap {
     }
 }
 
+/// [`luma_map`] of the image file at `path`.
+pub fn luma_map_from_file(
+    path: impl AsRef<std::path::Path>,
+    invert: bool,
+) -> Result<LumaMap, String> {
+    let path = path.as_ref();
+    let image = image::open(path)
+        .map_err(|error| format!("could not read the luma image {}: {error}", path.display()))?;
+    Ok(luma_map(&image, invert))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

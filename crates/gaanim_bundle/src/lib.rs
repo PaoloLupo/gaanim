@@ -14,7 +14,8 @@
 //!   other entry.
 //! - `scene.bin`: static data (background, post-process shaders, timeline
 //!   structure, audio tracks).
-//! - `tables/*.bin`: deduplicated paths, images, recipes and strings.
+//! - `tables/*.bin`: deduplicated paths, images, recipes, strings and shader
+//!   transitions.
 //! - `frames/NNNNNN.bin`: chunks of frames, each frame encoded against the
 //!   one before it; a chunk starts with a whole frame.
 //! - `media/*`: embedded audio files.
@@ -73,8 +74,9 @@ pub const FORMAT: &str = "gaanim-bundle";
 ///
 /// Every data entry holds a Zstandard frame; `manifest.json` stays Deflate
 /// and media stays as authored. Version 1 (Gaanim 0.6.0) left compression
-/// to the archive.
-pub const VERSION: u32 = 2;
+/// to the archive; version 2 (up to Gaanim 0.8) had no shader transitions
+/// (`tables/transitions.bin`).
+pub const VERSION: u32 = 3;
 /// Zstandard level of data entries, still fast to read. Level 17 made
 /// entries about 8% smaller and compressed nearly four times slower.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1181,6 +1183,12 @@ impl<W: Write + Seek> BundleWriter<W> {
         self.write_entry("tables/images.bin", &images.into_bytes())?;
         self.write_entry("tables/recipes.bin", &recipes.into_bytes())?;
         self.write_entry("tables/strings.bin", &strings.into_bytes())?;
+        let mut transitions = Writer::new();
+        transitions.len(self.tables.transition_shaders.len());
+        for shader in &self.tables.transition_shaders {
+            model::write_transition_shader(&mut transitions, shader);
+        }
+        self.write_entry("tables/transitions.bin", &transitions.into_bytes())?;
         self.write_entry("scene.bin", &scene_bytes)?;
         let mut index = Writer::new();
         index.len(self.times.len());
@@ -1422,6 +1430,7 @@ impl Bundle {
             images: Vec::new(),
             recipes: Vec::new(),
             strings: Vec::new(),
+            transition_shaders: Vec::new(),
         };
         let paths = read_entry(&archive, Some(&manifest), "tables/paths.bin")?;
         let mut r = Reader::new(&paths);
@@ -1437,6 +1446,13 @@ impl Bundle {
         let mut r = Reader::new(&strings);
         for _ in 0..r.len()? {
             tables.strings.push(Arc::from(r.str()?));
+        }
+        let transitions = read_entry(&archive, Some(&manifest), "tables/transitions.bin")?;
+        let mut r = Reader::new(&transitions);
+        for _ in 0..r.len()? {
+            tables
+                .transition_shaders
+                .push(Arc::new(model::read_transition_shader(&mut r)?));
         }
         let recipes = read_entry(&archive, Some(&manifest), "tables/recipes.bin")?;
         let mut r = Reader::new(&recipes);

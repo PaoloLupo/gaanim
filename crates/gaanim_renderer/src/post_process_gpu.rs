@@ -8,9 +8,12 @@ use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy::window::PrimaryWindow;
 use gaanim_core::kurbo;
+use vello::wgpu;
 
 use crate::canvas::{PreviewResolution, VelloCanvas, VelloView, scaled_canvas_size};
-use crate::post_process::{CanvasPostProcess, GpuPostProcess, PostProcessRequest};
+use crate::post_process::{
+    CanvasPostProcess, GpuPostProcess, PostProcessRequest, TransitionInputs,
+};
 
 /// Post-process of the next frame and the canvas texture it applies to.
 #[derive(Resource, Default)]
@@ -29,6 +32,57 @@ impl ExtractedPostProcess {
 #[derive(Resource, Default)]
 struct RenderPostProcess(GpuPostProcess);
 
+/// Render-world targets of a shader transition's incoming segment and of the
+/// layer above its blend, the size of the canvas texture. `render_canvas`
+/// draws them while a transition runs.
+#[derive(Resource, Default)]
+pub(crate) struct CanvasTransitionTargets(Option<[(wgpu::Texture, wgpu::TextureView); 2]>);
+
+impl CanvasTransitionTargets {
+    /// Views of the incoming and above targets, if a transition prepared them.
+    pub(crate) fn views(&self) -> Option<(&wgpu::TextureView, &wgpu::TextureView)> {
+        self.0
+            .as_ref()
+            .map(|[incoming, above]| (&incoming.1, &above.1))
+    }
+
+    /// Targets matching `size`, created or resized as needed.
+    fn ensure(
+        &mut self,
+        device: &wgpu::Device,
+        size: wgpu::Extent3d,
+    ) -> &[(wgpu::Texture, wgpu::TextureView); 2] {
+        let fits = self
+            .0
+            .as_ref()
+            .is_some_and(|[incoming, _]| incoming.0.size() == size);
+        if !fits {
+            self.0 = Some(
+                [
+                    "gaanim-canvas-transition-incoming",
+                    "gaanim-canvas-transition-above",
+                ]
+                .map(|label| {
+                    let texture = device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some(label),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::STORAGE_BINDING
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    });
+                    let view = texture.create_view(&Default::default());
+                    (texture, view)
+                }),
+            );
+        }
+        self.0.as_ref().expect("targets were just created")
+    }
+}
+
 pub(crate) fn build(app: &mut App) {
     let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
         return;
@@ -36,6 +90,7 @@ pub(crate) fn build(app: &mut App) {
     render_app
         .init_resource::<ExtractedPostProcess>()
         .init_resource::<RenderPostProcess>()
+        .init_resource::<CanvasTransitionTargets>()
         .add_systems(ExtractSchedule, extract_post_process)
         .add_systems(
             Render,
@@ -61,12 +116,16 @@ fn update_post_process_frame(
     views: Query<(&Camera, Option<&bevy::camera::RenderTarget>), With<VelloView>>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    (canvas, preview): (Res<VelloCanvas>, Option<Res<PreviewResolution>>),
+    (canvas, preview, layers): (
+        Res<VelloCanvas>,
+        Option<Res<PreviewResolution>>,
+        Option<Res<crate::pipeline::TransitionLayers>>,
+    ),
     signals: Query<&gaanim_animation::FloatSignal>,
     mut frame: ResMut<PostProcessFrame>,
 ) {
     frame.0 = (|| {
-        let (post, camera) = (post?, camera?);
+        let camera = camera?;
         let (view, target) = views.single().ok()?;
         let window = match target {
             Some(bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(entity))) => {
@@ -92,10 +151,21 @@ fn update_post_process_frame(
         let origin = (viewport.physical_position.as_dvec2() - target_origin.as_dvec2()) * used;
         let size = viewport.physical_size.as_dvec2() * used;
         let time = playback.map_or(0.0, |state| state.current_time);
-        let mut request = post.request_with(
-            time,
-            kurbo::Rect::new(origin.x, origin.y, origin.x + size.x, origin.y + size.y),
-            |entity| signals.get(entity).ok().map(|signal| signal.value),
+        let rect = kurbo::Rect::new(origin.x, origin.y, origin.x + size.x, origin.y + size.y);
+        let request = post.and_then(|post| {
+            post.request_with(time, rect, |entity| {
+                signals.get(entity).ok().map(|signal| signal.value)
+            })
+        });
+        // A shader transition blends its segments first.
+        let mut request = PostProcessRequest::with_transition(
+            request,
+            layers
+                .as_ref()
+                .and_then(|layers| layers.0.as_ref())
+                .map(|layers| &layers.shader),
+            rect,
+            time as f32,
         )?;
         // The passes are the timeline's; a resting presentation keeps them
         // moving (see `AmbientClock`).
@@ -119,6 +189,7 @@ fn prepare_post_process(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     mut state: ResMut<RenderPostProcess>,
+    mut targets: ResMut<CanvasTransitionTargets>,
 ) {
     let target = extracted
         .0
@@ -126,12 +197,19 @@ fn prepare_post_process(
         .and_then(|(request, image)| Some((request, images.get(*image)?)));
     match target {
         Some((request, image)) => {
+            let inputs = request.transition.as_ref().map(|_| {
+                let [incoming, above] = targets.ensure(device.wgpu_device(), image.texture.size());
+                TransitionInputs {
+                    incoming: &incoming.0,
+                    above: &above.0,
+                }
+            });
             state.0.prepare(
                 device.wgpu_device(),
                 &queue,
                 &image.texture,
                 Some(request),
-                None,
+                inputs,
             );
         }
         None => state.0.clear(),

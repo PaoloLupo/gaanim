@@ -13,6 +13,9 @@ pub use gaanim_renderer::post_presets::{CubeLut, PostPreset};
 pub use gaanim_renderer::post_process::{
     PostProcessError, PostProcessOverride, PostProcessPass, PostProcessShader,
 };
+pub use gaanim_renderer::transition_presets::{
+    LUMA_MAP_MAX, LumaMap, TransitionPreset, luma_map, luma_map_from_file,
+};
 pub use ops::{
     AnchorPoint, CanvasEndpoint, CanvasRay, FragmentRevealStyle, PointRef, UpdaterPreset,
 };

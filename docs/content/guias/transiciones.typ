@@ -54,6 +54,8 @@ scene.render()
   [`slide(d, direction)`], [El segmento nuevo se desliza encima del anterior, que queda quieto.],
   [`zoom_through(d)`], [Atravesar una idea para llegar a la siguiente.],
   [`morph(d, pairs=...)`], [Un objeto continúa a través del corte y cambia de forma, tamaño o color.],
+  [`preset(nombre, d)`], [Efectos de vídeo con shader: `cross_zoom`, `directional_warp`, `ripple`, `glitch_displace` y `luma`.],
+  [`shader(wgsl, d)`], [Tu propia transición en WGSL, como en gl-transitions.],
 )
 
 Los revelados vectoriales (`wipe`, `clock_wipe`, `iris`, `blinds`, `push` y
@@ -205,6 +207,79 @@ scene.render()
 La duración por defecto de `shake` es `trauma / decay` segundos. Un
 `shake(0.12, 8)` con solo amplitud y frecuencia conserva la sacudida
 sinusoidal de versiones anteriores.
+
+== Transiciones por shader
+
+`Transition.preset(nombre, d)` y `Transition.shader(wgsl, d)` dibujan cada
+segmento por separado, cada uno con su fondo, y los mezclan en la GPU con una
+función WGSL. Así se consiguen efectos que la geometría no puede hacer: un zoom
+con desenfoque, ondas que deforman la imagen o un glitch. Los objetos de
+`scene.persist(...)` y los overlays quedan nítidos por encima de la mezcla. Un
+seek o una exportación desde la mitad dan el mismo fotograma que la
+reproducción.
+
+```python
+from gaanim import GOLD, WHITE, Scene, Transition
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+
+def tarjeta(titulo, color):
+    scene.text(titulo, role="title").fill(color)
+    scene.wait(1.0)
+
+scene.segment("intro", background="#1e3a8a")
+tarjeta("Inicio", WHITE)
+scene.segment("zoom", Transition.preset("cross_zoom", 0.8, strength=0.6), background="#052e16")
+tarjeta("cross_zoom", GOLD)
+scene.segment("ondas", Transition.preset("ripple", 1.0), background="#431407")
+tarjeta("ripple", WHITE)
+scene.segment("glitch", Transition.preset("glitch_displace", 0.6, strength=0.8), background="#083344")
+tarjeta("glitch_displace", GOLD)
+scene.render()
+```
+
+`luma` revela el segmento entrante siguiendo una imagen en escala de grises:
+primero donde es más oscura (o más clara, con `invert=True`). Con un degradado,
+unas nubes o una mancha de tinta se obtienen revelados orgánicos;
+`softness` suaviza el borde.
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("antes")
+>>>scene.wait(1)
+scene.segment("despues", Transition.preset("luma", 1.2, image="assets/tinta.png", softness=0.15))
+scene.wait(1)
+```
+
+Para escribir la tuya, define `fn transition(uv: vec2<f32>) -> vec4<f32>`.
+`gaanim_from(uv)` lee el segmento saliente, `gaanim_to(uv)` el entrante y
+`progress` va de 0 a 1 (lineal salvo que pases `easing=`). `uv` vale (0, 0)
+en la esquina superior izquierda del cuadro, `gaanim_resolution()` es su tamaño
+en píxeles y los `uniforms` son campos de `gaanim_uniforms`:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>scene.segment("antes")
+>>>scene.wait(1)
+ondas = Transition.shader(
+    """
+    fn transition(uv: vec2<f32>) -> vec4<f32> {
+        let shift = sin(uv.y * 30.0) * gaanim_uniforms.amount * sin(progress * 3.14159);
+        let q = uv + vec2<f32>(shift, 0.0);
+        return mix(gaanim_from(q), gaanim_to(q), progress);
+    }
+    """,
+    0.8,
+    uniforms={"amount": 0.03},
+)
+scene.segment("despues", ondas)
+scene.wait(1)
+```
+
+Los paquetes `.gaanim` guardan la transición y la reproducen igual, también en
+el reproductor web.
 
 == Referencia
 

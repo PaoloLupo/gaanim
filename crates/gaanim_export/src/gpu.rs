@@ -1,4 +1,5 @@
-use gaanim_renderer::post_process::{GpuPostProcess, PostProcessRequest};
+use gaanim_renderer::pipeline::TransitionScenes;
+use gaanim_renderer::post_process::{GpuPostProcess, PostProcessRequest, TransitionInputs};
 use std::sync::{Arc, Mutex, mpsc};
 use thiserror::Error;
 use vello::RendererOptions;
@@ -77,6 +78,9 @@ pub struct GpuContext {
     padded_width: u32,
     pending_error: Arc<Mutex<Option<GpuContextError>>>,
     post: GpuPostProcess,
+    /// Targets of a shader transition's incoming segment and of the layer
+    /// above its blend, created on first use.
+    transition_targets: Option<[(vello::wgpu::Texture, vello::wgpu::TextureView); 2]>,
     /// Multiplier of Vello's bump buffers; it only grows during an export.
     bump_scale: u32,
     /// Largest Vello buffer the device can bind.
@@ -213,9 +217,65 @@ impl GpuContext {
             padded_width,
             pending_error,
             post: GpuPostProcess::default(),
+            transition_targets: None,
             bump_scale: 1,
             max_bump_bytes: max_storage,
         })
+    }
+
+    /// Render the incoming segment over `base_color` and the layer above
+    /// over transparency into their own targets.
+    fn render_transition_layers(
+        &mut self,
+        layers: &TransitionScenes,
+        base_color: vello::peniko::Color,
+    ) -> Result<(), GpuContextError> {
+        let (width, height) = (self.width, self.height);
+        let device = &self.device;
+        let targets = self.transition_targets.get_or_insert_with(|| {
+            [
+                "gaanim-export-transition-incoming",
+                "gaanim-export-transition-above",
+            ]
+            .map(|label| {
+                let texture = device.create_texture(&TextureDescriptor {
+                    label: Some(label),
+                    size: Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::Rgba8Unorm,
+                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&Default::default());
+                (texture, view)
+            })
+        });
+        for ((_, view), (scene, base)) in targets.iter().zip([
+            (&layers.incoming, base_color),
+            (&layers.above, vello::peniko::Color::TRANSPARENT),
+        ]) {
+            self.renderer
+                .render_to_texture(
+                    &self.device,
+                    &self.queue,
+                    scene,
+                    view,
+                    &vello::RenderParams {
+                        base_color: base,
+                        width,
+                        height,
+                        antialiasing_method: vello::AaConfig::Msaa16,
+                    },
+                )
+                .map_err(|e| GpuContextError::Render(e.to_string()))?;
+        }
+        self.check_error()
     }
 
     /// Corners and center of the target.
@@ -278,8 +338,21 @@ impl GpuContext {
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
+        self.render_frame_layers(scene, None, base_color, post)
+    }
+
+    /// [`Self::render_frame`] for a frame under a shader transition: `scene`
+    /// is the outgoing segment, `layers` the incoming one and the layer
+    /// above, which `post` (with its transition) blends.
+    pub fn render_frame_layers(
+        &mut self,
+        scene: &vello::Scene,
+        layers: Option<&TransitionScenes>,
+        base_color: vello::peniko::Color,
+        post: Option<&PostProcessRequest>,
+    ) -> Result<Vec<u8>, GpuContextError> {
         loop {
-            if let Some(pixels) = self.render_attempt(scene, base_color, post)? {
+            if let Some(pixels) = self.render_attempt(scene, layers, base_color, post)? {
                 return Ok(pixels);
             }
             if self.bump_scale >= MAX_BUMP_SCALE {
@@ -295,6 +368,7 @@ impl GpuContext {
     fn render_attempt(
         &mut self,
         scene: &vello::Scene,
+        layers: Option<&TransitionScenes>,
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Option<Vec<u8>>, GpuContextError> {
@@ -339,6 +413,9 @@ impl GpuContext {
             )
             .map_err(|e| GpuContextError::Render(e.to_string()))?;
         self.check_error()?;
+        if let Some(layers) = layers {
+            self.render_transition_layers(layers, base_color)?;
+        }
 
         let mut encoder = self
             .device
@@ -369,9 +446,15 @@ impl GpuContext {
                 },
             );
         }
+        let inputs = layers
+            .and(self.transition_targets.as_ref())
+            .map(|[incoming, above]| TransitionInputs {
+                incoming: &incoming.0,
+                above: &above.0,
+            });
         if self
             .post
-            .prepare(&self.device, &self.queue, &self.texture, post, None)
+            .prepare(&self.device, &self.queue, &self.texture, post, inputs)
         {
             self.post.encode(&mut encoder);
         }

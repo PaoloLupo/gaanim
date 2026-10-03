@@ -1142,7 +1142,9 @@ class Transition:
     linearly and the vector reveals (``wipe``, ``clock_wipe``, ``iris``,
     ``blinds``, ``push``, ``slide``) use ``Easing.SMOOTH``. Vector reveals
     clip both segments with animated paths in the visible camera frame, so
-    they stay sharp at any resolution and need no textures.
+    they stay sharp at any resolution and need no textures. Shader
+    transitions (``shader``, ``preset``) render each segment alone and blend
+    them with WGSL on the GPU.
 
     Every transition also accepts ``sound=`` (an audio file path, relative to
     the assets folder): the sound effect plays once, at full volume, when the
@@ -1385,6 +1387,77 @@ class Transition:
 
         Example:
             result = Transition.push(0.5, direction="up")
+        """
+        ...
+    @staticmethod
+    def shader(
+        source: str | os.PathLike[str],
+        duration: float,
+        *,
+        uniforms: Optional[Mapping[str, float]] = None,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
+    ) -> Transition:
+        """Blend the two segments with a WGSL function, like gl-transitions.
+
+        ``source`` (inline WGSL or an ``os.PathLike`` ``.wgsl`` file, used as
+        given) defines ``fn transition(uv: vec2<f32>) -> vec4<f32>``. Each
+        segment is rendered alone, over its own background: ``gaanim_from(uv)``
+        samples the outgoing one and ``gaanim_to(uv)`` the incoming one, and
+        ``progress`` goes from 0 to 1 (linear unless ``easing`` is given).
+        ``uv`` has (0, 0) at the top-left of the camera frame;
+        ``gaanim_resolution()`` is its size in pixels and ``gaanim_time()`` the
+        timeline seconds. ``uniforms`` become fixed ``f32`` fields of
+        ``gaanim_uniforms``. Drawables of neither segment and the ``overlay``
+        stay sharp above the blend. Seeks render the same frame as playback.
+        Invalid WGSL or uniform names raise ``ValueError``.
+
+        Example:
+            swirl = Transition.shader(
+                "fn transition(uv: vec2<f32>) -> vec4<f32> {\n"
+                "    let q = uv + vec2<f32>(sin(uv.y * 20.0), 0.0) * gaanim_uniforms.amount * sin(progress * 3.14159);\n"
+                "    return mix(gaanim_from(q), gaanim_to(q), progress);\n"
+                "}",
+                0.8,
+                uniforms={"amount": 0.03},
+            )
+            scene.segment("next", transition=swirl)
+        """
+        ...
+    @staticmethod
+    def preset(
+        name: Literal["cross_zoom", "directional_warp", "ripple", "glitch_displace", "luma"],
+        duration: float,
+        *,
+        image: Optional[str | os.PathLike[str]] = None,
+        invert: bool = False,
+        easing: Optional[Easing] = None,
+        overlay: Optional[Overlay] = None,
+        sound: Optional[str] = None,
+        **settings: float,
+    ) -> Transition:
+        """A built-in shader transition (see ``Transition.shader``).
+
+        Settings and their defaults:
+
+        - ``cross_zoom``: ``strength=0.4`` (0..1), a radial zoom blur that
+          resolves into the incoming segment.
+        - ``directional_warp``: ``dx=1, dy=0`` (direction, y up),
+          ``smoothness=0.5``; the incoming segment sweeps in with a warp.
+        - ``ripple``: ``amplitude=100`` (waves across the frame), ``speed=50``.
+        - ``glitch_displace``: ``strength=0.5``, ``bands=24``, ``seed=0``;
+          bands slip sideways with split channels and cut at the middle.
+        - ``luma``: ``softness=0.1``; the incoming segment appears first where
+          the grayscale ``image`` (a path used as given, scaled to at most
+          256 px) is darkest, or brightest with ``invert=True``.
+
+        An unknown name or setting, ``image`` on another preset or ``luma``
+        without it raise ``ValueError``.
+
+        Example:
+            scene.segment("results", transition=Transition.preset("cross_zoom", 0.8, strength=0.6))
+            scene.segment("map", transition=Transition.preset("luma", 1.2, image="assets/clouds.png"))
         """
         ...
 
