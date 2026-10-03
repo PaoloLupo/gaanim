@@ -8208,9 +8208,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         end: kurbo::Point,
         head_len: Option<f64>,
         head_width: Option<f64>,
+        body_width: Option<f64>,
     ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle = gaanim_objects::primitives::double_arrow(id, start, end, head_len, head_width);
+        let bundle = gaanim_objects::primitives::double_arrow(
+            id, start, end, head_len, head_width, body_width,
+        );
         MobjectSpawnBuilder {
             builder: self,
             id,

@@ -1678,22 +1678,82 @@ pub(crate) fn draw_soft_fill(
     }
 }
 
-/// Draw a drop shadow under `path`.
+/// The painted silhouette a drop shadow copies.
+pub(crate) enum ShadowCaster<'a> {
+    /// The region the fill (or clipped raster) covers.
+    Fill,
+    /// The stroke of a path drawn without fill, so an open curve casts the
+    /// shadow of its line rather than of the region its chord closes.
+    Stroke {
+        style: &'a kurbo::Stroke,
+        view: Option<kurbo::Affine>,
+        source: Option<&'a kurbo::BezPath>,
+        align: StrokeAlign,
+        profile: Option<&'a StrokeProfile>,
+    },
+    /// Nothing is painted, so nothing casts a shadow.
+    None,
+}
+
+/// Draw a drop shadow under `path`, shaped like what `caster` paints.
 ///
 /// A blurred shadow builds the blur's coverage from black taps and colors it
 /// with one opaque fill inside a layer carrying the color's alpha. Tinting
 /// every tap instead quantized the color per tap (brushes are 8-bit): alphas
 /// below about 24/255 vanished, larger ones all looked alike, and light warm
 /// tones drifted in hue.
-pub(crate) fn draw_shadow(scene: &mut vello::Scene, path: &kurbo::BezPath, shadow: &DropShadow) {
+pub(crate) fn draw_shadow(
+    scene: &mut vello::Scene,
+    path: &kurbo::BezPath,
+    shadow: &DropShadow,
+    caster: ShadowCaster<'_>,
+) {
     let offset = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
+    // A stroke is drawn on the shifted path: under a zoomed view its pen
+    // works in view space, where `offset` would no longer be a translation.
+    let shifted = |path: &kurbo::BezPath| offset * path;
     let sharp = shadow.blur_radius.is_nan() || shadow.blur_radius <= 0.0;
+    let stroke_reach = match &caster {
+        ShadowCaster::Fill => 0.0,
+        ShadowCaster::Stroke { style, view, .. } => {
+            let corner = style.miter_limit.max(std::f64::consts::SQRT_2);
+            let pen_scale = view.map_or(1.0, |view| {
+                let [a, b, c, d, _, _] = view.inverse().as_coeffs();
+                (a * a + b * b + c * c + d * d).sqrt()
+            });
+            let reach = style.width.abs() * corner * pen_scale;
+            if reach.is_finite() { reach } else { 0.0 }
+        }
+        ShadowCaster::None => return,
+    };
     if sharp {
         let brush = peniko::Brush::Solid(shadow.color);
-        scene.fill(peniko::Fill::NonZero, offset, &brush, None, path);
+        match caster {
+            ShadowCaster::Fill => scene.fill(peniko::Fill::NonZero, offset, &brush, None, path),
+            ShadowCaster::Stroke {
+                style,
+                view,
+                source,
+                align,
+                profile,
+            } => {
+                let source = source.map(shifted);
+                draw_aligned_stroke(
+                    scene,
+                    style,
+                    &brush,
+                    view,
+                    &shifted(path),
+                    source.as_ref(),
+                    align,
+                    profile,
+                );
+            }
+            ShadowCaster::None => {}
+        }
         return;
     }
-    let reach = BLUR_TAP_RADIUS * shadow.blur_radius + 1.0e-3;
+    let reach = BLUR_TAP_RADIUS * shadow.blur_radius + stroke_reach + 1.0e-3;
     let area = path.bounding_box().inflate(reach, reach);
     let alpha = shadow.color.components[3];
     scene.push_layer(
@@ -1713,7 +1773,22 @@ pub(crate) fn draw_shadow(scene: &mut vello::Scene, path: &kurbo::BezPath, shado
         &area,
     );
     let coverage = peniko::Brush::Solid(peniko::Color::BLACK);
-    draw_soft_fill(scene, path, &coverage, shadow.blur_radius, 1.0, offset);
+    match caster {
+        ShadowCaster::Fill => {
+            draw_soft_fill(scene, path, &coverage, shadow.blur_radius, 1.0, offset);
+        }
+        ShadowCaster::Stroke { style, view, .. } => {
+            draw_soft_stroke(
+                scene,
+                &shifted(path),
+                &coverage,
+                style,
+                shadow.blur_radius,
+                view,
+            );
+        }
+        ShadowCaster::None => {}
+    }
     scene.pop_layer();
     scene.pop_layer();
 }

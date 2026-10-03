@@ -3488,7 +3488,8 @@ impl PyGeometry {
         ))
     }
 
-    #[pyo3(signature = (x1, y1, x2, y2, *, head_length=None, head_width=None))]
+    #[pyo3(signature = (x1, y1, x2, y2, *, head_length=None, head_width=None, body_width=None))]
+    #[allow(clippy::too_many_arguments)]
     fn double_arrow(
         &self,
         x1: f64,
@@ -3497,12 +3498,13 @@ impl PyGeometry {
         y2: f64,
         head_length: Option<f64>,
         head_width: Option<f64>,
+        body_width: Option<f64>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        for value in [head_length, head_width].into_iter().flatten() {
+        for value in [head_length, head_width, body_width].into_iter().flatten() {
             if !value.is_finite() || value <= 0.0 {
                 return Err(pyo3::exceptions::PyValueError::new_err(
-                    "head_length and head_width must be finite positive numbers",
+                    "head_length, head_width and body_width must be finite positive numbers",
                 ));
             }
         }
@@ -3510,7 +3512,7 @@ impl PyGeometry {
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .double_arrow(x1, y1, x2, y2, head_length, head_width),
+                .double_arrow(x1, y1, x2, y2, head_length, head_width, body_width),
         ))
     }
 

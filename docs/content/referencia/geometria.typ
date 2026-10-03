@@ -208,12 +208,14 @@ scene.render()
 #api-entry(
   name: "Geometry.double_arrow",
   kind: "factory",
-  desc: [Flecha con punta en ambos extremos, para rangos y relaciones bidireccionales. Las puntas miden 0.18 × 0.15 por defecto, con cuerpo de 0.036, y se acortan para no solaparse.],
+  params: ((name: "x1, y1, x2, y2", type: "float", default: none, desc: [Extremos.]), (name: "head_length / head_width / body_width", type: "float | None", default: "None", desc: [Igual que en `arrow`: por defecto 0.18, 0.15 y 0.036.])),
+  desc: [Flecha con punta en ambos extremos, para rangos y relaciones bidireccionales. Las puntas se acortan para no solaparse; un `body_width` fino sirve para cotas. Para una cota completa, con líneas de extensión, usa #link("/referencia/mecanica/")[`scene.mechanics.dimension`]. Medidas no positivas lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 span = scene.geometry.double_arrow(-3, 0, 3, 0).fill(WHITE).no_stroke()
+fine = scene.geometry.double_arrow(-3, -1, 3, -1, body_width=0.012).fill(WHITE).no_stroke()
 ```
 ]
 

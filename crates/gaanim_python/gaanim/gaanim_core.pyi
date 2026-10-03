@@ -2443,8 +2443,10 @@ def stagger(
 ) -> Composition:
     """Offset items by ``index * each`` seconds, or by distance from ``origin``.
 
-    With ``origin``, ``grid``, ``total`` or ``easing`` the delay of each item
-    grows with its distance from ``origin``: the first item (``"start"``), the
+    Without ``origin`` or ``grid`` items keep their list order: ``total``
+    fixes the whole spread and ``easing`` shapes it, still by index. With
+    ``origin`` or ``grid`` the delay of each item grows with its distance from
+    ``origin`` (``"start"`` when only ``grid`` is given): the first item (``"start"``), the
     last (``"end"``), the center of the items (``"center"``), the outer edges
     moving inward (``"edges"``), a seeded random order (``"random"``), or an
     ``(x, y)`` scene point. Distances use the items' declared positions
@@ -2503,7 +2505,8 @@ def distribute(
 ) -> list[float]:
     """Spread values from ``low`` to ``high`` over ``items`` by distance from ``origin``.
 
-    Uses the same ordering as ``stagger`` and returns one value per item, so
+    Uses the same ordering as ``stagger`` (list order without ``origin`` or
+    ``grid``) and returns one value per item, so
     it distributes sizes, colors or opacities instead of start times.
 
     Example:
@@ -6851,12 +6854,22 @@ class Geometry:
         """
         ...
     def double_arrow(
-        self, x1: float, y1: float, x2: float, y2: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None
+        self,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        *,
+        head_length: Optional[float] = None,
+        head_width: Optional[float] = None,
+        body_width: Optional[float] = None,
     ) -> Drawable:
         """Create a filled double-headed arrow in scene units.
 
-        Omitted head metrics use 0.18 by 0.15 with a 0.036 body; heads shrink
-        so they never overlap.
+        Omitted metrics use 0.18 by 0.15 heads with a 0.036 body, as in
+        ``arrow``; heads shrink so they never overlap. Pass a thinner
+        ``body_width`` for fine dimension lines, or use
+        ``scene.mechanics.dimension`` for a full dimension with extension lines.
 
         Example:
             result = scene.geometry.double_arrow(-3, 0, 3, 0)
@@ -7444,8 +7457,11 @@ class Typography:
         keeps Typst's own proportions and is scaled so its default 11pt text
         is as large as the ``body`` text role; ``#set text(size: 22pt)`` is
         therefore twice the body size, and table insets and rule widths scale
-        with it. ``width`` is a Typst page width (``"16cm"``, ``"800pt"``; a
-        number means points) measured before that scaling. Empty inline
+        with it. Without ``width`` the page fits its content, so
+        ``#align(center)`` centers within the content and lines only break
+        where the source breaks them. ``width`` is a Typst page width
+        (``"16cm"``, ``"800pt"``; a number means points) measured before that
+        scaling, for paragraphs that wrap or ``1fr`` columns. Empty inline
         source raises ``ValueError`` and an unreadable asset raises
         ``RuntimeError``.
 

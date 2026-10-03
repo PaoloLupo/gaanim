@@ -582,10 +582,11 @@ pub fn double_arrow(
     end: kurbo::Point,
     head_len: Option<f64>,
     head_width: Option<f64>,
+    body_width: Option<f64>,
 ) -> MobjectBundle {
     let mut head_len = head_len.unwrap_or(DEFAULT_ARROW_HEAD_LENGTH);
     let head_half_width = head_width.unwrap_or(DEFAULT_ARROW_HEAD_WIDTH) * 0.5;
-    let body_half_t: f64 = DEFAULT_ARROW_BODY_WIDTH * 0.5;
+    let body_half_t: f64 = body_width.unwrap_or(DEFAULT_ARROW_BODY_WIDTH) * 0.5;
 
     let dx = end.x - start.x;
     let dy = end.y - start.y;
@@ -1608,6 +1609,7 @@ mod arrow_tests {
             kurbo::Point::new(100.0, 0.0),
             None,
             None,
+            None,
         );
         assert_eq!(
             count_subpaths(&b.path.0),
@@ -1626,6 +1628,7 @@ mod arrow_tests {
             ObjectId::from_raw(0),
             kurbo::Point::new(-2.0, 0.0),
             kurbo::Point::new(2.0, 0.0),
+            None,
             None,
             None,
         );
@@ -1648,8 +1651,28 @@ mod arrow_tests {
             kurbo::Point::new(10.0, 0.0),
             Some(50.0),
             Some(20.0),
+            None,
         );
         assert_eq!(count_subpaths(&b.path.0), 1);
+    }
+
+    #[test]
+    fn double_arrow_body_width_sets_the_shaft_thickness() {
+        let shaft_height = |body_width| {
+            let b = double_arrow(
+                ObjectId::from_raw(0),
+                kurbo::Point::new(-2.0, 0.0),
+                kurbo::Point::new(2.0, 0.0),
+                None,
+                None,
+                body_width,
+            );
+            // Probe the shaft midpoint just inside and outside its half width.
+            let inside = |y: f64| b.path.0.winding(kurbo::Point::new(0.0, y)) != 0;
+            (inside(0.009), inside(0.011))
+        };
+        assert_eq!(shaft_height(Some(0.02)), (true, false));
+        assert_eq!(shaft_height(None), (true, true));
     }
 
     #[test]

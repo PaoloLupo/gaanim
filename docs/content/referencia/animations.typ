@@ -1908,7 +1908,7 @@ scene.play(
     (name: "seed", type: "int", default: "0", desc: [Semilla de `origin="random"`.]),
   ),
   returns: (type: "Composition", desc: [Elementos desplazados en el tiempo.]),
-  desc: [Sin `origin`, `grid`, `total` ni `easing`, escalona por índice. Con cualquiera de ellos, el retardo crece con la distancia al origen. Los elementos cuya posición depende de un layout usan su índice.],
+  desc: [Sin `origin` ni `grid`, escalona por índice: `total` fija la duración de toda la onda y `easing` la acelera o frena, pero el orden sigue siendo el de la lista. Con `origin` o `grid`, el retardo crece con la distancia al origen, que es el primer elemento (`"start"`) si solo se pasa `grid`. Los elementos cuya posición depende de un layout usan su índice.],
 )[
 ```python
 >>>from gaanim import *
@@ -1917,6 +1917,7 @@ scene.play(
 scene.play(stagger(*[d.animate.grow_from_center() for d in dots], each=0.03, origin="center"))
 scene.play(stagger(*[d.animate.indicate() for d in dots], total=1.2, origin="random", seed=7))
 scene.play(stagger(*[d.animate.fill(GOLD) for d in dots], each=0.05, origin=(0.0, -3.0)))
+scene.play(stagger(*[d.animate.fade_out() for d in dots], total=1.0, easing=Easing.ease_out(EasingCurve.QUADRATIC)))
 ```
 ]
 
@@ -1930,7 +1931,7 @@ scene.play(stagger(*[d.animate.fill(GOLD) for d in dots], each=0.05, origin=(0.0
     (name: "origin, grid, easing, seed", type: "", default: "None, None, None, 0", desc: [Como en `stagger`.]),
   ),
   returns: (type: "list[float]", desc: [Un valor por objeto.]),
-  desc: [Usa el mismo orden que `stagger` para repartir tamaños, colores u opacidades en lugar de tiempos.],
+  desc: [Usa el mismo orden que `stagger` para repartir tamaños, colores u opacidades en lugar de tiempos; sin `origin` ni `grid`, el de la lista.],
 )[
 ```python
 >>>from gaanim import *

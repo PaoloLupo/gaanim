@@ -8895,12 +8895,14 @@ impl SceneModel {
                 end,
                 head_length,
                 head_width,
+                body_width,
             } => {
                 let b = builder.double_arrow(
                     Point::new(start.0, start.1),
                     Point::new(end.0, end.1),
                     *head_length,
                     *head_width,
+                    *body_width,
                 );
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
@@ -9078,7 +9080,7 @@ impl SceneModel {
                         .stroke(color, 0.02)
                         .spawn();
                     let measurement = builder
-                        .double_arrow(dimension_start, dimension_end, None, None)
+                        .double_arrow(dimension_start, dimension_end, None, None, None)
                         .fill(color)
                         .no_stroke()
                         .spawn();
@@ -9919,7 +9921,9 @@ impl SceneModel {
                     }
                     format!("#set page(width: {w}, height: auto, margin: 0pt)\n")
                 } else {
-                    "#set page(height: auto, margin: 0pt)\n".to_string()
+                    // Fit the page to the content, so `#align(center)` centers
+                    // within it instead of widening the drawable to a page.
+                    "#set page(width: auto, height: auto, margin: 0pt)\n".to_string()
                 };
                 let source =
                     format!("{page_directive}#set text(fill: rgb(\"{foreground}\"))\n{source}");
@@ -13692,6 +13696,41 @@ mod tests {
         units.typst_in_scene_units("#set text(size: 0.5pt)\nResult table");
         let units_height = tallest_compiled_height(&units);
         assert!((0.3..0.8).contains(&units_height), "{units_height}");
+    }
+
+    /// Width of the widest compiled drawable in `canvas`.
+    fn widest_compiled_width(canvas: &SceneModel) -> f64 {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<&LocalBounds>();
+        query
+            .iter(&world)
+            .map(|bounds| bounds.0.width())
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn typst_document_page_fits_centered_content() {
+        let table = "#table(columns: 3, [a], [b], [c])";
+        let mut plain = SceneModel::new(16.0, 9.0);
+        plain.typst(table);
+        let mut centered = SceneModel::new(16.0, 9.0);
+        centered.typst(&format!("#align(center)[Title]\n{table}"));
+        let plain_width = widest_compiled_width(&plain);
+        let centered_width = widest_compiled_width(&centered);
+        assert!(plain_width > 0.0, "{plain_width}");
+        assert!(
+            centered_width < plain_width * 1.2,
+            "#align(center) must center within the content ({centered_width}), \
+             not widen it to a page ({plain_width})"
+        );
     }
 
     #[test]

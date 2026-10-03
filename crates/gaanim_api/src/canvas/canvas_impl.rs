@@ -3431,6 +3431,7 @@ impl SceneModel {
             gap_length,
         })
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn double_arrow(
         &mut self,
         x1: f64,
@@ -3439,12 +3440,14 @@ impl SceneModel {
         y2: f64,
         head_length: Option<f64>,
         head_width: Option<f64>,
+        body_width: Option<f64>,
     ) -> DrawableHandle {
         self.spawn(SpawnKind::DoubleArrow {
             start: (x1, y1),
             end: (x2, y2),
             head_length,
             head_width,
+            body_width,
         })
     }
     pub fn polygon(&mut self, points: Vec<(f64, f64)>) -> DrawableHandle {

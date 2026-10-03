@@ -683,7 +683,7 @@ medidas antes de crear nada.
   kind: "factory",
   params: (
     (name: "source", type: "str | os.PathLike", default: none, desc: [Marcado Typst en línea o la ruta de un archivo `.typ` (relativa a la carpeta de assets).]),
-    (name: "width", type: "str | float | int | None", default: "None", desc: [Ancho de página Typst antes de escalar: `"16cm"`, `"800pt"` o un número en puntos.]),
+    (name: "width", type: "str | float | int | None", default: "None", desc: [Ancho de página Typst antes de escalar: `"16cm"`, `"800pt"` o un número en puntos. Sin él, la página se ajusta al contenido: `#align(center)` centra dentro del contenido y los párrafos solo cortan línea donde la fuente lo indica. Pásalo para que un párrafo se ajuste o para columnas `1fr`.]),
   ),
   desc: [Compila un documento Typst arbitrario (tablas con celdas combinadas, estructuras matemáticas propias, paquetes `@preview/…`) como un `Drawable`. Conserva sus proporciones y se escala para que su texto de 11 pt mida lo mismo que el rol `body`. No ofrece las selecciones de `Text`. Una fuente vacía lanza `ValueError` y un archivo ilegible, `RuntimeError`.],
 )[

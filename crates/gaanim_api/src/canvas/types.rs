@@ -585,6 +585,7 @@ pub enum SpawnKind {
         end: (f64, f64),
         head_length: Option<f64>,
         head_width: Option<f64>,
+        body_width: Option<f64>,
     },
     /// Closed polygon defined by scene-space vertices.
     Polygon(Vec<(f64, f64)>),
