@@ -11,6 +11,40 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.8.1
+
+Publicada el 3 de octubre de 2026. Corrige lo que se vio al hacer los primeros
+videos con 0.8.0: sombras de curvas sin relleno, cotas demasiado gruesas, un
+`stagger` que cambiaba de orden y documentos Typst que se ensanchaban hasta la
+página. Lee «Al actualizar» si usas `scene.text.typst` con párrafos largos.
+
+== Cambios
+
+- `scene.geometry.double_arrow(..., body_width=…)` acepta el grosor del cuerpo,
+  como `arrow`, para cotas finas. Para una cota completa con líneas de
+  extensión, usa `scene.mechanics.dimension`. Lee
+  #link("/referencia/geometria/")[Geometría].
+
+== Al actualizar
+
+- Un documento de `scene.text.typst(...)` sin `width=` ya no reparte un párrafo
+  largo en líneas al ancho de una página A4: corta línea solo donde lo indica
+  el texto. Pasa `width="16cm"` (o el ancho que quieras) para que se ajuste, o
+  para columnas `1fr`.
+- Un `stagger` con `total` o `easing` pero sin `origin` sigue el orden de la
+  lista. Si querías el orden por distancia, pasa `origin="start"`.
+
+== Correcciones
+
+- `shadow()` sobre un camino abierto o sin relleno proyecta la sombra de su
+  trazo; antes rellenaba la región entre el trazo y la cuerda que une sus
+  extremos, también en un `group`. Los objetos con relleno conservan su sombra.
+- `scene.text.typst(...)` ajusta la página a su contenido, así que un
+  `#align(center)` centra dentro del contenido y `move_to` deja el documento
+  centrado.
+- `stagger(..., total=…, easing=…)` sin `origin` ni `grid` escalona en el orden
+  de la lista, y `distribute` también.
+
 = 0.8.0
 
 Publicada el 2 de octubre de 2026. El público entra a la presentación: desde su

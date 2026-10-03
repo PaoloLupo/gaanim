@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_launcher"
-version = "0.8.0"
+version = "0.8.1"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "The gaanim executable: Home, playback, editor, and command line, with Python loaded on demand"
