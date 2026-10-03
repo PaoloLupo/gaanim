@@ -956,6 +956,8 @@ pub struct ObjectSpec {
     /// Whether the stroke pen follows the drawable's accumulated scale;
     /// `None` keeps it in scene units.
     pub stroke_scales_with_object: Option<bool>,
+    /// Chalk look of the fill and stroke, on every glyph and child.
+    pub chalk: Option<gaanim_renderer::effects::ChalkBrush>,
     /// This group is the public root of an imported SVG hierarchy.
     pub(crate) svg_root: bool,
     /// Root of the imported SVG this group or path belongs to. Stroke widths
@@ -1104,6 +1106,7 @@ impl ObjectSpec {
             stroke_overridden: false,
             stroke_align: None,
             stroke_scales_with_object: None,
+            chalk: None,
             svg_root: false,
             svg_owner: None,
             glow: None,
@@ -2391,6 +2394,18 @@ impl Anim {
         self.effect(AnimationType::Write {
             config: DrawAnimationConfig::default(),
         })
+    }
+
+    /// Draw the animated drawable as chalk for the whole scene, as
+    /// [`crate::canvas::DrawableHandle::chalk`] does.
+    pub fn chalk(self, seed: u64, roughness: f64) -> Self {
+        if let (Some(spec), Some(state)) = (&self.property_spec, &self.owner) {
+            state.lock().expect("canvas state poisoned").set_chalk(
+                spec,
+                gaanim_renderer::effects::ChalkBrush { seed, roughness },
+            );
+        }
+        self
     }
 
     pub fn create(self) -> Self {

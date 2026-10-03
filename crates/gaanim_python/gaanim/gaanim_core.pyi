@@ -1616,7 +1616,7 @@ class Anim:
     def fade_out(self) -> Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
-    def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None) -> Anim:
+    def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None, brush: Literal["pen", "chalk"] = "pen", seed: int = 0) -> Anim:
         """Trace paths with a constant logical stroke, then smoothly fade their fills.
 
         On text, ``by`` starts the glyphs of each grapheme, word, explicit line,
@@ -1627,7 +1627,10 @@ class Anim:
         ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
         sequential staggering and a number overrides it. A missing outline is
         synthesized at 0.03 logical units and removed as the authored fill
-        appears. Raises ``ValueError`` after a property target or another effect.
+        appears. ``brush="chalk"`` draws the drawable as chalk for the whole
+        scene, like ``Drawable.chalk(seed)``: a trembling outline and a grain
+        that follow ``seed``. Raises ``ValueError`` after a property target or
+        another effect.
         """
         ...
     def create(self) -> Anim:
@@ -3003,6 +3006,20 @@ class Drawable:
         Example:
             face = scene.group([head, brows, nose]).scale_stroke_with_object()
             face.scale_to(1.18)  # The brows thicken with the head.
+        """
+        ...
+    def chalk(self, seed: int = 0, roughness: float = 0.01) -> Self:
+        """Draw the fill and stroke as chalk on a blackboard.
+
+        The outline trembles by up to ``roughness`` scene units and a grain
+        breaks the paint; both follow ``seed``, so every frame and export
+        draws the same chalk. On a text or a group it applies to every glyph
+        and child. This is declaration state and is not animated. Playback
+        bundles (``.gaanim``) cannot record chalk yet.
+
+        Example:
+            formula = scene.text.equation("E = m c^2").chalk(seed=7)
+            scene.play([formula.animate.write()])
         """
         ...
     def no_stroke(self) -> Self:

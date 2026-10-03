@@ -1,8 +1,8 @@
 use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
-    BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ClipMask, DropShadow,
-    ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
+    BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ChalkBrush, ClipMask,
+    DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
     StrokeProfile, StrokeScalesWithObject, VectorOutlineBinding, ViewLayer,
 };
 use crate::fragment::{FragmentParts, FragmentRecipe, build_fragment, fragment_recipe};
@@ -2182,6 +2182,7 @@ fn extract_world(
         Option<&StrokeAlign>,
         Option<&StrokeProfile>,
         Has<StrokeScalesWithObject>,
+        Option<&ChalkBrush>,
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
@@ -2223,6 +2224,7 @@ fn extract_world(
             stroke_align_opt,
             stroke_profile_opt,
             stroke_scales,
+            chalk_opt,
         )) = query_effects.get(world, entity)
         else {
             continue;
@@ -2267,7 +2269,9 @@ fn extract_world(
         };
         let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
         let elem_stroke_style = stroke_opt.map(|s| &s.style);
-        let stroke_view = if !stroke_scales && (elem_stroke.is_some() || glow_opt.is_some()) {
+        let stroke_view = if !stroke_scales
+            && (elem_stroke.is_some() || glow_opt.is_some() || chalk_opt.is_some())
+        {
             scene_unit_stroke_transform(transform.affine_2d)
         } else {
             None
@@ -2289,6 +2293,7 @@ fn extract_world(
             stroke_profile: stroke_profile_opt,
             stroke_view,
             screen: camera_view.is_some(),
+            chalk: chalk_opt,
         }));
         let built = build_fragment(&recipe, lottie_opt.map(|lottie| lottie.scene().as_ref()));
         let scene = built.scene;
@@ -3175,6 +3180,7 @@ pub fn gaanim_render_system(
         Option<Ref<StrokeAlign>>,
         Option<Ref<StrokeProfile>>,
         Has<StrokeScalesWithObject>,
+        Option<Ref<ChalkBrush>>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     (mut shader_frame, preview, live, ambient): (
@@ -3277,8 +3283,9 @@ pub fn gaanim_render_system(
             stroke_align_ref,
             stroke_profile_ref,
             stroke_scales,
+            chalk_ref,
         ) = query_effects.get(entity).unwrap_or((
-            None, None, None, None, None, None, None, None, None, None, None, false,
+            None, None, None, None, None, None, None, None, None, None, None, false, None,
         ));
         let camera_view = camera_views.get(&entity);
 
@@ -3288,7 +3295,8 @@ pub fn gaanim_render_system(
             && (stroke_ref
                 .as_ref()
                 .is_some_and(|stroke| stroke.brush.is_some())
-                || glow_ref.is_some())
+                || glow_ref.is_some()
+                || chalk_ref.is_some())
         {
             scene_unit_stroke_transform(transform.affine_2d)
         } else {
@@ -3340,6 +3348,7 @@ pub fn gaanim_render_system(
             || clip_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_profile_ref.as_ref().is_some_and(|r| r.is_changed())
+            || chalk_ref.as_ref().is_some_and(|r| r.is_changed())
             // Becoming or ceasing to be a screen moves the stroke.
             || cache.screen_overlays.contains_key(&mobj_id.0) != camera_view.is_some();
 
@@ -3421,6 +3430,7 @@ pub fn gaanim_render_system(
                 stroke_profile: stroke_profile_ref.as_deref(),
                 stroke_view,
                 screen: camera_view.is_some(),
+                chalk: chalk_ref.as_deref(),
             });
             let built = build_fragment(
                 &recipe,

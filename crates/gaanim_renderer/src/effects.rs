@@ -56,6 +56,24 @@ pub enum StrokeAlign {
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StrokeScalesWithObject;
 
+/// Component: draw the fill and stroke as chalk on a blackboard: the outline
+/// trembles by up to `roughness` scene units and the paint is broken by a
+/// grain. Both follow `seed`, so every frame and export draws the same chalk.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ChalkBrush {
+    pub seed: u64,
+    pub roughness: f64,
+}
+
+impl Default for ChalkBrush {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            roughness: 0.01,
+        }
+    }
+}
+
 /// Component: Adds an outer glow outline effect to a 2D Mobject.
 #[derive(Component, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

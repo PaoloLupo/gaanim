@@ -475,6 +475,8 @@ scene.render()
     (name: "by", type: "\"grapheme\" | \"word\" | \"line\" | \"part\"", default: "\"grapheme\"", desc: [En un texto, qué unidades empiezan juntas: grafemas, palabras, líneas explícitas o partes semánticas. La puntuación se une a su vecina.]),
     (name: "order", type: "\"forward\" | \"reverse\" | \"center\" | \"random\"", default: "\"forward\"", desc: [Orden de los grupos: hacia delante, al revés, desde el centro hacia fuera o en una permutación aleatoria fija.]),
     (name: "stagger", type: "float | None", default: "None", desc: [Retardo relativo entre grupos; `None` lo adapta al número de grupos.]),
+    (name: "brush", type: "\"pen\" | \"chalk\"", default: "\"pen\"", desc: [`"chalk"` dibuja el objeto como tiza en una pizarra durante toda la escena, como `Drawable.chalk(seed)`.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla del temblor y del grano de la tiza.]),
   ),
   returns: (type: "Anim", desc: [Escritura trazo a trazo.]),
   desc: [Traza los contornos con un grosor lógico constante y luego funde los rellenos. Si el objeto no tiene contorno, usa uno temporal de 0.03 unidades que desaparece al entrar el relleno. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
@@ -487,6 +489,18 @@ scene = Scene(frame=(16, 9), background="#0f172a")
 eq = scene.text("$", part("energy", "E"), " = ", part("mass", "m"), " ", part("speed", "c^2"), "$").move_to(0, 0)
 scene.play([eq.animate.write(by="part", stagger=0.08).duration(1.4)])
 # output: preview.webp
+scene.render()
+```
+
+Con `brush="chalk"` la fórmula se escribe como en una pizarra:
+
+```python
+# show-code: true
+from gaanim import WHITE, Scene
+scene = Scene(frame=(16, 9), background="#1f3a2e")
+eq = scene.text.equation("E = m c^2").fill(WHITE).scale_to(2)
+scene.play([eq.animate.write(brush="chalk", seed=3).duration(1.5)])
+# output: chalk.webp
 scene.render()
 ```
 ]

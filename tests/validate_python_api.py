@@ -2040,6 +2040,35 @@ def validate_polyline_connector_contract(module):
     return failures
 
 
+def validate_chalk_quantity_and_arc_contract(module):
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    box = scene.geometry.rect(2, 1)
+    if box.chalk(seed=2) is not box:
+        failures.append("Drawable.chalk did not return the same drawable")
+    title = scene.text("Pizarra")
+    scene.play(box.animate.write().duration(0.2))
+    scene.play(title.animate.write(brush="chalk", seed=3).duration(0.2))
+    for operation in (
+        lambda: title.animate.write(brush="crayon"),
+        lambda: box.chalk(roughness=-1),
+        lambda: box.chalk(roughness=float("nan")),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("chalk accepted an unknown brush or an invalid roughness")
+    if module.quantity(181, "L") != '181 thin upright("L")':
+        failures.append("quantity(181, 'L') did not space number and unit")
+    if module.quantity(3.14159, "rad", decimals=2, decimal_separator=",") != '3upright(",")14 thin upright("rad")':
+        failures.append("quantity ignored decimals or the decimal separator")
+    for operation in (lambda: module.quantity(1, "m^x"), lambda: module.quantity(True, "m")):
+        if not raises_error((ValueError, TypeError), operation):
+            failures.append("quantity accepted a malformed unit or a bool")
+    scene.geometry.ellipse_arc(0, 0, 2, 0.5, 0, 3.14159)
+    if not raises_error(ValueError, lambda: scene.geometry.ellipse_arc(0, 0, 0, 1, 0, 1)):
+        failures.append("ellipse_arc accepted a zero radius")
+    return failures
+
+
 def raises_error(expected, operation):
     try:
         operation()
@@ -2693,7 +2722,7 @@ def main() -> int:
             missing.append(node.target.id)
         elif (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in {"part", "parts", "parallel", "sequence", "stagger", "magic_move"}
+            and node.name in {"part", "parts", "parallel", "sequence", "stagger", "magic_move", "quantity"}
         ):
             if not hasattr(module, node.name):
                 missing.append(node.name)
@@ -2717,6 +2746,7 @@ def main() -> int:
     missing.extend(validate_section_navigation_contract(module))
     missing.extend(validate_reactive_fill_level_contract(module))
     missing.extend(validate_polyline_connector_contract(module))
+    missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))
     missing.extend(validate_emphasis_contract(module))

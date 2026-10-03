@@ -11,7 +11,7 @@ use std::sync::Arc;
 use gaanim_core::{kurbo, peniko};
 use gaanim_scene::{RasterImage, StrokeBrush};
 
-use crate::effects::{DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile};
+use crate::effects::{ChalkBrush, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile};
 
 /// Everything one drawable's fragment is built from.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -43,6 +43,8 @@ pub struct FragmentRecipe {
     /// A camera view screen draws its stroke above what its camera sees, in
     /// a separate overlay.
     pub screen: bool,
+    /// Chalk look of the fill and stroke.
+    pub chalk: Option<ChalkBrush>,
 }
 
 /// Borrowed components a recipe is captured from.
@@ -62,6 +64,7 @@ pub(crate) struct FragmentParts<'a> {
     pub stroke_profile: Option<&'a StrokeProfile>,
     pub stroke_view: Option<kurbo::Affine>,
     pub screen: bool,
+    pub chalk: Option<&'a ChalkBrush>,
 }
 
 /// The recipe of a drawable's components.
@@ -82,6 +85,7 @@ pub(crate) fn fragment_recipe(parts: FragmentParts<'_>) -> FragmentRecipe {
         stroke_profile: parts.stroke_profile.cloned(),
         stroke_view: parts.stroke_view,
         screen: parts.screen,
+        chalk: parts.chalk.copied(),
     }
 }
 
@@ -121,6 +125,28 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
     let empty = kurbo::BezPath::new();
     let elem_path = recipe.visible_path(&empty);
     let source_path = recipe.source.as_deref();
+    let is_trimmed_closed = source_path
+        .is_some_and(|src| src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath));
+    // Chalk trembles the outline it draws, measured in scene units: the
+    // stroke correction maps local lengths to scene lengths.
+    let chalk_unit = recipe.stroke_view.map_or(1.0, |view| {
+        let determinant = view.determinant().abs();
+        if determinant > 1.0e-12 {
+            1.0 / determinant.sqrt()
+        } else {
+            1.0
+        }
+    });
+    let rough = recipe.chalk.as_ref().map(|chalk| {
+        (
+            crate::chalk::roughen(elem_path, chalk, chalk_unit),
+            source_path.map(|source| crate::chalk::roughen(source, chalk, chalk_unit)),
+        )
+    });
+    let (elem_path, source_path) = match &rough {
+        Some((path, source)) => (path, source.as_ref()),
+        None => (elem_path, source_path),
+    };
     let elem_fill = recipe.fill.as_ref();
     let elem_stroke = recipe
         .stroke
@@ -140,9 +166,6 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
     } else {
         0.0
     };
-
-    let is_trimmed_closed = source_path
-        .is_some_and(|src| src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath));
 
     // 1. Drop shadow and glow, under the geometry. The shadow follows what
     // is painted: the filled region, or the stroke of an unfilled path.
@@ -206,6 +229,27 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
         false
     };
 
+    // Chalk paints the fill and stroke in a layer the grain then masks.
+    let chalk_bounds = recipe
+        .chalk
+        .filter(|_| !blurred_vector && !elem_path.is_empty())
+        .map(|chalk| {
+            use kurbo::Shape;
+            let pen = elem_stroke_style.map_or(0.0, |style| style.width.abs());
+            let reach = pen * chalk_unit.max(1.0) + (chalk.roughness * 2.0 + 0.05) * chalk_unit;
+            let reach = if reach.is_finite() { reach } else { chalk_unit };
+            (chalk, elem_path.bounding_box().inflate(reach, reach))
+        });
+    if let Some((_, bounds)) = chalk_bounds {
+        scene.push_layer(
+            peniko::Fill::NonZero,
+            peniko::BlendMode::default(),
+            1.0,
+            kurbo::Affine::IDENTITY,
+            &bounds,
+        );
+    }
+
     // 2. Fill, or the raster content clipped to the outline.
     if !blurred_vector
         && let Some(raster_image) = &recipe.raster
@@ -265,6 +309,10 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
             recipe.stroke_align,
             recipe.stroke_profile.as_ref(),
         );
+    }
+    if let Some((chalk, bounds)) = chalk_bounds {
+        crate::chalk::mask_with_grain(&mut scene, &chalk, chalk_unit, bounds);
+        scene.pop_layer();
     }
 
     BuiltFragment { scene, overlay }

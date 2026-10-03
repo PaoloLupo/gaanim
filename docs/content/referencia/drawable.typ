@@ -102,6 +102,23 @@ face.scale_to(1.18)
 ]
 
 #api-entry(
+  name: "Drawable.chalk",
+  kind: "method",
+  params: (
+    (name: "seed", type: "int", default: "0", desc: [Semilla del temblor y del grano: la misma semilla dibuja la misma tiza en cada fotograma y exportación.]),
+    (name: "roughness", type: "float", default: "0.01", desc: [Desplazamiento máximo del contorno, en unidades de escena; `0` deja el contorno limpio y solo aplica el grano.]),
+  ),
+  desc: [Dibuja el relleno y el trazo como tiza en una pizarra: el contorno tiembla un poco y un grano rompe la pintura. En un texto o un grupo se aplica a cada glifo y miembro. Vale para toda la escena, aunque se llame después de un `play`; no se anima. `write(brush="chalk")` hace lo mismo desde la animación. Los paquetes de reproducción (`.gaanim`) aún no pueden grabar tiza: exporta un vídeo.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), background="#1f3a2e")
+box = scene.geometry.rect(3, 1.5).no_fill().stroke(WHITE, 0.05).chalk(seed=2)
+scene.play([box.animate.write().duration(1)])
+```
+]
+
+#api-entry(
   name: "Drawable.no_stroke",
   kind: "method",
   desc: [Quita el trazo. Las flechas sólidas se ven mejor con `.fill(color).no_stroke()`.],

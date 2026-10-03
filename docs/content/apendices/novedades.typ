@@ -17,8 +17,9 @@ Publicada el 3 de octubre de 2026. Corrige lo que se vio al hacer los primeros
 videos con 0.8.0: sombras de curvas sin relleno, cotas demasiado gruesas, un
 `stagger` que cambiaba de orden y documentos Typst que se ensanchaban hasta la
 página. Llegan `gaanim export --frame`, contadores con ancho reservado sin
-ceros, trazos que escalan con su figura y updaters con velocidad o amplitud
-animable. Lee «Al actualizar» si usas
+ceros, trazos que escalan con su figura, updaters con velocidad o amplitud
+animable, escritura con tiza, arcos de elipse, magnitudes con unidades y una
+guía de personajes por partes. Lee «Al actualizar» si usas
 `scene.text.typst` con párrafos largos.
 
 == Cambios
@@ -41,6 +42,17 @@ animable. Lee «Al actualizar» si usas
   `Updater.wiggle` aceptan un `Parameter`: animarlo acelera un giro o calma un
   temblor sin saltos, y un seek cae en el mismo fotograma que la reproducción.
   Lee #link("/guias/movimiento/")[Movimiento].
+- `write(brush="chalk", seed=…)` y `drawable.chalk(seed, roughness)` dibujan
+  como con tiza: un contorno que tiembla un poco y un grano que rompe la
+  pintura, iguales para la misma semilla. Los paquetes `.gaanim` aún no
+  graban tiza. Lee #link("/referencia/drawable/")[Drawable].
+- `scene.geometry.ellipse_arc(cx, cy, rx, ry, inicio, barrido)` dibuja arcos de
+  elipse, como la base de un cilindro en perspectiva.
+- `quantity(valor, unidad)` escribe magnitudes con unidades como `siunitx`:
+  `quantity(181, "L")` y `quantity(1, "m^3")` dejan el mismo espacio fino.
+  Lee #link("/referencia/text/")[Texto].
+- La guía #link("/guias/personajes/")[Personajes con SVG por partes] anima un
+  personaje dibujado en Inkscape con `part`, `with_pivot` y `look_at`.
 
 == Al actualizar
 

@@ -11398,6 +11398,32 @@ mod tests {
     }
 
     #[test]
+    fn chalk_from_a_later_write_reaches_the_frozen_spec() {
+        let mut scene = SceneModel::new(1280, 720);
+        let first = scene.circle(1.0);
+        let title = scene.text("Pizarra");
+        scene
+            .play_items(vec![first.animate().write().into()])
+            .unwrap();
+        assert!(
+            scene.state.lock().unwrap().frozen_spawn_specs[&title.id]
+                .chalk
+                .is_none()
+        );
+        let write = title.animate().write().chalk(4, 0.02);
+        scene.play_items(vec![write.into()]).unwrap();
+        let chalk = gaanim_renderer::effects::ChalkBrush {
+            seed: 4,
+            roughness: 0.02,
+        };
+        assert_eq!(
+            scene.state.lock().unwrap().frozen_spawn_specs[&title.id].chalk,
+            Some(chalk)
+        );
+        assert_eq!(title.spec.lock().unwrap().chalk, Some(chalk));
+    }
+
+    #[test]
     fn media_framing_validates_and_preserves_birth_state() {
         let mut scene = SceneModel::new(1280, 720);
         let video = synthetic_video(&mut scene)

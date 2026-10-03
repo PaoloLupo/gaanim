@@ -10233,6 +10233,11 @@ impl SceneModel {
                 }
             }
         }
+        if let Some(chalk) = spec.chalk {
+            for (entity, _) in Self::hierarchy_entities(builder, mref.id) {
+                builder.commands.entity(entity).insert(chalk);
+            }
+        }
         if let Some(blend) = spec.blend {
             Self::apply_blend(builder, mref.id, blend);
         }
@@ -10476,6 +10481,7 @@ impl SceneModel {
                             gaanim_renderer::effects::ViewLayer,
                             gaanim_renderer::effects::MotionBlurExempt,
                             gaanim_renderer::effects::StrokeProfile,
+                            gaanim_renderer::effects::ChalkBrush,
                         )>();
                     })
                     .insert((

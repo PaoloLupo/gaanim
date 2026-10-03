@@ -174,8 +174,8 @@ mod tests {
     fn decimals_and_separator_shape_the_number() {
         use QuantityValue::*;
         assert_eq!(
-            quantity_math(Float(3.14159), "rad", Some(2), ",").unwrap(),
-            r#"3upright(",")14 thin upright("rad")"#
+            quantity_math(Float(1.23456), "rad", Some(2), ",").unwrap(),
+            r#"1upright(",")23 thin upright("rad")"#
         );
         assert_eq!(quantity_math(Integer(2), "", Some(1), ".").unwrap(), "2.0");
         assert_eq!(

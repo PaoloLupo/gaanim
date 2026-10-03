@@ -908,8 +908,15 @@ impl PyCanvasAnim {
         })
     }
 
-    #[pyo3(signature = (*, by="grapheme", order="forward", stagger=None))]
-    fn write(&self, by: &str, order: &str, stagger: Option<f64>) -> PyResult<Self> {
+    #[pyo3(signature = (*, by="grapheme", order="forward", stagger=None, brush="pen", seed=0))]
+    fn write(
+        &self,
+        by: &str,
+        order: &str,
+        stagger: Option<f64>,
+        brush: &str,
+        seed: u64,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         if self.inner.property_target_is_text_selection() {
@@ -934,6 +941,9 @@ impl PyCanvasAnim {
                 "stagger must be finite and non-negative",
             ));
         }
+        if !matches!(brush, "pen" | "chalk") {
+            return Err(PyValueError::new_err("brush must be pen or chalk"));
+        }
         self.require_effect_slot("write")?;
         use gaanim_api::anim::DrawOrder;
         use gaanim_text::prelude::TextRevealUnit;
@@ -957,6 +967,9 @@ impl PyCanvasAnim {
             .draw_order(order);
         if let Some(stagger) = stagger {
             inner = inner.lag_ratio(stagger);
+        }
+        if brush == "chalk" {
+            inner = inner.chalk(seed, 0.01);
         }
         Ok(Self { inner })
     }
@@ -1644,7 +1657,7 @@ mod tests {
         let animation = PyCanvasAnim {
             inner: text.animate(),
         }
-        .write("grapheme", "forward", None)
+        .write("grapheme", "forward", None, "pen", 0)
         .expect("default write should be valid");
 
         let AnimationType::Write { config } = animation.inner.inner.anim_type else {
@@ -1660,7 +1673,7 @@ mod tests {
         let animation = PyCanvasAnim {
             inner: text.animate(),
         }
-        .write("word", "center", Some(0.3))
+        .write("word", "center", Some(0.3), "pen", 0)
         .expect("grouped write should be valid");
 
         let AnimationType::Write { config } = animation.inner.inner.anim_type else {
@@ -1727,7 +1740,7 @@ mod tests {
         .unwrap();
         assert!(error_is::<PyValueError>(faded.fade_out()));
         assert!(error_is::<PyValueError>(
-            faded.write("grapheme", "forward", None)
+            faded.write("grapheme", "forward", None, "pen", 0)
         ));
     }
 
@@ -1769,7 +1782,7 @@ mod tests {
         let written = PyCanvasAnim {
             inner: text.animate(),
         }
-        .write("grapheme", "forward", None)
+        .write("grapheme", "forward", None, "pen", 0)
         .unwrap();
         assert!(error_is::<PyValueError>(written.fill(white())));
         // Draw modifiers still configure the effect itself.
@@ -3205,6 +3218,23 @@ impl PyDrawable {
         let result = Ok(Self(
             slf.borrow().0.clone().scale_stroke_with_object(enabled),
         ));
+        same_drawable(slf, result)
+    }
+    /// Draw the fill and stroke as chalk: the outline trembles by up to
+    /// `roughness` scene units and a grain breaks the paint, both from `seed`.
+    #[pyo3(signature = (seed=0, roughness=0.01))]
+    fn chalk<'py>(
+        slf: &Bound<'py, Self>,
+        seed: u64,
+        roughness: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !roughness.is_finite() || roughness < 0.0 {
+            return Err(PyValueError::new_err(
+                "roughness must be finite and non-negative",
+            ));
+        }
+        let result = Ok(Self(slf.borrow().0.clone().chalk(seed, roughness)));
         same_drawable(slf, result)
     }
     /// Apply cap, join, miter, and dash geometry from a reusable StrokeStyle.

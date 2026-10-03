@@ -6652,8 +6652,10 @@ mod tests {
     fn derive_layout(world: &mut World, entities: &[Entity; 3]) {
         for &entity in entities {
             let x = world.get::<SpatialTransform>(entity).unwrap().translation.x;
-            world.get_mut::<gaanim_scene::LocalBounds>(entity).unwrap().0 =
-                gaanim_math::Bounds3D::new_2d(x, 0.0, x + 10.0, 1.0);
+            world
+                .get_mut::<gaanim_scene::LocalBounds>(entity)
+                .unwrap()
+                .0 = gaanim_math::Bounds3D::new_2d(x, 0.0, x + 10.0, 1.0);
         }
         let opacity = f64::from(world.get::<Opacity>(entities[1]).unwrap().0);
         let rect = gaanim_core::kurbo::Rect::new(0.0, 0.0, 1.0 + 10.0 * opacity, 2.0);
