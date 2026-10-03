@@ -15,6 +15,7 @@ pub mod pipeline;
 mod post_bloom;
 pub mod post_presets;
 pub mod post_process;
+pub mod transition_presets;
 mod post_process_gpu;
 pub mod prelude;
 mod stroke;

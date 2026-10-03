@@ -126,9 +126,13 @@ fn prepare_post_process(
         .and_then(|(request, image)| Some((request, images.get(*image)?)));
     match target {
         Some((request, image)) => {
-            state
-                .0
-                .prepare(device.wgpu_device(), &queue, &image.texture, Some(request));
+            state.0.prepare(
+                device.wgpu_device(),
+                &queue,
+                &image.texture,
+                Some(request),
+                None,
+            );
         }
         None => state.0.clear(),
     }

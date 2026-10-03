@@ -371,7 +371,7 @@ impl GpuContext {
         }
         if self
             .post
-            .prepare(&self.device, &self.queue, &self.texture, post)
+            .prepare(&self.device, &self.queue, &self.texture, post, None)
         {
             self.post.encode(&mut encoder);
         }

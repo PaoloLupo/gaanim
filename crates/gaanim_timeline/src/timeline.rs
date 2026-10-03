@@ -4798,6 +4798,16 @@ fn apply_transition(
         TransitionType::Morph { mappings, .. } => {
             apply_morph_transition(world, scene_entities, mappings, t.clamp(0.0, 1.0), from, to);
         }
+        TransitionType::Shader { shader, .. } => {
+            crate::transition_mask::apply_shader_transition(
+                world,
+                scene_entities,
+                shader,
+                t,
+                from,
+                to,
+            );
+        }
         // Keys are resolved into `Morph` pairs by the authoring layer; an
         // unresolved magic move has no pairs and cross-fades like a morph.
         TransitionType::MagicMove { .. } => {

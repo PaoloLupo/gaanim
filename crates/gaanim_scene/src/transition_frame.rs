@@ -3,9 +3,11 @@
 //! The timeline evaluates every transition as a pure function of the playhead
 //! and publishes the result here; renderers only read it. Masks and overlays
 //! are plain `kurbo`/`peniko` geometry in world space, so they stay exact at
-//! any resolution and need no intermediate textures.
+//! any resolution and need no intermediate textures. A shader transition is
+//! the exception: it renders each side alone and blends them in one WGSL pass.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use bevy::prelude::{Entity, Resource};
 use gaanim_core::kurbo::{BezPath, Point};
@@ -45,6 +47,28 @@ pub struct TransitionOverlayLayer {
     pub fills: Vec<(BezPath, Brush)>,
 }
 
+/// A WGSL transition that blends the outgoing and incoming sides, as plain
+/// data: the renderer compiles it (see `gaanim_renderer::post_process`).
+///
+/// `source` defines `fn transition(uv: vec2<f32>) -> vec4<f32>` and reads
+/// `gaanim_from(uv)`, `gaanim_to(uv)` and `progress`; `uniforms` names the
+/// `f32` fields of `gaanim_uniforms`, whose `values` are fixed, and `data`
+/// fills the storage array `gaanim_data` (e.g. a luma reveal map).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransitionShader {
+    pub source: String,
+    pub uniforms: Vec<String>,
+    pub values: Vec<f32>,
+    pub data: Option<Vec<[f32; 4]>>,
+}
+
+/// The shader transition at the playhead and its eased progress.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransitionShaderFrame {
+    pub shader: Arc<TransitionShader>,
+    pub progress: f32,
+}
+
 /// Which side of the active transition a drawable belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransitionSide {
@@ -75,12 +99,23 @@ pub struct SceneTransitionFrame {
     pub backgrounds: Option<(f64, f64)>,
     /// Overlay layers drawn above every drawable.
     pub overlays: Vec<TransitionOverlayLayer>,
+    /// A shader transition: each side is rendered alone and the shader
+    /// blends them; drawables of neither side and overlays go above.
+    pub shader: Option<TransitionShaderFrame>,
 }
 
 impl SceneTransitionFrame {
     /// Whether this frame changes nothing in the rendered output.
     pub fn is_empty(&self) -> bool {
-        self.outgoing_mask.is_none() && self.incoming_mask.is_none() && self.overlays.is_empty()
+        self.outgoing_mask.is_none()
+            && self.incoming_mask.is_none()
+            && self.overlays.is_empty()
+            && self.shader.is_none()
+    }
+
+    /// Whether the frame splits its drawables into sides.
+    fn splits(&self) -> bool {
+        self.outgoing_mask.is_some() || self.incoming_mask.is_some() || self.shader.is_some()
     }
 
     /// Classify an entity, walking up its ancestors so untagged descendants
@@ -90,7 +125,7 @@ impl SceneTransitionFrame {
         entity: Entity,
         mut parent_of: impl FnMut(Entity) -> Option<Entity>,
     ) -> TransitionSide {
-        if self.outgoing_mask.is_none() && self.incoming_mask.is_none() {
+        if !self.splits() {
             return TransitionSide::None;
         }
         let mut current = Some(entity);

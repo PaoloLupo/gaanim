@@ -810,7 +810,7 @@ impl SceneData {
             })?;
             let bloom = r.bool()?;
             post_shaders.push(
-                PostProcessShader::from_parts(source, &uniforms, data, bloom)
+                PostProcessShader::from_parts(source, &uniforms, data, bloom, false)
                     .map_err(|error| BundleError::Corrupt(error.to_string()))?,
             );
         }
