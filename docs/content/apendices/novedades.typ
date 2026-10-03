@@ -17,7 +17,10 @@ Publicada el 3 de octubre de 2026. Transiciones por shader: cada segmento se
 dibuja por separado y la GPU los mezcla con una función WGSL, como en
 gl-transitions. Llegan cinco listas para usar y la posibilidad de escribir las
 tuyas. Y el audio anima la escena: el volumen, las bandas de frecuencia y los
-golpes de una pista mueven, giran y tiñen cualquier objeto. Además, los SVG
+golpes de una pista mueven, giran y tiñen cualquier objeto. Cualquier objeto
+puede ser de vidrio, esmerilado o líquido como el _Liquid Glass_ de iOS, pasar
+por sus propios shaders, mostrarse a través de un mate o fundirse como gotas
+con los metaballs. Además, los SVG
 con transformaciones conservan sus degradados, recortes y trazos, los grupos
 se funden como una capa y las sombras de texto cuestan una por objeto. Lee «Al
 actualizar»: los paquetes `.gaanim` de 0.8 deben grabarse de nuevo y el
@@ -55,12 +58,18 @@ interlineado por defecto es más compacto.
   y con uniforms animados por `Parameter` o por el audio. Lee
   #link("/referencia/drawable/")[Drawable].
 - Los paquetes `.gaanim` graban la tiza y los efectos de shader por objeto.
+- `Drawable.liquid_glass()` convierte un objeto en vidrio líquido como el
+  _Liquid Glass_ de iOS: el centro deja ver lo que hay detrás sin deformarlo
+  y el borde lo curva como una lente, lo desliza a lo largo del contorno
+  (`twist`), lo separa en colores (aberración cromática, `dispersion`) y
+  brilla con una línea fina de luz. Sus ajustes (`bevel`, `refraction`,
+  `blur`, `transparency`…) son los de `Drawable.glass`, que hace vidrio
+  esmerilado; `backdrop_blur` solo desenfoca lo que hay detrás. El borde
+  sigue la forma real del objeto, así que unos metaballs de vidrio se funden
+  como gotas. Lee #link("/referencia/drawable/")[Drawable].
 - `Drawable.matte(fuente, mode=)` muestra un objeto solo a través de otro
-  (alpha o luma, normales o invertidos), `scene.geometry.metaballs` funde
-  bolas como gotas, y `Drawable.glass`, `liquid_glass` y `backdrop_blur`
-  hacen vidrio (esmerilado o líquido, con lente y dispersión) sobre lo que
-  hay detrás. Lee
-  #link("/referencia/drawable/")[Drawable] y
+  (alpha o luma, normales o invertidos), y `scene.geometry.metaballs` funde
+  bolas como gotas. Lee #link("/referencia/drawable/")[Drawable] y
   #link("/referencia/geometria/")[Geometría].
 - `echo(..., start=, end=)` limita la estela a un intervalo de la escena.
 - `drawable.copy()` duplica un objeto; en un SVG copia también sus partes con
