@@ -2961,7 +2961,7 @@ scene.wait(1)
     (name: "name", type: "str", default: none, desc: [`"cross_zoom"`, `"directional_warp"`, `"ripple"`, `"glitch_displace"` o `"luma"`.]),
     (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
     (name: "image / invert", type: "str | os.PathLike | None / bool", default: "None / False", desc: [Solo `luma`: mapa en escala de grises (ruta tal cual, reducido a 256 px como mucho); el segmento entrante aparece primero donde es más oscuro, o más claro con `invert=True`.]),
-    (name: "**settings", type: "float", default: none, desc: [`cross_zoom`: `strength=0.4`. `directional_warp`: `dx=1`, `dy=0` (y hacia arriba), `smoothness=0.5`. `ripple`: `amplitude=100`, `speed=50`. `glitch_displace`: `strength=0.5`, `bands=24`, `seed=0`. `luma`: `softness=0.1`.]),
+    (name: "**settings", type: "float | int", default: none, desc: [`bands` y `seed` son enteros; los demás, números reales. `cross_zoom`: `strength=0.4`. `directional_warp`: `dx=1`, `dy=0` (y hacia arriba), `smoothness=0.5`. `ripple`: `amplitude=100`, `speed=50`. `glitch_displace`: `strength=0.5`, `bands=24`, `seed=0`. `luma`: `softness=0.1`.]),
   ),
   returns: (type: "Transition", desc: [Transición por shader incorporada.]),
   desc: [Un nombre o un ajuste desconocidos, `image` en otro preset o `luma` sin imagen lanzan `ValueError`.],

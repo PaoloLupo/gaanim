@@ -2577,6 +2577,30 @@ def validate_fluent_setters_keep_their_class(module):
     return failures
 
 
+def validate_readout_number_formats(module):
+    """Readouts follow Python's format specification and reject the rest."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    for spec in ("05.2f", "+,.1f", "_.0f", ".3e", ".2g", ".1%", "*^9.1f", "z.1f"):
+        try:
+            scene.viz.readout(0.07, format=spec)
+        except Exception as error:
+            failures.append(f"readout rejected the valid format {spec!r}: {error}")
+    for spec in ("d", ",d", "s", ".f", "2.2.2f", ".2fx"):
+        for create in (
+            lambda: scene.viz.readout(1.0, format=spec),
+            lambda: scene.viz.variable(1.0, label="x", format=spec),
+            lambda: scene.mechanics.dimension_between((0, 0), (1, 0), 0.4, show_value=True, format=spec),
+        ):
+            try:
+                create()
+            except ValueError:
+                pass
+            else:
+                failures.append(f"a readout accepted the unsupported format {spec!r}")
+    return failures
+
+
 def validate_narration_contract(module: object) -> list[str]:
     """Voiceover takes set the pace; a live take turns stops into holds."""
     import json
@@ -2959,6 +2983,7 @@ def main() -> int:
     missing.extend(validate_falloff_contract(module))
     missing.extend(validate_emphasis_contract(module))
     missing.extend(validate_fluent_setters_keep_their_class(module))
+    missing.extend(validate_readout_number_formats(module))
     missing.extend(validate_editorial_contract(module))
     missing.extend(validate_theme_typography_contract(module))
     missing.extend(validate_default_theme_contract(module, tree))

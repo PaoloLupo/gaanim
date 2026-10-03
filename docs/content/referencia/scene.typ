@@ -746,7 +746,7 @@ sin alterar su estado visual. Un objeto de otra escena lanza `ValueError`.
     (name: "others", type: "Drawable", default: "()", desc: [Más objetos de la misma escena.]),
   ),
   returns: (type: "None"),
-  desc: [Mantiene objetos visibles y animables en los segmentos siguientes, desde el cursor actual. Las transiciones automáticas (`cross_fade`, `slide`…) no los afectan. Un objeto invisible sigue invisible hasta que una animación de entrada cambia su opacidad.],
+  desc: [Mantiene objetos visibles y animables en los segmentos siguientes, desde el cursor actual. Las transiciones automáticas (`cross_fade`, `slide`…) no los afectan. Con el mismo `z_index`, un objeto persistente se dibuja encima del contenido de los segmentos, durante las transiciones y fuera de ellas; con un `z_index` menor queda debajo (una rejilla persistente con `z_index(-1)`), salvo en una transición por shader, que lo compone encima de la mezcla. Un objeto invisible sigue invisible hasta que una animación de entrada cambia su opacidad.],
   none,
 )
 

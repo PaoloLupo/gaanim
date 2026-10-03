@@ -333,6 +333,9 @@ pub struct ExtractedElement {
     blend: Option<peniko::BlendMode>,
     /// Side of the active scene transition this element belongs to.
     transition_side: gaanim_scene::TransitionSide,
+    /// In a scene with segments, belongs to none of them (`scene.persist`):
+    /// it draws above segment content with the same z-index.
+    persistent: bool,
     /// The element and its ancestors, recorded only while camera views
     /// exist so they can leave excluded subtrees out.
     lineage: Vec<Entity>,
@@ -403,13 +406,14 @@ impl ExtractedCameraView {
 }
 
 impl ExtractedElement {
-    /// Deterministic layering: z-index, then creation order, then echo copies
-    /// beneath their source and stroke tips beneath the stroke they share an
-    /// order with.
+    /// Deterministic layering: z-index, then persistent objects above
+    /// segment content, then creation order, then echo copies beneath their
+    /// source and stroke tips beneath the stroke they share an order with.
     fn draw_order(a: &Self, b: &Self) -> std::cmp::Ordering {
         a.render_order
             .z_index
             .cmp(&b.render_order.z_index)
+            .then(a.persistent.cmp(&b.persistent))
             .then(
                 a.render_order
                     .creation_order
@@ -459,6 +463,7 @@ impl ExtractedElement {
             clip_mask: self.clip_mask.clone(),
             blend: self.blend,
             transition_side: self.transition_side,
+            persistent: self.persistent,
             lineage: Vec::new(),
             view_bounds: None,
             in_views: self.in_views,
@@ -671,6 +676,22 @@ fn element_lineage(
         current = parent;
     }
     lineage
+}
+
+/// Whether neither `entity` nor any ancestor belongs to a segment.
+fn outside_segments(
+    entity: Entity,
+    mut parent_of: impl FnMut(Entity) -> Option<Entity>,
+    mut is_member: impl FnMut(Entity) -> bool,
+) -> bool {
+    let mut current = Some(entity);
+    while let Some(node) = current {
+        if is_member(node) {
+            return false;
+        }
+        current = parent_of(node);
+    }
+    true
 }
 
 /// Stack order of a drawn element: its own `z_index` plus every ancestor's,
@@ -2462,7 +2483,8 @@ fn extract_world(
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
-    let mut order_query = world.query::<&RenderOrder>();
+    let mut order_query = world.query::<(&RenderOrder, Has<gaanim_scene::SegmentContent>)>();
+    let segmented = order_query.iter(world).any(|(_, member)| member);
     let mut blend_query = world.query::<&ElementBlend>();
 
     for (
@@ -2701,7 +2723,11 @@ fn extract_world(
                 *render_order,
                 entity,
                 |e| child_query.get(world, e).ok().map(ChildOf::parent),
-                |e| order_query.get(world, e).map_or(0, |order| order.z_index),
+                |e| {
+                    order_query
+                        .get(world, e)
+                        .map_or(0, |(order, _)| order.z_index)
+                },
             ),
             scene: Arc::new(scene),
             clip_mask: clip_opt.cloned(),
@@ -2713,6 +2739,12 @@ fn extract_world(
                         child_query.get(world, e).ok().map(ChildOf::parent)
                     })
                 }),
+            persistent: segmented
+                && outside_segments(
+                    entity,
+                    |e| child_query.get(world, e).ok().map(ChildOf::parent),
+                    |e| order_query.get(world, e).is_ok_and(|(_, member)| member),
+                ),
             lineage: if camera_views.is_empty() {
                 Vec::new()
             } else {
@@ -2970,6 +3002,7 @@ fn three_d_elements<'a>(
         let scene = build_fragment(&recipe, None).scene;
         let (hud, layer) = composition.get(&entity).cloned().unwrap_or_default();
         extracted.push(ExtractedElement {
+            persistent: false,
             entity,
             recipe: Some(Arc::new(recipe)),
             lottie: None,
@@ -4046,6 +4079,7 @@ fn compose_captured_layers(
         .map(|element| {
             let (scene, overlay) = store.get(&element.recipe, element.lottie.as_ref());
             ExtractedElement {
+                persistent: false,
                 entity: element.entity,
                 recipe: None,
                 lottie: None,
@@ -4311,7 +4345,7 @@ pub fn gaanim_render_system(
     canvas_bg: Option<Res<CanvasBackground>>,
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
-    order_query: Query<&RenderOrder>,
+    order_query: Query<(&RenderOrder, Has<gaanim_scene::SegmentContent>)>,
     (
         blend_query,
         echo_query,
@@ -4434,6 +4468,7 @@ pub fn gaanim_render_system(
             None
         }
     });
+    let segmented = order_query.iter().any(|(_, member)| member);
     let opacity_fallback = canvas_bg
         .as_ref()
         .map(|background| {
@@ -4782,7 +4817,7 @@ pub fn gaanim_render_system(
                 *render_order,
                 entity,
                 |e| child_query.get(e).ok().map(ChildOf::parent),
-                |e| order_query.get(e).map_or(0, |order| order.z_index),
+                |e| order_query.get(e).map_or(0, |(order, _)| order.z_index),
             ),
             scene: fragment,
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
@@ -4793,6 +4828,12 @@ pub fn gaanim_render_system(
                 .map_or_else(Default::default, |frame| {
                     frame.side_of(entity, |e| child_query.get(e).ok().map(ChildOf::parent))
                 }),
+            persistent: segmented
+                && outside_segments(
+                    entity,
+                    |e| child_query.get(e).ok().map(ChildOf::parent),
+                    |e| order_query.get(e).is_ok_and(|(_, member)| member),
+                ),
             lineage: if camera_views.is_empty() {
                 Vec::new()
             } else {
@@ -5984,6 +6025,7 @@ mod tests {
     #[test]
     fn opacity_runs_clip_to_their_own_elements_not_the_frame() {
         let element = |rect| ExtractedElement {
+            persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -6036,6 +6078,7 @@ mod tests {
             &path,
         );
         ExtractedElement {
+            persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -6188,6 +6231,7 @@ mod tests {
     #[test]
     fn consecutive_glyphs_with_the_same_opacity_share_one_compositor_run() {
         let element = |opacity| ExtractedElement {
+            persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -6227,6 +6271,7 @@ mod tests {
     #[test]
     fn a_translucent_single_solid_paint_is_faded_without_a_layer() {
         let element = |scene: vello::Scene| ExtractedElement {
+            persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -6295,6 +6340,7 @@ mod tests {
     #[test]
     fn blended_elements_never_join_a_shared_opacity_layer() {
         let element = |blend| ExtractedElement {
+            persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -6341,6 +6387,7 @@ mod tests {
             ..ClipMask::default()
         };
         let element = |clip_mask| ExtractedElement {
+            persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,

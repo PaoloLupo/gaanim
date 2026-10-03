@@ -1435,7 +1435,7 @@ class Transition:
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
         sound: Optional[str] = None,
-        **settings: float,
+        **settings: float | int,
     ) -> Transition:
         """A built-in shader transition (see ``Transition.shader``).
 
@@ -1446,8 +1446,8 @@ class Transition:
         - ``directional_warp``: ``dx=1, dy=0`` (direction, y up),
           ``smoothness=0.5``; the incoming segment sweeps in with a warp.
         - ``ripple``: ``amplitude=100`` (waves across the frame), ``speed=50``.
-        - ``glitch_displace``: ``strength=0.5``, ``bands=24``, ``seed=0``;
-          bands slip sideways with split channels and cut at the middle.
+        - ``glitch_displace``: ``strength=0.5``, ``bands=24`` and ``seed=0``
+          (whole numbers); bands slip sideways with split channels and cut at the middle.
         - ``luma``: ``softness=0.1``; the incoming segment appears first where
           the grayscale ``image`` (a path used as given, scaled to at most
           256 px) is darkest, or brightest with ``invert=True``.
@@ -8526,6 +8526,13 @@ class Visualization:
         It must be one character that is not a digit, sign, space, ``e`` or
         ``%``; otherwise ``ValueError`` is raised.
 
+        ``format`` is a Python format specification for a float, applied as
+        ``format(value, format)``: fill and alignment, sign, ``z``, ``#``,
+        ``0``, width, ``,`` or ``_`` grouping, precision and the types ``f``,
+        ``F``, ``e``, ``E``, ``g``, ``G`` and ``%`` (``"05.2f"`` shows
+        ``00.07``). Integer and string types such as ``d`` and malformed
+        specifications raise ``ValueError``; use ``".0f"`` for whole numbers.
+
         ``spacing`` is the space between the label, ``=``, number and unit, in
         scene units; by default a thin space that grows with ``font_size``
         (0.1 at the default size). A ``prefix`` or ``suffix`` belongs to the
@@ -9516,8 +9523,12 @@ class Scene:
 
         Persistence begins at the current cursor and is not retroactive. Global
         drawables are excluded from automatic ``cross_fade``, ``slide``, and
-        other segment transitions. An invisible drawable remains invisible until
-        an explicit entry animation changes its opacity.
+        other segment transitions. With equal ``z_index``, a persistent drawable
+        draws above segment content, during transitions and outside them; a
+        lower ``z_index`` keeps it below (a persistent grid with
+        ``z_index(-1)``), except during a shader transition, which composites
+        it above the blend. An invisible drawable remains invisible until an
+        explicit entry animation changes its opacity.
 
         Raises:
             ValueError: If any drawable belongs to another ``Scene``.

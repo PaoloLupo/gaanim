@@ -2248,7 +2248,7 @@ impl Timeline {
                         if let Some(scene) = scene {
                             entity_mut.insert(SceneMember(scene));
                         } else {
-                            entity_mut.remove::<SceneMember>();
+                            entity_mut.remove::<(SceneMember, gaanim_scene::SegmentContent)>();
                             // Global objects are outside the per-scene visibility pass.
                             // Restore render eligibility without changing authored opacity.
                             entity_mut.insert(gaanim_scene::Visible);

@@ -60,7 +60,7 @@ pub use signals::{
     position_binding_system, reactive_3d_regen_system, reactive_readout_layout_system,
     reactive_readout_update_system, reserve_readout_bounds, right_align_readout_path,
     right_aligned_readout_baseline, shape_readout_text, shape_readout_text_with_weight,
-    signal_binding_system, tangent_on_curve_system,
+    signal_binding_system, tangent_on_curve_system, validate_number_format,
 };
 pub use tween::{
     AnimatableLens, CameraStateSource, DeltaTime, MorphTable, PropertyLens, Tween, TweenState,

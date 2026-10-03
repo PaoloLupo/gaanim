@@ -21,7 +21,7 @@ use gaanim_text::font::FontRegistry;
 pub use gaanim_animation::{
     CustomAnimation, CustomChannel, CustomValues, PropertyChannel, PropertySources,
     ReactiveFunction, ReactiveReadout, ScalarSource, format_reactive_number,
-    reactive_readout_update_system,
+    reactive_readout_update_system, validate_number_format,
 };
 
 /// Component for dynamically-rendered decimal numbers that bind to a FloatSignal.
@@ -124,6 +124,48 @@ mod tests {
             "invalid"
         );
         assert_eq!(format_reactive_number(2.0, "6.0f", "—"), "     2");
+    }
+
+    #[test]
+    fn reactive_number_format_matches_python_format_spec() {
+        // Each expectation is `format(value, spec)` in CPython.
+        for (value, spec, expected) in [
+            (0.07, "05.2f", "00.07"),
+            (1234.5, "08.1f", "001234.5"),
+            (-3.5, "07.2f", "-003.50"),
+            (-3.5, "*<8.1f", "-3.5****"),
+            (42.0, "^9.1f", "  42.0   "),
+            (-1.0, "=+8.1f", "-    1.0"),
+            (3.0, " .1f", " 3.0"),
+            (1234567.891, "_.2f", "1_234_567.89"),
+            (1234567.891, "015,.2f", "0,001,234,567.89"),
+            (1234.5, ".2g", "1.2e+03"),
+            (9.99, ".2g", "10"),
+            (0.00012345, ".3g", "0.000123"),
+            (0.000012345, ".3g", "1.23e-05"),
+            (2.0, "#.3g", "2.00"),
+            (1234.5, ".3e", "1.234e+03"),
+            (1234.5, ".1E", "1.2E+03"),
+            (0.256, ".1%", "25.6%"),
+            (3.0, "#.0f", "3."),
+            (-0.001, "z.1f", "0.0"),
+            (-0.001, ".1f", "-0.0"),
+            (2.0, "", "2.0"),
+            (0.1, "", "0.1"),
+            (1e20, "", "1e+20"),
+            (2.0, ".3", "2.0"),
+            (1234.5, ".3", "1.23e+03"),
+        ] {
+            assert_eq!(
+                format_reactive_number(value, spec, "—"),
+                expected,
+                "{spec:?}"
+            );
+        }
+        for spec in ["d", ",d", "x", "s", ".f", "2.2.2f", "abc", ".2fx", ".99f"] {
+            assert!(validate_number_format(spec).is_err(), "{spec:?}");
+        }
+        assert!(validate_number_format("+,.2%").is_ok());
     }
 
     #[test]

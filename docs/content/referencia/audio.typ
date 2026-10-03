@@ -192,8 +192,9 @@ scene.render()
 ```
 
 `scene.play(musica)` sin `duration` no alarga el lote: `scene.wait(musica.duration)`
-mantiene la escena mientras suena. El ejemplo completo está en
-`examples/audio_reactive.py`.
+mantiene la escena mientras suena. El ejemplo completo,
+#link("https://github.com/PaoloLupo/gaanim/blob/main/examples/audio_reactive.py")[`examples/audio_reactive.py`],
+está en el repositorio de Gaanim; no viene con el paquete instalado.
 
 #api-entry(
   name: "Audio.level",

@@ -425,6 +425,12 @@ fn field_evaluator_3d(
 }
 
 /// One visible character that cannot be read as part of the number.
+/// Reject a number format that `format(value, spec)` would not accept for
+/// a float, instead of silently showing it another way.
+pub(crate) fn check_number_format(format: &str) -> PyResult<()> {
+    gaanim_animation::validate_number_format(format).map_err(PyValueError::new_err)
+}
+
 fn parse_decimal_separator(value: &str) -> PyResult<char> {
     let mut chars = value.chars();
     match (chars.next(), chars.next()) {
@@ -2951,6 +2957,7 @@ impl PyVisualization {
         reserve: Option<f64>,
     ) -> PyResult<Py<PyReadout>> {
         crate::custom::ensure_authoring_allowed()?;
+        check_number_format(format)?;
         let decimal_separator = parse_decimal_separator(decimal_separator)?;
         check_readout_spacing(spacing)?;
         check_readout_reserve(reserve)?;
@@ -3009,6 +3016,7 @@ impl PyVisualization {
         reserve: Option<f64>,
     ) -> PyResult<Py<PyVariable>> {
         crate::custom::ensure_authoring_allowed()?;
+        check_number_format(format)?;
         let decimal_separator = parse_decimal_separator(decimal_separator)?;
         check_readout_spacing(spacing)?;
         check_readout_reserve(reserve)?;

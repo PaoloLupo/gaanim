@@ -244,8 +244,9 @@ líneas vivas (`connect`) o animar el trazo (`stroke_profile`,
 
 == Límites
 
-- Las transiciones entre segmentos no aceptan shaders propios: usa las de
-  `Transition`.
+- Una transición entre segmentos con shader propio usa `Transition.shader`
+  (o `Transition.preset`), no `shader_effect`: el efecto por objeto no ve
+  los dos segmentos a la vez.
 - El postprocesado no se aplica a la exportación SVG ni a otras salidas
   vectoriales. Con una cámara en perspectiva y en escenas 3D sí se aplica.
 - El desenfoque de movimiento solo se ve al exportar y en los snapshots; la

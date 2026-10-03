@@ -420,6 +420,9 @@ fn insert_snapshot_parts(
         snap.is_group.then_some(gaanim_scene::GroupMarker),
     );
     sync_optional(entity_mut, snap.scene.map(SceneMember));
+    if snap.scene.is_none() {
+        remove_if_present::<gaanim_scene::SegmentContent>(entity_mut);
+    }
 }
 
 /// Whether restoring a snapshot fully determines a component of type

@@ -215,6 +215,13 @@ pub struct RenderOrder {
     pub creation_order: u64,
 }
 
+/// Marks an entity that belongs to one segment of the timeline. In a scene
+/// with segments, a drawable whose chain of parents carries no marker is
+/// persistent (`scene.persist`) and draws above segment content with the
+/// same `z_index`.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SegmentContent;
+
 /// Marker component indicating that the Mobject is visible and should be extracted for rendering.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
