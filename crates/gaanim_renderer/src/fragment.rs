@@ -409,7 +409,7 @@ mod tests {
         );
         let built = build_fragment(&recipe, None).scene;
         assert_eq!(built.encoding().path_data, expected.encoding().path_data);
-        assert_eq!(built.encoding().draw_tags, expected.encoding().draw_tags);
+        assert!(built.encoding().draw_tags == expected.encoding().draw_tags);
     }
 
     #[test]
