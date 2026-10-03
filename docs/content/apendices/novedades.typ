@@ -55,6 +55,13 @@ interlineado por defecto es más compacto.
   y con uniforms animados por `Parameter` o por el audio. Lee
   #link("/referencia/drawable/")[Drawable].
 - Los paquetes `.gaanim` graban la tiza y los efectos de shader por objeto.
+- `Drawable.matte(fuente, mode=)` muestra un objeto solo a través de otro
+  (alpha o luma, normales o invertidos), `scene.geometry.metaballs` funde
+  bolas como gotas, y `Drawable.glass`, `liquid_glass` y `backdrop_blur`
+  hacen vidrio (esmerilado o líquido, con lente y dispersión) sobre lo que
+  hay detrás. Lee
+  #link("/referencia/drawable/")[Drawable] y
+  #link("/referencia/geometria/")[Geometría].
 - `echo(..., start=, end=)` limita la estela a un intervalo de la escena.
 - `drawable.copy()` duplica un objeto; en un SVG copia también sus partes con
   nombre y sus recortes (`copia.part("cabeza")`).

@@ -271,6 +271,7 @@ fn spawn_members(kind: &SpawnKind) -> Option<&[ObjectId]> {
         | SpawnKind::DashedLine { .. }
         | SpawnKind::DoubleArrow { .. }
         | SpawnKind::Polygon(..)
+        | SpawnKind::Metaballs { .. }
         | SpawnKind::Points { .. }
         | SpawnKind::Star { .. }
         | SpawnKind::RegularPolygon { .. }

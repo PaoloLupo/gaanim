@@ -3222,6 +3222,108 @@ class Drawable:
             face.scale_to(1.18)  # The brows thicken with the head.
         """
         ...
+    def glass(
+        self,
+        blur: float = 0.25,
+        *,
+        saturation: float = 1.4,
+        refraction: float = 0.08,
+        edge: float = 0.3,
+        dispersion: float = 0.0,
+        bevel: float = 0.12,
+        transparency: float = 1.0,
+        twist: float = 0.0,
+    ) -> Self:
+        """Turn this drawable into glass over what is drawn behind it.
+
+        Inside its outline, the canvas and every drawable drawn before it
+        show blurred by ``blur`` scene units, with their colors saturated by
+        ``saturation`` (1 keeps them). The outline is a lens with a rounded
+        rim ``bevel`` scene units wide: across it, what lies just outside
+        bends in by up to ``refraction`` scene units (most at the outline,
+        none in the flat middle), splits into its colors by ``dispersion``
+        (0 to 1), and a thin line along the outline catches a light from the
+        top left as bright as ``edge`` (0 to 1). ``twist`` (-2 to 2) also
+        slides what the rim shows along the outline, as a share of the bend:
+        clockwise when positive (to the right along the top, to the left
+        along the bottom), like Liquid Glass. ``transparency`` (0 to 1)
+        is how clear the glass is: 1 shows what is behind it, lower values
+        turn it milky, and 0 is opaque white. The rim follows the real outline of any
+        shape, metaballs included. The drawable itself is drawn on top, so a
+        translucent fill tints the glass and a stroke frames it; the glass
+        fades with it. It is declaration state for the whole timeline and
+        works in previews, exports and ``.gaanim`` bundles. Negative or
+        non-finite values, or ``edge``, ``dispersion`` or ``transparency``
+        above 1, raise
+        ``ValueError``.
+
+        Example:
+            card = scene.geometry.rounded_rect(5, 3, 0.4).fill("#ffffff22").stroke("#ffffff55", 0.02)
+            card.glass(blur=0.3, refraction=0.12)
+        """
+        ...
+    def liquid_glass(
+        self,
+        *,
+        refraction: float = 1.0,
+        dispersion: float = 0.12,
+        bevel: float = 0.6,
+        blur: float = 0.04,
+        edge: float = 0.8,
+        saturation: float = 1.4,
+        transparency: float = 0.92,
+        twist: float = 0.6,
+    ) -> Self:
+        """Turn this drawable into liquid glass: clear, with a thick lens rim.
+
+        ``glass`` with Liquid Glass defaults: almost no blur, a flat middle
+        and a wide rim, steep at the outline, that bends what is behind
+        strongly while sliding it along the outline (``twist``), with faint
+        red, green and blue fringes (``dispersion``), and a thin bright line along
+        the outline. A light fill (``"#ffffff30"``) frosts it like iOS. On ``scene.geometry.metaballs`` the drops keep
+        their lens as they melt together.
+
+        Example:
+            drops = [scene.geometry.circle(0.8).move_to(x, 0) for x in (-1.5, 1.5)]
+            scene.geometry.metaballs(drops, smoothness=0.8).fill("#ffffff12").liquid_glass()
+        """
+        ...
+    def backdrop_blur(self, radius: float = 0.25, *, saturation: float = 1.0) -> Self:
+        """Blur what is drawn behind this drawable, inside its outline.
+
+        The same as ``glass(radius, saturation=saturation, refraction=0, edge=0)``.
+
+        Example:
+            panel = scene.geometry.rect(6, 2).fill("#0f172a88").backdrop_blur(0.4)
+        """
+        ...
+    def no_glass(self) -> Self:
+        """Remove the glass or backdrop blur."""
+        ...
+    def matte(
+        self,
+        source: Optional[Drawable],
+        mode: Literal["alpha", "alpha_inverted", "luma", "luma_inverted"] = "alpha",
+    ) -> Self:
+        """Show this drawable and its descendants only through ``source``, a track matte.
+
+        ``"alpha"`` shows it where ``source`` is opaque, so a photo or a
+        gradient appears inside the letters of a title; ``"luma"`` where
+        ``source`` is bright, so a gradient rectangle makes a soft reveal;
+        ``"alpha_inverted"`` and ``"luma_inverted"`` show the opposite. The
+        matte follows ``source`` as it moves, scales, fades or is written,
+        but ``source`` is no longer drawn on its own. ``None`` removes the
+        matte. It is declaration state for the whole timeline and works in
+        previews, exports and ``.gaanim`` bundles. A ``source`` from another
+        scene, the drawable itself or an unknown ``mode`` raises
+        ``ValueError``.
+
+        Example:
+            title = scene.text("OCÉANO").scale_to(2.5)
+            waves = scene.media.image("olas.jpg").scale_to(8).matte(title)
+            scene.play([title.animate.write()])
+        """
+        ...
     def shader_effect(
         self,
         effect: Optional[PostProcess | Sequence[PostProcess]],
@@ -7424,6 +7526,32 @@ class Geometry:
         Example:
             trend = scene.geometry.polyline([(-3, -1), (-1, 0.5), (1, 0), (3, 2)])
             wave = scene.geometry.polyline([(x, computed(lambda t, x=x: math.sin(x + t), inputs=[scene.time])) for x in range(-6, 7)])
+        """
+        ...
+    def metaballs(
+        self,
+        balls: Sequence[Drawable],
+        *,
+        threshold: float = 1.0,
+        smoothness: float = 0.4,
+    ) -> Drawable:
+        """Create the outline of ``balls`` melted together like drops of liquid.
+
+        Each drawable counts as a circle: the center of its bounds and half
+        their larger side. The outline follows them every frame as they
+        move and scale, so animating the balls animates the blob; the
+        balls themselves stop being drawn (opacity 0). Balls closer than
+        ``smoothness`` scene units join with a neck (0 is a plain union),
+        and ``threshold`` divides every radius (above 1 thins them). The
+        result is an ordinary filled path in scene coordinates: style it,
+        export it to SVG or give it effects. An empty list, a ball from
+        another scene, a non-positive ``threshold`` or a negative
+        ``smoothness`` raises ``ValueError``.
+
+        Example:
+            drops = [scene.geometry.circle(0.6).move_to(x, 0) for x in (-2, 0, 2)]
+            blob = scene.geometry.metaballs(drops, smoothness=0.8).fill(BLUE)
+            scene.play([drops[0].animate.move_to(-0.6, 0)])
         """
         ...
     def polyline_3d(

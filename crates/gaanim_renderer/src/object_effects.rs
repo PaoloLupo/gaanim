@@ -11,16 +11,19 @@
 //! pixels, as shader backgrounds do. A renderer that does not run the
 //! effects composes the drawables plainly instead.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
-use bevy::prelude::Component;
+use bevy::prelude::{Component, Entity};
 use gaanim_core::kurbo;
 use gaanim_core::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
 use vello::wgpu;
 use vello::{AaConfig, RenderParams, Scene};
 
-use crate::post_process::{CanvasPostProcess, GpuPostProcess, PostProcessRequest};
+use crate::post_process::{
+    CanvasPostProcess, GpuPostProcess, PostProcessRequest, PostProcessShader,
+};
 
 /// Largest side, in pixels, of an effect's texture.
 pub const MAX_EFFECT_TEXTURE: u32 = 4096;
@@ -32,6 +35,242 @@ pub const MAX_EFFECT_TEXTURE: u32 = 4096;
 pub struct ShaderEffect {
     pub post: CanvasPostProcess,
     pub margin: f64,
+}
+
+/// How a track matte shows the drawable it is set on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatteMode {
+    /// Where the matte is opaque.
+    Alpha,
+    /// Where the matte is transparent.
+    AlphaInverted,
+    /// Where the matte is bright.
+    Luma,
+    /// Where the matte is dark or transparent.
+    LumaInverted,
+}
+
+/// Component: show this drawable and its descendants only through `source`
+/// (see [`MatteMode`]).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Matte {
+    pub source: Entity,
+    pub mode: MatteMode,
+}
+
+/// Component: this drawable is a matte; it is drawn only as the matte of
+/// the drawables whose [`Matte`] names it.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct MatteSource;
+
+/// Component: glass. What is drawn behind this drawable shows through its
+/// outline blurred by `blur` scene units (a Gaussian's sigma), with its
+/// colors saturated by `saturation` (1 keeps them). The outline is a lens
+/// with a rounded rim `bevel` scene units wide: across the rim, what is
+/// behind bends by up to `refraction` scene units, splits into its colors
+/// by `dispersion` (0 to 1) and catches a light from the top left as bright
+/// as `edge` (0 to 1). `twist` also slides what the rim shows along the
+/// outline, clockwise for positive values (to the right along the top, to
+/// the left along the bottom), as a share of the bend.
+/// `transparency` (0 to 1) is how clear the glass is:
+/// 1 shows what is behind it, 0 turns it into milky white. The drawable
+/// itself is drawn above, so a translucent fill tints the glass.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct Glass {
+    pub blur: f64,
+    pub saturation: f64,
+    pub refraction: f64,
+    pub edge: f64,
+    pub dispersion: f64,
+    pub bevel: f64,
+    pub transparency: f64,
+    pub twist: f64,
+}
+
+impl Default for Glass {
+    /// Frosted glass.
+    fn default() -> Self {
+        Self {
+            blur: 0.25,
+            saturation: 1.4,
+            refraction: 0.08,
+            edge: 0.3,
+            dispersion: 0.0,
+            bevel: 0.12,
+            transparency: 1.0,
+            twist: 0.0,
+        }
+    }
+}
+
+impl Glass {
+    /// Clear glass that bends and splits what is behind it along a wide
+    /// rounded rim, like Apple's Liquid Glass.
+    pub const LIQUID: Self = Self {
+        blur: 0.04,
+        saturation: 1.4,
+        refraction: 1.0,
+        edge: 0.8,
+        dispersion: 0.12,
+        bevel: 0.6,
+        transparency: 0.92,
+        twist: 0.6,
+    };
+
+    /// How far beyond its outline the glass reads what is behind it.
+    pub fn reach(&self) -> f64 {
+        let bend = self.refraction.max(0.0) * (1.0 + self.twist.abs().min(2.0));
+        3.0 * self.blur.max(0.0) + bend * (1.0 + self.dispersion.max(0.0))
+    }
+}
+
+/// Reads the texture of a glass layer: what is behind the glass in the top
+/// half and its outline in the bottom half, each clamped to its own half.
+const GLASS_COMMON: &str = r#"
+fn glass_sample(p: vec2<f32>, resolution: vec2<f32>, top: bool) -> vec4<f32> {
+    let half = 0.5 * resolution.y;
+    let low = select(half + 0.5, 0.5, top);
+    let high = select(resolution.y - 0.5, half - 0.5, top);
+    let q = vec2<f32>(clamp(p.x, 0.5, resolution.x - 0.5), clamp(p.y, low, high));
+    return gaanim_scene(q / resolution);
+}
+"#;
+
+const GLASS_BLUR: &str = r#"
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let p = uv * resolution;
+    let top = p.y < 0.5 * resolution.y;
+    // What is behind blurs by `sigma`; the outline by `bevel` into a rim.
+    let sigma = max(select(gaanim_uniforms.bevel, gaanim_uniforms.sigma, top), 0.001);
+    if (sigma < 0.5) {
+        return glass_sample(p, resolution, top);
+    }
+    let radius = ceil(3.0 * sigma);
+    let step = max(1.0, radius / 32.0);
+    var sum = vec4<f32>(0.0);
+    var total = 0.0;
+    for (var i = -32; i <= 32; i++) {
+        let x = f32(i) * step;
+        if (abs(x) > radius) {
+            continue;
+        }
+        let weight = exp(-0.5 * x * x / (sigma * sigma));
+        let offset = select(vec2<f32>(0.0, x), vec2<f32>(x, 0.0), gaanim_uniforms.horizontal > 0.5);
+        sum += glass_sample(p + offset, resolution, top) * weight;
+        total += weight;
+    }
+    if (top) {
+        return sum / total;
+    }
+    // The outline keeps its sharp copy in red and its rim in alpha.
+    return vec4<f32>(glass_sample(p, resolution, false).rgb, sum.a / total);
+}
+"#;
+
+const GLASS_FINISH: &str = r#"
+fn glass_outline(p: vec2<f32>, resolution: vec2<f32>) -> vec4<f32> {
+    return glass_sample(p + vec2<f32>(0.0, 0.5 * resolution.y), resolution, false);
+}
+
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let p = uv * resolution;
+    if (p.y >= 0.5 * resolution.y) {
+        return gaanim_scene(uv);
+    }
+    // The blurred outline is the height of the lens: 1/2 on the outline,
+    // rising to 1 inside across the rim; its slope points inward.
+    let bevel = max(gaanim_uniforms.bevel, 1.0);
+    let h = max(1.0, 0.2 * bevel);
+    let slope = vec2<f32>(
+        glass_outline(p + vec2<f32>(h, 0.0), resolution).a - glass_outline(p - vec2<f32>(h, 0.0), resolution).a,
+        glass_outline(p + vec2<f32>(0.0, h), resolution).a - glass_outline(p - vec2<f32>(0.0, h), resolution).a,
+    );
+    let inward = select(vec2<f32>(0.0), normalize(slope), length(slope) > 1e-6);
+    // 0 on the outline, 1 where the flat middle of the lens starts.
+    let depth = clamp(2.0 * glass_outline(p, resolution).a - 1.0, 0.0, 1.0);
+    // Like the steep side of a dome, the rim bends most at the outline and
+    // leaves the middle untouched.
+    let bend = gaanim_uniforms.refraction * (1.0 - depth);
+    let split = gaanim_uniforms.dispersion;
+    // The rim shows what lies outside the glass, pulled in like a lens.
+    // Along the outline too: clockwise for a positive twist.
+    let along = vec2<f32>(-inward.y, inward.x);
+    let shift = (-inward + along * gaanim_uniforms.twist) * bend;
+    let red = glass_sample(p + shift * (1.0 + split), resolution, true);
+    let green = glass_sample(p + shift, resolution, true);
+    let blue = glass_sample(p + shift * (1.0 - split), resolution, true);
+    var color = vec3<f32>(red.r, green.g, blue.b);
+    let luma = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
+    color = mix(vec3<f32>(luma), color, gaanim_uniforms.saturation);
+    // Less transparent glass turns milky: white with a hint of what is behind.
+    let milk = mix(vec3<f32>(0.96), color, 0.12);
+    color = mix(milk, color, gaanim_uniforms.transparency);
+    // A thin bright line along the outline, strongest where it faces the
+    // light from the top left or the opposite corner, and a faint glow
+    // inside the rim.
+    let e = 1.5;
+    let sharp = vec2<f32>(
+        glass_outline(p + vec2<f32>(e, 0.0), resolution).r - glass_outline(p - vec2<f32>(e, 0.0), resolution).r,
+        glass_outline(p + vec2<f32>(0.0, e), resolution).r - glass_outline(p - vec2<f32>(0.0, e), resolution).r,
+    );
+    let line = clamp(length(sharp) * 1.5, 0.0, 1.0);
+    let facing = abs(dot(inward, normalize(vec2<f32>(-1.0, -1.0))));
+    let shine = gaanim_uniforms.edge * (line * (0.45 + 0.55 * facing) + 0.05 * pow(1.0 - depth, 4.0));
+    color = clamp(color + vec3<f32>(shine), vec3<f32>(0.0), vec3<f32>(1.0));
+    return vec4<f32>(color, green.a);
+}
+"#;
+
+/// The passes that turn a glass layer's texture into its glass, at
+/// `density` pixels per scene unit: the texture holds what is behind the
+/// glass in its top half and the glass's outline, filled opaque, in the
+/// bottom half.
+pub fn glass_passes(glass: &Glass, density: f64) -> Vec<(PostProcessShader, Vec<f32>)> {
+    static SHADERS: OnceLock<Option<(PostProcessShader, PostProcessShader)>> = OnceLock::new();
+    let Some((blur, finish)) = SHADERS.get_or_init(|| {
+        let blur = PostProcessShader::with_uniforms(
+            format!("{GLASS_COMMON}{GLASS_BLUR}"),
+            ["sigma", "bevel", "horizontal"],
+        )
+        .ok()?;
+        let finish = PostProcessShader::with_uniforms(
+            format!("{GLASS_COMMON}{GLASS_FINISH}"),
+            [
+                "bevel",
+                "refraction",
+                "dispersion",
+                "saturation",
+                "edge",
+                "transparency",
+                "twist",
+            ],
+        )
+        .ok()?;
+        Some((blur, finish))
+    }) else {
+        return Vec::new();
+    };
+    let pixels = |value: f64| (value.max(0.0) * density) as f32;
+    let (sigma, bevel) = (pixels(glass.blur), pixels(glass.bevel).max(1.0));
+    // The outline blurs so its height reaches the flat middle `bevel` in
+    // from the outline.
+    let rim = bevel / 1.5;
+    vec![
+        (blur.clone(), vec![sigma, rim, 1.0]),
+        (blur.clone(), vec![sigma, rim, 0.0]),
+        (
+            finish.clone(),
+            vec![
+                bevel,
+                pixels(glass.refraction),
+                glass.dispersion.clamp(0.0, 1.0) as f32,
+                glass.saturation.max(0.0) as f32,
+                glass.edge.clamp(0.0, 1.0) as f32,
+                glass.transparency.clamp(0.0, 1.0) as f32,
+                glass.twist.clamp(-2.0, 2.0) as f32,
+            ],
+        ),
+    ]
 }
 
 /// One drawable to draw through its shader effect this frame.
@@ -73,12 +312,21 @@ pub fn effect_texture_size(bounds: kurbo::Rect, pixels_per_unit: f64) -> Option<
 
 /// The image drawn in place of the drawable `key` at this size. The same
 /// key and size return the same image, so Vello refreshes one atlas slot.
+/// Images are kept per thread: two scenes composed at once, such as an
+/// export and a recording, share entity keys but never images.
 pub fn effect_image(key: u64, width: u32, height: u32) -> ImageData {
-    static IMAGES: OnceLock<Mutex<HashMap<u64, ImageData>>> = OnceLock::new();
-    let mut images = IMAGES
-        .get_or_init(Default::default)
-        .lock()
-        .expect("effect images poisoned");
+    thread_local! {
+        static IMAGES: RefCell<HashMap<u64, ImageData>> = RefCell::new(HashMap::new());
+    }
+    IMAGES.with_borrow_mut(|images| effect_image_in(images, key, width, height))
+}
+
+fn effect_image_in(
+    images: &mut HashMap<u64, ImageData>,
+    key: u64,
+    width: u32,
+    height: u32,
+) -> ImageData {
     if let Some(image) = images.get(&key)
         && image.width == width
         && image.height == height
@@ -112,6 +360,9 @@ pub struct ObjectEffects {
     device: Option<wgpu::Device>,
     /// Textures by image id.
     slots: HashMap<u64, Slot>,
+    /// Textures of images no longer drawn, kept for a new image of their
+    /// size: an image's identity can change while its drawable does not.
+    spare: Vec<Slot>,
 }
 
 impl ObjectEffects {
@@ -131,33 +382,51 @@ impl ObjectEffects {
                 renderer.override_image(&slot.image, None);
             }
             self.slots.clear();
+            self.spare.clear();
             self.device = Some(device.clone());
         }
-        self.slots.retain(|id, slot| {
-            let keep = layers.iter().any(|layer| layer.image.data.id() == *id);
-            if !keep {
+        let gone: Vec<u64> = self
+            .slots
+            .keys()
+            .copied()
+            .filter(|id| !layers.iter().any(|layer| layer.image.data.id() == *id))
+            .collect();
+        for id in gone {
+            if let Some(slot) = self.slots.remove(&id) {
                 renderer.override_image(&slot.image, None);
+                self.spare.push(slot);
             }
-            keep
-        });
+        }
         for layer in layers {
+            let spare = &mut self.spare;
             let slot = self.slots.entry(layer.image.data.id()).or_insert_with(|| {
-                let texture = effect_texture(device, layer.image.width, layer.image.height);
+                let (width, height) = (layer.image.width, layer.image.height);
+                let mut slot = match spare
+                    .iter()
+                    .position(|slot| (slot.image.width, slot.image.height) == (width, height))
+                {
+                    Some(index) => spare.swap_remove(index),
+                    None => {
+                        let texture = effect_texture(device, width, height);
+                        Slot {
+                            image: layer.image.clone(),
+                            view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                            texture,
+                            post: GpuPostProcess::default(),
+                        }
+                    }
+                };
+                slot.image = layer.image.clone();
                 renderer.override_image(
-                    &layer.image,
+                    &slot.image,
                     Some(wgpu::TexelCopyTextureInfoBase {
-                        texture: texture.clone(),
+                        texture: slot.texture.clone(),
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     }),
                 );
-                Slot {
-                    image: layer.image.clone(),
-                    view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
-                    texture,
-                    post: GpuPostProcess::default(),
-                }
+                slot
             });
             let mut placed = Scene::new();
             placed.append(&layer.scene, Some(layer.to_pixels));
@@ -183,7 +452,13 @@ impl ObjectEffects {
                 slot.post.encode(&mut encoder);
                 queue.submit(Some(encoder.finish()));
             }
+            // A later layer may draw this image (glass shows what is behind
+            // it), so it is copied for the next render too.
+            renderer.mark_override_image_dirty(&slot.image);
         }
+        // Spare textures last one frame: a drawable that changed its image
+        // has taken one back by now.
+        self.spare.clear();
         // Each render consumes the pending copies of overridden images, so
         // the images are marked only once every texture is drawn: the frame
         // then copies all of them.
@@ -238,6 +513,22 @@ mod tests {
         assert_eq!(width, MAX_EFFECT_TEXTURE);
         assert!(height <= 410 && density < 100.0);
         assert!(effect_texture_size(kurbo::Rect::ZERO, 100.0).is_none());
+    }
+
+    #[test]
+    fn glass_shaders_build_with_their_uniforms_in_pixels() {
+        let glass = Glass {
+            blur: 0.2,
+            bevel: 0.3,
+            refraction: 0.1,
+            ..Glass::LIQUID
+        };
+        let passes = glass_passes(&glass, 100.0);
+        assert_eq!(passes.len(), 3, "two blur passes and the finish");
+        assert_eq!(passes[0].1, vec![20.0, 20.0, 1.0]);
+        assert_eq!(passes[1].1[2], 0.0);
+        assert_eq!(passes[2].1[1], 10.0);
+        assert!(Glass::LIQUID.reach() > Glass::default().refraction);
     }
 
     #[test]

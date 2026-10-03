@@ -3700,6 +3700,37 @@ impl SceneModel {
         self.spawn(SpawnKind::Polyline(points.to_vec()))
     }
 
+    /// The outline of `balls` melted together like drops of liquid: each
+    /// is taken as a circle (its center and half its larger side) and the
+    /// outline follows them every frame as they move and scale. Balls
+    /// closer than `smoothness` join with a neck (0 is a plain union);
+    /// `threshold` divides every radius. The balls stop being drawn.
+    pub fn metaballs(
+        &mut self,
+        balls: &[&DrawableHandle],
+        threshold: f64,
+        smoothness: f64,
+    ) -> Result<DrawableHandle, String> {
+        if balls.iter().any(|ball| !self.owns_drawable(ball)) {
+            return Err("a metaball belongs to another scene".to_string());
+        }
+        if !(threshold.is_finite() && threshold > 0.0) {
+            return Err("threshold must be a positive number".to_string());
+        }
+        if !(smoothness.is_finite() && smoothness >= 0.0) {
+            return Err("smoothness must be zero or a positive number".to_string());
+        }
+        let sources = balls.iter().map(|ball| ball.id).collect();
+        for ball in balls {
+            let _ = (*ball).clone().opacity(0.0);
+        }
+        Ok(self.spawn(SpawnKind::Metaballs {
+            sources,
+            threshold,
+            smoothness,
+        }))
+    }
+
     /// A polyline whose coordinates are reactive sources, redrawn every
     /// frame from their values; `closed` joins the last point to the first.
     pub fn reactive_polyline(

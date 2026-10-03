@@ -4282,6 +4282,29 @@ impl PyGeometry {
         ))
     }
 
+    #[pyo3(signature = (balls, *, threshold=1.0, smoothness=0.4))]
+    fn metaballs(
+        &self,
+        balls: Vec<PyDrawable>,
+        threshold: f64,
+        smoothness: f64,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        if balls.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "metaballs needs at least one drawable",
+            ));
+        }
+        let handles: Vec<&gaanim_api::canvas::DrawableHandle> =
+            balls.iter().map(|ball| &ball.0).collect();
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .metaballs(&handles, threshold, smoothness)
+            .map(PyDrawable)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     fn bezier(
         &self,
         start: (f64, f64),

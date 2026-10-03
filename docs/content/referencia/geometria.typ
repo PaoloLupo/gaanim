@@ -495,6 +495,28 @@ wave = scene.geometry.polyline(
 ]
 
 #api-entry(
+  name: "Geometry.metaballs",
+  kind: "factory",
+  params: (
+    (name: "balls", type: "Sequence[Drawable]", default: none, desc: [Los objetos que forman la masa; cada uno cuenta como un círculo con el centro de su caja y la mitad de su lado mayor.]),
+    (name: "threshold", type: "float", default: "1.0", desc: [Divide cada radio: por encima de 1 adelgaza las bolas.]),
+    (name: "smoothness", type: "float", default: "0.4", desc: [Distancia en unidades de escena a la que dos bolas se unen con un cuello; 0 es una unión simple.]),
+  ),
+  desc: [Contorno de varias bolas fundidas como gotas de líquido (efecto _gooey_). Se recalcula en cada fotograma a partir de dónde están las bolas y de su tamaño, así que animarlas anima la masa; las bolas dejan de dibujarse (opacidad 0). El resultado es un trazado vectorial normal en coordenadas de la escena: nítido a cualquier tamaño, con relleno, trazo y efectos como cualquier otro. Una lista vacía, una bola de otra escena, un `threshold` no positivo o un `smoothness` negativo lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, Scene
+scene = Scene(frame=(16, 9), background="#0b1020")
+drops = [scene.geometry.circle(r).move_to(x, 0) for x, r in ((-3, 0.9), (0, 1.1), (3, 0.7))]
+blob = scene.geometry.metaballs(drops, smoothness=0.9).fill(BLUE)
+scene.play([drops[0].animate.move_to(-1.2, 0.3).duration(1.5), drops[2].animate.move_to(1.3, -0.3).duration(1.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Geometry.bezier",
   kind: "factory",
   params: ((name: "start / end", type: "tuple[float, float]", default: none, desc: [Extremos.]), (name: "controls", type: "Sequence[tuple[float, float]]", default: none, desc: [Uno para una curva cuadrática, dos para una cúbica.])),

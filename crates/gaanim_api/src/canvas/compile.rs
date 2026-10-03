@@ -75,6 +75,23 @@ fn reactive_polyline_path(
     path
 }
 
+/// `entity` as a metaball: the center of its local bounds and half their
+/// larger side, in scene coordinates.
+fn metaball_of(
+    world: &bevy::prelude::World,
+    entity: bevy::prelude::Entity,
+) -> Option<gaanim_objects::metaballs::Ball> {
+    let matrix = gaanim_animation::updaters::entity_world_matrix(entity, world)?;
+    let bounds = world.get::<gaanim_scene::LocalBounds>(entity)?.0;
+    let center = matrix.transform_point3(bounds.center());
+    let size = bounds.size();
+    let scale = 0.5 * (matrix.x_axis.truncate().length() + matrix.y_axis.truncate().length());
+    Some(gaanim_objects::metaballs::Ball {
+        center: Point::new(center.x, center.y),
+        radius: 0.5 * size.x.max(size.y) * scale,
+    })
+}
+
 fn sampled_reactive_path(
     map: &gaanim_visualization::CoordinateMap2D,
     function: &ReactiveFunction,
@@ -3194,6 +3211,44 @@ impl SceneModel {
                     post,
                     margin: effect.margin,
                 });
+        }
+
+        // A matte names another drawable, which then only draws as the
+        // matte; both exist once every segment has been compiled.
+        let mut mattes: Vec<_> = object_specs
+            .iter()
+            .filter_map(|(logical, spec)| {
+                let (source, mode) = spec.matte?;
+                Some((*id_map.get(logical)?, *id_map.get(&source)?, mode))
+            })
+            .collect();
+        mattes.sort_by_key(|(id, _, _)| *id);
+        for (id, source, mode) in mattes {
+            let (Some(entity), Some(source)) = (
+                builder.states.get(id).map(|state| state.entity),
+                builder.states.get(source).map(|state| state.entity),
+            ) else {
+                continue;
+            };
+            builder
+                .commands
+                .entity(entity)
+                .insert(gaanim_renderer::object_effects::Matte { source, mode });
+            builder
+                .commands
+                .entity(source)
+                .insert(gaanim_renderer::object_effects::MatteSource);
+        }
+
+        let mut glasses: Vec<_> = object_specs
+            .iter()
+            .filter_map(|(logical, spec)| Some((*id_map.get(logical)?, spec.glass?)))
+            .collect();
+        glasses.sort_by_key(|(id, _)| *id);
+        for (id, glass) in glasses {
+            if let Some(entity) = builder.states.get(id).map(|state| state.entity) {
+                builder.commands.entity(entity).insert(glass);
+            }
         }
 
         // Echo copies clone their sources once every segment has been
@@ -9282,6 +9337,41 @@ impl SceneModel {
                 }
                 mr
             }
+            SpawnKind::Metaballs {
+                sources,
+                threshold,
+                smoothness,
+            } => {
+                let entities: Vec<bevy::prelude::Entity> = sources
+                    .iter()
+                    .filter_map(|logical| {
+                        let actual = id_map.get(logical).copied()?;
+                        Some(builder.states.get(actual)?.entity)
+                    })
+                    .collect();
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "Metaballs".to_owned(),
+                    bounds: gaanim_math::Bounds3D::default(),
+                    path: gaanim_core::kurbo::BezPath::new(),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                if let Some(state) = builder.states.get(mr.id) {
+                    let (threshold, smoothness) = (*threshold, *smoothness);
+                    let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
+                        let balls: Vec<gaanim_objects::metaballs::Ball> = entities
+                            .iter()
+                            .filter_map(|&entity| metaball_of(world, entity))
+                            .collect();
+                        gaanim_objects::metaballs::metaballs_path(&balls, threshold, smoothness)
+                    });
+                    builder.commands.entity(state.entity).insert(redraw);
+                }
+                mr
+            }
             SpawnKind::Bezier {
                 start,
                 controls,
@@ -10909,6 +10999,7 @@ impl SceneModel {
                 | SpawnKind::DashedLine { .. }
                 | SpawnKind::DoubleArrow { .. }
                 | SpawnKind::Polygon(_)
+                | SpawnKind::Metaballs { .. }
                 | SpawnKind::Points { .. }
                 | SpawnKind::Sector { .. }
                 | SpawnKind::Brace { .. }

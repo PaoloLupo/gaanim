@@ -668,6 +668,14 @@ pub enum SpawnKind {
         )>,
         closed: bool,
     },
+    /// The blended outline of other drawables taken as circles (see
+    /// `gaanim_objects::metaballs`), redrawn every frame from where they are
+    /// and how large they are.
+    Metaballs {
+        sources: Vec<ObjectId>,
+        threshold: f64,
+        smoothness: f64,
+    },
     /// Native quadratic (one control) or cubic (two controls) Bézier path.
     Bezier {
         start: (f64, f64),
@@ -971,6 +979,10 @@ pub struct ObjectSpec {
     /// Post-process passes this drawable and its descendants are drawn
     /// through, as one layer.
     pub shader_effect: Option<ShaderEffectSpec>,
+    /// Track matte: the drawable whose alpha or luminance shows this one.
+    pub matte: Option<(ObjectId, gaanim_renderer::object_effects::MatteMode)>,
+    /// Frosted glass showing what is drawn behind the drawable.
+    pub glass: Option<gaanim_renderer::object_effects::Glass>,
     /// This group is the public root of an imported SVG hierarchy.
     pub(crate) svg_root: bool,
     /// Root of the imported SVG this group or path belongs to. Stroke widths
@@ -1161,6 +1173,8 @@ impl ObjectSpec {
             stroke_scales_with_object: None,
             chalk: None,
             shader_effect: None,
+            matte: None,
+            glass: None,
             svg_root: false,
             svg_owner: None,
             glow: None,
