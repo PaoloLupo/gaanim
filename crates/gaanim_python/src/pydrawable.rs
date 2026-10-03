@@ -3323,7 +3323,7 @@ impl PyDrawable {
         same_drawable(slf, Ok(Self(handle.glass(Some(glass)))))
     }
     /// Clear lens-like glass; see `gaanim_core.pyi`.
-    #[pyo3(signature = (*, refraction=0.4, dispersion=0.4, bevel=0.4, blur=0.02, edge=0.8, saturation=1.4, transparency=1.0))]
+    #[pyo3(signature = (*, refraction=0.5, dispersion=0.4, bevel=0.3, blur=0.02, edge=0.8, saturation=1.4, transparency=1.0))]
     #[allow(clippy::too_many_arguments)]
     fn liquid_glass<'py>(
         slf: &Bound<'py, Self>,

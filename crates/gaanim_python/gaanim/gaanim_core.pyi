@@ -3261,9 +3261,9 @@ class Drawable:
     def liquid_glass(
         self,
         *,
-        refraction: float = 0.4,
+        refraction: float = 0.5,
         dispersion: float = 0.4,
-        bevel: float = 0.4,
+        bevel: float = 0.3,
         blur: float = 0.02,
         edge: float = 0.8,
         saturation: float = 1.4,

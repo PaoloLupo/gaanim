@@ -103,10 +103,10 @@ impl Glass {
     pub const LIQUID: Self = Self {
         blur: 0.02,
         saturation: 1.4,
-        refraction: 0.4,
+        refraction: 0.5,
         edge: 0.8,
         dispersion: 0.4,
-        bevel: 0.4,
+        bevel: 0.3,
         transparency: 1.0,
     };
 
@@ -172,7 +172,7 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     // The blurred outline is the height of the lens: 1/2 on the outline,
     // rising to 1 inside across the rim; its slope points inward.
     let bevel = max(gaanim_uniforms.bevel, 1.0);
-    let h = max(1.0, 0.5 * bevel);
+    let h = max(1.0, 0.2 * bevel);
     let slope = vec2<f32>(
         glass_outline(p + vec2<f32>(h, 0.0), resolution).a - glass_outline(p - vec2<f32>(h, 0.0), resolution).a,
         glass_outline(p + vec2<f32>(0.0, h), resolution).a - glass_outline(p - vec2<f32>(0.0, h), resolution).a,
@@ -182,7 +182,7 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     let depth = clamp(2.0 * glass_outline(p, resolution).a - 1.0, 0.0, 1.0);
     // Like the steep side of a dome, the rim bends most at the outline and
     // leaves the middle untouched.
-    let bend = gaanim_uniforms.refraction * pow(1.0 - depth, 1.5);
+    let bend = gaanim_uniforms.refraction * (1.0 - depth);
     let split = gaanim_uniforms.dispersion;
     // The rim shows what lies outside the glass, pulled in like a lens.
     let red = glass_sample(p - inward * bend * (1.0 + split), resolution, true);
@@ -240,9 +240,12 @@ pub fn glass_passes(glass: &Glass, density: f64) -> Vec<(PostProcessShader, Vec<
     };
     let pixels = |value: f64| (value.max(0.0) * density) as f32;
     let (sigma, bevel) = (pixels(glass.blur), pixels(glass.bevel).max(1.0));
+    // The outline blurs so its height reaches the flat middle `bevel` in
+    // from the outline.
+    let rim = bevel / 1.5;
     vec![
-        (blur.clone(), vec![sigma, bevel, 1.0]),
-        (blur.clone(), vec![sigma, bevel, 0.0]),
+        (blur.clone(), vec![sigma, rim, 1.0]),
+        (blur.clone(), vec![sigma, rim, 0.0]),
         (
             finish.clone(),
             vec![
@@ -476,7 +479,7 @@ mod tests {
         };
         let passes = glass_passes(&glass, 100.0);
         assert_eq!(passes.len(), 3, "two blur passes and the finish");
-        assert_eq!(passes[0].1, vec![20.0, 30.0, 1.0]);
+        assert_eq!(passes[0].1, vec![20.0, 20.0, 1.0]);
         assert_eq!(passes[1].1[2], 0.0);
         assert_eq!(passes[2].1[1], 10.0);
         assert!(Glass::LIQUID.reach() > Glass::default().refraction);
