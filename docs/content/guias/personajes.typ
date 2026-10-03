@@ -117,3 +117,6 @@ scene.play([cabeza.animate.scale_to(1.18).duration(0.5)])
   `scale_stroke_with_object` y las animaciones de `.animate`.
 - #link("/guias/movimiento/")[Movimiento]: trayectorias, updaters y temblores
   para dar vida a un personaje quieto.
+- #link("/referencia/layout/")[Layout]: `scene.layout.scatter` reparte
+  fórmulas o etiquetas alrededor del personaje sin tapar sus partes
+  (`avoid=[persona.part("cabeza"), ...]`).

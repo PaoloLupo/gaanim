@@ -2958,6 +2958,57 @@ impl PyLayoutBuilder {
         crate::pyzones::PyZoneSet::resolve(py, self.inner.clone(), &template, region)
     }
 
+    /// Place `items` at seeded positions inside `region` (the safe area by
+    /// default) where none overlaps another or anything in `avoid` (drawables
+    /// or zones, by their boxes), with at least `gap` between them. Each item
+    /// is only moved, never owned. The same seed gives the same layout; a
+    /// layout with no room raises ``ValueError`` and moves nothing.
+    #[pyo3(signature = (items, region=None, *, avoid=None, gap=None, seed=0))]
+    fn scatter(
+        &self,
+        items: &Bound<'_, PyAny>,
+        region: Option<&Bound<'_, PyAny>>,
+        avoid: Option<&Bound<'_, PyAny>>,
+        gap: Option<&Bound<'_, PyAny>>,
+        seed: u64,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        if items.is_instance_of::<pyo3::types::PyString>() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "scatter() needs a sequence of Drawables",
+            ));
+        }
+        let mut handles = Vec::new();
+        for item in items.try_iter()? {
+            let handle = crate::pyzones::handle_of(&item?)?;
+            if !self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .owns_drawable(&handle)
+            {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "scatter() items must belong to this Scene",
+                ));
+            }
+            crate::pydrawable::PyDrawable(handle.clone()).require_free_position("scatter")?;
+            handles.push(handle);
+        }
+        let region = self.region(region)?;
+        let mut obstacles = Vec::new();
+        if let Some(avoid) = avoid {
+            for target in avoid.try_iter()? {
+                obstacles.push(crate::pyzones::target_bounds(&target?)?);
+            }
+        }
+        let gap = match gap {
+            Some(gap) => crate::pylayout::Units::new(self.inner.clone()).length(gap, "gap")?,
+            None => 0.2,
+        };
+        gaanim_api::canvas::scatter(&handles, region, &obstacles, gap, seed)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
     /// The safe area: the frame minus the scene margin.
     #[getter]
     fn safe(&self) -> PyResult<crate::pyzones::PyZone> {

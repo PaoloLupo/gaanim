@@ -2063,6 +2063,16 @@ def validate_chalk_quantity_and_arc_contract(module):
     for operation in (lambda: module.quantity(1, "m^x"), lambda: module.quantity(True, "m")):
         if not raises_error((ValueError, TypeError), operation):
             failures.append("quantity accepted a malformed unit or a bool")
+    cards = [scene.geometry.rect(0.8, 0.4) for _ in range(6)]
+    scene.layout.scatter(cards, scene.layout.safe, avoid=[box], gap=0.1, seed=3)
+    for operation, error in (
+        (lambda: scene.layout.scatter([scene.geometry.rect(40, 1)]), ValueError),
+        (lambda: scene.layout.scatter(cards, gap=-1), ValueError),
+        (lambda: scene.layout.scatter("abc"), TypeError),
+        (lambda: scene.layout.scatter([module.Scene(frame=(16, 9)).geometry.rect(1, 1)]), ValueError),
+    ):
+        if not raises_error(error, operation):
+            failures.append("layout.scatter accepted an impossible or invalid layout")
     scene.geometry.ellipse_arc(0, 0, 2, 0.5, 0, 3.14159)
     if not raises_error(ValueError, lambda: scene.geometry.ellipse_arc(0, 0, 0, 1, 0, 1)):
         failures.append("ellipse_arc accepted a zero radius")

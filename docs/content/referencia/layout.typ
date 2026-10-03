@@ -499,6 +499,39 @@ scene.play([logo.animate.place(zone, anchor="bottom_left").duration(0.8)])
 ```
 ]
 
+#api-entry(
+  name: "LayoutBuilder.scatter",
+  kind: "method",
+  signature: "scatter(items, region=None, *, avoid=(), gap=None, seed=0) -> None",
+  params: (
+    (name: "items", type: "Sequence[Drawable]", default: none, desc: [Los objetos que se reparten. Conservan su tamaño; solo se mueven, sin quedar adoptados.]),
+    (name: "region", type: "\"safe\" | \"frame\" | Zone | Drawable | None", default: "None", desc: [Dónde caben: el área segura por defecto, el encuadre, una zona o la caja de un objeto.]),
+    (name: "avoid", type: "Sequence[Drawable | Zone]", default: "()", desc: [Formas que hay que dejar libres, por su caja. Para no tapar una figura sin vaciar toda su caja, evita sus partes: `avoid=[persona.part("cabeza"), ...]`.]),
+    (name: "gap", type: "Length | None", default: "0.2", desc: [Separación mínima entre objetos y respecto a cada forma de `avoid`.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla: la misma semilla da siempre el mismo reparto.]),
+  ),
+  desc: [Coloca los objetos en posiciones aleatorias deterministas, dentro de `region` y sin solaparse entre sí ni con `avoid`. Los más grandes se colocan primero y cada uno va donde tiene más sitio, así se reparten por toda la región. Si no caben (un objeto mayor que la región, o sin hueco con ese `gap`), lanza `ValueError` y no mueve nada.],
+)[
+```python
+# show-code: true
+from gaanim import WHITE, Scene, stagger
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+persona = scene.media.svg("assets/personaje.svg").scale_to(2.0)
+partes = [persona.part(p) for p in ("cabeza", "torso", "piernas", "brazo-izq", "brazo-der")]
+formulas = [
+    scene.text.equation(f).fill(WHITE).scale_to(0.75)
+    for f in ["E = m c^2", "F = m a", "pi r^2", "sqrt(2)", "e^(i pi) + 1 = 0",
+              "a^2 + b^2 = c^2", "Delta x", "nabla dot E", "x!", "lambda", "oo", "phi"]
+]
+scene.layout.scatter(formulas, avoid=partes, gap=0.25, seed=1)
+scene.play([persona.animate.fade_in().duration(0.4)])
+scene.play(stagger(*[f.animate.write().duration(0.6) for f in formulas], each=0.05))
+# output: scatter.webp
+scene.render()
+```
+]
+
 == Componentes
 
 `component` convierte una función `(scene, *, huecos...) -> Box` en un

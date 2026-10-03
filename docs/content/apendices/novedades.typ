@@ -18,8 +18,8 @@ videos con 0.8.0: sombras de curvas sin relleno, cotas demasiado gruesas, un
 `stagger` que cambiaba de orden y documentos Typst que se ensanchaban hasta la
 página. Llegan `gaanim export --frame`, contadores con ancho reservado sin
 ceros, trazos que escalan con su figura, updaters con velocidad o amplitud
-animable, escritura con tiza, arcos de elipse, magnitudes con unidades y una
-guía de personajes por partes. Lee «Al actualizar» si usas
+animable, escritura con tiza, arcos de elipse, magnitudes con unidades,
+reparto automático sin solapes y una guía de personajes por partes. Lee «Al actualizar» si usas
 `scene.text.typst` con párrafos largos.
 
 == Cambios
@@ -51,6 +51,9 @@ guía de personajes por partes. Lee «Al actualizar» si usas
 - `quantity(valor, unidad)` escribe magnitudes con unidades como `siunitx`:
   `quantity(181, "L")` y `quantity(1, "m^3")` dejan el mismo espacio fino.
   Lee #link("/referencia/text/")[Texto].
+- `scene.layout.scatter(items, region, avoid=[...], gap=..., seed=...)` reparte
+  objetos en una región sin solaparse entre sí ni con `avoid`, igual para la
+  misma semilla. Lee #link("/referencia/layout/")[Layout].
 - La guía #link("/guias/personajes/")[Personajes con SVG por partes] anima un
   personaje dibujado en Inkscape con `part`, `with_pivot` y `look_at`.
 

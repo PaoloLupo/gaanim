@@ -7637,6 +7637,24 @@ class LayoutBuilder:
     def zones(self, template: Zones, *, within: Optional[Literal["safe", "frame"] | Zone | Drawable] = None) -> ZoneSet:
         """Apply a Zones template to the safe area (default), the frame, a zone or an object's box."""
         ...
+    def scatter(self, items: Sequence[Drawable], region: Optional[Literal["safe", "frame"] | Zone | Drawable] = None, *, avoid: Sequence[Drawable | Zone] = (), gap: Optional[Length] = None, seed: int = 0) -> None:
+        """Place ``items`` at seeded positions without overlaps.
+
+        Every item lands inside ``region`` (the safe area by default, or the
+        frame, a zone or an object's box) with at least ``gap`` (0.2 by
+        default) between items and from the box of each shape in ``avoid``.
+        Items keep their size and are only moved, never owned; larger items
+        are placed first and each one goes where it has the most room, so
+        they spread over the region. The same items, region and ``seed``
+        always give the same layout. To keep a figure's outline clear rather
+        than its whole box, avoid its parts: ``avoid=[persona.part("cabeza")]``.
+        A layout with no room raises ``ValueError`` and moves nothing.
+
+        Example:
+            labels = [scene.text.equation(f) for f in formulas]
+            scene.layout.scatter(labels, avoid=[character], gap=0.25, seed=1)
+        """
+        ...
     @property
     def safe(self) -> Zone:
         """The safe area: the frame minus the scene margin."""
