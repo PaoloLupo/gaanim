@@ -149,7 +149,7 @@ fn fill_canvas_background(
         transform,
         &brush,
         brush_transform,
-        &rect,
+        &background_cover(rect),
     );
     CanvasPaint {
         brush,
@@ -220,6 +220,9 @@ pub struct GaanimRenderCache {
     /// Strokes of camera view screens, split from their fragments so they
     /// draw above the view. An entry marks a fragment built as a screen.
     screen_overlays: HashMap<ObjectId, Arc<vello::Scene>>,
+    /// Fragments built without their drop shadow, which the composition
+    /// draws for their group.
+    shared_shadows: std::collections::HashSet<ObjectId>,
 }
 
 /// Values of the timeline-driven components a retained fragment was built from.
@@ -298,6 +301,12 @@ pub struct ExtractedElement {
     /// `None` when `opacity_bounds` takes no margin.
     opacity_extent: Option<(kurbo::Rect, f64)>,
     opacity_group: Entity,
+    /// Opacity of `opacity_group` itself, which `opacity` includes: a
+    /// translucent group composites its members in one layer of it.
+    group_opacity: f32,
+    /// The member's drop shadow, left out of `scene` and drawn once for the
+    /// run of members that share it.
+    group_shadow: Option<Arc<crate::fragment::GroupShadow>>,
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
@@ -398,6 +407,15 @@ impl ExtractedElement {
         self.backdrop.unwrap_or(u32::MAX)
     }
 
+    /// This element drawn inside its group's layer, which applies the
+    /// group's opacity.
+    fn inside_group(&self) -> Self {
+        let mut element = self.clone();
+        element.opacity = (self.opacity / self.group_opacity).min(1.0);
+        element.group_opacity = 1.0;
+        element
+    }
+
     /// This element as the camera of a view sees it: `content` maps it onto
     /// the screen.
     fn seen_through(&self, content: kurbo::Affine) -> Self {
@@ -410,6 +428,8 @@ impl ExtractedElement {
             opacity_bounds: content.transform_rect_bbox(self.opacity_bounds),
             opacity_extent: None,
             opacity_group: self.opacity_group,
+            group_opacity: self.group_opacity,
+            group_shadow: self.group_shadow.clone(),
             render_order: self.render_order,
             scene: Arc::clone(&self.scene),
             clip_mask: self.clip_mask.clone(),
@@ -773,6 +793,8 @@ fn opacity_run_end(elements: &[ExtractedElement], start: usize) -> usize {
         if element.clip_mask.is_some()
             || element.blend.is_some()
             || element.screen.is_some()
+            // Members sharing a drop shadow draw it before themselves.
+            || element.group_shadow.is_some()
             || element.opacity_group != elements[start].opacity_group
             || !element.opacity.is_finite()
             || element.opacity <= 0.0
@@ -784,6 +806,92 @@ fn opacity_run_end(elements: &[ExtractedElement], start: usize) -> usize {
         end += 1;
     }
     end
+}
+
+/// End of the run of members of one translucent group that needs a layer
+/// of its own: two or more members that would not share one opacity layer
+/// anyway, because they differ in opacity or are clipped or blended.
+fn group_fade_run_end(elements: &[ExtractedElement], start: usize) -> Option<usize> {
+    let first = &elements[start];
+    let fade = first.group_opacity;
+    if !(fade > 0.0 && fade < 1.0) {
+        return None;
+    }
+    let mut end = start + 1;
+    while let Some(element) = elements.get(end) {
+        if element.opacity_group != first.opacity_group
+            || element.group_opacity.to_bits() != fade.to_bits()
+        {
+            break;
+        }
+        end += 1;
+    }
+    let run = &elements[start..end];
+    let shares_one_layer = run.iter().all(|element| {
+        element.clip_mask.is_none()
+            && element.blend.is_none()
+            && element.screen.is_none()
+            && element.opacity.to_bits() == first.opacity.to_bits()
+    });
+    (run.len() > 1 && !shares_one_layer).then_some(end)
+}
+
+/// End of the run of members of one group, from `start`, that share its
+/// drop shadow: the same shadow, opacity and scale.
+fn shadow_run_end(elements: &[ExtractedElement], start: usize) -> Option<usize> {
+    let first = &elements[start];
+    let shadow = first.group_shadow.as_ref()?;
+    let linear = |transform: kurbo::Affine| {
+        let [a, b, c, d, _, _] = transform.as_coeffs();
+        [a, b, c, d]
+    };
+    let scale = linear(first.transform);
+    let mut end = start + 1;
+    while let Some(element) = elements.get(end) {
+        let shares = element.group_shadow.as_ref().is_some_and(|other| {
+            other.shadow == shadow.shadow
+                && element.opacity_group == first.opacity_group
+                && element.opacity.to_bits() == first.opacity.to_bits()
+                && element.transition_side == first.transition_side
+                && linear(element.transform)
+                    .iter()
+                    .zip(scale)
+                    .all(|(a, b)| (a - b).abs() <= 1e-9 * (1.0 + b.abs()))
+        });
+        if !shares {
+            break;
+        }
+        end += 1;
+    }
+    Some(end)
+}
+
+/// Draw the drop shadow `run` shares from the union of its outlines, in the
+/// local coordinates of its first member, where each member drew it.
+fn append_group_shadow(scene: &mut vello::Scene, run: &[ExtractedElement]) {
+    let Some(first) = run.first() else {
+        return;
+    };
+    let Some(shared) = &first.group_shadow else {
+        return;
+    };
+    let to_local = first.transform.inverse();
+    let mut outline = kurbo::BezPath::new();
+    for member in run {
+        if let Some(shadow) = &member.group_shadow {
+            let placed = to_local * member.transform;
+            outline.extend(
+                shadow
+                    .path
+                    .elements()
+                    .iter()
+                    .map(|element| placed * *element),
+            );
+        }
+    }
+    let mut local = vello::Scene::new();
+    draw_shadow(&mut local, &outline, &shared.shadow, ShadowCaster::Fill);
+    scene.append(&local, Some(first.transform));
 }
 
 /// Clip of the layer shared by an opacity run: the union of what its
@@ -974,6 +1082,62 @@ fn append_element_run(
             continue;
         }
 
+        // A translucent group composites as one layer, like CSS opacity:
+        // its members draw inside it with their opacity relative to it, so
+        // what they cover stays covered while the group fades.
+        if let Some(end) = group_fade_run_end(elements, index) {
+            main_scene.push_layer(
+                peniko::Fill::NonZero,
+                peniko::BlendMode::default(),
+                elem.group_opacity,
+                kurbo::Affine::IDENTITY,
+                &opacity_run_bounds(&elements[index..end]),
+            );
+            let members: Vec<ExtractedElement> = elements[index..end]
+                .iter()
+                .map(ExtractedElement::inside_group)
+                .collect();
+            append_element_run(main_scene, &members, views);
+            main_scene.pop_layer();
+            index = end;
+            continue;
+        }
+
+        // Members of a group sharing a drop shadow draw it once, beneath
+        // them all, in the layer of their common opacity.
+        if let Some(end) = shadow_run_end(elements, index) {
+            let run = &elements[index..end];
+            let layered = elem.opacity < 1.0;
+            if layered {
+                main_scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::BlendMode::default(),
+                    elem.opacity.clamp(0.0, 1.0),
+                    kurbo::Affine::IDENTITY,
+                    &opacity_run_bounds(run),
+                );
+            }
+            append_group_shadow(main_scene, run);
+            let members: Vec<ExtractedElement> = run
+                .iter()
+                .map(|member| {
+                    let mut member = member.clone();
+                    member.group_shadow = None;
+                    member.group_opacity = 1.0;
+                    if layered {
+                        member.opacity = 1.0;
+                    }
+                    member
+                })
+                .collect();
+            append_element_run(main_scene, &members, views);
+            if layered {
+                main_scene.pop_layer();
+            }
+            index = end;
+            continue;
+        }
+
         if let Some(screen) = &elem.screen {
             append_screen(main_scene, elem, screen, views);
             index += 1;
@@ -1144,7 +1308,7 @@ fn append_camera_view(
                         content,
                         &canvas.brush,
                         canvas.brush_transform,
-                        &canvas.rect,
+                        &background_cover(canvas.rect),
                     );
                 }
             }
@@ -1170,6 +1334,14 @@ fn append_camera_view(
         append_element_run(scene, &seen, None);
     }
     scene.pop_layer();
+}
+
+/// Region the background fills: its paint is mapped onto the authored
+/// frame `rect`, but a camera that pans or zooms out past the frame still
+/// sees it, with the paint's edges extended, instead of a bare strip.
+fn background_cover(rect: kurbo::Rect) -> kurbo::Rect {
+    let reach = 64.0 * rect.width().max(rect.height());
+    rect.inflate(reach, reach)
 }
 
 fn canvas_background_geometry(background: &CanvasBackground) -> (kurbo::Rect, kurbo::Affine) {
@@ -1978,6 +2150,7 @@ pub fn gaanim_render_cache_sweep_system(
     cache.stroke_views.retain(|id, _| active.contains(id));
     cache.fragment_inputs.retain(|id, _| active.contains(id));
     cache.screen_overlays.retain(|id, _| active.contains(id));
+    cache.shared_shadows.retain(|id| active.contains(id));
 }
 
 /// Standalone function: extracts all visible Vello2D mobjects from a Bevy World
@@ -2295,7 +2468,20 @@ fn extract_world(
             None
         };
 
-        let recipe = Arc::new(fragment_recipe(FragmentParts {
+        let mut opacity_group = entity;
+        while let Ok(child_of) = child_query.get(world, opacity_group) {
+            opacity_group = child_of.parent();
+        }
+        let group_opacity = world
+            .get::<GlobalOpacity>(opacity_group)
+            .map_or(1.0, |opacity| opacity.0);
+        let blend = blend_query
+            .get(world, entity)
+            .ok()
+            .map(|blend| blend.0)
+            // An explicit normal blend paints plainly, without its own layer.
+            .filter(|blend| *blend != peniko::BlendMode::default());
+        let mut parts = FragmentParts {
             path: path_opt,
             source: path_source_opt,
             fill: fill_opt,
@@ -2312,21 +2498,22 @@ fn extract_world(
             stroke_view,
             screen: camera_view.is_some(),
             chalk: chalk_opt,
-        }));
+        };
+        let group_shadow = crate::fragment::group_shadow(
+            &parts,
+            opacity_group != entity
+                && clip_opt.is_none()
+                && blend.is_none()
+                && camera_view.is_none(),
+        )
+        .map(Arc::new);
+        if group_shadow.is_some() {
+            parts.shadow = None;
+        }
+        let recipe = Arc::new(fragment_recipe(parts));
         let built = build_fragment(&recipe, lottie_opt.map(|lottie| lottie.scene().as_ref()));
         let scene = built.scene;
         let overlay = built.overlay;
-
-        let mut opacity_group = entity;
-        while let Ok(child_of) = child_query.get(world, opacity_group) {
-            opacity_group = child_of.parent();
-        }
-        let blend = blend_query
-            .get(world, entity)
-            .ok()
-            .map(|blend| blend.0)
-            // An explicit normal blend paints plainly, without its own layer.
-            .filter(|blend| *blend != peniko::BlendMode::default());
         // Only translucent or blended elements open a layer; a Lottie draws
         // geometry that `Path2D` does not describe.
         let opacity_extent = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
@@ -2370,6 +2557,8 @@ fn extract_world(
             opacity_bounds,
             opacity_extent,
             opacity_group,
+            group_opacity,
+            group_shadow,
             render_order: stacked_render_order(
                 *render_order,
                 entity,
@@ -2651,6 +2840,8 @@ fn three_d_elements<'a>(
             opacity_bounds,
             opacity_extent: None,
             opacity_group: entity,
+            group_opacity: 1.0,
+            group_shadow: None,
             // Beneath every 2D drawable, in depth order.
             render_order: RenderOrder {
                 z_index: i32::MIN,
@@ -2936,6 +3127,10 @@ pub struct CapturedElement {
     pub opacity_reach: Option<f64>,
     /// Root ancestor: translucent siblings share one layer.
     pub opacity_group: Entity,
+    /// Opacity of `opacity_group` itself, included in `opacity`.
+    pub group_opacity: f32,
+    /// Drop shadow drawn once for the run of group members sharing it.
+    pub group_shadow: Option<Arc<crate::fragment::GroupShadow>>,
     /// Render order with the ancestors' z-indices stacked.
     pub render_order: RenderOrder,
     pub clip_mask: Option<ClipMask>,
@@ -3046,6 +3241,8 @@ fn capture_extraction(extraction: WorldExtraction) -> FrameCapture {
                     .map_or(element.opacity_bounds, |(rect, _)| rect),
                 opacity_reach: element.opacity_extent.map(|(_, reach)| reach),
                 opacity_group: element.opacity_group,
+                group_opacity: element.group_opacity,
+                group_shadow: element.group_shadow,
                 render_order: element.render_order,
                 clip_mask: element.clip_mask,
                 blend: element.blend,
@@ -3133,6 +3330,8 @@ pub fn compose_captured_frame(
                     }),
                 opacity_extent: None,
                 opacity_group: element.opacity_group,
+                group_opacity: element.group_opacity,
+                group_shadow: element.group_shadow.clone(),
                 render_order: element.render_order,
                 scene,
                 clip_mask: element.clip_mask.clone(),
@@ -3342,13 +3541,14 @@ pub fn gaanim_render_system(
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
-    (blend_query, echo_query, tip_query, backdrop_query, three_d_query, lighting): (
+    (blend_query, echo_query, tip_query, backdrop_query, three_d_query, lighting, opacity_query): (
         Query<&ElementBlend>,
         Query<&gaanim_animation::EchoGhost>,
         TipQuery,
         Query<&gaanim_scene::LayoutBackdrop>,
         ThreeDQuery,
         Option<Res<gaanim_scene::Lighting3D>>,
+        Query<&GlobalOpacity>,
     ),
     query_mobjects: Query<
         (
@@ -3602,6 +3802,56 @@ pub fn gaanim_render_system(
             continue;
         }
 
+        let mut opacity_group = entity;
+        while let Ok(child_of) = child_query.get(opacity_group) {
+            opacity_group = child_of.parent();
+        }
+        let group_opacity = opacity_query
+            .get(opacity_group)
+            .map_or(1.0, |opacity| opacity.0);
+        let blend = blend_query
+            .get(entity)
+            .ok()
+            .map(|blend| blend.0)
+            // An explicit normal blend paints plainly, without its own layer.
+            .filter(|blend| *blend != peniko::BlendMode::default());
+        let parts = FragmentParts {
+            path: path_ref.as_deref(),
+            source: path_source_ref.as_deref(),
+            fill: fill_ref.as_deref(),
+            stroke: stroke_ref.as_deref(),
+            raster: raster_image_ref.as_deref(),
+            lottie: lottie_ref.is_some(),
+            shadow: shadow_ref.as_deref(),
+            glow: glow_ref.as_deref(),
+            blur: blur_ref.as_deref(),
+            fill_progress: fill_progress_ref.as_deref(),
+            tip_glow: tip_glow_ref.as_deref(),
+            stroke_align: stroke_align_ref.as_deref(),
+            stroke_profile: stroke_profile_ref.as_deref(),
+            stroke_view,
+            screen: camera_view.is_some(),
+            chalk: chalk_ref.as_deref(),
+        };
+        let group_shadow = crate::fragment::group_shadow(
+            &parts,
+            opacity_group != entity
+                && clip_ref.is_none()
+                && blend.is_none()
+                && camera_view.is_none(),
+        )
+        .map(Arc::new);
+        // A fragment keeps its shadow only while its group does not draw it.
+        let shared = group_shadow.is_some();
+        if cache.shared_shadows.contains(&mobj_id.0) != shared {
+            cache.fragment_cache.remove(&mobj_id.0);
+            if shared {
+                cache.shared_shadows.insert(mobj_id.0);
+            } else {
+                cache.shared_shadows.remove(&mobj_id.0);
+            }
+        }
+
         if !cache.fragment_cache.contains_key(&mobj_id.0) {
             let inputs = current_inputs.unwrap_or_else(|| {
                 FragmentInputs::capture(
@@ -3619,22 +3869,8 @@ pub fn gaanim_render_system(
         let mut rebuilt_overlay = None;
         let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
             let recipe = fragment_recipe(FragmentParts {
-                path: path_ref.as_deref(),
-                source: path_source_ref.as_deref(),
-                fill: fill_ref.as_deref(),
-                stroke: stroke_ref.as_deref(),
-                raster: raster_image_ref.as_deref(),
-                lottie: lottie_ref.is_some(),
-                shadow: shadow_ref.as_deref(),
-                glow: glow_ref.as_deref(),
-                blur: blur_ref.as_deref(),
-                fill_progress: fill_progress_ref.as_deref(),
-                tip_glow: tip_glow_ref.as_deref(),
-                stroke_align: stroke_align_ref.as_deref(),
-                stroke_profile: stroke_profile_ref.as_deref(),
-                stroke_view,
-                screen: camera_view.is_some(),
-                chalk: chalk_ref.as_deref(),
+                shadow: if shared { None } else { parts.shadow },
+                ..parts
             });
             let built = build_fragment(
                 &recipe,
@@ -3654,16 +3890,6 @@ pub fn gaanim_render_system(
             None => {}
         }
 
-        let mut opacity_group = entity;
-        while let Ok(child_of) = child_query.get(opacity_group) {
-            opacity_group = child_of.parent();
-        }
-        let blend = blend_query
-            .get(entity)
-            .ok()
-            .map(|blend| blend.0)
-            // An explicit normal blend paints plainly, without its own layer.
-            .filter(|blend| *blend != peniko::BlendMode::default());
         // Only translucent or blended elements open a layer; a Lottie draws
         // geometry that `Path2D` does not describe.
         let opacity_bounds = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_ref.is_some() {
@@ -3705,6 +3931,8 @@ pub fn gaanim_render_system(
             opacity_bounds,
             opacity_extent: None,
             opacity_group,
+            group_opacity,
+            group_shadow,
             render_order: stacked_render_order(
                 *render_order,
                 entity,
@@ -4866,6 +5094,8 @@ mod tests {
             opacity_bounds: rect,
             opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
+            group_opacity: 1.0,
+            group_shadow: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -4890,6 +5120,102 @@ mod tests {
         );
     }
 
+    /// A filled square at `x` as a member of the group `root`.
+    fn group_member(root: Entity, x: f64, opacity: f32, group_opacity: f32) -> ExtractedElement {
+        let path = kurbo::Rect::new(x, 0.0, x + 1.0, 1.0).to_path(0.1);
+        let mut scene = vello::Scene::new();
+        scene.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            peniko::Color::WHITE,
+            None,
+            &path,
+        );
+        ExtractedElement {
+            entity: Entity::PLACEHOLDER,
+            recipe: None,
+            lottie: None,
+            transform: kurbo::Affine::IDENTITY,
+            opacity,
+            opacity_bounds: kurbo::Rect::new(x - 1.0, -1.0, x + 2.0, 2.0),
+            opacity_extent: None,
+            opacity_group: root,
+            group_opacity,
+            group_shadow: None,
+            render_order: RenderOrder::default(),
+            scene: Arc::new(scene),
+            clip_mask: None,
+            blend: None,
+            transition_side: Default::default(),
+            lineage: Vec::new(),
+            view_bounds: None,
+            in_views: true,
+            layer: None,
+            screen: None,
+            echo_rank: 0,
+            tip: false,
+            backdrop: None,
+        }
+    }
+
+    #[test]
+    fn members_of_a_text_draw_their_shared_shadow_once() {
+        let root = Entity::from_raw_u32(7).unwrap();
+        let shadow = DropShadow {
+            offset: gaanim_core::glam::DVec2::new(0.1, -0.1),
+            blur_radius: 0.1,
+            color: peniko::Color::from_rgba8(0, 0, 0, 128),
+        };
+        let glyphs: Vec<ExtractedElement> = (0..12)
+            .map(|index| {
+                let mut glyph = group_member(root, f64::from(index) * 1.2, 1.0, 1.0);
+                glyph.group_shadow = Some(Arc::new(crate::fragment::GroupShadow {
+                    shadow: shadow.clone(),
+                    path: Arc::new(kurbo::Rect::new(0.0, 0.0, 1.0, 1.0).to_path(0.1)),
+                }));
+                glyph.transform = kurbo::Affine::translate((f64::from(index) * 1.2, 0.0));
+                glyph
+            })
+            .collect();
+        assert_eq!(shadow_run_end(&glyphs, 0), Some(12));
+        let mut composed = vello::Scene::new();
+        append_element_run(&mut composed, &glyphs, None);
+        // One blurred shadow opens two layers, not two per glyph.
+        assert_eq!(composed.encoding().n_clips, 4);
+
+        // A translucent text keeps its shadow, in the layer of its opacity.
+        let faded: Vec<ExtractedElement> = glyphs
+            .iter()
+            .map(|glyph| ExtractedElement {
+                opacity: 0.5,
+                group_opacity: 0.5,
+                ..glyph.clone()
+            })
+            .collect();
+        let mut composed = vello::Scene::new();
+        append_element_run(&mut composed, &faded, None);
+        assert_eq!(composed.encoding().n_clips, 6);
+    }
+
+    #[test]
+    fn a_fading_group_is_one_layer_over_its_members() {
+        let root = Entity::from_raw_u32(9).unwrap();
+        // An opaque body and a translucent highlight, the group at 50%.
+        let members = [
+            group_member(root, 0.0, 0.5, 0.5),
+            group_member(root, 0.5, 0.25, 0.5),
+        ];
+        assert_eq!(group_fade_run_end(&members, 0), Some(2));
+        // Members that share one opacity layer anyway need no group layer.
+        let even = [
+            group_member(root, 0.0, 0.5, 0.5),
+            group_member(root, 0.5, 0.5, 0.5),
+        ];
+        assert_eq!(group_fade_run_end(&even, 0), None);
+        let inside = members[1].inside_group();
+        assert!((inside.opacity - 0.5).abs() < 1e-6 && inside.group_opacity == 1.0);
+    }
+
     #[test]
     fn consecutive_glyphs_with_the_same_opacity_share_one_compositor_run() {
         let element = |opacity| ExtractedElement {
@@ -4901,6 +5227,8 @@ mod tests {
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
             opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
+            group_opacity: 1.0,
+            group_shadow: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -4932,6 +5260,8 @@ mod tests {
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
             opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
+            group_opacity: 1.0,
+            group_shadow: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(scene),
             clip_mask: None,
@@ -4992,6 +5322,8 @@ mod tests {
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
             opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
+            group_opacity: 1.0,
+            group_shadow: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -5030,6 +5362,8 @@ mod tests {
             opacity_bounds: kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
             opacity_extent: None,
             opacity_group: Entity::PLACEHOLDER,
+            group_opacity: 1.0,
+            group_shadow: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask,

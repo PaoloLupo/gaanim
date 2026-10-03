@@ -12,9 +12,11 @@
 
 `scene.media` carga archivos locales como objetos de la escena: imágenes, SVG,
 video y animaciones Lottie. Todos son `Drawable`, así que se
-colocan, escalan y animan como cualquier forma. Las rutas relativas se resuelven
-desde la carpeta de assets del proyecto (ver
-#link("/referencia/assets/")[Recursos]); el audio está en
+colocan, escalan y animan como cualquier forma. Una ruta relativa se resuelve
+desde la carpeta de recursos de la escena si se fijó con
+`scene.assets.load_project()` o `scene.assets.assets_dir(...)`; si no, desde el
+directorio de trabajo, la carpeta `assets/` del script y la carpeta del script,
+en ese orden (ver #link("/referencia/assets/")[Recursos]); el audio está en
 #link("/referencia/audio/")[Audio].
 
 ```python

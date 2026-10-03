@@ -138,7 +138,7 @@ impl Default for TextFlow {
         Self {
             wrap: TextWrap::Auto,
             align: TextAlign::Left,
-            line_spacing: 1.2,
+            line_spacing: 1.0,
             max_lines: None,
             overflow: TextOverflow::Clip,
             direction: TextDirection::Auto,

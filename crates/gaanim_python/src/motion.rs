@@ -87,7 +87,7 @@ fn vector(value: &Bound<'_, PyAny>, method: &str) -> PyResult<DVec2> {
 impl PyCanvasAnim {
     /// Several stops in one clip; see `gaanim_core.pyi`.
     #[pyo3(signature = (
-        times, *, position=None, rotation=None, scale=None, opacity=None,
+        times, *, position=None, offset=None, rotation=None, scale=None, opacity=None,
         fill=None, stroke=None, values=None, easing=None, spatial="linear"
     ))]
     #[allow(clippy::too_many_arguments)]
@@ -95,6 +95,7 @@ impl PyCanvasAnim {
         &self,
         times: Vec<f64>,
         position: Values<'py>,
+        offset: Values<'py>,
         rotation: Values<'py>,
         scale: Values<'py>,
         opacity: Values<'py>,
@@ -116,9 +117,11 @@ impl PyCanvasAnim {
             }
         };
         if let Some(values) = values {
-            if [&position, &rotation, &scale, &opacity, &fill, &stroke]
-                .iter()
-                .any(|channel| channel.is_some())
+            if [
+                &position, &offset, &rotation, &scale, &opacity, &fill, &stroke,
+            ]
+            .iter()
+            .any(|channel| channel.is_some())
             {
                 return Err(PyValueError::new_err(
                     "keyframes() takes values= for a Parameter, or drawable channels, not both",
@@ -141,7 +144,7 @@ impl PyCanvasAnim {
                 .map_err(PyValueError::new_err);
         }
         self.require_transformable()?;
-        if spatial != Spatial::Linear && position.is_none() {
+        if spatial != Spatial::Linear && position.is_none() && offset.is_none() {
             return Err(PyValueError::new_err(
                 "spatial applies to position keyframes",
             ));
@@ -149,6 +152,7 @@ impl PyCanvasAnim {
         let keyframes = Keyframes {
             times,
             position: stops(position, "position", point)?,
+            offset: stops(offset, "offset", point)?,
             rotation: stops(rotation, "rotation", |value| value.extract::<f64>())?,
             scale: stops(scale, "scale", self::scale)?,
             opacity: stops(opacity, "opacity", |value| value.extract::<f32>())?,

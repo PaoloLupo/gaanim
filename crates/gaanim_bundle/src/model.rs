@@ -8,7 +8,7 @@ use gaanim_core::{kurbo, peniko};
 use gaanim_renderer::effects::{
     CameraViewBackground, ClipMask, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile,
 };
-use gaanim_renderer::fragment::FragmentRecipe;
+use gaanim_renderer::fragment::{FragmentRecipe, GroupShadow};
 use gaanim_renderer::pipeline::{CapturedElement, CapturedTransition, CapturedView, FrameCapture};
 use gaanim_scene::{
     RasterImage, RenderOrder, StrokeBrush, TransitionMask, TransitionShader, TransitionShaderFrame,
@@ -285,12 +285,7 @@ pub(crate) fn write_recipe(w: &mut Writer, tables: &mut Tables, recipe: &Fragmen
         w.affine(raster.local_transform);
     });
     w.bool(recipe.lottie);
-    w.option(recipe.shadow.as_ref(), |w, shadow| {
-        w.f64(shadow.offset.x);
-        w.f64(shadow.offset.y);
-        w.f64(shadow.blur_radius);
-        codec::write_color(w, shadow.color);
-    });
+    w.option(recipe.shadow.as_ref(), write_shadow);
     w.option(recipe.glow.as_ref(), |w, glow| {
         w.f64(glow.radius);
         w.f32(glow.intensity);
@@ -311,6 +306,21 @@ pub(crate) fn write_recipe(w: &mut Writer, tables: &mut Tables, recipe: &Fragmen
     w.bool(recipe.screen);
 }
 
+fn write_shadow(w: &mut Writer, shadow: &DropShadow) {
+    w.f64(shadow.offset.x);
+    w.f64(shadow.offset.y);
+    w.f64(shadow.blur_radius);
+    codec::write_color(w, shadow.color);
+}
+
+fn read_shadow(r: &mut Reader<'_>) -> Result<DropShadow> {
+    Ok(DropShadow {
+        offset: gaanim_core::glam::DVec2::new(r.f64()?, r.f64()?),
+        blur_radius: r.f64()?,
+        color: codec::read_color(r)?,
+    })
+}
+
 pub(crate) fn read_recipe(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<FragmentRecipe> {
     Ok(FragmentRecipe {
         path: r.option(|r| tables.path(r.u32()?))?,
@@ -324,13 +334,7 @@ pub(crate) fn read_recipe(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<
             })
         })?,
         lottie: r.bool()?,
-        shadow: r.option(|r| {
-            Ok(DropShadow {
-                offset: gaanim_core::glam::DVec2::new(r.f64()?, r.f64()?),
-                blur_radius: r.f64()?,
-                color: codec::read_color(r)?,
-            })
-        })?,
+        shadow: r.option(read_shadow)?,
         glow: r.option(|r| {
             Ok(Glow {
                 radius: r.f64()?,
@@ -581,6 +585,9 @@ pub(crate) struct ElementRecord {
     pub layer: Option<u32>,
     pub screen: Option<ViewRecord>,
     pub echo_rank: u32,
+    pub group_opacity: f32,
+    /// The shared drop shadow and the table index of its outline.
+    pub group_shadow: Option<(u32, DropShadow)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -681,6 +688,11 @@ impl ElementRecord {
                 },
             }),
             echo_rank: element.echo_rank,
+            group_opacity: element.group_opacity,
+            group_shadow: element
+                .group_shadow
+                .as_ref()
+                .map(|shared| (tables.path(&shared.path), shared.shadow.clone())),
         }
     }
 
@@ -727,6 +739,11 @@ impl ElementRecord {
             }
         });
         w.var(u64::from(self.echo_rank));
+        w.f32(self.group_opacity);
+        w.option(self.group_shadow.as_ref(), |w, (path, shadow)| {
+            w.var(u64::from(*path));
+            write_shadow(w, shadow);
+        });
     }
 
     pub fn read(r: &mut Reader<'_>) -> Result<Self> {
@@ -778,6 +795,8 @@ impl ElementRecord {
                 })
             })?,
             echo_rank: r.u32()?,
+            group_opacity: r.f32()?,
+            group_shadow: r.option(|r| Ok((r.u32()?, read_shadow(r)?)))?,
         })
     }
 
@@ -846,6 +865,17 @@ impl ElementRecord {
                 })
                 .transpose()?,
             echo_rank: self.echo_rank,
+            group_opacity: self.group_opacity,
+            group_shadow: self
+                .group_shadow
+                .as_ref()
+                .map(|(path, shadow)| -> Result<_> {
+                    Ok(Arc::new(GroupShadow {
+                        shadow: shadow.clone(),
+                        path: tables.path(*path)?,
+                    }))
+                })
+                .transpose()?,
         })
     }
 }

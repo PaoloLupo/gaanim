@@ -66,6 +66,7 @@ impl SceneModel {
             // Read only while authoring, to convert `px` lengths.
             design_resolution: _,
             asset_root,
+            asset_search,
             audio_tracks,
             // Positions inside `audio_tracks`, which is fingerprinted.
             transition_sounds: _,
@@ -97,6 +98,7 @@ impl SceneModel {
         global.add(code_font_family_override);
         global.add(margin);
         global.add(asset_root);
+        global.add(asset_search);
         global.add(audio_tracks);
         global.add(tempo);
         global.add(branding);

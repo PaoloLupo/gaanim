@@ -217,9 +217,12 @@ fn collect_group_transformed(
     Ok(SvgGroup {
         id: group.id().to_owned(),
         opacity: group.opacity().get(),
-        clip_path: group
-            .clip_path()
-            .and_then(|clip| convert_clip_path(clip, width, height)),
+        clip_path: group.clip_path().and_then(|clip| {
+            // The clip's shapes live in the group's user space.
+            let space =
+                compose_transform(group.abs_transform(), outer_transform.unwrap_or_default());
+            convert_clip_path(clip, space, width, height)
+        }),
         blur_sigma: group_blur(group),
         shadow: group_shadow(group),
         children,
@@ -292,24 +295,13 @@ fn convert_path(
     }
 
     let bounds = bez.bounding_box();
-    let fill = path.fill().and_then(|fill| {
-        paint_to_brush(
-            fill.paint(),
-            fill.opacity().get(),
-            width,
-            height,
-            outer_transform,
-        )
-    });
+    // Gradients are in the path's user space, like its points.
+    let space = compose_transform(transform, outer_transform.unwrap_or_default());
+    let fill = path
+        .fill()
+        .and_then(|fill| paint_to_brush(fill.paint(), fill.opacity().get(), width, height, space));
     let stroke = path.stroke().and_then(|stroke| {
-        paint_to_brush(
-            stroke.paint(),
-            stroke.opacity().get(),
-            width,
-            height,
-            outer_transform,
-        )
-        .map(|brush| {
+        paint_to_brush(stroke.paint(), stroke.opacity().get(), width, height, space).map(|brush| {
             let scale =
                 transform_scale(transform) * outer_transform.map(transform_scale).unwrap_or(1.0);
             StrokeBrush {
@@ -330,39 +322,40 @@ fn convert_path(
     })
 }
 
+/// The brush of `paint`, whose coordinates are in the user space that
+/// `space` maps to document pixels.
 fn paint_to_brush(
     paint: &usvg::Paint,
     opacity: f32,
     width: f64,
     height: f64,
-    outer_transform: Option<usvg::Transform>,
+    space: usvg::Transform,
 ) -> Option<Brush> {
     match paint {
         usvg::Paint::Color(color) => Some(Brush::Solid(svg_color(*color, opacity))),
         usvg::Paint::LinearGradient(gradient) => {
-            let transform = gradient.transform();
-            let start = scene_point(
-                apply_outer(
-                    transform_point(gradient.x1(), gradient.y1(), transform),
-                    outer_transform,
-                ),
-                width,
-                height,
-            );
-            let end = scene_point(
-                apply_outer(
-                    transform_point(gradient.x2(), gradient.y2(), transform),
-                    outer_transform,
-                ),
-                width,
-                height,
-            );
-            if start == end {
+            let transform = compose_transform(gradient.transform(), space);
+            let (x1, y1) = transform_point(gradient.x1(), gradient.y1(), transform);
+            // An affine map keeps a linear gradient linear, but not its axis
+            // perpendicular to the bands: the gradient of the color's
+            // parameter maps by the inverse transpose.
+            let (dx, dy) = (gradient.x2() - gradient.x1(), gradient.y2() - gradient.y1());
+            let length = dx * dx + dy * dy;
+            let det = transform.sx * transform.sy - transform.kx * transform.ky;
+            if length <= f32::EPSILON || det.abs() <= f32::EPSILON {
                 return gradient
                     .stops()
                     .last()
                     .map(|stop| Brush::Solid(stop_color(stop, opacity)));
             }
+            let (dx, dy) = (dx / length, dy / length);
+            let (gx, gy) = (
+                (transform.sy * dx - transform.ky * dy) / det,
+                (-transform.kx * dx + transform.sx * dy) / det,
+            );
+            let span = gx * gx + gy * gy;
+            let start = scene_point((x1, y1), width, height);
+            let end = scene_point((x1 + gx / span, y1 + gy / span), width, height);
             let stops = gradient_stops(gradient.stops(), opacity);
             Some(Brush::Gradient(
                 Gradient::new_linear(start, end)
@@ -371,28 +364,20 @@ fn paint_to_brush(
             ))
         }
         usvg::Paint::RadialGradient(gradient) => {
-            let transform = gradient.transform();
+            let transform = compose_transform(gradient.transform(), space);
             let focus = scene_point(
-                apply_outer(
-                    transform_point(gradient.fx(), gradient.fy(), transform),
-                    outer_transform,
-                ),
+                transform_point(gradient.fx(), gradient.fy(), transform),
                 width,
                 height,
             );
             let center = scene_point(
-                apply_outer(
-                    transform_point(gradient.cx(), gradient.cy(), transform),
-                    outer_transform,
-                ),
+                transform_point(gradient.cx(), gradient.cy(), transform),
                 width,
                 height,
             );
-            let scale = ((transform.sx * transform.sy - transform.kx * transform.ky).abs()).sqrt()
-                * outer_transform
-                    .map(|outer| transform_scale(outer) as f32)
-                    .unwrap_or(1.0)
-                / SVG_PIXELS_PER_UNIT as f32;
+            // A non-uniform scale would turn the circles into ellipses; the
+            // radii take the transform's mean scale.
+            let scale = transform_scale(transform) as f32 / SVG_PIXELS_PER_UNIT as f32;
             let stops = gradient_stops(gradient.stops(), opacity);
             Some(Brush::Gradient(
                 Gradient::new_two_point_radial(
@@ -437,11 +422,16 @@ fn convert_spread(spread: usvg::SpreadMethod) -> Extend {
     }
 }
 
-fn convert_clip_path(clip: &usvg::ClipPath, width: f64, height: f64) -> Option<BezPath> {
+fn convert_clip_path(
+    clip: &usvg::ClipPath,
+    space: usvg::Transform,
+    width: f64,
+    height: f64,
+) -> Option<BezPath> {
     let mut result = BezPath::new();
     collect_clip_nodes(
         clip.root(),
-        Some(clip.transform()),
+        Some(compose_transform(clip.transform(), space)),
         width,
         height,
         &mut result,
@@ -515,12 +505,6 @@ fn transform_point(x: f32, y: f32, transform: usvg::Transform) -> (f32, f32) {
         x * transform.sx + y * transform.kx + transform.tx,
         x * transform.ky + y * transform.sy + transform.ty,
     )
-}
-
-fn apply_outer(point: (f32, f32), outer_transform: Option<usvg::Transform>) -> (f32, f32) {
-    outer_transform
-        .map(|outer| transform_point(point.0, point.1, outer))
-        .unwrap_or(point)
 }
 
 /// Compose transforms so the result applies `first`, then `second`.
@@ -714,6 +698,75 @@ mod tests {
         };
         assert_eq!(label.id, "label");
         assert!(!label.children.is_empty());
+    }
+
+    #[test]
+    fn gradients_and_clips_follow_transforms_and_the_view_box() {
+        use gaanim_core::peniko::GradientKind;
+        // 100 px per unit: the view box puts the document origin at the center.
+        let document = load_temp(
+            "gaanim_svg_transformed_paints",
+            r##"<svg width="400" height="200" viewBox="-200 -100 400 200" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <radialGradient id="r"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/></radialGradient>
+                  <linearGradient id="l" gradientUnits="userSpaceOnUse" x1="-20" y1="0" x2="20" y2="0">
+                    <stop offset="0" stop-color="#ff0"/><stop offset="1" stop-color="#0ff"/>
+                  </linearGradient>
+                  <clipPath id="c"><rect x="-10" y="-10" width="20" height="20"/></clipPath>
+                </defs>
+                <g transform="translate(100 0) scale(2)"><circle id="orb" r="20" fill="url(#r)"/></g>
+                <g transform="translate(-100 50) rotate(90)"><rect id="bar" x="-20" y="-5" width="40" height="10" fill="url(#l)"/></g>
+                <g id="clipped" transform="translate(0 -50)" clip-path="url(#c)"><circle r="30" fill="#0a0"/></g>
+              </svg>"##,
+        );
+        let path = |id: &str| {
+            fn find<'a>(group: &'a super::SvgGroup, id: &str) -> Option<&'a super::SvgPath> {
+                group.children.iter().find_map(|node| match node {
+                    SvgNode::Path(path) if path.id == id => Some(path.as_ref()),
+                    SvgNode::Group(group) => find(group, id),
+                    _ => None,
+                })
+            }
+            find(&document.root, id).expect("path")
+        };
+        let Some(Brush::Gradient(orb)) = &path("orb").fill else {
+            panic!("radial gradient");
+        };
+        let GradientKind::Radial(radial) = orb.kind else {
+            panic!("radial gradient");
+        };
+        assert!((radial.end_center.x - 1.0).abs() < 1e-6, "{radial:?}");
+        assert!(radial.end_center.y.abs() < 1e-6, "{radial:?}");
+        assert!((radial.end_radius - 0.4).abs() < 1e-5, "{radial:?}");
+
+        // Rotated a quarter turn, the bands run across the y axis: y down in
+        // the document is y up in the scene.
+        let Some(Brush::Gradient(bar)) = &path("bar").fill else {
+            panic!("linear gradient");
+        };
+        let GradientKind::Linear(linear) = bar.kind else {
+            panic!("linear gradient");
+        };
+        assert!((linear.start.x + 1.0).abs() < 1e-6 && (linear.end.x + 1.0).abs() < 1e-6);
+        assert!((linear.start.y - -0.3).abs() < 1e-6, "{linear:?}");
+        assert!((linear.end.y - -0.7).abs() < 1e-6, "{linear:?}");
+
+        fn clipped(group: &super::SvgGroup) -> Option<&super::SvgGroup> {
+            if group.clip_path.is_some() {
+                return Some(group);
+            }
+            group.children.iter().find_map(|node| match node {
+                SvgNode::Group(group) => clipped(group),
+                _ => None,
+            })
+        }
+        let clipped = clipped(&document.root).expect("clipped group");
+        let clip = clipped.clip_path.as_ref().expect("clip").bounding_box();
+        assert!(
+            (clip.center().x).abs() < 1e-6 && (clip.center().y - 0.5).abs() < 1e-6,
+            "{clip:?}"
+        );
+        assert!((clip.width() - 0.2).abs() < 1e-6, "{clip:?}");
     }
 
     fn load_temp(name: &str, contents: &str) -> SvgDocument {

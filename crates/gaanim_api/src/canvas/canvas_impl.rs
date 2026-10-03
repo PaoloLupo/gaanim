@@ -2207,6 +2207,10 @@ pub struct SceneModel {
     /// convert with it, so measurements copied from a 1080p design match.
     pub design_resolution: f64,
     pub asset_root: Option<PathBuf>,
+    /// Folders a relative path is looked up in when no asset root is set
+    /// and the path is not in the working directory: the script's `assets`
+    /// folder and the script's own folder.
+    pub asset_search: Vec<PathBuf>,
     /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
     /// Index in `audio_tracks` of each segment's transition sound, so that a
@@ -2261,6 +2265,7 @@ impl SceneModel {
             margin: Margin::default(),
             design_resolution: 1080.0,
             asset_root: None,
+            asset_search: Vec::new(),
             audio_tracks: Vec::new(),
             transition_sounds: Vec::new(),
             tempo: None,
@@ -2731,8 +2736,14 @@ impl SceneModel {
             path.to_path_buf()
         } else if let Some(root) = &self.asset_root {
             root.join(path)
-        } else {
+        } else if path.exists() {
             path.to_path_buf()
+        } else {
+            self.asset_search
+                .iter()
+                .map(|folder| folder.join(path))
+                .find(|candidate| candidate.exists())
+                .unwrap_or_else(|| path.to_path_buf())
         }
     }
 
@@ -4345,6 +4356,11 @@ impl SceneModel {
                         false,
                     );
                     leaf_specs.push(handle.spec.clone());
+                    {
+                        let mut spec = handle.spec.lock().expect("SVG path spec poisoned");
+                        // SVG centers a stroke on its path, closed or not.
+                        spec.stroke_align = Some(gaanim_renderer::effects::StrokeAlign::Center);
+                    }
                     if !path.id.is_empty() {
                         handle.spec.lock().expect("SVG path spec poisoned").svg_id =
                             Some(path.id.clone());

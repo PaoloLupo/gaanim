@@ -2717,6 +2717,7 @@ impl PyScene {
         design_resolution=1080.0,
     ))]
     fn new(
+        py: Python<'_>,
         frame: (f64, f64),
         background: Option<crate::brush::PyBackgroundInput>,
         margin: Option<f64>,
@@ -2744,6 +2745,11 @@ impl PyScene {
             canvas.margin = gaanim_api::canvas::Margin::all(margin);
         }
         canvas.design_resolution = design_resolution;
+        // Without an asset folder, a relative path missing from the working
+        // directory is found next to the script or in its `assets` folder.
+        if let Ok(directory) = caller_directory(py) {
+            canvas.asset_search = vec![directory.join(DEFAULT_ASSETS_DIR), directory];
+        }
         let inner = canvas.into_shared();
         let passes = crate::brush::post_process_passes(post, &inner)?;
         inner

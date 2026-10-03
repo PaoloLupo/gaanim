@@ -311,6 +311,7 @@ scene.canvas.background = Brush.linear(["#071022", "#164E8A", "#7DD3FC"], start=
   signature: "Background(paint: Paint)",
   params: ((name: "paint", type: "Paint", default: none, desc: [Color o `Brush` que cubre toda la escena.]),),
   returns: (type: "Background"),
+  desc: [El fondo se ajusta al cuadro de la escena (16 × 9 por defecto) y se mueve con la cámara como el resto del mundo. Si la cámara se desplaza o se aleja más allá del cuadro, el fondo sigue llenando la vista: sus bordes se prolongan, así que un degradado o un shader continúan con el color de su borde en lugar de dejar una franja vacía.],
   none,
 )
 

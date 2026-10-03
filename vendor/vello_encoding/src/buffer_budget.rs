@@ -37,6 +37,9 @@ const TILE_SIZE: f32 = 16.0;
 thread_local! {
     /// Device-space `[x0, y0, x1, y1]` per path of the last resolved scene.
     static PATH_BOUNDS: RefCell<Option<Vec<[f32; 4]>>> = const { RefCell::new(None) };
+    /// Estimated lines and tile segments `flatten` and `path_count` produce
+    /// for the last resolved scene.
+    static LINE_ESTIMATE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
     static SCALE: Cell<u32> = const { Cell::new(1) };
     static MAX_BYTES: Cell<u64> = const { Cell::new(128 << 20) };
 }
@@ -127,6 +130,8 @@ pub(crate) fn record_path_bounds(layout: &Layout, data: &[u8]) {
         let mut reach = 0.0_f32;
         let mut style: Option<Style> = None;
         let mut style_reach = 0.0_f32;
+        let mut lines = 0_u64;
+        let mut segments = 0_u64;
         let bound_range = |local: &mut [f32; 4], words: &[u32]| {
             for point in words.chunks_exact(2) {
                 let (x, y) = (f32::from_bits(point[0]), f32::from_bits(point[1]));
@@ -204,7 +209,25 @@ pub(crate) fn record_path_bounds(layout: &Layout, data: &[u8]) {
             if new_points == 0 {
                 continue;
             }
+            let stroked = style
+                .is_some_and(|style| style.flags_and_miter_limit & Style::FLAGS_STYLE_BIT != 0);
             if tag.is_f32() {
+                let (segment_lines, length) = segment_estimate(
+                    path_data
+                        .get(offset..offset + (new_points + 1) * 2)
+                        .unwrap_or_default(),
+                    &transform,
+                );
+                // A stroke flattens both offset sides, with joins and caps.
+                let segment_lines = if stroked {
+                    segment_lines * 2 + 4
+                } else {
+                    segment_lines
+                };
+                lines += segment_lines;
+                // Each line adds one segment per tile it crosses.
+                segments +=
+                    segment_lines + (length / TILE_SIZE) as u64 * if stroked { 2 } else { 1 };
                 // Start point plus the new points.
                 if run.is_empty() {
                     run.start = offset;
@@ -229,10 +252,56 @@ pub(crate) fn record_path_bounds(layout: &Layout, data: &[u8]) {
                 }
                 offset += new_points + usize::from(tag.is_subpath_end());
                 run = offset..offset;
+                let packed = new_points as u64 * if stroked { 3 } else { 1 };
+                lines += packed;
+                segments += packed * 2;
             }
             reach = reach.max(style_reach);
         }
+        LINE_ESTIMATE.set(Some((lines, segments)));
     });
+}
+
+/// Lines Vello's `flatten` makes of one segment (`words` holds its start
+/// point and new points as f32 pairs) at 0.25 px tolerance, bounded with
+/// Wang's formula, and the device length of its control polygon.
+fn segment_estimate(words: &[u32], transform: &Transform) -> (u64, f32) {
+    const TOLERANCE: f32 = 0.25;
+    let [a, b, c, d] = transform.matrix;
+    let stretch = (a * a + b * b + c * c + d * d).sqrt();
+    let points: Vec<(f32, f32)> = words
+        .chunks_exact(2)
+        .map(|point| (f32::from_bits(point[0]), f32::from_bits(point[1])))
+        .collect();
+    let length = points
+        .windows(2)
+        .map(|pair| (pair[1].0 - pair[0].0).hypot(pair[1].1 - pair[0].1))
+        .sum::<f32>()
+        * stretch;
+    let curvature = points
+        .windows(3)
+        .map(|triple| {
+            let x = triple[0].0 - 2.0 * triple[1].0 + triple[2].0;
+            let y = triple[0].1 - 2.0 * triple[1].1 + triple[2].1;
+            x.hypot(y)
+        })
+        .fold(0.0_f32, f32::max)
+        * stretch;
+    let degree = points.len().saturating_sub(1) as f32;
+    let lines = if degree <= 1.0 {
+        1.0
+    } else {
+        (degree * (degree - 1.0) / 8.0 * curvature / TOLERANCE)
+            .sqrt()
+            .ceil()
+    };
+    let lines = if lines.is_finite() {
+        lines.clamp(1.0, 1024.0)
+    } else {
+        1.0
+    };
+    let length = if length.is_finite() { length } else { 0.0 };
+    (lines as u64, length)
 }
 
 /// How far a stroke can extend beyond its control points, in device space:
@@ -317,10 +386,15 @@ pub(crate) fn fit(sizes: &mut BufferSizes, width_in_tiles: u32, height_in_tiles:
     let ptcl = scaled(sizes.ptcl.len())
         .max(viewport_tiles * PTCL_INITIAL_ALLOC + PTCL_DYNAMIC_WORDS * scale);
     sizes.ptcl = grown::<u32>(sizes.ptcl.len(), ptcl, max);
-    sizes.lines = grown::<LineSoup>(sizes.lines.len(), scaled(sizes.lines.len()), max);
-    sizes.seg_counts =
-        grown::<SegmentCount>(sizes.seg_counts.len(), scaled(sizes.seg_counts.len()), max);
-    sizes.segments = grown::<PathSegment>(sizes.segments.len(), scaled(sizes.segments.len()), max);
+    // Flattening and tiling outgrow the upstream sizes for scenes of many
+    // curves (text, roughened outlines): size them from the estimate, with
+    // a quarter of headroom.
+    let (lines_needed, segments_needed) = LINE_ESTIMATE.take().unwrap_or((0, 0));
+    let lines = scaled(sizes.lines.len()).max(lines_needed + lines_needed / 4);
+    sizes.lines = grown::<LineSoup>(sizes.lines.len(), lines, max);
+    let segments = scaled(sizes.segments.len()).max(segments_needed + segments_needed / 4);
+    sizes.seg_counts = grown::<SegmentCount>(sizes.seg_counts.len(), segments, max);
+    sizes.segments = grown::<PathSegment>(sizes.segments.len(), segments, max);
     sizes.bin_data = grown::<u32>(sizes.bin_data.len(), scaled(sizes.bin_data.len()), max);
     sizes.blend_spill = grown::<u32>(
         sizes.blend_spill.len(),
@@ -365,6 +439,30 @@ mod tests {
         assert!(u64::from(config.buffer_sizes.tiles.len()) >= needed);
         assert_eq!(config.gpu.tiles_size, config.buffer_sizes.tiles.len());
         assert!(u64::from(config.buffer_sizes.tiles.len()) <= needed * 2);
+    }
+
+    #[test]
+    fn many_curves_get_room_for_their_flattened_lines() {
+        // 150k wavy cubics flatten into about 17 lines each: more than the
+        // upstream 2M lines, which made a frame of many formulas render
+        // nothing.
+        let mut wave = BezPath::new();
+        wave.move_to((0.0, 500.0));
+        for index in 0..150_000 {
+            let x = f64::from(index % 1000) * 1.9;
+            wave.curve_to((x, 450.0), (x + 1.0, 550.0), (x + 1.9, 500.0));
+        }
+        let mut encoding = Encoding::default();
+        encoding.encode_transform(Transform::IDENTITY);
+        encoding.encode_fill_style(Fill::NonZero);
+        encoding.encode_shape(&wave, true);
+        encoding.encode_color(Color::WHITE);
+        let config = resolved_config(&encoding, 1920, 1080);
+        assert!(config.buffer_sizes.lines.len() > 1 << 21);
+        assert!(config.buffer_sizes.segments.len() >= config.buffer_sizes.lines.len());
+        assert_eq!(config.gpu.lines_size, config.buffer_sizes.lines.len());
+        // The estimate is spent by the render that uses it.
+        assert!(LINE_ESTIMATE.get().is_none());
     }
 
     #[test]

@@ -17,8 +17,11 @@ Publicada el 3 de octubre de 2026. Transiciones por shader: cada segmento se
 dibuja por separado y la GPU los mezcla con una función WGSL, como en
 gl-transitions. Llegan cinco listas para usar y la posibilidad de escribir las
 tuyas. Y el audio anima la escena: el volumen, las bandas de frecuencia y los
-golpes de una pista mueven, giran y tiñen cualquier objeto. Lee «Al
-actualizar»: los paquetes `.gaanim` de 0.8 deben grabarse de nuevo.
+golpes de una pista mueven, giran y tiñen cualquier objeto. Además, los SVG
+con transformaciones conservan sus degradados, recortes y trazos, los grupos
+se funden como una capa y las sombras de texto cuestan una por objeto. Lee «Al
+actualizar»: los paquetes `.gaanim` de 0.8 deben grabarse de nuevo y el
+interlineado por defecto es más compacto.
 
 == Cambios
 
@@ -39,12 +42,40 @@ actualizar»: los paquetes `.gaanim` de 0.8 deben grabarse de nuevo.
 - `Updater.rotate`, `Updater.wiggle` y el nuevo `Falloff.source` aceptan una
   señal del tiempo, así que el audio también gira, hace temblar y tiñe con
   `drive("fill", ...)`. Lee #link("/referencia/audio/")[Audio].
+- `drawable.copy()` duplica un objeto; en un SVG copia también sus partes con
+  nombre y sus recortes (`copia.part("cabeza")`).
+- `keyframes(offset=[...])` mueve el objeto relativo a donde está al empezar.
+  `position` fija su origen, no su centro visual como `move_to`.
+- Sin carpeta de recursos, las rutas relativas se buscan también en la
+  carpeta `assets/` del script y en la del script.
+- `GAANIM_FRAME_PROFILE=1` informa de caminos, segmentos y recortes.
+- El fondo llena la vista aunque la cámara salga del cuadro de la escena.
+
+== Correcciones
+
+- Los degradados y los `clip-path` de un SVG bajo `<g transform>` o un
+  `viewBox` desplazado siguen la transformación, y el trazo de una figura
+  cerrada va centrado, como en SVG.
+- Un grupo o un SVG que se funde se compone como una sola capa: lo que una
+  pieza tapa sigue tapado.
+- La sombra de un texto o un grupo se dibuja una vez, desde la silueta de sus
+  miembros, en lugar de una por glifo.
+- `echo` en reposo no apila sus copias sobre el objeto.
+- `quantity(1600, "kg/m^3")` escribe «kg/m³» sin hueco antes de la barra.
+- La vista previa ya no desborda los búferes de Vello con muchas curvas
+  (decenas de fórmulas o tiza), que dejaban una mancha blanca.
 
 == Al actualizar
 
 - Los paquetes `.gaanim` pasan a la versión 3 del formato: Gaanim 0.9 no abre
   los grabados con 0.8 ni anteriores. Vuelve a grabarlos con
   `gaanim export <proyecto> --output charla.gaanim`.
+- `line_spacing` vale 1.0 por defecto en lugar de 1.2: las líneas quedan a
+  un tamaño de letra, más cerca de como se veían en 0.7. Pasa
+  `line_spacing=1.2` para el espaciado de 0.8.
+- Los trazos de los SVG importados van centrados; usa
+  `.stroke_align("inside")` si un dibujo dependía del trazo hacia dentro.
+- La sombra de un grupo es una sola, bajo todos sus miembros.
 
 = 0.8.1
 

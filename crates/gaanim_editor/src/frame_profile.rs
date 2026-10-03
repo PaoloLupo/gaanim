@@ -4,7 +4,8 @@
 //! loaded, the timeline plays continuously from t=0 (authored stops are
 //! ignored) and one line per wall-clock second is written to stderr, splitting
 //! the frame into main-world phases (timeline seek, fragment compilation) and
-//! render-world phases (surface acquire, render graph and present). The editor
+//! render-world phases (surface acquire, render graph and present), with the
+//! largest Vello scene of the second (paths, segments and clips). The editor
 //! exits with a summary of the slowest windows when the timeline ends.
 
 use crate::EditorState;
@@ -15,7 +16,7 @@ use bevy::render::view::window::prepare_windows;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use gaanim_core::ObjectId;
 use gaanim_renderer::pipeline::{GaanimRenderCache, gaanim_render_system};
-use gaanim_renderer::prelude::PreviewResolution;
+use gaanim_renderer::prelude::{PreviewResolution, VelloDiagnostics};
 use gaanim_timeline::timeline::Timeline;
 use gaanim_timeline::{timeline_playback_system, timeline_seek_system};
 use std::collections::HashMap;
@@ -104,6 +105,8 @@ struct Window {
     mobjects: usize,
     /// Lowest preview resolution scale used in the window.
     preview_scale: f32,
+    /// Largest Vello scene of the window: paths, path segments and clips.
+    vello: [u32; 3],
     timeline_start: f64,
     timeline_end: f64,
     segment: Option<String>,
@@ -120,6 +123,7 @@ impl Window {
             compile: Phase::ZERO,
             rebuilt: 0,
             fragments: 0,
+            vello: [0; 3],
             visible: 0,
             mobjects: 0,
             preview_scale: 1.0,
@@ -265,6 +269,7 @@ fn main_frame_end(
     mut profile: ResMut<FrameProfile>,
     timeline: Option<Res<Timeline>>,
     preview: Option<Res<PreviewResolution>>,
+    vello: Option<Res<VelloDiagnostics>>,
     mobjects: Query<Has<gaanim_scene::Visible>, With<gaanim_scene::MobjectId>>,
 ) {
     let now = Instant::now();
@@ -279,6 +284,12 @@ fn main_frame_end(
     window.frames += 1;
     if let Some(preview) = preview {
         window.preview_scale = window.preview_scale.min(preview.scale);
+    }
+    if let Some(vello) = vello {
+        let counts = [vello.paths, vello.path_segments, vello.clips];
+        for (largest, count) in window.vello.iter_mut().zip(counts) {
+            *largest = (*largest).max(count.unwrap_or(0));
+        }
     }
     if let Some(main) = main {
         window.main.add(main);
@@ -319,7 +330,7 @@ fn flush_window(profile: &mut FrameProfile) {
     let frames = window.frames;
     let avg_dt_ms = window.frame_dt.avg_ms(frames);
     let line = format!(
-        "t={:6.2}-{:6.2}s {:>3} fps | frame {:5.1} [{:5.1}] | main {:5.1} [{:5.1}] seek {:5.1} [{:5.1}] compile {:5.1} [{:5.1}] rebuilt {:5.1}/{:<5} | render {:5.1} [{:5.1}] acquire {:5.1} [{:5.1}] graph+present {:5.1} [{:5.1}] preview {:3.0}% | visible {}/{} | {}",
+        "t={:6.2}-{:6.2}s {:>3} fps | frame {:5.1} [{:5.1}] | main {:5.1} [{:5.1}] seek {:5.1} [{:5.1}] compile {:5.1} [{:5.1}] rebuilt {:5.1}/{:<5} | render {:5.1} [{:5.1}] acquire {:5.1} [{:5.1}] graph+present {:5.1} [{:5.1}] preview {:3.0}% | paths {} segs {} clips {} | visible {}/{} | {}",
         window.timeline_start,
         window.timeline_end,
         (f64::from(frames) / window.started.elapsed().as_secs_f64()).round(),
@@ -340,6 +351,9 @@ fn flush_window(profile: &mut FrameProfile) {
         render.graph.avg_ms(render.frames),
         render.graph.max_ms(),
         window.preview_scale * 100.0,
+        window.vello[0],
+        window.vello[1],
+        window.vello[2],
         window.visible,
         window.mobjects,
         window.segment.as_deref().unwrap_or("-"),
