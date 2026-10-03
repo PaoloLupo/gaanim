@@ -422,9 +422,16 @@ struct ExtractedCanvas {
     /// A shader transition's incoming segment and layer above, drawn with
     /// the scene's transform into their own targets.
     transition: Option<(Arc<Scene>, Arc<Scene>)>,
+    /// Drawables drawn through their shader effect, into the images the
+    /// scene draws; see [`crate::object_effects`].
+    effects: Vec<crate::object_effects::EffectLayer>,
     /// Preview resolution scale; see [`PreviewResolution`].
     scale: f32,
 }
+
+/// The render world's textures for drawables with a shader effect.
+#[derive(Resource, Default)]
+struct CanvasObjectEffects(crate::object_effects::ObjectEffects);
 
 /// The [`CanvasMirror`] the render world draws into this frame.
 #[derive(Resource, Default)]
@@ -481,6 +488,7 @@ impl Plugin for VelloCanvasPlugin {
         app.add_plugins(ExtractComponentPlugin::<VelloView>::default())
             .init_resource::<VelloCanvas>()
             .init_resource::<CanvasMirror>()
+            .init_resource::<crate::pipeline::EffectLayers>()
             .insert_resource(stats.clone())
             .add_systems(PreUpdate, adapt_preview_resolution)
             .add_systems(PostUpdate, resize_canvas_target.after(CameraUpdateSystems));
@@ -493,6 +501,7 @@ impl Plugin for VelloCanvasPlugin {
             .init_resource::<ExtractedCanvas>()
             .init_resource::<RenderedCanvas>()
             .init_resource::<ExtractedMirror>()
+            .init_resource::<CanvasObjectEffects>()
             .add_systems(ExtractSchedule, (extract_canvas, extract_mirror))
             .add_systems(
                 Render,
@@ -583,8 +592,13 @@ fn extract_canvas(
     preview: Extract<Option<Res<PreviewResolution>>>,
     scenes: Extract<Query<(&VelloScene2d, &Transform), With<MainVelloScene>>>,
     layers: Extract<Option<Res<crate::pipeline::TransitionLayers>>>,
+    effects: Extract<Option<Res<crate::pipeline::EffectLayers>>>,
     mut extracted: ResMut<ExtractedCanvas>,
 ) {
+    extracted.effects = effects
+        .as_ref()
+        .map(|effects| effects.0.clone())
+        .unwrap_or_default();
     extracted.transition = layers
         .as_ref()
         .and_then(|layers| layers.0.as_ref())
@@ -672,6 +686,7 @@ fn render_canvas(
     renderer: Res<VelloRenderer>,
     stats: Res<VelloFrameStats>,
     effects: CanvasEffects,
+    mut object_effects: ResMut<CanvasObjectEffects>,
     mut rendered: ResMut<RenderedCanvas>,
 ) {
     let Some(target) = extracted.image.and_then(|image| images.get(image)) else {
@@ -700,7 +715,8 @@ fn render_canvas(
     let (post, shader, transition_targets) = effects;
     let volatile = post.is_some_and(|post| post.is_active())
         || shader.is_some_and(|shader| shader.is_active())
-        || extracted.transition.is_some();
+        || extracted.transition.is_some()
+        || !extracted.effects.is_empty();
     if !volatile && rendered.0.as_ref().is_some_and(|last| last.same(&current)) {
         return;
     }
@@ -730,6 +746,18 @@ fn render_canvas(
         return;
     };
     let placement = current.scene.as_ref().map(|(_, affine)| *affine);
+    // Effects fill the images the frame draws, so they render first.
+    if (!extracted.effects.is_empty() || object_effects.0.is_active())
+        && let Err(error) = object_effects.0.render(
+            device.wgpu_device(),
+            &queue,
+            &mut renderer,
+            &extracted.effects,
+            CANVAS_ANTIALIASING,
+        )
+    {
+        error!("Vello failed to render a shader effect: {error}");
+    }
     match renderer.render_to_texture(
         device.wgpu_device(),
         &queue,

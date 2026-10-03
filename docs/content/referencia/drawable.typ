@@ -108,7 +108,7 @@ face.scale_to(1.18)
     (name: "seed", type: "int", default: "0", desc: [Semilla del temblor y del grano: la misma semilla dibuja la misma tiza en cada fotograma y exportación.]),
     (name: "roughness", type: "float", default: "0.01", desc: [Desplazamiento máximo del contorno, en unidades de escena; `0` deja el contorno limpio y solo aplica el grano.]),
   ),
-  desc: [Dibuja el relleno y el trazo como tiza en una pizarra: el contorno tiembla un poco y un grano rompe la pintura. En un texto o un grupo se aplica a cada glifo y miembro. Vale para toda la escena, aunque se llame después de un `play`; no se anima. `write(brush="chalk")` hace lo mismo desde la animación. Los paquetes de reproducción (`.gaanim`) aún no pueden grabar tiza: exporta un vídeo.],
+  desc: [Dibuja el relleno y el trazo como tiza en una pizarra: el contorno tiembla un poco y un grano rompe la pintura. En un texto o un grupo se aplica a cada glifo y miembro. Vale para toda la escena, aunque se llame después de un `play`; no se anima. `write(brush="chalk")` hace lo mismo desde la animación. Los paquetes `.gaanim` la graban y reproducen igual.],
 )[
 ```python
 >>>from gaanim import *
@@ -556,6 +556,33 @@ scene.render()
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 blob = scene.geometry.circle(2).fill("#1E3A8A").blur(0.15)
+```
+]
+
+#api-entry(
+  name: "Drawable.shader_effect",
+  kind: "method",
+  params: (
+    (name: "effect", type: "PostProcess | Sequence[PostProcess] | None", default: none, desc: [Un pase o una cadena de pases WGSL; `None` quita el efecto.]),
+    (name: "margin", type: "float", default: "0.25", desc: [Unidades de escena que se agregan alrededor del objeto, para efectos que se salen de su contorno (un brillo, una onda).]),
+  ),
+  desc: [Dibuja el objeto y sus descendientes en una textura propia, le aplica los pases y devuelve el resultado a la escena en su lugar del orden de dibujo. Es un `PostProcess.shader` sobre un solo objeto: en el shader, `gaanim_scene(uv)` lee solo ese objeto (transparente alrededor), `uv` va de 0 a 1 sobre su caja con el margen, `resolution` es el tamaño de la textura en píxeles y `time` es el tiempo de la escena. Los uniforms aceptan `Parameter`, `Computed` y señales de audio. Los presets de `PostProcess` (`grain`, `chromatic_aberration`…) también sirven. Es estado de declaración: vale para toda la línea de tiempo. Si un objeto con efecto contiene otro, se aplica el efecto exterior. Se ve en la vista previa, en la exportación y en los paquetes `.gaanim`, que guardan los uniforms de cada fotograma.],
+)[
+```python
+# show-code: true
+from gaanim import GOLD, WHITE, PostProcess, Scene
+scene = Scene(frame=(16, 9), background="#0b1020")
+ripple = PostProcess.shader("""
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let wave = gaanim_uniforms.amount * sin(uv.x * 14.0 + time * 6.0);
+    return gaanim_scene(uv + vec2<f32>(0.0, wave));
+}
+""", uniforms={"amount": 0.12})
+title = scene.text("Ondas").fill(WHITE).scale_to(2.0).shader_effect(ripple, margin=0.4)
+plain = scene.text("Sin efecto").fill(GOLD).scale_to(1.0).move_to(0, -2.5)
+scene.wait(2)
+# output: preview.webp
+scene.render()
 ```
 ]
 

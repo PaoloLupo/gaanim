@@ -697,7 +697,7 @@ where
             continue;
         }
 
-        let (vello_scene, layers, post_process) = {
+        let (vello_scene, layers, effects, post_process) = {
             let resolved_camera = frame_camera(app.world());
             let composed = gaanim_renderer::pipeline::compile_frame_from_world(
                 app.world_mut(),
@@ -717,7 +717,7 @@ where
                 config.fit,
             );
             let post = export_post_process(app.world(), frame, composed.transition.as_ref());
-            (composed.scene, composed.transition, post)
+            (composed.scene, composed.transition, composed.effects, post)
         };
 
         let bg_color = app
@@ -739,6 +739,7 @@ where
             .render_frame_layers(
                 &vello_scene,
                 layers.as_ref(),
+                &effects,
                 bg_color,
                 post_process.as_ref(),
             )
@@ -1065,6 +1066,7 @@ impl FrameRasterizer {
             .render_frame_layers(
                 &composed.scene,
                 composed.transition.as_ref(),
+                &composed.effects,
                 self.bg_color,
                 post.as_ref(),
             )
@@ -1111,6 +1113,7 @@ pub fn compose_bundle_layers(
         pixels_per_unit,
         None,
         0.0,
+        pixels_per_unit.unwrap_or(gaanim_renderer::pipeline::DEFAULT_EFFECT_DENSITY),
     );
     store.end_frame();
     if let Some(overlay) = overlay {
@@ -1344,6 +1347,7 @@ where
             .render_frame_layers(
                 &composed.scene,
                 composed.transition.as_ref(),
+                &composed.effects,
                 background,
                 post_process.as_ref(),
             )
@@ -1426,6 +1430,7 @@ fn render_updated_world(
     gpu.render_frame_layers(
         &composed.scene,
         composed.transition.as_ref(),
+        &composed.effects,
         background,
         post_process.as_ref(),
     )

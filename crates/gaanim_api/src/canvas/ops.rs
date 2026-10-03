@@ -166,6 +166,21 @@ impl CanvasState {
 
     /// Draw `spec` as chalk for the whole scene. Chalk is not animated, so
     /// a spec already frozen by a `play` takes it too.
+    pub(crate) fn set_shader_effect(
+        &mut self,
+        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        effect: Option<super::types::ShaderEffectSpec>,
+    ) {
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.shader_effect = effect.clone();
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.shader_effect = effect;
+        }
+    }
+
     pub(crate) fn set_chalk(
         &mut self,
         spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,

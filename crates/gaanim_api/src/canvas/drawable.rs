@@ -1200,6 +1200,40 @@ impl DrawableHandle {
     /// `roughness` scene units and a grain breaks the paint, both following
     /// `seed`. Applies to every glyph of a text and every child of a group,
     /// for the whole scene: chalk is not animated or cut on the timeline.
+    /// Draw this drawable and its descendants through post-process
+    /// `passes`, as one layer in a texture `margin` scene units wider than
+    /// them; no passes removes the effect. Declaration state: it applies
+    /// for the whole timeline.
+    pub fn shader_effect(
+        self,
+        passes: Vec<gaanim_renderer::post_process::PostProcessPass>,
+        margin: f64,
+    ) -> Self {
+        let effect = (!passes.is_empty()).then(|| super::types::ShaderEffectSpec {
+            passes,
+            margin: if margin.is_finite() {
+                margin.max(0.0)
+            } else {
+                0.0
+            },
+        });
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_shader_effect(&self.spec, effect);
+        self
+    }
+
+    /// The scene this drawable belongs to, while it is shared.
+    pub fn owning_scene(&self) -> Option<std::sync::Arc<std::sync::Mutex<super::SceneModel>>> {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .owner
+            .as_ref()?
+            .upgrade()
+    }
+
     pub fn chalk(self, seed: u64, roughness: f64) -> Self {
         let chalk = gaanim_renderer::effects::ChalkBrush { seed, roughness };
         let mut state = self.state.lock().expect("canvas state poisoned");

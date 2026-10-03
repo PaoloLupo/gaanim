@@ -2173,6 +2173,26 @@ def validate_audio_viz_contract(module):
     return failures
 
 
+def validate_shader_effect_contract(module):
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    amount = scene.viz.parameter(0.0)
+    circle = scene.geometry.circle(1)
+    if circle.shader_effect(module.PostProcess.grain(), margin=0.5) is not circle:
+        failures.append("Drawable.shader_effect does not return the drawable")
+    circle.shader_effect([module.PostProcess.pixelate(8), module.PostProcess.shader(
+        "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> "
+        "{ return gaanim_scene(uv) * gaanim_uniforms.amount; }", uniforms={"amount": amount})])
+    circle.shader_effect(None)
+    scene.geometry.group([scene.text("a"), scene.geometry.square(1)]).shader_effect(
+        module.PostProcess.chromatic_aberration(0.02))
+    if not raises_error(ValueError, lambda: circle.shader_effect(module.PostProcess.grain(), margin=-1)):
+        failures.append("Drawable.shader_effect accepted a negative margin")
+    if not raises_error(TypeError, lambda: circle.shader_effect("ripple")):
+        failures.append("Drawable.shader_effect accepted a string")
+    return failures
+
+
 def raises_error(expected, operation):
     try:
         operation()
@@ -2893,6 +2913,7 @@ def main() -> int:
     missing.extend(validate_audio_signals_contract(module))
     missing.extend(validate_copy_and_offset_contract(module))
     missing.extend(validate_audio_viz_contract(module))
+    missing.extend(validate_shader_effect_contract(module))
     missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))

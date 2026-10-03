@@ -3222,6 +3222,31 @@ class Drawable:
             face.scale_to(1.18)  # The brows thicken with the head.
         """
         ...
+    def shader_effect(
+        self,
+        effect: Optional[PostProcess | Sequence[PostProcess]],
+        *,
+        margin: float = 0.25,
+    ) -> Self:
+        """Draw this drawable and its descendants through WGSL passes, as one layer.
+
+        The drawable is drawn into a texture of its own ``margin`` scene
+        units wider than it, the passes run over that texture, and the
+        result is drawn back in the drawable's place in draw order. Inside
+        the shader ``gaanim_scene(uv)`` reads only this drawable
+        (transparent around it), ``uv`` spans its box with the margin,
+        ``resolution`` is the texture size in pixels and ``time`` the scene
+        time. Uniforms take Parameters, Computeds and audio signals, and the
+        ``PostProcess`` presets work too. ``None`` removes the effect. It is
+        declaration state for the whole timeline; a drawable with an effect
+        inside another one is drawn by the outer effect. Previews, exports
+        and ``.gaanim`` bundles draw it; a bundle stores the uniforms of
+        every frame. A negative ``margin`` raises ``ValueError``.
+
+        Example:
+            title.shader_effect(PostProcess.shader(ripple_src, uniforms={"amount": level}), margin=0.4)
+        """
+        ...
     def chalk(self, seed: int = 0, roughness: float = 0.01) -> Self:
         """Draw the fill and stroke as chalk on a blackboard.
 
@@ -3229,7 +3254,7 @@ class Drawable:
         breaks the paint; both follow ``seed``, so every frame and export
         draws the same chalk. On a text or a group it applies to every glyph
         and child. This is declaration state and is not animated. Playback
-        bundles (``.gaanim``) cannot record chalk yet.
+        bundles (``.gaanim``) record and replay it.
 
         Example:
             formula = scene.text.equation("E = m c^2").chalk(seed=7)

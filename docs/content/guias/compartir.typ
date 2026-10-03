@@ -378,7 +378,7 @@ Un `.gaanim` es un ZIP con estas entradas:
   [*Entrada*], [*Contenido*],
   [`manifest.json`], [Formato y versión, generador, frecuencia, duración, tamaño, bloques de fotogramas y el hash BLAKE3 de cada entrada.],
   [`scene.bin`], [Título, fondo, color de borrado, posprocesados, segmentos con notas y pausas, marcadores, escenas y pistas de audio.],
-  [`tables/*.bin`], [Trazados, imágenes, recetas de fragmentos y cadenas, cada uno guardado una sola vez.],
+  [`tables/*.bin`], [Trazados, imágenes, recetas de fragmentos, cadenas y los shaders de las transiciones y de los efectos por objeto, cada uno guardado una sola vez.],
   [`frames/NNNNNN.bin`], [Bloques de 60 fotogramas; cada bloque empieza con un fotograma completo y el resto guarda solo lo que cambió.],
   [`scenes/NNNNNN.bin`], [Cada fotograma distinto de una animación Lottie, como escena vectorial de Vello.],
   [`index.bin`, `digests.bin`], [Instante y resumen BLAKE3 de cada fotograma.],
@@ -392,6 +392,6 @@ modo que el paquete compone exactamente lo que compuso la escena.
 Salvo `manifest.json`, `media/*` y `thumbnail.png`, cada entrada guarda sus datos comprimidos
 con Zstandard. En una presentación larga ocupa menos de la mitad que con la
 compresión propia del ZIP; en un paquete pequeño, alrededor de un 10 % menos.
-Este es el formato 2, que escribe y lee Gaanim 0.6.1 (y el reproductor web
-actual). Los paquetes grabados con 0.6.0 usan el formato 1 y ya no se abren:
-vuelve a grabarlos desde su script.
+Este es el formato 4, que escribe y lee Gaanim 0.9 (y su reproductor web).
+Los paquetes grabados con versiones anteriores usan otro formato y ya no se
+abren: vuelve a grabarlos desde su script.
