@@ -11,6 +11,33 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.9.0
+
+Publicada el 3 de octubre de 2026. Transiciones por shader: cada segmento se
+dibuja por separado y la GPU los mezcla con una función WGSL, como en
+gl-transitions. Llegan cinco listas para usar y la posibilidad de escribir las
+tuyas. Lee «Al actualizar»: los paquetes `.gaanim` de 0.8 deben grabarse de
+nuevo.
+
+== Cambios
+
+- `Transition.preset(nombre, duración, **ajustes)` aplica una transición
+  incorporada: `cross_zoom`, `directional_warp`, `ripple`, `glitch_displace` o
+  `luma`, que revela el segmento entrante siguiendo una imagen en escala de
+  grises (`image=`). Lee #link("/guias/transiciones/")[Transiciones].
+- `Transition.shader(wgsl, duración, uniforms={...})` acepta tu propia función
+  `transition(uv)`, que lee `gaanim_from(uv)`, `gaanim_to(uv)` y `progress`.
+- Cada segmento se dibuja con su fondo; los objetos persistentes y los
+  overlays quedan nítidos por encima de la mezcla. Funcionan en la vista
+  previa, la exportación, los paquetes y el reproductor web, y un seek cae en
+  el mismo fotograma que la reproducción.
+
+== Al actualizar
+
+- Los paquetes `.gaanim` pasan a la versión 3 del formato: Gaanim 0.9 no abre
+  los grabados con 0.8 ni anteriores. Vuelve a grabarlos con
+  `gaanim export <proyecto> --output charla.gaanim`.
+
 = 0.8.1
 
 Publicada el 3 de octubre de 2026. Corrige lo que se vio al hacer los primeros
