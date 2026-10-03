@@ -2141,6 +2141,38 @@ def validate_copy_and_offset_contract(module):
     return failures
 
 
+def validate_audio_viz_contract(module):
+    failures = []
+    track = Path(__file__).resolve().parent.parent / "docs/fixtures/assets/ritmo.ogg"
+    scene = module.Scene(frame=(16, 9))
+    music = scene.media.audio(str(track))
+    spectrum = music.spectrum(12, smoothing=0.3)
+    wave = music.waveform(24, span=1.5, low=20, high=150)
+    if len(spectrum) != 12 or not all(isinstance(value, module.Computed) for value in spectrum):
+        failures.append("Audio.spectrum does not return one Computed per band")
+    if len(wave) != 24:
+        failures.append("Audio.waveform does not return one Computed per point")
+    for shape in ("bar", "capsule", "dot", "line", "area"):
+        for layout in ("row", "mirror", "radial"):
+            scene.viz.equalizer(spectrum, shape=shape, layout=layout)
+    scene.viz.equalizer(spectrum, fill=module.Falloff.index().gradient("#000000", "#ffffff"))
+    scene.viz.equalizer(spectrum, value_colors=["#000000", "#ffffff"], stretch=False,
+                        shape=lambda s, i, n: s.geometry.circle(0.1),
+                        layout=lambda i, n: (i * 0.5, 0.0, 1.5707963))
+    scene.geometry.polyline([(0, spectrum[0]), (1, 0.5), (scene.time, 1)], closed=True)
+    for operation in (
+        lambda: music.spectrum(0),
+        lambda: music.waveform(1),
+        lambda: music.waveform(8, low=100),
+        lambda: scene.viz.equalizer([]),
+        lambda: scene.viz.equalizer(spectrum, shape="hexagon"),
+        lambda: scene.geometry.circle(1).echo(3, start=2.0, end=1.0),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("audio visualizers accepted an invalid count, band, shape or window")
+    return failures
+
+
 def raises_error(expected, operation):
     try:
         operation()
@@ -2860,6 +2892,7 @@ def main() -> int:
     missing.extend(validate_polyline_connector_contract(module))
     missing.extend(validate_audio_signals_contract(module))
     missing.extend(validate_copy_and_offset_contract(module))
+    missing.extend(validate_audio_viz_contract(module))
     missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))

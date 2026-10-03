@@ -47,6 +47,34 @@ use gaanim_math::{RateFunc, SpatialTransform};
 /// Typst's default text size, in points.
 const TYPST_DEFAULT_TEXT_PT: f64 = 11.0;
 
+/// The polyline through `points` evaluated at `time`; a point whose source
+/// cannot be evaluated is left out.
+fn reactive_polyline_path(
+    points: &[(
+        gaanim_animation::ScalarSource,
+        gaanim_animation::ScalarSource,
+    )],
+    closed: bool,
+    time: f64,
+    signal: impl Fn(gaanim_core::ObjectId) -> Option<f64>,
+) -> gaanim_core::kurbo::BezPath {
+    let mut path = gaanim_core::kurbo::BezPath::new();
+    for (x, y) in points {
+        let (Ok(x), Ok(y)) = (x.evaluate(time, &signal), y.evaluate(time, &signal)) else {
+            continue;
+        };
+        if path.elements().is_empty() {
+            path.move_to((x, y));
+        } else {
+            path.line_to((x, y));
+        }
+    }
+    if closed && path.elements().len() > 2 {
+        path.close_path();
+    }
+    path
+}
+
 fn sampled_reactive_path(
     map: &gaanim_visualization::CoordinateMap2D,
     function: &ReactiveFunction,
@@ -9169,6 +9197,68 @@ impl SceneModel {
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
             }
+            SpawnKind::ReactivePolyline { points, closed } => {
+                let mut parameter_ids: Vec<gaanim_core::ObjectId> = points
+                    .iter()
+                    .flat_map(|(x, y)| x.parameter_ids().into_iter().chain(y.parameter_ids()))
+                    .collect();
+                parameter_ids.sort_unstable();
+                parameter_ids.dedup();
+                let parameters: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> = parameter_ids
+                    .into_iter()
+                    .filter_map(|logical| {
+                        let actual = id_map.get(&logical).copied()?;
+                        Some((logical, builder.states.get(actual)?.entity))
+                    })
+                    .collect();
+                let initial: Vec<(gaanim_core::ObjectId, f64)> = parameters
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        Some((*logical, builder.float_signals.get(&actual).copied()?))
+                    })
+                    .collect();
+                let path = reactive_polyline_path(points, *closed, builder.current_time, |id| {
+                    initial
+                        .iter()
+                        .find(|(logical, _)| *logical == id)
+                        .map(|(_, value)| *value)
+                });
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "ReactivePolyline".to_owned(),
+                    bounds: {
+                        let rect = path.bounding_box();
+                        gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1)
+                    },
+                    path,
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
+                let changes = !parameters.is_empty()
+                    || points
+                        .iter()
+                        .any(|(x, y)| x.depends_on_time() || y.depends_on_time());
+                if changes && let Some(state) = builder.states.get(mr.id) {
+                    let points = points.clone();
+                    let closed = *closed;
+                    let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
+                        let time = world
+                            .get_resource::<gaanim_animation::PlaybackState>()
+                            .map_or(0.0, |state| state.current_time);
+                        reactive_polyline_path(&points, closed, time, |id| {
+                            let entity = parameters.iter().find(|(logical, _)| *logical == id)?.1;
+                            world
+                                .get::<gaanim_animation::FloatSignal>(entity)
+                                .map(|signal| signal.value)
+                        })
+                    });
+                    builder.commands.entity(state.entity).insert(redraw);
+                }
+                mr
+            }
             SpawnKind::Bezier {
                 start,
                 controls,
@@ -10804,6 +10894,7 @@ impl SceneModel {
                 | SpawnKind::CurvedArrowArc { .. }
                 | SpawnKind::Dimension { .. }
                 | SpawnKind::Polyline(_)
+                | SpawnKind::ReactivePolyline { .. }
                 | SpawnKind::Bezier { .. }
                 | SpawnKind::Curve(_)
         )

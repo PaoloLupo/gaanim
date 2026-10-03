@@ -82,6 +82,70 @@ impl AudioClip {
         Ok(self.source(sample, format!("pulse:{decay}")))
     }
 
+    /// `bands` amplitudes over log-spaced frequency bands from `low` to
+    /// `high` Hz (the analysis's top frequency when `None`), lowest first.
+    /// Each band is 0 to 1 against its own loud end, like [`Self::band`].
+    pub fn spectrum(
+        &self,
+        bands: usize,
+        low: f64,
+        high: Option<f64>,
+        smoothing: f64,
+    ) -> Result<Vec<ScalarSource>, AnalysisError> {
+        let nyquist = self.analysis()?.nyquist();
+        let high = high.unwrap_or(nyquist);
+        if !(low.is_finite() && low > 0.0 && high > low && high <= nyquist) || bands == 0 {
+            return Err(AnalysisError::InvalidBand { low, high, nyquist });
+        }
+        let ratio = (high / low).powf(1.0 / bands as f64);
+        (0..bands)
+            .map(|index| {
+                let from = low * ratio.powi(index as i32);
+                let to = if index + 1 == bands {
+                    high
+                } else {
+                    low * ratio.powi(index as i32 + 1)
+                };
+                self.band(from, to, smoothing)
+            })
+            .collect()
+    }
+
+    /// The loudness (or the band `low`-`high` Hz) over the last `span`
+    /// seconds at `points` evenly spaced instants, oldest first: point `i`
+    /// reads it `span * (1 - i / (points - 1))` seconds ago, so the values
+    /// scroll from the last point to the first as the clip plays.
+    pub fn waveform(
+        &self,
+        points: usize,
+        span: f64,
+        band: Option<(f64, f64)>,
+        smoothing: f64,
+    ) -> Result<Vec<ScalarSource>, AnalysisError> {
+        let analysis = self.analysis()?;
+        let (series, name) = match band {
+            Some((low, high)) => (
+                analysis.band(low, high)?.smoothed(smoothing)?,
+                format!("band:{low}:{high}:{smoothing}"),
+            ),
+            None => (
+                analysis.level().smoothed(smoothing)?,
+                format!("level:{smoothing}"),
+            ),
+        };
+        let last = points.saturating_sub(1).max(1) as f64;
+        Ok((0..points)
+            .map(|index| {
+                let ago = if points > 1 {
+                    span * (1.0 - index as f64 / last)
+                } else {
+                    0.0
+                };
+                self.delayed_series_source(series.clone(), ago, format!("{name}:ago:{ago}"))
+            })
+            .collect())
+    }
+
     /// Seconds from the clip's start at which a sound starts (a drum hit, a
     /// note, a syllable), following the clip's offset, speed and length.
     pub fn onsets(&self) -> Result<Vec<f64>, AnalysisError> {
@@ -92,12 +156,17 @@ impl AudioClip {
     }
 
     fn series_source(&self, series: Series, recipe: String) -> ScalarSource {
+        self.delayed_series_source(series, 0.0, recipe)
+    }
+
+    /// `series` where the clip played `ago` seconds before the scene time.
+    fn delayed_series_source(&self, series: Series, ago: f64, recipe: String) -> ScalarSource {
         let duration = series.values.len() as f64 / series.frame_rate;
         let plays = Arc::clone(&self.plays);
         let sample = move |time: f64| {
             each_play(&plays, |track| {
                 track
-                    .source_time(time, duration)
+                    .source_time(time - ago, duration)
                     .map(|source| series.at(source))
             })
         };
@@ -229,6 +298,35 @@ mod tests {
         assert_eq!(at(&pulse, 1.3), 0.0);
         // Evaluating again at the same time reads the same value.
         assert_eq!(at(&bass, 1.75), at(&bass, 1.75));
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn spectrum_and_waveform_follow_the_clip() {
+        let directory =
+            std::env::temp_dir().join(format!("gaanim-audio-spectrum-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("tone.wav");
+        // An 80 Hz tone from 0.5 s to 1.0 s of the file.
+        write_wav(&path, 2.0, 0.5, 1.0);
+        let mut scene = SceneModel::new(16.0, 9.0);
+        let clip = scene.audio(&path, None, 1.0, 0.0, 0.0).unwrap();
+        let spectrum = clip.spectrum(6, 40.0, None, 0.0).unwrap();
+        assert_eq!(spectrum.len(), 6);
+        let wave = clip.waveform(5, 1.0, None, 0.0).unwrap();
+        assert!(clip.spectrum(4, 100.0, Some(50.0), 0.0).is_err());
+        assert!(clip.spectrum(0, 40.0, None, 0.0).is_err());
+        scene
+            .play_items(vec![PlayItem::Audio(clip.clone())])
+            .unwrap();
+        // The lowest band holds the 80 Hz tone; the top ones stay quiet.
+        assert!(at(&spectrum[0], 0.75) > 0.5, "{}", at(&spectrum[0], 0.75));
+        assert!(at(&spectrum[5], 0.75) < 0.1);
+        // At 1.25 s the newest point is past the tone and the one a half
+        // second older is inside it.
+        assert!(at(&wave[4], 1.25) < 0.05);
+        assert!(at(&wave[2], 1.25) > 0.5, "{}", at(&wave[2], 1.25));
+        assert_eq!(at(&wave[0], 0.2), 0.0, "before the clip played");
         std::fs::remove_dir_all(&directory).ok();
     }
 

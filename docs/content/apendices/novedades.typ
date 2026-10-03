@@ -42,6 +42,15 @@ interlineado por defecto es más compacto.
 - `Updater.rotate`, `Updater.wiggle` y el nuevo `Falloff.source` aceptan una
   señal del tiempo, así que el audio también gira, hace temblar y tiñe con
   `drive("fill", ...)`. Lee #link("/referencia/audio/")[Audio].
+- `Audio.spectrum(bandas)` y `Audio.waveform(puntos, span=)` dan una señal
+  por banda o por instante reciente, y `scene.viz.equalizer` las dibuja con
+  la forma (`"bar"`, `"capsule"`, `"dot"`, `"line"`, `"area"` o la tuya), la
+  disposición (`"row"`, `"mirror"`, `"radial"` o la tuya) y los colores que
+  elijas. También sirven como uniforms de un shader. Lee
+  #link("/referencia/audio/")[Audio].
+- `scene.geometry.polyline` acepta señales en sus coordenadas y
+  `closed=True`.
+- `echo(..., start=, end=)` limita la estela a un intervalo de la escena.
 - `drawable.copy()` duplica un objeto; en un SVG copia también sus partes con
   nombre y sus recortes (`copia.part("cabeza")`).
 - `keyframes(offset=[...])` mueve el objeto relativo a donde está al empezar.

@@ -285,6 +285,7 @@ fn spawn_members(kind: &SpawnKind) -> Option<&[ObjectId]> {
         | SpawnKind::CurvedArrowArc { .. }
         | SpawnKind::Dimension { .. }
         | SpawnKind::Polyline(..)
+        | SpawnKind::ReactivePolyline { .. }
         | SpawnKind::Bezier { .. }
         | SpawnKind::Curve(..)
         | SpawnKind::Text(..)

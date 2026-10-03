@@ -3170,6 +3170,7 @@ impl SceneModel {
                     | SpawnKind::DoubleArrow { .. }
                     | SpawnKind::Arc { .. }
                     | SpawnKind::Polyline(_)
+                    | SpawnKind::ReactivePolyline { .. }
                     | SpawnKind::Bezier { .. }
                     | SpawnKind::Curve(_)
                     | SpawnKind::Image { .. }
@@ -3697,6 +3698,19 @@ impl SceneModel {
     /// Use this for technical geometry such as springs, rails, or trajectories.
     pub fn polyline(&mut self, points: &[(f64, f64)]) -> DrawableHandle {
         self.spawn(SpawnKind::Polyline(points.to_vec()))
+    }
+
+    /// A polyline whose coordinates are reactive sources, redrawn every
+    /// frame from their values; `closed` joins the last point to the first.
+    pub fn reactive_polyline(
+        &mut self,
+        points: Vec<(
+            gaanim_animation::ScalarSource,
+            gaanim_animation::ScalarSource,
+        )>,
+        closed: bool,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::ReactivePolyline { points, closed })
     }
 
     /// Create a native quadratic or cubic Bézier path.

@@ -1072,6 +1072,73 @@ impl PyAudio {
         ))
     }
 
+    /// One signal per log-spaced frequency band, lowest first; see
+    /// `gaanim_core.pyi`.
+    #[pyo3(signature = (bands=32, *, low=40.0, high=None, smoothing=0.0))]
+    fn spectrum(
+        &self,
+        bands: usize,
+        low: f64,
+        high: Option<f64>,
+        smoothing: f64,
+    ) -> PyResult<Vec<crate::visualization::PyComputed>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !(1..=256).contains(&bands) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "bands must be between 1 and 256",
+            ));
+        }
+        let sources = self
+            .inner
+            .spectrum(bands, low, high, smoothing)
+            .map_err(analysis_error)?;
+        Ok(sources
+            .into_iter()
+            .map(|source| crate::visualization::PyComputed::time_source(&self.canvas, source))
+            .collect())
+    }
+
+    /// The loudness (or a band) over the last `span` seconds, oldest first;
+    /// see `gaanim_core.pyi`.
+    #[pyo3(signature = (points=64, *, span=2.0, low=None, high=None, smoothing=0.0))]
+    fn waveform(
+        &self,
+        points: usize,
+        span: f64,
+        low: Option<f64>,
+        high: Option<f64>,
+        smoothing: f64,
+    ) -> PyResult<Vec<crate::visualization::PyComputed>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !(2..=512).contains(&points) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "points must be between 2 and 512",
+            ));
+        }
+        if !(span.is_finite() && span > 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "span must be a positive number of seconds",
+            ));
+        }
+        let band = match (low, high) {
+            (None, None) => None,
+            (Some(low), Some(high)) => Some((low, high)),
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "waveform takes both low and high, or neither",
+                ));
+            }
+        };
+        let sources = self
+            .inner
+            .waveform(points, span, band, smoothing)
+            .map_err(analysis_error)?;
+        Ok(sources
+            .into_iter()
+            .map(|source| crate::visualization::PyComputed::time_source(&self.canvas, source))
+            .collect())
+    }
+
     /// Seconds from the clip's start at which a sound starts, in order.
     fn beats(&self) -> PyResult<Vec<f64>> {
         self.inner.onsets().map_err(analysis_error)
@@ -4168,16 +4235,51 @@ impl PyGeometry {
         ))
     }
 
-    fn polyline(&self, points: Vec<(f64, f64)>) -> PyResult<PyDrawable> {
+    #[pyo3(signature = (points, *, closed=false))]
+    fn polyline(
+        &self,
+        points: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>)>,
+        closed: bool,
+    ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok({
-            PyDrawable(
+        let constant = |value: &Bound<'_, PyAny>| {
+            value
+                .extract::<f64>()
+                .ok()
+                .filter(|_| !value.is_instance_of::<pyo3::types::PyBool>())
+        };
+        let fixed: Option<Vec<(f64, f64)>> = points
+            .iter()
+            .map(|(x, y)| Some((constant(x)?, constant(y)?)))
+            .collect();
+        if let (Some(fixed), false) = (&fixed, closed) {
+            return Ok(PyDrawable(
                 self.inner
                     .lock()
                     .expect("scene canvas poisoned")
-                    .polyline(&points),
-            )
-        })
+                    .polyline(fixed),
+            ));
+        }
+        // Signals in the coordinates make a polyline redrawn every frame.
+        let mut sources = Vec::with_capacity(points.len());
+        for (x, y) in points {
+            let mut pair = [None, None];
+            for (slot, value) in pair.iter_mut().zip([x, y]) {
+                let scalar = crate::visualization::extract_deferred_scalar(value)?;
+                scalar.validate(&self.inner)?;
+                *slot = Some(scalar.source);
+            }
+            let [Some(x), Some(y)] = pair else {
+                unreachable!("both coordinates are read")
+            };
+            sources.push((x, y));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .reactive_polyline(sources, closed),
+        ))
     }
 
     fn bezier(
@@ -4395,6 +4497,23 @@ impl PyVisualization {
         Ok(module
             .getattr("_build_matrix")?
             .call((self.scene.bind(py), data), options)?
+            .unbind())
+    }
+
+    /// Draw one element per signal (a spectrum, a waveform); see
+    /// `gaanim_core.pyi`.
+    #[pyo3(signature = (values, **options))]
+    fn equalizer<'py>(
+        &self,
+        py: Python<'py>,
+        values: &Bound<'py, PyAny>,
+        options: Option<&Bound<'py, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let module = py.import("gaanim.audio_viz")?;
+        Ok(module
+            .getattr("_build_equalizer")?
+            .call((self.scene.bind(py), values), options)?
             .unbind())
     }
 }

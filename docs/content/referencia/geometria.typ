@@ -477,12 +477,20 @@ scene.render()
 #api-entry(
   name: "Geometry.polyline",
   kind: "factory",
-  desc: [Polilínea abierta que une al menos dos puntos en orden.],
+  params: (
+    (name: "points", type: "Sequence[tuple[ScalarSource, ScalarSource]]", default: none, desc: [Puntos en orden, en coordenadas de la escena.]),
+    (name: "closed", type: "bool", default: "False", desc: [Une el último punto con el primero.]),
+  ),
+  desc: [Polilínea que une los puntos en orden. Una coordenada puede ser un `Parameter`, un `Computed` o `scene.time`: entonces la polilínea se redibuja en cada fotograma con sus valores, lo que da forma a cualquier línea o contorno a partir de señales (la traza de un audio, un gráfico en vivo). Un punto cuyo valor no se puede leer queda fuera de ese fotograma.],
 )[
 ```python
+>>>import math
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 zig = scene.geometry.polyline([(-1.25, -0.375), (0, 0.375), (1.25, -0.375)]).no_fill().stroke(GOLD, 0.04)
+wave = scene.geometry.polyline(
+    [(x / 2, computed(lambda t, x=x: 0.5 * math.sin(x / 2 + 3 * t), inputs=[scene.time])) for x in range(-8, 9)]
+).no_fill().stroke(GOLD, 0.04)
 ```
 ]
 

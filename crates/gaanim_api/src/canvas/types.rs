@@ -658,6 +658,16 @@ pub enum SpawnKind {
     },
     /// Open sequence of straight segments. Useful for springs, rails, and paths.
     Polyline(Vec<(f64, f64)>),
+    /// A polyline whose coordinates are reactive sources, redrawn every
+    /// frame from their current values; closed joins the last point to the
+    /// first.
+    ReactivePolyline {
+        points: Vec<(
+            gaanim_animation::ScalarSource,
+            gaanim_animation::ScalarSource,
+        )>,
+        closed: bool,
+    },
     /// Native quadratic (one control) or cubic (two controls) Bézier path.
     Bezier {
         start: (f64, f64),

@@ -2656,6 +2656,49 @@ class Audio:
     def start(self) -> Optional[float]:
         """Timeline second where the clip last started playing, or ``None`` before it plays."""
         ...
+    def spectrum(
+        self,
+        bands: int = 32,
+        *,
+        low: float = 40.0,
+        high: Optional[float] = None,
+        smoothing: float = 0.0,
+    ) -> list[Computed]:
+        """One signal per frequency band, lowest first, each from 0 to 1.
+
+        The ``bands`` (1-256) split ``low``-``high`` Hz on a logarithmic
+        scale, as the ear hears pitch; ``high`` defaults to the analysis's
+        top frequency (about 11 kHz). Each band is measured against its own
+        loud end, like ``band``, so quiet treble still moves. They are
+        ordinary signals: pass them to ``scene.viz.equalizer``, to
+        ``computed``, or as shader uniforms. An invalid range raises
+        ``ValueError``.
+
+        Example:
+            bars = scene.viz.equalizer(music.spectrum(24, smoothing=0.3))
+        """
+        ...
+    def waveform(
+        self,
+        points: int = 64,
+        *,
+        span: float = 2.0,
+        low: Optional[float] = None,
+        high: Optional[float] = None,
+        smoothing: float = 0.0,
+    ) -> list[Computed]:
+        """The loudness over the last ``span`` seconds at ``points`` instants, oldest first.
+
+        Point ``i`` reads the clip ``span * (1 - i / (points - 1))`` seconds
+        ago, so the values scroll toward the first point as the clip plays,
+        like a recorder's trace. With ``low`` and ``high`` it follows that
+        band instead of the whole loudness. ``points`` is 2-512 and ``span``
+        positive; otherwise ``ValueError``.
+
+        Example:
+            trace = scene.viz.equalizer(music.waveform(96, span=3), shape="line", layout="mirror")
+        """
+        ...
     @property
     def duration(self) -> float:
         """Seconds the clip plays: its ``duration``, or the whole file.
@@ -7339,11 +7382,23 @@ class Geometry:
             wave = scene.geometry.path([("move", [(-2, 0)]), ("quad", [(-1, 1.5), (0, 0)])])
         """
         ...
-    def polyline(self, points: Sequence[tuple[float, float]]) -> Drawable:
-        """Create an open polyline through ``points``, in order, in scene coordinates.
+    def polyline(
+        self,
+        points: Sequence[tuple[ScalarSource, ScalarSource]],
+        *,
+        closed: bool = False,
+    ) -> Drawable:
+        """Create a polyline through ``points``, in order, in scene coordinates.
+
+        ``closed=True`` joins the last point to the first. A coordinate may
+        be a Parameter, Computed or ``scene.time``: the polyline is then
+        redrawn every frame from the current values, which shapes any line
+        or outline from signals (an audio trace, a live chart). A point
+        whose value cannot be read is left out of that frame.
 
         Example:
             trend = scene.geometry.polyline([(-3, -1), (-1, 0.5), (1, 0), (3, 2)])
+            wave = scene.geometry.polyline([(x, computed(lambda t, x=x: math.sin(x + t), inputs=[scene.time])) for x in range(-6, 7)])
         """
         ...
     def polyline_3d(
@@ -8356,6 +8411,62 @@ class Visualization:
         ``numbers`` controls tick text and ``labels`` controls the title from
         ``Axis.label``. Disabled components remain addressable as empty layers.
         ``axis_visible`` avoids colliding with the existing ``axis`` argument.
+        """
+        ...
+    def equalizer(
+        self,
+        values: Sequence[float | Parameter | Variable | Computed],
+        *,
+        shape: Literal["bar", "capsule", "dot", "line", "area"] | Callable[[Scene, int, int], Drawable] = "bar",
+        layout: Literal["row", "mirror", "radial"] | Callable[[int, int], tuple[float, float, float]] = "row",
+        center: tuple[float, float] = (0.0, 0.0),
+        width: float = 8.0,
+        height: float = 2.0,
+        radius: float = 1.5,
+        gap: float = 0.25,
+        thickness: Optional[float] = None,
+        min_length: float = 0.04,
+        start_angle: float = 1.5707963267948966,
+        fill: Optional[Paint | Sequence[Paint] | FalloffColor | Callable[[int, int], Paint]] = None,
+        value_colors: Optional[Sequence[ColorLike]] = None,
+        stretch: bool = True,
+    ) -> Drawable:
+        """Draw one element per value, each as long as its value from 0 to 1.
+
+        ``values`` are signals such as ``Audio.spectrum()`` or
+        ``Audio.waveform()``, or any Parameter, Computed or number; values
+        outside 0-1 are clamped. Each element grows from ``min_length`` to
+        ``height``. Every part can be chosen or replaced:
+
+        - ``shape``: ``"bar"``, ``"capsule"`` (round ends), ``"dot"`` (at the
+          tip), ``"line"`` (one curve through the tips) or ``"area"`` (that
+          curve filled to the base), or ``shape(scene, index, count)``
+          returning any drawable, which is centered on its slot, turned along
+          it and stretched to its length (``stretch=False`` scales it whole,
+          for icons that should keep their proportions).
+        - ``layout``: ``"row"`` (``width`` wide, growing up from the bottom
+          of a ``height`` box), ``"mirror"`` (growing both ways from a
+          middle line) or ``"radial"`` (around a ``radius`` circle from
+          ``start_angle``, clockwise, growing outward), or
+          ``layout(index, count)`` returning ``(x, y, angle)``: where the
+          element starts and the direction it grows in, in radians.
+        - ``fill``: one paint, a list cycled over the elements, a
+          ``Falloff`` ramp across the group, or ``fill(index, count)``.
+          ``value_colors`` instead colors each element by its own value
+          along those colors (signals of time only, such as audio).
+
+        ``gap`` is the fraction of each slot left empty and ``thickness``
+        overrides the element width. Returns a group whose members are the
+        elements in order, ordinary drawables that take any style, effect
+        or animation. The signals also drive shaders: pass them as
+        ``PostProcess.shader`` uniforms. An empty ``values``, an unknown
+        shape or layout, or invalid sizes raise ``ValueError``.
+
+        Example:
+            music = scene.media.audio("pista.mp3")
+            bars = scene.viz.equalizer(music.spectrum(32), shape="capsule",
+                                       fill=Falloff.index().gradient(BLUE, GOLD))
+            ring = scene.viz.equalizer(music.spectrum(48), layout="radial", shape="dot")
         """
         ...
     def matrix(
