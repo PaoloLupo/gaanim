@@ -2210,6 +2210,9 @@ def validate_matte_metaballs_glass_contract(module):
     if card.glass(blur=0.2, saturation=1.2, refraction=0.1, edge=0.5) is not card:
         failures.append("Drawable.glass does not return the drawable")
     card.backdrop_blur(0.3).no_glass()
+    card.glass(dispersion=0.5, bevel=0.2)
+    if blob.liquid_glass(refraction=0.4) is not blob:
+        failures.append("Drawable.liquid_glass does not return the drawable")
     for operation in (
         lambda: stripes.matte(title, "chroma"),
         lambda: stripes.matte(stripes),
@@ -2218,6 +2221,9 @@ def validate_matte_metaballs_glass_contract(module):
         lambda: scene.geometry.metaballs(balls, threshold=0),
         lambda: scene.geometry.metaballs(balls, smoothness=-1),
         lambda: card.glass(blur=-1),
+        lambda: card.glass(edge=1.5),
+        lambda: card.liquid_glass(dispersion=2),
+        lambda: card.liquid_glass(bevel=-0.1),
     ):
         if not raises_error(ValueError, operation):
             failures.append("mattes, metaballs or glass accepted an invalid argument")

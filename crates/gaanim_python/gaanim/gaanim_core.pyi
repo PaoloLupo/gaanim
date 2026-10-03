@@ -3229,24 +3229,50 @@ class Drawable:
         saturation: float = 1.4,
         refraction: float = 0.08,
         edge: float = 0.3,
+        dispersion: float = 0.0,
+        bevel: float = 0.12,
     ) -> Self:
-        """Turn this drawable into frosted glass over what is drawn behind it.
+        """Turn this drawable into glass over what is drawn behind it.
 
         Inside its outline, the canvas and every drawable drawn before it
         show blurred by ``blur`` scene units, with their colors saturated by
-        ``saturation`` (1 keeps them), bent inward by up to ``refraction``
-        scene units near the edge like a lens, and lit along the edge by
-        ``edge`` (0 to 1). The drawable itself is drawn on top, so a
+        ``saturation`` (1 keeps them). The outline is a lens with a rounded
+        rim ``bevel`` scene units wide: across it, what lies just outside
+        bends in by up to ``refraction`` scene units, splits into its colors
+        by ``dispersion`` (0 to 1) and catches a light from the top left as
+        bright as ``edge`` (0 to 1). The rim follows the real outline of any
+        shape, metaballs included. The drawable itself is drawn on top, so a
         translucent fill tints the glass and a stroke frames it; the glass
-        fades with it. Refraction and the lit edge follow the outline as a
-        rounded rectangle, exact for rectangles, cards and circles. It is
-        declaration state for the whole timeline and works in previews,
-        exports and ``.gaanim`` bundles. Negative or non-finite values raise
+        fades with it. It is declaration state for the whole timeline and
+        works in previews, exports and ``.gaanim`` bundles. Negative or
+        non-finite values, or ``edge`` or ``dispersion`` above 1, raise
         ``ValueError``.
 
         Example:
             card = scene.geometry.rounded_rect(5, 3, 0.4).fill("#ffffff22").stroke("#ffffff55", 0.02)
             card.glass(blur=0.3, refraction=0.12)
+        """
+        ...
+    def liquid_glass(
+        self,
+        *,
+        refraction: float = 0.3,
+        dispersion: float = 0.3,
+        bevel: float = 0.35,
+        blur: float = 0.03,
+        edge: float = 0.7,
+        saturation: float = 1.25,
+    ) -> Self:
+        """Turn this drawable into liquid glass: clear, with a thick lens rim.
+
+        ``glass`` with Liquid Glass defaults: almost no blur, a wide rim that
+        bends what is behind strongly and splits it into its colors, and a
+        bright highlight. On ``scene.geometry.metaballs`` the drops keep
+        their lens as they melt together.
+
+        Example:
+            drops = [scene.geometry.circle(0.8).move_to(x, 0) for x in (-1.5, 1.5)]
+            scene.geometry.metaballs(drops, smoothness=0.8).fill("#ffffff12").liquid_glass()
         """
         ...
     def backdrop_blur(self, radius: float = 0.25, *, saturation: float = 1.0) -> Self:

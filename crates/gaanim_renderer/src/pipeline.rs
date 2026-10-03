@@ -3208,9 +3208,7 @@ fn divert_glass(
     rest: f64,
     pixels_per_unit: f64,
 ) -> Vec<crate::object_effects::EffectLayer> {
-    use crate::object_effects::{
-        EffectLayer, effect_image, effect_texture_size, glass_passes, rounded_rect_of,
-    };
+    use crate::object_effects::{EffectLayer, effect_image, effect_texture_size, glass_passes};
     let time = time_seconds as f32;
     let mut layers = Vec::new();
     if !time.is_finite() {
@@ -3238,31 +3236,54 @@ fn divert_glass(
         let shape = outline.bounding_box();
         let reach = glass.glass.reach();
         let bounds = shape.inflate(reach, reach);
-        let Some((width, height, density)) = effect_texture_size(bounds, pixels_per_unit) else {
+        // The texture stacks what is behind the glass over its outline, so
+        // the passes shape the lens from the drawable's own outline.
+        let stacked = kurbo::Rect::new(
+            bounds.x0,
+            bounds.y0,
+            bounds.x1,
+            bounds.y0 + 2.0 * bounds.height(),
+        );
+        let Some((width, stacked_height, density)) = effect_texture_size(stacked, pixels_per_unit)
+        else {
             continue;
         };
-        // What is behind the glass: the canvas and everything drawn before.
-        let mut scene = vello::Scene::new();
-        if let Some((canvas, pixel_size)) = background {
-            fill_canvas_background(&mut scene, canvas, pixel_size, time_seconds, rest, None);
-        }
-        append_element_run(&mut scene, &elements[..first], None);
-        let (half_width, half_height, corner) = rounded_rect_of(&outline);
-        // The texture is centered on the outline only when the reach is
-        // the same on every side, which `inflate` keeps.
-        let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
-        let request = crate::post_process::PostProcessRequest {
-            passes: glass_passes(&glass.glass, density, (half_width, half_height), corner),
-            frame,
-            time,
-            transition: None,
-        };
-        let image = effect_image(glass.root.to_bits() ^ 0x9e37_79b9_7f4a_7c15, width, height);
+        let height = stacked_height.div_ceil(2).max(1);
         let image_to_world = kurbo::Affine::translate((bounds.x0, bounds.y1))
             * kurbo::Affine::scale_non_uniform(
                 bounds.width() / f64::from(width),
                 -bounds.height() / f64::from(height),
             );
+        let to_pixels = image_to_world.inverse();
+        let top = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+        let mut behind = vello::Scene::new();
+        if let Some((canvas, pixel_size)) = background {
+            fill_canvas_background(&mut behind, canvas, pixel_size, time_seconds, rest, None);
+        }
+        append_element_run(&mut behind, &elements[..first], None);
+        let mut scene = vello::Scene::new();
+        scene.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, &top);
+        scene.append(&behind, Some(to_pixels));
+        scene.pop_layer();
+        scene.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::translate((0.0, f64::from(height))) * to_pixels,
+            peniko::Color::WHITE,
+            None,
+            &outline,
+        );
+        let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(2 * height));
+        let request = crate::post_process::PostProcessRequest {
+            passes: glass_passes(&glass.glass, density),
+            frame,
+            time,
+            transition: None,
+        };
+        let image = effect_image(
+            glass.root.to_bits() ^ 0x9e37_79b9_7f4a_7c15,
+            width,
+            2 * height,
+        );
         let mut fill = vello::Scene::new();
         fill.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, &outline);
         fill.fill(
@@ -3292,7 +3313,7 @@ fn divert_glass(
         placeholder.view_bounds = Some(bounds);
         layers.push(EffectLayer {
             scene,
-            to_pixels: image_to_world.inverse(),
+            to_pixels: kurbo::Affine::IDENTITY,
             image,
             request,
         });

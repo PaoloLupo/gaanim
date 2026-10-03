@@ -617,10 +617,12 @@ scene.render()
   params: (
     (name: "blur", type: "float", default: "0.25", desc: [Desenfoque de lo que hay detrás, en unidades de escena (la sigma de una gaussiana).]),
     (name: "saturation", type: "float", default: "1.4", desc: [Saturación de esos colores; 1 los deja igual.]),
-    (name: "refraction", type: "float", default: "0.08", desc: [Cuánto se curva la imagen cerca del borde, como una lente, en unidades de escena.]),
-    (name: "edge", type: "float", default: "0.3", desc: [Brillo del borde, de 0 a 1.]),
+    (name: "refraction", type: "float", default: "0.08", desc: [Cuánto se curva hacia dentro, en el borde, lo que hay justo fuera, en unidades de escena.]),
+    (name: "edge", type: "float", default: "0.3", desc: [Brillo del borde, con la luz arriba a la izquierda, de 0 a 1.]),
+    (name: "dispersion", type: "float", default: "0.0", desc: [Cuánto se separan los colores en el borde, de 0 a 1.]),
+    (name: "bevel", type: "float", default: "0.12", desc: [Ancho del borde redondeado de la lente, en unidades de escena.]),
   ),
-  desc: [Convierte el objeto en vidrio esmerilado. Dentro de su contorno se ve el lienzo y todo lo que se dibujó antes, desenfocado, saturado y curvado hacia dentro cerca del borde, con el borde iluminado. El objeto se dibuja encima, así que un relleno translúcido tiñe el vidrio y un trazo lo enmarca; el vidrio aparece y se desvanece con él. La refracción y el borde siguen el contorno como un rectángulo redondeado: son exactos en rectángulos, tarjetas y círculos. `backdrop_blur(radius, saturation=1.0)` es solo el desenfoque, sin refracción ni borde, y `no_glass()` quita el efecto. Es estado de declaración y se ve en la vista previa, la exportación y los paquetes `.gaanim`. Valores negativos o no finitos lanzan `ValueError`.],
+  desc: [Convierte el objeto en vidrio. Dentro de su contorno se ve el lienzo y todo lo que se dibujó antes, desenfocado y saturado. El contorno es una lente con un borde redondeado de ancho `bevel`: ahí lo que hay detrás se curva, se separa en colores y recibe un brillo. El borde sigue el contorno real de cualquier forma, metaballs incluidos. El objeto se dibuja encima, así que un relleno translúcido tiñe el vidrio y un trazo lo enmarca; el vidrio aparece y se desvanece con él. `liquid_glass()` es el mismo vidrio con valores de _Liquid Glass_: casi sin desenfoque, con un borde ancho que curva y separa los colores con fuerza. `backdrop_blur(radius, saturation=1.0)` es solo el desenfoque, y `no_glass()` quita el efecto. Es estado de declaración y se ve en la vista previa, la exportación y los paquetes `.gaanim`. Valores negativos o no finitos, o `edge` o `dispersion` mayores que 1, lanzan `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -628,9 +630,11 @@ from gaanim import BLUE, CORAL, GOLD, Scene
 scene = Scene(frame=(16, 9), background="#0b1020")
 for i, color in enumerate([BLUE, GOLD, CORAL]):
     scene.geometry.circle(1.3).fill(color).no_stroke().move_to(-2.5 + 2.5 * i, 0.4 * (-1) ** i)
-card = scene.geometry.rounded_rect(5, 3, 0.4).fill("#ffffff1a").stroke("#ffffff55", 0.03).move_to(-3, 0)
+card = scene.geometry.rounded_rect(5, 3, 0.4).fill("#ffffff1a").stroke("#ffffff55", 0.03).move_to(-3, 1)
 card.glass(blur=0.25, refraction=0.14)
-scene.play([card.animate.move_to(3, 0).duration(2.0)])
+drops = [scene.geometry.circle(0.9).move_to(x, -2.2) for x in (-2.5, 2.5)]
+lens = scene.geometry.metaballs(drops, smoothness=0.9).fill("#ffffff10").liquid_glass()
+scene.play([card.animate.move_to(3, 1).duration(2.0), drops[0].animate.move_to(1.0, -2.2).duration(2.0)])
 # output: preview.webp
 scene.render()
 ```

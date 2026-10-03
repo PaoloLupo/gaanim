@@ -57,8 +57,9 @@ interlineado por defecto es más compacto.
 - Los paquetes `.gaanim` graban la tiza y los efectos de shader por objeto.
 - `Drawable.matte(fuente, mode=)` muestra un objeto solo a través de otro
   (alpha o luma, normales o invertidos), `scene.geometry.metaballs` funde
-  bolas como gotas, y `Drawable.glass` y `backdrop_blur` hacen vidrio
-  esmerilado sobre lo que hay detrás. Lee
+  bolas como gotas, y `Drawable.glass`, `liquid_glass` y `backdrop_blur`
+  hacen vidrio (esmerilado o líquido, con lente y dispersión) sobre lo que
+  hay detrás. Lee
   #link("/referencia/drawable/")[Drawable] y
   #link("/referencia/geometria/")[Geometría].
 - `echo(..., start=, end=)` limita la estela a un intervalo de la escena.

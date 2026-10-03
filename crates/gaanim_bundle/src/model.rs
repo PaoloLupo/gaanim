@@ -1262,7 +1262,14 @@ impl DeltaEncoder {
         w.len(frame.glasses.len());
         for (root, glass) in &frame.glasses {
             w.var(u64::from(*root));
-            for value in [glass.blur, glass.saturation, glass.refraction, glass.edge] {
+            for value in [
+                glass.blur,
+                glass.saturation,
+                glass.refraction,
+                glass.edge,
+                glass.dispersion,
+                glass.bevel,
+            ] {
                 w.f64(value);
             }
         }
@@ -1354,6 +1361,8 @@ impl DeltaDecoder {
                     saturation: r.f64()?,
                     refraction: r.f64()?,
                     edge: r.f64()?,
+                    dispersion: r.f64()?,
+                    bevel: r.f64()?,
                 },
             ));
         }

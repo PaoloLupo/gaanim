@@ -628,9 +628,7 @@ fn chalk_and_effects() -> SceneModel {
         .move_to(1.5, -2.0)
         .glass(Some(gaanim_renderer::object_effects::Glass {
             blur: 0.2,
-            saturation: 1.3,
-            refraction: 0.1,
-            edge: 0.3,
+            ..gaanim_renderer::object_effects::Glass::LIQUID
         }));
     let _ = (stripes, blob);
     canvas.play(vec![

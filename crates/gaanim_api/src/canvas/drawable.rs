@@ -1274,6 +1274,8 @@ impl DrawableHandle {
                 saturation: finite(glass.saturation, 1.0),
                 refraction: finite(glass.refraction, 0.0),
                 edge: finite(glass.edge, 0.0).min(1.0),
+                dispersion: finite(glass.dispersion, 0.0).min(1.0),
+                bevel: finite(glass.bevel, 0.0),
             }
         });
         self.state

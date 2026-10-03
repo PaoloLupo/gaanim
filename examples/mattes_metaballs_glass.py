@@ -1,11 +1,12 @@
-"""Track mattes, metaballs and glass.
+"""Track mattes, metaballs, glass and liquid glass.
 
 Top left, drops of a lava lamp melt into each other as they drift
 (`scene.geometry.metaballs`). Top right, stripes show only inside the
 letters of a title (an alpha matte) and a gradient sweeping across reveals
 a block (a luma matte), with a star cut out of a disc (inverted alpha).
-Below, a frosted glass card slides over colored shapes and a caption,
-blurring and bending what is behind it, next to a plain backdrop blur.
+Below, over colored stripes and a caption, a frosted glass card slides
+by, two drops of liquid glass melt into one lens that bends and splits
+the stripes, and a disc only blurs what is behind it.
 The checks of edge cases run before the scene and print their result at
 the bottom. Set GAANIM_SNAPSHOTS to capture exact seeks for visual
 regression.
@@ -56,6 +57,14 @@ expect("mate de otra escena", ValueError, foreign_matte)
 expect("matte(None) lo quita", None,
        lambda: (lambda s, b: b.matte(s.geometry.square(1)).matte(None))(*fresh()))
 expect("vidrio con blur negativo", ValueError, lambda: fresh()[1].glass(blur=-0.1))
+expect("edge mayor que 1", ValueError, lambda: fresh()[1].glass(edge=1.5))
+expect("dispersion mayor que 1", ValueError, lambda: fresh()[1].liquid_glass(dispersion=2))
+expect("bevel negativo", ValueError, lambda: fresh()[1].liquid_glass(bevel=-0.1))
+expect("blur infinito", ValueError, lambda: fresh()[1].glass(blur=float("inf")))
+expect("liquid_glass sobre metaballs", None,
+       lambda: (lambda s, b: s.geometry.metaballs([b]).liquid_glass())(*fresh()))
+expect("glass sin blur ni refracción", None,
+       lambda: fresh()[1].glass(blur=0, refraction=0, edge=0))
 expect("un Text sigue siendo Text", None,
        lambda: isinstance(Scene(frame=(16, 9)).text("a").backdrop_blur(0.2).no_glass(), Text) or 1 / 0)
 
@@ -89,14 +98,16 @@ star = scene.geometry.star(5, 0.5, 0.22).fill(WHITE).move_to(1.2, 1.0)
 disc.matte(star, "alpha_inverted")
 label('"alpha_inverted"', 1.2, 0.05)
 
-# 3. A glass card over colored shapes and a caption, and a plain blur.
-for i, color in enumerate([BLUE, GOLD, CORAL, "#22d3ee", "#a78bfa"]):
-    scene.geometry.circle(0.8).fill(color).no_stroke().move_to(-5.0 + 2.2 * i, -1.6 + 0.4 * (-1) ** i)
-scene.text("lo que hay detrás").fill(WHITE).scale_to(0.55).move_to(-1.5, -2.9)
-card = scene.geometry.rounded_rect(4.0, 2.4, 0.4).fill("#ffffff1a").stroke("#ffffff55", 0.03).move_to(-4.5, -2.0)
+# 3. Glass over stripes and a caption: frosted, liquid, and a plain blur.
+for i in range(14):
+    scene.geometry.rect(0.5, 3.6).fill([BLUE, GOLD, CORAL, "#22d3ee"][i % 4]).no_stroke().move_to(-7.15 + 1.1 * i, -2.2)
+scene.text("lo que hay detrás").fill(WHITE).scale_to(0.55).move_to(-1.5, -3.1)
+card = scene.geometry.rounded_rect(3.6, 2.2, 0.4).fill("#ffffff1a").stroke("#ffffff55", 0.03).move_to(-5.0, -2.0)
 card.glass(blur=0.22, refraction=0.14, edge=0.35)
-panel = scene.geometry.circle(1.0).fill("#ffffff10").move_to(4.6, -1.8).backdrop_blur(0.3)
-label("glass(); a la derecha, backdrop_blur()", 0, -3.6)
+beads = [scene.geometry.circle(0.85).move_to(0.2, -1.9), scene.geometry.circle(0.65).move_to(3.3, -2.3)]
+lens = scene.geometry.metaballs(beads, smoothness=0.9).fill("#ffffff10").liquid_glass()
+panel = scene.geometry.circle(0.9).fill("#ffffff10").move_to(5.9, -2.0).backdrop_blur(0.3)
+label("glass(), liquid_glass() sobre metaballs y backdrop_blur()", 0, -0.15)
 
 ok = sum(passed for _, passed in checks)
 failed = [name for name, passed in checks if not passed]
@@ -109,7 +120,8 @@ scene.play([
     drops[2].animate.move_to(-5.0, 2.9).duration(2.0),
     drops[3].animate.move_to(-3.6, 1.5).duration(2.0),
     wipe.animate.move_to(6.2, 3.0).duration(2.0),
-    card.animate.move_to(0.5, -1.8).duration(2.0),
+    card.animate.move_to(-2.4, -2.2).duration(2.0),
+    beads[1].animate.move_to(1.8, -2.1).duration(2.0),
     title.animate.move_to(1.4, 3.0).duration(2.0),
 ])
 scene.wait(0.5)
