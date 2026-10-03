@@ -624,6 +624,7 @@ scene.render()
     (name: "delay", type: "float", default: "0.04", desc: [Segundos entre copias; positivo.]),
     (name: "decay", type: "float", default: "0.6", desc: [Opacidad de cada copia respecto a la anterior, en `(0, 1]`.]),
     (name: "hold", type: "bool", default: "False", desc: [Con `True` las copias se retrasan a lo largo del movimiento y no del reloj: cuando el objeto se detiene, quedan congeladas donde estaban (papel cebolla) y siguen cuando vuelve a moverse. Sin él, alcanzan al objeto al detenerse y dejan de dibujarse: una copia que coincide con el objeto no se apila sobre él, así que un objeto translúcido en reposo se ve igual que sin eco.]),
+    (name: "start / end", type: "float | None", default: "None", desc: [Segundos de la escena que graban las copias: cada copia muestra el objeto solo como estaba entre `start` y `end`, y se oculta fuera de ese intervalo. Así la estela crece desde `start`, se vacía después de `end` y no aparece en el resto de movimientos. Cualquiera de los dos puede quedar abierto; `end` debe ser mayor que `start`.]),
   ),
   desc: [Copias que siguen al objeto en el tiempo, como el efecto Echo de After Effects: la copia `k` lo muestra como estaba hace `k * delay` segundos, con `decay ** k` de su opacidad y debajo de él. Cada copia repite las animaciones del propio objeto (`animate`, `create`, fundidos, color y forma) con ese retraso, así que es exacta en cualquier búsqueda y en todas las exportaciones, SVG incluido. Se ocultan mientras el objeto está oculto y no cruzan un corte de segmento. No retrasan el movimiento de los _updaters_, de las posiciones reactivas ni de un grupo padre que se mueve, ni copian Lottie o vídeo. En un `Text`, cada glifo repite sus propias animaciones. Se declara una vez y vale para toda la línea de tiempo.],
 )[
@@ -638,6 +639,20 @@ scene.play([ball.animate.move_to(0, 0).fill(GOLD).duration(0.6)])
 scene.render()
 ```
 ]
+
+```python
+# show-code: true
+from gaanim import CORAL, Scene
+scene = Scene(frame=(16, 9), background="#0e1422")
+# La estela solo existe durante la sacudida, de 1.0 s a 1.6 s.
+head = scene.geometry.circle(0.6).fill(CORAL).move_to(-4, 0).echo(6, delay=0.04, start=1.0, end=1.6)
+scene.play([head.animate.move_to(0, 0).duration(1.0)])
+scene.play([head.animate.wiggle().duration(0.6)])
+scene.play([head.animate.move_to(4, 0).duration(1.0)])
+# output: preview.webp
+scene.render()
+```
+
 
 #api-entry(
   name: "Drawable.count",

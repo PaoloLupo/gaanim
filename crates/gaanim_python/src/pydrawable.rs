@@ -56,12 +56,15 @@ pub(crate) fn echo_spec(
     delay: f64,
     decay: f64,
     hold: bool,
+    start: Option<f64>,
+    end: Option<f64>,
 ) -> PyResult<Option<gaanim_api::canvas::EchoSpec>> {
     if count == 0 {
         return Ok(None);
     }
     gaanim_api::canvas::EchoSpec::new(count, delay, decay)
-        .map(|spec| Some(spec.with_hold(hold)))
+        .and_then(|spec| spec.with_hold(hold).with_window(start, end))
+        .map(Some)
         .map_err(PyValueError::new_err)
 }
 
@@ -2385,10 +2388,14 @@ impl PyDrawable {
         delay: f64,
         decay: f64,
         hold: bool,
+        start: Option<f64>,
+        end: Option<f64>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(
-            self.0.clone().echo(echo_spec(count, delay, decay, hold)?),
+            self.0
+                .clone()
+                .echo(echo_spec(count, delay, decay, hold, start, end)?),
         ))
     }
 
@@ -3374,15 +3381,20 @@ impl PyDrawable {
         same_drawable(slf, result)
     }
     /// Trail the drawable with fading copies of itself as it was earlier.
-    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6, hold=false))]
+    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6, hold=false, start=None, end=None))]
+    #[allow(clippy::too_many_arguments)]
     fn echo<'py>(
         slf: &Bound<'py, Self>,
         count: u32,
         delay: f64,
         decay: f64,
         hold: bool,
+        start: Option<f64>,
+        end: Option<f64>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let result = slf.borrow().echo_impl(count, delay, decay, hold);
+        let result = slf
+            .borrow()
+            .echo_impl(count, delay, decay, hold, start, end);
         same_drawable(slf, result)
     }
     /// Clip this drawable to another drawable's vector outline.

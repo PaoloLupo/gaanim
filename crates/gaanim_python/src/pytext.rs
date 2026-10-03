@@ -1317,16 +1317,19 @@ impl PyText {
         Ok(slf)
     }
 
-    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6, hold=false))]
+    #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6, hold=false, start=None, end=None))]
+    #[allow(clippy::too_many_arguments)]
     fn echo<'py>(
         slf: PyRef<'py, Self>,
         count: u32,
         delay: f64,
         decay: f64,
         hold: bool,
+        start: Option<f64>,
+        end: Option<f64>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        let echo = crate::pydrawable::echo_spec(count, delay, decay, hold)?;
+        let echo = crate::pydrawable::echo_spec(count, delay, decay, hold, start, end)?;
         slf.handle.clone().echo(echo);
         Ok(slf)
     }

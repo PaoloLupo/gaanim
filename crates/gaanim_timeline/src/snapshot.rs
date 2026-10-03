@@ -1037,6 +1037,7 @@ mod tests {
                     rank: 1,
                     hold: false,
                     motion_sources: Vec::new(),
+                    window: None,
                 });
             }
             let entity = entity.id();

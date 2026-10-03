@@ -253,6 +253,104 @@ golpes = [musica.start + t for t in musica.beats()]
   none,
 )
 
+== Visualizar el audio
+
+Para dibujar el sonido, una pista da una señal por banda de frecuencia
+(`spectrum`) o por instante de su pasado reciente (`waveform`), y
+`scene.viz.equalizer` las dibuja. Cada parte se elige o se reemplaza: la forma
+de los elementos, su disposición y sus colores. Como son señales normales,
+también sirven para dibujar a mano o en un shader.
+
+#api-entry(
+  name: "Audio.spectrum",
+  kind: "method",
+  params: (
+    (name: "bands", type: "int", default: "32", desc: [Bandas, de 1 a 256.]),
+    (name: "low / high", type: "float", default: "40 / None", desc: [Rango en Hz; `high` es por defecto la frecuencia más alta del análisis, unos 11 kHz.]),
+    (name: "smoothing", type: "float", default: "0.0", desc: [Suavizado de cada banda, en `[0, 1)`.]),
+  ),
+  returns: (type: "list[Computed]", desc: [Una señal de 0 a 1 por banda, de la más grave a la más aguda.]),
+  desc: [Reparte el rango en escala logarítmica, como el oído percibe el tono. Cada banda se mide contra su propio máximo, igual que `band`, así que los agudos también se mueven aunque suenen menos. Un rango inválido lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Audio.waveform",
+  kind: "method",
+  params: (
+    (name: "points", type: "int", default: "64", desc: [Instantes, de 2 a 512.]),
+    (name: "span", type: "float", default: "2.0", desc: [Segundos que abarca, hacia atrás desde el presente.]),
+    (name: "low / high", type: "float | None", default: "None", desc: [Sigue esa banda en lugar del volumen; los dos o ninguno.]),
+    (name: "smoothing", type: "float", default: "0.0", desc: [Suavizado, en `[0, 1)`.]),
+  ),
+  returns: (type: "list[Computed]", desc: [El volumen en `points` instantes de los últimos `span` segundos, el más antiguo primero.]),
+  desc: [El punto `i` lee la pista `span * (1 - i / (points - 1))` segundos atrás, así que los valores avanzan hacia el primer punto mientras suena, como el trazo de una grabadora. Valores fuera de rango lanzan `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Visualization.equalizer",
+  kind: "factory",
+  params: (
+    (name: "values", type: "Sequence[ScalarSource]", default: none, desc: [Señales de 0 a 1: `spectrum()`, `waveform()`, `Parameter`, `Computed` o números. Lo que sale de ese rango se recorta.]),
+    (name: "shape", type: "str | Callable", default: "\"bar\"", desc: [`"bar"`, `"capsule"` (extremos redondos), `"dot"` (en la punta), `"line"` (una curva por las puntas) o `"area"` (esa curva rellena hasta la base). O una función `shape(scene, index, count)` que devuelve cualquier objeto, que se centra en su lugar, se gira a lo largo y se estira a su longitud.]),
+    (name: "layout", type: "str | Callable", default: "\"row\"", desc: [`"row"` (crece hacia arriba desde la base de una caja de `width` × `height`), `"mirror"` (crece hacia los dos lados de una línea media) o `"radial"` (alrededor de un círculo de `radius`, desde `start_angle` en sentido horario, hacia fuera). O una función `layout(index, count)` que devuelve `(x, y, ángulo)`: dónde empieza cada elemento y en qué dirección crece, en radianes.]),
+    (name: "fill", type: "Paint | list | FalloffColor | Callable", default: "None", desc: [Una pintura, una lista que se repite, una rampa `Falloff` sobre el grupo (`Falloff.index().gradient(...)`) o `fill(index, count)`.]),
+    (name: "value_colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Colorea cada elemento según su propio valor a lo largo de estos colores. Requiere señales que solo dependen del tiempo, como las de audio.]),
+    (name: "center / width / height / radius", type: "—", default: "(0, 0) / 8 / 2 / 1.5", desc: [Dónde y de qué tamaño. Cada elemento mide de `min_length` (0.04) a `height`.]),
+    (name: "gap / thickness", type: "float", default: "0.25 / None", desc: [Fracción de cada hueco que queda vacía, o un grosor fijo.]),
+    (name: "stretch", type: "bool", default: "True", desc: [Con una forma propia, `False` la escala entera en lugar de estirarla, para iconos que deben conservar su proporción.]),
+  ),
+  returns: (type: "Drawable", desc: [Un grupo con un miembro por valor, en orden: objetos normales que aceptan cualquier estilo, efecto o animación.]),
+  desc: [Una lista vacía, una forma o disposición desconocida o tamaños inválidos lanzan `ValueError`; una función que no devuelve lo esperado, `TypeError`.],
+)[
+```python
+# show-code: true
+import math
+from gaanim import BLUE, CORAL, GOLD, Falloff, Scene
+scene = Scene(frame=(16, 9), background="#0b1020")
+music = scene.media.audio("assets/ritmo.ogg")
+bars = scene.viz.equalizer(music.spectrum(32, smoothing=0.3), center=(-4, 1.5), width=6.5,
+                           fill=Falloff.index().gradient(BLUE, GOLD))
+ring = scene.viz.equalizer(music.spectrum(40), shape="dot", layout="radial", center=(4, 1.5),
+                           radius=1.2, height=0.8, fill=[CORAL, GOLD])
+trace = scene.viz.equalizer(music.waveform(96, span=2), shape="line", layout="mirror",
+                            center=(0, -2.2), width=12, height=1.6)
+scene.play(music)
+scene.wait(music.duration)
+scene.render()
+```
+]
+
+Las mismas señales llegan a un shader como uniforms de `PostProcess.shader`.
+Un shader no indexa campos, así que el ejemplo genera una función que elige
+la banda:
+
+```python
+# show-code: true
+from gaanim import PostProcess, Scene
+scene = Scene(frame=(16, 9), background="#0b1020")
+music = scene.media.audio("assets/ritmo.ogg")
+bands = music.spectrum(16, smoothing=0.3)
+pick = "\n".join(f"    if (i == {i}u) {{ return gaanim_uniforms.b{i}; }}" for i in range(16))
+scene.canvas.post = PostProcess.shader(f"""
+fn band(i: u32) -> f32 {{
+{pick}
+    return 0.0;
+}}
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {{
+    let column = min(u32(uv.x * 16.0), 15u);
+    if (1.0 - uv.y < 0.3 * band(column)) {{
+        return vec4<f32>(0.2, 0.8, 0.95, 1.0);
+    }}
+    return gaanim_scene(uv);
+}}
+""", uniforms={f"b{i}": band for i, band in enumerate(bands)})
+scene.play(music)
+scene.wait(music.duration)
+scene.render()
+```
+
 == Narración
 
 Gaanim graba tu voz sin salir del editor y la sincroniza con la escena, sin
