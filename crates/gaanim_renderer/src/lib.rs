@@ -10,6 +10,7 @@ pub mod effects;
 pub mod fragment;
 mod gpu_scope;
 pub mod lottie;
+pub mod object_effects;
 pub mod offscreen;
 pub mod pipeline;
 mod post_bloom;

@@ -3173,6 +3173,29 @@ impl SceneModel {
             }
         }
 
+        // Shader effects read parameters any segment may declare, so they
+        // resolve once every object exists; echo copies then carry them.
+        let mut effects: Vec<_> = object_specs
+            .iter()
+            .filter_map(|(logical, spec)| {
+                Some((*id_map.get(logical)?, spec.shader_effect.clone()?))
+            })
+            .collect();
+        effects.sort_by_key(|(id, _)| *id);
+        for (id, effect) in effects {
+            let Some(entity) = builder.states.get(id).map(|state| state.entity) else {
+                continue;
+            };
+            let post = Self::compiled_post_process(&builder, &id_map, effect.passes, Vec::new());
+            builder
+                .commands
+                .entity(entity)
+                .insert(gaanim_renderer::object_effects::ShaderEffect {
+                    post,
+                    margin: effect.margin,
+                });
+        }
+
         // Echo copies clone their sources once every segment has been
         // compiled, so they carry every component the sources ended up with.
         let mut echoes: Vec<_> = object_specs

@@ -50,6 +50,10 @@ interlineado por defecto es más compacto.
   #link("/referencia/audio/")[Audio].
 - `scene.geometry.polyline` acepta señales en sus coordenadas y
   `closed=True`.
+- `Drawable.shader_effect(efecto, margin=)` aplica pases de `PostProcess`
+  (presets, tu WGSL o una cadena) a un solo objeto y sus hijos, en su sitio
+  y con uniforms animados por `Parameter` o por el audio. Lee
+  #link("/referencia/drawable/")[Drawable].
 - `echo(..., start=, end=)` limita la estela a un intervalo de la escena.
 - `drawable.copy()` duplica un objeto; en un SVG copia también sus partes con
   nombre y sus recortes (`copia.part("cabeza")`).

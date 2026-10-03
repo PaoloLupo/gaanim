@@ -81,6 +81,8 @@ pub struct GpuContext {
     /// Targets of a shader transition's incoming segment and of the layer
     /// above its blend, created on first use.
     transition_targets: Option<[(vello::wgpu::Texture, vello::wgpu::TextureView); 2]>,
+    /// Textures of drawables drawn through a shader effect.
+    effects: gaanim_renderer::object_effects::ObjectEffects,
     /// Multiplier of Vello's bump buffers; it only grows during an export.
     bump_scale: u32,
     /// Largest Vello buffer the device can bind.
@@ -218,6 +220,7 @@ impl GpuContext {
             pending_error,
             post: GpuPostProcess::default(),
             transition_targets: None,
+            effects: Default::default(),
             bump_scale: 1,
             max_bump_bytes: max_storage,
         })
@@ -338,21 +341,23 @@ impl GpuContext {
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
-        self.render_frame_layers(scene, None, base_color, post)
+        self.render_frame_layers(scene, None, &[], base_color, post)
     }
 
     /// [`Self::render_frame`] for a frame under a shader transition: `scene`
     /// is the outgoing segment, `layers` the incoming one and the layer
-    /// above, which `post` (with its transition) blends.
+    /// above, which `post` (with its transition) blends. `effects` fill the
+    /// images of drawables drawn through a shader effect.
     pub fn render_frame_layers(
         &mut self,
         scene: &vello::Scene,
         layers: Option<&TransitionScenes>,
+        effects: &[gaanim_renderer::object_effects::EffectLayer],
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
         loop {
-            if let Some(pixels) = self.render_attempt(scene, layers, base_color, post)? {
+            if let Some(pixels) = self.render_attempt(scene, layers, effects, base_color, post)? {
                 return Ok(pixels);
             }
             if self.bump_scale >= MAX_BUMP_SCALE {
@@ -369,6 +374,7 @@ impl GpuContext {
         &mut self,
         scene: &vello::Scene,
         layers: Option<&TransitionScenes>,
+        effects: &[gaanim_renderer::object_effects::EffectLayer],
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Option<Vec<u8>>, GpuContextError> {
@@ -397,6 +403,18 @@ impl GpuContext {
                     depth_or_array_layers: 1,
                 },
             );
+        }
+        // Effects fill the images the frame draws, so they render first.
+        if !effects.is_empty() || self.effects.is_active() {
+            self.effects
+                .render(
+                    &self.device,
+                    &self.queue,
+                    &mut self.renderer,
+                    effects,
+                    vello::AaConfig::Msaa16,
+                )
+                .map_err(|e| GpuContextError::Render(e.to_string()))?;
         }
         self.renderer
             .render_to_texture(

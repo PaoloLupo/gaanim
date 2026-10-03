@@ -307,6 +307,12 @@ pub struct ExtractedElement {
     /// The member's drop shadow, left out of `scene` and drawn once for the
     /// run of members that share it.
     group_shadow: Option<Arc<crate::fragment::GroupShadow>>,
+    /// The outermost ancestor (or the element itself) with a
+    /// [`crate::object_effects::ShaderEffect`], whose effect draws it.
+    effect_root: Option<Entity>,
+    /// World rectangle the element draws in, with its strokes and effects,
+    /// when it belongs to a shader effect.
+    effect_extent: Option<kurbo::Rect>,
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
@@ -430,6 +436,8 @@ impl ExtractedElement {
             opacity_group: self.opacity_group,
             group_opacity: self.group_opacity,
             group_shadow: self.group_shadow.clone(),
+            effect_root: self.effect_root,
+            effect_extent: self.effect_extent,
             render_order: self.render_order,
             scene: Arc::clone(&self.scene),
             clip_mask: self.clip_mask.clone(),
@@ -2169,7 +2177,7 @@ pub fn compile_scene_from_world(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
 ) -> vello::Scene {
-    compile_scene_with_pins(world, camera, None).flattened()
+    compile_scene_with_pins(world, camera, None, false).flattened()
 }
 
 /// [`compile_scene_from_world`] keeping a shader transition's segments
@@ -2178,7 +2186,7 @@ pub fn compile_frame_from_world(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
 ) -> ComposedFrame {
-    compile_scene_with_pins(world, camera, None)
+    compile_scene_with_pins(world, camera, None, true)
 }
 
 /// Elements of [`MotionBlurExempt`] drawables frozen at a frame's own time,
@@ -2198,7 +2206,7 @@ pub fn compile_scene_pinned(
     camera: Option<&gaanim_math::Camera>,
     pins: &mut PinnedElements,
 ) -> vello::Scene {
-    compile_scene_with_pins(world, camera, Some(pins)).flattened()
+    compile_scene_with_pins(world, camera, Some(pins), false).flattened()
 }
 
 /// [`compile_scene_pinned`] keeping a shader transition's segments apart.
@@ -2207,15 +2215,41 @@ pub fn compile_frame_pinned(
     camera: Option<&gaanim_math::Camera>,
     pins: &mut PinnedElements,
 ) -> ComposedFrame {
-    compile_scene_with_pins(world, camera, Some(pins))
+    compile_scene_with_pins(world, camera, Some(pins), true)
 }
 
+/// With `effects`, drawables with a shader effect are drawn into images that
+/// [`ComposedFrame::effects`] fills; without, they are drawn plainly, for a
+/// renderer that does not run the effects.
 fn compile_scene_with_pins(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
     pins: Option<&mut PinnedElements>,
+    effects: bool,
 ) -> ComposedFrame {
-    let extraction = extract_world(world, camera, pins, true);
+    let mut extraction = extract_world(world, camera, pins, true);
+    let effect_layers = if effects {
+        let pixels_per_unit = camera.map_or(DEFAULT_EFFECT_DENSITY, |camera| {
+            camera.pixels_per_unit() * orthographic_zoom(camera)
+        });
+        divert_effects(
+            &mut extraction.elements,
+            |entity| {
+                world
+                    .get::<crate::object_effects::ShaderEffect>(entity)
+                    .cloned()
+            },
+            extraction.background_time,
+            pixels_per_unit,
+            |entity| {
+                world
+                    .get::<gaanim_animation::FloatSignal>(entity)
+                    .map(|signal| signal.value)
+            },
+        )
+    } else {
+        Vec::new()
+    };
     let background = world.get_resource::<CanvasBackground>();
     let mut frame = compose_frame(
         &extraction.elements,
@@ -2225,10 +2259,21 @@ fn compile_scene_with_pins(
         0.0,
         None,
     );
+    frame.effects = effect_layers;
     if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
         append_live_overlay(frame.top_mut(), overlay);
     }
     frame
+}
+
+/// Pixels per scene unit of an effect texture without a camera.
+const DEFAULT_EFFECT_DENSITY: f64 = 120.0;
+
+fn orthographic_zoom(camera: &gaanim_math::Camera) -> f64 {
+    match camera.projection {
+        gaanim_math::Projection::Orthographic { zoom } if zoom.is_finite() && zoom > 0.0 => zoom,
+        _ => 1.0,
+    }
 }
 
 /// Draw what live zones show above the scene, in scene units: each zone's
@@ -2472,6 +2517,14 @@ fn extract_world(
         while let Ok(child_of) = child_query.get(world, opacity_group) {
             opacity_group = child_of.parent();
         }
+        let effect_root = outermost_effect(entity, |node| {
+            (
+                world
+                    .get::<crate::object_effects::ShaderEffect>(node)
+                    .is_some(),
+                child_query.get(world, node).ok().map(ChildOf::parent),
+            )
+        });
         let group_opacity = world
             .get::<GlobalOpacity>(opacity_group)
             .map_or(1.0, |opacity| opacity.0);
@@ -2541,6 +2594,24 @@ fn extract_world(
         let opacity_bounds = opacity_extent.map_or(opacity_fallback, |(rect, reach)| {
             pad_opacity_layer(rect, reach, antialias, opacity_fallback)
         });
+        let effect_extent = effect_root
+            .and_then(|_| {
+                fragment_extent(
+                    elem_path,
+                    transform.affine_2d,
+                    elem_stroke
+                        .and(elem_stroke_style)
+                        .map(|style| {
+                            aligned_pen(style, stroke_align_opt.copied().unwrap_or_default())
+                        })
+                        .as_deref(),
+                    stroke_view,
+                    shadow_opt,
+                    glow_opt,
+                    blur_opt,
+                )
+            })
+            .map(reached_rect);
         // A capture keeps the extent, so a replay at another resolution pads
         // the layer for its own pixels; an unbounded reach keeps the fallback.
         let opacity_extent = opacity_extent.filter(|(_, reach)| reach.is_finite());
@@ -2559,6 +2630,8 @@ fn extract_world(
             opacity_group,
             group_opacity,
             group_shadow,
+            effect_root,
+            effect_extent,
             render_order: stacked_render_order(
                 *render_order,
                 entity,
@@ -2842,6 +2915,8 @@ fn three_d_elements<'a>(
             opacity_group: entity,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_root: None,
+            effect_extent: None,
             // Beneath every 2D drawable, in depth order.
             render_order: RenderOrder {
                 z_index: i32::MIN,
@@ -2968,6 +3043,155 @@ fn compose_elements(
     main_scene
 }
 
+/// Shader effect layers of the frame the live preview shows, which the
+/// canvas renders before the frame.
+#[derive(Resource, Default, Clone)]
+pub struct EffectLayers(pub Vec<crate::object_effects::EffectLayer>);
+
+/// `rect` widened by `reach` when it is finite.
+fn reached_rect((rect, reach): (kurbo::Rect, f64)) -> kurbo::Rect {
+    if reach.is_finite() {
+        rect.inflate(reach, reach)
+    } else {
+        rect
+    }
+}
+
+/// The outermost of `entity` and its ancestors that has a shader effect;
+/// `step` says whether a node has one and returns its parent.
+fn outermost_effect(
+    entity: Entity,
+    mut step: impl FnMut(Entity) -> (bool, Option<Entity>),
+) -> Option<Entity> {
+    let mut found = None;
+    let mut current = Some(entity);
+    while let Some(node) = current {
+        let (has_effect, parent) = step(node);
+        if has_effect {
+            found = Some(node);
+        }
+        current = parent;
+    }
+    found
+}
+
+/// Take the elements of each drawable with a shader effect out of
+/// `elements` and draw an image in their place, at the first one's position
+/// in draw order. Returns the layers that draw those images: their
+/// elements composed in world coordinates, a texture at `pixels_per_unit`
+/// around their bounds and the effect's passes at `time_seconds`, with
+/// uniforms read through `signal`. A drawable whose elements have no bounds
+/// is drawn plainly.
+fn divert_effects(
+    elements: &mut Vec<ExtractedElement>,
+    effect: impl Fn(Entity) -> Option<crate::object_effects::ShaderEffect>,
+    time_seconds: f64,
+    pixels_per_unit: f64,
+    mut signal: impl FnMut(Entity) -> Option<f64>,
+) -> Vec<crate::object_effects::EffectLayer> {
+    use crate::object_effects::{EffectLayer, effect_image, effect_texture_size};
+    let mut roots: Vec<Entity> = Vec::new();
+    for element in elements.iter() {
+        if let Some(root) = element.effect_root
+            && !roots.contains(&root)
+        {
+            roots.push(root);
+        }
+    }
+    let mut layers = Vec::new();
+    for root in roots {
+        let Some(shader_effect) = effect(root) else {
+            continue;
+        };
+        let members: Vec<usize> = elements
+            .iter()
+            .enumerate()
+            .filter(|(_, element)| element.effect_root == Some(root))
+            .map(|(index, _)| index)
+            .collect();
+        let bounds = members
+            .iter()
+            .filter_map(|&index| {
+                elements[index]
+                    .effect_extent
+                    .or(elements[index].view_bounds)
+            })
+            .reduce(|bounds, next| bounds.union(next));
+        let margin = shader_effect.margin.max(0.0);
+        let Some(bounds) = bounds.map(|bounds| bounds.inflate(margin, margin)) else {
+            continue;
+        };
+        let Some((width, height, _)) = effect_texture_size(bounds, pixels_per_unit) else {
+            continue;
+        };
+        let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+        let Some(request) = shader_effect
+            .post
+            .request_with(time_seconds, frame, &mut signal)
+        else {
+            continue;
+        };
+        let mut scene = vello::Scene::new();
+        let drawn: Vec<ExtractedElement> = members
+            .iter()
+            .map(|&index| {
+                let mut member = elements[index].clone();
+                member.effect_root = None;
+                member
+            })
+            .collect();
+        append_element_run(&mut scene, &drawn, None);
+        let image = effect_image(root.to_bits(), width, height);
+        // Image pixels run top to bottom over the y-up world rectangle.
+        let image_to_world = kurbo::Affine::translate((bounds.x0, bounds.y1))
+            * kurbo::Affine::scale_non_uniform(
+                bounds.width() / f64::from(width),
+                -bounds.height() / f64::from(height),
+            );
+        let mut placeholder = elements[members[0]].clone();
+        let mut fill = vello::Scene::new();
+        fill.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            &peniko::Brush::Image(peniko::ImageBrush::new(image.clone())),
+            Some(image_to_world),
+            &bounds,
+        );
+        placeholder.scene = Arc::new(fill);
+        placeholder.recipe = None;
+        placeholder.lottie = None;
+        placeholder.transform = kurbo::Affine::IDENTITY;
+        placeholder.opacity = 1.0;
+        placeholder.opacity_bounds = bounds;
+        placeholder.opacity_extent = None;
+        placeholder.group_opacity = 1.0;
+        placeholder.group_shadow = None;
+        placeholder.effect_root = None;
+        placeholder.clip_mask = None;
+        placeholder.blend = None;
+        placeholder.screen = None;
+        placeholder.view_bounds = Some(bounds);
+        placeholder.tip = false;
+        placeholder.backdrop = None;
+        layers.push(EffectLayer {
+            scene,
+            to_pixels: image_to_world.inverse(),
+            image,
+            request,
+        });
+        let first = members[0];
+        let mut index = 0;
+        elements.retain(|_| {
+            let keep = !members.contains(&index) || index == first;
+            index += 1;
+            keep
+        });
+        // Members after the first are gone; the first keeps its index.
+        elements[first] = placeholder;
+    }
+    layers
+}
+
 /// A composed frame. Under a shader transition `scene` holds the outgoing
 /// segment alone and `transition` the rest, which a GPU renderer blends with
 /// [`crate::post_process::TransitionInputs`]; otherwise `scene` is the
@@ -2976,6 +3200,10 @@ fn compose_elements(
 pub struct ComposedFrame {
     pub scene: vello::Scene,
     pub transition: Option<TransitionScenes>,
+    /// Drawables drawn through their shader effect, which a GPU renderer
+    /// draws into their images before the frame; see
+    /// [`crate::object_effects`].
+    pub effects: Vec<crate::object_effects::EffectLayer>,
 }
 
 /// The parts of a frame under a shader transition besides the outgoing
@@ -3034,6 +3262,9 @@ impl ComposedFrame {
                 above: place(&transition.above),
                 shader: transition.shader,
             }),
+            // Effects draw into textures of their own, placed by their
+            // images in the scene.
+            effects: self.effects,
         }
     }
 }
@@ -3056,6 +3287,7 @@ fn compose_frame(
         return ComposedFrame {
             scene: compose_elements(elements, transition, background, time_seconds, rest, gpu),
             transition: None,
+            effects: Vec::new(),
         };
     };
     let side = |side: gaanim_scene::TransitionSide| -> Vec<ExtractedElement> {
@@ -3104,6 +3336,7 @@ fn compose_frame(
             above,
             shader,
         }),
+        effects: Vec::new(),
     }
 }
 
@@ -3332,6 +3565,8 @@ pub fn compose_captured_frame(
                 opacity_group: element.opacity_group,
                 group_opacity: element.group_opacity,
                 group_shadow: element.group_shadow.clone(),
+                effect_root: None,
+                effect_extent: None,
                 render_order: element.render_order,
                 scene,
                 clip_mask: element.clip_mask.clone(),
@@ -3541,7 +3776,18 @@ pub fn gaanim_render_system(
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
     order_query: Query<&RenderOrder>,
-    (blend_query, echo_query, tip_query, backdrop_query, three_d_query, lighting, opacity_query): (
+    (
+        blend_query,
+        echo_query,
+        tip_query,
+        backdrop_query,
+        three_d_query,
+        lighting,
+        opacity_query,
+        effect_query,
+        signal_query,
+        mut effect_layers,
+    ): (
         Query<&ElementBlend>,
         Query<&gaanim_animation::EchoGhost>,
         TipQuery,
@@ -3549,6 +3795,9 @@ pub fn gaanim_render_system(
         ThreeDQuery,
         Option<Res<gaanim_scene::Lighting3D>>,
         Query<&GlobalOpacity>,
+        Query<&crate::object_effects::ShaderEffect>,
+        Query<&gaanim_animation::FloatSignal>,
+        Option<ResMut<EffectLayers>>,
     ),
     query_mobjects: Query<
         (
@@ -3806,6 +4055,12 @@ pub fn gaanim_render_system(
         while let Ok(child_of) = child_query.get(opacity_group) {
             opacity_group = child_of.parent();
         }
+        let effect_root = outermost_effect(entity, |node| {
+            (
+                effect_query.contains(node),
+                child_query.get(node).ok().map(ChildOf::parent),
+            )
+        });
         let group_opacity = opacity_query
             .get(opacity_group)
             .map_or(1.0, |opacity| opacity.0);
@@ -3922,6 +4177,27 @@ pub fn gaanim_render_system(
                 antialias,
             )
         };
+        let effect_extent = effect_root
+            .and_then(|_| {
+                let path = path_ref
+                    .as_ref()
+                    .filter(|_| !path_reveal_is_empty(tip_glow_ref.as_deref()))?;
+                let stroke_align = stroke_align_ref.as_deref().copied().unwrap_or_default();
+                let stroke_style = stroke_ref
+                    .as_deref()
+                    .filter(|stroke| stroke.brush.is_some())
+                    .map(|stroke| aligned_pen(&stroke.style, stroke_align));
+                fragment_extent(
+                    path.0.as_ref(),
+                    transform.affine_2d,
+                    stroke_style.as_deref(),
+                    stroke_view,
+                    shadow_ref.as_deref(),
+                    glow_ref.as_deref(),
+                    blur_ref.as_deref(),
+                )
+            })
+            .map(reached_rect);
         local_extracted.push(ExtractedElement {
             entity,
             recipe: None,
@@ -3933,6 +4209,8 @@ pub fn gaanim_render_system(
             opacity_group,
             group_opacity,
             group_shadow,
+            effect_root,
+            effect_extent,
             render_order: stacked_render_order(
                 *render_order,
                 entity,
@@ -3986,6 +4264,36 @@ pub fn gaanim_render_system(
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
     local_extracted.sort_by(ExtractedElement::draw_order);
+
+    // Drawables with a shader effect become images the canvas fills first.
+    let layers = match effect_layers.as_deref_mut() {
+        Some(_) => {
+            let pixels_per_unit =
+                gaanim_camera
+                    .as_deref()
+                    .map_or(DEFAULT_EFFECT_DENSITY, |resolved| {
+                        resolved.camera.pixels_per_unit()
+                            * orthographic_zoom(&resolved.camera)
+                            * resolved.viewport.scale
+                    })
+                    * preview
+                        .as_deref()
+                        .map_or(1.0, |preview| f64::from(preview.scale));
+            divert_effects(
+                local_extracted,
+                |entity| effect_query.get(entity).ok().cloned(),
+                time_seconds,
+                pixels_per_unit,
+                |entity| signal_query.get(entity).ok().map(|signal| signal.value),
+            )
+        }
+        None => Vec::new(),
+    };
+    if let Some(published) = effect_layers.as_deref_mut()
+        && !(published.0.is_empty() && layers.is_empty())
+    {
+        published.0 = layers;
+    }
 
     // Assemble the global composited Scene in Bevy world coordinates.
     let mut shader_request = None;
@@ -5096,6 +5404,8 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_root: None,
+            effect_extent: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -5142,6 +5452,8 @@ mod tests {
             opacity_group: root,
             group_opacity,
             group_shadow: None,
+            effect_root: None,
+            effect_extent: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(scene),
             clip_mask: None,
@@ -5156,6 +5468,63 @@ mod tests {
             tip: false,
             backdrop: None,
         }
+    }
+
+    #[test]
+    fn a_shader_effect_draws_its_drawable_as_one_image_in_its_place() {
+        let root = Entity::from_raw_u32(11).unwrap();
+        let other = Entity::from_raw_u32(12).unwrap();
+        let member = |x: f64, effect: Option<Entity>| {
+            let mut element = group_member(root, x, 1.0, 1.0);
+            element.effect_root = effect;
+            element.effect_extent = Some(kurbo::Rect::new(x, 0.0, x + 1.0, 1.0));
+            element
+        };
+        let mut elements = vec![
+            member(-3.0, None),
+            member(0.0, Some(root)),
+            member(1.5, Some(root)),
+            member(5.0, None),
+            member(3.0, Some(root)),
+        ];
+        let shader = crate::post_process::PostProcessShader::new(
+            "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> { return gaanim_scene(uv); }",
+        )
+        .unwrap();
+        let effect = crate::object_effects::ShaderEffect {
+            post: crate::post_process::CanvasPostProcess {
+                passes: vec![shader.into()],
+                ..Default::default()
+            },
+            margin: 0.5,
+        };
+        let layers = divert_effects(
+            &mut elements,
+            |entity| (entity == root).then(|| effect.clone()),
+            1.0,
+            10.0,
+            |_| None,
+        );
+        // The three members became one element, where the first one was.
+        assert_eq!(elements.len(), 3);
+        assert!(elements.iter().all(|element| element.effect_root.is_none()));
+        assert_eq!(
+            elements[1].view_bounds,
+            Some(kurbo::Rect::new(-0.5, -0.5, 4.5, 1.5))
+        );
+        assert_eq!(layers.len(), 1);
+        let layer = &layers[0];
+        assert_eq!((layer.image.width, layer.image.height), (50, 20));
+        assert_eq!(layer.request.frame, kurbo::Rect::new(0.0, 0.0, 50.0, 20.0));
+        // The texture's top-left pixel is the bounds' top-left corner.
+        assert_eq!(
+            layer.to_pixels * kurbo::Point::new(-0.5, 1.5),
+            kurbo::Point::ZERO
+        );
+        // A drawable without the component is drawn plainly.
+        let mut plain = vec![member(0.0, Some(other))];
+        assert!(divert_effects(&mut plain, |_| None, 1.0, 10.0, |_| None).is_empty());
+        assert_eq!(plain.len(), 1);
     }
 
     #[test]
@@ -5229,6 +5598,8 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_root: None,
+            effect_extent: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -5262,6 +5633,8 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_root: None,
+            effect_extent: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(scene),
             clip_mask: None,
@@ -5324,6 +5697,8 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_root: None,
+            effect_extent: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -5364,6 +5739,8 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_root: None,
+            effect_extent: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask,

@@ -32,7 +32,7 @@ pub use types::{
     EchoSpec, FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError, LabelMode,
     LayoutMemberSpec, LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin, LinearMap2D,
     LinearMapError, LottieOptions, MAX_ECHO_COUNT, Margin, ObjectSpec, OptDuration, SceneFrame,
-    SpawnKind, VideoOptions,
+    ShaderEffectSpec, SpawnKind, VideoOptions,
 };
 /// Raster image handle; remains compatible with every DrawableHandle consumer.
 pub type ImageHandle = DrawableHandle;

@@ -968,6 +968,9 @@ pub struct ObjectSpec {
     pub stroke_scales_with_object: Option<bool>,
     /// Chalk look of the fill and stroke, on every glyph and child.
     pub chalk: Option<gaanim_renderer::effects::ChalkBrush>,
+    /// Post-process passes this drawable and its descendants are drawn
+    /// through, as one layer.
+    pub shader_effect: Option<ShaderEffectSpec>,
     /// This group is the public root of an imported SVG hierarchy.
     pub(crate) svg_root: bool,
     /// Root of the imported SVG this group or path belongs to. Stroke widths
@@ -1037,6 +1040,14 @@ pub struct ObjectSpec {
     pub media_frame: Option<gaanim_scene::MediaFrame>,
     /// Scale and translation of a coordinate view after its queued view changes.
     pub(crate) coordinate_view_cursor: Option<(DVec3, DVec3)>,
+}
+
+/// A drawable's shader effect: post-process passes over the drawable and its
+/// descendants, drawn into a texture `margin` scene units wider than them.
+#[derive(Debug, Clone)]
+pub struct ShaderEffectSpec {
+    pub passes: Vec<gaanim_renderer::post_process::PostProcessPass>,
+    pub margin: f64,
 }
 
 /// Most copies one [`EchoSpec`] draws.
@@ -1149,6 +1160,7 @@ impl ObjectSpec {
             stroke_align: None,
             stroke_scales_with_object: None,
             chalk: None,
+            shader_effect: None,
             svg_root: false,
             svg_owner: None,
             glow: None,

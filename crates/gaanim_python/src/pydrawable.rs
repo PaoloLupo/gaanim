@@ -3250,6 +3250,30 @@ impl PyDrawable {
         let result = Ok(Self(slf.borrow().0.clone().chalk(seed, roughness)));
         same_drawable(slf, result)
     }
+    /// Draw the drawable and its descendants through post-process passes;
+    /// see `gaanim_core.pyi`.
+    #[pyo3(signature = (effect, *, margin=0.25))]
+    fn shader_effect<'py>(
+        slf: &Bound<'py, Self>,
+        effect: Option<Bound<'py, PyAny>>,
+        margin: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !margin.is_finite() || margin < 0.0 {
+            return Err(PyValueError::new_err(
+                "margin must be finite and non-negative",
+            ));
+        }
+        let handle = slf.borrow().0.clone();
+        // Uniforms must read this drawable's scene. Once that Scene is gone
+        // nothing can render it, and only constant uniforms validate.
+        let scene = handle
+            .owning_scene()
+            .unwrap_or_else(|| gaanim_api::canvas::SceneModel::new(16.0, 9.0).into_shared());
+        let passes = crate::brush::post_process_passes(effect.as_ref(), &scene)?;
+        let result = Ok(Self(handle.shader_effect(passes, margin)));
+        same_drawable(slf, result)
+    }
     /// Apply cap, join, miter, and dash geometry from a reusable StrokeStyle.
     fn stroke_style<'py>(
         slf: &Bound<'py, Self>,
