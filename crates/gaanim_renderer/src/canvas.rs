@@ -652,6 +652,14 @@ type CanvasViews<'w, 's> = Query<
     (With<Camera2d>, With<VelloView>),
 >;
 
+/// What else draws into the canvas this frame: post-processing, a shader
+/// background and a shader transition's targets.
+type CanvasEffects<'w> = (
+    Option<Res<'w, crate::post_process_gpu::ExtractedPostProcess>>,
+    Option<Res<'w, crate::background_gpu::ExtractedShaderBackground>>,
+    Option<Res<'w, crate::post_process_gpu::CanvasTransitionTargets>>,
+);
+
 /// Rasterizes the extracted scene into the canvas texture before the camera
 /// passes sample it. A frame identical to the one the texture holds is skipped.
 #[allow(clippy::too_many_arguments)]
@@ -663,11 +671,7 @@ fn render_canvas(
     queue: Res<RenderQueue>,
     renderer: Res<VelloRenderer>,
     stats: Res<VelloFrameStats>,
-    effects: (
-        Option<Res<crate::post_process_gpu::ExtractedPostProcess>>,
-        Option<Res<crate::background_gpu::ExtractedShaderBackground>>,
-        Option<Res<crate::post_process_gpu::CanvasTransitionTargets>>,
-    ),
+    effects: CanvasEffects,
     mut rendered: ResMut<RenderedCanvas>,
 ) {
     let Some(target) = extracted.image.and_then(|image| images.get(image)) else {
@@ -745,15 +749,11 @@ fn render_canvas(
 
     // A shader transition draws its other layers with the same placement;
     // the post-process pass blends them into the canvas.
-    let layers = extracted
-        .transition
-        .as_ref()
-        .zip(placement)
-        .zip(
-            transition_targets
-                .as_deref()
-                .and_then(|targets| targets.views()),
-        );
+    let layers = extracted.transition.as_ref().zip(placement).zip(
+        transition_targets
+            .as_deref()
+            .and_then(|targets| targets.views()),
+    );
     if let Some((((incoming, above), affine), (incoming_view, above_view))) = layers {
         for (scene, view) in [(incoming, incoming_view), (above, above_view)] {
             let mut placed = Scene::new();

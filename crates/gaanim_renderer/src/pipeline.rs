@@ -5115,7 +5115,10 @@ mod tests {
         assert_eq!(segments(&transition.above), 7);
         // Without the GPU blend, all three draw in one scene, the incoming
         // side inside a cross-fade layer (its clip is a rectangle).
-        assert_eq!(segments(&compile_scene_from_world(&mut world, None)), 15 + 4);
+        assert_eq!(
+            segments(&compile_scene_from_world(&mut world, None)),
+            15 + 4
+        );
     }
 
     #[test]

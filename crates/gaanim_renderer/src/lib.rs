@@ -15,11 +15,11 @@ pub mod pipeline;
 mod post_bloom;
 pub mod post_presets;
 pub mod post_process;
-pub mod transition_presets;
 mod post_process_gpu;
 pub mod prelude;
 mod stroke;
 mod three_d;
+pub mod transition_presets;
 
 // MainVelloScene is re-exported via prelude; used implicitly by the plugin system registration.
 #[allow(unused_imports)]
