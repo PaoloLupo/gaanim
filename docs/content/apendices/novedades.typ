@@ -54,6 +54,7 @@ interlineado por defecto es más compacto.
   (presets, tu WGSL o una cadena) a un solo objeto y sus hijos, en su sitio
   y con uniforms animados por `Parameter` o por el audio. Lee
   #link("/referencia/drawable/")[Drawable].
+- Los paquetes `.gaanim` graban la tiza y los efectos de shader por objeto.
 - `echo(..., start=, end=)` limita la estela a un intervalo de la escena.
 - `drawable.copy()` duplica un objeto; en un SVG copia también sus partes con
   nombre y sus recortes (`copia.part("cabeza")`).
@@ -80,7 +81,7 @@ interlineado por defecto es más compacto.
 
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan a la versión 3 del formato: Gaanim 0.9 no abre
+- Los paquetes `.gaanim` pasan a la versión 4 del formato: Gaanim 0.9 no abre
   los grabados con 0.8 ni anteriores. Vuelve a grabarlos con
   `gaanim export <proyecto> --output charla.gaanim`.
 - `line_spacing` vale 1.0 por defecto en lugar de 1.2: las líneas quedan a

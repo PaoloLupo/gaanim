@@ -5,11 +5,15 @@ use std::sync::Arc;
 
 use bevy::prelude::Entity;
 use gaanim_core::{kurbo, peniko};
+use gaanim_renderer::effects::ChalkBrush;
 use gaanim_renderer::effects::{
     CameraViewBackground, ClipMask, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile,
 };
 use gaanim_renderer::fragment::{FragmentRecipe, GroupShadow};
-use gaanim_renderer::pipeline::{CapturedElement, CapturedTransition, CapturedView, FrameCapture};
+use gaanim_renderer::pipeline::{
+    CapturedEffect, CapturedElement, CapturedTransition, CapturedView, FrameCapture,
+};
+use gaanim_renderer::post_process::PostProcessShader;
 use gaanim_scene::{
     RasterImage, RenderOrder, StrokeBrush, TransitionMask, TransitionShader, TransitionShaderFrame,
     TransitionSide,
@@ -96,6 +100,8 @@ pub struct Tables {
     string_index: HashMap<Arc<str>, u32>,
     /// Shader transitions the frames blend with, deduplicated.
     pub(crate) transition_shaders: Vec<Arc<TransitionShader>>,
+    /// Passes of the drawables' shader effects, deduplicated.
+    pub(crate) effect_shaders: Vec<PostProcessShader>,
 }
 
 impl Interner for Tables {
@@ -152,6 +158,18 @@ impl Tables {
         index as u32
     }
 
+    pub fn effect_shader(&mut self, shader: &PostProcessShader) -> u32 {
+        let index = self
+            .effect_shaders
+            .iter()
+            .position(|known| known == shader)
+            .unwrap_or_else(|| {
+                self.effect_shaders.push(shader.clone());
+                self.effect_shaders.len() - 1
+            });
+        index as u32
+    }
+
     pub fn string(&mut self, value: &Arc<str>) -> u32 {
         if let Some(index) = self.string_index.get(value) {
             return *index;
@@ -196,6 +214,7 @@ pub struct DecodedTables {
     pub strings: Vec<Arc<str>>,
     /// Shared by every frame of one transition, so its shader is built once.
     pub transition_shaders: Vec<Arc<TransitionShader>>,
+    pub effect_shaders: Vec<PostProcessShader>,
 }
 
 impl Resolver for DecodedTables {
@@ -222,12 +241,60 @@ impl DecodedTables {
             .ok_or_else(|| corrupt("recipe index out of range"))
     }
 
+    fn effect_shader(&self, index: u32) -> Result<PostProcessShader> {
+        self.effect_shaders
+            .get(index as usize)
+            .cloned()
+            .ok_or_else(|| corrupt("effect shader index out of range"))
+    }
+
     fn string(&self, index: u32) -> Result<Arc<str>> {
         self.strings
             .get(index as usize)
             .cloned()
             .ok_or_else(|| corrupt("string index out of range"))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Post-process shaders
+// ---------------------------------------------------------------------------
+
+pub(crate) fn write_post_shader(w: &mut Writer, shader: &PostProcessShader) {
+    w.str(shader.source());
+    w.len(shader.uniforms().len());
+    for uniform in shader.uniforms() {
+        w.str(uniform);
+    }
+    w.option(shader.data(), |w, data| {
+        w.len(data.len());
+        for texel in data.iter() {
+            for value in texel {
+                w.f32(*value);
+            }
+        }
+    });
+    w.bool(shader.bloom());
+}
+
+pub(crate) fn read_post_shader(r: &mut Reader<'_>) -> Result<PostProcessShader> {
+    let source = r.str()?.to_owned();
+    let uniform_count = r.len()?;
+    let mut uniforms = Vec::with_capacity(uniform_count.min(256));
+    for _ in 0..uniform_count {
+        uniforms.push(Arc::<str>::from(r.str()?));
+    }
+    let data = r.option(|r| {
+        let count = r.len()?;
+        let mut data = Vec::with_capacity(count.min(1 << 20));
+        for _ in 0..count {
+            data.push([r.f32()?, r.f32()?, r.f32()?, r.f32()?]);
+        }
+        Ok(Arc::<[[f32; 4]]>::from(data))
+    })?;
+    let bloom = r.bool()?;
+    PostProcessShader::from_parts(source, &uniforms, data, bloom, false)
+        .map_err(|error| BundleError::Corrupt(error.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +371,10 @@ pub(crate) fn write_recipe(w: &mut Writer, tables: &mut Tables, recipe: &Fragmen
     });
     w.option(recipe.stroke_view, Writer::affine);
     w.bool(recipe.screen);
+    w.option(recipe.chalk.as_ref(), |w, chalk| {
+        w.var(chalk.seed);
+        w.f64(chalk.roughness);
+    });
 }
 
 fn write_shadow(w: &mut Writer, shadow: &DropShadow) {
@@ -356,8 +427,12 @@ pub(crate) fn read_recipe(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<
         })?,
         stroke_view: r.option(Reader::affine)?,
         screen: r.bool()?,
-        // Bundle format 2 refuses to record chalk.
-        chalk: None,
+        chalk: r.option(|r| {
+            Ok(ChalkBrush {
+                seed: r.var()?,
+                roughness: r.f64()?,
+            })
+        })?,
     })
 }
 
@@ -588,6 +663,8 @@ pub(crate) struct ElementRecord {
     pub group_opacity: f32,
     /// The shared drop shadow and the table index of its outline.
     pub group_shadow: Option<(u32, DropShadow)>,
+    pub effect_root: Option<u32>,
+    pub effect_extent: Option<kurbo::Rect>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -693,6 +770,8 @@ impl ElementRecord {
                 .group_shadow
                 .as_ref()
                 .map(|shared| (tables.path(&shared.path), shared.shadow.clone())),
+            effect_root: element.effect_root.map(&mut key_of),
+            effect_extent: element.effect_extent,
         }
     }
 
@@ -744,6 +823,8 @@ impl ElementRecord {
             w.var(u64::from(*path));
             write_shadow(w, shadow);
         });
+        w.option(self.effect_root, |w, key| w.var(u64::from(key)));
+        w.option(self.effect_extent, Writer::rect);
     }
 
     pub fn read(r: &mut Reader<'_>) -> Result<Self> {
@@ -797,6 +878,8 @@ impl ElementRecord {
             echo_rank: r.u32()?,
             group_opacity: r.f32()?,
             group_shadow: r.option(|r| Ok((r.u32()?, read_shadow(r)?)))?,
+            effect_root: r.option(Reader::u32)?,
+            effect_extent: r.option(Reader::rect)?,
         })
     }
 
@@ -876,6 +959,8 @@ impl ElementRecord {
                     }))
                 })
                 .transpose()?,
+            effect_root: self.effect_root.map(key_entity).transpose()?,
+            effect_extent: self.effect_extent,
         })
     }
 }
@@ -894,8 +979,62 @@ pub(crate) struct FrameRecord {
     pub transition: Option<Vec<u8>>,
     pub post: Vec<PostPass>,
     pub elements: Vec<ElementRecord>,
+    /// Shader effects of drawables; each pass's shader indexes
+    /// [`Tables::effect_shaders`].
+    pub effects: Vec<EffectRecord>,
     /// Motion blur sub-frames, each without sub-frames of its own.
     pub motion_blur: Vec<FrameRecord>,
+}
+
+/// A [`CapturedEffect`] with its drawable and shaders resolved to keys and
+/// table indices.
+#[derive(Clone, PartialEq)]
+pub(crate) struct EffectRecord {
+    pub root: u32,
+    pub margin: f64,
+    pub passes: Vec<PostPass>,
+}
+
+impl EffectRecord {
+    fn write(&self, w: &mut Writer) {
+        w.var(u64::from(self.root));
+        w.f64(self.margin);
+        write_passes(w, &self.passes);
+    }
+
+    fn read(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(Self {
+            root: r.u32()?,
+            margin: r.f64()?,
+            passes: read_passes(r)?,
+        })
+    }
+}
+
+fn write_passes(w: &mut Writer, passes: &[PostPass]) {
+    w.len(passes.len());
+    for pass in passes {
+        w.var(u64::from(pass.shader));
+        w.len(pass.values.len());
+        for value in &pass.values {
+            w.f32(*value);
+        }
+    }
+}
+
+fn read_passes(r: &mut Reader<'_>) -> Result<Vec<PostPass>> {
+    let pass_count = r.len()?;
+    let mut passes = Vec::with_capacity(pass_count.min(64));
+    for _ in 0..pass_count {
+        let shader = r.u32()?;
+        let count = r.len()?;
+        let mut values = Vec::with_capacity(count.min(256));
+        for _ in 0..count {
+            values.push(r.f32()?);
+        }
+        passes.push(PostPass { shader, values });
+    }
+    Ok(passes)
 }
 
 impl FrameRecord {
@@ -920,6 +1059,23 @@ impl FrameRecord {
                 .elements
                 .iter()
                 .map(|element| ElementRecord::capture(element, tables, keys, lottie(element)))
+                .collect(),
+            effects: frame
+                .capture
+                .effects
+                .iter()
+                .map(|effect| EffectRecord {
+                    root: keys.key(effect.root),
+                    margin: effect.margin,
+                    passes: effect
+                        .passes
+                        .iter()
+                        .map(|(shader, values)| PostPass {
+                            shader: tables.effect_shader(shader),
+                            values: values.clone(),
+                        })
+                        .collect(),
+                })
                 .collect(),
             motion_blur: frame
                 .motion_blur
@@ -957,6 +1113,23 @@ impl FrameRecord {
                     .as_ref()
                     .map(|bytes| read_transition(&mut Reader::new(bytes), tables))
                     .transpose()?,
+                effects: self
+                    .effects
+                    .iter()
+                    .map(|effect| -> Result<CapturedEffect> {
+                        Ok(CapturedEffect {
+                            root: key_entity(effect.root)?,
+                            margin: effect.margin,
+                            passes: effect
+                                .passes
+                                .iter()
+                                .map(|pass| {
+                                    Ok((tables.effect_shader(pass.shader)?, pass.values.clone()))
+                                })
+                                .collect::<Result<_>>()?,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
             },
             post: self.post.clone(),
             motion_blur: self
@@ -1002,13 +1175,10 @@ impl DeltaEncoder {
         w.f64(frame.background_time);
         write_camera(w, &frame.camera);
         w.option(frame.transition.as_ref(), |w, bytes| w.bytes(bytes));
-        w.len(frame.post.len());
-        for pass in &frame.post {
-            w.var(u64::from(pass.shader));
-            w.len(pass.values.len());
-            for value in &pass.values {
-                w.f32(*value);
-            }
+        write_passes(w, &frame.post);
+        w.len(frame.effects.len());
+        for effect in &frame.effects {
+            effect.write(w);
         }
         match &self.previous {
             None => {
@@ -1077,16 +1247,11 @@ impl DeltaDecoder {
         let background_time = r.f64()?;
         let camera = read_camera(r)?;
         let transition = r.option(|r| Ok(r.bytes()?.to_vec()))?;
-        let pass_count = r.len()?;
-        let mut post = Vec::with_capacity(pass_count.min(64));
-        for _ in 0..pass_count {
-            let shader = r.u32()?;
-            let count = r.len()?;
-            let mut values = Vec::with_capacity(count.min(256));
-            for _ in 0..count {
-                values.push(r.f32()?);
-            }
-            post.push(PostPass { shader, values });
+        let post = read_passes(r)?;
+        let effect_count = r.len()?;
+        let mut effects = Vec::with_capacity(effect_count.min(1 << 12));
+        for _ in 0..effect_count {
+            effects.push(EffectRecord::read(r)?);
         }
         let elements = match r.u8()? {
             FRAME_FULL => {
@@ -1142,6 +1307,7 @@ impl DeltaDecoder {
             transition,
             post,
             elements,
+            effects,
             motion_blur: Vec::new(),
         };
         self.previous = Some(frame.clone());

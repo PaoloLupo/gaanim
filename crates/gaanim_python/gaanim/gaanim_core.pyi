@@ -3239,9 +3239,9 @@ class Drawable:
         time. Uniforms take Parameters, Computeds and audio signals, and the
         ``PostProcess`` presets work too. ``None`` removes the effect. It is
         declaration state for the whole timeline; a drawable with an effect
-        inside another one is drawn by the outer effect. Previews and
-        exports draw it; ``.gaanim`` bundles do not record it yet and refuse
-        it. A negative ``margin`` raises ``ValueError``.
+        inside another one is drawn by the outer effect. Previews, exports
+        and ``.gaanim`` bundles draw it; a bundle stores the uniforms of
+        every frame. A negative ``margin`` raises ``ValueError``.
 
         Example:
             title.shader_effect(PostProcess.shader(ripple_src, uniforms={"amount": level}), margin=0.4)
@@ -3254,7 +3254,7 @@ class Drawable:
         breaks the paint; both follow ``seed``, so every frame and export
         draws the same chalk. On a text or a group it applies to every glyph
         and child. This is declaration state and is not animated. Playback
-        bundles (``.gaanim``) cannot record chalk yet.
+        bundles (``.gaanim``) record and replay it.
 
         Example:
             formula = scene.text.equation("E = m c^2").chalk(seed=7)

@@ -14,8 +14,8 @@
 //!   other entry.
 //! - `scene.bin`: static data (background, post-process shaders, timeline
 //!   structure, audio tracks).
-//! - `tables/*.bin`: deduplicated paths, images, recipes, strings and shader
-//!   transitions.
+//! - `tables/*.bin`: deduplicated paths, images, recipes, strings, shader
+//!   transitions and the passes of shader effects on drawables.
 //! - `frames/NNNNNN.bin`: chunks of frames, each frame encoded against the
 //!   one before it; a chunk starts with a whole frame.
 //! - `media/*`: embedded audio files.
@@ -46,7 +46,8 @@ use std::sync::Arc;
 use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundRequest};
 use gaanim_renderer::fragment::FragmentStore;
 use gaanim_renderer::pipeline::{
-    CanvasBackground, CapturedElement, SegmentBackgroundPaint, compose_captured,
+    CanvasBackground, CapturedElement, ComposedFrame, SegmentBackgroundPaint,
+    compose_captured_frame,
 };
 use gaanim_renderer::post_process::PostProcessShader;
 use gaanim_timeline::timeline::{
@@ -75,8 +76,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// Every data entry holds a Zstandard frame; `manifest.json` stays Deflate
 /// and media stays as authored. Version 1 (Gaanim 0.6.0) left compression
 /// to the archive; version 2 (up to Gaanim 0.8) had no shader transitions
-/// (`tables/transitions.bin`) nor the opacity of each element's group.
-pub const VERSION: u32 = 3;
+/// (`tables/transitions.bin`) nor the opacity of each element's group;
+/// version 3 (development builds of Gaanim 0.9) had no chalk strokes nor
+/// shader effects on drawables (`tables/effects.bin`).
+pub const VERSION: u32 = 4;
 /// Zstandard level of data entries, still fast to read. Level 17 made
 /// entries about 8% smaller and compressed nearly four times slower.
 #[cfg(not(target_arch = "wasm32"))]
@@ -704,20 +707,7 @@ impl SceneData {
         });
         w.len(self.post_shaders.len());
         for shader in &self.post_shaders {
-            w.str(shader.source());
-            w.len(shader.uniforms().len());
-            for uniform in shader.uniforms() {
-                w.str(uniform);
-            }
-            w.option(shader.data(), |w, data| {
-                w.len(data.len());
-                for texel in data.iter() {
-                    for value in texel {
-                        w.f32(*value);
-                    }
-                }
-            });
-            w.bool(shader.bloom());
+            model::write_post_shader(w, shader);
         }
         w.len(self.segments.len());
         for segment in &self.segments {
@@ -796,25 +786,7 @@ impl SceneData {
         let shader_count = r.len()?;
         let mut post_shaders = Vec::with_capacity(shader_count.min(256));
         for _ in 0..shader_count {
-            let source = r.str()?.to_owned();
-            let uniform_count = r.len()?;
-            let mut uniforms = Vec::with_capacity(uniform_count.min(256));
-            for _ in 0..uniform_count {
-                uniforms.push(Arc::<str>::from(r.str()?));
-            }
-            let data = r.option(|r| {
-                let count = r.len()?;
-                let mut data = Vec::with_capacity(count.min(1 << 20));
-                for _ in 0..count {
-                    data.push([r.f32()?, r.f32()?, r.f32()?, r.f32()?]);
-                }
-                Ok(Arc::<[[f32; 4]]>::from(data))
-            })?;
-            let bloom = r.bool()?;
-            post_shaders.push(
-                PostProcessShader::from_parts(source, &uniforms, data, bloom, false)
-                    .map_err(|error| BundleError::Corrupt(error.to_string()))?,
-            );
+            post_shaders.push(model::read_post_shader(r)?);
         }
         let segment_count = r.len()?;
         let mut segments = Vec::with_capacity(segment_count.min(4096));
@@ -1189,6 +1161,12 @@ impl<W: Write + Seek> BundleWriter<W> {
             model::write_transition_shader(&mut transitions, shader);
         }
         self.write_entry("tables/transitions.bin", &transitions.into_bytes())?;
+        let mut effects = Writer::new();
+        effects.len(self.tables.effect_shaders.len());
+        for shader in &self.tables.effect_shaders {
+            model::write_post_shader(&mut effects, shader);
+        }
+        self.write_entry("tables/effects.bin", &effects.into_bytes())?;
         self.write_entry("scene.bin", &scene_bytes)?;
         let mut index = Writer::new();
         index.len(self.times.len());
@@ -1431,6 +1409,7 @@ impl Bundle {
             recipes: Vec::new(),
             strings: Vec::new(),
             transition_shaders: Vec::new(),
+            effect_shaders: Vec::new(),
         };
         let paths = read_entry(&archive, Some(&manifest), "tables/paths.bin")?;
         let mut r = Reader::new(&paths);
@@ -1453,6 +1432,11 @@ impl Bundle {
             tables
                 .transition_shaders
                 .push(Arc::new(model::read_transition_shader(&mut r)?));
+        }
+        let effects = read_entry(&archive, Some(&manifest), "tables/effects.bin")?;
+        let mut r = Reader::new(&effects);
+        for _ in 0..r.len()? {
+            tables.effect_shaders.push(model::read_post_shader(&mut r)?);
         }
         let recipes = read_entry(&archive, Some(&manifest), "tables/recipes.bin")?;
         let mut r = Reader::new(&recipes);
@@ -1703,18 +1687,32 @@ pub fn compose_frame(
     background: Option<&CanvasBackground>,
     store: &mut FragmentStore,
 ) -> (vello::Scene, Option<ShaderBackgroundRequest>) {
+    let (composed, request) = compose_frame_layers(frame, background, store);
+    (composed.flattened(), request)
+}
+
+/// [`compose_frame`] with its shader transition and the drawables under a
+/// shader effect kept apart, as an export at the background's size renders
+/// them.
+pub fn compose_frame_layers(
+    frame: &Frame,
+    background: Option<&CanvasBackground>,
+    store: &mut FragmentStore,
+) -> (ComposedFrame, Option<ShaderBackgroundRequest>) {
     let mut request = None;
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
     });
-    let scene = compose_captured(
+    let composed = compose_captured_frame(
         &frame.capture,
         store,
         background.map(|background| (background, background.pixel_size)),
         pixels_per_unit,
         Some(&mut request),
+        0.0,
+        pixels_per_unit.unwrap_or(gaanim_renderer::pipeline::DEFAULT_EFFECT_DENSITY),
     );
-    (scene, request)
+    (composed, request)
 }
 
 /// Digest of what a frame hands the renderer: its composed scene, the
@@ -1724,9 +1722,26 @@ pub fn frame_digest(
     background: Option<&CanvasBackground>,
     store: &mut FragmentStore,
 ) -> [u8; 32] {
-    let (scene, request) = compose_frame(frame, background, store);
+    let (mut composed, request) = compose_frame_layers(frame, background, store);
+    let effects = std::mem::take(&mut composed.effects);
     let mut hasher = blake3::Hasher::new();
-    hasher.update(&scene_digest(&scene));
+    hasher.update(&scene_digest(&composed.flattened()));
+    hasher.update(&(effects.len() as u64).to_le_bytes());
+    for effect in &effects {
+        hasher.update(&scene_digest(&effect.scene));
+        for value in effect.to_pixels.as_coeffs() {
+            hasher.update(&value.to_bits().to_le_bytes());
+        }
+        hasher.update(&effect.image.width.to_le_bytes());
+        hasher.update(&effect.image.height.to_le_bytes());
+        hasher.update(&effect.request.time.to_bits().to_le_bytes());
+        for (shader, values) in &effect.request.passes {
+            hasher.update(blake3::hash(shader.source().as_bytes()).as_bytes());
+            for value in values {
+                hasher.update(&value.to_bits().to_le_bytes());
+            }
+        }
+    }
     if let Some(request) = request {
         hasher.update(&request.time().to_bits().to_le_bytes());
         for value in request.frame() {

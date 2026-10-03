@@ -1113,6 +1113,7 @@ pub fn compose_bundle_layers(
         pixels_per_unit,
         None,
         0.0,
+        pixels_per_unit.unwrap_or(gaanim_renderer::pipeline::DEFAULT_EFFECT_DENSITY),
     );
     store.end_frame();
     if let Some(overlay) = overlay {

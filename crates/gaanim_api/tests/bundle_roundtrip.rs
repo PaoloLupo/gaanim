@@ -583,3 +583,112 @@ fn a_history_free_scene_records_in_one_world_like_in_two() {
     };
     assert_eq!(by_time(&one), by_time(&two));
 }
+
+/// Chalk strokes and a drawable drawn through a shader effect that moves
+/// with time.
+fn chalk_and_effects() -> SceneModel {
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let board = canvas
+        .circle(1.5)
+        .stroke(Color::WHITE, 0.08)
+        .chalk(7, 0.03)
+        .move_to(-3.0, 0.0);
+    let shader = gaanim_renderer::post_process::PostProcessShader::new(
+        "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n    \
+         return gaanim_scene(uv + vec2<f32>(0.0, 0.05 * sin(uv.x * 12.0 + time * 4.0)));\n}",
+    )
+    .unwrap();
+    let wave = canvas
+        .rect(4.0, 1.0)
+        .fill(Color::from_rgb8(0x38, 0xbd, 0xf8))
+        .shader_effect(vec![shader.into()], 0.3)
+        .move_to(3.0, 0.0);
+    canvas.play(vec![
+        board.animate().create().duration(0.5),
+        wave.animate().shift_by(0.0, 1.0).duration(0.5),
+    ]);
+    canvas
+}
+
+#[test]
+fn chalk_and_shader_effects_record_and_replay() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("effects.gaanim");
+    let mut config = BundleConfig::new(&path);
+    config.fps = 12;
+    config.width = 160;
+    config.height = 90;
+    record_canvas(chalk_and_effects(), config).expect("record chalk and shader effects");
+
+    let mut bundle = Bundle::open(&path).unwrap();
+    assert!(bundle.verify().unwrap().is_empty());
+    let frame = bundle.frame(bundle.frame_index_at(0.4)).unwrap();
+    assert!(
+        frame
+            .capture
+            .elements
+            .iter()
+            .any(|element| element.recipe.chalk.is_some()),
+        "the chalk survives the bundle"
+    );
+    assert_eq!(frame.capture.effects.len(), 1);
+    let effect = &frame.capture.effects[0];
+    assert_eq!(effect.margin, 0.3);
+    assert_eq!(effect.passes.len(), 1);
+    assert!(
+        frame
+            .capture
+            .elements
+            .iter()
+            .any(|element| element.effect_root == Some(effect.root))
+    );
+}
+
+#[test]
+fn a_video_exported_from_a_bundle_with_effects_matches_the_scene_export() {
+    if gaanim_export::prelude::GpuContext::new(16, 16).is_err() {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let bundle_path = directory.path().join("effects.gaanim");
+    let mut config = BundleConfig::new(&bundle_path);
+    // The rate of a draft export.
+    config.fps = 30;
+    config.width = 160;
+    config.height = 90;
+    record_canvas(chalk_and_effects(), config).unwrap();
+
+    let output = |name: &str| {
+        let directory = directory.path().join(name);
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut export =
+            gaanim_export::prelude::ExportConfig::new(&directory.join("f.png").to_string_lossy())
+                .with_quality(gaanim_export::prelude::QualityPreset::Draft);
+        export.width = 160;
+        export.height = 90;
+        export.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
+        export.format = gaanim_export::prelude::ExportFormat::PngSequence;
+        export.headless = true;
+        (directory, export)
+    };
+    let (direct, config) = output("direct");
+    gaanim_api::export::export_canvas(chalk_and_effects(), config).unwrap();
+    let (replayed, config) = output("bundle");
+    gaanim_export::prelude::export_bundle(&bundle_path, config).unwrap();
+
+    let mut frames: Vec<_> = std::fs::read_dir(&direct)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    frames.sort();
+    assert!(frames.len() > 4);
+    assert_eq!(frames.len(), std::fs::read_dir(&replayed).unwrap().count());
+    for frame in frames {
+        assert!(
+            std::fs::read(direct.join(&frame)).unwrap()
+                == std::fs::read(replayed.join(&frame)).unwrap(),
+            "{frame:?} differs between the scene and the bundle"
+        );
+    }
+}

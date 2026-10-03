@@ -264,22 +264,6 @@ fn unsupported_content(world: &mut World) -> Option<&'static str> {
     {
         return Some("video");
     }
-    if world
-        .query_filtered::<(), With<gaanim_renderer::effects::ChalkBrush>>()
-        .iter(world)
-        .next()
-        .is_some()
-    {
-        return Some("chalk strokes");
-    }
-    if world
-        .query_filtered::<(), With<gaanim_renderer::object_effects::ShaderEffect>>()
-        .iter(world)
-        .next()
-        .is_some()
-    {
-        return Some("shader effects on drawables");
-    }
     None
 }
 

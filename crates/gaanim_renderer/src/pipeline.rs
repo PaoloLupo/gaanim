@@ -2229,23 +2229,21 @@ fn compile_scene_with_pins(
 ) -> ComposedFrame {
     let mut extraction = extract_world(world, camera, pins, true);
     let effect_layers = if effects {
+        // As dense as the output, like a replay of the captured frame.
+        let output_width = world
+            .get_resource::<CanvasBackground>()
+            .map(|background| background.pixel_size.0);
         let pixels_per_unit = camera.map_or(DEFAULT_EFFECT_DENSITY, |camera| {
-            camera.pixels_per_unit() * orthographic_zoom(camera)
+            output_width
+                .and_then(|width| output_pixels_per_unit(camera, width))
+                .unwrap_or_else(|| camera.pixels_per_unit() * orthographic_zoom(camera))
         });
+        let evaluated = world_effects(world, &extraction.elements, extraction.background_time);
         divert_effects(
             &mut extraction.elements,
-            |entity| {
-                world
-                    .get::<crate::object_effects::ShaderEffect>(entity)
-                    .cloned()
-            },
+            &evaluated,
             extraction.background_time,
             pixels_per_unit,
-            |entity| {
-                world
-                    .get::<gaanim_animation::FloatSignal>(entity)
-                    .map(|signal| signal.value)
-            },
         )
     } else {
         Vec::new()
@@ -2267,7 +2265,20 @@ fn compile_scene_with_pins(
 }
 
 /// Pixels per scene unit of an effect texture without a camera.
-const DEFAULT_EFFECT_DENSITY: f64 = 120.0;
+pub const DEFAULT_EFFECT_DENSITY: f64 = 120.0;
+
+/// Pixels per scene unit of an effect texture in the interactive preview:
+/// as many as the preview shows.
+fn preview_effect_density(
+    camera: Option<&gaanim_math::ResolvedCamera>,
+    preview: Option<&crate::canvas::PreviewResolution>,
+) -> f64 {
+    camera.map_or(DEFAULT_EFFECT_DENSITY, |resolved| {
+        resolved.camera.pixels_per_unit()
+            * orthographic_zoom(&resolved.camera)
+            * resolved.viewport.scale
+    }) * preview.map_or(1.0, |preview| f64::from(preview.scale))
+}
 
 fn orthographic_zoom(camera: &gaanim_math::Camera) -> f64 {
     match camera.projection {
@@ -3075,34 +3086,85 @@ fn outermost_effect(
     found
 }
 
-/// Take the elements of each drawable with a shader effect out of
-/// `elements` and draw an image in their place, at the first one's position
-/// in draw order. Returns the layers that draw those images: their
-/// elements composed in world coordinates, a texture at `pixels_per_unit`
-/// around their bounds and the effect's passes at `time_seconds`, with
-/// uniforms read through `signal`. A drawable whose elements have no bounds
-/// is drawn plainly.
-fn divert_effects(
-    elements: &mut Vec<ExtractedElement>,
-    effect: impl Fn(Entity) -> Option<crate::object_effects::ShaderEffect>,
+/// The shader effects of the drawables `elements` belong to, evaluated at
+/// `time_seconds`: `effect` gives a drawable's effect and `signal` the
+/// values its uniforms read. Effects without an active pass are left out,
+/// so their drawables are drawn plainly.
+fn evaluate_effects(
+    elements: &[ExtractedElement],
     time_seconds: f64,
-    pixels_per_unit: f64,
+    effect: impl Fn(Entity) -> Option<crate::object_effects::ShaderEffect>,
     mut signal: impl FnMut(Entity) -> Option<f64>,
-) -> Vec<crate::object_effects::EffectLayer> {
-    use crate::object_effects::{EffectLayer, effect_image, effect_texture_size};
+) -> Vec<CapturedEffect> {
     let mut roots: Vec<Entity> = Vec::new();
-    for element in elements.iter() {
+    for element in elements {
         if let Some(root) = element.effect_root
             && !roots.contains(&root)
         {
             roots.push(root);
         }
     }
+    roots
+        .into_iter()
+        .filter_map(|root| {
+            let shader_effect = effect(root)?;
+            // Uniform values do not depend on the texture's size.
+            let request = shader_effect.post.request_with(
+                time_seconds,
+                kurbo::Rect::new(0.0, 0.0, 1.0, 1.0),
+                &mut signal,
+            )?;
+            Some(CapturedEffect {
+                root,
+                margin: shader_effect.margin.max(0.0),
+                passes: request.passes,
+            })
+        })
+        .collect()
+}
+
+/// [`evaluate_effects`] reading effects and signals from `world`.
+fn world_effects(
+    world: &World,
+    elements: &[ExtractedElement],
+    time_seconds: f64,
+) -> Vec<CapturedEffect> {
+    evaluate_effects(
+        elements,
+        time_seconds,
+        |entity| {
+            world
+                .get::<crate::object_effects::ShaderEffect>(entity)
+                .cloned()
+        },
+        |entity| {
+            world
+                .get::<gaanim_animation::FloatSignal>(entity)
+                .map(|signal| signal.value)
+        },
+    )
+}
+
+/// Take the elements of each drawable in `effects` out of `elements` and
+/// draw an image in their place, at the first one's position in draw
+/// order. Returns the layers that draw those images: their elements
+/// composed in world coordinates, a texture at `pixels_per_unit` around
+/// their bounds and the effect's passes at `time_seconds`. A drawable whose
+/// elements have no bounds is drawn plainly.
+fn divert_effects(
+    elements: &mut Vec<ExtractedElement>,
+    effects: &[CapturedEffect],
+    time_seconds: f64,
+    pixels_per_unit: f64,
+) -> Vec<crate::object_effects::EffectLayer> {
+    use crate::object_effects::{EffectLayer, effect_image, effect_texture_size};
+    let time = time_seconds as f32;
+    if !time.is_finite() {
+        return Vec::new();
+    }
     let mut layers = Vec::new();
-    for root in roots {
-        let Some(shader_effect) = effect(root) else {
-            continue;
-        };
+    for effect in effects {
+        let root = effect.root;
         let members: Vec<usize> = elements
             .iter()
             .enumerate()
@@ -3117,7 +3179,7 @@ fn divert_effects(
                     .or(elements[index].view_bounds)
             })
             .reduce(|bounds, next| bounds.union(next));
-        let margin = shader_effect.margin.max(0.0);
+        let margin = effect.margin;
         let Some(bounds) = bounds.map(|bounds| bounds.inflate(margin, margin)) else {
             continue;
         };
@@ -3125,11 +3187,11 @@ fn divert_effects(
             continue;
         };
         let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
-        let Some(request) = shader_effect
-            .post
-            .request_with(time_seconds, frame, &mut signal)
-        else {
-            continue;
+        let request = crate::post_process::PostProcessRequest {
+            passes: effect.passes.clone(),
+            frame,
+            time,
+            transition: None,
         };
         let mut scene = vello::Scene::new();
         let drawn: Vec<ExtractedElement> = members
@@ -3376,6 +3438,19 @@ pub struct CapturedElement {
     pub layer: Option<Arc<str>>,
     pub screen: Option<CapturedView>,
     pub echo_rank: u32,
+    /// The outermost ancestor (or the element itself) drawn through a
+    /// shader effect, and the world rectangle the element reaches.
+    pub effect_root: Option<Entity>,
+    pub effect_extent: Option<kurbo::Rect>,
+}
+
+/// A drawable's shader effect evaluated for one frame: its margin and its
+/// passes with their uniform values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CapturedEffect {
+    pub root: Entity,
+    pub margin: f64,
+    pub passes: Vec<(crate::post_process::PostProcessShader, Vec<f32>)>,
 }
 
 /// A camera view screen resolved against a captured frame.
@@ -3426,12 +3501,16 @@ pub struct FrameCapture {
     /// Drawables in draw order.
     pub elements: Vec<CapturedElement>,
     pub transition: Option<CapturedTransition>,
+    /// Shader effects of the drawables, in the order they first draw.
+    pub effects: Vec<CapturedEffect>,
 }
 
 /// Capture the drawables of the world as it stands, without culling, for a
 /// replay that composites the same frame with [`compose_captured`].
 pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) -> FrameCapture {
-    capture_extraction(extract_world(world, camera, None, false))
+    let extraction = extract_world(world, camera, None, false);
+    let effects = world_effects(world, &extraction.elements, extraction.background_time);
+    capture_extraction(extraction, effects)
 }
 
 /// [`capture_frame`] for a motion blur sub-frame: like
@@ -3442,12 +3521,15 @@ pub fn capture_frame_pinned(
     camera: Option<&gaanim_math::Camera>,
     pins: &mut PinnedElements,
 ) -> FrameCapture {
-    capture_extraction(extract_world(world, camera, Some(pins), false))
+    let extraction = extract_world(world, camera, Some(pins), false);
+    let effects = world_effects(world, &extraction.elements, extraction.background_time);
+    capture_extraction(extraction, effects)
 }
 
-fn capture_extraction(extraction: WorldExtraction) -> FrameCapture {
+fn capture_extraction(extraction: WorldExtraction, effects: Vec<CapturedEffect>) -> FrameCapture {
     FrameCapture {
         background_time: extraction.background_time,
+        effects,
         transition: extraction
             .transition
             .filter(|frame| !frame.is_empty())
@@ -3496,6 +3578,8 @@ fn capture_extraction(extraction: WorldExtraction) -> FrameCapture {
                     }
                 }),
                 echo_rank: element.echo_rank,
+                effect_root: element.effect_root,
+                effect_extent: element.effect_extent,
             })
             .collect(),
     }
@@ -3514,7 +3598,7 @@ pub fn compose_captured(
     pixels_per_unit: Option<f64>,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
 ) -> vello::Scene {
-    compose_captured_frame(frame, store, background, pixels_per_unit, gpu, 0.0).flattened()
+    compose_captured_layers(frame, store, background, pixels_per_unit, gpu, 0.0, None).flattened()
 }
 
 /// [`compose_captured`] with a shader background animated `rest` seconds
@@ -3527,10 +3611,13 @@ pub fn compose_captured_at(
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
     rest: f64,
 ) -> vello::Scene {
-    compose_captured_frame(frame, store, background, pixels_per_unit, gpu, rest).flattened()
+    compose_captured_layers(frame, store, background, pixels_per_unit, gpu, rest, None).flattened()
 }
 
-/// [`compose_captured_at`] keeping a shader transition's segments apart.
+/// [`compose_captured_at`] keeping a shader transition's segments apart,
+/// with the drawables under a shader effect drawn as the images of
+/// [`ComposedFrame::effects`], whose textures hold `effect_density` pixels
+/// per scene unit.
 pub fn compose_captured_frame(
     frame: &FrameCapture,
     store: &mut crate::fragment::FragmentStore,
@@ -3538,9 +3625,32 @@ pub fn compose_captured_frame(
     pixels_per_unit: Option<f64>,
     gpu: Option<&mut Option<ShaderBackgroundRequest>>,
     rest: f64,
+    effect_density: f64,
+) -> ComposedFrame {
+    compose_captured_layers(
+        frame,
+        store,
+        background,
+        pixels_per_unit,
+        gpu,
+        rest,
+        Some(effect_density),
+    )
+}
+
+/// [`compose_captured_frame`]; without `effect_density`, drawables under a
+/// shader effect are drawn plainly.
+fn compose_captured_layers(
+    frame: &FrameCapture,
+    store: &mut crate::fragment::FragmentStore,
+    background: Option<(&CanvasBackground, (u32, u32))>,
+    pixels_per_unit: Option<f64>,
+    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    rest: f64,
+    effect_density: Option<f64>,
 ) -> ComposedFrame {
     let margin = antialias_margin(pixels_per_unit);
-    let elements: Vec<ExtractedElement> = frame
+    let mut elements: Vec<ExtractedElement> = frame
         .elements
         .iter()
         .map(|element| {
@@ -3565,8 +3675,8 @@ pub fn compose_captured_frame(
                 opacity_group: element.opacity_group,
                 group_opacity: element.group_opacity,
                 group_shadow: element.group_shadow.clone(),
-                effect_root: None,
-                effect_extent: None,
+                effect_root: element.effect_root,
+                effect_extent: element.effect_extent,
                 render_order: element.render_order,
                 scene,
                 clip_mask: element.clip_mask.clone(),
@@ -3594,15 +3704,26 @@ pub fn compose_captured_frame(
             }
         })
         .collect();
+    let effects = match effect_density {
+        Some(density) if !frame.effects.is_empty() => divert_effects(
+            &mut elements,
+            &frame.effects,
+            frame.background_time,
+            density,
+        ),
+        _ => Vec::new(),
+    };
     let transition = frame.transition.as_ref().map(CapturedTransition::frame);
-    compose_frame(
+    let mut composed = compose_frame(
         &elements,
         transition.as_ref(),
         background,
         frame.background_time,
         rest,
         gpu,
-    )
+    );
+    composed.effects = effects;
+    composed
 }
 
 /// Resource: what the canvas blends over the main scene under a shader
@@ -3647,11 +3768,12 @@ pub fn external_frame_system(
     mut external: ResMut<ExternalFrame>,
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     canvas_bg: Option<Res<CanvasBackground>>,
-    (mut shader_frame, preview, ambient, mut transition_layers): (
+    (mut shader_frame, preview, ambient, mut transition_layers, mut effect_layers): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
         Option<Res<gaanim_animation::AmbientClock>>,
         Option<ResMut<TransitionLayers>>,
+        Option<ResMut<EffectLayers>>,
     ),
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     live: Option<Res<gaanim_animation::live::LiveOverlay>>,
@@ -3683,7 +3805,13 @@ pub fn external_frame_system(
         pixels_per_unit,
         shader_frame.is_some().then_some(&mut shader_request),
         ambient.map_or(0.0, |clock| clock.rest),
+        preview_effect_density(gaanim_camera.as_deref(), preview.as_deref()),
     );
+    if let Some(published) = effect_layers.as_deref_mut()
+        && !(published.0.is_empty() && composed.effects.is_empty())
+    {
+        published.0 = std::mem::take(&mut composed.effects);
+    }
     if let Some(overlay) = live.as_deref() {
         append_live_overlay(composed.top_mut(), overlay);
     }
@@ -4269,23 +4397,14 @@ pub fn gaanim_render_system(
     let layers = match effect_layers.as_deref_mut() {
         Some(_) => {
             let pixels_per_unit =
-                gaanim_camera
-                    .as_deref()
-                    .map_or(DEFAULT_EFFECT_DENSITY, |resolved| {
-                        resolved.camera.pixels_per_unit()
-                            * orthographic_zoom(&resolved.camera)
-                            * resolved.viewport.scale
-                    })
-                    * preview
-                        .as_deref()
-                        .map_or(1.0, |preview| f64::from(preview.scale));
-            divert_effects(
+                preview_effect_density(gaanim_camera.as_deref(), preview.as_deref());
+            let evaluated = evaluate_effects(
                 local_extracted,
-                |entity| effect_query.get(entity).ok().cloned(),
                 time_seconds,
-                pixels_per_unit,
+                |entity| effect_query.get(entity).ok().cloned(),
                 |entity| signal_query.get(entity).ok().map(|signal| signal.value),
-            )
+            );
+            divert_effects(local_extracted, &evaluated, time_seconds, pixels_per_unit)
         }
         None => Vec::new(),
     };
@@ -5498,13 +5617,14 @@ mod tests {
             },
             margin: 0.5,
         };
-        let layers = divert_effects(
-            &mut elements,
-            |entity| (entity == root).then(|| effect.clone()),
+        let effects = evaluate_effects(
+            &elements,
             1.0,
-            10.0,
+            |entity| (entity == root).then(|| effect.clone()),
             |_| None,
         );
+        assert_eq!(effects.len(), 1);
+        let layers = divert_effects(&mut elements, &effects, 1.0, 10.0);
         // The three members became one element, where the first one was.
         assert_eq!(elements.len(), 3);
         assert!(elements.iter().all(|element| element.effect_root.is_none()));
@@ -5523,7 +5643,8 @@ mod tests {
         );
         // A drawable without the component is drawn plainly.
         let mut plain = vec![member(0.0, Some(other))];
-        assert!(divert_effects(&mut plain, |_| None, 1.0, 10.0, |_| None).is_empty());
+        let none = evaluate_effects(&plain, 1.0, |_| None, |_| None);
+        assert!(divert_effects(&mut plain, &none, 1.0, 10.0).is_empty());
         assert_eq!(plain.len(), 1);
     }
 
