@@ -125,6 +125,8 @@ pub struct ExportCommand {
     pub to: Option<ExportBound>,
     /// Recording rate of a playback bundle.
     pub fps: Option<u32>,
+    /// `--frame`: instants written as single PNGs instead of a range.
+    pub frames: Vec<ExportBound>,
 }
 
 impl Default for ExportCommand {
@@ -141,6 +143,7 @@ impl Default for ExportCommand {
             from: None,
             to: None,
             fps: None,
+            frames: Vec::new(),
         }
     }
 }
@@ -160,6 +163,20 @@ impl ExportCommand {
                             .filter(|value| (1..=240).contains(value))
                             .ok_or_else(|| "--fps requires an integer from 1 to 240".to_string())?,
                     );
+                }
+                "--frame" => {
+                    index += 1;
+                    let list = args
+                        .get(index)
+                        .filter(|list| !list.trim().is_empty())
+                        .ok_or_else(|| {
+                            "--frame requires seconds or marker names, e.g. 3,11.4".to_string()
+                        })?;
+                    for value in list.split(',') {
+                        command
+                            .frames
+                            .push(parse_export_seconds("--frame", Some(&value.to_string()))?);
+                    }
                 }
                 flag @ ("--from" | "--to") => {
                     index += 1;
@@ -255,7 +272,36 @@ impl ExportCommand {
         if format != "mp4" && self.encoder != VideoEncoder::Auto {
             return Err("--encoder requires MP4 output".to_string());
         }
+        if !self.frames.is_empty() {
+            if format != "png" {
+                return Err("--frame writes PNG files; use an output ending in .png".to_string());
+            }
+            if self.from.is_some() || self.to.is_some() {
+                return Err("--frame exports single instants; drop --from and --to".to_string());
+            }
+        }
         validate_export_range(self.from.as_ref(), self.to.as_ref())
+    }
+
+    /// The PNG each `--frame` instant is written to: `output` itself for one
+    /// instant, otherwise `output` with the instant's 1-based position
+    /// appended (`still.png` -> `still_1.png`, `still_2.png`).
+    pub fn frame_outputs(&self, output: &str) -> Vec<PathBuf> {
+        let path = Path::new(output);
+        if self.frames.len() <= 1 {
+            return vec![path.to_path_buf()];
+        }
+        let stem = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("frame");
+        let extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("png");
+        (1..=self.frames.len())
+            .map(|position| path.with_file_name(format!("{stem}_{position}.{extension}")))
+            .collect()
     }
 }
 
@@ -297,6 +343,73 @@ pub fn video_config(
     config.transparent = command.transparent;
     config.headless = true;
     config
+}
+
+/// Render each `--frame` instant of `canvas` as exactly one PNG, seeking the
+/// timeline to it as `gaanim --diff` does, and return the files written.
+pub fn export_frames(
+    canvas: gaanim_api::canvas::SceneModel,
+    command: &ExportCommand,
+    output: &str,
+) -> Result<Vec<PathBuf>, String> {
+    let markers = canvas.markers();
+    let markers: Vec<(&str, f64)> = markers
+        .iter()
+        .map(|marker| (marker.name.as_str(), marker.time))
+        .collect();
+    let times = command
+        .frames
+        .iter()
+        .map(|bound| {
+            resolve_export_bound("--frame", Some(bound), &markers)
+                .map(|time| time.expect("a --frame bound is present"))
+        })
+        .collect::<Result<Vec<f64>, String>>()?;
+    let mut config = ExportConfig::new(output).with_quality(quality_preset(&command.quality));
+    config.width = command.width;
+    config.height = command.height;
+    config.fit = command.fit;
+    config.aspect_ratio = AspectRatioPreset::Custom;
+    config.transparent = command.transparent;
+    config.headless = true;
+    let paths = command.frame_outputs(output);
+    for path in &paths {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+    }
+    let transparent = command.transparent;
+    let mut written = Vec::with_capacity(paths.len());
+    let mut result = Ok(());
+    gaanim_export::prelude::capture_scene_direct_streaming(
+        config,
+        &times,
+        move |world| gaanim_api::runtime::replay_canvas_into(world, canvas),
+        |frame| {
+            let path = &paths[written.len()];
+            match gaanim_export::prelude::write_png_frame(
+                path,
+                frame.rgba,
+                frame.width,
+                frame.height,
+                transparent,
+            ) {
+                Ok(()) => {
+                    written.push(path.clone());
+                    std::ops::ControlFlow::Continue(())
+                }
+                Err(error) => {
+                    result = Err(error.to_string());
+                    std::ops::ControlFlow::Break(())
+                }
+            }
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    result.map(|()| written)
 }
 
 /// Frames per second a bundle records for an export `quality`: the rate a
@@ -373,6 +486,12 @@ pub fn export_bundle_video(command: &ExportCommand) -> Result<(), CommandError> 
         .as_deref()
         .ok_or_else(|| CommandError::Usage("a bundle to export is required".to_string()))?;
     let (output, format) = command.output_format().map_err(CommandError::Usage)?;
+    if !command.frames.is_empty() {
+        return Err(CommandError::Usage(
+            "--frame renders a script or project; for a bundle, export a short range with --from and --to"
+                .to_string(),
+        ));
+    }
     if format == gaanim_bundle::EXTENSION {
         return Err(CommandError::Usage(
             "the input is already a playback bundle; export it to mp4, webm, webp, gif, or png"
@@ -419,6 +538,56 @@ mod tests {
         assert_eq!(bundle_title(&project.entry).as_deref(), Some("tesis"));
         let loose = temp.path().join("demo.py");
         assert_eq!(bundle_title(&loose).as_deref(), Some("demo"));
+    }
+
+    #[test]
+    fn frame_exports_single_instants_as_png() {
+        let one = ExportCommand::parse(&args(&["scene.py", "-o", "still.png", "--frame", "11.4"]))
+            .unwrap();
+        assert_eq!(one.frames, vec![ExportBound::Seconds(11.4)]);
+        assert!(one.validate_video("png").is_ok());
+        assert_eq!(
+            one.frame_outputs("out/still.png"),
+            vec![PathBuf::from("out/still.png")]
+        );
+
+        let many = ExportCommand::parse(&args(&[
+            "scene.py",
+            "-o",
+            "still.png",
+            "--frame",
+            "3, climax",
+        ]))
+        .unwrap();
+        assert_eq!(
+            many.frames,
+            vec![
+                ExportBound::Seconds(3.0),
+                ExportBound::Marker("climax".into())
+            ]
+        );
+        assert_eq!(
+            many.frame_outputs("out/still.png"),
+            vec![
+                PathBuf::from("out/still_1.png"),
+                PathBuf::from("out/still_2.png")
+            ]
+        );
+
+        assert!(one.validate_video("mp4").is_err());
+        let ranged = ExportCommand::parse(&args(&[
+            "scene.py",
+            "-o",
+            "still.png",
+            "--frame",
+            "3",
+            "--from",
+            "1",
+        ]))
+        .unwrap();
+        assert!(ranged.validate_video("png").is_err());
+        assert!(ExportCommand::parse(&args(&["scene.py", "--frame", "-1"])).is_err());
+        assert!(ExportCommand::parse(&args(&["scene.py", "--frame"])).is_err());
     }
 
     #[test]

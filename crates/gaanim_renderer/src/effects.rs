@@ -49,6 +49,13 @@ pub enum StrokeAlign {
     Outside,
 }
 
+/// Component: the stroke pen follows the scale the drawable accumulates from
+/// itself, its groups and coordinate views, like a stroke drawn on paper
+/// that is then enlarged. Without it a stroke keeps its width in scene units.
+/// A non-uniform scale widens the pen along its axis.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StrokeScalesWithObject;
+
 /// Component: Adds an outer glow outline effect to a 2D Mobject.
 #[derive(Component, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -16,7 +16,9 @@ instalar una versión nueva, sigue
 Publicada el 3 de octubre de 2026. Corrige lo que se vio al hacer los primeros
 videos con 0.8.0: sombras de curvas sin relleno, cotas demasiado gruesas, un
 `stagger` que cambiaba de orden y documentos Typst que se ensanchaban hasta la
-página. Lee «Al actualizar» si usas `scene.text.typst` con párrafos largos.
+página. Llegan `gaanim export --frame`, contadores con ancho reservado sin
+ceros y trazos que escalan con su figura. Lee «Al actualizar» si usas
+`scene.text.typst` con párrafos largos.
 
 == Cambios
 
@@ -24,6 +26,16 @@ página. Lee «Al actualizar» si usas `scene.text.typst` con párrafos largos.
   como `arrow`, para cotas finas. Para una cota completa con líneas de
   extensión, usa `scene.mechanics.dimension`. Lee
   #link("/referencia/geometria/")[Geometría].
+- `gaanim export <escena> --output f.png --frame 11.4` escribe exactamente un
+  PNG con lo que se ve en ese instante. Acepta varios instantes o marcadores
+  separados por comas, que se escriben como `f_1.png`, `f_2.png`… Lee
+  #link("/referencia/cli/")[CLI].
+- `scene.viz.rolling_number(..., pad=" ")` deja vacías las posiciones que
+  reserva `min_digits` en lugar de dibujar ceros: el contador ocupa siempre lo
+  mismo y el prefijo no se desplaza.
+- `drawable.scale_stroke_with_object()` o `stroke(..., scale_with_object=True)`
+  hacen que el ancho del trazo siga la escala de la figura y de sus grupos; en
+  un grupo o un SVG se aplica a todos sus trazos.
 
 == Al actualizar
 

@@ -1131,6 +1131,14 @@ impl DrawableHandle {
         self.update_style(|spec| spec.stroke_align = Some(align))
     }
 
+    /// Let the stroke pen follow the scale the drawable accumulates from
+    /// itself, its groups and coordinate views (`enabled`), or keep it in
+    /// scene units (the default). Applies to every stroke of a group or an
+    /// imported SVG. This is declaration state: it is not animated or cut.
+    pub fn scale_stroke_with_object(self, enabled: bool) -> Self {
+        self.update_style(|spec| spec.stroke_scales_with_object = Some(enabled))
+    }
+
     /// Apply a complete native stroke, including cap, join, miter and dashes.
     pub fn stroke_with_style(self, brush: Brush, style: gaanim_core::kurbo::Stroke) -> Self {
         self.update_style(|spec| {

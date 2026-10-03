@@ -2944,14 +2944,22 @@ class Drawable:
             result = drawable.no_fill()
         """
         ...
-    def stroke(self, paint: Paint, width: float, *, align: Optional[Literal["inside", "center", "outside"]] = None) -> Self:
+    def stroke(
+        self,
+        paint: Paint,
+        width: float,
+        *,
+        align: Optional[Literal["inside", "center", "outside"]] = None,
+        scale_with_object: Optional[bool] = None,
+    ) -> Self:
         """Apply a stroke whose width is measured in logical scene units.
 
         The width does not follow the drawable's scale: ``scale_to``,
         ``scale_to_3d``, ``matrix_to``, skews, group scales and their
         animations resize the shape, never the pen, which stays round and
         equally wide on every side. This includes an imported SVG root or
-        part scaled to fit the scene.
+        part scaled to fit the scene. ``scale_with_object=True`` makes the
+        width follow that scale instead, as ``scale_stroke_with_object`` does.
 
         ``align`` places the stroke on closed contours, including every text
         glyph. By default it stays inside the shape, so ``write`` draws a
@@ -2967,6 +2975,21 @@ class Drawable:
         ...
     def stroke_style(self, style: StrokeStyle) -> Self:
         """Apply complete stroke geometry and return this drawable."""
+        ...
+    def scale_stroke_with_object(self, enabled: bool = True) -> Self:
+        """Let the stroke width follow the drawable's accumulated scale.
+
+        Scaling the drawable, its groups or a coordinate view then widens or
+        narrows the pen with the shape, as if the drawing were enlarged; a
+        non-uniform scale widens it along its axis. On a group or an imported
+        SVG it applies to every stroke inside. ``enabled=False`` keeps the
+        width in scene units again (the default). This is declaration state
+        and is not animated.
+
+        Example:
+            face = scene.group([head, brows, nose]).scale_stroke_with_object()
+            face.scale_to(1.18)  # The brows thicken with the head.
+        """
         ...
     def no_stroke(self) -> Self:
         """Apply no stroke to this drawable and return the result.
@@ -7820,6 +7843,7 @@ class Visualization:
         ...
     def rolling_number(
         self, value: float = 0.0, *, decimals: int = 0, min_digits: int = 1,
+        pad: Literal["0", " "] = "0",
         group_separator: str = "", decimal_separator: str = ".",
         prefix: str = "", suffix: str = "", show_plus: bool = False,
         font_family: Optional[str] = None, weight: Optional[int] = None,
@@ -7828,8 +7852,10 @@ class Visualization:
     ) -> RollingNumber:
         """Create a right-anchored rolling counter with fixed-width digit cells.
 
-        decimals is 0..6; min_digits counts zero-padded integer positions (1..15;
-        their sum is at most 15). Group/decimal separators are zero-or-one/one
+        decimals is 0..6; min_digits counts reserved integer positions (1..15;
+        their sum is at most 15). pad fills the unused ones: "0" draws leading
+        zeros, " " leaves blank cells of the same width, so the display keeps
+        its width and its prefix stays put as the value grows. Group/decimal separators are zero-or-one/one
         characters. Affixes are single-line, at most 256 UTF-8 bytes combined.
         Sizes and spacing use scene units; line_height is a digit-ink-height multiplier
         of at least 1. All dimensions must be finite, font_size positive and

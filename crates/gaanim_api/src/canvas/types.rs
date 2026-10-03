@@ -952,6 +952,9 @@ pub struct ObjectSpec {
     /// Stroke placement relative to closed contours; `None` keeps the
     /// renderer default (inside closed shapes).
     pub stroke_align: Option<gaanim_renderer::effects::StrokeAlign>,
+    /// Whether the stroke pen follows the drawable's accumulated scale;
+    /// `None` keeps it in scene units.
+    pub stroke_scales_with_object: Option<bool>,
     /// This group is the public root of an imported SVG hierarchy.
     pub(crate) svg_root: bool,
     /// Root of the imported SVG this group or path belongs to. Stroke widths
@@ -1099,6 +1102,7 @@ impl ObjectSpec {
             stroke_style: None,
             stroke_overridden: false,
             stroke_align: None,
+            stroke_scales_with_object: None,
             svg_root: false,
             svg_owner: None,
             glow: None,

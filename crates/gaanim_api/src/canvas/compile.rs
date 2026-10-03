@@ -10145,6 +10145,21 @@ impl SceneModel {
                 builder.commands.entity(entity).insert(align);
             }
         }
+        if let Some(scales) = spec.stroke_scales_with_object
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            let entities: Vec<_> = std::iter::once(state.entity)
+                .chain(state.child_spans.iter().map(|child| child.entity))
+                .collect();
+            for entity in entities {
+                let mut entity = builder.commands.entity(entity);
+                if scales {
+                    entity.insert(gaanim_renderer::effects::StrokeScalesWithObject);
+                } else {
+                    entity.remove::<gaanim_renderer::effects::StrokeScalesWithObject>();
+                }
+            }
+        }
         if let Some(blend) = spec.blend {
             Self::apply_blend(builder, mref.id, blend);
         }

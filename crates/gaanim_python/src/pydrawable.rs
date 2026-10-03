@@ -2161,14 +2161,18 @@ impl PyDrawable {
         paint: PyPaint,
         width: f64,
         align: Option<&str>,
+        scale_with_object: Option<bool>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         let align = align.map(parse_stroke_align).transpose()?;
-        let handle = self.0.clone().stroke_brush(paint.0, width);
-        Ok(Self(match align {
-            Some(align) => handle.stroke_align(align),
-            None => handle,
-        }))
+        let mut handle = self.0.clone().stroke_brush(paint.0, width);
+        if let Some(align) = align {
+            handle = handle.stroke_align(align);
+        }
+        if let Some(enabled) = scale_with_object {
+            handle = handle.scale_stroke_with_object(enabled);
+        }
+        Ok(Self(handle))
     }
 
     pub(crate) fn stroke_style_impl(&self, style: PyStrokeStyle) -> PyResult<Self> {
@@ -3177,14 +3181,30 @@ impl PyDrawable {
         let result = slf.borrow().no_fill_impl();
         same_drawable(slf, result)
     }
-    #[pyo3(signature = (paint, width, *, align=None))]
+    #[pyo3(signature = (paint, width, *, align=None, scale_with_object=None))]
     fn stroke<'py>(
         slf: &Bound<'py, Self>,
         paint: PyPaint,
         width: f64,
         align: Option<&str>,
+        scale_with_object: Option<bool>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let result = slf.borrow().stroke_impl(paint, width, align);
+        let result = slf
+            .borrow()
+            .stroke_impl(paint, width, align, scale_with_object);
+        same_drawable(slf, result)
+    }
+    /// Let the stroke width follow the drawable's scale, or keep it in scene
+    /// units with `enabled=False`.
+    #[pyo3(signature = (enabled=true))]
+    fn scale_stroke_with_object<'py>(
+        slf: &Bound<'py, Self>,
+        enabled: bool,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let result = Ok(Self(
+            slf.borrow().0.clone().scale_stroke_with_object(enabled),
+        ));
         same_drawable(slf, result)
     }
     /// Apply cap, join, miter, and dash geometry from a reusable StrokeStyle.
@@ -3910,14 +3930,15 @@ macro_rules! media_drawable_methods {
         Ok(slf)
     }
 
-    #[pyo3(signature = (paint, width, *, align=None))]
+    #[pyo3(signature = (paint, width, *, align=None, scale_with_object=None))]
     fn stroke<'py>(
         slf: PyRef<'py, Self>,
         paint: PyPaint,
         width: f64,
         align: Option<&str>,
+        scale_with_object: Option<bool>,
     ) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).stroke_impl(paint, width, align)?;
+        PyDrawable(slf.handle()).stroke_impl(paint, width, align, scale_with_object)?;
         Ok(slf)
     }
 

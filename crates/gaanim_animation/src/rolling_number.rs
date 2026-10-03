@@ -21,6 +21,9 @@ pub enum RollingMode {
 pub struct RollingNumberOptions {
     pub decimals: usize,
     pub min_digits: usize,
+    /// Fill of the leading places `min_digits` reserves: `'0'` draws zeros,
+    /// `' '` leaves the cells blank but keeps their width.
+    pub pad: char,
     pub group_separator: String,
     pub decimal_separator: String,
     pub prefix: String,
@@ -45,6 +48,7 @@ impl Default for RollingNumberOptions {
         Self {
             decimals: 0,
             min_digits: 1,
+            pad: '0',
             group_separator: String::new(),
             decimal_separator: ".".into(),
             prefix: String::new(),
@@ -68,6 +72,9 @@ impl RollingNumberOptions {
             || self.min_digits + self.decimals > 15
         {
             return Err("decimals must be 0..6, min_digits 1..15, and their sum at most 15".into());
+        }
+        if !matches!(self.pad, '0' | ' ') {
+            return Err("pad must be \"0\" or \" \"".into());
         }
         if !self.font_size.is_finite()
             || self.font_size <= 0.0
@@ -264,7 +271,9 @@ impl RollingNumber {
         let height = self.digit_height * o.line_height;
         let mut path = BezPath::new();
         let mut x = 0.0;
-        let mut append = |ch: char, digit: Option<(u8, f64)>| {
+        // `blank` hides a glyph but keeps its cell: a leading wheel shows
+        // nothing instead of its 0, and rolls its next digit in from blank.
+        let mut append = |ch: char, digit: Option<(u8, f64)>, blank: bool| {
             let width = if digit.is_some() {
                 self.digit_width
             } else {
@@ -272,7 +281,7 @@ impl RollingNumber {
             };
             if let Some((number, phase)) = digit {
                 for (n, offset) in [(number, phase), ((number + 1) % 10, phase - 1.0)] {
-                    if offset.abs() >= 1.0 {
+                    if offset.abs() >= 1.0 || (blank && n == 0) {
                         continue;
                     }
                     let glyph = &self.glyphs[&char::from(b'0' + n)];
@@ -280,7 +289,7 @@ impl RollingNumber {
                     let dy = offset * height * if o.roll_up { 1.0 } else { -1.0 };
                     append_clipped(&mut path, &glyph.path, dx, dy, height * 0.5);
                 }
-            } else {
+            } else if !blank {
                 let glyph = &self.glyphs[&ch];
                 path.extend(
                     (Affine::translate((x, 0.0)) * &glyph.path)
@@ -292,10 +301,10 @@ impl RollingNumber {
             x += width + o.digit_spacing;
         };
         if o.validate_value(value).is_err() {
-            append('—', None);
+            append('—', None, false);
         } else {
             for ch in o.prefix.chars() {
-                append(ch, None);
+                append(ch, None, false);
             }
             // The right anchor keeps digit positions stable across sign changes.
             let sign = if value < 0.0 {
@@ -306,7 +315,7 @@ impl RollingNumber {
                 ' '
             };
             if sign != ' ' {
-                append(sign, None);
+                append(sign, None, false);
             }
             let units = value.abs() * 10_f64.powi(o.decimals as i32);
             // Remove representation noise at exact user-authored display boundaries.
@@ -324,18 +333,22 @@ impl RollingNumber {
             let total = integer_digits.max(o.min_digits) + o.decimals;
             for place in (0..total).rev() {
                 let state = wheel(units, place, o.mode, continuous);
-                append('0', Some(state));
+                // A leading place: above the units digit, with nothing
+                // settled in it yet.
+                let leading =
+                    o.pad == ' ' && place > o.decimals && units < 10_f64.powi(place as i32);
+                append('0', Some(state), leading);
                 if place == o.decimals && o.decimals > 0 {
-                    append(o.decimal_separator.chars().next().unwrap(), None);
+                    append(o.decimal_separator.chars().next().unwrap(), None, false);
                 } else if place > o.decimals
                     && (place - o.decimals).is_multiple_of(3)
                     && let Some(ch) = o.group_separator.chars().next()
                 {
-                    append(ch, None);
+                    append(ch, None, leading);
                 }
             }
             for ch in o.suffix.chars() {
-                append(ch, None);
+                append(ch, None, false);
             }
         }
         let width = (x - o.digit_spacing).max(0.0);
@@ -500,6 +513,39 @@ mod tests {
             unpadded.geometry(100.0).0
         );
         assert!(unpadded.geometry(999_999_999_999_999.0).1.min.x.is_finite());
+    }
+
+    #[test]
+    fn space_padding_reserves_blank_leading_cells() {
+        let registry = FontRegistry::new();
+        let options = |pad| RollingNumberOptions {
+            min_digits: 4,
+            pad,
+            prefix: "N".into(),
+            group_separator: ",".into(),
+            ..Default::default()
+        };
+        let spaced = RollingNumber::new(&registry, options(' ')).unwrap();
+        let zeros = RollingNumber::new(&registry, options('0')).unwrap();
+        // The reserved width does not depend on the value or the pad...
+        let (small, small_bounds) = spaced.geometry(7.0);
+        let (large, large_bounds) = spaced.geometry(1234.0);
+        assert_eq!(small_bounds, large_bounds);
+        assert_eq!(small_bounds, zeros.geometry(7.0).1);
+        // ...but blank cells and their separator draw nothing.
+        assert!(!small.is_empty());
+        assert!(
+            small.elements().len() < zeros.geometry(7.0).0.elements().len(),
+            "leading zeros and the separator must not be drawn"
+        );
+        // A full display draws the same glyphs whatever the pad.
+        assert_eq!(large, zeros.geometry(1234.0).0);
+        // A carry rolls the next digit in from a blank cell.
+        assert_ne!(spaced.geometry(9.5).0, spaced.geometry(9.0).0);
+        let mut invalid = options('x');
+        assert!(invalid.validate().is_err());
+        invalid.pad = ' ';
+        assert!(invalid.validate().is_ok());
     }
 
     #[test]

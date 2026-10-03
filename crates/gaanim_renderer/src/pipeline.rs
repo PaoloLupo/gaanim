@@ -3,7 +3,7 @@ use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
     BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ClipMask, DropShadow,
     ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
-    StrokeProfile, VectorOutlineBinding, ViewLayer,
+    StrokeProfile, StrokeScalesWithObject, VectorOutlineBinding, ViewLayer,
 };
 use crate::fragment::{FragmentParts, FragmentRecipe, build_fragment, fragment_recipe};
 use crate::lottie::LottiePlayer;
@@ -2181,6 +2181,7 @@ fn extract_world(
         Option<&WriteTipGlow>,
         Option<&StrokeAlign>,
         Option<&StrokeProfile>,
+        Has<StrokeScalesWithObject>,
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
@@ -2221,6 +2222,7 @@ fn extract_world(
             tip_glow_opt,
             stroke_align_opt,
             stroke_profile_opt,
+            stroke_scales,
         )) = query_effects.get(world, entity)
         else {
             continue;
@@ -2265,7 +2267,7 @@ fn extract_world(
         };
         let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
         let elem_stroke_style = stroke_opt.map(|s| &s.style);
-        let stroke_view = if elem_stroke.is_some() || glow_opt.is_some() {
+        let stroke_view = if !stroke_scales && (elem_stroke.is_some() || glow_opt.is_some()) {
             scene_unit_stroke_transform(transform.affine_2d)
         } else {
             None
@@ -3172,6 +3174,7 @@ pub fn gaanim_render_system(
         Option<Ref<Visible>>,
         Option<Ref<StrokeAlign>>,
         Option<Ref<StrokeProfile>>,
+        Has<StrokeScalesWithObject>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     (mut shader_frame, preview, live, ambient): (
@@ -3273,17 +3276,19 @@ pub fn gaanim_render_system(
             visible_ref,
             stroke_align_ref,
             stroke_profile_ref,
+            stroke_scales,
         ) = query_effects.get(entity).unwrap_or((
-            None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, false,
         ));
         let camera_view = camera_views.get(&entity);
 
         // Invalidate before skipping hidden or culled objects. Their new geometry
         // may stop changing before they become visible again (e.g. a rewound Lottie).
-        let stroke_view = if stroke_ref
-            .as_ref()
-            .is_some_and(|stroke| stroke.brush.is_some())
-            || glow_ref.is_some()
+        let stroke_view = if !stroke_scales
+            && (stroke_ref
+                .as_ref()
+                .is_some_and(|stroke| stroke.brush.is_some())
+                || glow_ref.is_some())
         {
             scene_unit_stroke_transform(transform.affine_2d)
         } else {
@@ -4140,6 +4145,75 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_eq!(live.encoding().path_data, fresh.encoding().path_data);
+    }
+
+    #[test]
+    fn scaling_strokes_follow_the_scale_of_their_group() {
+        use gaanim_math::SpatialTransform;
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>().add_systems(
+            Update,
+            (
+                gaanim_scene::transform_propagation_system,
+                gaanim_render_system,
+            )
+                .chain(),
+        );
+        let group = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default().with_scale_2d(3.0, 3.0),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        let path = kurbo::BezPath::from_svg("M 0 0 L 1 1 L 2 0").unwrap();
+        let style = kurbo::Stroke::new(0.04);
+        let brush = peniko::Brush::Solid(peniko::Color::BLACK);
+        let mut spawn = |raw: u64, scales: bool| {
+            let id = ObjectId::from_raw(raw);
+            let mut entity = app.world_mut().spawn((
+                MobjectId(id),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(Arc::new(path.clone())),
+                StrokeBrush {
+                    brush: Some(brush.clone()),
+                    style: style.clone(),
+                },
+                Visible,
+                ChildOf(group),
+            ));
+            if scales {
+                entity.insert(StrokeScalesWithObject);
+            }
+            id
+        };
+        let fixed = spawn(93, false);
+        let scaling = spawn(94, true);
+        app.update();
+        let cache = app.world().resource::<GaanimRenderCache>();
+        // The scaling stroke keeps its local pen, which the group then
+        // scales; the fixed one is drawn through the scene-unit correction.
+        let mut local = vello::Scene::new();
+        local.stroke(&style, kurbo::Affine::IDENTITY, &brush, None, &path);
+        assert_eq!(
+            cache.fragment_cache[&scaling].encoding().path_data,
+            local.encoding().path_data
+        );
+        assert_ne!(
+            cache.fragment_cache[&fixed].encoding().path_data,
+            local.encoding().path_data
+        );
+        let headless = compile_scene_from_world(app.world_mut(), None);
+        let live = app
+            .world_mut()
+            .query::<&VelloScene2d>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(headless.encoding().path_data, live.encoding().path_data);
     }
 
     #[test]
