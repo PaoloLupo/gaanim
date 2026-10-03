@@ -140,7 +140,7 @@ scene.wait(0.5)
 
 snapshot_dir = os.environ.get("GAANIM_SNAPSHOTS")
 if snapshot_dir:
-    count = scene.snapshots(snapshot_dir, [0.5, 1.4, 3.0, 4.0, 4.6])
+    count = scene.snapshots(snapshot_dir, [0.5, 1.4, 2.6, 3.3, 3.9, 4.27])
     print(f"[gaanim-diff] captured {count} exact seeks in {snapshot_dir}")
 
 scene.render()
