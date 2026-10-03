@@ -11,7 +11,7 @@ use std::sync::Arc;
 use gaanim_core::{kurbo, peniko};
 use gaanim_scene::{RasterImage, StrokeBrush};
 
-use crate::effects::{DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile};
+use crate::effects::{ChalkBrush, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile};
 
 /// Everything one drawable's fragment is built from.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -43,6 +43,8 @@ pub struct FragmentRecipe {
     /// A camera view screen draws its stroke above what its camera sees, in
     /// a separate overlay.
     pub screen: bool,
+    /// Chalk look of the fill and stroke.
+    pub chalk: Option<ChalkBrush>,
 }
 
 /// Borrowed components a recipe is captured from.
@@ -62,6 +64,7 @@ pub(crate) struct FragmentParts<'a> {
     pub stroke_profile: Option<&'a StrokeProfile>,
     pub stroke_view: Option<kurbo::Affine>,
     pub screen: bool,
+    pub chalk: Option<&'a ChalkBrush>,
 }
 
 /// The recipe of a drawable's components.
@@ -82,6 +85,7 @@ pub(crate) fn fragment_recipe(parts: FragmentParts<'_>) -> FragmentRecipe {
         stroke_profile: parts.stroke_profile.cloned(),
         stroke_view: parts.stroke_view,
         screen: parts.screen,
+        chalk: parts.chalk.copied(),
     }
 }
 
@@ -109,8 +113,8 @@ impl FragmentRecipe {
 /// recipe with [`FragmentRecipe::lottie`] set.
 pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) -> BuiltFragment {
     use crate::pipeline::{
-        animated_stroke_paint, draw_aligned_stroke, draw_glow, draw_shadow, draw_soft_fill,
-        draw_soft_stroke, modulate_brush_alpha,
+        ShadowCaster, animated_stroke_paint, draw_aligned_stroke, draw_glow, draw_shadow,
+        draw_soft_fill, draw_soft_stroke, modulate_brush_alpha,
     };
 
     let mut scene = vello::Scene::new();
@@ -121,6 +125,28 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
     let empty = kurbo::BezPath::new();
     let elem_path = recipe.visible_path(&empty);
     let source_path = recipe.source.as_deref();
+    let is_trimmed_closed = source_path
+        .is_some_and(|src| src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath));
+    // Chalk trembles the outline it draws, measured in scene units: the
+    // stroke correction maps local lengths to scene lengths.
+    let chalk_unit = recipe.stroke_view.map_or(1.0, |view| {
+        let determinant = view.determinant().abs();
+        if determinant > 1.0e-12 {
+            1.0 / determinant.sqrt()
+        } else {
+            1.0
+        }
+    });
+    let rough = recipe.chalk.as_ref().map(|chalk| {
+        (
+            crate::chalk::roughen(elem_path, chalk, chalk_unit),
+            source_path.map(|source| crate::chalk::roughen(source, chalk, chalk_unit)),
+        )
+    });
+    let (elem_path, source_path) = match &rough {
+        Some((path, source)) => (path, source.as_ref()),
+        None => (elem_path, source_path),
+    };
     let elem_fill = recipe.fill.as_ref();
     let elem_stroke = recipe
         .stroke
@@ -141,16 +167,32 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
         0.0
     };
 
-    // 1. Drop shadow and glow, under the geometry.
+    // 1. Drop shadow and glow, under the geometry. The shadow follows what
+    // is painted: the filled region, or the stroke of an unfilled path.
     if let Some(shadow) = &recipe.shadow {
-        draw_shadow(&mut scene, elem_path, shadow);
+        let filled = (elem_fill.is_some() && !is_trimmed_closed)
+            || recipe
+                .raster
+                .as_ref()
+                .is_some_and(|raster| raster.image.is_some());
+        let caster = if filled {
+            ShadowCaster::Fill
+        } else if let (Some(_), Some(style)) = (elem_stroke, elem_stroke_style) {
+            ShadowCaster::Stroke {
+                style,
+                view: stroke_view,
+                source: source_path,
+                align: recipe.stroke_align,
+                profile: recipe.stroke_profile.as_ref(),
+            }
+        } else {
+            ShadowCaster::None
+        };
+        draw_shadow(&mut scene, elem_path, shadow, caster);
     }
     if let Some(glow) = &recipe.glow {
         draw_glow(&mut scene, elem_path, glow, stroke_view);
     }
-
-    let is_trimmed_closed = source_path
-        .is_some_and(|src| src != elem_path && src.elements().contains(&kurbo::PathEl::ClosePath));
     let blur_sigma = recipe
         .blur
         .map(|blur| blur.sigma)
@@ -186,6 +228,27 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
     } else {
         false
     };
+
+    // Chalk paints the fill and stroke in a layer the grain then masks.
+    let chalk_bounds = recipe
+        .chalk
+        .filter(|_| !blurred_vector && !elem_path.is_empty())
+        .map(|chalk| {
+            use kurbo::Shape;
+            let pen = elem_stroke_style.map_or(0.0, |style| style.width.abs());
+            let reach = pen * chalk_unit.max(1.0) + (chalk.roughness * 2.0 + 0.05) * chalk_unit;
+            let reach = if reach.is_finite() { reach } else { chalk_unit };
+            (chalk, elem_path.bounding_box().inflate(reach, reach))
+        });
+    if let Some((_, bounds)) = chalk_bounds {
+        scene.push_layer(
+            peniko::Fill::NonZero,
+            peniko::BlendMode::default(),
+            1.0,
+            kurbo::Affine::IDENTITY,
+            &bounds,
+        );
+    }
 
     // 2. Fill, or the raster content clipped to the outline.
     if !blurred_vector
@@ -246,6 +309,10 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
             recipe.stroke_align,
             recipe.stroke_profile.as_ref(),
         );
+    }
+    if let Some((chalk, bounds)) = chalk_bounds {
+        crate::chalk::mask_with_grain(&mut scene, &chalk, chalk_unit, bounds);
+        scene.pop_layer();
     }
 
     BuiltFragment { scene, overlay }
@@ -339,5 +406,74 @@ impl FragmentStore {
 
     pub fn is_empty(&self) -> bool {
         self.built.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open_polyline(fill: Option<peniko::Brush>, blur_radius: f64) -> FragmentRecipe {
+        FragmentRecipe {
+            path: Some(Arc::new(
+                kurbo::BezPath::from_svg("M -3 -1 L 0 2 L 3 -1").unwrap(),
+            )),
+            fill,
+            stroke: Some(StrokeBrush {
+                brush: Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+                style: kurbo::Stroke::new(0.04),
+            }),
+            shadow: Some(DropShadow {
+                offset: gaanim_core::glam::DVec2::new(0.03, -0.03),
+                blur_radius,
+                color: peniko::Color::from_rgba8(0, 0, 0, 176),
+            }),
+            stroke_align: StrokeAlign::Center,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn unfilled_open_path_casts_the_shadow_of_its_stroke() {
+        let recipe = open_polyline(None, 0.0);
+        let path = recipe.path.as_deref().unwrap();
+        let style = &recipe.stroke.as_ref().unwrap().style;
+        let offset = kurbo::Affine::translate((0.03, -0.03));
+        let shadow = peniko::Brush::Solid(recipe.shadow.as_ref().unwrap().color);
+        let mut expected = vello::Scene::new();
+        expected.stroke(
+            style,
+            kurbo::Affine::IDENTITY,
+            &shadow,
+            None,
+            &(offset * path),
+        );
+        expected.stroke(
+            style,
+            kurbo::Affine::IDENTITY,
+            recipe.stroke.as_ref().unwrap().brush.as_ref().unwrap(),
+            None,
+            path,
+        );
+        let built = build_fragment(&recipe, None).scene;
+        assert_eq!(built.encoding().path_data, expected.encoding().path_data);
+        assert!(built.encoding().draw_tags == expected.encoding().draw_tags);
+    }
+
+    #[test]
+    fn filled_path_keeps_the_shadow_of_its_region() {
+        let fill = peniko::Brush::Solid(peniko::Color::WHITE);
+        let recipe = open_polyline(Some(fill.clone()), 0.0);
+        let path = recipe.path.as_deref().unwrap();
+        let offset = kurbo::Affine::translate((0.03, -0.03));
+        let shadow = peniko::Brush::Solid(recipe.shadow.as_ref().unwrap().color);
+        let mut expected = vello::Scene::new();
+        expected.fill(peniko::Fill::NonZero, offset, &shadow, None, path);
+        let built = build_fragment(&recipe, None).scene;
+        let shadow_len = expected.encoding().path_data.len();
+        assert_eq!(
+            built.encoding().path_data[..shadow_len],
+            expected.encoding().path_data[..]
+        );
     }
 }

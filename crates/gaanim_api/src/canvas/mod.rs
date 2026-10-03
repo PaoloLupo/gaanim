@@ -131,7 +131,7 @@ pub(crate) use compile::{
 };
 mod incremental;
 mod measure;
-pub use measure::BoundsError;
+pub use measure::{BoundsError, ScatterLayoutError, avoid_boxes, scatter};
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
 pub mod text_animator;

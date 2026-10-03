@@ -50,6 +50,7 @@ from .gaanim_core import (
     parallel,
     sequence,
     stagger,
+    quantity,
     distribute,
     label,
     magic_move,
@@ -235,6 +236,7 @@ __all__ = [
     "parallel",
     "sequence",
     "stagger",
+    "quantity",
     "distribute",
     "label",
     "magic_move",
@@ -382,4 +384,4 @@ __all__ = [
     "TEAL",
 ]
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"

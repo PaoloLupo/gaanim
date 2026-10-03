@@ -4,6 +4,7 @@ pub mod background;
 mod background_gpu;
 pub mod background_presets;
 pub mod canvas;
+mod chalk;
 pub mod diagnostics;
 pub mod effects;
 pub mod fragment;

@@ -1,9 +1,9 @@
 use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
-    BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ClipMask, DropShadow,
-    ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
-    StrokeProfile, VectorOutlineBinding, ViewLayer,
+    BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ChalkBrush, ClipMask,
+    DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
+    StrokeProfile, StrokeScalesWithObject, VectorOutlineBinding, ViewLayer,
 };
 use crate::fragment::{FragmentParts, FragmentRecipe, build_fragment, fragment_recipe};
 use crate::lottie::LottiePlayer;
@@ -1678,22 +1678,82 @@ pub(crate) fn draw_soft_fill(
     }
 }
 
-/// Draw a drop shadow under `path`.
+/// The painted silhouette a drop shadow copies.
+pub(crate) enum ShadowCaster<'a> {
+    /// The region the fill (or clipped raster) covers.
+    Fill,
+    /// The stroke of a path drawn without fill, so an open curve casts the
+    /// shadow of its line rather than of the region its chord closes.
+    Stroke {
+        style: &'a kurbo::Stroke,
+        view: Option<kurbo::Affine>,
+        source: Option<&'a kurbo::BezPath>,
+        align: StrokeAlign,
+        profile: Option<&'a StrokeProfile>,
+    },
+    /// Nothing is painted, so nothing casts a shadow.
+    None,
+}
+
+/// Draw a drop shadow under `path`, shaped like what `caster` paints.
 ///
 /// A blurred shadow builds the blur's coverage from black taps and colors it
 /// with one opaque fill inside a layer carrying the color's alpha. Tinting
 /// every tap instead quantized the color per tap (brushes are 8-bit): alphas
 /// below about 24/255 vanished, larger ones all looked alike, and light warm
 /// tones drifted in hue.
-pub(crate) fn draw_shadow(scene: &mut vello::Scene, path: &kurbo::BezPath, shadow: &DropShadow) {
+pub(crate) fn draw_shadow(
+    scene: &mut vello::Scene,
+    path: &kurbo::BezPath,
+    shadow: &DropShadow,
+    caster: ShadowCaster<'_>,
+) {
     let offset = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
+    // A stroke is drawn on the shifted path: under a zoomed view its pen
+    // works in view space, where `offset` would no longer be a translation.
+    let shifted = |path: &kurbo::BezPath| offset * path;
     let sharp = shadow.blur_radius.is_nan() || shadow.blur_radius <= 0.0;
+    let stroke_reach = match &caster {
+        ShadowCaster::Fill => 0.0,
+        ShadowCaster::Stroke { style, view, .. } => {
+            let corner = style.miter_limit.max(std::f64::consts::SQRT_2);
+            let pen_scale = view.map_or(1.0, |view| {
+                let [a, b, c, d, _, _] = view.inverse().as_coeffs();
+                (a * a + b * b + c * c + d * d).sqrt()
+            });
+            let reach = style.width.abs() * corner * pen_scale;
+            if reach.is_finite() { reach } else { 0.0 }
+        }
+        ShadowCaster::None => return,
+    };
     if sharp {
         let brush = peniko::Brush::Solid(shadow.color);
-        scene.fill(peniko::Fill::NonZero, offset, &brush, None, path);
+        match caster {
+            ShadowCaster::Fill => scene.fill(peniko::Fill::NonZero, offset, &brush, None, path),
+            ShadowCaster::Stroke {
+                style,
+                view,
+                source,
+                align,
+                profile,
+            } => {
+                let source = source.map(shifted);
+                draw_aligned_stroke(
+                    scene,
+                    style,
+                    &brush,
+                    view,
+                    &shifted(path),
+                    source.as_ref(),
+                    align,
+                    profile,
+                );
+            }
+            ShadowCaster::None => {}
+        }
         return;
     }
-    let reach = BLUR_TAP_RADIUS * shadow.blur_radius + 1.0e-3;
+    let reach = BLUR_TAP_RADIUS * shadow.blur_radius + stroke_reach + 1.0e-3;
     let area = path.bounding_box().inflate(reach, reach);
     let alpha = shadow.color.components[3];
     scene.push_layer(
@@ -1713,7 +1773,22 @@ pub(crate) fn draw_shadow(scene: &mut vello::Scene, path: &kurbo::BezPath, shado
         &area,
     );
     let coverage = peniko::Brush::Solid(peniko::Color::BLACK);
-    draw_soft_fill(scene, path, &coverage, shadow.blur_radius, 1.0, offset);
+    match caster {
+        ShadowCaster::Fill => {
+            draw_soft_fill(scene, path, &coverage, shadow.blur_radius, 1.0, offset);
+        }
+        ShadowCaster::Stroke { style, view, .. } => {
+            draw_soft_stroke(
+                scene,
+                &shifted(path),
+                &coverage,
+                style,
+                shadow.blur_radius,
+                view,
+            );
+        }
+        ShadowCaster::None => {}
+    }
     scene.pop_layer();
     scene.pop_layer();
 }
@@ -2106,6 +2181,8 @@ fn extract_world(
         Option<&WriteTipGlow>,
         Option<&StrokeAlign>,
         Option<&StrokeProfile>,
+        Has<StrokeScalesWithObject>,
+        Option<&ChalkBrush>,
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
@@ -2146,6 +2223,8 @@ fn extract_world(
             tip_glow_opt,
             stroke_align_opt,
             stroke_profile_opt,
+            stroke_scales,
+            chalk_opt,
         )) = query_effects.get(world, entity)
         else {
             continue;
@@ -2190,7 +2269,9 @@ fn extract_world(
         };
         let elem_stroke = stroke_opt.and_then(|s| s.brush.as_ref());
         let elem_stroke_style = stroke_opt.map(|s| &s.style);
-        let stroke_view = if elem_stroke.is_some() || glow_opt.is_some() {
+        let stroke_view = if !stroke_scales
+            && (elem_stroke.is_some() || glow_opt.is_some() || chalk_opt.is_some())
+        {
             scene_unit_stroke_transform(transform.affine_2d)
         } else {
             None
@@ -2212,6 +2293,7 @@ fn extract_world(
             stroke_profile: stroke_profile_opt,
             stroke_view,
             screen: camera_view.is_some(),
+            chalk: chalk_opt,
         }));
         let built = build_fragment(&recipe, lottie_opt.map(|lottie| lottie.scene().as_ref()));
         let scene = built.scene;
@@ -3097,6 +3179,8 @@ pub fn gaanim_render_system(
         Option<Ref<Visible>>,
         Option<Ref<StrokeAlign>>,
         Option<Ref<StrokeProfile>>,
+        Has<StrokeScalesWithObject>,
+        Option<Ref<ChalkBrush>>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     (mut shader_frame, preview, live, ambient): (
@@ -3198,17 +3282,21 @@ pub fn gaanim_render_system(
             visible_ref,
             stroke_align_ref,
             stroke_profile_ref,
+            stroke_scales,
+            chalk_ref,
         ) = query_effects.get(entity).unwrap_or((
-            None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, false, None,
         ));
         let camera_view = camera_views.get(&entity);
 
         // Invalidate before skipping hidden or culled objects. Their new geometry
         // may stop changing before they become visible again (e.g. a rewound Lottie).
-        let stroke_view = if stroke_ref
-            .as_ref()
-            .is_some_and(|stroke| stroke.brush.is_some())
-            || glow_ref.is_some()
+        let stroke_view = if !stroke_scales
+            && (stroke_ref
+                .as_ref()
+                .is_some_and(|stroke| stroke.brush.is_some())
+                || glow_ref.is_some()
+                || chalk_ref.is_some())
         {
             scene_unit_stroke_transform(transform.affine_2d)
         } else {
@@ -3260,6 +3348,7 @@ pub fn gaanim_render_system(
             || clip_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_profile_ref.as_ref().is_some_and(|r| r.is_changed())
+            || chalk_ref.as_ref().is_some_and(|r| r.is_changed())
             // Becoming or ceasing to be a screen moves the stroke.
             || cache.screen_overlays.contains_key(&mobj_id.0) != camera_view.is_some();
 
@@ -3341,6 +3430,7 @@ pub fn gaanim_render_system(
                 stroke_profile: stroke_profile_ref.as_deref(),
                 stroke_view,
                 screen: camera_view.is_some(),
+                chalk: chalk_ref.as_deref(),
             });
             let built = build_fragment(
                 &recipe,
@@ -4065,6 +4155,75 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_eq!(live.encoding().path_data, fresh.encoding().path_data);
+    }
+
+    #[test]
+    fn scaling_strokes_follow_the_scale_of_their_group() {
+        use gaanim_math::SpatialTransform;
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>().add_systems(
+            Update,
+            (
+                gaanim_scene::transform_propagation_system,
+                gaanim_render_system,
+            )
+                .chain(),
+        );
+        let group = app
+            .world_mut()
+            .spawn((
+                SpatialTransform::default().with_scale_2d(3.0, 3.0),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        let path = kurbo::BezPath::from_svg("M 0 0 L 1 1 L 2 0").unwrap();
+        let style = kurbo::Stroke::new(0.04);
+        let brush = peniko::Brush::Solid(peniko::Color::BLACK);
+        let mut spawn = |raw: u64, scales: bool| {
+            let id = ObjectId::from_raw(raw);
+            let mut entity = app.world_mut().spawn((
+                MobjectId(id),
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+                RenderOrder::default(),
+                RenderLayer::Vello2D,
+                Path2D(Arc::new(path.clone())),
+                StrokeBrush {
+                    brush: Some(brush.clone()),
+                    style: style.clone(),
+                },
+                Visible,
+                ChildOf(group),
+            ));
+            if scales {
+                entity.insert(StrokeScalesWithObject);
+            }
+            id
+        };
+        let fixed = spawn(93, false);
+        let scaling = spawn(94, true);
+        app.update();
+        let cache = app.world().resource::<GaanimRenderCache>();
+        // The scaling stroke keeps its local pen, which the group then
+        // scales; the fixed one is drawn through the scene-unit correction.
+        let mut local = vello::Scene::new();
+        local.stroke(&style, kurbo::Affine::IDENTITY, &brush, None, &path);
+        assert_eq!(
+            cache.fragment_cache[&scaling].encoding().path_data,
+            local.encoding().path_data
+        );
+        assert_ne!(
+            cache.fragment_cache[&fixed].encoding().path_data,
+            local.encoding().path_data
+        );
+        let headless = compile_scene_from_world(app.world_mut(), None);
+        let live = app
+            .world_mut()
+            .query::<&VelloScene2d>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(headless.encoding().path_data, live.encoding().path_data);
     }
 
     #[test]

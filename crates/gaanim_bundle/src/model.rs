@@ -333,6 +333,8 @@ pub(crate) fn read_recipe(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<
         })?,
         stroke_view: r.option(Reader::affine)?,
         screen: r.bool()?,
+        // Bundle format 2 refuses to record chalk.
+        chalk: None,
     })
 }
 

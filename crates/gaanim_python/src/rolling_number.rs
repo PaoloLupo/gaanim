@@ -144,7 +144,7 @@ impl PyRollingNumber {
 
 #[pymethods]
 impl PyVisualization {
-    #[pyo3(signature = (value=0.0, *, decimals=0, min_digits=1, group_separator="", decimal_separator=".", prefix="", suffix="", show_plus=false, font_family=None, weight=None, font_size=0.75, digit_spacing=0.02, line_height=1.25, mode="odometer", direction="up", color=None))]
+    #[pyo3(signature = (value=0.0, *, decimals=0, min_digits=1, pad="0", group_separator="", decimal_separator=".", prefix="", suffix="", show_plus=false, font_family=None, weight=None, font_size=0.75, digit_spacing=0.02, line_height=1.25, mode="odometer", direction="up", color=None))]
     #[allow(clippy::too_many_arguments)]
     fn rolling_number(
         &self,
@@ -152,6 +152,7 @@ impl PyVisualization {
         value: f64,
         decimals: i64,
         min_digits: i64,
+        pad: &str,
         group_separator: &str,
         decimal_separator: &str,
         prefix: &str,
@@ -172,6 +173,11 @@ impl PyVisualization {
                 .map_err(|_| PyValueError::new_err("decimals must be 0..6"))?,
             min_digits: usize::try_from(min_digits)
                 .map_err(|_| PyValueError::new_err("min_digits must be 1..15"))?,
+            pad: match pad {
+                "0" => '0',
+                " " => ' ',
+                _ => return Err(PyValueError::new_err("pad must be \"0\" or \" \"")),
+            },
             group_separator: group_separator.into(),
             decimal_separator: decimal_separator.into(),
             prefix: prefix.into(),

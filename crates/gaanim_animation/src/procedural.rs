@@ -7,13 +7,203 @@
 //! and seeks keep seeing the authored values, `move_to` and similar clips
 //! combine with it additively, and any frame is reproducible from its time.
 
+use std::sync::Arc;
+
 use bevy::prelude::*;
+use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::{Brush, Color};
-use gaanim_math::{Noise, SpatialTransform};
+use gaanim_math::{Noise, RateFunc, SpatialTransform};
 use gaanim_scene::{Opacity, StrokeBrush};
 
+use crate::signals::FloatSignal;
 use crate::updaters::PlaybackState;
+
+/// One tween of a parameter signal, as the timeline evaluates it.
+#[derive(Debug, Clone)]
+pub struct SignalTween {
+    pub start: f64,
+    pub duration: f64,
+    pub from: f64,
+    pub to: f64,
+    pub rate: RateFunc,
+}
+
+impl SignalTween {
+    fn end(&self) -> f64 {
+        self.start + self.duration
+    }
+
+    fn value_at(&self, time: f64) -> f64 {
+        let t = if self.duration <= 0.0 || time >= self.end() {
+            self.rate.evaluate(1.0)
+        } else {
+            self.rate
+                .evaluate(((time - self.start) / self.duration).clamp(0.0, 1.0))
+        };
+        self.from + (self.to - self.from) * t
+    }
+}
+
+/// The values a parameter signal takes from a layer's start: `base` until
+/// its first tween, then each tween in start order, as a seek applies them.
+#[derive(Debug, Clone)]
+pub struct SignalTrack {
+    pub base: f64,
+    /// Tweens sorted by start time.
+    pub tweens: Vec<SignalTween>,
+}
+
+impl SignalTrack {
+    pub fn new(base: f64, mut tweens: Vec<SignalTween>) -> Self {
+        tweens.sort_by(|a, b| a.start.total_cmp(&b.start));
+        Self { base, tweens }
+    }
+
+    pub fn value_at(&self, time: f64) -> f64 {
+        let mut value = self.base;
+        for tween in &self.tweens {
+            if tween.start > time {
+                break;
+            }
+            value = tween.value_at(time);
+        }
+        value
+    }
+
+    /// `∫ value dt` over `[from, to]`: exact where the value holds still,
+    /// Simpson's rule inside each tween. A pure function of its bounds, so a
+    /// seek and a playback reach the same angle or phase.
+    pub fn integral(&self, from: f64, to: f64) -> f64 {
+        if to <= from {
+            return 0.0;
+        }
+        let mut breaks = vec![from, to];
+        for tween in &self.tweens {
+            for time in [tween.start, tween.end()] {
+                if time > from && time < to {
+                    breaks.push(time);
+                }
+            }
+        }
+        breaks.sort_by(f64::total_cmp);
+        breaks.dedup();
+        let mut total = 0.0;
+        for window in breaks.windows(2) {
+            let (a, b) = (window[0], window[1]);
+            let middle = 0.5 * (a + b);
+            let moving = self
+                .tweens
+                .iter()
+                .rev()
+                .find(|tween| tween.start <= middle)
+                .is_some_and(|tween| tween.duration > 0.0 && middle < tween.end());
+            if !moving {
+                total += self.value_at(middle) * (b - a);
+                continue;
+            }
+            const STEPS: usize = 32;
+            let step = (b - a) / STEPS as f64;
+            let mut sum = self.value_at(a) + self.value_at(b);
+            for index in 1..STEPS {
+                let weight = if index % 2 == 1 { 4.0 } else { 2.0 };
+                sum += weight * self.value_at(a + step * index as f64);
+            }
+            total += sum * step / 3.0;
+        }
+        total
+    }
+}
+
+/// A number of a procedural layer: fixed, or a `Parameter` whose animation
+/// changes the layer while it runs.
+#[derive(Debug, Clone)]
+pub enum LayerParam {
+    Fixed(f64),
+    Signal {
+        /// Authoring id of the parameter until compiled, then its compiled id.
+        id: ObjectId,
+        /// The signal entity, read for the live value.
+        entity: Option<Entity>,
+        /// The signal's values from the layer's start, for integrals.
+        track: Option<Arc<SignalTrack>>,
+    },
+}
+
+impl PartialEq for LayerParam {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Fixed(a), Self::Fixed(b)) => a.to_bits() == b.to_bits(),
+            (
+                Self::Signal {
+                    id: a,
+                    entity: ea,
+                    track: ta,
+                },
+                Self::Signal {
+                    id: b,
+                    entity: eb,
+                    track: tb,
+                },
+            ) => {
+                a == b
+                    && ea == eb
+                    && match (ta, tb) {
+                        (Some(ta), Some(tb)) => Arc::ptr_eq(ta, tb),
+                        (None, None) => true,
+                        _ => false,
+                    }
+            }
+            _ => false,
+        }
+    }
+}
+
+impl From<f64> for LayerParam {
+    fn from(value: f64) -> Self {
+        Self::Fixed(value)
+    }
+}
+
+impl LayerParam {
+    pub fn signal(id: ObjectId) -> Self {
+        Self::Signal {
+            id,
+            entity: None,
+            track: None,
+        }
+    }
+
+    /// The fixed value, if it is one.
+    pub fn fixed(&self) -> Option<f64> {
+        match self {
+            Self::Fixed(value) => Some(*value),
+            Self::Signal { .. } => None,
+        }
+    }
+
+    /// The value at `time`: the signal's live value when it can be read.
+    fn value(&self, time: f64, live: &dyn Fn(Entity) -> Option<f64>) -> f64 {
+        match self {
+            Self::Fixed(value) => *value,
+            Self::Signal { entity, track, .. } => entity
+                .and_then(live)
+                .or_else(|| track.as_ref().map(|track| track.value_at(time)))
+                .unwrap_or(0.0),
+        }
+    }
+
+    /// `∫ value dt` over `[from, to]`.
+    fn integral(&self, from: f64, to: f64, live: &dyn Fn(Entity) -> Option<f64>) -> f64 {
+        match self {
+            Self::Fixed(value) => value * (to - from),
+            Self::Signal {
+                track: Some(track), ..
+            } => track.integral(from, to),
+            Self::Signal { .. } => self.value(to, live) * (to - from),
+        }
+    }
+}
 
 /// Periodic shape used by [`ProceduralLayer::Oscillate`], mapped to `[0, 1]`
 /// and starting at 0.
@@ -64,12 +254,19 @@ pub enum OscillatedChannel {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProceduralLayer {
     /// Organic jitter: seeded fBm noise on position, rotation, and scale.
+    /// A fixed `frequency` lives in `noise`; a signal one keeps the noise at
+    /// frequency 1 and advances it by the integrated frequency, so changing
+    /// it changes the pace without jumping.
     Wiggle {
         noise: Noise,
-        position: f64,
-        rotation: f64,
-        scale: f64,
+        position: LayerParam,
+        rotation: LayerParam,
+        scale: LayerParam,
+        frequency: LayerParam,
     },
+    /// A turn about z at `speed` radians per second; with a signal speed the
+    /// angle is its integral, so it speeds up and slows down smoothly.
+    Spin { speed: LayerParam },
     /// Periodic value between `low` and `high`.
     Oscillate {
         channel: OscillatedChannel,
@@ -79,6 +276,23 @@ pub enum ProceduralLayer {
         high: f64,
         phase: f64,
     },
+}
+
+impl ProceduralLayer {
+    /// The numbers of the layer that a parameter may drive.
+    pub fn params_mut(&mut self) -> Vec<&mut LayerParam> {
+        match self {
+            Self::Wiggle {
+                position,
+                rotation,
+                scale,
+                frequency,
+                ..
+            } => vec![position, rotation, scale, frequency],
+            Self::Spin { speed } => vec![speed],
+            Self::Oscillate { .. } => Vec::new(),
+        }
+    }
 }
 
 /// A layer active from `start` until `end` in absolute timeline seconds.
@@ -133,11 +347,28 @@ impl ProceduralMotion {
         }
     }
 
-    /// Combined offset of the layers active at `time`.
+    /// Combined offset of the layers active at `time`, with fixed values
+    /// only; signal parameters read through [`Self::offset_with`].
     pub fn offset_at(&self, time: f64) -> ProceduralOffset {
+        self.offset_with(time, &|_| None)
+    }
+
+    /// Combined offset of the layers active at `time`; `live` reads the
+    /// current value of a parameter signal.
+    pub fn offset_with(&self, time: f64, live: &dyn Fn(Entity) -> Option<f64>) -> ProceduralOffset {
         let mut offset = ProceduralOffset::default();
         for scheduled in &self.layers {
-            if time < scheduled.start || scheduled.end.is_some_and(|end| time >= end) {
+            if time < scheduled.start {
+                continue;
+            }
+            // A removed spin keeps the angle it reached, like the `rotate`
+            // updater; every other layer ends with its removal.
+            if let ProceduralLayer::Spin { speed } = &scheduled.layer {
+                let until = scheduled.end.map_or(time, |end| time.min(end));
+                offset.rotation += speed.integral(scheduled.start, until, live);
+                continue;
+            }
+            if scheduled.end.is_some_and(|end| time >= end) {
                 continue;
             }
             let local = time - scheduled.start;
@@ -147,14 +378,23 @@ impl ProceduralMotion {
                     position,
                     rotation,
                     scale,
+                    frequency,
                 } => {
+                    let x = match frequency {
+                        LayerParam::Fixed(_) => local,
+                        LayerParam::Signal { .. } => {
+                            frequency.integral(scheduled.start, time, live)
+                        }
+                    };
                     // Subtracting the value at the layer's start avoids a jump.
-                    let channel = |index| noise.at_time(local, index) - noise.at_time(0.0, index);
+                    let channel = |index| noise.at_time(x, index) - noise.at_time(0.0, index);
+                    let position = position.value(time, live);
                     offset.translation.x += position * channel(0);
                     offset.translation.y += position * channel(1);
-                    offset.rotation += rotation * channel(2);
-                    offset.scale *= 1.0 + scale * channel(3);
+                    offset.rotation += rotation.value(time, live) * channel(2);
+                    offset.scale *= 1.0 + scale.value(time, live) * channel(3);
                 }
+                ProceduralLayer::Spin { .. } => {}
                 ProceduralLayer::Oscillate {
                     channel,
                     waveform,
@@ -186,10 +426,12 @@ pub fn apply_procedural_motion_system(
         &mut SpatialTransform,
         Option<&mut Opacity>,
     )>,
+    signals: Query<&FloatSignal>,
 ) {
     let time = playback.map_or(0.0, |state| state.current_time);
+    let live = |entity: Entity| signals.get(entity).ok().map(|signal| signal.value);
     for (mut motion, mut transform, opacity) in &mut query {
-        let offset = motion.offset_at(time);
+        let offset = motion.offset_with(time, &live);
         let base = *transform;
         transform.translation += offset.translation;
         transform.rotation = base.rotation * DQuat::from_rotation_z(offset.rotation);
@@ -379,9 +621,10 @@ mod tests {
     fn wiggle() -> ProceduralLayer {
         ProceduralLayer::Wiggle {
             noise: Noise::new(1, 2.0, 1.0, 2),
-            position: 0.1,
-            rotation: 0.05,
-            scale: 0.0,
+            position: 0.1.into(),
+            rotation: 0.05.into(),
+            scale: 0.0.into(),
+            frequency: 2.0.into(),
         }
     }
 
@@ -412,6 +655,81 @@ mod tests {
 
         motion.stop_at(3.0);
         assert_eq!(motion.offset_at(3.5), ProceduralOffset::default());
+    }
+
+    fn ramp(start: f64, duration: f64, from: f64, to: f64) -> SignalTween {
+        SignalTween {
+            start,
+            duration,
+            from,
+            to,
+            rate: RateFunc::Linear,
+        }
+    }
+
+    #[test]
+    fn signal_tracks_integrate_holds_and_tweens_exactly() {
+        // 1 rad/s until t = 2, a linear ramp to 3 rad/s over [2, 4], then a
+        // cut to 0 at t = 5.
+        let track = SignalTrack::new(
+            1.0,
+            vec![ramp(5.0, 0.0, 3.0, 0.0), ramp(2.0, 2.0, 1.0, 3.0)],
+        );
+        assert_eq!(track.value_at(1.0), 1.0);
+        assert_eq!(track.value_at(3.0), 2.0);
+        assert_eq!(track.value_at(4.5), 3.0);
+        assert_eq!(track.value_at(6.0), 0.0);
+        // 2 + 4 (ramp average 2 over 2 s) + 3 + 0.
+        assert!((track.integral(0.0, 7.0) - 9.0).abs() < 1e-9);
+        // Additive over any split, which keeps seeks consistent.
+        let split = track.integral(0.0, 3.3) + track.integral(3.3, 7.0);
+        assert!((split - track.integral(0.0, 7.0)).abs() < 1e-9);
+        assert_eq!(track.integral(3.0, 3.0), 0.0);
+    }
+
+    #[test]
+    fn spin_speed_and_wiggle_amplitude_follow_their_signals() {
+        let track = Arc::new(SignalTrack::new(0.0, vec![ramp(1.0, 1.0, 0.0, 2.0)]));
+        let speed = LayerParam::Signal {
+            id: ObjectId::from_raw(7),
+            entity: None,
+            track: Some(track),
+        };
+        let mut motion = ProceduralMotion::default();
+        motion.push(ProceduralLayer::Spin { speed }, 0.0);
+        assert_eq!(motion.offset_at(1.0).rotation, 0.0);
+        // The ramp averages 1 rad/s over [1, 2], then holds 2 rad/s.
+        assert!((motion.offset_at(2.0).rotation - 1.0).abs() < 1e-9);
+        assert!((motion.offset_at(3.0).rotation - 3.0).abs() < 1e-9);
+        // A fixed speed keeps turning at its rate, and holds its angle once
+        // removed.
+        let mut fixed = ProceduralMotion::default();
+        fixed.push(ProceduralLayer::Spin { speed: 0.5.into() }, 1.0);
+        assert!((fixed.offset_at(3.0).rotation - 1.0).abs() < 1e-12);
+        fixed.stop_at(3.0);
+        assert!((fixed.offset_at(5.0).rotation - 1.0).abs() < 1e-12);
+
+        // A live amplitude scales the jitter; at zero it is still.
+        let entity = Entity::from_raw_u32(3).unwrap();
+        let mut jitter = ProceduralMotion::default();
+        jitter.push(
+            ProceduralLayer::Wiggle {
+                noise: Noise::new(1, 2.0, 1.0, 2),
+                position: LayerParam::Signal {
+                    id: ObjectId::from_raw(8),
+                    entity: Some(entity),
+                    track: None,
+                },
+                rotation: 0.0.into(),
+                scale: 0.0.into(),
+                frequency: 2.0.into(),
+            },
+            0.0,
+        );
+        let at = |amplitude: f64| jitter.offset_with(2.3, &|_| Some(amplitude)).translation;
+        assert_eq!(at(0.0), DVec3::ZERO);
+        assert!((at(0.2) - 2.0 * at(0.1)).length() < 1e-12);
+        assert!(at(0.1).length() > 0.0);
     }
 
     #[test]

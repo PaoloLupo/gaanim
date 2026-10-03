@@ -342,6 +342,61 @@ impl DrawableHandle {
     }
 }
 
+/// Why [`scatter`] could not lay its drawables out.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum ScatterLayoutError {
+    #[error("item {index} cannot be measured: {source}")]
+    Item { index: usize, source: BoundsError },
+    #[error("avoided shape {index} cannot be measured: {source}")]
+    Avoid { index: usize, source: BoundsError },
+    #[error(transparent)]
+    Layout(#[from] gaanim_layout::ScatterError),
+}
+
+/// Move `items` to seeded positions inside `region` where none overlaps
+/// another or the box of an `avoid` drawable or rectangle, with at least
+/// `gap` between them. The same items, region and seed give the same
+/// layout. Nothing moves unless every item fits.
+pub fn scatter(
+    items: &[DrawableHandle],
+    region: Bounds3D,
+    avoid: &[Bounds3D],
+    gap: f64,
+    seed: u64,
+) -> Result<(), ScatterLayoutError> {
+    let boxes = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            item.bounds()
+                .map_err(|source| ScatterLayoutError::Item { index, source })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let sizes: Vec<_> = boxes
+        .iter()
+        .map(|bounds| gaanim_core::glam::DVec2::new(bounds.width(), bounds.height()))
+        .collect();
+    let centers = gaanim_layout::scatter(&sizes, region, avoid, gap, seed)?;
+    for (item, center) in items.iter().zip(centers) {
+        item.clone()
+            .at_anchor(center.x, center.y, gaanim_layout::Anchor::Center);
+    }
+    Ok(())
+}
+
+/// The boxes of `drawables`, for the `avoid` list of [`scatter`].
+pub fn avoid_boxes(drawables: &[DrawableHandle]) -> Result<Vec<Bounds3D>, ScatterLayoutError> {
+    drawables
+        .iter()
+        .enumerate()
+        .map(|(index, drawable)| {
+            drawable
+                .bounds()
+                .map_err(|source| ScatterLayoutError::Avoid { index, source })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

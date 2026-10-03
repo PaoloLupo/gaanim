@@ -90,6 +90,31 @@ scene.render()
 ```
 ]
 
+#api-entry(
+  name: "quantity",
+  kind: "function",
+  signature: "quantity(value: int | float, unit: str = \"\", *, decimals: int | None = None, decimal_separator: str = \".\") -> str",
+  params: (
+    (name: "value", type: "int | float", default: none, desc: [El número; un entero conserva sus cifras.]),
+    (name: "unit", type: "str", default: "\"\"", desc: [Factores separados por espacios, `*`, `·` o `.`, cada uno con un exponente opcional (`m^3`, `s^-1`); `/` divide por los que siguen: `"kg m/s^2"`.]),
+    (name: "decimals", type: "int | None", default: "None", desc: [Decimales fijos; sin él, la forma más corta del número.]),
+    (name: "decimal_separator", type: "str", default: "\".\"", desc: [Un carácter, por ejemplo `","`.]),
+  ),
+  returns: (type: "str", desc: [Matemática Typst para `scene.text.equation`.]),
+  desc: [Escribe cantidades con unidades de forma consistente, como `siunitx` en LaTeX: un espacio fino entre número y unidad (salvo en `°`, `′` y `″`), unidades en redonda, exponentes y una barra en lugar de una fracción. Así `1 m³` y `181 L` quedan espaciados igual. Una unidad mal formada lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene, quantity
+scene = Scene(frame=(16, 9), background="#0f172a")
+volumen = scene.text.equation("V =", quantity(1, "m^3"), "=", quantity(1000, "L")).move_to(0, 0.8)
+gravedad = scene.text.equation("g =", quantity(9.81, "m/s^2", decimal_separator=",")).move_to(0, -0.6)
+scene.play([volumen.animate.write(), gravedad.animate.write()])
+# output: quantity.webp
+scene.render()
+```
+]
+
 === Roles
 
 Los roles son `title`, `subtitle`, `kicker`, `heading`, `body`, `caption`,
@@ -683,7 +708,7 @@ medidas antes de crear nada.
   kind: "factory",
   params: (
     (name: "source", type: "str | os.PathLike", default: none, desc: [Marcado Typst en línea o la ruta de un archivo `.typ` (relativa a la carpeta de assets).]),
-    (name: "width", type: "str | float | int | None", default: "None", desc: [Ancho de página Typst antes de escalar: `"16cm"`, `"800pt"` o un número en puntos.]),
+    (name: "width", type: "str | float | int | None", default: "None", desc: [Ancho de página Typst antes de escalar: `"16cm"`, `"800pt"` o un número en puntos. Sin él, la página se ajusta al contenido: `#align(center)` centra dentro del contenido y los párrafos solo cortan línea donde la fuente lo indica. Pásalo para que un párrafo se ajuste o para columnas `1fr`.]),
   ),
   desc: [Compila un documento Typst arbitrario (tablas con celdas combinadas, estructuras matemáticas propias, paquetes `@preview/…`) como un `Drawable`. Conserva sus proporciones y se escala para que su texto de 11 pt mida lo mismo que el rol `body`. No ofrece las selecciones de `Text`. Una fuente vacía lanza `ValueError` y un archivo ilegible, `RuntimeError`.],
 )[

@@ -532,7 +532,7 @@ fn flatten<'py>(objects: &Bound<'py, PyTuple>) -> PyResult<Vec<Bound<'py, PyAny>
     Ok(flat)
 }
 
-fn handle_of(object: &Bound<'_, PyAny>) -> PyResult<DrawableHandle> {
+pub(crate) fn handle_of(object: &Bound<'_, PyAny>) -> PyResult<DrawableHandle> {
     Ok(object
         .extract::<PyRef<'_, PyDrawable>>()
         .map_err(|_| pyo3::exceptions::PyTypeError::new_err("expected a Drawable"))?

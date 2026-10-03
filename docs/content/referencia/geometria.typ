@@ -208,12 +208,14 @@ scene.render()
 #api-entry(
   name: "Geometry.double_arrow",
   kind: "factory",
-  desc: [Flecha con punta en ambos extremos, para rangos y relaciones bidireccionales. Las puntas miden 0.18 × 0.15 por defecto, con cuerpo de 0.036, y se acortan para no solaparse.],
+  params: ((name: "x1, y1, x2, y2", type: "float", default: none, desc: [Extremos.]), (name: "head_length / head_width / body_width", type: "float | None", default: "None", desc: [Igual que en `arrow`: por defecto 0.18, 0.15 y 0.036.])),
+  desc: [Flecha con punta en ambos extremos, para rangos y relaciones bidireccionales. Las puntas se acortan para no solaparse; un `body_width` fino sirve para cotas. Para una cota completa, con líneas de extensión, usa #link("/referencia/mecanica/")[`scene.mechanics.dimension`]. Medidas no positivas lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 span = scene.geometry.double_arrow(-3, 0, 3, 0).fill(WHITE).no_stroke()
+fine = scene.geometry.double_arrow(-3, -1, 3, -1, body_width=0.012).fill(WHITE).no_stroke()
 ```
 ]
 
@@ -260,6 +262,28 @@ from gaanim import GOLD, Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
 arc = scene.geometry.arc(0, 0, 0.75, 0.0, 2.0).no_fill().stroke(GOLD, 0.05)
 scene.play([arc.animate.create().duration(0.8)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Geometry.ellipse_arc",
+  kind: "factory",
+  params: ((name: "cx, cy", type: "float", default: none, desc: [Centro.]), (name: "rx, ry", type: "float", default: none, desc: [Radios positivos en x y en y.]), (name: "start_angle, sweep_angle", type: "float", default: none, desc: [Radianes, en sentido antihorario desde +x, como en `arc`.])),
+  desc: [Arco de elipse, para el borde de un cilindro, un cono o una probeta en perspectiva: media elipse es `sweep_angle=math.pi`. Nace sin relleno y admite `tip`, recortes y `create()`, como `arc`. Radios no positivos o valores no finitos lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+import math
+from gaanim import GOLD, WHITE, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+front = scene.geometry.ellipse_arc(0, -1.2, 1.6, 0.45, math.pi, math.pi).stroke(WHITE, 0.05)
+back = scene.geometry.ellipse_arc(0, -1.2, 1.6, 0.45, 0, math.pi).stroke(WHITE, 0.03).opacity(0.4)
+top = scene.geometry.ellipse_arc(0, 1.2, 1.6, 0.45, 0, 2 * math.pi).stroke(GOLD, 0.05)
+left = scene.geometry.line(-1.6, -1.2, -1.6, 1.2).stroke(WHITE, 0.05)
+right = scene.geometry.line(1.6, -1.2, 1.6, 1.2).stroke(WHITE, 0.05)
+scene.play([shape.animate.create().duration(0.8) for shape in (front, back, top, left, right)])
 # output: preview.webp
 scene.render()
 ```

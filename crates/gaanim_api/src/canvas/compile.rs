@@ -3062,6 +3062,59 @@ impl SceneModel {
                 .insert(gaanim_animation::RollingTweens(windows));
         }
 
+        // Parameter-driven procedural layers integrate their signal from the
+        // layer's start, so they need its whole schedule.
+        for (target, signal, start, base) in std::mem::take(&mut builder.procedural_signal_tracks) {
+            let tweens: Vec<gaanim_animation::SignalTween> = builder
+                .timeline
+                .clips
+                .values()
+                .filter_map(|clip| match &clip.payload {
+                    gaanim_timeline::clip::ClipPayload::Animation(animation)
+                        if animation.target == signal
+                            && (clip.start >= start || clip.end() > start) =>
+                    {
+                        match animation.lens {
+                            gaanim_timeline::clip::PropertyLensSpec::SignalFloat { from, to } => {
+                                Some(gaanim_animation::SignalTween {
+                                    start: clip.start,
+                                    duration: clip.duration,
+                                    from,
+                                    to,
+                                    rate: animation.rate_func.clone(),
+                                })
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+                .collect();
+            let track = std::sync::Arc::new(gaanim_animation::SignalTrack::new(base, tweens));
+            builder.commands.entity(target).queue(
+                move |mut entity: bevy::prelude::EntityWorldMut| {
+                    let Some(mut motion) = entity.get_mut::<gaanim_animation::ProceduralMotion>()
+                    else {
+                        return;
+                    };
+                    for scheduled in &mut motion.layers {
+                        if scheduled.start.to_bits() != start.to_bits() {
+                            continue;
+                        }
+                        for param in scheduled.layer.params_mut() {
+                            if let gaanim_animation::LayerParam::Signal {
+                                id, track: slot, ..
+                            } = param
+                                && *id == signal
+                            {
+                                *slot = Some(track.clone());
+                            }
+                        }
+                    }
+                },
+            );
+        }
+
         for (i, seg) in segments.iter().enumerate() {
             if let Some(prev) = seg.prev_segment
                 && prev < i
@@ -5919,9 +5972,29 @@ impl SceneModel {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(st) = builder.states.get(target_id)
                     {
-                        let layer = layer.clone();
+                        let target_entity = st.entity;
+                        let mut layer = layer.clone();
                         let start = builder.current_time;
-                        builder.commands.entity(st.entity).queue(
+                        // Point parameter-driven numbers at their compiled
+                        // signals; their tracks are filled in once every
+                        // tween is scheduled.
+                        for param in layer.params_mut() {
+                            if let gaanim_animation::LayerParam::Signal { id, entity, .. } = param
+                                && let Some(compiled) = id_map.get(id).copied()
+                            {
+                                *id = compiled;
+                                *entity = builder.states.get(compiled).map(|state| state.entity);
+                                let base =
+                                    builder.float_signals.get(&compiled).copied().unwrap_or(0.0);
+                                builder.procedural_signal_tracks.push((
+                                    target_entity,
+                                    compiled,
+                                    start,
+                                    base,
+                                ));
+                            }
+                        }
+                        builder.commands.entity(target_entity).queue(
                             move |mut entity: bevy::prelude::EntityWorldMut| {
                                 if let Some(mut motion) =
                                     entity.get_mut::<gaanim_animation::ProceduralMotion>()
@@ -8895,12 +8968,14 @@ impl SceneModel {
                 end,
                 head_length,
                 head_width,
+                body_width,
             } => {
                 let b = builder.double_arrow(
                     Point::new(start.0, start.1),
                     Point::new(end.0, end.1),
                     *head_length,
                     *head_width,
+                    *body_width,
                 );
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
@@ -8992,13 +9067,13 @@ impl SceneModel {
             }
             SpawnKind::Arc {
                 center,
-                radius,
+                radii,
                 start_angle,
                 sweep_angle,
             } => {
                 let b = builder.arc(
                     Point::new(center.0, center.1),
-                    Vec2::new(*radius, *radius),
+                    Vec2::new(radii.0, radii.1),
                     *start_angle,
                     *sweep_angle,
                     0.0,
@@ -9078,7 +9153,7 @@ impl SceneModel {
                         .stroke(color, 0.02)
                         .spawn();
                     let measurement = builder
-                        .double_arrow(dimension_start, dimension_end, None, None)
+                        .double_arrow(dimension_start, dimension_end, None, None, None)
                         .fill(color)
                         .no_stroke()
                         .spawn();
@@ -9919,7 +9994,9 @@ impl SceneModel {
                     }
                     format!("#set page(width: {w}, height: auto, margin: 0pt)\n")
                 } else {
-                    "#set page(height: auto, margin: 0pt)\n".to_string()
+                    // Fit the page to the content, so `#align(center)` centers
+                    // within it instead of widening the drawable to a page.
+                    "#set page(width: auto, height: auto, margin: 0pt)\n".to_string()
                 };
                 let source =
                     format!("{page_directive}#set text(fill: rgb(\"{foreground}\"))\n{source}");
@@ -10139,6 +10216,26 @@ impl SceneModel {
                 .collect();
             for entity in entities {
                 builder.commands.entity(entity).insert(align);
+            }
+        }
+        if let Some(scales) = spec.stroke_scales_with_object
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            let entities: Vec<_> = std::iter::once(state.entity)
+                .chain(state.child_spans.iter().map(|child| child.entity))
+                .collect();
+            for entity in entities {
+                let mut entity = builder.commands.entity(entity);
+                if scales {
+                    entity.insert(gaanim_renderer::effects::StrokeScalesWithObject);
+                } else {
+                    entity.remove::<gaanim_renderer::effects::StrokeScalesWithObject>();
+                }
+            }
+        }
+        if let Some(chalk) = spec.chalk {
+            for (entity, _) in Self::hierarchy_entities(builder, mref.id) {
+                builder.commands.entity(entity).insert(chalk);
             }
         }
         if let Some(blend) = spec.blend {
@@ -10384,6 +10481,7 @@ impl SceneModel {
                             gaanim_renderer::effects::ViewLayer,
                             gaanim_renderer::effects::MotionBlurExempt,
                             gaanim_renderer::effects::StrokeProfile,
+                            gaanim_renderer::effects::ChalkBrush,
                         )>();
                     })
                     .insert((
@@ -13694,6 +13792,66 @@ mod tests {
         assert!((0.3..0.8).contains(&units_height), "{units_height}");
     }
 
+    /// Width of the widest compiled drawable in `canvas`.
+    fn widest_compiled_width(canvas: &SceneModel) -> f64 {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        let mut world = world;
+        queue.apply(&mut world);
+        let mut query = world.query::<&LocalBounds>();
+        query
+            .iter(&world)
+            .map(|bounds| bounds.0.width())
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn ellipse_arcs_keep_their_two_radii() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.ellipse_arc(0.0, 0.0, 2.0, 0.5, 0.0, std::f64::consts::PI);
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        let mut world = world;
+        queue.apply(&mut world);
+        let bounds = world
+            .query::<&LocalBounds>()
+            .iter(&world)
+            .find(|bounds| bounds.0.width() > 0.0)
+            .expect("arc bounds")
+            .0;
+        // The upper half: 4 wide, half a radius tall.
+        assert!((bounds.width() - 4.0).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.height() - 0.5).abs() < 1e-6, "{bounds:?}");
+        assert!(bounds.min.y.abs() < 1e-6, "{bounds:?}");
+    }
+
+    #[test]
+    fn typst_document_page_fits_centered_content() {
+        let table = "#table(columns: 3, [a], [b], [c])";
+        let mut plain = SceneModel::new(16.0, 9.0);
+        plain.typst(table);
+        let mut centered = SceneModel::new(16.0, 9.0);
+        centered.typst(&format!("#align(center)[Title]\n{table}"));
+        let plain_width = widest_compiled_width(&plain);
+        let centered_width = widest_compiled_width(&centered);
+        assert!(plain_width > 0.0, "{plain_width}");
+        assert!(
+            centered_width < plain_width * 1.2,
+            "#align(center) must center within the content ({centered_width}), \
+             not widen it to a page ({plain_width})"
+        );
+    }
+
     #[test]
     fn paragraph_max_lines_emits_a_clipped_text_box() {
         let spec = StructuredTextSpec::new(
@@ -16630,6 +16788,42 @@ mod tests {
                 "DashOffsetLens { from: 2.0, to: 3.0 }",
             ]
         );
+    }
+
+    #[test]
+    fn parameter_driven_spin_integrates_the_parameter_tweens() {
+        let mut canvas = SceneModel::new(640, 360);
+        let wheel = canvas.circle(1.0);
+        let speed = canvas.parameter(1.0).unwrap();
+        canvas.wait(1.0);
+        wheel.add_updater(crate::canvas::UpdaterPreset::Procedural(
+            gaanim_animation::ProceduralLayer::Spin {
+                speed: gaanim_animation::LayerParam::signal(speed.drawable().id),
+            },
+        ));
+        canvas.wait(1.0);
+        canvas.play(vec![speed.animate().set(3.0).duration(2.0)]);
+        canvas.wait(1.0);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        let entity = entity_of(&mut world, &wheel);
+        let motion = world
+            .get::<gaanim_animation::ProceduralMotion>(entity)
+            .unwrap();
+        // 1 rad/s over [1, 2], a symmetric ease from 1 to 3 rad/s over
+        // [2, 4] (2 rad/s on average), then 3 rad/s.
+        assert!((motion.offset_at(2.0).rotation - 1.0).abs() < 1e-9);
+        assert!((motion.offset_at(4.0).rotation - 5.0).abs() < 1e-6);
+        assert!((motion.offset_at(5.0).rotation - 8.0).abs() < 1e-6);
     }
 
     #[test]

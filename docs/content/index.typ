@@ -23,6 +23,7 @@
 #book-part("III", "Guías", description: "Cómo resolver cada tarea: composición, reactividad, presentaciones y producción")
 #include "guias/layout.typ"
 #include "guias/movimiento.typ"
+#include "guias/personajes.typ"
 #include "guias/tipografia-cinetica.typ"
 #include "guias/transiciones.typ"
 #include "guias/efectos.typ"

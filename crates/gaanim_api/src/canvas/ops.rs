@@ -164,6 +164,23 @@ impl CanvasState {
         }
     }
 
+    /// Draw `spec` as chalk for the whole scene. Chalk is not animated, so
+    /// a spec already frozen by a `play` takes it too.
+    pub(crate) fn set_chalk(
+        &mut self,
+        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        chalk: gaanim_renderer::effects::ChalkBrush,
+    ) {
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.chalk = Some(chalk);
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.chalk = Some(chalk);
+        }
+    }
+
     pub fn push_immediate(&mut self, builder: AnimationBuilder) {
         fn channel(ty: &AnimationType) -> &'static str {
             match ty {

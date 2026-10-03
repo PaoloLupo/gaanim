@@ -205,6 +205,7 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--transparent`], [desactivado], [Conserva el canal alfa en WebM, WebP y PNG. MP4 y GIF lo rechazan.],
   [`--from <SEGUNDOS|MARCADOR>`], [`0`], [Inicio del tramo exportado.],
   [`--to <SEGUNDOS|MARCADOR>`], [fin de la escena], [Fin del tramo exportado.],
+  [`--frame <SEGUNDOS|MARCADOR>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
   [`--fps <N>`], [`60`], [Solo al grabar un paquete: fotogramas por segundo grabados, de 1 a 240.],
 )
 
@@ -239,6 +240,20 @@ gaanim export overlay.py --output overlay.webm --transparent
 gaanim export mi-video --output exports/tramo.mp4 --from 12 --to 15
 gaanim export mi-video --output exports/climax.mp4 --from climax --to fin
 gaanim export mi-video --output frames/f_%04d.png --quality draft
+```
+
+== Fotogramas sueltos
+
+Para revisar la composición en un instante, `--frame` escribe exactamente un
+PNG con lo que se ve en ese momento, sin exportar un tramo. Acepta segundos o
+marcadores separados por comas. Con un solo instante escribe el archivo de
+`--output`; con varios añade su posición al nombre (`fotos/f.png` escribe
+`f_1.png`, `f_2.png`…). Respeta `--width`, `--height`, `--fit` y
+`--transparent`.
+
+```bash
+gaanim export mi-video --output revision.png --frame 11.4
+gaanim export mi-video --output fotos/f.png --frame 3,11.4,climax
 ```
 
 == Paquetes

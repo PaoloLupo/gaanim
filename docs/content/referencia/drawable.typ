@@ -69,7 +69,7 @@ badge = scene.geometry.square(1).fill("#f97316").move_to(3, 0)
 #api-entry(
   name: "Drawable.stroke",
   kind: "method",
-  params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro.])),
+  params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro.]), (name: "scale_with_object", type: "bool | None", default: "None", desc: [`True` hace que el ancho siga la escala de la figura, como `scale_stroke_with_object`.])),
   desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`.],
 )[
 ```python
@@ -82,6 +82,39 @@ scene.text("halo", size=0.8).fill(BLACK).move_to(0, 0, Anchor.CENTER)
 scene.wait(0.1)
 # output: preview.webp
 scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.scale_stroke_with_object",
+  kind: "method",
+  params: ((name: "enabled", type: "bool", default: "True", desc: [`False` vuelve al ancho en unidades de escena.]),),
+  desc: [Hace que el ancho del trazo siga la escala que acumula la figura (la suya, la de sus grupos y la de un espacio de coordenadas), como un dibujo que se amplía: al escalar una cara ×1.18, las cejas y la nariz engrosan con ella. Una escala no uniforme ensancha el pincel en su eje. En un grupo o un SVG importado se aplica a todos sus trazos. Es estado de declaración y no se anima.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>head = scene.geometry.circle(1).no_fill().stroke(WHITE, 0.04)
+>>>brow = scene.geometry.line(-0.5, 0.4, -0.1, 0.5).stroke(WHITE, 0.04)
+face = scene.geometry.group([head, brow]).scale_stroke_with_object()
+face.scale_to(1.18)
+```
+]
+
+#api-entry(
+  name: "Drawable.chalk",
+  kind: "method",
+  params: (
+    (name: "seed", type: "int", default: "0", desc: [Semilla del temblor y del grano: la misma semilla dibuja la misma tiza en cada fotograma y exportación.]),
+    (name: "roughness", type: "float", default: "0.01", desc: [Desplazamiento máximo del contorno, en unidades de escena; `0` deja el contorno limpio y solo aplica el grano.]),
+  ),
+  desc: [Dibuja el relleno y el trazo como tiza en una pizarra: el contorno tiembla un poco y un grano rompe la pintura. En un texto o un grupo se aplica a cada glifo y miembro. Vale para toda la escena, aunque se llame después de un `play`; no se anima. `write(brush="chalk")` hace lo mismo desde la animación. Los paquetes de reproducción (`.gaanim`) aún no pueden grabar tiza: exporta un vídeo.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), background="#1f3a2e")
+box = scene.geometry.rect(3, 1.5).no_fill().stroke(WHITE, 0.05).chalk(seed=2)
+scene.play([box.animate.write().duration(1)])
 ```
 ]
 

@@ -405,6 +405,24 @@ fn png_pixels(
     Ok((rgb, image::ExtendedColorType::Rgb8))
 }
 
+/// Write one captured RGBA frame as a PNG at `path`: RGBA when
+/// `transparent`, otherwise RGB like a PNG sequence frame.
+pub fn write_png_frame(
+    path: &std::path::Path,
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+    transparent: bool,
+) -> Result<()> {
+    let (pixels, color_type) = png_pixels(rgba, width, height, transparent)?;
+    let mut png_buffer = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut png_buffer);
+    image::ImageEncoder::write_image(encoder, &pixels, width, height, color_type)
+        .map_err(|e| ExportError::General(format!("PNG encode error: {e}")))?;
+    std::fs::write(path, png_buffer)?;
+    Ok(())
+}
+
 /// Names one PNG sequence frame. A printf-style `%d` or `%0Nd` in the output
 /// file name numbers the frames in place, as FFmpeg does; otherwise the frame
 /// index is appended to the stem as `_NNNNN`.

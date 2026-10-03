@@ -2958,6 +2958,57 @@ impl PyLayoutBuilder {
         crate::pyzones::PyZoneSet::resolve(py, self.inner.clone(), &template, region)
     }
 
+    /// Place `items` at seeded positions inside `region` (the safe area by
+    /// default) where none overlaps another or anything in `avoid` (drawables
+    /// or zones, by their boxes), with at least `gap` between them. Each item
+    /// is only moved, never owned. The same seed gives the same layout; a
+    /// layout with no room raises ``ValueError`` and moves nothing.
+    #[pyo3(signature = (items, region=None, *, avoid=None, gap=None, seed=0))]
+    fn scatter(
+        &self,
+        items: &Bound<'_, PyAny>,
+        region: Option<&Bound<'_, PyAny>>,
+        avoid: Option<&Bound<'_, PyAny>>,
+        gap: Option<&Bound<'_, PyAny>>,
+        seed: u64,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        if items.is_instance_of::<pyo3::types::PyString>() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "scatter() needs a sequence of Drawables",
+            ));
+        }
+        let mut handles = Vec::new();
+        for item in items.try_iter()? {
+            let handle = crate::pyzones::handle_of(&item?)?;
+            if !self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .owns_drawable(&handle)
+            {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "scatter() items must belong to this Scene",
+                ));
+            }
+            crate::pydrawable::PyDrawable(handle.clone()).require_free_position("scatter")?;
+            handles.push(handle);
+        }
+        let region = self.region(region)?;
+        let mut obstacles = Vec::new();
+        if let Some(avoid) = avoid {
+            for target in avoid.try_iter()? {
+                obstacles.push(crate::pyzones::target_bounds(&target?)?);
+            }
+        }
+        let gap = match gap {
+            Some(gap) => crate::pylayout::Units::new(self.inner.clone()).length(gap, "gap")?,
+            None => 0.2,
+        };
+        gaanim_api::canvas::scatter(&handles, region, &obstacles, gap, seed)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
     /// The safe area: the frame minus the scene margin.
     #[getter]
     fn safe(&self) -> PyResult<crate::pyzones::PyZone> {
@@ -3488,7 +3539,8 @@ impl PyGeometry {
         ))
     }
 
-    #[pyo3(signature = (x1, y1, x2, y2, *, head_length=None, head_width=None))]
+    #[pyo3(signature = (x1, y1, x2, y2, *, head_length=None, head_width=None, body_width=None))]
+    #[allow(clippy::too_many_arguments)]
     fn double_arrow(
         &self,
         x1: f64,
@@ -3497,12 +3549,13 @@ impl PyGeometry {
         y2: f64,
         head_length: Option<f64>,
         head_width: Option<f64>,
+        body_width: Option<f64>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        for value in [head_length, head_width].into_iter().flatten() {
+        for value in [head_length, head_width, body_width].into_iter().flatten() {
             if !value.is_finite() || value <= 0.0 {
                 return Err(pyo3::exceptions::PyValueError::new_err(
-                    "head_length and head_width must be finite positive numbers",
+                    "head_length, head_width and body_width must be finite positive numbers",
                 ));
             }
         }
@@ -3510,7 +3563,7 @@ impl PyGeometry {
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .double_arrow(x1, y1, x2, y2, head_length, head_width),
+                .double_arrow(x1, y1, x2, y2, head_length, head_width, body_width),
         ))
     }
 
@@ -3710,6 +3763,38 @@ impl PyGeometry {
                 sweep_angle,
             ))
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ellipse_arc(
+        &self,
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        if ![cx, cy, start_angle, sweep_angle]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "ellipse_arc center and angles must be finite",
+            ));
+        }
+        if !(rx.is_finite() && ry.is_finite() && rx > 0.0 && ry > 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "ellipse_arc radii must be finite and positive",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .ellipse_arc(cx, cy, rx, ry, start_angle, sweep_angle),
+        ))
     }
     #[pyo3(signature = (x1, y1, x2, y2, angle, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
     #[allow(clippy::too_many_arguments)]

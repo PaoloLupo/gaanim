@@ -150,12 +150,13 @@ fn dispatch_export_mode() -> bool {
     if format == gaanim_bundle::EXTENSION {
         if command.from.is_some()
             || command.to.is_some()
+            || !command.frames.is_empty()
             || command.transparent
             || command.encoder != VideoEncoder::Auto
         {
             console::error(
                 "export",
-                "a playback bundle records the whole scene; --from, --to, --transparent and --encoder do not apply",
+                "a playback bundle records the whole scene; --from, --to, --frame, --transparent and --encoder do not apply",
             );
             std::process::exit(2);
         }
@@ -171,6 +172,23 @@ fn dispatch_export_mode() -> bool {
         std::process::exit(2);
     }
     console::banner("Export");
+    if !command.frames.is_empty() {
+        let written = crate::python::runtime(&script)
+            .and_then(|python| (python.load_script_canvas)(&script))
+            .and_then(|canvas| gaanim_editor::cli::export_frames(canvas, &command, &output));
+        match written {
+            Ok(paths) => {
+                for path in paths {
+                    console::success("export", format!("wrote {}", path.display()));
+                }
+            }
+            Err(error) => {
+                console::error("export", error);
+                std::process::exit(1);
+            }
+        }
+        return true;
+    }
     if let Err(error) = run_export_worker(ExportWorkerArgs {
         script,
         output,

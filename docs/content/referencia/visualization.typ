@@ -613,7 +613,8 @@ regresivas.
   kind: "factory",
   params: (
     (name: "value", type: "float", default: "0.0", desc: [Valor inicial finito; su magnitud por `10**decimals` debe ser menor que `1e15`.]),
-    (name: "decimals / min_digits", type: "int", default: "0 / 1", desc: [De 0 a 6 decimales y de 1 a 15 posiciones enteras con ceros iniciales; la suma no supera 15.]),
+    (name: "decimals / min_digits", type: "int", default: "0 / 1", desc: [De 0 a 6 decimales y de 1 a 15 posiciones enteras reservadas; la suma no supera 15.]),
+    (name: "pad", type: "str", default: "\"0\"", desc: [Relleno de las posiciones reservadas sin usar: `"0"` dibuja ceros iniciales y `" "` deja celdas vacías del mismo ancho, sin dibujar sus separadores de miles.]),
     (name: "group_separator / decimal_separator", type: "str", default: "\"\" / \".\"", desc: [Cero o un carácter, y un carácter distinto.]),
     (name: "prefix / suffix / show_plus", type: "str / str / bool", default: "\"\" / \"\" / False", desc: [Afijos de una línea (256 bytes UTF-8 en total) y signo positivo visible.]),
     (name: "font_family / weight", type: "str | None / int | None", default: "None", desc: [Familia y peso (1 a 1000), resueltos como en `scene.text`; sin familia hereda la de cuerpo.]),
@@ -622,7 +623,7 @@ regresivas.
     (name: "direction", type: "str", default: "\"up\"", desc: [`up` o `down` para magnitudes crecientes; al disminuir se invierte.]),
     (name: "color", type: "Color | None", default: "None", desc: [Color de cifras, signo y afijos; sin él, el del tema.]),
   ),
-  desc: [Las cifras son contornos vectoriales de ancho fijo recortados en su celda. La geometría depende solo del valor actual, así que reproducción, seeks y exportación coinciden. El borde derecho queda anclado; `min_digits` reserva posiciones para que no crezca durante un acarreo. En modo `continuous`, las ruedas se asientan durante el primer y el último 15 % de cada animación del valor. Opciones inválidas lanzan `ValueError`; si un driver sale del rango, se muestra una raya.],
+  desc: [Las cifras son contornos vectoriales de ancho fijo recortados en su celda. La geometría depende solo del valor actual, así que reproducción, seeks y exportación coinciden. El borde derecho queda anclado; `min_digits` reserva posiciones para que no crezca durante un acarreo. Con `pad=" "` esas posiciones quedan vacías: el contador ocupa siempre lo mismo, el prefijo no se desplaza y una frase con el valor final queda centrada para todos los valores. En modo `continuous`, las ruedas se asientan durante el primer y el último 15 % de cada animación del valor. Opciones inválidas lanzan `ValueError`; si un driver sale del rango, se muestra una raya.],
 )[
 ```python
 from gaanim import Easing, Scene
@@ -633,6 +634,8 @@ counter = scene.viz.rolling_number(
 ).move_to(0, 0)
 scene.play([counter.count_to(1250, duration=3).easing(Easing.SMOOTH)])
 scene.play([counter.animate.set(500).duration(2)])
+designs = scene.viz.rolling_number(0, min_digits=8, pad=" ", group_separator=" ").move_to(0, -1.5)
+scene.play([designs.count_to(14_000_605, duration=3)])
 counter.set(0)  # Corte reversible en el cursor actual.
 scene.wait(0.5)
 scene.render()

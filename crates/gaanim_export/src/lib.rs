@@ -12,7 +12,7 @@ pub mod prelude {
     };
     pub use crate::encoder::{
         EncodingSpeed, ExportError, ExportFormat, VideoEncoder, detect_available_encoders,
-        detect_best_encoder,
+        detect_best_encoder, write_png_frame,
     };
     pub use crate::exporter::{
         BundleRenderer, CapturedFrame, capture_bundle_streaming, capture_scene_direct,

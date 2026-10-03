@@ -3431,6 +3431,7 @@ impl SceneModel {
             gap_length,
         })
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn double_arrow(
         &mut self,
         x1: f64,
@@ -3439,12 +3440,14 @@ impl SceneModel {
         y2: f64,
         head_length: Option<f64>,
         head_width: Option<f64>,
+        body_width: Option<f64>,
     ) -> DrawableHandle {
         self.spawn(SpawnKind::DoubleArrow {
             start: (x1, y1),
             end: (x2, y2),
             head_length,
             head_width,
+            body_width,
         })
     }
     pub fn polygon(&mut self, points: Vec<(f64, f64)>) -> DrawableHandle {
@@ -3532,7 +3535,25 @@ impl SceneModel {
     ) -> DrawableHandle {
         self.spawn(SpawnKind::Arc {
             center: (cx, cy),
-            radius,
+            radii: (radius, radius),
+            start_angle,
+            sweep_angle,
+        })
+    }
+    /// Creates an open elliptical arc with radii `rx` along x and `ry`
+    /// along y. Angles are expressed in radians, counter-clockwise from +x.
+    pub fn ellipse_arc(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Arc {
+            center: (cx, cy),
+            radii: (rx, ry),
             start_angle,
             sweep_angle,
         })
@@ -11374,6 +11395,32 @@ mod tests {
             scene.play_items(vec![segment.into()]),
             Err(PlayError::MixedVideoPlayback)
         );
+    }
+
+    #[test]
+    fn chalk_from_a_later_write_reaches_the_frozen_spec() {
+        let mut scene = SceneModel::new(1280, 720);
+        let first = scene.circle(1.0);
+        let title = scene.text("Pizarra");
+        scene
+            .play_items(vec![first.animate().write().into()])
+            .unwrap();
+        assert!(
+            scene.state.lock().unwrap().frozen_spawn_specs[&title.id]
+                .chalk
+                .is_none()
+        );
+        let write = title.animate().write().chalk(4, 0.02);
+        scene.play_items(vec![write.into()]).unwrap();
+        let chalk = gaanim_renderer::effects::ChalkBrush {
+            seed: 4,
+            roughness: 0.02,
+        };
+        assert_eq!(
+            scene.state.lock().unwrap().frozen_spawn_specs[&title.id].chalk,
+            Some(chalk)
+        );
+        assert_eq!(title.spec.lock().unwrap().chalk, Some(chalk));
     }
 
     #[test]

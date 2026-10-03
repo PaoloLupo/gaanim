@@ -1616,7 +1616,7 @@ class Anim:
     def fade_out(self) -> Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
-    def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None) -> Anim:
+    def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None, brush: Literal["pen", "chalk"] = "pen", seed: int = 0) -> Anim:
         """Trace paths with a constant logical stroke, then smoothly fade their fills.
 
         On text, ``by`` starts the glyphs of each grapheme, word, explicit line,
@@ -1627,7 +1627,10 @@ class Anim:
         ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
         sequential staggering and a number overrides it. A missing outline is
         synthesized at 0.03 logical units and removed as the authored fill
-        appears. Raises ``ValueError`` after a property target or another effect.
+        appears. ``brush="chalk"`` draws the drawable as chalk for the whole
+        scene, like ``Drawable.chalk(seed)``: a trembling outline and a grain
+        that follow ``seed``. Raises ``ValueError`` after a property target or
+        another effect.
         """
         ...
     def create(self) -> Anim:
@@ -2443,8 +2446,10 @@ def stagger(
 ) -> Composition:
     """Offset items by ``index * each`` seconds, or by distance from ``origin``.
 
-    With ``origin``, ``grid``, ``total`` or ``easing`` the delay of each item
-    grows with its distance from ``origin``: the first item (``"start"``), the
+    Without ``origin`` or ``grid`` items keep their list order: ``total``
+    fixes the whole spread and ``easing`` shapes it, still by index. With
+    ``origin`` or ``grid`` the delay of each item grows with its distance from
+    ``origin`` (``"start"`` when only ``grid`` is given): the first item (``"start"``), the
     last (``"end"``), the center of the items (``"center"``), the outer edges
     moving inward (``"edges"``), a seeded random order (``"random"``), or an
     ``(x, y)`` scene point. Distances use the items' declared positions
@@ -2503,7 +2508,8 @@ def distribute(
 ) -> list[float]:
     """Spread values from ``low`` to ``high`` over ``items`` by distance from ``origin``.
 
-    Uses the same ordering as ``stagger`` and returns one value per item, so
+    Uses the same ordering as ``stagger`` (list order without ``origin`` or
+    ``grid``) and returns one value per item, so
     it distributes sizes, colors or opacities instead of start times.
 
     Example:
@@ -2709,20 +2715,28 @@ class Updater:
         """
         ...
     @staticmethod
-    def rotate(speed: float) -> Updater:
-        """Create an updater that will rotate the drawable each frame.
+    def rotate(speed: float | Parameter) -> Updater:
+        """Turn the drawable about z at ``speed`` radians per second.
+
+        A ``Parameter`` speed can be animated to speed the turn up or slow it
+        down without jumps: the angle is its integral from when the updater is
+        added, so seeks and exports land on the same angle as playback, and
+        ``remove_updater()`` keeps the angle reached. A parameter driven by
+        ``drive_from_samples`` or ``add_updater_fn`` uses each frame's value.
 
         Example:
-            result = Updater.rotate(1.0)
+            speed = scene.viz.parameter(0.5)
+            circle.add_updater(Updater.rotate(speed))
+            scene.play([speed.animate.set(6.0).duration(2)])
         """
         ...
     @staticmethod
     def wiggle(
         *,
-        position: float = 0.08,
-        rotation: float = 0.0,
-        scale: float = 0.0,
-        frequency: float = 2.0,
+        position: float | Parameter = 0.08,
+        rotation: float | Parameter = 0.0,
+        scale: float | Parameter = 0.0,
+        frequency: float | Parameter = 2.0,
         octaves: int = 2,
         seed: int = 0,
     ) -> Updater:
@@ -2733,10 +2747,16 @@ class Updater:
         jitter changes and ``octaves`` (1 to 8) adds finer detail. The offset
         starts at zero, is a pure function of timeline time, and adds to
         ``animate.move_to`` and other clips instead of replacing them.
-        ``remove_updater()`` ends it. Invalid values raise ``ValueError``.
+        ``remove_updater()`` ends it. The amplitudes and ``frequency`` accept a
+        ``Parameter``: animating an amplitude to 0 calms the jitter instead of
+        cutting it, and a changing frequency changes the pace without jumps.
+        Invalid values raise ``ValueError``.
 
         Example:
             logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, frequency=2.0, seed=1))
+            shake = scene.viz.parameter(0.15)
+            logo.add_updater(Updater.wiggle(position=shake))
+            scene.play([shake.animate.set(0).duration(1.5)])
         """
         ...
     @staticmethod
@@ -2941,14 +2961,22 @@ class Drawable:
             result = drawable.no_fill()
         """
         ...
-    def stroke(self, paint: Paint, width: float, *, align: Optional[Literal["inside", "center", "outside"]] = None) -> Self:
+    def stroke(
+        self,
+        paint: Paint,
+        width: float,
+        *,
+        align: Optional[Literal["inside", "center", "outside"]] = None,
+        scale_with_object: Optional[bool] = None,
+    ) -> Self:
         """Apply a stroke whose width is measured in logical scene units.
 
         The width does not follow the drawable's scale: ``scale_to``,
         ``scale_to_3d``, ``matrix_to``, skews, group scales and their
         animations resize the shape, never the pen, which stays round and
         equally wide on every side. This includes an imported SVG root or
-        part scaled to fit the scene.
+        part scaled to fit the scene. ``scale_with_object=True`` makes the
+        width follow that scale instead, as ``scale_stroke_with_object`` does.
 
         ``align`` places the stroke on closed contours, including every text
         glyph. By default it stays inside the shape, so ``write`` draws a
@@ -2964,6 +2992,35 @@ class Drawable:
         ...
     def stroke_style(self, style: StrokeStyle) -> Self:
         """Apply complete stroke geometry and return this drawable."""
+        ...
+    def scale_stroke_with_object(self, enabled: bool = True) -> Self:
+        """Let the stroke width follow the drawable's accumulated scale.
+
+        Scaling the drawable, its groups or a coordinate view then widens or
+        narrows the pen with the shape, as if the drawing were enlarged; a
+        non-uniform scale widens it along its axis. On a group or an imported
+        SVG it applies to every stroke inside. ``enabled=False`` keeps the
+        width in scene units again (the default). This is declaration state
+        and is not animated.
+
+        Example:
+            face = scene.geometry.group([head, brows, nose]).scale_stroke_with_object()
+            face.scale_to(1.18)  # The brows thicken with the head.
+        """
+        ...
+    def chalk(self, seed: int = 0, roughness: float = 0.01) -> Self:
+        """Draw the fill and stroke as chalk on a blackboard.
+
+        The outline trembles by up to ``roughness`` scene units and a grain
+        breaks the paint; both follow ``seed``, so every frame and export
+        draws the same chalk. On a text or a group it applies to every glyph
+        and child. This is declaration state and is not animated. Playback
+        bundles (``.gaanim``) cannot record chalk yet.
+
+        Example:
+            formula = scene.text.equation("E = m c^2").chalk(seed=7)
+            scene.play([formula.animate.write()])
+        """
         ...
     def no_stroke(self) -> Self:
         """Apply no stroke to this drawable and return the result.
@@ -4107,6 +4164,29 @@ def parts(mapping: Optional[Mapping[str, str]] = None, /, **content: str) -> Tex
         terms = parts(mass="m", gravity="g sin(theta)")
         labels = parts({"tb:dist": "d", "x-1": "x"})
         equation = scene.text("$", terms, "$")
+    """
+    ...
+
+def quantity(
+    value: int | float,
+    unit: str = "",
+    *,
+    decimals: Optional[int] = None,
+    decimal_separator: str = ".",
+) -> str:
+    """Typst math for a number with its unit, like LaTeX's siunitx.
+
+    The number and the unit are separated by a thin space (except ``°``,
+    ``′`` and ``″``), unit symbols are upright, ``^`` writes exponents and
+    ``/`` a slash instead of a fraction, so ``1 m³`` and ``181 L`` are spaced
+    alike. ``unit`` lists factors separated by spaces, ``*``, ``·`` or
+    ``.``: ``"kg m/s^2"``, ``"s^-1"``, ``"°C"``. ``decimals`` fixes the
+    decimal places and ``decimal_separator`` replaces the point. Use the
+    result as content of ``scene.text.equation``. A malformed unit raises
+    ``ValueError``.
+
+    Example:
+        scene.text.equation("V =", quantity(1, "m^3"), "=", quantity(1000, "L"))
     """
     ...
 
@@ -5886,7 +5966,7 @@ class Parameter:
         ``times`` are relative to the timeline cursor where this call is made.
 
         Example:
-            phase = scene.parameter(0.0)
+            phase = scene.viz.parameter(0.0)
             phase.drive_from_samples(times, values, scale=2.0 * math.pi)
         """
         ...
@@ -6851,12 +6931,22 @@ class Geometry:
         """
         ...
     def double_arrow(
-        self, x1: float, y1: float, x2: float, y2: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None
+        self,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        *,
+        head_length: Optional[float] = None,
+        head_width: Optional[float] = None,
+        body_width: Optional[float] = None,
     ) -> Drawable:
         """Create a filled double-headed arrow in scene units.
 
-        Omitted head metrics use 0.18 by 0.15 with a 0.036 body; heads shrink
-        so they never overlap.
+        Omitted metrics use 0.18 by 0.15 heads with a 0.036 body, as in
+        ``arrow``; heads shrink so they never overlap. Pass a thinner
+        ``body_width`` for fine dimension lines, or use
+        ``scene.mechanics.dimension`` for a full dimension with extension lines.
 
         Example:
             result = scene.geometry.double_arrow(-3, 0, 3, 0)
@@ -6981,6 +7071,21 @@ class Geometry:
             angle = scene.geometry.arc(0, 0, 0.8, 0, math.pi / 4).stroke(GOLD, 0.03)
         """
         ...
+    def ellipse_arc(
+        self, cx: float, cy: float, rx: float, ry: float, start_angle: float, sweep_angle: float
+    ) -> Drawable:
+        """Create an open elliptical arc with radii ``rx`` (x) and ``ry`` (y).
+
+        Angles are in radians counterclockwise from the positive x axis, as
+        in ``arc``: half an ellipse is ``sweep_angle=math.pi``, the visible
+        rim of a cylinder or a beaker drawn in perspective. Like ``arc`` it
+        is born without fill and works with ``tip``, trims and ``create()``.
+        Non-positive radii or non-finite values raise ``ValueError``.
+
+        Example:
+            rim = scene.geometry.ellipse_arc(0, -1, 1.5, 0.4, math.pi, math.pi).stroke(WHITE, 0.04)
+        """
+        ...
     def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
         """Create a curved arrow between two points deflected by ``angle`` radians.
 
@@ -7097,7 +7202,7 @@ class Geometry:
         reveal those deferred descendants.
 
         Example:
-            result = scene.group([drawable])
+            result = scene.geometry.group([drawable])
         """
         ...
     def repeat(
@@ -7444,8 +7549,11 @@ class Typography:
         keeps Typst's own proportions and is scaled so its default 11pt text
         is as large as the ``body`` text role; ``#set text(size: 22pt)`` is
         therefore twice the body size, and table insets and rule widths scale
-        with it. ``width`` is a Typst page width (``"16cm"``, ``"800pt"``; a
-        number means points) measured before that scaling. Empty inline
+        with it. Without ``width`` the page fits its content, so
+        ``#align(center)`` centers within the content and lines only break
+        where the source breaks them. ``width`` is a Typst page width
+        (``"16cm"``, ``"800pt"``; a number means points) measured before that
+        scaling, for paragraphs that wrap or ``1fr`` columns. Empty inline
         source raises ``ValueError`` and an unreadable asset raises
         ``RuntimeError``.
 
@@ -7528,6 +7636,24 @@ class LayoutBuilder:
         ...
     def zones(self, template: Zones, *, within: Optional[Literal["safe", "frame"] | Zone | Drawable] = None) -> ZoneSet:
         """Apply a Zones template to the safe area (default), the frame, a zone or an object's box."""
+        ...
+    def scatter(self, items: Sequence[Drawable], region: Optional[Literal["safe", "frame"] | Zone | Drawable] = None, *, avoid: Sequence[Drawable | Zone] = (), gap: Optional[Length] = None, seed: int = 0) -> None:
+        """Place ``items`` at seeded positions without overlaps.
+
+        Every item lands inside ``region`` (the safe area by default, or the
+        frame, a zone or an object's box) with at least ``gap`` (0.2 by
+        default) between items and from the box of each shape in ``avoid``.
+        Items keep their size and are only moved, never owned; larger items
+        are placed first and each one goes where it has the most room, so
+        they spread over the region. The same items, region and ``seed``
+        always give the same layout. To keep a figure's outline clear rather
+        than its whole box, avoid its parts: ``avoid=[persona.part("cabeza")]``.
+        A layout with no room raises ``ValueError`` and moves nothing.
+
+        Example:
+            labels = [scene.text.equation(f) for f in formulas]
+            scene.layout.scatter(labels, avoid=[character], gap=0.25, seed=1)
+        """
         ...
     @property
     def safe(self) -> Zone:
@@ -7804,6 +7930,7 @@ class Visualization:
         ...
     def rolling_number(
         self, value: float = 0.0, *, decimals: int = 0, min_digits: int = 1,
+        pad: Literal["0", " "] = "0",
         group_separator: str = "", decimal_separator: str = ".",
         prefix: str = "", suffix: str = "", show_plus: bool = False,
         font_family: Optional[str] = None, weight: Optional[int] = None,
@@ -7812,8 +7939,10 @@ class Visualization:
     ) -> RollingNumber:
         """Create a right-anchored rolling counter with fixed-width digit cells.
 
-        decimals is 0..6; min_digits counts zero-padded integer positions (1..15;
-        their sum is at most 15). Group/decimal separators are zero-or-one/one
+        decimals is 0..6; min_digits counts reserved integer positions (1..15;
+        their sum is at most 15). pad fills the unused ones: "0" draws leading
+        zeros, " " leaves blank cells of the same width, so the display keeps
+        its width and its prefix stays put as the value grows. Group/decimal separators are zero-or-one/one
         characters. Affixes are single-line, at most 256 UTF-8 bytes combined.
         Sizes and spacing use scene units; line_height is a digit-ink-height multiplier
         of at least 1. All dimensions must be finite, font_size positive and

@@ -314,6 +314,25 @@ fn stagger_grid(grid: Option<&Bound<'_, PyAny>>) -> PyResult<Option<(usize, usiz
     Ok(Some((rows, columns)))
 }
 
+/// Origin and grid of a shaped stagger. Without `origin` or `grid` the
+/// items keep their index order, laid on one row of cells, so `total` and
+/// `easing` only reshape the timing of the list order.
+fn stagger_order(
+    origin: Option<&Bound<'_, PyAny>>,
+    grid: Option<&Bound<'_, PyAny>>,
+    count: usize,
+    seed: u64,
+) -> PyResult<(StaggerOrigin, Option<(usize, usize)>)> {
+    if origin.is_none() && grid.is_none() {
+        return Ok((StaggerOrigin::Start, Some((1, count.max(1)))));
+    }
+    let origin = match origin {
+        Some(origin) => stagger_origin(origin, seed)?,
+        None => StaggerOrigin::Start,
+    };
+    Ok((origin, stagger_grid(grid)?))
+}
+
 #[pyfunction]
 #[pyo3(signature = (*items, each=0.1, total=None, origin=None, grid=None, easing=None, seed=0))]
 #[allow(clippy::too_many_arguments)]
@@ -327,18 +346,16 @@ pub fn stagger(
     seed: u64,
 ) -> PyResult<PyComposition> {
     let children = tuple_children(items)?;
-    let spatial = origin.is_some() || grid.is_some() || total.is_some() || easing.is_some();
-    let composition = if spatial {
-        let origin = match origin {
-            Some(origin) => stagger_origin(origin, seed)?,
-            None => StaggerOrigin::Start,
-        };
+    let shaped = origin.is_some() || grid.is_some() || total.is_some() || easing.is_some();
+    let composition = if shaped {
+        let count = children.len();
+        let (origin, grid) = stagger_order(origin, grid, count, seed)?;
         Composition::stagger_layout(
             children,
             each,
             StaggerLayout {
                 origin,
-                grid: stagger_grid(grid)?,
+                grid,
                 total,
                 easing: easing.map(|easing| easing.inner.clone()),
             },
@@ -367,11 +384,8 @@ pub fn distribute(
     if !low.is_finite() || !high.is_finite() {
         return Err(PyValueError::new_err("low and high must be finite"));
     }
-    let origin = match origin {
-        Some(origin) => stagger_origin(origin, seed)?,
-        None => StaggerOrigin::Start,
-    };
-    let positions: Vec<gaanim_core::glam::DVec2> = match stagger_grid(grid)? {
+    let (origin, grid) = stagger_order(origin, grid, items.len(), seed)?;
+    let positions: Vec<gaanim_core::glam::DVec2> = match grid {
         Some((_, columns)) => (0..items.len())
             .map(|index| {
                 gaanim_core::glam::DVec2::new((index % columns) as f64, -((index / columns) as f64))

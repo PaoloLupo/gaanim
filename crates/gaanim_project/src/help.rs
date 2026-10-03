@@ -272,6 +272,10 @@ const EXPORT: Page = Page {
                     "End of the range (default: the end of the scene). Audio\nis trimmed to the range and PNG frames start at 0",
                 ),
                 (
+                    "--frame <SECONDS|MARKER>[,...]",
+                    "Write exactly one PNG at each instant instead of a range.\nOne instant writes --output; several append 1, 2, ...\n(still.png -> still_1.png). Needs a .png output",
+                ),
+                (
                     "--fps <N>",
                     "Bundles only: frames recorded per second (default 60).\nA video exported from a bundle runs at this rate",
                 ),
@@ -296,6 +300,10 @@ const EXPORT: Page = Page {
                 (
                     "gaanim export . -o intro.gif --from 0 --to intro_end",
                     "Only up to scene.marker(\"intro_end\")",
+                ),
+                (
+                    "gaanim export . -o still.png --frame 11.4",
+                    "One PNG of the frame shown at 11.4 s",
                 ),
                 (
                     "gaanim export . -o talk.gaanim",

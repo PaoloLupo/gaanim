@@ -585,6 +585,7 @@ pub enum SpawnKind {
         end: (f64, f64),
         head_length: Option<f64>,
         head_width: Option<f64>,
+        body_width: Option<f64>,
     },
     /// Closed polygon defined by scene-space vertices.
     Polygon(Vec<(f64, f64)>),
@@ -622,10 +623,11 @@ pub enum SpawnKind {
     Checkmark(f64),
     Cross(f64),
     RightAngle(f64),
-    /// Circular arc centered at `(cx, cy)`, in radians.
+    /// Circular or elliptical arc centered at `(cx, cy)` with radii
+    /// `(rx, ry)` along x and y, in radians.
     Arc {
         center: (f64, f64),
-        radius: f64,
+        radii: (f64, f64),
         start_angle: f64,
         sweep_angle: f64,
     },
@@ -951,6 +953,11 @@ pub struct ObjectSpec {
     /// Stroke placement relative to closed contours; `None` keeps the
     /// renderer default (inside closed shapes).
     pub stroke_align: Option<gaanim_renderer::effects::StrokeAlign>,
+    /// Whether the stroke pen follows the drawable's accumulated scale;
+    /// `None` keeps it in scene units.
+    pub stroke_scales_with_object: Option<bool>,
+    /// Chalk look of the fill and stroke, on every glyph and child.
+    pub chalk: Option<gaanim_renderer::effects::ChalkBrush>,
     /// This group is the public root of an imported SVG hierarchy.
     pub(crate) svg_root: bool,
     /// Root of the imported SVG this group or path belongs to. Stroke widths
@@ -1098,6 +1105,8 @@ impl ObjectSpec {
             stroke_style: None,
             stroke_overridden: false,
             stroke_align: None,
+            stroke_scales_with_object: None,
+            chalk: None,
             svg_root: false,
             svg_owner: None,
             glow: None,
@@ -2385,6 +2394,18 @@ impl Anim {
         self.effect(AnimationType::Write {
             config: DrawAnimationConfig::default(),
         })
+    }
+
+    /// Draw the animated drawable as chalk for the whole scene, as
+    /// [`crate::canvas::DrawableHandle::chalk`] does.
+    pub fn chalk(self, seed: u64, roughness: f64) -> Self {
+        if let (Some(spec), Some(state)) = (&self.property_spec, &self.owner) {
+            state.lock().expect("canvas state poisoned").set_chalk(
+                spec,
+                gaanim_renderer::effects::ChalkBrush { seed, roughness },
+            );
+        }
+        self
     }
 
     pub fn create(self) -> Self {

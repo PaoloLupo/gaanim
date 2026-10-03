@@ -49,6 +49,31 @@ pub enum StrokeAlign {
     Outside,
 }
 
+/// Component: the stroke pen follows the scale the drawable accumulates from
+/// itself, its groups and coordinate views, like a stroke drawn on paper
+/// that is then enlarged. Without it a stroke keeps its width in scene units.
+/// A non-uniform scale widens the pen along its axis.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StrokeScalesWithObject;
+
+/// Component: draw the fill and stroke as chalk on a blackboard: the outline
+/// trembles by up to `roughness` scene units and the paint is broken by a
+/// grain. Both follow `seed`, so every frame and export draws the same chalk.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ChalkBrush {
+    pub seed: u64,
+    pub roughness: f64,
+}
+
+impl Default for ChalkBrush {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            roughness: 0.01,
+        }
+    }
+}
+
 /// Component: Adds an outer glow outline effect to a 2D Mobject.
 #[derive(Component, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

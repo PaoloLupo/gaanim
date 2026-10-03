@@ -475,6 +475,8 @@ scene.render()
     (name: "by", type: "\"grapheme\" | \"word\" | \"line\" | \"part\"", default: "\"grapheme\"", desc: [En un texto, qué unidades empiezan juntas: grafemas, palabras, líneas explícitas o partes semánticas. La puntuación se une a su vecina.]),
     (name: "order", type: "\"forward\" | \"reverse\" | \"center\" | \"random\"", default: "\"forward\"", desc: [Orden de los grupos: hacia delante, al revés, desde el centro hacia fuera o en una permutación aleatoria fija.]),
     (name: "stagger", type: "float | None", default: "None", desc: [Retardo relativo entre grupos; `None` lo adapta al número de grupos.]),
+    (name: "brush", type: "\"pen\" | \"chalk\"", default: "\"pen\"", desc: [`"chalk"` dibuja el objeto como tiza en una pizarra durante toda la escena, como `Drawable.chalk(seed)`.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla del temblor y del grano de la tiza.]),
   ),
   returns: (type: "Anim", desc: [Escritura trazo a trazo.]),
   desc: [Traza los contornos con un grosor lógico constante y luego funde los rellenos. Si el objeto no tiene contorno, usa uno temporal de 0.03 unidades que desaparece al entrar el relleno. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
@@ -487,6 +489,18 @@ scene = Scene(frame=(16, 9), background="#0f172a")
 eq = scene.text("$", part("energy", "E"), " = ", part("mass", "m"), " ", part("speed", "c^2"), "$").move_to(0, 0)
 scene.play([eq.animate.write(by="part", stagger=0.08).duration(1.4)])
 # output: preview.webp
+scene.render()
+```
+
+Con `brush="chalk"` la fórmula se escribe como en una pizarra:
+
+```python
+# show-code: true
+from gaanim import WHITE, Scene
+scene = Scene(frame=(16, 9), background="#1f3a2e")
+eq = scene.text.equation("E = m c^2").fill(WHITE).scale_to(2)
+scene.play([eq.animate.write(brush="chalk", seed=3).duration(1.5)])
+# output: chalk.webp
 scene.render()
 ```
 ]
@@ -1908,7 +1922,7 @@ scene.play(
     (name: "seed", type: "int", default: "0", desc: [Semilla de `origin="random"`.]),
   ),
   returns: (type: "Composition", desc: [Elementos desplazados en el tiempo.]),
-  desc: [Sin `origin`, `grid`, `total` ni `easing`, escalona por índice. Con cualquiera de ellos, el retardo crece con la distancia al origen. Los elementos cuya posición depende de un layout usan su índice.],
+  desc: [Sin `origin` ni `grid`, escalona por índice: `total` fija la duración de toda la onda y `easing` la acelera o frena, pero el orden sigue siendo el de la lista. Con `origin` o `grid`, el retardo crece con la distancia al origen, que es el primer elemento (`"start"`) si solo se pasa `grid`. Los elementos cuya posición depende de un layout usan su índice.],
 )[
 ```python
 >>>from gaanim import *
@@ -1917,6 +1931,7 @@ scene.play(
 scene.play(stagger(*[d.animate.grow_from_center() for d in dots], each=0.03, origin="center"))
 scene.play(stagger(*[d.animate.indicate() for d in dots], total=1.2, origin="random", seed=7))
 scene.play(stagger(*[d.animate.fill(GOLD) for d in dots], each=0.05, origin=(0.0, -3.0)))
+scene.play(stagger(*[d.animate.fade_out() for d in dots], total=1.0, easing=Easing.ease_out(EasingCurve.QUADRATIC)))
 ```
 ]
 
@@ -1930,7 +1945,7 @@ scene.play(stagger(*[d.animate.fill(GOLD) for d in dots], each=0.05, origin=(0.0
     (name: "origin, grid, easing, seed", type: "", default: "None, None, None, 0", desc: [Como en `stagger`.]),
   ),
   returns: (type: "list[float]", desc: [Un valor por objeto.]),
-  desc: [Usa el mismo orden que `stagger` para repartir tamaños, colores u opacidades en lugar de tiempos.],
+  desc: [Usa el mismo orden que `stagger` para repartir tamaños, colores u opacidades en lugar de tiempos; sin `origin` ni `grid`, el de la lista.],
 )[
 ```python
 >>>from gaanim import *
@@ -2177,10 +2192,20 @@ scene.wait(2)
 #api-entry(
   name: "Updater.rotate",
   kind: "factory",
-  params: ((name: "speed", type: "float", default: none, desc: [Radianes por segundo.]),),
+  params: ((name: "speed", type: "float | Parameter", default: none, desc: [Radianes por segundo. Con un `Parameter`, animarlo acelera o frena el giro sin saltos.]),),
   returns: (type: "Updater", desc: [Giro continuo alrededor de Z.]),
-  none,
-)
+  desc: [Con un `Parameter`, el ángulo es la integral de su valor desde que se añade el updater, así que un seek o una exportación desde la mitad caen en el mismo ángulo que la reproducción, y `remove_updater()` lo deja en el ángulo alcanzado. Para un `Parameter` movido por `drive_from_samples` o `add_updater_fn` se usa su valor de cada fotograma.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>circle = scene.geometry.regular_polygon(6, 1.5).no_fill().stroke(GOLD, 0.03)
+speed = scene.viz.parameter(0.5)
+circle.add_updater(Updater.rotate(speed))
+scene.play([speed.animate.set(6.0).duration(2)])  # el clímax: gira cada vez más rápido
+scene.play([speed.animate.set(0.5).duration(1)])
+```
+]
 
 #api-entry(
   name: "Updater.pulse",
@@ -2208,15 +2233,15 @@ scene.wait(2)
   name: "Updater.wiggle",
   kind: "factory",
   params: (
-    (name: "position", type: "float", default: "0.08", desc: [Amplitud del ruido de posición, en unidades de escena.]),
-    (name: "rotation", type: "float", default: "0.0", desc: [Amplitud de giro, en radianes.]),
-    (name: "scale", type: "float", default: "0.0", desc: [Amplitud de escala, como fracción.]),
-    (name: "frequency", type: "float", default: "2.0", desc: [Rapidez del temblor.]),
+    (name: "position", type: "float | Parameter", default: "0.08", desc: [Amplitud del ruido de posición, en unidades de escena.]),
+    (name: "rotation", type: "float | Parameter", default: "0.0", desc: [Amplitud de giro, en radianes.]),
+    (name: "scale", type: "float | Parameter", default: "0.0", desc: [Amplitud de escala, como fracción.]),
+    (name: "frequency", type: "float | Parameter", default: "2.0", desc: [Rapidez del temblor.]),
     (name: "octaves", type: "int", default: "2", desc: [Capas de detalle, de 1 a 8.]),
     (name: "seed", type: "int", default: "0", desc: [Semilla del ruido.]),
   ),
   returns: (type: "Updater", desc: [Temblor orgánico con semilla.]),
-  desc: [Es una capa sobre la animación del objeto: empieza en cero, es función pura del tiempo de la línea de tiempo y se suma a `animate.move_to` y a otros clips en lugar de sustituirlos. Un seek cae en el mismo fotograma que la reproducción. Valores inválidos lanzan `ValueError`.],
+  desc: [Es una capa sobre la animación del objeto: empieza en cero, es función pura del tiempo de la línea de tiempo y se suma a `animate.move_to` y a otros clips en lugar de sustituirlos. Un seek cae en el mismo fotograma que la reproducción. Las amplitudes y la frecuencia aceptan un `Parameter`: animar la amplitud a 0 apaga el temblor poco a poco en lugar de cortarlo con `remove_updater()`, y cambiar la frecuencia cambia el ritmo sin saltos. Valores inválidos lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -2224,6 +2249,18 @@ scene.wait(2)
 >>>logo = scene.media.image("assets/logo.webp").scale_to(0.25)
 logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, seed=1))
 scene.play([logo.animate.move_to(3, 0).duration(2)])  # sigue temblando mientras se mueve
+```
+
+Para atenuarlo, pasa la amplitud como `Parameter`:
+
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>logo = scene.geometry.star(5, 1.0, 0.45).fill(GOLD)
+shake = scene.viz.parameter(0.15)
+logo.add_updater(Updater.wiggle(position=shake, frequency=3.0, seed=2))
+scene.wait(1)
+scene.play([shake.animate.set(0).duration(1.5)])  # el temblor se calma
 ```
 ]
 

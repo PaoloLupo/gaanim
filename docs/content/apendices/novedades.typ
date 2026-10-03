@@ -11,6 +11,72 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.8.1
+
+Publicada el 3 de octubre de 2026. Corrige lo que se vio al hacer los primeros
+videos con 0.8.0: sombras de curvas sin relleno, cotas demasiado gruesas, un
+`stagger` que cambiaba de orden y documentos Typst que se ensanchaban hasta la
+página. Llegan `gaanim export --frame`, contadores con ancho reservado sin
+ceros, trazos que escalan con su figura, updaters con velocidad o amplitud
+animable, escritura con tiza, arcos de elipse, magnitudes con unidades,
+reparto automático sin solapes y una guía de personajes por partes. Lee «Al actualizar» si usas
+`scene.text.typst` con párrafos largos.
+
+== Cambios
+
+- `scene.geometry.double_arrow(..., body_width=…)` acepta el grosor del cuerpo,
+  como `arrow`, para cotas finas. Para una cota completa con líneas de
+  extensión, usa `scene.mechanics.dimension`. Lee
+  #link("/referencia/geometria/")[Geometría].
+- `gaanim export <escena> --output f.png --frame 11.4` escribe exactamente un
+  PNG con lo que se ve en ese instante. Acepta varios instantes o marcadores
+  separados por comas, que se escriben como `f_1.png`, `f_2.png`… Lee
+  #link("/referencia/cli/")[CLI].
+- `scene.viz.rolling_number(..., pad=" ")` deja vacías las posiciones que
+  reserva `min_digits` en lugar de dibujar ceros: el contador ocupa siempre lo
+  mismo y el prefijo no se desplaza.
+- `drawable.scale_stroke_with_object()` o `stroke(..., scale_with_object=True)`
+  hacen que el ancho del trazo siga la escala de la figura y de sus grupos; en
+  un grupo o un SVG se aplica a todos sus trazos.
+- `Updater.rotate(velocidad)` y las amplitudes y la frecuencia de
+  `Updater.wiggle` aceptan un `Parameter`: animarlo acelera un giro o calma un
+  temblor sin saltos, y un seek cae en el mismo fotograma que la reproducción.
+  Lee #link("/guias/movimiento/")[Movimiento].
+- `write(brush="chalk", seed=…)` y `drawable.chalk(seed, roughness)` dibujan
+  como con tiza: un contorno que tiembla un poco y un grano que rompe la
+  pintura, iguales para la misma semilla. Los paquetes `.gaanim` aún no
+  graban tiza. Lee #link("/referencia/drawable/")[Drawable].
+- `scene.geometry.ellipse_arc(cx, cy, rx, ry, inicio, barrido)` dibuja arcos de
+  elipse, como la base de un cilindro en perspectiva.
+- `quantity(valor, unidad)` escribe magnitudes con unidades como `siunitx`:
+  `quantity(181, "L")` y `quantity(1, "m^3")` dejan el mismo espacio fino.
+  Lee #link("/referencia/text/")[Texto].
+- `scene.layout.scatter(items, region, avoid=[...], gap=..., seed=...)` reparte
+  objetos en una región sin solaparse entre sí ni con `avoid`, igual para la
+  misma semilla. Lee #link("/referencia/layout/")[Layout].
+- La guía #link("/guias/personajes/")[Personajes con SVG por partes] anima un
+  personaje dibujado en Inkscape con `part`, `with_pivot` y `look_at`.
+
+== Al actualizar
+
+- Un documento de `scene.text.typst(...)` sin `width=` ya no reparte un párrafo
+  largo en líneas al ancho de una página A4: corta línea solo donde lo indica
+  el texto. Pasa `width="16cm"` (o el ancho que quieras) para que se ajuste, o
+  para columnas `1fr`.
+- Un `stagger` con `total` o `easing` pero sin `origin` sigue el orden de la
+  lista. Si querías el orden por distancia, pasa `origin="start"`.
+
+== Correcciones
+
+- `shadow()` sobre un camino abierto o sin relleno proyecta la sombra de su
+  trazo; antes rellenaba la región entre el trazo y la cuerda que une sus
+  extremos, también en un `group`. Los objetos con relleno conservan su sombra.
+- `scene.text.typst(...)` ajusta la página a su contenido, así que un
+  `#align(center)` centra dentro del contenido y `move_to` deja el documento
+  centrado.
+- `stagger(..., total=…, easing=…)` sin `origin` ni `grid` escalona en el orden
+  de la lista, y `distribute` también.
+
 = 0.8.0
 
 Publicada el 2 de octubre de 2026. El público entra a la presentación: desde su
