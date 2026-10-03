@@ -270,6 +270,8 @@ impl RollingNumber {
         let o = &self.options;
         let height = self.digit_height * o.line_height;
         let mut path = BezPath::new();
+        // Ink of hidden separators, so blank cells keep the display's bounds.
+        let mut hidden_ink: Option<gaanim_core::kurbo::Rect> = None;
         let mut x = 0.0;
         // `blank` hides a glyph but keeps its cell: a leading wheel shows
         // nothing instead of its 0, and rolls its next digit in from blank.
@@ -289,7 +291,11 @@ impl RollingNumber {
                     let dy = offset * height * if o.roll_up { 1.0 } else { -1.0 };
                     append_clipped(&mut path, &glyph.path, dx, dy, height * 0.5);
                 }
-            } else if !blank {
+            } else if blank {
+                let rect =
+                    self.glyphs[&ch].path.bounding_box() + gaanim_core::kurbo::Vec2::new(x, 0.0);
+                hidden_ink = Some(hidden_ink.map_or(rect, |ink| ink.union(rect)));
+            } else {
                 let glyph = &self.glyphs[&ch];
                 path.extend(
                     (Affine::translate((x, 0.0)) * &glyph.path)
@@ -353,7 +359,10 @@ impl RollingNumber {
         }
         let width = (x - o.digit_spacing).max(0.0);
         path.apply_affine(Affine::translate((-width, 0.0)));
-        let ink = path.bounding_box();
+        let mut ink = path.bounding_box();
+        if let Some(hidden) = hidden_ink {
+            ink = ink.union(hidden + gaanim_core::kurbo::Vec2::new(-width, 0.0));
+        }
         (
             path,
             Bounds3D::new_2d(
