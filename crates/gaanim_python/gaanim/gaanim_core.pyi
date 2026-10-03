@@ -4150,6 +4150,29 @@ def parts(mapping: Optional[Mapping[str, str]] = None, /, **content: str) -> Tex
     """
     ...
 
+def quantity(
+    value: int | float,
+    unit: str = "",
+    *,
+    decimals: Optional[int] = None,
+    decimal_separator: str = ".",
+) -> str:
+    """Typst math for a number with its unit, like LaTeX's siunitx.
+
+    The number and the unit are separated by a thin space (except ``°``,
+    ``′`` and ``″``), unit symbols are upright, ``^`` writes exponents and
+    ``/`` a slash instead of a fraction, so ``1 m³`` and ``181 L`` are spaced
+    alike. ``unit`` lists factors separated by spaces, ``*``, ``·`` or
+    ``.``: ``"kg m/s^2"``, ``"s^-1"``, ``"°C"``. ``decimals`` fixes the
+    decimal places and ``decimal_separator`` replaces the point. Use the
+    result as content of ``scene.text.equation``. A malformed unit raises
+    ``ValueError``.
+
+    Example:
+        scene.text.equation("V =", quantity(1, "m^3"), "=", quantity(1000, "L"))
+    """
+    ...
+
 def part(
     name: str,
     *content: TextContent,
@@ -7029,6 +7052,21 @@ class Geometry:
 
         Example:
             angle = scene.geometry.arc(0, 0, 0.8, 0, math.pi / 4).stroke(GOLD, 0.03)
+        """
+        ...
+    def ellipse_arc(
+        self, cx: float, cy: float, rx: float, ry: float, start_angle: float, sweep_angle: float
+    ) -> Drawable:
+        """Create an open elliptical arc with radii ``rx`` (x) and ``ry`` (y).
+
+        Angles are in radians counterclockwise from the positive x axis, as
+        in ``arc``: half an ellipse is ``sweep_angle=math.pi``, the visible
+        rim of a cylinder or a beaker drawn in perspective. Like ``arc`` it
+        is born without fill and works with ``tip``, trims and ``create()``.
+        Non-positive radii or non-finite values raise ``ValueError``.
+
+        Example:
+            rim = scene.geometry.ellipse_arc(0, -1, 1.5, 0.4, math.pi, math.pi).stroke(WHITE, 0.04)
         """
         ...
     def curved_arrow(self, x1: float, y1: float, x2: float, y2: float, angle: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:

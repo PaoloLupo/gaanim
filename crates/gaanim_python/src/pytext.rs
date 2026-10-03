@@ -324,6 +324,32 @@ fn overlay_style(
     style
 }
 
+/// Typst math for a quantity with its unit, for `scene.text.equation`.
+#[pyfunction]
+#[pyo3(signature = (value, unit="", *, decimals=None, decimal_separator="."))]
+pub fn quantity(
+    value: &Bound<'_, PyAny>,
+    unit: &str,
+    decimals: Option<usize>,
+    decimal_separator: &str,
+) -> PyResult<String> {
+    use gaanim_text::quantity::{QuantityValue, quantity_math};
+    let value =
+        if value.is_instance_of::<pyo3::types::PyBool>() {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "a quantity must be a number",
+            ));
+        } else if value.is_instance_of::<pyo3::types::PyInt>() {
+            QuantityValue::Integer(value.extract::<i64>()?)
+        } else {
+            QuantityValue::Float(value.extract::<f64>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err("a quantity must be a number")
+            })?)
+        };
+    quantity_math(value, unit, decimals, decimal_separator)
+        .map_err(pyo3::exceptions::PyValueError::new_err)
+}
+
 #[pyfunction(name = "part")]
 #[pyo3(signature = (name, *content, style=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None))]
 #[allow(clippy::too_many_arguments)]

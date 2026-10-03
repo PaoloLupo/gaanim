@@ -3535,7 +3535,25 @@ impl SceneModel {
     ) -> DrawableHandle {
         self.spawn(SpawnKind::Arc {
             center: (cx, cy),
-            radius,
+            radii: (radius, radius),
+            start_angle,
+            sweep_angle,
+        })
+    }
+    /// Creates an open elliptical arc with radii `rx` along x and `ry`
+    /// along y. Angles are expressed in radians, counter-clockwise from +x.
+    pub fn ellipse_arc(
+        &mut self,
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Arc {
+            center: (cx, cy),
+            radii: (rx, ry),
             start_angle,
             sweep_angle,
         })

@@ -2,6 +2,7 @@ pub mod config;
 pub mod font;
 pub mod motion;
 pub mod prelude;
+pub mod quantity;
 pub mod shaper;
 pub mod structured;
 pub mod typst_compiler;

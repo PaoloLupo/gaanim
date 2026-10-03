@@ -9067,13 +9067,13 @@ impl SceneModel {
             }
             SpawnKind::Arc {
                 center,
-                radius,
+                radii,
                 start_angle,
                 sweep_angle,
             } => {
                 let b = builder.arc(
                     Point::new(center.0, center.1),
-                    Vec2::new(*radius, *radius),
+                    Vec2::new(radii.0, radii.1),
                     *start_angle,
                     *sweep_angle,
                     0.0,
@@ -13802,6 +13802,31 @@ mod tests {
             .iter(&world)
             .map(|bounds| bounds.0.width())
             .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn ellipse_arcs_keep_their_two_radii() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        canvas.ellipse_arc(0.0, 0.0, 2.0, 0.5, 0.0, std::f64::consts::PI);
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        let mut world = world;
+        queue.apply(&mut world);
+        let bounds = world
+            .query::<&LocalBounds>()
+            .iter(&world)
+            .find(|bounds| bounds.0.width() > 0.0)
+            .expect("arc bounds")
+            .0;
+        // The upper half: 4 wide, half a radius tall.
+        assert!((bounds.width() - 4.0).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.height() - 0.5).abs() < 1e-6, "{bounds:?}");
+        assert!(bounds.min.y.abs() < 1e-6, "{bounds:?}");
     }
 
     #[test]

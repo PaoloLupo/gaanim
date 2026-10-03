@@ -3713,6 +3713,38 @@ impl PyGeometry {
             ))
         })
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ellipse_arc(
+        &self,
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+        start_angle: f64,
+        sweep_angle: f64,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        if ![cx, cy, start_angle, sweep_angle]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "ellipse_arc center and angles must be finite",
+            ));
+        }
+        if !(rx.is_finite() && ry.is_finite() && rx > 0.0 && ry > 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "ellipse_arc radii must be finite and positive",
+            ));
+        }
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .ellipse_arc(cx, cy, rx, ry, start_angle, sweep_angle),
+        ))
+    }
     #[pyo3(signature = (x1, y1, x2, y2, angle, *, head_length=None, head_width=None, body_width=None, max_head_ratio=None))]
     #[allow(clippy::too_many_arguments)]
     fn curved_arrow(

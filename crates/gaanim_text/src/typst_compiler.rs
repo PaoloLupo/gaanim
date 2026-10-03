@@ -1353,6 +1353,32 @@ mod tests {
     }
 
     #[test]
+    fn quantities_compile_as_typst_math() {
+        use crate::quantity::{QuantityValue, quantity_math};
+        let registry = FontRegistry::new();
+        for (value, unit) in [
+            (QuantityValue::Integer(1), "m^3"),
+            (QuantityValue::Float(9.81), "kg m/s^2"),
+            (QuantityValue::Integer(90), "°"),
+        ] {
+            let math = quantity_math(value, unit, Some(2), ",").unwrap();
+            let source = format!("#set page(width: auto, height: auto, margin: 0pt)\n$ {math} $");
+            compile_typst_source(
+                &registry,
+                &source,
+                false,
+                Some("New Computer Modern"),
+                Some("New Computer Modern Math"),
+                Some(32.0),
+                Some(32.0),
+                &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+                &StrokeBrush::transparent(),
+            )
+            .unwrap_or_else(|error| panic!("{math}: {error:?}"));
+        }
+    }
+
+    #[test]
     fn typst_math_exposes_a_real_baseline_after_centering() {
         let registry = FontRegistry::new();
         let source = "#set page(width: auto, height: auto, margin: 0pt)\n$W_f$";

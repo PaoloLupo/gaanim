@@ -623,10 +623,11 @@ pub enum SpawnKind {
     Checkmark(f64),
     Cross(f64),
     RightAngle(f64),
-    /// Circular arc centered at `(cx, cy)`, in radians.
+    /// Circular or elliptical arc centered at `(cx, cy)` with radii
+    /// `(rx, ry)` along x and y, in radians.
     Arc {
         center: (f64, f64),
-        radius: f64,
+        radii: (f64, f64),
         start_angle: f64,
         sweep_angle: f64,
     },

@@ -268,6 +268,28 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Geometry.ellipse_arc",
+  kind: "factory",
+  params: ((name: "cx, cy", type: "float", default: none, desc: [Centro.]), (name: "rx, ry", type: "float", default: none, desc: [Radios positivos en x y en y.]), (name: "start_angle, sweep_angle", type: "float", default: none, desc: [Radianes, en sentido antihorario desde +x, como en `arc`.])),
+  desc: [Arco de elipse, para el borde de un cilindro, un cono o una probeta en perspectiva: media elipse es `sweep_angle=math.pi`. Nace sin relleno y admite `tip`, recortes y `create()`, como `arc`. Radios no positivos o valores no finitos lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+import math
+from gaanim import GOLD, WHITE, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+front = scene.geometry.ellipse_arc(0, -1.2, 1.6, 0.45, math.pi, math.pi).stroke(WHITE, 0.05)
+back = scene.geometry.ellipse_arc(0, -1.2, 1.6, 0.45, 0, math.pi).stroke(WHITE, 0.03).opacity(0.4)
+top = scene.geometry.ellipse_arc(0, 1.2, 1.6, 0.45, 0, 2 * math.pi).stroke(GOLD, 0.05)
+left = scene.geometry.line(-1.6, -1.2, -1.6, 1.2).stroke(WHITE, 0.05)
+right = scene.geometry.line(1.6, -1.2, 1.6, 1.2).stroke(WHITE, 0.05)
+scene.play([shape.animate.create().duration(0.8) for shape in (front, back, top, left, right)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Geometry.dashed_line",
   kind: "factory",
   desc: [Línea discontinua para guías y aristas ocultas. Acepta los mismos extremos que `line`: dos puntos, objetos, `PointRef` o `AnchorPoint`, o cuatro coordenadas; entre objetos, los sigue en cada cuadro. Los guiones miden `dash_length` y los separa `gap_length` (0.16 y 0.10 por defecto). `create()` los dibuja uno tras otro desde el inicio.],
