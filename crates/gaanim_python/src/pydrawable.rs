@@ -3274,6 +3274,73 @@ impl PyDrawable {
         let result = Ok(Self(handle.shader_effect(passes, margin)));
         same_drawable(slf, result)
     }
+    /// Frosted glass; see `gaanim_core.pyi`.
+    #[pyo3(signature = (blur=0.25, *, saturation=1.4, refraction=0.08, edge=0.3))]
+    fn glass<'py>(
+        slf: &Bound<'py, Self>,
+        blur: f64,
+        saturation: f64,
+        refraction: f64,
+        edge: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let valid = |value: f64| value.is_finite() && value >= 0.0;
+        if !(valid(blur) && valid(saturation) && valid(refraction) && valid(edge)) {
+            return Err(PyValueError::new_err(
+                "glass needs finite, non-negative blur, saturation, refraction and edge",
+            ));
+        }
+        let glass = gaanim_api::canvas::Glass {
+            blur,
+            saturation,
+            refraction,
+            edge: edge.min(1.0),
+        };
+        let handle = slf.borrow().0.clone();
+        same_drawable(slf, Ok(Self(handle.glass(Some(glass)))))
+    }
+    /// A plain blur of what is behind; see `gaanim_core.pyi`.
+    #[pyo3(signature = (radius=0.25, *, saturation=1.0))]
+    fn backdrop_blur<'py>(
+        slf: &Bound<'py, Self>,
+        radius: f64,
+        saturation: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        Self::glass(slf, radius, saturation, 0.0, 0.0)
+    }
+    /// Remove the glass or backdrop blur.
+    fn no_glass<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = slf.borrow().0.clone();
+        same_drawable(slf, Ok(Self(handle.glass(None))))
+    }
+    /// Show the drawable only through a track matte; see `gaanim_core.pyi`.
+    #[pyo3(signature = (source, mode="alpha"))]
+    fn matte<'py>(
+        slf: &Bound<'py, Self>,
+        source: Option<PyRef<'py, PyDrawable>>,
+        mode: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        use gaanim_api::canvas::MatteMode;
+        let mode = match mode {
+            "alpha" => MatteMode::Alpha,
+            "alpha_inverted" => MatteMode::AlphaInverted,
+            "luma" => MatteMode::Luma,
+            "luma_inverted" => MatteMode::LumaInverted,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown matte mode {other:?}; use \"alpha\", \"alpha_inverted\", \"luma\" or \"luma_inverted\""
+                )));
+            }
+        };
+        let handle = slf.borrow().0.clone();
+        let result = handle
+            .matte(source.as_ref().map(|source| &source.0), mode)
+            .map(Self)
+            .map_err(PyValueError::new_err);
+        same_drawable(slf, result)
+    }
     /// Apply cap, join, miter, and dash geometry from a reusable StrokeStyle.
     fn stroke_style<'py>(
         slf: &Bound<'py, Self>,

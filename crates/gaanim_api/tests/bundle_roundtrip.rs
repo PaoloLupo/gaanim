@@ -584,8 +584,8 @@ fn a_history_free_scene_records_in_one_world_like_in_two() {
     assert_eq!(by_time(&one), by_time(&two));
 }
 
-/// Chalk strokes and a drawable drawn through a shader effect that moves
-/// with time.
+/// Chalk strokes, a drawable drawn through a shader effect that moves
+/// with time, a track matte, metaballs and glass.
 fn chalk_and_effects() -> SceneModel {
     let mut canvas = SceneModel::new(16.0, 9.0);
     let board = canvas
@@ -603,9 +603,42 @@ fn chalk_and_effects() -> SceneModel {
         .fill(Color::from_rgb8(0x38, 0xbd, 0xf8))
         .shader_effect(vec![shader.into()], 0.3)
         .move_to(3.0, 0.0);
+    // A matte, metaballs and glass over what is drawn before it.
+    let letters = canvas.text("M").fill(Color::WHITE).move_to(-3.0, 2.5);
+    let stripes = canvas
+        .rect(3.0, 1.5)
+        .fill(Color::from_rgb8(0xff, 0x6b, 0x6b))
+        .move_to(-3.0, 2.5)
+        .matte(
+            Some(&letters),
+            gaanim_renderer::object_effects::MatteMode::Alpha,
+        )
+        .unwrap();
+    let drops = [
+        canvas.circle(0.5).move_to(1.0, -2.5),
+        canvas.circle(0.4).move_to(2.2, -2.5),
+    ];
+    let blob = canvas
+        .metaballs(&[&drops[0], &drops[1]], 1.0, 0.6)
+        .unwrap()
+        .fill(Color::from_rgb8(0xff, 0xd1, 0x66));
+    let glass = canvas
+        .rounded_rect(3.0, 2.0, 0.3)
+        .fill(Color::from_rgba8(255, 255, 255, 30))
+        .move_to(1.5, -2.0)
+        .glass(Some(gaanim_renderer::object_effects::Glass {
+            blur: 0.2,
+            saturation: 1.3,
+            refraction: 0.1,
+            edge: 0.3,
+        }));
+    let _ = (stripes, blob);
     canvas.play(vec![
         board.animate().create().duration(0.5),
         wave.animate().shift_by(0.0, 1.0).duration(0.5),
+        drops[1].animate().shift_by(-0.6, 0.0).duration(0.5),
+        glass.animate().shift_by(-1.0, 0.0).duration(0.5),
+        letters.animate().shift_by(0.5, 0.0).duration(0.5),
     ]);
     canvas
 }
@@ -641,6 +674,15 @@ fn chalk_and_shader_effects_record_and_replay() {
             .elements
             .iter()
             .any(|element| element.effect_root == Some(effect.root))
+    );
+    assert_eq!(frame.capture.mattes.len(), 1);
+    assert_eq!(frame.capture.glasses.len(), 1);
+    assert!(
+        frame
+            .capture
+            .elements
+            .iter()
+            .any(|element| element.matte_of == Some(frame.capture.mattes[0].source))
     );
 }
 

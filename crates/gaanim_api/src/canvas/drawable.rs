@@ -1196,10 +1196,6 @@ impl DrawableHandle {
         self.update_style(|spec| spec.stroke_scales_with_object = Some(enabled))
     }
 
-    /// Draw the fill and stroke as chalk: the outline trembles by up to
-    /// `roughness` scene units and a grain breaks the paint, both following
-    /// `seed`. Applies to every glyph of a text and every child of a group,
-    /// for the whole scene: chalk is not animated or cut on the timeline.
     /// Draw this drawable and its descendants through post-process
     /// `passes`, as one layer in a texture `margin` scene units wider than
     /// them; no passes removes the effect. Declaration state: it applies
@@ -1234,6 +1230,63 @@ impl DrawableHandle {
             .upgrade()
     }
 
+    /// Show this drawable and its descendants only through `source`, a
+    /// track matte: where `source` is opaque (`Alpha`) or bright (`Luma`),
+    /// or the opposite with the inverted modes. `source` stops being drawn
+    /// on its own; it still moves and animates. `None` removes the matte.
+    /// Declaration state: it applies for the whole timeline.
+    pub fn matte(
+        self,
+        source: Option<&DrawableHandle>,
+        mode: gaanim_renderer::object_effects::MatteMode,
+    ) -> Result<Self, String> {
+        if let Some(source) = source {
+            if !self.same_canvas(source) {
+                return Err("the matte belongs to another scene".to_string());
+            }
+            if source.id == self.id {
+                return Err("a drawable cannot be its own matte".to_string());
+            }
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_matte(&self.spec, source.map(|source| (source.id, mode)));
+        Ok(self)
+    }
+
+    /// Make this drawable frosted glass (see
+    /// [`gaanim_renderer::object_effects::Glass`]): what is drawn behind it
+    /// shows through its outline, blurred and bent; the drawable itself is
+    /// drawn above, so a translucent fill tints it. `None` removes it.
+    /// Declaration state: it applies for the whole timeline.
+    pub fn glass(self, glass: Option<gaanim_renderer::object_effects::Glass>) -> Self {
+        let glass = glass.map(|glass| {
+            let finite = |value: f64, fallback: f64| {
+                if value.is_finite() {
+                    value.max(0.0)
+                } else {
+                    fallback
+                }
+            };
+            gaanim_renderer::object_effects::Glass {
+                blur: finite(glass.blur, 0.0),
+                saturation: finite(glass.saturation, 1.0),
+                refraction: finite(glass.refraction, 0.0),
+                edge: finite(glass.edge, 0.0).min(1.0),
+            }
+        });
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_glass(&self.spec, glass);
+        self
+    }
+
+    /// Draw the fill and stroke as chalk: the outline trembles by up to
+    /// `roughness` scene units and a grain breaks the paint, both following
+    /// `seed`. Applies to every glyph of a text and every child of a group,
+    /// for the whole scene: chalk is not animated or cut on the timeline.
     pub fn chalk(self, seed: u64, roughness: f64) -> Self {
         let chalk = gaanim_renderer::effects::ChalkBrush { seed, roughness };
         let mut state = self.state.lock().expect("canvas state poisoned");

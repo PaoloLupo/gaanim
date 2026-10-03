@@ -313,6 +313,18 @@ pub struct ExtractedElement {
     /// World rectangle the element draws in, with its strokes and effects,
     /// when it belongs to a shader effect.
     effect_extent: Option<kurbo::Rect>,
+    /// The outermost ancestor (or the element itself) with a
+    /// [`crate::object_effects::Matte`], which shows it through its matte.
+    matte_root: Option<Entity>,
+    /// The outermost ancestor (or the element itself) that is a
+    /// [`crate::object_effects::MatteSource`]: the element draws only as
+    /// part of that matte.
+    matte_of: Option<Entity>,
+    /// The outermost ancestor (or the element itself) that is
+    /// [`crate::object_effects::Glass`], and the element's outline in its
+    /// local coordinates, which the glass is cut to.
+    glass_root: Option<Entity>,
+    outline: Option<Arc<kurbo::BezPath>>,
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
     clip_mask: Option<ClipMask>,
@@ -438,6 +450,10 @@ impl ExtractedElement {
             group_shadow: self.group_shadow.clone(),
             effect_root: self.effect_root,
             effect_extent: self.effect_extent,
+            matte_root: self.matte_root,
+            matte_of: self.matte_of,
+            glass_root: self.glass_root,
+            outline: self.outline.clone(),
             render_order: self.render_order,
             scene: Arc::clone(&self.scene),
             clip_mask: self.clip_mask.clone(),
@@ -2228,23 +2244,36 @@ fn compile_scene_with_pins(
     effects: bool,
 ) -> ComposedFrame {
     let mut extraction = extract_world(world, camera, pins, true);
+    divert_mattes(&mut extraction.elements, &world_mattes(world));
+    // As dense as the output, like a replay of the captured frame.
+    let output_width = world
+        .get_resource::<CanvasBackground>()
+        .map(|background| background.pixel_size.0);
+    let effect_density = camera.map_or(DEFAULT_EFFECT_DENSITY, |camera| {
+        output_width
+            .and_then(|width| output_pixels_per_unit(camera, width))
+            .unwrap_or_else(|| camera.pixels_per_unit() * orthographic_zoom(camera))
+    });
     let effect_layers = if effects {
-        // As dense as the output, like a replay of the captured frame.
-        let output_width = world
-            .get_resource::<CanvasBackground>()
-            .map(|background| background.pixel_size.0);
-        let pixels_per_unit = camera.map_or(DEFAULT_EFFECT_DENSITY, |camera| {
-            output_width
-                .and_then(|width| output_pixels_per_unit(camera, width))
-                .unwrap_or_else(|| camera.pixels_per_unit() * orthographic_zoom(camera))
-        });
         let evaluated = world_effects(world, &extraction.elements, extraction.background_time);
-        divert_effects(
+        let mut layers = divert_effects(
             &mut extraction.elements,
             &evaluated,
             extraction.background_time,
-            pixels_per_unit,
-        )
+            effect_density,
+        );
+        // Glass reads what is drawn behind it, effects included.
+        let glasses = world_glasses(world);
+        let background = world.get_resource::<CanvasBackground>();
+        layers.extend(divert_glass(
+            &mut extraction.elements,
+            &glasses,
+            background.map(|background| (background, background.pixel_size)),
+            extraction.background_time,
+            0.0,
+            effect_density,
+        ));
+        layers
     } else {
         Vec::new()
     };
@@ -2536,6 +2565,26 @@ fn extract_world(
                 child_query.get(world, node).ok().map(ChildOf::parent),
             )
         });
+        let matte_root = outermost_effect(entity, |node| {
+            (
+                world.get::<crate::object_effects::Matte>(node).is_some(),
+                child_query.get(world, node).ok().map(ChildOf::parent),
+            )
+        });
+        let matte_of = outermost_effect(entity, |node| {
+            (
+                world
+                    .get::<crate::object_effects::MatteSource>(node)
+                    .is_some(),
+                child_query.get(world, node).ok().map(ChildOf::parent),
+            )
+        });
+        let glass_root = outermost_effect(entity, |node| {
+            (
+                world.get::<crate::object_effects::Glass>(node).is_some(),
+                child_query.get(world, node).ok().map(ChildOf::parent),
+            )
+        });
         let group_opacity = world
             .get::<GlobalOpacity>(opacity_group)
             .map_or(1.0, |opacity| opacity.0);
@@ -2630,6 +2679,7 @@ fn extract_world(
         if exempt && replaying_pins {
             continue;
         }
+        let outline = glass_root.and_then(|_| recipe.path.clone());
         extracted.push(ExtractedElement {
             entity,
             recipe: Some(recipe),
@@ -2643,6 +2693,10 @@ fn extract_world(
             group_shadow,
             effect_root,
             effect_extent,
+            matte_root,
+            matte_of,
+            glass_root,
+            outline,
             render_order: stacked_render_order(
                 *render_order,
                 entity,
@@ -2928,6 +2982,10 @@ fn three_d_elements<'a>(
             group_shadow: None,
             effect_root: None,
             effect_extent: None,
+            matte_root: None,
+            matte_of: None,
+            glass_root: None,
+            outline: None,
             // Beneath every 2D drawable, in depth order.
             render_order: RenderOrder {
                 z_index: i32::MIN,
@@ -3121,6 +3179,277 @@ fn evaluate_effects(
             })
         })
         .collect()
+}
+
+/// The glass drawables of `world`, in entity order.
+fn world_glasses(world: &mut World) -> Vec<CapturedGlass> {
+    let mut query = world.query::<(Entity, &crate::object_effects::Glass)>();
+    let mut glasses: Vec<CapturedGlass> = query
+        .iter(world)
+        .map(|(root, glass)| CapturedGlass {
+            root,
+            glass: *glass,
+        })
+        .collect();
+    glasses.sort_by_key(|glass| glass.root);
+    glasses
+}
+
+/// Before the elements of each drawable in `glasses`, draw what is behind
+/// it as glass: an image, cut to the drawable's outline, that the returned
+/// layers fill with everything drawn earlier (over the canvas `background`
+/// at `time_seconds`) through the glass passes, at `pixels_per_unit`. A
+/// glass drawable without an outline is drawn plainly.
+fn divert_glass(
+    elements: &mut Vec<ExtractedElement>,
+    glasses: &[CapturedGlass],
+    background: Option<(&CanvasBackground, (u32, u32))>,
+    time_seconds: f64,
+    rest: f64,
+    pixels_per_unit: f64,
+) -> Vec<crate::object_effects::EffectLayer> {
+    use crate::object_effects::{
+        EffectLayer, effect_image, effect_texture_size, glass_passes, rounded_rect_of,
+    };
+    let time = time_seconds as f32;
+    let mut layers = Vec::new();
+    if !time.is_finite() {
+        return layers;
+    }
+    for glass in glasses {
+        let Some(first) = elements
+            .iter()
+            .position(|element| element.glass_root == Some(glass.root))
+        else {
+            continue;
+        };
+        let mut outline = kurbo::BezPath::new();
+        for element in elements
+            .iter()
+            .filter(|element| element.glass_root == Some(glass.root))
+        {
+            if let Some(path) = &element.outline {
+                outline.extend(element.transform * path.as_ref().clone());
+            }
+        }
+        if outline.elements().is_empty() {
+            continue;
+        }
+        let shape = outline.bounding_box();
+        let reach = glass.glass.reach();
+        let bounds = shape.inflate(reach, reach);
+        let Some((width, height, density)) = effect_texture_size(bounds, pixels_per_unit) else {
+            continue;
+        };
+        // What is behind the glass: the canvas and everything drawn before.
+        let mut scene = vello::Scene::new();
+        if let Some((canvas, pixel_size)) = background {
+            fill_canvas_background(&mut scene, canvas, pixel_size, time_seconds, rest, None);
+        }
+        append_element_run(&mut scene, &elements[..first], None);
+        let (half_width, half_height, corner) = rounded_rect_of(&outline);
+        // The texture is centered on the outline only when the reach is
+        // the same on every side, which `inflate` keeps.
+        let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+        let request = crate::post_process::PostProcessRequest {
+            passes: glass_passes(&glass.glass, density, (half_width, half_height), corner),
+            frame,
+            time,
+            transition: None,
+        };
+        let image = effect_image(glass.root.to_bits() ^ 0x9e37_79b9_7f4a_7c15, width, height);
+        let image_to_world = kurbo::Affine::translate((bounds.x0, bounds.y1))
+            * kurbo::Affine::scale_non_uniform(
+                bounds.width() / f64::from(width),
+                -bounds.height() / f64::from(height),
+            );
+        let mut fill = vello::Scene::new();
+        fill.push_clip_layer(peniko::Fill::NonZero, kurbo::Affine::IDENTITY, &outline);
+        fill.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            &peniko::Brush::Image(peniko::ImageBrush::new(image.clone())),
+            Some(image_to_world),
+            &bounds,
+        );
+        fill.pop_layer();
+        // The glass fades with the drawable: it keeps its opacity and group.
+        let mut placeholder = elements[first].clone();
+        placeholder.scene = Arc::new(fill);
+        placeholder.recipe = None;
+        placeholder.lottie = None;
+        placeholder.transform = kurbo::Affine::IDENTITY;
+        placeholder.opacity_bounds = bounds;
+        placeholder.opacity_extent = None;
+        placeholder.group_shadow = None;
+        placeholder.glass_root = None;
+        placeholder.outline = None;
+        placeholder.clip_mask = None;
+        placeholder.blend = None;
+        placeholder.screen = None;
+        placeholder.tip = false;
+        placeholder.backdrop = None;
+        placeholder.view_bounds = Some(bounds);
+        layers.push(EffectLayer {
+            scene,
+            to_pixels: image_to_world.inverse(),
+            image,
+            request,
+        });
+        for element in elements
+            .iter_mut()
+            .filter(|element| element.glass_root == Some(glass.root))
+        {
+            element.glass_root = None;
+            element.outline = None;
+        }
+        elements.insert(first, placeholder);
+    }
+    layers
+}
+
+/// The track mattes of `world`, in entity order.
+fn world_mattes(world: &mut World) -> Vec<CapturedMatte> {
+    let mut query = world.query::<(Entity, &crate::object_effects::Matte)>();
+    let mut mattes: Vec<CapturedMatte> = query
+        .iter(world)
+        .map(|(root, matte)| CapturedMatte {
+            root,
+            source: matte.source,
+            mode: matte.mode,
+        })
+        .collect();
+    mattes.sort_by_key(|matte| matte.root);
+    mattes
+}
+
+/// Draw the elements of each drawable in `mattes` through its matte: one
+/// element in their place, at the first one's position in draw order,
+/// whose scene holds them in a layer that the matte's elements mask. The
+/// elements of every matte source leave `elements`: a matte draws only as
+/// a matte.
+fn divert_mattes(elements: &mut Vec<ExtractedElement>, mattes: &[CapturedMatte]) {
+    use crate::object_effects::MatteMode;
+    if mattes.is_empty() && elements.iter().all(|element| element.matte_of.is_none()) {
+        return;
+    }
+    let everywhere = kurbo::Rect::new(-1.0e7, -1.0e7, 1.0e7, 1.0e7);
+    for matte in mattes {
+        let members: Vec<usize> = elements
+            .iter()
+            .enumerate()
+            .filter(|(_, element)| {
+                element.matte_root == Some(matte.root) && element.matte_of.is_none()
+            })
+            .map(|(index, _)| index)
+            .collect();
+        let Some(&first) = members.first() else {
+            continue;
+        };
+        let drawn: Vec<ExtractedElement> = members
+            .iter()
+            .map(|&index| {
+                let mut member = elements[index].clone();
+                member.matte_root = None;
+                member
+            })
+            .collect();
+        let masks: Vec<ExtractedElement> = elements
+            .iter()
+            .filter(|element| element.matte_of == Some(matte.source))
+            .map(|element| {
+                let mut mask = element.clone();
+                mask.matte_of = None;
+                mask
+            })
+            .collect();
+        let layer = |scene: &mut vello::Scene, mix: peniko::Mix, compose: peniko::Compose| {
+            scene.push_layer(
+                peniko::Fill::NonZero,
+                peniko::BlendMode::new(mix, compose),
+                1.0,
+                kurbo::Affine::IDENTITY,
+                &everywhere,
+            );
+        };
+        let mut scene = vello::Scene::new();
+        layer(&mut scene, peniko::Mix::Normal, peniko::Compose::SrcOver);
+        append_element_run(&mut scene, &drawn, None);
+        match matte.mode {
+            MatteMode::Alpha => {
+                layer(&mut scene, peniko::Mix::Normal, peniko::Compose::DestIn);
+                append_element_run(&mut scene, &masks, None);
+                scene.pop_layer();
+            }
+            MatteMode::AlphaInverted => {
+                layer(&mut scene, peniko::Mix::Normal, peniko::Compose::DestOut);
+                append_element_run(&mut scene, &masks, None);
+                scene.pop_layer();
+            }
+            MatteMode::Luma | MatteMode::LumaInverted => {
+                scene.push_luminance_mask_layer(
+                    peniko::Fill::NonZero,
+                    1.0,
+                    kurbo::Affine::IDENTITY,
+                    &everywhere,
+                );
+                if matte.mode == MatteMode::LumaInverted {
+                    // White minus the matte: dark and empty places show.
+                    scene.fill(
+                        peniko::Fill::NonZero,
+                        kurbo::Affine::IDENTITY,
+                        peniko::Color::WHITE,
+                        None,
+                        &everywhere,
+                    );
+                    layer(
+                        &mut scene,
+                        peniko::Mix::Difference,
+                        peniko::Compose::SrcOver,
+                    );
+                    append_element_run(&mut scene, &masks, None);
+                    scene.pop_layer();
+                } else {
+                    append_element_run(&mut scene, &masks, None);
+                }
+                scene.pop_layer();
+            }
+        }
+        scene.pop_layer();
+        let mut placeholder = elements[first].clone();
+        placeholder.scene = Arc::new(scene);
+        placeholder.recipe = None;
+        placeholder.lottie = None;
+        placeholder.transform = kurbo::Affine::IDENTITY;
+        placeholder.opacity = 1.0;
+        placeholder.opacity_bounds = everywhere;
+        placeholder.opacity_extent = None;
+        placeholder.group_opacity = 1.0;
+        placeholder.group_shadow = None;
+        placeholder.matte_root = None;
+        placeholder.clip_mask = None;
+        placeholder.blend = None;
+        placeholder.screen = None;
+        placeholder.tip = false;
+        placeholder.backdrop = None;
+        // An effect around the matted drawable reaches what its members do.
+        placeholder.effect_extent = members
+            .iter()
+            .filter_map(|&index| elements[index].effect_extent)
+            .reduce(|a, b| a.union(b));
+        placeholder.view_bounds = members
+            .iter()
+            .filter_map(|&index| elements[index].view_bounds)
+            .reduce(|a, b| a.union(b));
+        let mut index = 0;
+        elements.retain(|_| {
+            let keep = !members.contains(&index) || index == first;
+            index += 1;
+            keep
+        });
+        elements[first] = placeholder;
+    }
+    elements.retain(|element| element.matte_of.is_none());
 }
 
 /// [`evaluate_effects`] reading effects and signals from `world`.
@@ -3442,6 +3771,28 @@ pub struct CapturedElement {
     /// shader effect, and the world rectangle the element reaches.
     pub effect_root: Option<Entity>,
     pub effect_extent: Option<kurbo::Rect>,
+    /// The outermost ancestor (or the element itself) shown through a
+    /// matte, and the matte the element itself belongs to.
+    pub matte_root: Option<Entity>,
+    pub matte_of: Option<Entity>,
+    /// The outermost ancestor (or the element itself) that is glass; the
+    /// recipe's path is the outline the glass is cut to.
+    pub glass_root: Option<Entity>,
+}
+
+/// A glass drawable in a captured frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CapturedGlass {
+    pub root: Entity,
+    pub glass: crate::object_effects::Glass,
+}
+
+/// A drawable shown through a track matte in a captured frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CapturedMatte {
+    pub root: Entity,
+    pub source: Entity,
+    pub mode: crate::object_effects::MatteMode,
 }
 
 /// A drawable's shader effect evaluated for one frame: its margin and its
@@ -3503,6 +3854,10 @@ pub struct FrameCapture {
     pub transition: Option<CapturedTransition>,
     /// Shader effects of the drawables, in the order they first draw.
     pub effects: Vec<CapturedEffect>,
+    /// Track mattes of the drawables.
+    pub mattes: Vec<CapturedMatte>,
+    /// Glass drawables.
+    pub glasses: Vec<CapturedGlass>,
 }
 
 /// Capture the drawables of the world as it stands, without culling, for a
@@ -3510,7 +3865,9 @@ pub struct FrameCapture {
 pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) -> FrameCapture {
     let extraction = extract_world(world, camera, None, false);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
-    capture_extraction(extraction, effects)
+    let mattes = world_mattes(world);
+    let glasses = world_glasses(world);
+    capture_extraction(extraction, effects, mattes, glasses)
 }
 
 /// [`capture_frame`] for a motion blur sub-frame: like
@@ -3523,13 +3880,22 @@ pub fn capture_frame_pinned(
 ) -> FrameCapture {
     let extraction = extract_world(world, camera, Some(pins), false);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
-    capture_extraction(extraction, effects)
+    let mattes = world_mattes(world);
+    let glasses = world_glasses(world);
+    capture_extraction(extraction, effects, mattes, glasses)
 }
 
-fn capture_extraction(extraction: WorldExtraction, effects: Vec<CapturedEffect>) -> FrameCapture {
+fn capture_extraction(
+    extraction: WorldExtraction,
+    effects: Vec<CapturedEffect>,
+    mattes: Vec<CapturedMatte>,
+    glasses: Vec<CapturedGlass>,
+) -> FrameCapture {
     FrameCapture {
         background_time: extraction.background_time,
         effects,
+        mattes,
+        glasses,
         transition: extraction
             .transition
             .filter(|frame| !frame.is_empty())
@@ -3580,6 +3946,9 @@ fn capture_extraction(extraction: WorldExtraction, effects: Vec<CapturedEffect>)
                 echo_rank: element.echo_rank,
                 effect_root: element.effect_root,
                 effect_extent: element.effect_extent,
+                matte_root: element.matte_root,
+                matte_of: element.matte_of,
+                glass_root: element.glass_root,
             })
             .collect(),
     }
@@ -3677,6 +4046,10 @@ fn compose_captured_layers(
                 group_shadow: element.group_shadow.clone(),
                 effect_root: element.effect_root,
                 effect_extent: element.effect_extent,
+                matte_root: element.matte_root,
+                matte_of: element.matte_of,
+                glass_root: element.glass_root,
+                outline: element.glass_root.and_then(|_| element.recipe.path.clone()),
                 render_order: element.render_order,
                 scene,
                 clip_mask: element.clip_mask.clone(),
@@ -3704,6 +4077,7 @@ fn compose_captured_layers(
             }
         })
         .collect();
+    divert_mattes(&mut elements, &frame.mattes);
     let effects = match effect_density {
         Some(density) if !frame.effects.is_empty() => divert_effects(
             &mut elements,
@@ -3713,6 +4087,19 @@ fn compose_captured_layers(
         ),
         _ => Vec::new(),
     };
+    let mut effects = effects;
+    if let Some(density) = effect_density
+        && !frame.glasses.is_empty()
+    {
+        effects.extend(divert_glass(
+            &mut elements,
+            &frame.glasses,
+            background,
+            frame.background_time,
+            rest,
+            density,
+        ));
+    }
     let transition = frame.transition.as_ref().map(CapturedTransition::frame);
     let mut composed = compose_frame(
         &elements,
@@ -3915,6 +4302,9 @@ pub fn gaanim_render_system(
         effect_query,
         signal_query,
         mut effect_layers,
+        matte_query,
+        matte_source_query,
+        glass_query,
     ): (
         Query<&ElementBlend>,
         Query<&gaanim_animation::EchoGhost>,
@@ -3926,6 +4316,9 @@ pub fn gaanim_render_system(
         Query<&crate::object_effects::ShaderEffect>,
         Query<&gaanim_animation::FloatSignal>,
         Option<ResMut<EffectLayers>>,
+        Query<(Entity, &crate::object_effects::Matte)>,
+        Query<(), With<crate::object_effects::MatteSource>>,
+        Query<(Entity, &crate::object_effects::Glass)>,
     ),
     query_mobjects: Query<
         (
@@ -4189,6 +4582,27 @@ pub fn gaanim_render_system(
                 child_query.get(node).ok().map(ChildOf::parent),
             )
         });
+        let matte_root = outermost_effect(entity, |node| {
+            (
+                matte_query.contains(node),
+                child_query.get(node).ok().map(ChildOf::parent),
+            )
+        });
+        let matte_of = outermost_effect(entity, |node| {
+            (
+                matte_source_query.contains(node),
+                child_query.get(node).ok().map(ChildOf::parent),
+            )
+        });
+        let glass_root = outermost_effect(entity, |node| {
+            (
+                glass_query.contains(node),
+                child_query.get(node).ok().map(ChildOf::parent),
+            )
+        });
+        let outline = glass_root
+            .and(path_ref.as_ref())
+            .map(|path| Arc::clone(&path.0));
         let group_opacity = opacity_query
             .get(opacity_group)
             .map_or(1.0, |opacity| opacity.0);
@@ -4339,6 +4753,10 @@ pub fn gaanim_render_system(
             group_shadow,
             effect_root,
             effect_extent,
+            matte_root,
+            matte_of,
+            glass_root,
+            outline,
             render_order: stacked_render_order(
                 *render_order,
                 entity,
@@ -4393,6 +4811,18 @@ pub fn gaanim_render_system(
     // Sort elements deterministically by RenderOrder to ensure correct layering
     local_extracted.sort_by(ExtractedElement::draw_order);
 
+    // Drawables with a matte draw through it, before any effect takes them.
+    let mut mattes: Vec<CapturedMatte> = matte_query
+        .iter()
+        .map(|(root, matte)| CapturedMatte {
+            root,
+            source: matte.source,
+            mode: matte.mode,
+        })
+        .collect();
+    mattes.sort_by_key(|matte| matte.root);
+    divert_mattes(local_extracted, &mattes);
+
     // Drawables with a shader effect become images the canvas fills first.
     let layers = match effect_layers.as_deref_mut() {
         Some(_) => {
@@ -4408,12 +4838,6 @@ pub fn gaanim_render_system(
         }
         None => Vec::new(),
     };
-    if let Some(published) = effect_layers.as_deref_mut()
-        && !(published.0.is_empty() && layers.is_empty())
-    {
-        published.0 = layers;
-    }
-
     // Assemble the global composited Scene in Bevy world coordinates.
     let mut shader_request = None;
     let background = canvas_bg.as_deref().map(|canvas_bg| {
@@ -4426,6 +4850,32 @@ pub fn gaanim_render_system(
             ),
         )
     });
+
+    // Glass reads what is drawn behind it, effects included.
+    let mut layers = layers;
+    if effect_layers.is_some() {
+        let mut glasses: Vec<CapturedGlass> = glass_query
+            .iter()
+            .map(|(root, glass)| CapturedGlass {
+                root,
+                glass: *glass,
+            })
+            .collect();
+        glasses.sort_by_key(|glass| glass.root);
+        layers.extend(divert_glass(
+            local_extracted,
+            &glasses,
+            background,
+            time_seconds,
+            ambient.as_ref().map_or(0.0, |clock| clock.rest),
+            preview_effect_density(gaanim_camera.as_deref(), preview.as_deref()),
+        ));
+    }
+    if let Some(published) = effect_layers.as_deref_mut()
+        && !(published.0.is_empty() && layers.is_empty())
+    {
+        published.0 = layers;
+    }
     let mut composed = compose_frame(
         local_extracted.as_slice(),
         transition_frame.as_deref(),
@@ -5525,6 +5975,10 @@ mod tests {
             group_shadow: None,
             effect_root: None,
             effect_extent: None,
+            matte_root: None,
+            matte_of: None,
+            glass_root: None,
+            outline: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -5573,6 +6027,10 @@ mod tests {
             group_shadow: None,
             effect_root: None,
             effect_extent: None,
+            matte_root: None,
+            matte_of: None,
+            glass_root: None,
+            outline: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(scene),
             clip_mask: None,
@@ -5721,6 +6179,10 @@ mod tests {
             group_shadow: None,
             effect_root: None,
             effect_extent: None,
+            matte_root: None,
+            matte_of: None,
+            glass_root: None,
+            outline: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -5756,6 +6218,10 @@ mod tests {
             group_shadow: None,
             effect_root: None,
             effect_extent: None,
+            matte_root: None,
+            matte_of: None,
+            glass_root: None,
+            outline: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(scene),
             clip_mask: None,
@@ -5820,6 +6286,10 @@ mod tests {
             group_shadow: None,
             effect_root: None,
             effect_extent: None,
+            matte_root: None,
+            matte_of: None,
+            glass_root: None,
+            outline: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
@@ -5862,6 +6332,10 @@ mod tests {
             group_shadow: None,
             effect_root: None,
             effect_extent: None,
+            matte_root: None,
+            matte_of: None,
+            glass_root: None,
+            outline: None,
             render_order: RenderOrder::default(),
             scene: Arc::new(vello::Scene::new()),
             clip_mask,

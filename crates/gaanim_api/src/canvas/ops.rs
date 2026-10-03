@@ -164,8 +164,8 @@ impl CanvasState {
         }
     }
 
-    /// Draw `spec` as chalk for the whole scene. Chalk is not animated, so
-    /// a spec already frozen by a `play` takes it too.
+    /// Draw `spec` through a shader effect for the whole scene. Effects are
+    /// not animated, so a spec already frozen by a `play` takes it too.
     pub(crate) fn set_shader_effect(
         &mut self,
         spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
@@ -178,6 +178,40 @@ impl CanvasState {
         };
         if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
             frozen.shader_effect = effect;
+        }
+    }
+
+    /// Show `spec` through a matte for the whole scene, like
+    /// [`Self::set_shader_effect`].
+    pub(crate) fn set_matte(
+        &mut self,
+        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        matte: Option<(ObjectId, gaanim_renderer::object_effects::MatteMode)>,
+    ) {
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.matte = matte;
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.matte = matte;
+        }
+    }
+
+    /// Make `spec` glass for the whole scene, like
+    /// [`Self::set_shader_effect`].
+    pub(crate) fn set_glass(
+        &mut self,
+        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        glass: Option<gaanim_renderer::object_effects::Glass>,
+    ) {
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.glass = glass;
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.glass = glass;
         }
     }
 

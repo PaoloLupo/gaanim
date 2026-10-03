@@ -78,7 +78,8 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// to the archive; version 2 (up to Gaanim 0.8) had no shader transitions
 /// (`tables/transitions.bin`) nor the opacity of each element's group;
 /// version 3 (development builds of Gaanim 0.9) had no chalk strokes nor
-/// shader effects on drawables (`tables/effects.bin`).
+/// shader effects on drawables (`tables/effects.bin`), track mattes nor
+/// glass.
 pub const VERSION: u32 = 4;
 /// Zstandard level of data entries, still fast to read. Level 17 made
 /// entries about 8% smaller and compressed nearly four times slower.

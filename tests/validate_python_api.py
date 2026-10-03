@@ -2193,6 +2193,37 @@ def validate_shader_effect_contract(module):
     return failures
 
 
+def validate_matte_metaballs_glass_contract(module):
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    title = scene.text("A")
+    stripes = scene.geometry.rect(2, 1)
+    for mode in ("alpha", "alpha_inverted", "luma", "luma_inverted"):
+        if stripes.matte(title, mode) is not stripes:
+            failures.append("Drawable.matte does not return the drawable")
+    stripes.matte(None)
+    balls = [scene.geometry.circle(0.5).move_to(x, 0) for x in (-1, 0, 1)]
+    blob = scene.geometry.metaballs(balls, threshold=1.2, smoothness=0.5)
+    if not isinstance(blob, module.Drawable):
+        failures.append("Geometry.metaballs does not return a Drawable")
+    card = scene.geometry.rounded_rect(3, 2, 0.3)
+    if card.glass(blur=0.2, saturation=1.2, refraction=0.1, edge=0.5) is not card:
+        failures.append("Drawable.glass does not return the drawable")
+    card.backdrop_blur(0.3).no_glass()
+    for operation in (
+        lambda: stripes.matte(title, "chroma"),
+        lambda: stripes.matte(stripes),
+        lambda: stripes.matte(module.Scene(frame=(16, 9)).geometry.circle(1)),
+        lambda: scene.geometry.metaballs([]),
+        lambda: scene.geometry.metaballs(balls, threshold=0),
+        lambda: scene.geometry.metaballs(balls, smoothness=-1),
+        lambda: card.glass(blur=-1),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("mattes, metaballs or glass accepted an invalid argument")
+    return failures
+
+
 def raises_error(expected, operation):
     try:
         operation()
@@ -2914,6 +2945,7 @@ def main() -> int:
     missing.extend(validate_copy_and_offset_contract(module))
     missing.extend(validate_audio_viz_contract(module))
     missing.extend(validate_shader_effect_contract(module))
+    missing.extend(validate_matte_metaballs_glass_contract(module))
     missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))

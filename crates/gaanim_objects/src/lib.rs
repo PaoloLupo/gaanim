@@ -1,5 +1,6 @@
 pub mod boolean;
 pub mod character;
+pub mod metaballs;
 pub mod offset;
 pub mod prelude;
 pub mod primitives;

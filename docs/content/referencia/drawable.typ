@@ -587,6 +587,56 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.matte",
+  kind: "method",
+  params: (
+    (name: "source", type: "Drawable | None", default: none, desc: [El mate: el objeto cuya forma o brillo deja ver a este; `None` quita el mate.]),
+    (name: "mode", type: "str", default: "\"alpha\"", desc: [`"alpha"`, `"alpha_inverted"`, `"luma"` o `"luma_inverted"`.]),
+  ),
+  desc: [Muestra el objeto y sus descendientes solo a través de `source`, como un _track matte_ de After Effects. Con `"alpha"` se ve donde `source` es opaco (una foto o un degradado dentro de las letras de un título); con `"luma"`, donde `source` es claro (un rectángulo con degradado que avanza hace un revelado suave); los modos invertidos muestran lo contrario. El mate sigue a `source` cuando se mueve, escala, aparece o se escribe, pero `source` deja de dibujarse por sí mismo. Es estado de declaración, vale para toda la línea de tiempo y se ve en la vista previa, la exportación y los paquetes `.gaanim`. Un `source` de otra escena, el propio objeto o un modo desconocido lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, GOLD, WHITE, Scene
+scene = Scene(frame=(16, 9), background="#0b1020")
+title = scene.text("MATE").fill(WHITE).scale_to(3.0)
+stripes = scene.geometry.group([
+    scene.geometry.rect(0.5, 3).fill(color).no_stroke().move_to(-3.5 + 0.5 * i, 0)
+    for i, color in zip(range(15), [GOLD, CORAL, "#22d3ee"] * 5)
+])
+stripes.matte(title)
+scene.play([title.animate.write().duration(1.5)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.glass",
+  kind: "method",
+  params: (
+    (name: "blur", type: "float", default: "0.25", desc: [Desenfoque de lo que hay detrás, en unidades de escena (la sigma de una gaussiana).]),
+    (name: "saturation", type: "float", default: "1.4", desc: [Saturación de esos colores; 1 los deja igual.]),
+    (name: "refraction", type: "float", default: "0.08", desc: [Cuánto se curva la imagen cerca del borde, como una lente, en unidades de escena.]),
+    (name: "edge", type: "float", default: "0.3", desc: [Brillo del borde, de 0 a 1.]),
+  ),
+  desc: [Convierte el objeto en vidrio esmerilado. Dentro de su contorno se ve el lienzo y todo lo que se dibujó antes, desenfocado, saturado y curvado hacia dentro cerca del borde, con el borde iluminado. El objeto se dibuja encima, así que un relleno translúcido tiñe el vidrio y un trazo lo enmarca; el vidrio aparece y se desvanece con él. La refracción y el borde siguen el contorno como un rectángulo redondeado: son exactos en rectángulos, tarjetas y círculos. `backdrop_blur(radius, saturation=1.0)` es solo el desenfoque, sin refracción ni borde, y `no_glass()` quita el efecto. Es estado de declaración y se ve en la vista previa, la exportación y los paquetes `.gaanim`. Valores negativos o no finitos lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, CORAL, GOLD, Scene
+scene = Scene(frame=(16, 9), background="#0b1020")
+for i, color in enumerate([BLUE, GOLD, CORAL]):
+    scene.geometry.circle(1.3).fill(color).no_stroke().move_to(-2.5 + 2.5 * i, 0.4 * (-1) ** i)
+card = scene.geometry.rounded_rect(5, 3, 0.4).fill("#ffffff1a").stroke("#ffffff55", 0.03).move_to(-3, 0)
+card.glass(blur=0.25, refraction=0.14)
+scene.play([card.animate.move_to(3, 0).duration(2.0)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.shadow",
   kind: "method",
   params: ((name: "color", type: "Color", default: none, desc: [Color de la sombra; su alfa escala la opacidad.]), (name: "x / y", type: "float", default: "0.08 / -0.08", desc: [Desplazamiento en unidades de escena.]), (name: "blur", type: "float", default: "0.06", desc: [Desenfoque en unidades de escena.])),

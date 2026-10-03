@@ -10,8 +10,10 @@ use gaanim_renderer::effects::{
     CameraViewBackground, ClipMask, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile,
 };
 use gaanim_renderer::fragment::{FragmentRecipe, GroupShadow};
+use gaanim_renderer::object_effects::{Glass, MatteMode};
 use gaanim_renderer::pipeline::{
-    CapturedEffect, CapturedElement, CapturedTransition, CapturedView, FrameCapture,
+    CapturedEffect, CapturedElement, CapturedGlass, CapturedMatte, CapturedTransition,
+    CapturedView, FrameCapture,
 };
 use gaanim_renderer::post_process::PostProcessShader;
 use gaanim_scene::{
@@ -665,6 +667,9 @@ pub(crate) struct ElementRecord {
     pub group_shadow: Option<(u32, DropShadow)>,
     pub effect_root: Option<u32>,
     pub effect_extent: Option<kurbo::Rect>,
+    pub matte_root: Option<u32>,
+    pub matte_of: Option<u32>,
+    pub glass_root: Option<u32>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -772,6 +777,9 @@ impl ElementRecord {
                 .map(|shared| (tables.path(&shared.path), shared.shadow.clone())),
             effect_root: element.effect_root.map(&mut key_of),
             effect_extent: element.effect_extent,
+            matte_root: element.matte_root.map(&mut key_of),
+            matte_of: element.matte_of.map(&mut key_of),
+            glass_root: element.glass_root.map(&mut key_of),
         }
     }
 
@@ -825,6 +833,9 @@ impl ElementRecord {
         });
         w.option(self.effect_root, |w, key| w.var(u64::from(key)));
         w.option(self.effect_extent, Writer::rect);
+        w.option(self.matte_root, |w, key| w.var(u64::from(key)));
+        w.option(self.matte_of, |w, key| w.var(u64::from(key)));
+        w.option(self.glass_root, |w, key| w.var(u64::from(key)));
     }
 
     pub fn read(r: &mut Reader<'_>) -> Result<Self> {
@@ -880,6 +891,9 @@ impl ElementRecord {
             group_shadow: r.option(|r| Ok((r.u32()?, read_shadow(r)?)))?,
             effect_root: r.option(Reader::u32)?,
             effect_extent: r.option(Reader::rect)?,
+            matte_root: r.option(Reader::u32)?,
+            matte_of: r.option(Reader::u32)?,
+            glass_root: r.option(Reader::u32)?,
         })
     }
 
@@ -961,6 +975,9 @@ impl ElementRecord {
                 .transpose()?,
             effect_root: self.effect_root.map(key_entity).transpose()?,
             effect_extent: self.effect_extent,
+            matte_root: self.matte_root.map(key_entity).transpose()?,
+            matte_of: self.matte_of.map(key_entity).transpose()?,
+            glass_root: self.glass_root.map(key_entity).transpose()?,
         })
     }
 }
@@ -982,6 +999,10 @@ pub(crate) struct FrameRecord {
     /// Shader effects of drawables; each pass's shader indexes
     /// [`Tables::effect_shaders`].
     pub effects: Vec<EffectRecord>,
+    /// Track mattes: the matted drawable, its matte and the mode.
+    pub mattes: Vec<(u32, u32, MatteMode)>,
+    /// Glass drawables and their glass.
+    pub glasses: Vec<(u32, Glass)>,
     /// Motion blur sub-frames, each without sub-frames of its own.
     pub motion_blur: Vec<FrameRecord>,
 }
@@ -1008,6 +1029,25 @@ impl EffectRecord {
             margin: r.f64()?,
             passes: read_passes(r)?,
         })
+    }
+}
+
+fn write_matte_mode(w: &mut Writer, mode: MatteMode) {
+    w.u8(match mode {
+        MatteMode::Alpha => 0,
+        MatteMode::AlphaInverted => 1,
+        MatteMode::Luma => 2,
+        MatteMode::LumaInverted => 3,
+    });
+}
+
+fn read_matte_mode(r: &mut Reader<'_>) -> Result<MatteMode> {
+    match r.u8()? {
+        0 => Ok(MatteMode::Alpha),
+        1 => Ok(MatteMode::AlphaInverted),
+        2 => Ok(MatteMode::Luma),
+        3 => Ok(MatteMode::LumaInverted),
+        _ => Err(corrupt("invalid matte mode")),
     }
 }
 
@@ -1077,6 +1117,18 @@ impl FrameRecord {
                         .collect(),
                 })
                 .collect(),
+            mattes: frame
+                .capture
+                .mattes
+                .iter()
+                .map(|matte| (keys.key(matte.root), keys.key(matte.source), matte.mode))
+                .collect(),
+            glasses: frame
+                .capture
+                .glasses
+                .iter()
+                .map(|glass| (keys.key(glass.root), glass.glass))
+                .collect(),
             motion_blur: frame
                 .motion_blur
                 .iter()
@@ -1130,6 +1182,27 @@ impl FrameRecord {
                         })
                     })
                     .collect::<Result<_>>()?,
+                mattes: self
+                    .mattes
+                    .iter()
+                    .map(|&(root, source, mode)| -> Result<CapturedMatte> {
+                        Ok(CapturedMatte {
+                            root: key_entity(root)?,
+                            source: key_entity(source)?,
+                            mode,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
+                glasses: self
+                    .glasses
+                    .iter()
+                    .map(|&(root, glass)| -> Result<CapturedGlass> {
+                        Ok(CapturedGlass {
+                            root: key_entity(root)?,
+                            glass,
+                        })
+                    })
+                    .collect::<Result<_>>()?,
             },
             post: self.post.clone(),
             motion_blur: self
@@ -1179,6 +1252,19 @@ impl DeltaEncoder {
         w.len(frame.effects.len());
         for effect in &frame.effects {
             effect.write(w);
+        }
+        w.len(frame.mattes.len());
+        for &(root, source, mode) in &frame.mattes {
+            w.var(u64::from(root));
+            w.var(u64::from(source));
+            write_matte_mode(w, mode);
+        }
+        w.len(frame.glasses.len());
+        for (root, glass) in &frame.glasses {
+            w.var(u64::from(*root));
+            for value in [glass.blur, glass.saturation, glass.refraction, glass.edge] {
+                w.f64(value);
+            }
         }
         match &self.previous {
             None => {
@@ -1253,6 +1339,24 @@ impl DeltaDecoder {
         for _ in 0..effect_count {
             effects.push(EffectRecord::read(r)?);
         }
+        let matte_count = r.len()?;
+        let mut mattes = Vec::with_capacity(matte_count.min(1 << 12));
+        for _ in 0..matte_count {
+            mattes.push((r.u32()?, r.u32()?, read_matte_mode(r)?));
+        }
+        let glass_count = r.len()?;
+        let mut glasses = Vec::with_capacity(glass_count.min(1 << 12));
+        for _ in 0..glass_count {
+            glasses.push((
+                r.u32()?,
+                Glass {
+                    blur: r.f64()?,
+                    saturation: r.f64()?,
+                    refraction: r.f64()?,
+                    edge: r.f64()?,
+                },
+            ));
+        }
         let elements = match r.u8()? {
             FRAME_FULL => {
                 let count = r.len()?;
@@ -1308,6 +1412,8 @@ impl DeltaDecoder {
             post,
             elements,
             effects,
+            mattes,
+            glasses,
             motion_blur: Vec::new(),
         };
         self.previous = Some(frame.clone());

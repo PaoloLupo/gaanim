@@ -3222,6 +3222,69 @@ class Drawable:
             face.scale_to(1.18)  # The brows thicken with the head.
         """
         ...
+    def glass(
+        self,
+        blur: float = 0.25,
+        *,
+        saturation: float = 1.4,
+        refraction: float = 0.08,
+        edge: float = 0.3,
+    ) -> Self:
+        """Turn this drawable into frosted glass over what is drawn behind it.
+
+        Inside its outline, the canvas and every drawable drawn before it
+        show blurred by ``blur`` scene units, with their colors saturated by
+        ``saturation`` (1 keeps them), bent inward by up to ``refraction``
+        scene units near the edge like a lens, and lit along the edge by
+        ``edge`` (0 to 1). The drawable itself is drawn on top, so a
+        translucent fill tints the glass and a stroke frames it; the glass
+        fades with it. Refraction and the lit edge follow the outline as a
+        rounded rectangle, exact for rectangles, cards and circles. It is
+        declaration state for the whole timeline and works in previews,
+        exports and ``.gaanim`` bundles. Negative or non-finite values raise
+        ``ValueError``.
+
+        Example:
+            card = scene.geometry.rounded_rect(5, 3, 0.4).fill("#ffffff22").stroke("#ffffff55", 0.02)
+            card.glass(blur=0.3, refraction=0.12)
+        """
+        ...
+    def backdrop_blur(self, radius: float = 0.25, *, saturation: float = 1.0) -> Self:
+        """Blur what is drawn behind this drawable, inside its outline.
+
+        The same as ``glass(radius, saturation=saturation, refraction=0, edge=0)``.
+
+        Example:
+            panel = scene.geometry.rect(6, 2).fill("#0f172a88").backdrop_blur(0.4)
+        """
+        ...
+    def no_glass(self) -> Self:
+        """Remove the glass or backdrop blur."""
+        ...
+    def matte(
+        self,
+        source: Optional[Drawable],
+        mode: Literal["alpha", "alpha_inverted", "luma", "luma_inverted"] = "alpha",
+    ) -> Self:
+        """Show this drawable and its descendants only through ``source``, a track matte.
+
+        ``"alpha"`` shows it where ``source`` is opaque, so a photo or a
+        gradient appears inside the letters of a title; ``"luma"`` where
+        ``source`` is bright, so a gradient rectangle makes a soft reveal;
+        ``"alpha_inverted"`` and ``"luma_inverted"`` show the opposite. The
+        matte follows ``source`` as it moves, scales, fades or is written,
+        but ``source`` is no longer drawn on its own. ``None`` removes the
+        matte. It is declaration state for the whole timeline and works in
+        previews, exports and ``.gaanim`` bundles. A ``source`` from another
+        scene, the drawable itself or an unknown ``mode`` raises
+        ``ValueError``.
+
+        Example:
+            title = scene.text("OCÉANO").scale_to(2.5)
+            waves = scene.media.image("olas.jpg").scale_to(8).matte(title)
+            scene.play([title.animate.write()])
+        """
+        ...
     def shader_effect(
         self,
         effect: Optional[PostProcess | Sequence[PostProcess]],
@@ -7424,6 +7487,32 @@ class Geometry:
         Example:
             trend = scene.geometry.polyline([(-3, -1), (-1, 0.5), (1, 0), (3, 2)])
             wave = scene.geometry.polyline([(x, computed(lambda t, x=x: math.sin(x + t), inputs=[scene.time])) for x in range(-6, 7)])
+        """
+        ...
+    def metaballs(
+        self,
+        balls: Sequence[Drawable],
+        *,
+        threshold: float = 1.0,
+        smoothness: float = 0.4,
+    ) -> Drawable:
+        """Create the outline of ``balls`` melted together like drops of liquid.
+
+        Each drawable counts as a circle: the center of its bounds and half
+        their larger side. The outline follows them every frame as they
+        move and scale, so animating the balls animates the blob; the
+        balls themselves stop being drawn (opacity 0). Balls closer than
+        ``smoothness`` scene units join with a neck (0 is a plain union),
+        and ``threshold`` divides every radius (above 1 thins them). The
+        result is an ordinary filled path in scene coordinates: style it,
+        export it to SVG or give it effects. An empty list, a ball from
+        another scene, a non-positive ``threshold`` or a negative
+        ``smoothness`` raises ``ValueError``.
+
+        Example:
+            drops = [scene.geometry.circle(0.6).move_to(x, 0) for x in (-2, 0, 2)]
+            blob = scene.geometry.metaballs(drops, smoothness=0.8).fill(BLUE)
+            scene.play([drops[0].animate.move_to(-0.6, 0)])
         """
         ...
     def polyline_3d(
