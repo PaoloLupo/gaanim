@@ -18,8 +18,21 @@ fn layer_param(
     if let Ok(parameter) = value.extract::<PyRef<'_, PyParameter>>() {
         return Ok(LayerParam::signal(parameter.inner.drawable().id));
     }
+    if let Ok(computed) = value.extract::<PyRef<'_, crate::visualization::PyComputed>>() {
+        let source = computed.time_only_source().ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "{name} must be a Computed of the time alone (an audio signal, scene.noise, \
+                 scene.time); pass a Parameter directly instead of computing from it"
+            ))
+        })?;
+        return Ok(LayerParam::Source(std::sync::Arc::new(
+            gaanim_animation::SourceParam::new(source),
+        )));
+    }
     let value: f64 = value.extract().map_err(|_| {
-        pyo3::exceptions::PyTypeError::new_err(format!("{name} must be a number or a Parameter"))
+        pyo3::exceptions::PyTypeError::new_err(format!(
+            "{name} must be a number, a Parameter or a time Computed"
+        ))
     })?;
     if !value.is_finite() {
         return Err(PyValueError::new_err(format!("{name} must be finite")));

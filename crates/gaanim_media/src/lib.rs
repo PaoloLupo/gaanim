@@ -15,6 +15,7 @@ use gaanim_scene::{RasterImage, SceneSet};
 use gaanim_timeline::timeline::Timeline;
 use serde::Deserialize;
 
+pub mod analysis;
 pub mod narration;
 
 /// Metadata read from the first video stream in a media file.
@@ -123,6 +124,84 @@ impl AudioTrack {
             speed: 1.0,
             looping: false,
         })
+    }
+
+    /// The source second this track plays at scene second `time`, or `None`
+    /// while it is silent. `file_duration` is the source's length, which
+    /// bounds a track without its own source duration. Matches the export
+    /// mix: the output starts at `start_time`, runs `duration` (or the
+    /// source to its end, once), and reads the source from
+    /// `source_offset` at `speed`, wrapping when looping.
+    pub fn source_time(&self, time: f64, file_duration: f64) -> Option<f64> {
+        let output = time - self.start_time;
+        if !output.is_finite() || output < 0.0 {
+            return None;
+        }
+        let available = (file_duration - self.source_offset).max(0.0);
+        let span = self
+            .source_duration
+            .map_or(available, |duration| duration.min(available));
+        if span <= 0.0 {
+            return None;
+        }
+        let speed = if self.speed > 0.0 { self.speed } else { 1.0 };
+        let length = self.duration.unwrap_or(if self.looping {
+            f64::INFINITY
+        } else {
+            span / speed
+        });
+        if output >= length {
+            return None;
+        }
+        let local = output * speed;
+        let local = if self.looping {
+            local.rem_euclid(span)
+        } else if local >= span {
+            return None;
+        } else {
+            local
+        };
+        Some(self.source_offset + local)
+    }
+
+    /// The scene seconds before `until` at which this track plays the
+    /// source seconds `times`, in order.
+    pub fn scene_times(&self, times: &[f64], file_duration: f64, until: f64) -> Vec<f64> {
+        let available = (file_duration - self.source_offset).max(0.0);
+        let span = self
+            .source_duration
+            .map_or(available, |duration| duration.min(available));
+        let speed = if self.speed > 0.0 { self.speed } else { 1.0 };
+        if span <= 0.0 {
+            return Vec::new();
+        }
+        let length = self.duration.unwrap_or(if self.looping {
+            f64::INFINITY
+        } else {
+            span / speed
+        });
+        let mut sorted: Vec<f64> = times
+            .iter()
+            .map(|time| time - self.source_offset)
+            .filter(|local| (0.0..span).contains(local))
+            .collect();
+        sorted.sort_by(f64::total_cmp);
+        let mut scene = Vec::new();
+        let mut cycle_start = 0.0;
+        while cycle_start < length && self.start_time + cycle_start < until {
+            for local in &sorted {
+                let output = cycle_start + local / speed;
+                if output >= length || self.start_time + output >= until {
+                    break;
+                }
+                scene.push(self.start_time + output);
+            }
+            if !self.looping {
+                break;
+            }
+            cycle_start += span / speed;
+        }
+        scene
     }
 
     pub fn from_media(
@@ -1145,6 +1224,58 @@ impl Plugin for GaanimMediaPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn track(
+        start: f64,
+        duration: Option<f64>,
+        offset: f64,
+        speed: f64,
+        looping: bool,
+    ) -> AudioTrack {
+        AudioTrack {
+            path: PathBuf::from("x.wav"),
+            start_time: start,
+            duration,
+            volume: 1.0,
+            fade_in: 0.0,
+            fade_out: 0.0,
+            source_offset: offset,
+            source_duration: None,
+            speed,
+            looping,
+        }
+    }
+
+    #[test]
+    fn source_time_follows_start_offset_speed_and_loops() {
+        let plain = track(2.0, None, 0.0, 1.0, false);
+        assert_eq!(plain.source_time(1.9, 10.0), None);
+        assert_eq!(plain.source_time(2.5, 10.0), Some(0.5));
+        assert_eq!(plain.source_time(12.0, 10.0), None);
+        let trimmed = track(0.0, Some(3.0), 1.0, 2.0, false);
+        assert_eq!(trimmed.source_time(1.0, 10.0), Some(3.0));
+        assert_eq!(trimmed.source_time(3.0, 10.0), None);
+        let looped = track(0.0, Some(9.0), 0.0, 1.0, true);
+        assert_eq!(looped.source_time(4.5, 4.0), Some(0.5));
+        assert_eq!(looped.source_time(9.0, 4.0), None);
+    }
+
+    #[test]
+    fn scene_times_map_onsets_through_the_track() {
+        let looped = track(1.0, Some(7.0), 0.0, 2.0, true);
+        // A 4 s source at double speed loops every 2 scene seconds.
+        assert_eq!(
+            looped.scene_times(&[0.0, 3.0], 4.0, 100.0),
+            vec![1.0, 2.5, 3.0, 4.5, 5.0, 6.5, 7.0]
+        );
+        let endless = track(0.0, None, 0.0, 1.0, true);
+        assert_eq!(endless.scene_times(&[1.0], 2.0, 6.0), vec![1.0, 3.0, 5.0]);
+        let offset = track(0.0, None, 1.0, 1.0, false);
+        assert_eq!(
+            offset.scene_times(&[0.5, 1.5, 2.0], 3.0, 100.0),
+            vec![0.5, 1.0]
+        );
+    }
 
     fn image_data(rgba: [u8; 4]) -> ImageData {
         ImageData {

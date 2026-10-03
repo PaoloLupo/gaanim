@@ -41,10 +41,13 @@ use crate::export::{AudioTrack, AudioTrackError};
 /// A validated audio declaration that can be activated by [`SceneModel::play_items`].
 #[derive(Debug, Clone)]
 pub struct AudioClip {
-    track: AudioTrack,
+    pub(crate) track: AudioTrack,
     state: SharedCanvasState,
     /// Whether the track's duration lengthens the play that activates it.
     extends_play: bool,
+    /// The tracks this clip has played, with their start times; audio
+    /// signals read them to place the analysis on the timeline.
+    pub(crate) plays: Arc<Mutex<Vec<AudioTrack>>>,
 }
 
 /// A timeline-synchronized video declaration activated by [`SceneModel::play_items`].
@@ -2757,6 +2760,7 @@ impl SceneModel {
             track,
             state: self.state.clone(),
             extends_play: true,
+            plays: Default::default(),
         })
     }
 
@@ -2785,6 +2789,7 @@ impl SceneModel {
             track,
             state: self.state.clone(),
             extends_play: false,
+            plays: Default::default(),
         })
     }
 
@@ -5633,6 +5638,11 @@ impl SceneModel {
                 PlayItem::Audio(audio) => {
                     let mut track = audio.track;
                     track.start_time = play_start + delay;
+                    audio
+                        .plays
+                        .lock()
+                        .expect("audio plays poisoned")
+                        .push(track.clone());
                     self.audio_tracks.push(track);
                 }
                 PlayItem::Video(video) => {

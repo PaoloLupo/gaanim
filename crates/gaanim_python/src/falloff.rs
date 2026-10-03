@@ -197,6 +197,22 @@ impl PyFalloff {
         })
     }
 
+    /// The value of a time-only `Computed` (an audio signal, `scene.noise`,
+    /// `scene.time`), the same for every instance.
+    #[staticmethod]
+    fn source(value: PyRef<'_, crate::visualization::PyComputed>) -> PyResult<Self> {
+        let source = value.time_only_source().ok_or_else(|| {
+            PyValueError::new_err(
+                "Falloff.source needs a Computed of the time alone (an audio signal, \
+                 scene.noise, scene.time)",
+            )
+        })?;
+        Ok(Self {
+            expr: FalloffExpr::Source(source),
+            targets: Vec::new(),
+        })
+    }
+
     /// Map `[0, 1]` to `[low, high]`: 0 becomes `low` and 1 becomes `high`.
     fn remap(&self, low: f64, high: f64) -> PyResult<Self> {
         Ok(Self {

@@ -2598,7 +2598,67 @@ class Audio:
     contributes to the enclosing play duration; an open-ended declaration, or
     one trimmed with ``end``, starts as background audio without extending the
     timeline.
+
+    Its data animates the scene: ``level``, ``band`` and ``pulse`` return a
+    ``Computed`` of the time, from 0 to 1, that every ``ScalarSource`` accepts
+    (``scale_to``, ``opacity``, ``move_to``, the camera, shader uniforms,
+    ``computed``, readouts), as do ``Updater.rotate``/``wiggle`` and
+    ``Falloff.source`` for colors. The file is analyzed once (WAV natively,
+    other formats with FFmpeg) and each signal looks the analysis up where the
+    clip plays, following its start, so seeks and exports read what playback
+    reads. Before the clip plays and after it ends, signals read 0.
+
+    Example:
+        music = scene.media.audio("track.mp3")
+        bass = music.band(20, 150, smoothing=0.6)
+        logo.scale_to(computed(lambda b: 1 + 0.3 * b, inputs=[bass]))
+        scene.play(music)
+        scene.wait(music.duration)
     """
+    def level(self, *, smoothing: float = 0.0) -> Computed:
+        """Loudness where the clip plays, 0 in silence and 1 at its loud end.
+
+        ``smoothing`` in ``[0, 1)`` keeps that share of the previous frame, so
+        values near 1 move slowly; outside that range raises ``ValueError``.
+        """
+        ...
+    def band(self, low: float, high: float, *, smoothing: float = 0.0) -> Computed:
+        """Amplitude of the frequencies from ``low`` to ``high`` Hz, 0 to 1.
+
+        ``band(20, 150)`` follows the bass, ``band(2000, 8000)`` the hi-hats
+        and sibilants. Each band is 1 at its own loud end of the file. A band
+        with ``low >= high``, negative, or above the analyzed range (11 kHz)
+        raises ``ValueError``.
+        """
+        ...
+    def pulse(self, decay: float = 0.15) -> Computed:
+        """1 at each onset (a hit, a note, a syllable), fading out over ``decay`` seconds.
+
+        The easiest way to make something react on the beat:
+        ``scale_to(computed(lambda p: 1 + 0.2 * p, inputs=[music.pulse()]))``.
+        A non-positive ``decay`` raises ``ValueError``.
+        """
+        ...
+    def beats(self) -> list[float]:
+        """Seconds from the clip's start at which a sound starts, in order.
+
+        These are onsets (hits, notes, syllables), not a tempo grid; add
+        ``music.start`` once the clip has played to get timeline seconds.
+        """
+        ...
+    @property
+    def start(self) -> Optional[float]:
+        """Timeline second where the clip last started playing, or ``None`` before it plays."""
+        ...
+    @property
+    def duration(self) -> float:
+        """Seconds the clip plays: its ``duration``, or the whole file.
+
+        ``scene.play(music)`` without ``duration`` does not lengthen the play;
+        follow it with ``scene.wait(music.duration)`` to keep the scene
+        running while the track sounds.
+        """
+        ...
 
 class Voiceover:
     """A voiceover block created by ``Scene.voiceover``.
@@ -2732,6 +2792,19 @@ class Falloff:
             grid.drive("rotation", Falloff.noise(frequency=0.4, seed=2).remap(-0.3, 0.3))
         """
         ...
+    @staticmethod
+    def source(value: Computed) -> Falloff:
+        """The value of a ``Computed`` of the time alone, the same for every instance.
+
+        Brings audio signals, ``scene.noise`` and ``scene.time`` to
+        ``drive``, which is how colors follow them. A ``Computed`` that reads
+        a ``Parameter`` raises ``ValueError``.
+
+        Example:
+            bass = music.band(20, 150, smoothing=0.5)
+            dots.drive("fill", Falloff.source(bass).gradient(BLUE, GOLD))
+        """
+        ...
     def remap(self, low: float, high: float) -> Falloff:
         """Map ``[0, 1]`` to ``[low, high]``: 0 becomes ``low`` and 1 becomes ``high``."""
         ...
@@ -2788,7 +2861,7 @@ class Updater:
         """
         ...
     @staticmethod
-    def rotate(speed: float | Parameter) -> Updater:
+    def rotate(speed: float | Parameter | Computed) -> Updater:
         """Turn the drawable about z at ``speed`` radians per second.
 
         A ``Parameter`` speed can be animated to speed the turn up or slow it
@@ -2796,6 +2869,9 @@ class Updater:
         added, so seeks and exports land on the same angle as playback, and
         ``remove_updater()`` keeps the angle reached. A parameter driven by
         ``drive_from_samples`` or ``add_updater_fn`` uses each frame's value.
+        A ``Computed`` of the time alone, such as an audio signal, turns at
+        its value, integrated from timeline second 0 at a fixed step; a
+        ``Computed`` that reads a ``Parameter`` raises ``ValueError``.
 
         Example:
             speed = scene.viz.parameter(0.5)
@@ -2806,10 +2882,10 @@ class Updater:
     @staticmethod
     def wiggle(
         *,
-        position: float | Parameter = 0.08,
-        rotation: float | Parameter = 0.0,
-        scale: float | Parameter = 0.0,
-        frequency: float | Parameter = 2.0,
+        position: float | Parameter | Computed = 0.08,
+        rotation: float | Parameter | Computed = 0.0,
+        scale: float | Parameter | Computed = 0.0,
+        frequency: float | Parameter | Computed = 2.0,
         octaves: int = 2,
         seed: int = 0,
     ) -> Updater:
@@ -2823,7 +2899,9 @@ class Updater:
         ``remove_updater()`` ends it. The amplitudes and ``frequency`` accept a
         ``Parameter``: animating an amplitude to 0 calms the jitter instead of
         cutting it, and a changing frequency changes the pace without jumps.
-        Invalid values raise ``ValueError``.
+        They also accept a ``Computed`` of the time alone, such as
+        ``music.level()``, to shake with the sound. Invalid values raise
+        ``ValueError``.
 
         Example:
             logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, frequency=2.0, seed=1))

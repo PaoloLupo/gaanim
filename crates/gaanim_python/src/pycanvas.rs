@@ -1009,6 +1009,92 @@ pub struct PyCanvas {
 #[derive(Clone, Debug)]
 pub struct PyAudio {
     pub(crate) inner: gaanim_api::canvas::AudioClip,
+    canvas: Arc<Mutex<ApiCanvas>>,
+}
+
+fn analysis_error(error: gaanim_api::canvas::AudioAnalysisError) -> PyErr {
+    use gaanim_api::canvas::AudioAnalysisError as AnalysisError;
+    match error {
+        AnalysisError::InvalidBand { .. } | AnalysisError::InvalidSmoothing(_) => {
+            pyo3::exceptions::PyValueError::new_err(error.to_string())
+        }
+        _ => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
+    }
+}
+
+#[pymethods]
+impl PyAudio {
+    /// Loudness of the clip where it plays, from 0 (silence) to 1 (its loud
+    /// end), as a signal that animates anything that takes a number.
+    #[pyo3(signature = (*, smoothing=0.0))]
+    fn level(&self, smoothing: f64) -> PyResult<crate::visualization::PyComputed> {
+        crate::custom::ensure_authoring_allowed()?;
+        let source = self.inner.level(smoothing).map_err(analysis_error)?;
+        Ok(crate::visualization::PyComputed::time_source(
+            &self.canvas,
+            source,
+        ))
+    }
+
+    /// Amplitude of the frequencies between `low` and `high` Hz, from 0 to 1.
+    #[pyo3(signature = (low, high, *, smoothing=0.0))]
+    fn band(
+        &self,
+        low: f64,
+        high: f64,
+        smoothing: f64,
+    ) -> PyResult<crate::visualization::PyComputed> {
+        crate::custom::ensure_authoring_allowed()?;
+        let source = self
+            .inner
+            .band(low, high, smoothing)
+            .map_err(analysis_error)?;
+        Ok(crate::visualization::PyComputed::time_source(
+            &self.canvas,
+            source,
+        ))
+    }
+
+    /// 1 at each onset (a hit, a note, a syllable), decaying to 0 with time
+    /// constant `decay` seconds.
+    #[pyo3(signature = (decay=0.15))]
+    fn pulse(&self, decay: f64) -> PyResult<crate::visualization::PyComputed> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !decay.is_finite() || decay <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "decay must be a positive number of seconds",
+            ));
+        }
+        let source = self.inner.pulse(decay).map_err(analysis_error)?;
+        Ok(crate::visualization::PyComputed::time_source(
+            &self.canvas,
+            source,
+        ))
+    }
+
+    /// Seconds from the clip's start at which a sound starts, in order.
+    fn beats(&self) -> PyResult<Vec<f64>> {
+        self.inner.onsets().map_err(analysis_error)
+    }
+
+    /// Seconds the clip plays for: its ``duration``, or the file from its start.
+    #[getter]
+    fn duration(&self) -> PyResult<f64> {
+        self.inner.length().map_err(analysis_error)
+    }
+
+    /// Timeline second where the clip last started playing, or ``None``.
+    #[getter]
+    fn start(&self) -> Option<f64> {
+        self.inner.start_time()
+    }
+
+    fn __repr__(&self) -> String {
+        match self.inner.start_time() {
+            Some(start) => format!("Audio(start={start:.3})"),
+            None => "Audio(not played)".to_string(),
+        }
+    }
 }
 
 /// A voiceover block whose narration take sets the pace of the scene.
@@ -3222,8 +3308,11 @@ impl PyMediaLibrary {
             (_, Some(end)) => canvas.audio_until(path, end, volume, fade_in, fade_out),
             (duration, None) => canvas.audio(path, duration, volume, fade_in, fade_out),
         };
-        clip.map(|inner| PyAudio { inner })
-            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+        clip.map(|inner| PyAudio {
+            inner,
+            canvas: self.inner.clone(),
+        })
+        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
     /// Place a sound effect at absolute timeline second `at` (the cursor by default).

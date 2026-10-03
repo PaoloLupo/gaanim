@@ -63,6 +63,22 @@ pub struct PyComputed {
 }
 
 impl PyComputed {
+    /// A native source of the time alone, owned by `canvas`'s scene.
+    pub(crate) fn time_source(canvas: &Arc<Mutex<ApiCanvas>>, source: ScalarSource) -> Self {
+        Self {
+            source,
+            owners: vec![ReactiveOwner::Time(canvas.clone())],
+        }
+    }
+
+    /// The source, when only the scene time drives it (no parameters).
+    pub(crate) fn time_only_source(&self) -> Option<ScalarSource> {
+        self.source
+            .parameter_ids()
+            .is_empty()
+            .then(|| self.source.clone())
+    }
+
     /// A native scalar that depends on the parameters of `owner`'s Scene.
     pub(crate) fn native_source(
         source: ScalarSource,

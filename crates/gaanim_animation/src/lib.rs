@@ -27,7 +27,7 @@ pub mod reactive;
 pub mod rehearsal;
 pub use procedural::{
     DashFlow, LayerParam, OscillatedChannel, ProceduralLayer, ProceduralMotion, ProceduralOffset,
-    ScheduledLayer, SignalTrack, SignalTween, StrokeCycle, Waveform,
+    ScheduledLayer, SignalTrack, SignalTween, SourceParam, StrokeCycle, Waveform,
 };
 pub use progress_arc::{ProgressArc, progress_arc_path};
 pub use property_bindings::*;

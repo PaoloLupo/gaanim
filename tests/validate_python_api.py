@@ -2079,6 +2079,44 @@ def validate_chalk_quantity_and_arc_contract(module):
     return failures
 
 
+def validate_audio_signals_contract(module):
+    failures = []
+    track = Path(__file__).resolve().parent.parent / "docs/fixtures/assets/ritmo.ogg"
+    scene = module.Scene(frame=(16, 9))
+    music = scene.media.audio(str(track))
+    signals = [music.level(), music.band(20, 150, smoothing=0.5), music.pulse(0.1)]
+    if not all(isinstance(signal, module.Computed) for signal in signals):
+        failures.append("audio signals are not Computed values")
+    dot = scene.geometry.circle(0.3)
+    dot.scale_to(module.computed(lambda b: 1 + b, inputs=[signals[1]]))
+    dot.add_updater(module.Updater.rotate(signals[0]))
+    dot.add_updater(module.Updater.wiggle(position=signals[2]))
+    group = scene.geometry.group([scene.geometry.circle(0.1), scene.geometry.circle(0.1)])
+    group.drive("fill", module.Falloff.source(signals[1]).gradient("#000000", "#ffffff"))
+    if music.start is not None:
+        failures.append("Audio.start is set before the clip plays")
+    beats = music.beats()
+    if beats != sorted(beats) or len(beats) < 20:
+        failures.append("Audio.beats did not find the ordered onsets of ritmo.ogg")
+    if abs(music.duration - 8.0) > 0.01:
+        failures.append("Audio.duration is not the file length")
+    scene.play(music)
+    if music.start != 0.0:
+        failures.append("Audio.start is not the play time")
+    parameter = scene.viz.parameter(1.0)
+    for operation in (
+        lambda: music.band(200, 100),
+        lambda: music.band(20000, 21000),
+        lambda: music.level(smoothing=1.0),
+        lambda: music.pulse(0),
+        lambda: module.Falloff.source(module.computed(lambda p: p, inputs=[parameter])),
+        lambda: module.Updater.rotate(module.computed(lambda p: p, inputs=[parameter])),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("audio signals accepted an invalid band, smoothing, decay or source")
+    return failures
+
+
 def raises_error(expected, operation):
     try:
         operation()
@@ -2796,6 +2834,7 @@ def main() -> int:
     missing.extend(validate_section_navigation_contract(module))
     missing.extend(validate_reactive_fill_level_contract(module))
     missing.extend(validate_polyline_connector_contract(module))
+    missing.extend(validate_audio_signals_contract(module))
     missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))

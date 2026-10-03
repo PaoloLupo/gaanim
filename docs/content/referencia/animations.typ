@@ -2192,9 +2192,9 @@ scene.wait(2)
 #api-entry(
   name: "Updater.rotate",
   kind: "factory",
-  params: ((name: "speed", type: "float | Parameter", default: none, desc: [Radianes por segundo. Con un `Parameter`, animarlo acelera o frena el giro sin saltos.]),),
+  params: ((name: "speed", type: "float | Parameter | Computed", default: none, desc: [Radianes por segundo. Con un `Parameter`, animarlo acelera o frena el giro sin saltos. Con un `Computed` del tiempo, como una señal de audio, gira a su valor.]),),
   returns: (type: "Updater", desc: [Giro continuo alrededor de Z.]),
-  desc: [Con un `Parameter`, el ángulo es la integral de su valor desde que se añade el updater, así que un seek o una exportación desde la mitad caen en el mismo ángulo que la reproducción, y `remove_updater()` lo deja en el ángulo alcanzado. Para un `Parameter` movido por `drive_from_samples` o `add_updater_fn` se usa su valor de cada fotograma.],
+  desc: [Con un `Parameter`, el ángulo es la integral de su valor desde que se añade el updater, así que un seek o una exportación desde la mitad caen en el mismo ángulo que la reproducción, y `remove_updater()` lo deja en el ángulo alcanzado. Para un `Parameter` movido por `drive_from_samples` o `add_updater_fn` se usa su valor de cada fotograma. Un `Computed` que depende solo del tiempo (`musica.level()`, `scene.noise`) se integra desde el segundo 0 con paso fijo, igual en reproducción y en seek; uno que lee un `Parameter` lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -2233,15 +2233,15 @@ scene.wait(2)
   name: "Updater.wiggle",
   kind: "factory",
   params: (
-    (name: "position", type: "float | Parameter", default: "0.08", desc: [Amplitud del ruido de posición, en unidades de escena.]),
-    (name: "rotation", type: "float | Parameter", default: "0.0", desc: [Amplitud de giro, en radianes.]),
-    (name: "scale", type: "float | Parameter", default: "0.0", desc: [Amplitud de escala, como fracción.]),
-    (name: "frequency", type: "float | Parameter", default: "2.0", desc: [Rapidez del temblor.]),
+    (name: "position", type: "float | Parameter | Computed", default: "0.08", desc: [Amplitud del ruido de posición, en unidades de escena.]),
+    (name: "rotation", type: "float | Parameter | Computed", default: "0.0", desc: [Amplitud de giro, en radianes.]),
+    (name: "scale", type: "float | Parameter | Computed", default: "0.0", desc: [Amplitud de escala, como fracción.]),
+    (name: "frequency", type: "float | Parameter | Computed", default: "2.0", desc: [Rapidez del temblor.]),
     (name: "octaves", type: "int", default: "2", desc: [Capas de detalle, de 1 a 8.]),
     (name: "seed", type: "int", default: "0", desc: [Semilla del ruido.]),
   ),
   returns: (type: "Updater", desc: [Temblor orgánico con semilla.]),
-  desc: [Es una capa sobre la animación del objeto: empieza en cero, es función pura del tiempo de la línea de tiempo y se suma a `animate.move_to` y a otros clips en lugar de sustituirlos. Un seek cae en el mismo fotograma que la reproducción. Las amplitudes y la frecuencia aceptan un `Parameter`: animar la amplitud a 0 apaga el temblor poco a poco en lugar de cortarlo con `remove_updater()`, y cambiar la frecuencia cambia el ritmo sin saltos. Valores inválidos lanzan `ValueError`.],
+  desc: [Es una capa sobre la animación del objeto: empieza en cero, es función pura del tiempo de la línea de tiempo y se suma a `animate.move_to` y a otros clips en lugar de sustituirlos. Un seek cae en el mismo fotograma que la reproducción. Las amplitudes y la frecuencia aceptan un `Parameter`: animar la amplitud a 0 apaga el temblor poco a poco en lugar de cortarlo con `remove_updater()`, y cambiar la frecuencia cambia el ritmo sin saltos. También aceptan un `Computed` del tiempo, como `musica.pulse()`, para temblar con el sonido. Valores inválidos lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -2598,6 +2598,22 @@ sway = Falloff.noise(frequency=0.4, seed=2).remap(-0.3, 0.3)
 ```python
 >>>from gaanim import *
 half = Falloff.constant(0.5)
+```
+]
+
+#api-entry(
+  name: "Falloff.source",
+  kind: "factory",
+  params: ((name: "value", type: "Computed", default: none, desc: [Un `Computed` que depende solo del tiempo: una señal de audio, `scene.noise` o `scene.time`.]),),
+  returns: (type: "Falloff", desc: [Su valor, el mismo para todos los miembros.]),
+  desc: [Lleva al `drive` una señal del tiempo, por ejemplo para que el color siga al audio. Un `Computed` que lee un `Parameter` lanza `ValueError`. Ver #link("/referencia/audio/")[Audio].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>dots = scene.geometry.group([scene.geometry.circle(0.2).move_to(x, 0) for x in range(-3, 4)])
+bajo = scene.media.audio("assets/ritmo.ogg").band(20, 150, smoothing=0.5)
+dots.drive("fill", Falloff.source(bajo).gradient(BLUE, GOLD))
 ```
 ]
 
