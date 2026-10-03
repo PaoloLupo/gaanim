@@ -17,7 +17,8 @@ Publicada el 3 de octubre de 2026. Corrige lo que se vio al hacer los primeros
 videos con 0.8.0: sombras de curvas sin relleno, cotas demasiado gruesas, un
 `stagger` que cambiaba de orden y documentos Typst que se ensanchaban hasta la
 página. Llegan `gaanim export --frame`, contadores con ancho reservado sin
-ceros y trazos que escalan con su figura. Lee «Al actualizar» si usas
+ceros, trazos que escalan con su figura y updaters con velocidad o amplitud
+animable. Lee «Al actualizar» si usas
 `scene.text.typst` con párrafos largos.
 
 == Cambios
@@ -36,6 +37,10 @@ ceros y trazos que escalan con su figura. Lee «Al actualizar» si usas
 - `drawable.scale_stroke_with_object()` o `stroke(..., scale_with_object=True)`
   hacen que el ancho del trazo siga la escala de la figura y de sus grupos; en
   un grupo o un SVG se aplica a todos sus trazos.
+- `Updater.rotate(velocidad)` y las amplitudes y la frecuencia de
+  `Updater.wiggle` aceptan un `Parameter`: animarlo acelera un giro o calma un
+  temblor sin saltos, y un seek cae en el mismo fotograma que la reproducción.
+  Lee #link("/guias/movimiento/")[Movimiento].
 
 == Al actualizar
 
