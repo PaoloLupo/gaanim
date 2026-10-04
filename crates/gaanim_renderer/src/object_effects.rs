@@ -459,7 +459,10 @@ impl ObjectEffects {
                             image: layer.image.clone(),
                             view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
                             texture,
-                            post: GpuPostProcess::default(),
+                            // A drawable whose image changed size takes the
+                            // passes of the image it replaces, whose
+                            // pipelines took about 0.5 ms each to build.
+                            post: spare.pop().map(|slot| slot.post).unwrap_or_default(),
                         }
                     }
                 };

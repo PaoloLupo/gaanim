@@ -148,6 +148,18 @@ class RuntimeBenchmarkTests(unittest.TestCase):
         self.assertNotIn("--quality", bundle)
         self.assertNotIn("--encoder", bundle)
 
+    def test_pruning_keeps_logs_and_manifests_but_not_media(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_dir = Path(temporary)
+            kept = ["command.log", "manifest.json", "reload.json"]
+            dropped = ["seek_0000.png", "benchmark.mp4", "benchmark.GIF", "deck.gaanim"]
+            for name in kept + dropped:
+                (artifact_dir / name).write_bytes(b"x")
+
+            benchmark_runtime.prune_artifacts(artifact_dir)
+
+            self.assertEqual(sorted(path.name for path in artifact_dir.iterdir()), sorted(kept))
+
     def test_png_sequence_export_accepts_numbered_files_without_timings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             artifact_dir = Path(temporary)

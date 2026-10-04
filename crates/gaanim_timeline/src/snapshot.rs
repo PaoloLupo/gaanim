@@ -1039,7 +1039,7 @@ mod tests {
                     parent: None,
                     rank: 1,
                     hold: false,
-                    motion_sources: Vec::new(),
+                    motion_sources: std::sync::Arc::default(),
                     window: None,
                 });
             }

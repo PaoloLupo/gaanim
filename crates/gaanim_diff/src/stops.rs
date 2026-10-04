@@ -262,18 +262,15 @@ pub fn capture_bundle_stops(
     drop(bundle);
 
     fs::create_dir_all(output_dir)?;
-    let mut frames = Vec::with_capacity(times.len());
-    gaanim_export::prelude::capture_bundle_streaming(
-        bundle_path,
-        size.0,
-        size.1,
-        &times,
-        |frame| {
-            frames.push(frame);
-            std::ops::ControlFlow::Continue(())
-        },
-    )?;
-    let manifest = crate::write_snapshots(output_dir, frames, &ids, size)?;
+    let manifest = crate::write_snapshots(output_dir, &ids, size, |on_frame| {
+        gaanim_export::prelude::capture_bundle_streaming(
+            bundle_path,
+            size.0,
+            size.1,
+            &times,
+            on_frame,
+        )
+    })?;
     let stops = StopsManifest {
         schema_version: 1,
         total,

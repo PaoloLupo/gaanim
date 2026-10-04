@@ -10716,7 +10716,8 @@ impl SceneModel {
                     .map(|child| (*child, Some(node))),
             );
         }
-        let motion_sources: Vec<ObjectId> = nodes.iter().map(|(node, _, _)| *node).collect();
+        let motion_sources: std::sync::Arc<[ObjectId]> =
+            nodes.iter().map(|(node, _, _)| *node).collect();
         for copy in 1..=echo.count() {
             let mut copies: HashMap<ObjectId, bevy::prelude::Entity> = HashMap::new();
             for &(node, entity, parent) in &nodes {

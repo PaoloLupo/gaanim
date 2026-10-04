@@ -3,6 +3,7 @@
 
 use bevy::prelude::{Component, Entity};
 use gaanim_core::ObjectId;
+use std::sync::Arc;
 
 /// A render-only copy of the Mobject `source`, drawn as it was `lag` seconds
 /// earlier.
@@ -29,8 +30,8 @@ pub struct EchoGhost {
     /// an onion skin, and it moves on when they move again.
     pub hold: bool,
     /// The echoed subtree, whose animation clips make up the motion a held
-    /// copy follows.
-    pub motion_sources: Vec<ObjectId>,
+    /// copy follows. Every copy of one echo shares it.
+    pub motion_sources: Arc<[ObjectId]>,
     /// Scene seconds the copy records, when limited: it shows the source
     /// only as it was inside them, and is hidden otherwise.
     pub window: Option<(f64, f64)>,

@@ -9,6 +9,7 @@ use bevy::prelude::{
 use ordered_float::OrderedFloat;
 use slotmap::SlotMap;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::clip::{Clip, ClipId, ClipPayload, PropertyLensSpec, SceneId, Track, TrackId};
 use crate::scene::{SceneMember, SceneMetadata};
@@ -2569,28 +2570,30 @@ impl Timeline {
             .collect();
         // A drawable positioned by a follow binding is rebuilt from the
         // drawables it follows, possibly a chain of them.
+        // An echo of a subtree has a copy of every member per echo, all of
+        // which share their echo's motion sources: each source and each set
+        // of motion sources is visited once.
+        let echo_sources: HashSet<gaanim_core::ObjectId> =
+            ghosts.iter().map(|(_, echo)| echo.source).collect();
         let needs_every_clip = !follows.is_empty()
-            || ghosts.iter().any(|(_, echo)| {
+            || echo_sources.iter().any(|source| {
                 entity_map
-                    .get(&echo.source)
+                    .get(source)
                     .is_some_and(|&source| follows_binding(world, source))
             })
             || squashes
                 .iter()
                 .any(|(entity, ..)| follows_binding(world, *entity));
         // Each source's animation clips, in start order.
-        let sources: HashSet<_> = ghosts
-            .iter()
-            .flat_map(|(_, echo)| {
-                std::iter::once(echo.source).chain(if echo.hold {
-                    echo.motion_sources.clone()
-                } else {
-                    Vec::new()
-                })
-            })
-            .chain(squashes.iter().map(|(_, id, _)| *id))
-            .chain(follows.iter().map(|(_, follow)| follow.source))
-            .collect();
+        let mut sources = echo_sources;
+        let mut motion_sets = HashSet::new();
+        for (_, echo) in &ghosts {
+            if echo.hold && motion_sets.insert(Arc::as_ptr(&echo.motion_sources).cast::<()>()) {
+                sources.extend(echo.motion_sources.iter().copied());
+            }
+        }
+        sources.extend(squashes.iter().map(|(_, id, _)| *id));
+        sources.extend(follows.iter().map(|(_, follow)| follow.source));
         let mut source_clips: HashMap<gaanim_core::ObjectId, Vec<&Clip>> = HashMap::new();
         for clip in self
             .clip_index
@@ -2624,16 +2627,28 @@ impl Timeline {
         let mut scratch: Option<Entity> = None;
         // Whether each shown copy draws exactly what its source draws now,
         // and the copy of its parent within the echoed subtree.
-        let mut coinciding: HashMap<Entity, (bool, Option<Entity>)> = HashMap::new();
+        // Ordered: hiding a copy moves it to another ECS table, and the
+        // order of those moves decides the order later queries visit copies
+        // in, so it must be the same in every process.
+        let mut coinciding: BTreeMap<Entity, (bool, Option<Entity>)> = BTreeMap::new();
+        // The copies of one echo level share their motion and lag, so their
+        // held time is computed once.
+        let mut held_times: HashMap<(*const (), u64), f64> = HashMap::new();
 
         for (ghost, echo) in ghosts {
             let time = if echo.hold {
-                let clips: Vec<&Clip> = echo
-                    .motion_sources
-                    .iter()
-                    .flat_map(|source| clips_of(source).iter().copied())
-                    .collect();
-                held_echo_time(&clips, self.current_time, echo.lag)
+                let key = (
+                    Arc::as_ptr(&echo.motion_sources).cast::<()>(),
+                    echo.lag.to_bits(),
+                );
+                *held_times.entry(key).or_insert_with(|| {
+                    let clips: Vec<&Clip> = echo
+                        .motion_sources
+                        .iter()
+                        .flat_map(|source| clips_of(source).iter().copied())
+                        .collect();
+                    held_echo_time(&clips, self.current_time, echo.lag)
+                })
             } else {
                 self.current_time - echo.lag
             };
@@ -5129,7 +5144,10 @@ fn echo_matches_source(
 }
 
 /// Hide every echoed subtree whose copies all coincide with their sources.
-fn hide_coinciding_echoes(world: &mut World, coinciding: &HashMap<Entity, (bool, Option<Entity>)>) {
+fn hide_coinciding_echoes(
+    world: &mut World,
+    coinciding: &BTreeMap<Entity, (bool, Option<Entity>)>,
+) {
     let root_of = |mut ghost: Entity| {
         while let Some(parent) = coinciding.get(&ghost).and_then(|(_, parent)| *parent) {
             if !coinciding.contains_key(&parent) {
@@ -5387,7 +5405,7 @@ mod tests {
                         parent: None,
                         rank,
                         hold: false,
-                        motion_sources: Vec::new(),
+                        motion_sources: Arc::default(),
                         window: None,
                     },
                 ))

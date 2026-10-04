@@ -6,7 +6,7 @@
 //! with marching squares on a grid and fitted with cubic curves, giving a
 //! vector outline that stays sharp at any size and exports as a path.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use kurbo::{BezPath, Point, Rect, Vec2};
 
@@ -120,7 +120,8 @@ pub fn metaballs_path(balls: &[Ball], threshold: f64, smoothness: f64) -> BezPat
         at(a.0, a.1).lerp(at(b.0, b.1), t)
     };
     // Each directed segment, keyed by the edge it starts on: where it ends.
-    let mut segments: HashMap<EdgeKey, (EdgeKey, Point)> = HashMap::new();
+    // Ordered, so that every loop starts on the same edge in every process.
+    let mut segments: BTreeMap<EdgeKey, (EdgeKey, Point)> = BTreeMap::new();
     for row in 0..rows {
         for column in 0..columns {
             // Corners counterclockwise from the bottom left (y up).
@@ -177,7 +178,7 @@ pub fn metaballs_path(balls: &[Ball], threshold: f64, smoothness: f64) -> BezPat
     }
 
     let mut path = BezPath::new();
-    while let Some(&start) = segments.keys().next() {
+    while let Some((&start, _)) = segments.first_key_value() {
         let mut loop_points = Vec::new();
         let mut key = start;
         while let Some((next, point)) = segments.remove(&key) {
@@ -246,6 +247,21 @@ mod tests {
         // A higher threshold thins the ball.
         let thin = metaballs_path(&[ball(0.0, 0.0, 1.0)], 2.0, 0.0);
         assert!((thin.bounding_box().width() - 1.0).abs() < 0.02);
+    }
+
+    #[test]
+    fn the_same_balls_always_trace_the_same_path() {
+        // Recordings compare paths exactly, so the loops must start where
+        // they did before, whatever order a hash map would visit them in.
+        let balls = [
+            ball(-2.0, 0.0, 0.6),
+            ball(2.0, 0.3, 0.7),
+            ball(0.2, 1.5, 0.5),
+        ];
+        let first = metaballs_path(&balls, 1.0, 0.6);
+        for _ in 0..8 {
+            assert_eq!(metaballs_path(&balls, 1.0, 0.6), first);
+        }
     }
 
     #[test]
