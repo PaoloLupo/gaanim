@@ -1,5 +1,7 @@
 use std::io::{Read, Write};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -201,9 +203,14 @@ fn wait_for_child(child: &mut Child, timeout: Duration) -> std::io::Result<Optio
 /// Probes each candidate with a 1-frame test encode to verify it works
 /// with the piped-rawvideo input we use (some encoders need driver-specific
 /// setup or proprietary drivers, e.g. AMF needs AMDGPU-PRO on Linux).
+/// The result is cached for the process: probing runs FFmpeg up to four
+/// times, and the installed FFmpeg and drivers do not change between exports.
 pub fn detect_best_encoder() -> VideoEncoder {
-    let available = detect_available_encoders();
-    select_best_encoder(&available, probe_encoder)
+    static BEST_ENCODER: OnceLock<VideoEncoder> = OnceLock::new();
+    *BEST_ENCODER.get_or_init(|| {
+        let available = detect_available_encoders();
+        select_best_encoder(&available, probe_encoder)
+    })
 }
 
 fn select_best_encoder(
@@ -416,7 +423,13 @@ pub fn write_png_frame(
 ) -> Result<()> {
     let (pixels, color_type) = png_pixels(rgba, width, height, transparent)?;
     let mut png_buffer = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new(&mut png_buffer);
+    // Fast DEFLATE with adaptive filters: frames stay lossless and encode
+    // several times faster than at the high compression levels.
+    let encoder = image::codecs::png::PngEncoder::new_with_quality(
+        &mut png_buffer,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::Adaptive,
+    );
     image::ImageEncoder::write_image(encoder, &pixels, width, height, color_type)
         .map_err(|e| ExportError::General(format!("PNG encode error: {e}")))?;
     std::fs::write(path, png_buffer)?;
@@ -530,7 +543,7 @@ impl ParallelEncoder {
 
     fn x264_preset(speed: EncodingSpeed) -> &'static str {
         match speed {
-            EncodingSpeed::Fast => "fast",
+            EncodingSpeed::Fast => "veryfast",
             EncodingSpeed::Balanced => "medium",
             EncodingSpeed::Best => "slower",
         }
@@ -538,6 +551,16 @@ impl ParallelEncoder {
 
     fn webp_quality(crf: u32) -> u32 {
         ((100_f64 * (1.0 - (crf as f64 - 14.0) / 14.0)) as u32).clamp(10, 100)
+    }
+
+    /// libvpx `-cpu-used` for a speed tier, in its good-quality deadline
+    /// (0 is slowest; 5 is the fastest setting that mode honours).
+    fn vp9_cpu_used(speed: EncodingSpeed) -> u32 {
+        match speed {
+            EncodingSpeed::Fast => 5,
+            EncodingSpeed::Balanced => 4,
+            EncodingSpeed::Best => 2,
+        }
     }
 
     fn webp_compression(speed: EncodingSpeed) -> u32 {
@@ -680,6 +703,10 @@ impl ParallelEncoder {
                             .arg(config.crf.to_string())
                             .arg("-preset")
                             .arg(Self::x264_preset(config.encoding_speed))
+                            // Flat fills and sharp edges: animation tuning
+                            // spends bits on them rather than on film grain.
+                            .arg("-tune")
+                            .arg("animation")
                             .arg("-threads")
                             .arg("0");
                     }
@@ -740,6 +767,17 @@ impl ParallelEncoder {
                     .arg(config.crf.to_string())
                     .arg("-b:v")
                     .arg("0")
+                    .arg("-deadline")
+                    .arg("good")
+                    .arg("-cpu-used")
+                    .arg(Self::vp9_cpu_used(config.encoding_speed).to_string())
+                    // Row multithreading and four tile columns (libvpx
+                    // lowers the count for frames narrower than 1024 px)
+                    // let VP9 use more than a couple of cores at 1080p.
+                    .arg("-row-mt")
+                    .arg("1")
+                    .arg("-tile-columns")
+                    .arg("2")
                     .arg("-threads")
                     .arg("0");
 
@@ -811,38 +849,7 @@ impl ParallelEncoder {
         let mut encode_time = Duration::ZERO;
         match config.format {
             ExportFormat::PngSequence => {
-                let base_path = std::path::Path::new(&config.output_path);
-                if let Some(parent) = base_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-
-                let file_name = base_path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("frame.png");
-                let mut frame_idx = 0;
-                while let Ok(Some(frame)) = receiver.recv() {
-                    let encode_started_at = Instant::now();
-                    let filename = png_sequence_frame_name(file_name, frame_idx);
-                    let dest_path = base_path
-                        .parent()
-                        .unwrap_or(std::path::Path::new(""))
-                        .join(filename);
-
-                    let width = config.width;
-                    let height = config.height;
-                    let (pixels, color_type) =
-                        png_pixels(frame, width, height, config.transparent)?;
-
-                    let mut png_buffer = Vec::new();
-                    let encoder = image::codecs::png::PngEncoder::new(&mut png_buffer);
-                    image::ImageEncoder::write_image(encoder, &pixels, width, height, color_type)
-                        .map_err(|e| ExportError::General(format!("PNG encode error: {}", e)))?;
-
-                    std::fs::write(dest_path, png_buffer)?;
-                    encode_time += encode_started_at.elapsed();
-                    frame_idx += 1;
-                }
+                encode_time = Self::encode_png_sequence(&config, &receiver)?;
             }
             _ => {
                 let mut child = child.expect("FFmpeg is started for every non-PNG format");
@@ -856,6 +863,13 @@ impl ParallelEncoder {
                         "Failed to open stdin/stderr pipes to FFmpeg".to_string(),
                     ));
                 };
+                // Drain stderr while frames are written: a chatty FFmpeg that
+                // fills the pipe would otherwise block and stop reading stdin.
+                let stderr_thread = std::thread::spawn(move || {
+                    let mut bytes = Vec::new();
+                    let _ = std::io::BufReader::new(stderr).read_to_end(&mut bytes);
+                    String::from_utf8_lossy(&bytes).into_owned()
+                });
 
                 let mut write_error = None;
                 while let Ok(Some(frame)) = receiver.recv() {
@@ -870,9 +884,7 @@ impl ParallelEncoder {
                 drop(stdin);
 
                 let status = child.wait()?;
-                let mut stderr_content = String::new();
-                let mut stderr_reader = std::io::BufReader::new(stderr);
-                let _ = stderr_reader.read_to_string(&mut stderr_content);
+                let stderr_content = stderr_thread.join().unwrap_or_default();
                 let stderr_content = stderr_content.trim();
                 if let Some(error) = write_error {
                     return Err(ExportError::FFmpeg(format!(
@@ -898,6 +910,93 @@ impl ParallelEncoder {
         }
 
         Ok(encode_time)
+    }
+
+    /// Write PNG sequence frames on a pool of threads while frames keep
+    /// arriving in order. Returns the encode time summed over every frame.
+    fn encode_png_sequence(
+        config: &EncoderConfig,
+        receiver: &Receiver<Option<Vec<u8>>>,
+    ) -> Result<Duration> {
+        let base_path = std::path::Path::new(&config.output_path);
+        if let Some(parent) = base_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file_name = base_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("frame.png");
+        let directory = base_path.parent().unwrap_or(std::path::Path::new(""));
+        let (width, height, transparent) = (config.width, config.height, config.transparent);
+        // Each worker holds a frame and its encoding, so large frames get the
+        // same smaller budget as the frame queue.
+        let workers = std::thread::available_parallelism()
+            .map_or(1, std::num::NonZeroUsize::get)
+            .min(adaptive_buffer_depth(width, height));
+        // A rendezvous channel hands each frame straight to an idle worker.
+        let (jobs, job_receiver) = crossbeam_channel::bounded::<(usize, Vec<u8>)>(0);
+        let failed = AtomicBool::new(false);
+
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..workers)
+                .map(|_| {
+                    let job_receiver = job_receiver.clone();
+                    let failed = &failed;
+                    scope.spawn(move || {
+                        let mut encode_time = Duration::ZERO;
+                        for (frame_idx, frame) in job_receiver {
+                            let encode_started_at = Instant::now();
+                            let dest_path =
+                                directory.join(png_sequence_frame_name(file_name, frame_idx));
+                            if let Err(error) =
+                                write_png_frame(&dest_path, frame, width, height, transparent)
+                            {
+                                failed.store(true, Ordering::Relaxed);
+                                return (encode_time, Some((frame_idx, error)));
+                            }
+                            encode_time += encode_started_at.elapsed();
+                        }
+                        (encode_time, None)
+                    })
+                })
+                .collect();
+            drop(job_receiver);
+
+            let mut frame_idx = 0;
+            while let Ok(Some(frame)) = receiver.recv() {
+                if failed.load(Ordering::Relaxed) || jobs.send((frame_idx, frame)).is_err() {
+                    break;
+                }
+                frame_idx += 1;
+            }
+            drop(jobs);
+
+            // Report the earliest failing frame, as a sequential encode would.
+            let mut encode_time = Duration::ZERO;
+            let mut first_error: Option<(usize, ExportError)> = None;
+            let mut panicked = false;
+            for handle in handles {
+                let Ok((worker_time, error)) = handle.join() else {
+                    panicked = true;
+                    continue;
+                };
+                encode_time += worker_time;
+                if let Some((frame_idx, error)) = error
+                    && first_error
+                        .as_ref()
+                        .is_none_or(|(first_idx, _)| frame_idx < *first_idx)
+                {
+                    first_error = Some((frame_idx, error));
+                }
+            }
+            match first_error {
+                Some((_, error)) => Err(error),
+                None if panicked => Err(ExportError::General(
+                    "PNG encoder thread panicked".to_string(),
+                )),
+                None => Ok(encode_time),
+            }
+        })
     }
 }
 
@@ -965,6 +1064,46 @@ mod tests {
         .expect("PNG sequences never start FFmpeg");
         encoder.push_frame(vec![0; 16 * 16 * 4]).unwrap();
         encoder.finalize().unwrap();
+    }
+
+    #[test]
+    fn parallel_png_sequences_keep_frame_names_and_order() {
+        let directory =
+            std::env::temp_dir().join(format!("gaanim-png-order-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        let output = directory.join("f_%03d.png");
+        let mut config = encoder_config(ExportFormat::PngSequence, "");
+        config.output_path = output.to_string_lossy().into_owned();
+        let mut encoder =
+            ParallelEncoder::with_ffmpeg_program(config, "gaanim-test-missing-ffmpeg")
+                .expect("PNG sequences never start FFmpeg");
+        for frame_idx in 0..12u8 {
+            encoder.push_frame(vec![frame_idx; 16 * 16 * 4]).unwrap();
+        }
+        encoder.finalize().unwrap();
+
+        for frame_idx in 0..12u8 {
+            let path = directory.join(format!("f_{frame_idx:03}.png"));
+            let image = image::open(&path).expect("frame written").into_rgb8();
+            assert_eq!(image.get_pixel(0, 0).0, [frame_idx; 3], "{}", path.display());
+        }
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn png_sequence_reports_a_failing_frame() {
+        let mut encoder = ParallelEncoder::with_ffmpeg_program(
+            encoder_config(ExportFormat::PngSequence, "gaanim-png-error-test/frame.png"),
+            "gaanim-test-missing-ffmpeg",
+        )
+        .expect("PNG sequences never start FFmpeg");
+        encoder.push_frame(vec![0; 16 * 16 * 4]).unwrap();
+        let error = encoder
+            .push_frame(vec![0; 3])
+            .err()
+            .or_else(|| encoder.finalize().err())
+            .expect("a malformed frame must fail the export");
+        assert!(error.to_string().contains("RGBA bytes"), "{error}");
     }
 
     #[cfg(unix)]
