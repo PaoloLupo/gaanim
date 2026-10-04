@@ -93,12 +93,23 @@ same.
   samples in a plain loop, instead of premultiplying both ends again for
   every sample inside an iterator, and reads sample positions from a table.
   It performs the same floating-point operations in the same order, so every
-  ramp is bit-identical to upstream's (about 40 % faster per ramp).
+  ramp is bit-identical to upstream's. Between two opaque stops alpha is
+  exactly 1, so un-premultiplying and premultiplying again, which multiply
+  by 1, are skipped; and bytes are converted after clamping with `max`/`min`
+  (which map NaN to 0, as the saturating cast does), so the loop vectorizes.
+  An opaque ramp, such as every gradient of a lit 3D mesh, takes about 0.4 µs
+  instead of upstream's 4 µs, a translucent one about 1.6 µs.
+- The ramp map hashes with FxHash instead of SipHash. A lit 3D mesh looks
+  up thousands of ramps per render (a sealed triangle's fill and seam stroke
+  share one), and hashing was most of the time spent outside sampling.
+  Which row a ramp takes does not change what is drawn; with SipHash's
+  random keys it already varied between runs.
 
 Regression checks:
 
 - `cargo test -p vello_encoding --lib ramp`: ramps equal upstream's sampling
-  for even, uneven, repeated and single stops; many ramps survive between
+  for even, uneven, repeated and single stops, and for 4000 random ones
+  (opaque, transparent, out-of-range channels); many ramps survive between
   renders; changing ramps add no rows; unused ramps free their rows.
 - Exported PNG frames of `examples/performance_3d.py` equal those of the
   unpatched build.

@@ -2414,6 +2414,8 @@ impl DrawableHandle {
     /// Attach a preset updater that runs every frame.
     ///
     /// Use `UpdaterPreset` variants: `Orbit`, `AdvanceX`, `Bob`, `Rotate`, `Pulse`.
+    /// `Bob`, `Rotate` and `Pulse` attach as procedural layers; see
+    /// [`UpdaterPreset::procedural`].
     pub fn add_updater(&self, preset: UpdaterPreset) {
         self.state
             .lock()
@@ -2422,7 +2424,7 @@ impl DrawableHandle {
             .ops
             .push(Op::AttachUpdater {
                 target: self.id,
-                preset,
+                preset: preset.procedural(),
             });
     }
 

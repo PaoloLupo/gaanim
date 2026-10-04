@@ -17143,6 +17143,55 @@ mod tests {
     }
 
     #[test]
+    fn periodic_and_spinning_presets_stack_as_layers_of_timeline_time() {
+        use crate::canvas::UpdaterPreset;
+        let mut canvas = SceneModel::new(640, 360);
+        let square = canvas.square(1.0);
+        canvas.wait(1.0);
+        square.add_updater(UpdaterPreset::Bob {
+            amplitude: 0.5,
+            frequency: 0.25,
+        });
+        square.add_updater(UpdaterPreset::Pulse {
+            min_scale: 1.0,
+            max_scale: 1.5,
+            frequency: 0.5,
+        });
+        square.add_updater(UpdaterPreset::Rotate { speed: 1.5 });
+        canvas.wait(4.0);
+
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &text_config);
+        let mut world = world;
+        queue.apply(&mut world);
+
+        let entity = entity_of(&mut world, &square);
+        let motion = world
+            .get::<gaanim_animation::ProceduralMotion>(entity)
+            .unwrap();
+        // The updaters' functions of the time since they were attached,
+        // all three at once.
+        for time in [1.0, 1.7, 2.0, 3.3, 4.9] {
+            let local = time - 1.0;
+            let offset = motion.offset_at(time);
+            let bob = 0.5 * (std::f64::consts::TAU * 0.25 * local).sin();
+            let pulse = 1.25 + 0.25 * (std::f64::consts::TAU * 0.5 * local).sin();
+            assert!((offset.translation.y - bob).abs() < 1e-9, "bob at {time}");
+            assert!((offset.scale - pulse).abs() < 1e-9, "pulse at {time}");
+            assert!(
+                (offset.rotation - 1.5 * local).abs() < 1e-9,
+                "spin at {time}"
+            );
+        }
+        assert!(world.get::<gaanim_animation::Updater>(entity).is_none());
+    }
+
+    #[test]
     fn dash_flow_updaters_reach_every_drawn_member() {
         let mut canvas = SceneModel::new(640, 360);
         let first = canvas.circle(1.0);

@@ -156,6 +156,8 @@ pub struct ExportConfig {
 
     pub encoding_speed: EncodingSpeed,
     pub video_encoder: VideoEncoder,
+    /// Render without a window, overlapping the CPU and the GPU (the
+    /// default); `false` renders in a visible export viewport window.
     pub headless: bool,
     pub audio_tracks: Vec<AudioTrack>,
     pub telemetry: Option<ExportTelemetry>,
@@ -182,7 +184,8 @@ impl Default for ExportConfig {
             crf: 18,
             encoding_speed: EncodingSpeed::Balanced,
             video_encoder: VideoEncoder::Auto,
-            headless: false,
+            // The direct path: no window, frames overlapped with the GPU.
+            headless: true,
             audio_tracks: Vec::new(),
             telemetry: None,
             // The values above are the Standard preset for MP4.
@@ -286,6 +289,14 @@ mod tests {
         assert_eq!(default.fps, applied.fps);
         assert_eq!(default.crf, applied.crf);
         assert_eq!(default.encoding_speed, applied.encoding_speed);
+    }
+
+    #[test]
+    fn configs_export_without_a_window_by_default() {
+        assert!(ExportConfig::default().headless);
+        for path in ["out.mp4", "out.webm", "out.gif", "out.png"] {
+            assert!(ExportConfig::new(path).headless, "{path}");
+        }
     }
 
     #[test]

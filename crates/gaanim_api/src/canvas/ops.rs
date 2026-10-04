@@ -1118,6 +1118,43 @@ pub enum UpdaterPreset {
 }
 
 impl UpdaterPreset {
+    /// The same motion as a procedural layer, for the presets that have one.
+    ///
+    /// A layer is evaluated from timeline time, so it does not drift with the
+    /// frame rate, oscillates around the drawable's animated position instead
+    /// of the one it had when the updater first ran, and stacks with the
+    /// drawable's other layers (an updater replaces the previous one).
+    pub fn procedural(self) -> Self {
+        use gaanim_animation::{OscillatedChannel, ProceduralLayer, Waveform};
+        // A sine starting at 0 and rising: the waveform starts at its low
+        // value, a quarter of a cycle earlier.
+        let rising_sine = |channel, frequency, low, high| {
+            Self::Procedural(ProceduralLayer::Oscillate {
+                channel,
+                waveform: Waveform::Sine,
+                frequency,
+                low,
+                high,
+                phase: 0.25,
+            })
+        };
+        match self {
+            Self::Rotate { speed } => Self::Procedural(ProceduralLayer::Spin {
+                speed: speed.into(),
+            }),
+            Self::Bob {
+                amplitude,
+                frequency,
+            } => rising_sine(OscillatedChannel::Y, frequency, -amplitude, amplitude),
+            Self::Pulse {
+                min_scale,
+                max_scale,
+                frequency,
+            } => rising_sine(OscillatedChannel::Scale, frequency, min_scale, max_scale),
+            other => other,
+        }
+    }
+
     /// Convert this preset into a boxed `Updater` component.
     pub fn into_updater(self) -> gaanim_animation::Updater {
         match self {

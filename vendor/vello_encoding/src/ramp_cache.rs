@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use peniko::color::cache_key::CacheKey;
 use peniko::color::Srgb;
@@ -46,12 +47,59 @@ pub struct Ramps<'a> {
 #[derive(Default)]
 pub(crate) struct RampCache {
     epoch: u64,
-    map: HashMap<CacheKey<ColorStops>, (u32, u64)>,
+    map: HashMap<CacheKey<ColorStops>, (u32, u64), BuildHasherDefault<FxHasher>>,
     data: Vec<u32>,
     /// Rows of `data` that no ramp uses.
     free: Vec<u32>,
     /// The epoch whose undrawn ramps were last released into `free`.
     released: u64,
+}
+
+/// Gaanim patch: FxHash, rustc's hasher, for the ramp map. A lit 3D mesh
+/// looks up thousands of ramps per render, and SipHash took most of the
+/// time spent outside sampling. Ramps are colors, not untrusted keys, and
+/// which row a ramp lands in does not change what is drawn.
+#[derive(Default)]
+struct FxHasher(u64);
+
+impl FxHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+impl Hasher for FxHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.add(value.into());
+    }
+
+    fn write_u16(&mut self, value: u16) {
+        self.add(value.into());
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.add(value.into());
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.add(value);
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.add(value as u64);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
 }
 
 impl RampCache {
@@ -122,6 +170,17 @@ impl RampCache {
     }
 }
 
+/// `x` in [0, 1] as a byte: `(x * 255. + 0.5).clamp(0.0, 255.0) as u8`.
+/// `max` and `min` map NaN to 0 as that cast does, and the clamped value
+/// then converts without the cast's saturation checks, so lanes of samples
+/// vectorize.
+#[inline(always)]
+fn byte(x: f32) -> u8 {
+    let clamped = (x * 255. + 0.5).max(0.0).min(255.0);
+    // SAFETY: `clamped` is finite and within [0, 255].
+    unsafe { clamped.to_int_unchecked::<i32>() as u8 }
+}
+
 /// Write the ramp of `stops` into `out`, which holds [`N_SAMPLES`] values.
 ///
 /// Gaanim patch: upstream evaluates every sample through
@@ -179,13 +238,27 @@ fn write_ramp(stops: &[ColorStop], out: &mut [u32]) {
             // that lanes of samples vectorize.
             let from = last_p.components;
             let span = (this_p - last_p).components;
-            // `x as u8` saturates and maps NaN to 0, as clamping first does.
-            let byte = |x: f32| (x * 255. + 0.5).clamp(0.0, 255.0) as u8;
+            let t_at = |u: f32| (u - last_u) / du;
+            if from[3] == 1.0 && span[3] == 0.0 {
+                // Opaque: alpha is exactly 1 at every sample, so
+                // un-premultiplying and premultiplying again multiply by 1.
+                for (value, &u) in out[i..end].iter_mut().zip(&SAMPLE_U[i..end]) {
+                    let t = t_at(u);
+                    *value = u32::from_ne_bytes([
+                        byte(from[0] + span[0] * t),
+                        byte(from[1] + span[1] * t),
+                        byte(from[2] + span[2] * t),
+                        255,
+                    ]);
+                }
+                i = end;
+                continue;
+            }
             let mut start = i;
             for chunk in out[i..end].chunks_mut(LANES) {
                 let mut t = [0.0_f32; LANES];
-                for (t, u) in t.iter_mut().zip(&SAMPLE_U[start..]) {
-                    *t = (u - last_u) / du;
+                for (t, &u) in t.iter_mut().zip(&SAMPLE_U[start..]) {
+                    *t = t_at(u);
                 }
                 let channel = |c: usize| t.map(|t| from[c] + span[c] * t);
                 let (r, g, b, a) = (channel(0), channel(1), channel(2), channel(3));
@@ -256,6 +329,45 @@ mod tests {
     }
 
     #[test]
+    fn random_ramps_match_upstream_sampling() {
+        // A small LCG: reproducible stops of every kind, including opaque
+        // ones, alpha 0, values outside [0, 1] and repeated offsets.
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            (state >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let mut ramp = vec![0; N_SAMPLES];
+        for case in 0..4000 {
+            let count = 1 + case % 4;
+            let mut offsets: Vec<f32> = (0..count).map(|_| next()).collect();
+            offsets.sort_by(f32::total_cmp);
+            if case % 3 == 0 {
+                offsets[0] = 0.0;
+                *offsets.last_mut().unwrap() = 1.0;
+            }
+            let stops: Vec<ColorStop> = offsets
+                .iter()
+                .map(|&offset| {
+                    let mut components = [next(), next(), next(), next()];
+                    match case % 5 {
+                        0 | 1 => components[3] = 1.0,
+                        2 if next() < 0.3 => components[3] = 0.0,
+                        3 => components[0] = next() * 1.4 - 0.2,
+                        _ => {}
+                    }
+                    ColorStop {
+                        offset,
+                        color: AlphaColor::<Srgb>::new(components).into(),
+                    }
+                })
+                .collect();
+            write_ramp(&stops, &mut ramp);
+            assert_eq!(ramp, upstream_ramp(&stops), "stops {stops:?}");
+        }
+    }
+
+    #[test]
     fn ramps_match_upstream_sampling() {
         for colors in [
             &[[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]][..],
@@ -287,22 +399,24 @@ mod tests {
     #[test]
     #[ignore = "timing; run with --release --ignored --nocapture"]
     fn ramp_timing() {
-        let all: Vec<Vec<ColorStop>> = (0..20_000)
-            .map(|index| stops(&[[index as f32 / 20_000.0, 0.3, 0.6, 0.9], [0.1, 0.8, 0.2, 1.0]]))
-            .collect();
-        let mut ramp = vec![0; N_SAMPLES];
-        let started = std::time::Instant::now();
-        for stops in &all {
-            write_ramp(stops, &mut ramp);
+        for (name, alpha) in [("opaque", 1.0), ("translucent", 0.9)] {
+            let all: Vec<Vec<ColorStop>> = (0..20_000)
+                .map(|index| stops(&[[index as f32 / 20_000.0, 0.3, 0.6, alpha], [0.1, 0.8, 0.2, 1.0]]))
+                .collect();
+            let mut ramp = vec![0; N_SAMPLES];
+            let started = std::time::Instant::now();
+            for stops in &all {
+                write_ramp(stops, &mut ramp);
+            }
+            let patched = started.elapsed();
+            let started = std::time::Instant::now();
+            let mut sum = 0_u64;
+            for stops in &all {
+                sum += u64::from(upstream_ramp(stops)[100]);
+            }
+            let upstream = started.elapsed();
+            println!("{name} ramp: patched {:?}, upstream {:?} ({sum})", patched / 20_000, upstream / 20_000);
         }
-        let patched = started.elapsed();
-        let started = std::time::Instant::now();
-        let mut sum = 0_u64;
-        for stops in &all {
-            sum += u64::from(upstream_ramp(stops)[100]);
-        }
-        let upstream = started.elapsed();
-        println!("per ramp: patched {:?}, upstream {:?} ({sum})", patched / 20_000, upstream / 20_000);
     }
 
     #[test]
