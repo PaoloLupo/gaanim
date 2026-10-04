@@ -349,6 +349,7 @@ pub fn reload_status_overlay_system(
     time: Res<Time>,
     presentation_mode: Option<Res<gaanim_editor::PresentationMode>>,
     overlays: Option<Res<gaanim_editor::overlays::EditorOverlays>>,
+    mut redraw: MessageWriter<bevy::window::RequestRedraw>,
 ) {
     if presentation_mode.is_some_and(|mode| mode.active) {
         return;
@@ -364,6 +365,8 @@ pub fn reload_status_overlay_system(
         status.shown_at = None;
         return;
     }
+    // A resting window would fade the badge in steps and leave it up late.
+    redraw.write(bevy::window::RequestRedraw);
 
     let alpha_mul = if elapsed < RELOAD_BADGE_VISIBLE_SECS {
         1.0_f32

@@ -454,6 +454,9 @@ fn start_script_session(
 
     let project_paths = resolve_project_paths(&script_path, project.as_ref());
     world.insert_resource(project_paths);
+    // A resting window takes a reload or a traceback as soon as it arrives.
+    let payload_rx = gaanim_editor::idle::waking_receiver(world, payload_rx, "gaanim-reload-wake");
+    let error_rx = gaanim_editor::idle::waking_receiver(world, error_rx, "gaanim-error-wake");
     world.insert_resource(ReloadReceiver { rx: payload_rx });
     world.insert_resource(ScriptErrorReceiver { rx: error_rx });
     if let Some(project) = project {

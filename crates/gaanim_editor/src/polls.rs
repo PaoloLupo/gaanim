@@ -1690,6 +1690,12 @@ fn store(snapshot: &Mutex<Option<Snapshot>>, mut latest: Snapshot) {
 use crate::presenter::AudienceView;
 
 impl AudiencePolls {
+    /// Whether a relay session runs: votes arrive from its thread.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn connected(&self) -> bool {
+        self.client.is_some()
+    }
+
     /// `snapshot` for Presenter View. Like the relay with phones, it sends
     /// every poll's answers when Presenter View just said hello or a game
     /// started, and otherwise only the polls whose answers changed: they

@@ -287,6 +287,16 @@ impl ProjectHubState {
         self.preparing.is_some() || self.opening.is_some() || self.bundle_request.is_some()
     }
 
+    /// Whether a worker or a request will change the hub without input: a
+    /// bundle about to open or, while the hub shows (only then are its
+    /// workers polled), the tool probe, an environment being prepared, a
+    /// project about to open or a dropped file not yet taken.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn working(&self) -> bool {
+        self.bundle_request.is_some()
+            || (self.active && (self.checking.is_some() || self.busy() || self.dropped.is_some()))
+    }
+
     /// Ask for a playback bundle with the native picker and open it.
     fn open_bundle_with_picker(&mut self) {
         let directory = self

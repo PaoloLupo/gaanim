@@ -19,6 +19,8 @@ pub mod feedback;
 mod fps_overlay;
 pub mod frame_profile;
 pub mod host;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod idle;
 pub mod narration;
 pub mod overlays;
 pub mod platform;

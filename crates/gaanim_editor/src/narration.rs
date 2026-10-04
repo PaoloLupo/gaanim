@@ -283,6 +283,13 @@ impl NarrationPanel {
         self.transcriptions.iter().any(|job| job.key == key)
     }
 
+    /// Whether a request waits for the session or a transcription or a
+    /// leveling still runs in the background.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn working(&self) -> bool {
+        self.request.is_some() || !self.transcriptions.is_empty() || !self.levelings.is_empty()
+    }
+
     fn leveling(&self, key: &str) -> bool {
         self.levelings.iter().any(|job| job.key == key)
     }
