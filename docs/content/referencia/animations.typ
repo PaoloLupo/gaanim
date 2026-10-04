@@ -2186,8 +2186,8 @@ scene.wait(2)
     (name: "amplitude", type: "float", default: none, desc: [Desplazamiento vertical máximo.]),
     (name: "frequency", type: "float", default: none, desc: [Oscilaciones por segundo.]),
   ),
-  returns: (type: "Updater", desc: [Oscilación vertical senoidal alrededor de la posición inicial.]),
-  none,
+  returns: (type: "Updater", desc: [Oscilación vertical senoidal sumada a la posición del objeto.]),
+  desc: [Como `Updater.pulse` y `Updater.rotate` con un número, es una capa sobre la animación del objeto: función del tiempo desde que se añade, igual en un seek que en la reproducción, que sigue a `animate.move_to` en lugar de volver a la posición inicial. Las tres se combinan en un mismo objeto. `remove_updater()` la quita y el objeto vuelve a su posición.],
 )
 
 #api-entry(
@@ -2195,7 +2195,7 @@ scene.wait(2)
   kind: "factory",
   params: ((name: "speed", type: "float | Parameter | Computed", default: none, desc: [Radianes por segundo. Con un `Parameter`, animarlo acelera o frena el giro sin saltos. Con un `Computed` del tiempo, como una señal de audio, gira a su valor.]),),
   returns: (type: "Updater", desc: [Giro continuo alrededor de Z.]),
-  desc: [Con un `Parameter`, el ángulo es la integral de su valor desde que se añade el updater, así que un seek o una exportación desde la mitad caen en el mismo ángulo que la reproducción, y `remove_updater()` lo deja en el ángulo alcanzado. Para un `Parameter` movido por `drive_from_samples` o `add_updater_fn` se usa su valor de cada fotograma. Un `Computed` que depende solo del tiempo (`musica.level()`, `scene.noise`) se integra desde el segundo 0 con paso fijo, igual en reproducción y en seek; uno que lee un `Parameter` lanza `ValueError`.],
+  desc: [Con un número, el ángulo es la velocidad por el tiempo desde que se añade el updater. Con un `Parameter`, el ángulo es la integral de su valor desde que se añade el updater, así que un seek o una exportación desde la mitad caen en el mismo ángulo que la reproducción, y `remove_updater()` lo deja en el ángulo alcanzado. Para un `Parameter` movido por `drive_from_samples` o `add_updater_fn` se usa su valor de cada fotograma. Un `Computed` que depende solo del tiempo (`musica.level()`, `scene.noise`) se integra desde el segundo 0 con paso fijo, igual en reproducción y en seek; uno que lee un `Parameter` lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -2212,10 +2212,11 @@ scene.play([speed.animate.set(0.5).duration(1)])
   name: "Updater.pulse",
   kind: "factory",
   params: (
-    (name: "min_scale, max_scale", type: "float", default: none, desc: [Factores de escala mínimo y máximo respecto de la escala inicial.]),
+    (name: "min_scale, max_scale", type: "float", default: none, desc: [Factores de escala mínimo y máximo respecto de la escala del objeto.]),
     (name: "frequency", type: "float", default: none, desc: [Pulsos por segundo.]),
   ),
   returns: (type: "Updater", desc: [Escala que late entre dos factores.]),
+  desc: [Una capa sobre la animación del objeto, como `Updater.bob`: se combina con `Updater.rotate` en el mismo objeto.],
 )[
 ```python
 >>>from gaanim import *

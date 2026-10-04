@@ -47,6 +47,11 @@ exportaciones respetan los fps que pidas.
 - Las imágenes de los efectos por objeto que dejan de dibujarse se liberan.
 - Un FFmpeg que escribe mucho en su salida de error ya no puede bloquear la
   exportación.
+- `Updater.bob`, `Updater.pulse` y `Updater.rotate` con un número dependen
+  solo del tiempo: ya no varían con la cadencia de fotogramas, oscilan
+  alrededor de la posición animada del objeto en lugar de la que tenía al
+  añadirlos y se combinan en un mismo objeto (antes el último sustituía a los
+  anteriores).
 
 == Al actualizar
 
@@ -55,6 +60,9 @@ exportaciones respetan los fps que pidas.
   preset.
 - Los MP4 con `libx264` usan `-tune animation`, y los WebM salen algo más
   grandes con la misma CRF.
+- Un objeto con `Updater.pulse` y `Updater.rotate` ahora late y gira; antes
+  solo giraba. `remove_updater()` devuelve un objeto con `Updater.bob` o
+  `Updater.pulse` a su posición y escala.
 
 = 0.9.0
 
