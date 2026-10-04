@@ -294,12 +294,18 @@ impl PostPreset {
                 .iter()
                 .map(|preset| {
                     let source = format!("{HELPERS}{}", preset.body());
-                    if *preset == Self::Bloom {
+                    let shader = if *preset == Self::Bloom {
                         PostProcessShader::with_bloom(source, preset.uniforms())
                     } else {
                         PostProcessShader::with_uniforms(source, preset.uniforms())
                     }
-                    .expect("built-in post-process presets are valid WGSL")
+                    .expect("built-in post-process presets are valid WGSL");
+                    // Still grain draws the same noise at every time.
+                    if *preset == Self::Grain {
+                        shader.time_gated_by("animated")
+                    } else {
+                        shader
+                    }
                 })
                 .collect()
         });

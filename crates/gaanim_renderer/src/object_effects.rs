@@ -17,7 +17,7 @@ use std::sync::{Arc, OnceLock};
 
 use bevy::prelude::{Component, Entity};
 use gaanim_core::kurbo;
-use gaanim_core::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
+use gaanim_core::peniko::{Blob, Fill, ImageAlphaType, ImageData, ImageFormat};
 use vello::wgpu;
 use vello::{AaConfig, RenderParams, Scene};
 
@@ -288,6 +288,16 @@ pub struct EffectLayer {
     pub request: PostProcessRequest,
 }
 
+impl EffectLayer {
+    /// Whether this layer draws the same image as `other`.
+    pub fn same_output(&self, other: &Self) -> bool {
+        self.to_pixels == other.to_pixels
+            && self.image == other.image
+            && crate::canvas::draws_same(&self.scene, &other.scene)
+            && self.request.same_output(&other.request)
+    }
+}
+
 /// Texture size for `bounds` (world units) at `pixels_per_unit`, and the
 /// density actually used: large drawables are drawn at a lower density so
 /// their texture stays within [`MAX_EFFECT_TEXTURE`].
@@ -397,6 +407,8 @@ pub struct ObjectEffects {
     /// Textures of images no longer drawn, kept for a new image of their
     /// size: an image's identity can change while its drawable does not.
     spare: Vec<Slot>,
+    /// Where batches of several layers are drawn; see [`Self::render_batch`].
+    atlas: Option<Atlas>,
 }
 
 impl ObjectEffects {
@@ -417,6 +429,7 @@ impl ObjectEffects {
             }
             self.slots.clear();
             self.spare.clear();
+            self.atlas = None;
             self.device = Some(device.clone());
         }
         let gone: Vec<u64> = self
@@ -433,7 +446,7 @@ impl ObjectEffects {
         }
         for layer in layers {
             let spare = &mut self.spare;
-            let slot = self.slots.entry(layer.image.data.id()).or_insert_with(|| {
+            self.slots.entry(layer.image.data.id()).or_insert_with(|| {
                 let (width, height) = (layer.image.width, layer.image.height);
                 let mut slot = match spare
                     .iter()
@@ -462,6 +475,61 @@ impl ObjectEffects {
                 );
                 slot
             });
+        }
+        // Spare textures last one frame: a drawable that changed its image
+        // has taken one back by now.
+        self.spare.clear();
+
+        let atlas_side = device.limits().max_texture_dimension_2d.min(MAX_ATLAS_SIDE);
+        let mut start = 0;
+        while start < layers.len() {
+            let batch = next_batch(layers, start, atlas_side);
+            self.render_batch(
+                device,
+                queue,
+                renderer,
+                &layers[start..batch.end],
+                &batch,
+                antialiasing,
+            )?;
+            // A later batch may draw these images (glass shows what is
+            // behind it), so its render copies them.
+            for layer in &layers[start..batch.end] {
+                if let Some(slot) = self.slots.get(&layer.image.data.id()) {
+                    renderer.mark_override_image_dirty(&slot.image);
+                }
+            }
+            start = batch.end;
+        }
+        // Each render consumes the pending copies of overridden images, so
+        // the images are marked only once every texture is drawn: the frame
+        // then copies all of them.
+        for layer in layers {
+            if let Some(slot) = self.slots.get(&layer.image.data.id()) {
+                renderer.mark_override_image_dirty(&slot.image);
+            }
+        }
+        Ok(())
+    }
+
+    /// Draw the layers of one batch into their textures and apply their
+    /// passes. A single layer is drawn into its texture directly; several
+    /// share one Vello render into the atlas, since Vello's cost is mostly
+    /// per render rather than per pixel, and are copied out of it.
+    fn render_batch(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        renderer: &mut vello::Renderer,
+        layers: &[EffectLayer],
+        batch: &Batch,
+        antialiasing: AaConfig,
+    ) -> Result<(), vello::Error> {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("gaanim-object-effect"),
+        });
+        if let [layer] = layers {
+            let slot = &self.slots[&layer.image.data.id()];
             let mut placed = Scene::new();
             placed.append(&layer.scene, Some(layer.to_pixels));
             renderer.render_to_texture(
@@ -476,37 +544,166 @@ impl ObjectEffects {
                     antialiasing_method: antialiasing,
                 },
             )?;
+        } else {
+            let atlas = self.atlas.take().filter(|atlas| atlas.fits(batch.extent));
+            let atlas = atlas.unwrap_or_else(|| Atlas::new(device, batch.extent));
+            let mut placed = Scene::new();
+            for (layer, &(x, y)) in layers.iter().zip(&batch.origins) {
+                let (x, y) = (f64::from(x), f64::from(y));
+                let area = kurbo::Rect::new(
+                    x,
+                    y,
+                    x + f64::from(layer.image.width),
+                    y + f64::from(layer.image.height),
+                );
+                // What a layer draws past its texture stays out of its
+                // neighbours, as the edge of its own texture would cut it.
+                placed.push_clip_layer(Fill::NonZero, kurbo::Affine::IDENTITY, &area);
+                placed.append(
+                    &layer.scene,
+                    Some(kurbo::Affine::translate((x, y)) * layer.to_pixels),
+                );
+                placed.pop_layer();
+            }
+            renderer.render_to_texture(
+                device,
+                queue,
+                &placed,
+                &atlas.view,
+                &RenderParams {
+                    base_color: vello::peniko::Color::TRANSPARENT,
+                    width: atlas.size.0,
+                    height: atlas.size.1,
+                    antialiasing_method: antialiasing,
+                },
+            )?;
+            for (layer, &(x, y)) in layers.iter().zip(&batch.origins) {
+                let slot = &self.slots[&layer.image.data.id()];
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &atlas.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x, y, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    slot.texture.as_image_copy(),
+                    wgpu::Extent3d {
+                        width: layer.image.width,
+                        height: layer.image.height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+            self.atlas = Some(atlas);
+        }
+        for layer in layers {
+            let Some(slot) = self.slots.get_mut(&layer.image.data.id()) else {
+                continue;
+            };
             if slot
                 .post
                 .prepare(device, queue, &slot.texture, Some(&layer.request), None)
             {
-                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("gaanim-object-effect"),
-                });
                 slot.post.encode(&mut encoder);
-                queue.submit(Some(encoder.finish()));
-            }
-            // A later layer may draw this image (glass shows what is behind
-            // it), so it is copied for the next render too.
-            renderer.mark_override_image_dirty(&slot.image);
-        }
-        // Spare textures last one frame: a drawable that changed its image
-        // has taken one back by now.
-        self.spare.clear();
-        // Each render consumes the pending copies of overridden images, so
-        // the images are marked only once every texture is drawn: the frame
-        // then copies all of them.
-        for layer in layers {
-            if let Some(slot) = self.slots.get(&layer.image.data.id()) {
-                renderer.mark_override_image_dirty(&slot.image);
             }
         }
+        queue.submit(Some(encoder.finish()));
         Ok(())
     }
 
     /// Whether the last frame drew any effect.
     pub fn is_active(&self) -> bool {
         !self.slots.is_empty()
+    }
+}
+
+/// Largest side of the atlas that batches of layers are drawn into.
+const MAX_ATLAS_SIDE: u32 = 8192;
+/// The atlas grows in steps of this many pixels, so that batches of
+/// slightly different sizes reuse it.
+const ATLAS_STEP: u32 = 512;
+
+/// Consecutive layers drawn with one Vello render, and where each one sits
+/// in the atlas.
+#[derive(Debug, PartialEq)]
+struct Batch {
+    /// One past the last layer of the batch.
+    end: usize,
+    /// The top-left corner of each layer's texture in the atlas.
+    origins: Vec<(u32, u32)>,
+    /// The size of the atlas area the batch covers.
+    extent: (u32, u32),
+}
+
+/// The layers from `start` on that can share one render, placed in rows of
+/// an atlas no wider or taller than `side`. The batch ends before a layer
+/// that does not fit, or that draws the image of a layer already in it,
+/// which must be finished first.
+fn next_batch(layers: &[EffectLayer], start: usize, side: u32) -> Batch {
+    let mut origins = Vec::new();
+    let mut drawn = Vec::new();
+    let (mut x, mut y, mut row_height, mut width) = (0_u32, 0_u32, 0_u32, 0_u32);
+    for layer in &layers[start..] {
+        let (w, h) = (layer.image.width, layer.image.height);
+        if !origins.is_empty() && draws_any_image(&layer.scene, &drawn) {
+            break;
+        }
+        let (mut at_x, mut at_y) = (x, y);
+        if at_x + w > side {
+            (at_x, at_y) = (0, y + row_height);
+        }
+        if !origins.is_empty() && (at_x + w > side || at_y + h > side) {
+            break;
+        }
+        if at_y != y {
+            row_height = 0;
+        }
+        origins.push((at_x, at_y));
+        drawn.push(layer.image.data.id());
+        (x, y) = (at_x + w, at_y);
+        row_height = row_height.max(h);
+        width = width.max(x);
+    }
+    Batch {
+        end: start + origins.len(),
+        origins,
+        extent: (width, y + row_height),
+    }
+}
+
+/// Whether `scene` draws any of the images `ids`.
+fn draws_any_image(scene: &Scene, ids: &[u64]) -> bool {
+    scene.encoding().resources.patches.iter().any(|patch| {
+        matches!(patch, vello_encoding::Patch::Image { image, .. } if ids.contains(&image.data.id()))
+    })
+}
+
+/// The texture several layers are drawn into with one render.
+struct Atlas {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    size: (u32, u32),
+}
+
+impl Atlas {
+    fn new(device: &wgpu::Device, (width, height): (u32, u32)) -> Self {
+        let step = |length: u32| length.max(1).div_ceil(ATLAS_STEP) * ATLAS_STEP;
+        let size = (step(width), step(height));
+        let texture = effect_texture(device, size.0, size.1);
+        Self {
+            view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+            texture,
+            size,
+        }
+    }
+
+    /// Whether `extent` fits without leaving most of the atlas unused.
+    fn fits(&self, (width, height): (u32, u32)) -> bool {
+        let (atlas_width, atlas_height) = self.size;
+        let used = u64::from(width.max(ATLAS_STEP)) * u64::from(height.max(ATLAS_STEP));
+        width <= atlas_width
+            && height <= atlas_height
+            && used * 4 >= u64::from(atlas_width) * u64::from(atlas_height)
     }
 }
 
@@ -563,6 +760,54 @@ mod tests {
         assert_eq!(passes[1].1[2], 0.0);
         assert_eq!(passes[2].1[1], 10.0);
         assert!(Glass::LIQUID.reach() > Glass::default().refraction);
+    }
+
+    fn layer(key: u64, width: u32, height: u32, draws: &[&EffectLayer]) -> EffectLayer {
+        let mut scene = Scene::new();
+        for drawn in draws {
+            scene.draw_image(&drawn.image, kurbo::Affine::IDENTITY);
+        }
+        EffectLayer {
+            scene: Arc::new(scene),
+            to_pixels: kurbo::Affine::IDENTITY,
+            image: effect_image(key, width, height),
+            request: PostProcessRequest {
+                passes: Vec::new(),
+                frame: kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
+                time: 0.0,
+                transition: None,
+            },
+        }
+    }
+
+    #[test]
+    fn independent_layers_share_rows_of_the_atlas() {
+        let layers: Vec<_> = (0..3).map(|key| layer(100 + key, 300, 200, &[])).collect();
+        let batch = next_batch(&layers, 0, 700);
+        assert_eq!(batch.end, 3);
+        assert_eq!(batch.origins, vec![(0, 0), (300, 0), (0, 200)]);
+        assert_eq!(batch.extent, (600, 400));
+    }
+
+    #[test]
+    fn a_layer_that_draws_another_of_its_batch_starts_the_next() {
+        let card = layer(110, 100, 100, &[]);
+        let other = layer(111, 100, 100, &[]);
+        let glass = layer(112, 200, 100, &[&card]);
+        let layers = vec![card, other, glass];
+        let first = next_batch(&layers, 0, 4096);
+        assert_eq!(first.end, 2, "the glass waits for the card it shows");
+        let second = next_batch(&layers, first.end, 4096);
+        assert_eq!((second.end, second.origins), (3, vec![(0, 0)]));
+    }
+
+    #[test]
+    fn a_batch_ends_before_a_layer_that_does_not_fit() {
+        let layers = vec![layer(120, 600, 600, &[]), layer(121, 600, 600, &[])];
+        assert_eq!(next_batch(&layers, 0, 1000).end, 1);
+        assert_eq!(next_batch(&layers, 0, 1200).end, 2, "side by side");
+        let alone = next_batch(&layers, 1, 1000);
+        assert_eq!((alone.end, alone.extent), (2, (600, 600)));
     }
 
     #[test]

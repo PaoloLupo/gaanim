@@ -166,6 +166,17 @@ pub struct PostProcessShader {
     transition: bool,
     /// The complete module: the preamble, `source` and the entry point.
     complete: Arc<str>,
+    /// Whether the output depends on the timeline time.
+    time: TimeUse,
+}
+
+/// How a pass's output depends on the timeline time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TimeUse {
+    Never,
+    Always,
+    /// Unless the uniform at this index is 0, as a preset's `animated`.
+    UnlessZero(usize),
 }
 
 impl fmt::Debug for PostProcessShader {
@@ -271,6 +282,11 @@ impl PostProcessShader {
         let complete: Arc<str> =
             complete_shader(&source, &uniforms, data.is_some(), bloom, transition).into();
         validate_post_source(&source, &complete, transition)?;
+        let time = if transition || source_reads_time(&source) {
+            TimeUse::Always
+        } else {
+            TimeUse::Never
+        };
         Ok(Self {
             source,
             uniforms,
@@ -278,7 +294,28 @@ impl PostProcessShader {
             bloom,
             transition,
             complete,
+            time,
         })
+    }
+
+    /// The same shader, whose output depends on the time only while the
+    /// uniform `uniform` is not 0.
+    pub(crate) fn time_gated_by(mut self, uniform: &str) -> Self {
+        if let Some(index) = self.uniforms.iter().position(|name| &**name == uniform) {
+            self.time = TimeUse::UnlessZero(index);
+        }
+        self
+    }
+
+    /// Whether the pass's output, with these uniform values, depends on the
+    /// timeline time. Frames whose passes do not can be reused while nothing
+    /// else changes.
+    pub fn reads_time(&self, uniforms: &[f32]) -> bool {
+        match self.time {
+            TimeUse::Never => false,
+            TimeUse::Always => true,
+            TimeUse::UnlessZero(index) => uniforms.get(index).is_none_or(|value| *value != 0.0),
+        }
     }
 
     /// Load WGSL source from an asset file. Relative paths are resolved by the caller.
@@ -542,6 +579,28 @@ pub struct PostProcessRequest {
     /// A scene transition blended before the passes; the target then holds
     /// the outgoing segment, see [`TransitionInputs`].
     pub transition: Option<TransitionPass>,
+}
+
+impl PostProcessRequest {
+    /// Whether this request turns a frame into the same pixels as `other`:
+    /// the same passes and values in the same frame, and the same time
+    /// unless no pass reads it. A transition always differs.
+    pub fn same_output(&self, other: &Self) -> bool {
+        self.frame == other.frame
+            && self.transition.is_none()
+            && other.transition.is_none()
+            && self.passes.len() == other.passes.len()
+            && self.passes.iter().zip(&other.passes).all(
+                |((shader, values), (other_shader, other_values))| {
+                    shader == other_shader && values == other_values
+                },
+            )
+            && (self.time == other.time
+                || !self
+                    .passes
+                    .iter()
+                    .any(|(shader, values)| shader.reads_time(values)))
+    }
 }
 
 /// The shader transition of one frame.
@@ -1295,6 +1354,42 @@ fn validate_uniform_names(names: &[Arc<str>]) -> Result<(), PostProcessError> {
     Ok(())
 }
 
+/// Whether `source` may read the timeline time: through `gaanim_time()`, or
+/// through the `time` parameter of `gaanim_post` named anywhere but in its
+/// declaration. Comments or another identifier of the same name count too,
+/// which only costs a frame that could have been reused.
+fn source_reads_time(source: &str) -> bool {
+    let words = |name: &str| {
+        let is_identifier = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        source
+            .match_indices(name)
+            .filter(|&(at, _)| {
+                let before = source[..at].chars().next_back();
+                let after = source[at + name.len()..].chars().next();
+                !before.is_some_and(is_identifier) && !after.is_some_and(is_identifier)
+            })
+            .count()
+    };
+    if words("gaanim_time") > 0 {
+        return true;
+    }
+    let parameter = source.find("fn gaanim_post").and_then(|start| {
+        let signature = &source[start..];
+        let open = signature.find('(')?;
+        let close = open + signature[open..].find(')')?;
+        let name = signature[open + 1..close]
+            .split(',')
+            .nth(2)?
+            .split(':')
+            .next()?;
+        Some(name.trim())
+    });
+    match parameter {
+        Some(name) if !name.is_empty() => words(name) > 1,
+        _ => true,
+    }
+}
+
 fn validate_post_source(
     source: &str,
     complete: &str,
@@ -1322,6 +1417,40 @@ fn validate_post_source(
 mod tests {
     use super::*;
     use crate::background::test_gpu::test_gpu;
+
+    #[test]
+    fn passes_know_whether_they_read_the_time() {
+        let shader = |body: &str| {
+            PostProcessShader::with_uniforms(
+                format!("fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, {body}"),
+                ["animated"],
+            )
+            .unwrap()
+        };
+        let still = shader("time: f32) -> vec4<f32> { return gaanim_scene(uv); }");
+        assert!(!still.reads_time(&[1.0]));
+        let moving = shader("time: f32) -> vec4<f32> { return gaanim_scene(uv) * sin(time); }");
+        assert!(moving.reads_time(&[0.0]));
+        let renamed = shader("t: f32) -> vec4<f32> { return gaanim_scene(uv + vec2<f32>(t)); }");
+        assert!(renamed.reads_time(&[0.0]));
+        assert!(source_reads_time(
+            "fn gaanim_post(uv: vec2<f32>, r: vec2<f32>, _t: f32) -> vec4<f32> { return vec4<f32>(gaanim_time()); }"
+        ));
+        let gated = moving.clone().time_gated_by("animated");
+        assert!(!gated.reads_time(&[0.0]) && gated.reads_time(&[1.0]));
+
+        let frame = kurbo::Rect::new(0.0, 0.0, 16.0, 9.0);
+        let request = |shader: &PostProcessShader, time: f32| PostProcessRequest {
+            passes: vec![(shader.clone(), vec![0.0])],
+            frame,
+            time,
+            transition: None,
+        };
+        assert!(request(&still, 1.0).same_output(&request(&still, 2.0)));
+        assert!(!request(&moving, 1.0).same_output(&request(&moving, 2.0)));
+        assert!(request(&gated, 1.0).same_output(&request(&gated, 2.0)));
+        assert!(!request(&still, 1.0).same_output(&request(&moving, 1.0)));
+    }
 
     const INVERT: &str = "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
          let color = gaanim_scene(uv + vec2<f32>(1.0, 0.0) / resolution);\n\
