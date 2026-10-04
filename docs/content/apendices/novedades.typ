@@ -94,6 +94,10 @@ interlineado por defecto es más compacto.
 
 == Correcciones
 
+- `uniforms=` de `Background.shader`, `PostProcess.shader` y
+  `Transition.shader` acepta cualquier `Mapping`, y los stubs lo tipan así:
+  un diccionario de señales de audio ya no da error en el comprobador de
+  tipos.
 - Los alias de tipo de los stubs (`Paint`, `ColorLike`, `Padding`…) existen
   también al ejecutar la escena: `from gaanim.gaanim_core import Paint` ya no
   lanza `ImportError`. `Paint`, `ColorLike`, `ColorMapLike` y

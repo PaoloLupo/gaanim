@@ -339,7 +339,7 @@ scene.canvas.background = Brush.linear(["#071022", "#164E8A", "#7DD3FC"], start=
   params: (
     (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` (con `pathlib.Path`), que se lee al crear el fondo.]),
     (name: "fallback", type: "ColorLike | None", default: "None", desc: [Color fuera del marco, para calcular el contraste automático y si falla la rasterización; negro si se omite.]),
-    (name: "uniforms", type: "dict[str, float | Parameter | Computed] | None", default: "None", desc: [Campos `f32` de `gaanim_uniforms`, como en `PostProcess.shader`: números fijos o un `Parameter`, `Variable`, `Computed`, `scene.time` o una señal de audio, evaluados en cada fotograma, así que el fondo reacciona a la música. Como máximo 32, con nombres que sean identificadores WGSL.]),
+    (name: "uniforms", type: "Mapping[str, float | Parameter | Computed] | None", default: "None", desc: [Campos `f32` de `gaanim_uniforms`, como en `PostProcess.shader`: números fijos o un `Parameter`, `Variable`, `Computed`, `scene.time` o una señal de audio, evaluados en cada fotograma, así que el fondo reacciona a la música. Como máximo 32, con nombres que sean identificadores WGSL.]),
     (name: "audio", type: "Audio | None", default: "None", desc: [Da al fondo el espectrograma de la pista con `gaanim_audio_spectrum(x, ago)` y las demás funciones `gaanim_audio_*` (ver #link("/referencia/audio/")[Audio]); reserva el uniform `gaanim_audio_time`.]),
   ),
   returns: (type: "Background", desc: [Un fondo procedural que sigue la línea de tiempo.]),
@@ -462,7 +462,7 @@ exacto de la línea de tiempo.
   kind: "factory",
   params: (
     (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` que se lee al crear el objeto.]),
-    (name: "uniforms", type: "dict[str, float | Parameter | Computed] | None", default: "None", desc: [Valores que el shader lee como campos `f32` de `gaanim_uniforms` (`gaanim_uniforms.amount`). Un `Parameter`, `Variable`, `Computed` o `scene.time` se evalúa en cada fotograma, así que animarlo anima el efecto. Como máximo 32 por pasada, con nombres que sean identificadores WGSL.]),
+    (name: "uniforms", type: "Mapping[str, float | Parameter | Computed] | None", default: "None", desc: [Valores que el shader lee como campos `f32` de `gaanim_uniforms` (`gaanim_uniforms.amount`). Un `Parameter`, `Variable`, `Computed` o `scene.time` se evalúa en cada fotograma, así que animarlo anima el efecto. Como máximo 32 por pasada, con nombres que sean identificadores WGSL.]),
     (name: "audio", type: "Audio | None", default: "None", desc: [Da al shader el espectrograma de la pista: `gaanim_audio_spectrum(x, ago)`, `gaanim_audio_level(ago)`, `gaanim_audio_band(low, high, ago)` y `gaanim_audio_x(hz)`. Reserva el uniform `gaanim_audio_time`. Ver #link("/referencia/audio/")[Audio].]),
   ),
   returns: (type: "PostProcess", desc: [Un postprocesado para `Scene(post=...)`, `scene.canvas.post` o `scene.segment(..., post=...)`.]),

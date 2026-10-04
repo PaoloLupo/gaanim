@@ -2935,7 +2935,7 @@ scene.wait(1)
   params: (
     (name: "source", type: "str | os.PathLike", default: none, desc: [WGSL en línea o un archivo `.wgsl` (ruta tal cual) que define `fn transition(uv: vec2<f32>) -> vec4<f32>`.]),
     (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
-    (name: "uniforms", type: "dict[str, float | Parameter | Computed] | None", default: "None", desc: [Campos de `gaanim_uniforms`: los números son fijos; un `Parameter`, `Variable`, `Computed`, `scene.time` o una señal de audio de la misma escena se evalúa en cada fotograma de la transición, así que puede latir con el bombo. Los paquetes `.gaanim` guardan los valores.]),
+    (name: "uniforms", type: "Mapping[str, float | Parameter | Computed] | None", default: "None", desc: [Campos de `gaanim_uniforms`: los números son fijos; un `Parameter`, `Variable`, `Computed`, `scene.time` o una señal de audio de la misma escena se evalúa en cada fotograma de la transición, así que puede latir con el bombo. Los paquetes `.gaanim` guardan los valores.]),
   ),
   returns: (type: "Transition", desc: [Transición por shader.]),
   desc: [Dibuja cada segmento por separado, con su fondo, y los mezcla en la GPU, como gl-transitions. La función lee `gaanim_from(uv)` (saliente), `gaanim_to(uv)` (entrante), `progress` (de 0 a 1, lineal salvo `easing=`), `gaanim_resolution()` y `gaanim_time()`; `uv` vale (0, 0) arriba a la izquierda del cuadro. Los objetos persistentes y el `overlay` quedan nítidos encima. WGSL o nombres de uniform inválidos lanzan `ValueError`.],

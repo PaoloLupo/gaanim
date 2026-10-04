@@ -413,7 +413,7 @@ impl PyTransitionType {
     fn shader(
         source: &Bound<'_, PyAny>,
         duration: f64,
-        uniforms: Option<&Bound<'_, pyo3::types::PyDict>>,
+        uniforms: Option<&Bound<'_, pyo3::types::PyMapping>>,
         easing: Option<PyEasing>,
         overlay: Option<PyOverlay>,
         sound: Option<String>,
@@ -439,7 +439,8 @@ impl PyTransitionType {
         let mut sources = Vec::new();
         let mut reactive = false;
         if let Some(uniforms) = uniforms {
-            for (name, value) in uniforms.iter() {
+            for item in uniforms.items()?.iter() {
+                let (name, value) = item.extract::<(Bound<'_, PyAny>, Bound<'_, PyAny>)>()?;
                 names.push(name.extract::<String>().map_err(|_| {
                     pyo3::exceptions::PyTypeError::new_err("uniform names must be strings")
                 })?);

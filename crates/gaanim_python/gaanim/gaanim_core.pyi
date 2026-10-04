@@ -343,7 +343,7 @@ class Background:
         source: str | os.PathLike[str],
         *,
         fallback: Optional[ColorLike] = None,
-        uniforms: Optional[dict[str, float | Parameter | Variable | Computed | TimeInput]] = None,
+        uniforms: Optional[Mapping[str, float | Parameter | Variable | Computed | TimeInput]] = None,
         audio: Optional[Audio] = None,
     ) -> Background:
         """Create a timeline-driven WGSL scene background.
@@ -536,7 +536,7 @@ class PostProcess:
     def shader(
         source: str | os.PathLike[str],
         *,
-        uniforms: Optional[dict[str, float | Parameter | Variable | Computed | TimeInput]] = None,
+        uniforms: Optional[Mapping[str, float | Parameter | Variable | Computed | TimeInput]] = None,
         audio: Optional[Audio] = None,
     ) -> PostProcess:
         """Create a WGSL post-process applied to the rendered 2D scene.
