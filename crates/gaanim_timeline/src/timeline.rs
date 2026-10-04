@@ -2627,7 +2627,10 @@ impl Timeline {
         let mut scratch: Option<Entity> = None;
         // Whether each shown copy draws exactly what its source draws now,
         // and the copy of its parent within the echoed subtree.
-        let mut coinciding: HashMap<Entity, (bool, Option<Entity>)> = HashMap::new();
+        // Ordered: hiding a copy moves it to another ECS table, and the
+        // order of those moves decides the order later queries visit copies
+        // in, so it must be the same in every process.
+        let mut coinciding: BTreeMap<Entity, (bool, Option<Entity>)> = BTreeMap::new();
         // The copies of one echo level share their motion and lag, so their
         // held time is computed once.
         let mut held_times: HashMap<(*const (), u64), f64> = HashMap::new();
@@ -5141,7 +5144,10 @@ fn echo_matches_source(
 }
 
 /// Hide every echoed subtree whose copies all coincide with their sources.
-fn hide_coinciding_echoes(world: &mut World, coinciding: &HashMap<Entity, (bool, Option<Entity>)>) {
+fn hide_coinciding_echoes(
+    world: &mut World,
+    coinciding: &BTreeMap<Entity, (bool, Option<Entity>)>,
+) {
     let root_of = |mut ghost: Entity| {
         while let Some(parent) = coinciding.get(&ghost).and_then(|(_, parent)| *parent) {
             if !coinciding.contains_key(&parent) {
