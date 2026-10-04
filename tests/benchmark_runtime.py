@@ -471,6 +471,18 @@ def regression_violation(
     return change, None
 
 
+# Media a sample writes; after validation only its logs and manifests are
+# kept. A standard preview sample of a heavy scene writes about 500 MB.
+GENERATED_MEDIA_SUFFIXES = frozenset({".png", ".mp4", ".webm", ".webp", ".gif", ".gaanim"})
+
+
+def prune_artifacts(artifact_dir: Path) -> None:
+    """Delete the frames and videos of a validated sample."""
+    for path in artifact_dir.iterdir():
+        if path.is_file() and path.suffix.lower() in GENERATED_MEDIA_SUFFIXES:
+            path.unlink()
+
+
 def measure_scene(
     *,
     repo: Path,
@@ -485,6 +497,7 @@ def measure_scene(
     apply_budgets: bool,
     baseline: dict[str, float],
     max_regression: float,
+    keep_artifacts: bool = False,
 ) -> tuple[dict[str, Any], bool]:
     """Measure every scenario of one scene at one scale."""
     results: dict[str, Any] = {}
@@ -544,6 +557,8 @@ def measure_scene(
                     )
             memory_scope = sampled_scope
             adapter = adapter or parse_adapter(artifact_dir / "command.log")
+            if not keep_artifacts:
+                prune_artifacts(artifact_dir)
             if is_warmup:
                 continue
             if scenario == "export" and artifact_report is not None:
@@ -686,6 +701,11 @@ def parse_args() -> argparse.Namespace:
         help="Relative p50 slowdown against --compare that counts as a violation.",
     )
     parser.add_argument("--enforce", action="store_true")
+    parser.add_argument(
+        "--keep-artifacts",
+        action="store_true",
+        help="Keep the frames and videos of every sample (by default only logs and manifests).",
+    )
     return parser.parse_args()
 
 
@@ -759,6 +779,7 @@ def main() -> int:
                     apply_budgets=entry["budgets"],
                     baseline=baseline,
                     max_regression=args.max_regression,
+                    keep_artifacts=args.keep_artifacts,
                 )
                 any_violations |= violated
                 runs.append(

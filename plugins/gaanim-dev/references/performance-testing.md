@@ -9,7 +9,9 @@ just benchmark standard
 
 Both recipes build and invoke the native `gaanim` release executable.
 Results live in `target/performance/runtime-benchmark.json`; command logs and
-generated artifacts remain under `target/performance/artifacts/`.
+snapshot manifests remain under `target/performance/artifacts/`. Each sample's
+frames and videos are deleted once validated (a standard preview of a heavy
+scene writes about 500 MB); pass `--keep-artifacts` to inspect them.
 
 ## Profiles and semantics
 
