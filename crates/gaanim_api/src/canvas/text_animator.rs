@@ -1099,6 +1099,61 @@ impl SceneBuilder<'_, '_, '_> {
                     if let Some(path) = unit_mask.as_ref().and_then(|lens| lens.mask_at(initial)) {
                         commands.insert(unit_clip(path));
                     }
+                    // A seek during a delay restores the glyph from earlier
+                    // state, such as its appearance when the text was
+                    // declared; held clips keep the first frame until the
+                    // sweep starts. The blur and the unit mask hold
+                    // themselves.
+                    if anim.delay > 0.0 {
+                        let mut held = Vec::new();
+                        if moves {
+                            let first = lerp_transform(&rest, &target, initial);
+                            held.push(PropertyLensSpec::Translation {
+                                from: first.translation,
+                                to: first.translation,
+                            });
+                            if out.rotation.is_some() {
+                                held.push(PropertyLensSpec::Rotation {
+                                    from: first.rotation,
+                                    to: first.rotation,
+                                });
+                            }
+                            if out.scale.is_some() {
+                                held.push(PropertyLensSpec::Scale {
+                                    from: first.scale,
+                                    to: first.scale,
+                                });
+                            }
+                        }
+                        if let Some(opacity) = out.opacity {
+                            let first = rest_opacity + (opacity - rest_opacity) * initial as f32;
+                            held.push(PropertyLensSpec::Opacity {
+                                from: first,
+                                to: first,
+                            });
+                        }
+                        if let Some((to, from)) = color {
+                            let first = gaanim_core::interpolate_color(from, to, initial);
+                            held.push(PropertyLensSpec::FillColor {
+                                from: first,
+                                to: first,
+                            });
+                        }
+                        for lens in held {
+                            self.timeline.add_clip(
+                                track,
+                                self.current_time,
+                                anim.delay,
+                                ClipPayload::Animation(AnimationSpec {
+                                    target: id,
+                                    lens,
+                                    rate_func: RateFunc::Linear,
+                                    delay: 0.0,
+                                    label: label.clone(),
+                                }),
+                            );
+                        }
+                    }
                 }
 
                 let state = self.states.get_mut(id).expect("glyph state exists");
@@ -1415,6 +1470,55 @@ mod tests {
                 assert_eq!(&state(&world), expected, "{style:?} at {time}");
             }
         }
+    }
+
+    #[test]
+    fn a_delayed_blur_in_keeps_its_glyphs_hidden_during_the_delay() {
+        use gaanim_scene::MobjectId;
+        use gaanim_timeline::snapshot::WorldSnapshot;
+        use gaanim_timeline::timeline::Timeline;
+
+        // Declared after a wait, so the text appears at 1 s; the sweep
+        // starts at 3 s.
+        let mut canvas = super::super::SceneModel::new(640, 360);
+        canvas.wait(1.0);
+        let text = canvas.text("GETTER");
+        canvas.play(vec![
+            text.animate()
+                .blur_in(0.3, TextRevealUnit::Grapheme, 0.1)
+                .unwrap()
+                .duration(1.0)
+                .delay(2.0),
+        ]);
+        canvas.wait(0.5);
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world.remove_resource::<Timeline>().expect("timeline");
+        let glyph = animator_clips(&timeline)[0].0;
+        let entity = world
+            .query::<(Entity, &MobjectId)>()
+            .iter(&world)
+            .find_map(|(entity, id)| (id.0 == glyph).then_some(entity))
+            .expect("glyph entity");
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        let opacity = |world: &World| world.get::<Opacity>(entity).map(|opacity| opacity.0);
+        let blur = |world: &World| world.get::<GaussianBlur>(entity).map(|blur| blur.sigma);
+
+        // In the delay, from the start and back from the end.
+        for from in [0.0, 4.4] {
+            timeline.seek(&mut world, from);
+            timeline.seek(&mut world, 2.0);
+            assert_eq!(opacity(&world), Some(0.0), "seek from {from}");
+            assert_eq!(blur(&world), Some(0.3), "seek from {from}");
+        }
+        // Once revealed, the glyph is sharp and opaque.
+        timeline.seek(&mut world, 4.4);
+        assert_eq!(opacity(&world), Some(1.0));
     }
 
     #[test]
