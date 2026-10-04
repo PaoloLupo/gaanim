@@ -25,16 +25,23 @@ LABELS = 60 * SCALE
 scene = Scene(frame=(16, 9), background="#08111f", margin=0.4)
 colors = (BLUE, GOLD, GREEN, CORAL, CYAN, PINK)
 
+# Labels fill a strip at the top, equations one at the bottom, and the
+# shapes the band between them.
+LABEL_COLUMNS = 30
+label_rows = math.ceil(LABELS / LABEL_COLUMNS)
+grid_top = 4.3 - label_rows * 0.3 - 0.15
+grid_bottom = -3.5
 columns = math.ceil(math.sqrt(SHAPES * 16 / 9))
 rows = math.ceil(SHAPES / columns)
-cell = min(15.2 / columns, 8.2 / rows)
+cell = min(15.2 / columns, (grid_top - grid_bottom) / rows)
 size = cell * 0.36
+grid_center = (grid_top + grid_bottom) / 2
 
 shapes = []
 for index in range(SHAPES):
     row, column = divmod(index, columns)
     x = (column - (columns - 1) / 2) * cell
-    y = ((rows - 1) / 2 - row) * cell
+    y = grid_center + ((rows - 1) / 2 - row) * cell
     kind = index % 4
     if kind == 0:
         shape = scene.geometry.circle(size)
@@ -52,15 +59,15 @@ for index in range(SHAPES):
     shapes.append(shape.stroke(WHITE, cell * 0.02).move_to(x, y))
 
 labels = [
-    scene.text(f"n{index:04}").fill("#cbd5e1").scale_to(0.18).move_to(
-        -7.2 + (index % 12) * 1.3, 4.1 - (index // 12) * 0.32
+    scene.text(f"n{index:04}").fill("#cbd5e1").scale_to(0.15).move_to(
+        -7.25 + (index % LABEL_COLUMNS) * 0.5, 4.15 - (index // LABEL_COLUMNS) * 0.3
     )
     for index in range(LABELS)
 ]
 equations = [
-    scene.text.equation(source).fill(WHITE).scale_to(0.5).move_to(-5.0 + 5.0 * index, -4.0)
+    scene.text.equation(source).fill(WHITE).scale_to(0.45).move_to(-5.0 + 5.0 * index, -4.05)
     for index, source in enumerate(
-        (r"e^{i \pi} + 1 = 0", r"\int_0^1 x^2 dx = \frac{1}{3}", r"\sum_{k=1}^{n} k = \frac{n(n+1)}{2}")
+        ("e^(i pi) + 1 = 0", "integral_0^1 x^2 dif x = 1/3", "sum_(k=1)^n k = (n(n+1))/2")
     )
 ]
 

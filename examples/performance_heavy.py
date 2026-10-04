@@ -100,7 +100,7 @@ lens = scene.geometry.metaballs(drops, smoothness=0.7).fill("#ffffff12").liquid_
 
 # 5. Text.
 title = scene.text("Escena pesada").fill(WHITE).scale_to(1.0).move_to(0, 3.8).glow(CYAN, radius=0.15)
-equation = scene.text.equation(r"\nabla \cdot \mathbf{E} = \frac{\rho}{\varepsilon_0}").fill(WHITE).scale_to(0.7).move_to(0, -3.9)
+equation = scene.text.equation("nabla dot bold(E) = rho / epsilon_0").fill(WHITE).scale_to(0.7).move_to(0, -3.9)
 
 motion_duration = max(0.1, DURATION)
 scene.play(
