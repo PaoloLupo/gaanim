@@ -55,6 +55,24 @@ Todo argumento `ColorLike` acepta un `Color`, una cadena CSS Color 4 (`"#0f172a"
 `(r, g, b)` o `(r, g, b, a)` de enteros de 0 a 255. Una sintaxis inválida o un
 componente fuera de rango lanzan `ValueError`.
 
+Para anotar tus propias funciones, importa esos tipos desde `gaanim`:
+`ColorLike`; `Paint`, que también acepta un `Brush`; `ColorMapLike`, y
+`BackgroundLike`, que también acepta un `Background`. Funcionan en el
+comprobador de tipos y al ejecutar la escena. El resto de alias de los stubs
+(`Padding`, `TextAlign`, `Endpoint`…) se importa desde `gaanim.gaanim_core`.
+
+```python
+from gaanim import Paint, Scene
+
+def disc(scene: Scene, paint: Paint):
+    return scene.geometry.circle(1).fill(paint)
+
+scene = Scene(frame=(16, 9))
+disc(scene, "#2563eb").move_to(-2, 0)
+disc(scene, (220, 38, 38)).move_to(2, 0)
+scene.render()
+```
+
 #api-entry(
   name: "Color",
   kind: "class",
