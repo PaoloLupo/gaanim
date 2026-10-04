@@ -3267,6 +3267,10 @@ fn three_d_elements<'a>(
                     path: Some(Arc::new(path)),
                     fill: (kind != RunKind::Line).then_some(brush),
                     stroke,
+                    // Centered: an inside stroke is clipped by a layer per
+                    // run, thousands per frame of a lit mesh, which kept its
+                    // preview below 144 fps.
+                    stroke_align: StrokeAlign::Center,
                     ..Default::default()
                 };
                 let scene = build_fragment(&recipe, None).scene;
@@ -3387,8 +3391,9 @@ struct Run {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RunKind {
     Fill,
-    /// A fill whose edges are also stroked, closing antialiasing seams
-    /// between neighbouring opaque triangles.
+    /// A fill whose edges are also stroked on their centerline, closing
+    /// antialiasing seams between neighbouring opaque triangles; at a
+    /// silhouette the stroke reaches half its width past the edge.
     SealedFill,
     Line,
 }

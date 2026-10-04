@@ -31,7 +31,7 @@ exportaciones respetan los fps que pidas.
   degradados en cada fotograma.
 - Las mallas 3D se proyectan y se preparan en varios núcleos: la escena 3D del
   benchmark exporta en la mitad de tiempo que en la 0.9 y se reproduce en el
-  editor a unos 130 fps en lugar de 90.
+  editor a 144 fps en lugar de 90.
 - Los ecos de un grupo se evalúan una vez por nivel de eco en lugar de una vez
   por copia, y los efectos por objeto que cambian de tamaño ya no recompilan
   sus pases en cada fotograma.
@@ -74,6 +74,8 @@ exportaciones respetan los fps que pidas.
   preset.
 - Los MP4 con `libx264` usan `-tune animation`, y los WebM salen algo más
   grandes con la misma CRF.
+- Las aristas de las mallas 3D opacas se sellan con un trazo centrado: la
+  silueta sobresale medio píxel más que antes.
 - Un objeto con `Updater.pulse` y `Updater.rotate` ahora late y gira; antes
   solo giraba. `remove_updater()` devuelve un objeto con `Updater.bob` o
   `Updater.pulse` a su posición y escala.
