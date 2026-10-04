@@ -11,6 +11,42 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.10.0
+
+Sin publicar. Rendimiento de la vista previa y de la exportación: saltar en la
+línea de tiempo reutiliza lo ya dibujado, el editor descansa cuando no hay
+nada que cambiar y GIF, WebP, WebM y secuencias PNG se exportan más rápido.
+Lee «Al actualizar»: los GIF y WebP salen a 30 fps como mucho y las
+exportaciones respetan los fps que pidas.
+
+== Cambios
+
+- Saltar a cualquier instante reutiliza lo ya dibujado: la línea de tiempo
+  ya no reescribe valores que no cambian. En la escena de referencia del
+  benchmark, un salto aleatorio pasa de 296 a 111 ms por fotograma.
+- Con la vista previa en pausa o en el Inicio, el editor espera a la
+  siguiente entrada en lugar de recalcular la escena en cada refresco.
+- WebM usa varios núcleos y se exporta un tercio más rápido; las secuencias
+  PNG se codifican en varios hilos y el borrador de MP4 usa `veryfast`.
+
+== Correcciones
+
+- Los GIF y WebP en calidad estándar o de producción salían a 60 fps y se
+  veían a cámara lenta en los navegadores. Ahora salen a 30 fps.
+- `scene.export(..., fps=...)` y los ajustes del diálogo de exportación ya no
+  se sustituyen por los del preset.
+- Las imágenes de los efectos por objeto que dejan de dibujarse se liberan.
+- Un FFmpeg que escribe mucho en su salida de error ya no puede bloquear la
+  exportación.
+
+== Al actualizar
+
+- Los GIF y WebP salen a 30 fps como mucho en cualquier calidad.
+- Los fps que pases a `scene.export` se respetan; antes se usaban los del
+  preset.
+- Los MP4 con `libx264` usan `-tune animation`, y los WebM salen algo más
+  grandes con la misma CRF.
+
 = 0.9.0
 
 Publicada el 3 de octubre de 2026. Transiciones por shader: cada segmento se
