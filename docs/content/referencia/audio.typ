@@ -327,6 +327,30 @@ también sirven para dibujar a mano o en un shader.
 )
 
 #api-entry(
+  name: "Audio.samples",
+  kind: "method",
+  params: (
+    (name: "points", type: "int", default: "256", desc: [Instantes, de 2 a 1024.]),
+    (name: "span", type: "float", default: "0.05", desc: [Segundos que abarca, hacia atrás desde el presente.]),
+  ),
+  returns: (type: "list[Computed]", desc: [La onda del sonido en esos instantes, de -1 a 1, la más antigua primero.]),
+  desc: [La onda misma, con signo, contra el pico del archivo: un osciloscopio. `waveform` sigue el volumen, de 0 a 1; `samples` dibuja la forma de las notas con un `span` de unas centésimas de segundo. Valores fuera de rango lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), background="#0b1020")
+>>>musica = scene.media.audio("assets/ritmo.ogg")
+onda = musica.samples(200, span=0.03)
+osciloscopio = scene.geometry.polyline(
+    [(-6 + 12 * i / 199, computed(lambda v: 1.5 * v, inputs=[s])) for i, s in enumerate(onda)]
+).stroke(GOLD, 0.03)
+scene.play(musica)
+scene.wait(3)
+scene.render()
+```
+]
+
+#api-entry(
   name: "Visualization.equalizer",
   kind: "factory",
   params: (

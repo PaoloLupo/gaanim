@@ -2140,6 +2140,12 @@ def validate_audio_signals_contract(module):
     ):
         if not raises_error(ValueError, operation):
             failures.append("audio analysis accepted an invalid tempo range, band or normalize")
+    scope = music.samples(32, span=0.02)
+    if len(scope) != 32 or not all(isinstance(point, module.Computed) for point in scope):
+        failures.append("Audio.samples does not return one Computed per point")
+    for operation in (lambda: music.samples(1), lambda: music.samples(16, span=0)):
+        if not raises_error(ValueError, operation):
+            failures.append("Audio.samples accepted invalid points or span")
     if len(music.spectrum(8, normalize="global")) != 8:
         failures.append("Audio.spectrum(normalize='global') does not return one Computed per band")
     return failures

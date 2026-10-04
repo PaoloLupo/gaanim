@@ -71,6 +71,10 @@ pub struct AudioAnalysis {
     /// `BINS + 1` bin edges, in Hz.
     edges: Vec<f64>,
     onsets: Vec<f64>,
+    /// The decoded mono samples as 16-bit values against the file's peak,
+    /// for signed waveforms: half the memory of `f32`, finer than a pixel.
+    pcm: Arc<[i16]>,
+    sample_rate: u32,
 }
 
 /// Values sampled at `frame_rate` frames per source second from second 0.
@@ -219,6 +223,14 @@ impl AudioAnalysis {
             ONSET_LATENCY,
             0.1,
         );
+        let peak = samples
+            .iter()
+            .fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+        let to_pcm = if peak > 0.0 { 32_767.0 / peak } else { 0.0 };
+        let pcm: Arc<[i16]> = samples
+            .iter()
+            .map(|sample| (sample * to_pcm).round() as i16)
+            .collect();
         Self {
             frame_rate,
             duration: samples.len() as f64 / rate,
@@ -226,7 +238,25 @@ impl AudioAnalysis {
             spectrum,
             edges,
             onsets,
+            pcm,
+            sample_rate,
         }
+    }
+
+    /// The signed waveform at source second `time`, -1 to 1 against the
+    /// file's peak, interpolated between samples; 0 outside the file.
+    pub fn sample_at(&self, time: f64) -> f64 {
+        if !time.is_finite() || time < 0.0 {
+            return 0.0;
+        }
+        let position = time * f64::from(self.sample_rate);
+        let index = position.floor() as usize;
+        let Some(&a) = self.pcm.get(index) else {
+            return 0.0;
+        };
+        let b = self.pcm.get(index + 1).copied().unwrap_or(a);
+        let fraction = position - index as f64;
+        (f64::from(a) + (f64::from(b) - f64::from(a)) * fraction) / 32_767.0
     }
 
     pub fn frames(&self) -> usize {
@@ -966,5 +996,18 @@ mod tests {
         let analysis = AudioAnalysis::from_samples(&[], RATE);
         assert_eq!(analysis.level().at(0.0), 0.0);
         assert!(analysis.onsets().is_empty());
+        assert_eq!(analysis.sample_at(0.0), 0.0);
+    }
+
+    #[test]
+    fn samples_keep_the_signed_waveform_against_the_peak() {
+        // A 100 Hz sine at half scale: its peak reads 1.
+        let analysis = AudioAnalysis::from_samples(&tone(100.0, 0.5, 0.5), RATE);
+        assert!((analysis.sample_at(0.0025) - 1.0).abs() < 1e-3);
+        assert!((analysis.sample_at(0.0075) + 1.0).abs() < 1e-3);
+        assert!(analysis.sample_at(0.005).abs() < 0.01);
+        assert_eq!(analysis.sample_at(-0.1), 0.0);
+        assert_eq!(analysis.sample_at(9.0), 0.0);
+        assert_eq!(analysis.sample_at(f64::NAN), 0.0);
     }
 }

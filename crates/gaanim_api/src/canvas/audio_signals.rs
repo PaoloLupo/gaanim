@@ -221,6 +221,38 @@ impl AudioClip {
             .collect())
     }
 
+    /// The signed waveform, -1 to 1 against the file's peak, at `points`
+    /// evenly spaced instants of the last `span` seconds, oldest first, like
+    /// [`Self::waveform`] but the sound itself rather than its loudness: an
+    /// oscilloscope.
+    pub fn samples(&self, points: usize, span: f64) -> Result<Vec<ScalarSource>, AnalysisError> {
+        let analysis = self.analysis()?;
+        let duration = analysis.duration;
+        let last = points.saturating_sub(1).max(1) as f64;
+        Ok((0..points)
+            .map(|index| {
+                let ago = if points > 1 {
+                    span * (1.0 - index as f64 / last)
+                } else {
+                    0.0
+                };
+                let analysis = Arc::clone(&analysis);
+                let plays = Arc::clone(&self.plays);
+                let sample = move |time: f64| {
+                    // The waveform is signed: the play that sounds, not the
+                    // loudest, so a silent play does not hide it.
+                    let plays = plays.lock().expect("audio plays poisoned");
+                    plays
+                        .iter()
+                        .rev()
+                        .find_map(|track| track.source_time(time - ago, duration))
+                        .map_or(0.0, |source| analysis.sample_at(source))
+                };
+                self.source(sample, format!("samples:ago:{ago}"))
+            })
+            .collect())
+    }
+
     /// Seconds from the clip's start at which a sound starts (a drum hit, a
     /// note, a syllable), following the clip's offset, speed and length;
     /// with `band`, only the onsets between those frequencies (Hz).
@@ -422,6 +454,17 @@ mod tests {
         assert!(at(&wave[4], 1.25) < 0.05);
         assert!(at(&wave[2], 1.25) > 0.5, "{}", at(&wave[2], 1.25));
         assert_eq!(at(&wave[0], 0.2), 0.0, "before the clip played");
+        // The signed waveform swings both ways inside the tone.
+        let scope = clip.samples(64, 0.0125).unwrap();
+        let values: Vec<f64> = scope.iter().map(|point| at(point, 0.75)).collect();
+        assert!(
+            values.iter().any(|&v| v > 0.5) && values.iter().any(|&v| v < -0.5),
+            "{values:?}"
+        );
+        assert!(
+            scope.iter().all(|point| at(point, 0.2) == 0.0),
+            "before the clip played"
+        );
         std::fs::remove_dir_all(&directory).ok();
     }
 
