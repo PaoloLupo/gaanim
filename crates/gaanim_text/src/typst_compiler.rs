@@ -210,14 +210,63 @@ struct TypstResources {
     system_font_count: usize,
 }
 
-static TYPST_HIERARCHY_CACHE: OnceLock<Mutex<HashMap<TypstCacheKey, Arc<CachedTypstHierarchy>>>> =
-    OnceLock::new();
+static TYPST_HIERARCHY_CACHE: OnceLock<Mutex<TypstHierarchyCache>> = OnceLock::new();
 static SHARED_TYPST_RESOURCES: OnceLock<SharedTypstResources> = OnceLock::new();
 static TYPST_RESOURCES_CACHE: OnceLock<Mutex<HashMap<FontUniverseKey, Arc<TypstResources>>>> =
     OnceLock::new();
 
-fn typst_hierarchy_cache() -> &'static Mutex<HashMap<TypstCacheKey, Arc<CachedTypstHierarchy>>> {
-    TYPST_HIERARCHY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn typst_hierarchy_cache() -> &'static Mutex<TypstHierarchyCache> {
+    TYPST_HIERARCHY_CACHE
+        .get_or_init(|| Mutex::new(RecentlyUsed::new(TYPST_HIERARCHY_CACHE_ENTRIES)))
+}
+
+/// Compiled layouts kept at most. A counter or readout drawn with Typst
+/// compiles a new source each time its value changes, so the cache keeps the
+/// layouts used most recently instead of every one.
+const TYPST_HIERARCHY_CACHE_ENTRIES: usize = 2048;
+
+type TypstHierarchyCache = RecentlyUsed<TypstCacheKey, Arc<CachedTypstHierarchy>>;
+
+/// A map of at most `capacity` entries that forgets the least recently used.
+struct RecentlyUsed<K, V> {
+    entries: HashMap<K, (V, u64)>,
+    clock: u64,
+    capacity: usize,
+}
+
+impl<K: std::hash::Hash + Eq, V: Clone> RecentlyUsed<K, V> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            clock: 0,
+            capacity: capacity.max(2),
+        }
+    }
+
+    fn get(&mut self, key: &K) -> Option<V> {
+        self.clock += 1;
+        let clock = self.clock;
+        self.entries.get_mut(key).map(|(value, used)| {
+            *used = clock;
+            value.clone()
+        })
+    }
+
+    /// Store `value`; a full map first drops its less recently used half.
+    fn insert(&mut self, key: K, value: V) {
+        if self.entries.len() >= self.capacity && !self.entries.contains_key(&key) {
+            let mut used: Vec<u64> = self.entries.values().map(|(_, used)| *used).collect();
+            let cut = used.len() - self.capacity / 2;
+            let oldest_kept = *used.select_nth_unstable(cut).1;
+            self.entries.retain(|_, (_, used)| *used >= oldest_kept);
+        }
+        self.clock += 1;
+        self.entries.insert(key, (value, self.clock));
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
 }
 
 /// Drop compiled Typst layouts so files they read (images, `#include`d
@@ -940,7 +989,6 @@ fn cached_typst_hierarchy(
         .lock()
         .expect("Typst hierarchy cache poisoned")
         .get(&cache_key)
-        .cloned()
     {
         return Ok(cached);
     }
@@ -1264,6 +1312,28 @@ pub fn compile_scaled_typst_to_hierarchy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layout_cache_forgets_the_least_recently_used_half_when_full() {
+        let mut cache = RecentlyUsed::new(4);
+        for key in 0..4 {
+            cache.insert(key, key * 10);
+        }
+        // 0 and 1 are used again, so 2 and 3 are the least recent.
+        assert_eq!(cache.get(&0), Some(0));
+        assert_eq!(cache.get(&1), Some(10));
+        cache.insert(4, 40);
+        assert_eq!(cache.entries.len(), 3);
+        assert_eq!((cache.get(&2), cache.get(&3)), (None, None));
+        assert_eq!(
+            (cache.get(&0), cache.get(&1), cache.get(&4)),
+            (Some(0), Some(10), Some(40))
+        );
+        // Replacing an entry of a full map evicts nothing.
+        cache.insert(5, 50);
+        cache.insert(5, 55);
+        assert_eq!((cache.entries.len(), cache.get(&5)), (4, Some(55)));
+    }
 
     #[test]
     fn test_default_math_font_loaded() {

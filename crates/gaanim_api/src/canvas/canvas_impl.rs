@@ -2060,8 +2060,65 @@ pub enum AssetPreloadError {
 /// Process-local decoded texture cache. Each canvas still receives its own
 /// mobject, while repeated references to the same canonical path share the
 /// immutable RGBA data used by Vello.
-static IMAGE_CACHE: OnceLock<Mutex<HashMap<PathBuf, gaanim_core::peniko::ImageData>>> =
-    OnceLock::new();
+static IMAGE_CACHE: OnceLock<Mutex<ImageCache>> = OnceLock::new();
+
+/// Decoded bytes the image cache keeps at most: the images used most
+/// recently stay, so a session that goes through many images does not keep
+/// them all.
+const IMAGE_CACHE_BYTES: usize = 512 << 20;
+
+/// Decoded images by canonical path, with when each was last used.
+#[derive(Default)]
+struct ImageCache {
+    entries: HashMap<PathBuf, (gaanim_core::peniko::ImageData, u64)>,
+    clock: u64,
+    bytes: usize,
+}
+
+impl ImageCache {
+    fn get(&mut self, path: &Path) -> Option<gaanim_core::peniko::ImageData> {
+        self.clock += 1;
+        let clock = self.clock;
+        self.entries.get_mut(path).map(|(image, used)| {
+            *used = clock;
+            image.clone()
+        })
+    }
+
+    /// Store `image`, first forgetting the least recently used images that
+    /// would take the cache past `budget` bytes.
+    fn insert(
+        &mut self,
+        path: PathBuf,
+        image: gaanim_core::peniko::ImageData,
+        budget: usize,
+    ) -> gaanim_core::peniko::ImageData {
+        if let Some((cached, _)) = self.entries.get(&path) {
+            return cached.clone();
+        }
+        let size = image.data.len();
+        while self.bytes + size > budget
+            && let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(path, _)| path.clone())
+        {
+            if let Some((evicted, _)) = self.entries.remove(&oldest) {
+                self.bytes -= evicted.data.len();
+            }
+        }
+        self.clock += 1;
+        self.bytes += size;
+        self.entries.insert(path, (image.clone(), self.clock));
+        image
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+}
 
 /// Drop every process-local cache of files read by scenes (raster images,
 /// Lottie, and Typst layouts) so the next compile reads them
@@ -2079,13 +2136,8 @@ fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, 
     let cache_key = requested
         .canonicalize()
         .unwrap_or_else(|_| requested.to_path_buf());
-    let cache = IMAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(image) = cache
-        .lock()
-        .expect("image cache poisoned")
-        .get(&cache_key)
-        .cloned()
-    {
+    let cache = IMAGE_CACHE.get_or_init(Mutex::default);
+    if let Some(image) = cache.lock().expect("image cache poisoned").get(&cache_key) {
         return Ok(image);
     }
 
@@ -2103,7 +2155,7 @@ fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, 
         height,
     };
     let mut cache = cache.lock().expect("image cache poisoned");
-    Ok(cache.entry(cache_key).or_insert(image).clone())
+    Ok(cache.insert(cache_key, image, IMAGE_CACHE_BYTES))
 }
 
 /// Default height of a presentation brand logo in scene units.
@@ -7828,6 +7880,31 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_cache_forgets_the_least_recently_used_images_past_its_budget() {
+        let image = |bytes: usize| gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::from(vec![0; bytes]),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 1,
+            height: (bytes / 4) as u32,
+        };
+        let mut cache = ImageCache::default();
+        for name in ["a", "b", "c"] {
+            cache.insert(PathBuf::from(name), image(400), 1000);
+        }
+        // Only two fit: "a", the oldest, made room for "c".
+        assert!(cache.get(Path::new("a")).is_none());
+        assert!(cache.get(Path::new("b")).is_some());
+        cache.insert(PathBuf::from("d"), image(400), 1000);
+        // "b" was used after "c", so "c" goes.
+        assert!(cache.get(Path::new("c")).is_none());
+        assert!(cache.get(Path::new("b")).is_some() && cache.get(Path::new("d")).is_some());
+        assert_eq!(cache.bytes, 800);
+        cache.clear();
+        assert_eq!((cache.bytes, cache.entries.len()), (0, 0));
+    }
 
     #[test]
     fn dimension_label_style_reaches_label_value_and_unit() {
