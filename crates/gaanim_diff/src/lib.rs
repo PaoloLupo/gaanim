@@ -13,11 +13,15 @@ pub use stops::{
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, mpsc};
 use std::time::Instant;
 
 use gaanim_api::canvas::SceneModel;
-use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, ExportError, capture_scene_direct};
+use gaanim_export::prelude::{
+    AspectRatioPreset, CapturedFrame, ExportConfig, ExportError, capture_scene_direct_streaming,
+};
 use image::{DynamicImage, ImageEncoder, Rgba, RgbaImage};
 use thiserror::Error;
 
@@ -117,40 +121,93 @@ pub(crate) fn capture_canvas_as(
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.headless = true;
 
-    let width = config.width;
-    let height = config.height;
-    let frames = capture_scene_direct(config, times, move |world| {
-        gaanim_api::runtime::replay_canvas_into(world, canvas)
-    })?;
-    write_snapshots(output_dir, frames, ids, (width, height))
+    let size = (config.width, config.height);
+    write_snapshots(output_dir, ids, size, |on_frame| {
+        capture_scene_direct_streaming(
+            config,
+            times,
+            move |world| gaanim_api::runtime::replay_canvas_into(world, canvas),
+            on_frame,
+        )
+    })
 }
 
-/// Write captured `frames` as the PNG snapshots `ids` plus their manifest.
+/// A frame source for [`write_snapshots`]: it hands every captured frame, in
+/// order, to the callback it is given.
+pub(crate) type SnapshotCallback<'a> = &'a mut dyn FnMut(CapturedFrame) -> ControlFlow<()>;
+
+/// Write the frames `capture` produces as the PNG snapshots `ids` plus their
+/// manifest.
+///
+/// Frames are encoded on a pool of threads while the next ones render: PNG
+/// encoding took about as long as capturing, one frame after another, once
+/// every frame had been captured and held in memory.
 pub(crate) fn write_snapshots(
     output_dir: &Path,
-    frames: Vec<gaanim_export::prelude::CapturedFrame>,
     ids: &[String],
     (width, height): (u32, u32),
+    capture: impl FnOnce(SnapshotCallback<'_>) -> std::result::Result<(), ExportError>,
 ) -> Result<SnapshotManifest> {
-    let png_started = Instant::now();
-    let mut snapshots = Vec::with_capacity(frames.len());
-    for (frame, id) in frames.into_iter().zip(ids) {
-        let id = id.clone();
-        let file = format!("{id}.png");
-        let path = output_dir.join(&file);
-        let encoder = image::codecs::png::PngEncoder::new(fs::File::create(path)?);
-        encoder.write_image(
-            &frame.rgba,
-            frame.width,
-            frame.height,
-            image::ExtendedColorType::Rgba8,
-        )?;
-        snapshots.push(SnapshotEntry {
-            id,
-            time_seconds: frame.time,
-            file,
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .clamp(1, MAX_PNG_WORKERS);
+    // Each queued or encoding frame is held in memory, so the queue is short.
+    let (jobs, job_receiver) = mpsc::sync_channel::<(PathBuf, CapturedFrame)>(workers);
+    let job_receiver = Mutex::new(job_receiver);
+    let mut snapshots = Vec::with_capacity(ids.len());
+    let (captured, encoded) = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                let job_receiver = &job_receiver;
+                scope.spawn(move || -> Result<std::time::Duration> {
+                    let mut encode_time = std::time::Duration::ZERO;
+                    loop {
+                        let job = job_receiver
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .recv();
+                        let Ok((path, frame)) = job else {
+                            return Ok(encode_time);
+                        };
+                        let started = Instant::now();
+                        write_snapshot_png(&path, &frame)?;
+                        encode_time += started.elapsed();
+                    }
+                })
+            })
+            .collect();
+        let captured = capture(&mut |frame| {
+            let Some(id) = ids.get(snapshots.len()) else {
+                return ControlFlow::Break(());
+            };
+            let file = format!("{id}.png");
+            let path = output_dir.join(&file);
+            snapshots.push(SnapshotEntry {
+                id: id.clone(),
+                time_seconds: frame.time,
+                file,
+            });
+            // Every worker stopped on an error, which joining reports.
+            match jobs.send((path, frame)) {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(_) => ControlFlow::Break(()),
+            }
         });
-    }
+        drop(jobs);
+        let encoded: Result<std::time::Duration> = handles
+            .into_iter()
+            .map(|handle| {
+                handle.join().unwrap_or_else(|_| {
+                    Err(DiffError::InvalidInput(
+                        "a snapshot PNG encoder panicked".to_string(),
+                    ))
+                })
+            })
+            .sum();
+        (captured, encoded)
+    });
+    let encode_time = encoded?;
+    captured?;
 
     let manifest = SnapshotManifest {
         schema_version: 1,
@@ -163,12 +220,28 @@ pub(crate) fn write_snapshots(
         serde_json::to_vec_pretty(&manifest)?,
     )?;
     if std::env::var_os("GAANIM_CAPTURE_TELEMETRY").is_some() {
+        // Summed over the encoding threads, which overlap the capture.
         eprintln!(
             "GAANIM_PNG_TIMINGS png_encode_ms={:.3}",
-            png_started.elapsed().as_secs_f64() * 1000.0,
+            encode_time.as_secs_f64() * 1000.0,
         );
     }
     Ok(manifest)
+}
+
+/// Threads encoding snapshot PNGs at most; each holds a frame in memory.
+const MAX_PNG_WORKERS: usize = 8;
+
+/// Write one snapshot as an RGBA PNG.
+fn write_snapshot_png(path: &Path, frame: &CapturedFrame) -> Result<()> {
+    let encoder = image::codecs::png::PngEncoder::new(fs::File::create(path)?);
+    encoder.write_image(
+        &frame.rgba,
+        frame.width,
+        frame.height,
+        image::ExtendedColorType::Rgba8,
+    )?;
+    Ok(())
 }
 
 /// Compare two snapshot directories and write a portable HTML + JSON report.
