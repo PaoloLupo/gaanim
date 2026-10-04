@@ -3395,6 +3395,8 @@ mod tests {
                 "—".to_owned(),
                 '.',
                 None,
+                None,
+                None,
             );
 
             for part in [label.as_ref(), equals.as_ref(), unit.as_ref()] {
