@@ -747,6 +747,26 @@ impl FramePixels {
         }
     }
 
+    /// `f` of the frame's bytes and the bytes from one row to the next,
+    /// which is `row` (a packed row) except in a mapped frame, whose rows
+    /// are aligned for the copy.
+    pub fn with_rows<R>(&self, row: usize, f: impl FnOnce(&[u8], usize) -> R) -> R {
+        match self {
+            Self::Owned(pixels) => f(pixels, row),
+            Self::Shared(pixels) => f(pixels, row),
+            Self::Mapped(frame) => {
+                let buffer = frame
+                    .buffer
+                    .as_ref()
+                    .expect("the buffer is held until drop");
+                f(
+                    &buffer.slice(..).get_mapped_range(),
+                    frame.padded_width as usize * 4,
+                )
+            }
+        }
+    }
+
     /// Write the rows to `out`, without copying a mapped frame first.
     pub fn write_to(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
         match self {
