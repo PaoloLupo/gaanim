@@ -29,6 +29,9 @@ exportaciones respetan los fps que pidas.
   cambió; los efectos por objeto independientes se dibujan con un solo
   render, y las mallas 3D con sombreado suave ya no recalculan sus
   degradados en cada fotograma.
+- Las mallas 3D se proyectan y se preparan en varios núcleos: la escena 3D del
+  benchmark exporta en la mitad de tiempo que en la 0.9 y se reproduce en el
+  editor a unos 130 fps en lugar de 90.
 - Exportar arranca entre 0,3 y 0,5 s antes en Windows, porque la GPU se busca
   primero en Vulkan.
 - Saltar en la línea de tiempo reutiliza lo ya dibujado: la línea de tiempo
@@ -47,6 +50,12 @@ exportaciones respetan los fps que pidas.
 - Las imágenes de los efectos por objeto que dejan de dibujarse se liberan.
 - Un FFmpeg que escribe mucho en su salida de error ya no puede bloquear la
   exportación.
+- Las escenas 3D con más de unos 8000 triángulos visibles con sombreado suave
+  ya no fallan al exportar.
+- La recarga en caliente ya no vigila `.venv`, `.git` ni `target`.
+- Un contador animado con Typst ya no hace crecer la memoria sin fin.
+- Al arrastrar la barra de tiempo, el vídeo ya no parpadea con fotogramas
+  anteriores.
 - `Updater.bob`, `Updater.pulse` y `Updater.rotate` con un número dependen
   solo del tiempo: ya no varían con la cadencia de fotogramas, oscilan
   alrededor de la posición animada del objeto en lugar de la que tenía al
