@@ -160,20 +160,22 @@ pub(crate) fn active_segment<T>(
         })
 }
 
-/// Resolve the background brush. With `gpu`, a shader paint draws a texture
-/// rendered on the render device and adds its request to the frame's
-/// requests there; otherwise the shader output is copied through the CPU.
-/// `rest` is the [`gaanim_animation::AmbientClock`] rest: the segment comes
-/// from `time_seconds`, and a shader animates `rest` seconds further.
+/// Resolve the background brush of the segment at `segment_time`, drawn at
+/// `time_seconds`. With `gpu`, a shader paint draws a texture rendered on
+/// the render device and adds its request to the frame's requests there;
+/// otherwise the shader output is copied through the CPU. `rest` is the
+/// [`gaanim_animation::AmbientClock`] rest: a shader animates `rest` seconds
+/// further.
 fn resolve_canvas_background_brush(
     background: &CanvasBackground,
     rect: kurbo::Rect,
     pixel_size: (u32, u32),
+    segment_time: f64,
     time_seconds: f64,
     rest: f64,
     gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> (peniko::Brush, Option<kurbo::Affine>) {
-    let paint = background.paint_at(time_seconds);
+    let paint = background.paint_at(segment_time);
     let shader_time = time_seconds + rest;
     let cpu_copy = |shader: &crate::background::ShaderBackground| {
         shader.resolve_with_values(
@@ -250,9 +252,39 @@ fn fill_canvas_background(
     rest: f64,
     gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> CanvasPaint {
+    fill_segment_background(
+        scene,
+        background,
+        pixel_size,
+        time_seconds,
+        time_seconds,
+        rest,
+        gpu,
+    )
+}
+
+/// [`fill_canvas_background`] with the background of the segment at
+/// `segment_time`, such as one side of a transition, drawn at
+/// `time_seconds`: a shader keeps animating through the transition.
+fn fill_segment_background(
+    scene: &mut vello::Scene,
+    background: &CanvasBackground,
+    pixel_size: (u32, u32),
+    segment_time: f64,
+    time_seconds: f64,
+    rest: f64,
+    gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
+) -> CanvasPaint {
     let (rect, transform) = canvas_background_geometry(background);
-    let (brush, brush_transform) =
-        resolve_canvas_background_brush(background, rect, pixel_size, time_seconds, rest, gpu);
+    let (brush, brush_transform) = resolve_canvas_background_brush(
+        background,
+        rect,
+        pixel_size,
+        segment_time,
+        time_seconds,
+        rest,
+        gpu,
+    );
     scene.fill(
         peniko::Fill::NonZero,
         transform,
@@ -264,7 +296,7 @@ fn fill_canvas_background(
         brush,
         brush_transform,
         rect,
-        fallback: background.paint_at(time_seconds).fallback_color(),
+        fallback: background.paint_at(segment_time).fallback_color(),
     }
 }
 
@@ -1206,6 +1238,7 @@ fn fill_transition_background(
     background: &CanvasBackground,
     pixel_size: (u32, u32),
     transition: Option<&gaanim_scene::SceneTransitionFrame>,
+    time_seconds: f64,
     rest: f64,
     gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) {
@@ -1219,7 +1252,15 @@ fn fill_transition_background(
         return;
     }
     push_transition_mask(scene, mask);
-    fill_canvas_background(scene, background, pixel_size, incoming, rest, gpu);
+    fill_segment_background(
+        scene,
+        background,
+        pixel_size,
+        incoming,
+        time_seconds,
+        rest,
+        gpu,
+    );
     pop_transition_mask(scene, mask);
 }
 
@@ -3283,11 +3324,12 @@ fn compose_elements(
     let mut main_scene = vello::Scene::new();
     let mut canvas_paint = None;
     if let Some((canvas_bg, pixel_size)) = background {
-        canvas_paint = Some(fill_canvas_background(
+        canvas_paint = Some(fill_segment_background(
             &mut main_scene,
             canvas_bg,
             pixel_size,
             transition_background_time(transition, time_seconds),
+            time_seconds,
             rest,
             gpu.as_deref_mut(),
         ));
@@ -3296,6 +3338,7 @@ fn compose_elements(
             canvas_bg,
             pixel_size,
             transition,
+            time_seconds,
             rest,
             gpu,
         );
@@ -3921,11 +3964,12 @@ fn compose_frame(
     let (outgoing_time, incoming_time) = frame.backgrounds.unwrap_or((time_seconds, time_seconds));
     let mut outgoing = vello::Scene::new();
     let outgoing_paint = background.map(|(canvas, pixel_size)| {
-        fill_canvas_background(
+        fill_segment_background(
             &mut outgoing,
             canvas,
             pixel_size,
             outgoing_time,
+            time_seconds,
             rest,
             gpu.as_deref_mut(),
         )
@@ -3938,7 +3982,15 @@ fn compose_frame(
     );
     let mut incoming = vello::Scene::new();
     let incoming_paint = background.map(|(canvas, pixel_size)| {
-        fill_canvas_background(&mut incoming, canvas, pixel_size, incoming_time, rest, gpu)
+        fill_segment_background(
+            &mut incoming,
+            canvas,
+            pixel_size,
+            incoming_time,
+            time_seconds,
+            rest,
+            gpu,
+        )
     });
     append_extracted_elements(
         &mut incoming,
@@ -6835,6 +6887,7 @@ mod tests {
             rect,
             (480, 270),
             1.0,
+            1.0,
             0.0,
             Some(&mut requests),
         );
@@ -6869,6 +6922,7 @@ mod tests {
             rect,
             (480, 270),
             1.0,
+            1.0,
             4.0,
             Some(&mut requests),
         );
@@ -6882,6 +6936,7 @@ mod tests {
             &background,
             rect,
             (480, 270),
+            2.5,
             2.5,
             4.0,
             Some(&mut requests),
@@ -6969,6 +7024,10 @@ mod tests {
             .unwrap()
         };
         let (outgoing, incoming) = (shader(1.0), shader(0.0));
+        let image = |shader: &crate::background::ShaderBackground| {
+            shader.gpu_request(480, 270, 0.0).unwrap().image().data.id()
+        };
+        let (outgoing_image, incoming_image) = (image(&outgoing), image(&incoming));
         let segment = |start_time, end_time, shader: &crate::background::ShaderBackground| {
             SegmentBackgroundPaint {
                 start_time,
@@ -7017,8 +7076,10 @@ mod tests {
             let mut requests = Vec::new();
             compose_frame(&[], Some(&frame), canvas, 2.0, 0.0, Some(&mut requests));
             assert_eq!(requests.len(), 2, "one texture per segment");
-            assert_ne!(requests[0].image().data.id(), requests[1].image().data.id());
-            assert_eq!((requests[0].time(), requests[1].time()), (1.9, 2.1));
+            assert_eq!(requests[0].image().data.id(), outgoing_image);
+            assert_eq!(requests[1].image().data.id(), incoming_image);
+            // Both keep animating through the transition.
+            assert_eq!((requests[0].time(), requests[1].time()), (2.0, 2.0));
         }
         assert!(!outgoing.has_cpu_copy() && !incoming.has_cpu_copy());
     }
