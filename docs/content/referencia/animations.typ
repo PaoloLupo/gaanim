@@ -2188,6 +2188,7 @@ scene.wait(2)
   ),
   returns: (type: "Updater", desc: [Oscilación vertical senoidal sumada a la posición del objeto.]),
   desc: [Como `Updater.pulse` y `Updater.rotate` con un número, es una capa sobre la animación del objeto: función del tiempo desde que se añade, igual en un seek que en la reproducción, que sigue a `animate.move_to` en lugar de volver a la posición inicial. Las tres se combinan en un mismo objeto. `remove_updater()` la quita y el objeto vuelve a su posición.],
+  none,
 )
 
 #api-entry(
