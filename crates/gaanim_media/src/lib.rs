@@ -911,8 +911,15 @@ fn sample_video_system(world: &mut World) {
         }
         decoder.pending.remove(&response.entity);
         if let Ok(image) = response.image {
-            if let Some(playback) = world.get::<VideoPlayback>(response.entity) {
-                decoder.insert_cache((playback.path.clone(), response.frame), image.clone());
+            let Some(playback) = world.get::<VideoPlayback>(response.entity) else {
+                continue;
+            };
+            // A response may arrive after a scrub reached a frame that the
+            // cache supplied; it must not replace the frame shown now.
+            let shows_wanted_frame = playback.last_frame == Some(playback.frame_index(scene_time));
+            decoder.insert_cache((playback.path.clone(), response.frame), image.clone());
+            if shows_wanted_frame {
+                continue;
             }
             if let Some(mut raster) = world.get_mut::<RasterImage>(response.entity) {
                 replace_raster_image(&mut raster, image);
@@ -1416,6 +1423,74 @@ mod tests {
             Some(90)
         );
         assert!(world.get::<RasterImage>(entity).unwrap().image.is_some());
+    }
+
+    #[test]
+    fn a_late_response_does_not_replace_a_frame_scrubbed_to_from_the_cache() {
+        let (request_tx, request_rx) = crossbeam_channel::unbounded();
+        let (response_tx, response_rx) = crossbeam_channel::unbounded();
+        let mut decoder = VideoDecoder {
+            request_tx,
+            response_rx,
+            pending: HashMap::new(),
+            generation: 0,
+            cache: HashMap::new(),
+            lru: VecDeque::new(),
+            cache_bytes: 0,
+            sequential: HashMap::new(),
+            realtime_process_spawns: Arc::new(AtomicUsize::new(0)),
+        };
+        let video = playback(false, 1.0);
+        let wanted = video.frame_index(3.0);
+        let cached = image_data([0, 255, 0, 255]);
+        decoder.insert_cache((video.path.clone(), wanted), cached.clone());
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(VideoSamplingMode::Realtime);
+        world.insert_resource(decoder);
+        let entity = world.spawn((gaanim_scene::RasterImage::none(), video)).id();
+
+        // A frame is requested, then the playhead jumps to a cached frame.
+        sample_video_system(&mut world);
+        let first = request_rx.recv().expect("initial frame request");
+        assert_ne!(first.frame, wanted);
+        world.resource_mut::<Timeline>().current_time = 3.0;
+        sample_video_system(&mut world);
+        assert_eq!(
+            world.get::<VideoPlayback>(entity).unwrap().last_frame,
+            Some(wanted)
+        );
+
+        // The request made before the jump completes afterwards.
+        response_tx
+            .send(DecodeResponse {
+                entity,
+                generation: first.generation,
+                frame: first.frame,
+                image: Ok(image_data([255, 0, 0, 255])),
+            })
+            .unwrap();
+        sample_video_system(&mut world);
+
+        assert_eq!(
+            world.get::<VideoPlayback>(entity).unwrap().last_frame,
+            Some(wanted)
+        );
+        let shown = world
+            .get::<RasterImage>(entity)
+            .unwrap()
+            .image
+            .as_ref()
+            .unwrap();
+        assert_eq!(shown.image.data.data(), cached.data.data());
+        // The late frame is kept for when the playhead returns to it.
+        let path = world.get::<VideoPlayback>(entity).unwrap().path.clone();
+        assert!(
+            world
+                .resource::<VideoDecoder>()
+                .cache
+                .contains_key(&(path, first.frame))
+        );
     }
 
     #[test]
