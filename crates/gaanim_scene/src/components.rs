@@ -535,7 +535,7 @@ pub struct TriangleMeshData {
 }
 
 /// A 3D line list (point pairs, or a strip), projected by the renderer.
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, PartialEq)]
 pub struct LineListData {
     pub points: Vec<[f32; 3]>,
     /// Indices as line pairs. If None, points are sequential pairs.

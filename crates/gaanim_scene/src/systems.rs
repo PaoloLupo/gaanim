@@ -644,7 +644,10 @@ pub fn world_bounds_propagation_system(
     for (local, global, mut world) in &mut query {
         // Use full 3D transform so that rotated/scaled 3D objects get correct AABB.
         // For pure 2D objects mat4 == affine_2d lifted to 3D, so result is identical to 2D path.
-        world.0 = local.0.transform_mat4(&global.mat4);
+        let bounds = local.0.transform_mat4(&global.mat4);
+        if world.0 != bounds {
+            world.0 = bounds;
+        }
     }
 }
 
@@ -659,7 +662,7 @@ pub fn world_bounds_fallback_system(
     for (global, mut world) in &mut query {
         // Use 3D mat4 to extract true world position (supports 3D groups).
         let pos = global.mat4.transform_point3(gaanim_core::glam::DVec3::ZERO);
-        world.0 = gaanim_math::Bounds3D::new_3d(
+        let bounds = gaanim_math::Bounds3D::new_3d(
             pos.x - 0.5,
             pos.y - 0.5,
             pos.z - 0.5,
@@ -667,6 +670,11 @@ pub fn world_bounds_fallback_system(
             pos.y + 0.5,
             pos.z + 0.5,
         );
+        // Unchanged bounds are not rewritten, so change detection only
+        // reports entities that actually moved.
+        if world.0 != bounds {
+            world.0 = bounds;
+        }
     }
 }
 
@@ -695,7 +703,9 @@ pub fn hierarchical_bounds_system(
     // through Children. Resetting here mirrors the old cleanup pass and
     // prevents stale bounds from persisting after all children are removed.
     for entity in &empty_root_group_query {
-        if let Ok(mut b) = bounds_query.get_mut(entity) {
+        if let Ok(mut b) = bounds_query.get_mut(entity)
+            && b.0 != gaanim_math::Bounds3D::default()
+        {
             b.0 = gaanim_math::Bounds3D::default();
         }
     }
@@ -724,12 +734,15 @@ fn compute_bounds_recursive(
 
     if is_group_query.contains(entity) {
         if let Ok(mut b) = bounds_query.get_mut(entity) {
-            b.0 = if union_bounds.min.x != f64::INFINITY {
+            let bounds = if union_bounds.min.x != f64::INFINITY {
                 union_bounds
             } else {
                 gaanim_math::Bounds3D::default()
             };
-            return b.0;
+            if b.0 != bounds {
+                b.0 = bounds;
+            }
+            return bounds;
         }
     } else if let Ok(b) = bounds_query.get(entity) {
         return b.0;
@@ -827,11 +840,14 @@ pub fn billboard_system(
     let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
     for (entity, mut global, transform_opt) in &mut query {
         // Preserve world position and scale, replace rotation with camera rotation.
-        let world = global.mat4;
+        // The result is built aside and written only when it differs, so a
+        // static billboard does not report a changed transform every frame.
+        let mut billboard = *global;
+        let world = billboard.mat4;
         let (scale, _rot, trans) = world.to_scale_rotation_translation();
         let billboard_mat =
             gaanim_core::glam::DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
-        global.mat4 = billboard_mat;
+        billboard.mat4 = billboard_mat;
         if is_perspective {
             // Project 3D world position to screen, then map to fixed Vello world.
             let world_pos = gaanim_core::glam::DVec3::new(trans.x, trans.y, trans.z);
@@ -844,29 +860,36 @@ pub fn billboard_system(
                 * gaanim_core::kurbo::Affine::scale_non_uniform(eff, -eff);
             let inv = vello.inverse();
             let vpos = inv * gaanim_core::kurbo::Point::new(screen.x, screen.y);
-            global.affine_2d = gaanim_core::kurbo::Affine::translate((vpos.x, vpos.y))
+            billboard.affine_2d = gaanim_core::kurbo::Affine::translate((vpos.x, vpos.y))
                 * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
         } else {
             // Orthographic: previous 2D behavior (rotate to stay upright)
             let z_angle = cam.z_angle();
-            global.affine_2d = gaanim_core::kurbo::Affine::translate((trans.x, trans.y))
+            billboard.affine_2d = gaanim_core::kurbo::Affine::translate((trans.x, trans.y))
                 * gaanim_core::kurbo::Affine::rotate(-z_angle)
                 * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
         }
+        if *global != billboard {
+            *global = billboard;
+        }
         if let Some(mut t) = transform_opt {
             let (scale_d, _, trans_d) = billboard_mat.to_scale_rotation_translation();
-            t.translation =
+            let mut next = *t;
+            next.translation =
                 bevy::prelude::Vec3::new(trans_d.x as f32, trans_d.y as f32, trans_d.z as f32);
-            t.rotation = bevy::prelude::Quat::from_xyzw(
+            next.rotation = bevy::prelude::Quat::from_xyzw(
                 cam_rot.x as f32,
                 cam_rot.y as f32,
                 cam_rot.z as f32,
                 cam_rot.w as f32,
             );
-            t.scale =
+            next.scale =
                 bevy::prelude::Vec3::new(scale_d.x as f32, scale_d.y as f32, scale_d.z as f32);
+            if *t != next {
+                *t = next;
+            }
         }
-        let current_global = *global;
+        let current_global = billboard;
 
         // Propagate updated billboard transform to non-billboard child entities (e.g. text glyphs)
         propagate_billboard_children_recursive(
@@ -890,9 +913,12 @@ fn propagate_billboard_children_recursive(
     if let Ok(children) = children_query.get(entity) {
         for &child in children.iter() {
             if let Ok((child_local, mut child_global)) = child_transforms.get_mut(child) {
-                *child_global =
+                let value =
                     GlobalSpatialTransform::from_parent_and_local(parent_global, child_local);
-                let current_child_global = *child_global;
+                if *child_global != value {
+                    *child_global = value;
+                }
+                let current_child_global = value;
                 propagate_billboard_children_recursive(
                     child,
                     &current_child_global,
