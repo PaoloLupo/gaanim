@@ -436,18 +436,40 @@ impl PyTransitionType {
         };
         let mut names = Vec::new();
         let mut values = Vec::new();
+        let mut sources = Vec::new();
+        let mut reactive = false;
         if let Some(uniforms) = uniforms {
             for (name, value) in uniforms.iter() {
                 names.push(name.extract::<String>().map_err(|_| {
                     pyo3::exceptions::PyTypeError::new_err("uniform names must be strings")
                 })?);
-                let value: f64 = value.extract().map_err(|_| {
-                    pyo3::exceptions::PyTypeError::new_err("uniform values must be numbers")
-                })?;
-                finite("uniform values", value)?;
-                values.push(value as f32);
+                if let Ok(number) = value.extract::<f64>() {
+                    finite("uniform values", number)?;
+                    values.push(number as f32);
+                    sources.push(gaanim_animation::ScalarSource::constant(number));
+                } else {
+                    let source = crate::visualization::extract_deferred_scalar(value).map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "uniform values must be numbers, Parameters, Variables, Computeds or scene.time",
+                        )
+                    })?;
+                    values.push(0.0);
+                    sources.push(source.source);
+                    reactive = true;
+                }
             }
         }
+        let uniform_sources: Vec<gaanim_animation::ResolvedScalarSource> = if reactive {
+            sources
+                .into_iter()
+                .map(|source| gaanim_animation::ResolvedScalarSource {
+                    source,
+                    parameters: Vec::new(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         gaanim_api::canvas::PostProcessShader::transition(source.as_str(), &names, None)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         let shader = gaanim_scene::TransitionShader {
@@ -460,6 +482,7 @@ impl PyTransitionType {
             TransitionType::Shader {
                 duration,
                 shader: std::sync::Arc::new(shader),
+                uniforms: uniform_sources,
             },
             easing,
             overlay,
@@ -528,6 +551,7 @@ impl PyTransitionType {
             TransitionType::Shader {
                 duration,
                 shader: std::sync::Arc::new(shader),
+                uniforms: Vec::new(),
             },
             easing,
             overlay,

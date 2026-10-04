@@ -32,30 +32,65 @@ impl PyBackground {
         Self(gaanim_api::canvas::BackgroundPaint::Brush(paint.0))
     }
 
-    /// Build a WGSL background evaluated with exact timeline time.
+    /// Build a WGSL background evaluated with exact timeline time, with
+    /// optional uniforms and an audio track's analysis.
     #[staticmethod]
-    #[pyo3(signature = (source, *, fallback=None))]
-    fn shader(source: &Bound<'_, PyAny>, fallback: Option<PyColor>) -> PyResult<Self> {
+    #[pyo3(signature = (source, *, fallback=None, uniforms=None, audio=None))]
+    fn shader(
+        py: Python<'_>,
+        source: &Bound<'_, PyAny>,
+        fallback: Option<PyColor>,
+        uniforms: Option<&Bound<'_, pyo3::types::PyDict>>,
+        audio: Option<PyRef<'_, crate::pycanvas::PyAudio>>,
+    ) -> PyResult<Self> {
         let fallback = fallback.map_or(peniko::Color::BLACK, |color| color.0);
-        let shader = if let Ok(source) = source.extract::<String>() {
-            gaanim_api::canvas::ShaderBackground::new(source, fallback)
+        let mut text = if let Ok(source) = source.extract::<String>() {
+            source
         } else {
             let path = source.extract::<PathBuf>().map_err(|_| {
                 pyo3::exceptions::PyTypeError::new_err(
                     "source must be inline WGSL text or an os.PathLike .wgsl asset",
                 )
             })?;
-            gaanim_api::canvas::ShaderBackground::from_file(path, fallback)
+            std::fs::read_to_string(&path).map_err(|error| {
+                pyo3::exceptions::PyRuntimeError::new_err(
+                    gaanim_api::canvas::ShaderBackgroundError::ReadSource {
+                        path: path.clone(),
+                        message: error.to_string(),
+                    }
+                    .to_string(),
+                )
+            })?
         };
-        shader
+        let mut named = Vec::new();
+        if let Some(uniforms) = uniforms {
+            for (name, value) in uniforms.iter() {
+                let name = name.extract::<String>().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err("uniform names must be strings")
+                })?;
+                named.push((
+                    name,
+                    crate::visualization::extract_deferred_scalar(value)?.source,
+                ));
+            }
+        }
+        let mut data = None;
+        if let Some(audio) = audio {
+            let name = gaanim_api::canvas::AUDIO_TIME_UNIFORM;
+            if named.iter().any(|(existing, _)| existing == name) {
+                return Err(PyValueError::new_err(format!(
+                    "the uniform {name:?} is reserved for audio="
+                )));
+            }
+            let (audio_data, time) = audio.shader_input(py)?;
+            named.push((name.to_string(), time.source));
+            data = Some(audio_data);
+            text = format!("{}\n{text}", gaanim_api::canvas::AUDIO_SHADER_FUNCTIONS);
+        }
+        gaanim_api::canvas::ShaderBackground::with_uniforms(text, fallback, named, data)
             .map(gaanim_api::canvas::BackgroundPaint::Shader)
             .map(Self)
-            .map_err(|error| match error {
-                gaanim_api::canvas::ShaderBackgroundError::ReadSource { .. } => {
-                    pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
-                }
-                _ => PyValueError::new_err(error.to_string()),
-            })
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     /// Soft color blobs drifting on seeded orbits, blended like a mesh gradient.

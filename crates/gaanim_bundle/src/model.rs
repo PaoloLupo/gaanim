@@ -547,6 +547,10 @@ fn write_transition(w: &mut Writer, tables: &mut Tables, transition: &CapturedTr
     w.option(transition.shader.as_ref(), |w, frame| {
         w.var(u64::from(tables.transition_shader(&frame.shader)));
         w.f32(frame.progress);
+        w.len(frame.values.len());
+        for value in &frame.values {
+            w.f32(*value);
+        }
     });
 }
 
@@ -623,9 +627,16 @@ fn read_transition(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<Capture
             .get(index)
             .cloned()
             .ok_or_else(|| corrupt("transition shader index out of range"))?;
+        let progress = r.f32()?;
+        let count = r.len()?;
+        let mut values = Vec::with_capacity(count.min(64));
+        for _ in 0..count {
+            values.push(r.f32()?);
+        }
         Ok(TransitionShaderFrame {
             shader,
-            progress: r.f32()?,
+            progress,
+            values,
         })
     })?;
     Ok(CapturedTransition {
@@ -991,6 +1002,8 @@ impl ElementRecord {
 pub(crate) struct FrameRecord {
     pub time: f64,
     pub background_time: f64,
+    /// Uniforms of the shader backgrounds the frame draws.
+    pub background_values: Vec<gaanim_renderer::pipeline::BackgroundValues>,
     pub camera: gaanim_math::Camera,
     /// Encoded [`CapturedTransition`], compared as bytes.
     pub transition: Option<Vec<u8>>,
@@ -1087,6 +1100,7 @@ impl FrameRecord {
         Self {
             time: frame.time,
             background_time: frame.capture.background_time,
+            background_values: frame.capture.background_values.clone(),
             camera: frame.camera,
             transition: frame.capture.transition.as_ref().map(|transition| {
                 let mut w = Writer::new();
@@ -1159,6 +1173,7 @@ impl FrameRecord {
             camera: self.camera,
             capture: FrameCapture {
                 background_time: self.background_time,
+                background_values: self.background_values.clone(),
                 elements,
                 transition: self
                     .transition
@@ -1246,6 +1261,15 @@ impl DeltaEncoder {
     fn write_frame(&mut self, w: &mut Writer, frame: FrameRecord) {
         w.f64(frame.time);
         w.f64(frame.background_time);
+        w.len(frame.background_values.len());
+        for entry in &frame.background_values {
+            w.var(u64::from(entry.paint));
+            w.f64(entry.time);
+            w.len(entry.values.len());
+            for value in &entry.values {
+                w.f32(*value);
+            }
+        }
         write_camera(w, &frame.camera);
         w.option(frame.transition.as_ref(), |w, bytes| w.bytes(bytes));
         write_passes(w, &frame.post);
@@ -1340,6 +1364,22 @@ impl DeltaDecoder {
     fn read_frame(&mut self, r: &mut Reader<'_>) -> Result<FrameRecord> {
         let time = r.f64()?;
         let background_time = r.f64()?;
+        let count = r.len()?;
+        let mut background_values = Vec::with_capacity(count.min(16));
+        for _ in 0..count {
+            let paint = u32::try_from(r.var()?).map_err(|_| corrupt("background paint index"))?;
+            let time = r.f64()?;
+            let count = r.len()?;
+            let mut values = Vec::with_capacity(count.min(64));
+            for _ in 0..count {
+                values.push(r.f32()?);
+            }
+            background_values.push(gaanim_renderer::pipeline::BackgroundValues {
+                paint,
+                time,
+                values,
+            });
+        }
         let camera = read_camera(r)?;
         let transition = r.option(|r| Ok(r.bytes()?.to_vec()))?;
         let post = read_passes(r)?;
@@ -1420,6 +1460,7 @@ impl DeltaDecoder {
         let frame = FrameRecord {
             time,
             background_time,
+            background_values,
             camera,
             transition,
             post,

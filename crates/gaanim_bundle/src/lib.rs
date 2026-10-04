@@ -79,8 +79,9 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// (`tables/transitions.bin`) nor the opacity of each element's group;
 /// version 3 (development builds of Gaanim 0.9) had no chalk strokes nor
 /// shader effects on drawables (`tables/effects.bin`), track mattes nor
-/// glass.
-pub const VERSION: u32 = 4;
+/// glass; version 4 (development builds of Gaanim 0.9) had no reactive
+/// uniforms on shader transitions nor shader backgrounds.
+pub const VERSION: u32 = 5;
 /// Zstandard level of data entries, still fast to read. Level 17 made
 /// entries about 8% smaller and compressed nearly four times slower.
 #[cfg(not(target_arch = "wasm32"))]
@@ -647,6 +648,19 @@ fn write_paint(w: &mut Writer, tables: &mut Tables, paint: &BackgroundPaint) {
             w.u8(1);
             w.str(shader.source());
             codec::write_color(w, shader.fallback());
+            // Frames record the values; playback only needs the names.
+            w.len(shader.uniforms().len());
+            for name in shader.uniforms() {
+                w.str(name);
+            }
+            w.option(shader.data(), |w, data| {
+                w.len(data.len());
+                for texel in data.iter() {
+                    for value in texel {
+                        w.f32(*value);
+                    }
+                }
+            });
         }
     }
 }
@@ -657,7 +671,23 @@ fn read_paint(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<BackgroundPa
         1 => {
             let source = r.str()?.to_owned();
             let fallback = codec::read_color(r)?;
-            ShaderBackground::new(source, fallback)
+            let count = r.len()?;
+            let mut uniforms = Vec::with_capacity(count.min(64));
+            for _ in 0..count {
+                uniforms.push((
+                    r.str()?.to_owned(),
+                    gaanim_animation::ScalarSource::constant(0.0),
+                ));
+            }
+            let data = r.option(|r| {
+                let count = r.len()?;
+                let mut data = Vec::with_capacity(count.min(1 << 20));
+                for _ in 0..count {
+                    data.push([r.f32()?, r.f32()?, r.f32()?, r.f32()?]);
+                }
+                Ok(data)
+            })?;
+            ShaderBackground::with_uniforms(source, fallback, uniforms, data.map(Into::into))
                 .map(BackgroundPaint::Shader)
                 .map_err(|error| BundleError::Corrupt(error.to_string()))
         }
@@ -782,6 +812,7 @@ impl SceneData {
                 segment_paints,
                 pixel_size,
                 bounds,
+                parameters: Vec::new(),
             })
         })?;
         let shader_count = r.len()?;
@@ -1745,6 +1776,9 @@ pub fn frame_digest(
     }
     if let Some(request) = request {
         hasher.update(&request.time().to_bits().to_le_bytes());
+        for value in request.values() {
+            hasher.update(&value.to_bits().to_le_bytes());
+        }
         for value in request.frame() {
             hasher.update(&value.to_bits().to_le_bytes());
         }
@@ -1757,6 +1791,19 @@ pub fn frame_digest(
     for pass in &frame.post {
         hasher.update(&pass.shader.to_le_bytes());
         for value in &pass.values {
+            hasher.update(&value.to_bits().to_le_bytes());
+        }
+    }
+    // A shader transition's uniforms can follow a signal: two frames at
+    // the same progress may still blend differently.
+    if let Some(shader) = frame
+        .capture
+        .transition
+        .as_ref()
+        .and_then(|transition| transition.shader.as_ref())
+    {
+        hasher.update(&shader.progress.to_bits().to_le_bytes());
+        for value in &shader.values {
             hasher.update(&value.to_bits().to_le_bytes());
         }
     }

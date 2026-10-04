@@ -2825,7 +2825,7 @@ impl SceneModel {
             });
             builder.end_scene();
         }
-        let segment_paints = segments
+        let segment_paints: Vec<gaanim_renderer::pipeline::SegmentBackgroundPaint> = segments
             .iter()
             .zip(&segment_metadata)
             .map(
@@ -3182,11 +3182,10 @@ impl SceneModel {
                     &object_specs,
                     &shown_at_end,
                 );
-                builder.timeline.connect(
-                    scene_ids[prev],
-                    scene_ids[i],
-                    Self::runtime_transition(&tr, &id_map),
-                );
+                let runtime = Self::runtime_transition(&tr, &id_map, &builder);
+                builder
+                    .timeline
+                    .connect(scene_ids[prev], scene_ids[i], runtime);
             }
         }
 
@@ -3265,14 +3264,42 @@ impl SceneModel {
         // Insert canvas background resource so the renderer draws a visible
         // canvas boundary, distinguishing the canvas area from the window.
         // Uses raw_bounds (no margin) — the visual background covers the full canvas.
-        builder
-            .commands
-            .insert_resource(gaanim_renderer::pipeline::CanvasBackground {
+        builder.commands.insert_resource({
+            // The entities holding the signals that shader uniforms read.
+            let mut parameters: Vec<(ObjectId, bevy::prelude::Entity)> = Vec::new();
+            let paints = std::iter::once(&bg_paint).chain(
+                segment_paints
+                    .iter()
+                    .filter_map(|segment| segment.paint.as_ref()),
+            );
+            for paint in paints {
+                let gaanim_renderer::background::BackgroundPaint::Shader(shader) = paint else {
+                    continue;
+                };
+                for logical in shader
+                    .uniform_sources()
+                    .iter()
+                    .flat_map(|source| source.parameter_ids())
+                {
+                    if parameters.iter().any(|(id, _)| *id == logical) {
+                        continue;
+                    }
+                    if let Some(state) = id_map
+                        .get(&logical)
+                        .and_then(|actual| builder.states.get(*actual))
+                    {
+                        parameters.push((logical, state.entity));
+                    }
+                }
+            }
+            gaanim_renderer::pipeline::CanvasBackground {
                 paint: bg_paint,
                 segment_paints,
                 pixel_size: self.frame.preview_pixel_size(),
                 bounds: raw_bounds,
-            });
+                parameters,
+            }
+        });
         let post_process = Self::compiled_post_process(
             &builder,
             &id_map,
@@ -7513,6 +7540,7 @@ impl SceneModel {
     fn runtime_transition(
         transition: &gaanim_timeline::transition::TransitionType,
         id_map: &HashMap<ObjectId, ObjectId>,
+        builder: &SceneBuilder,
     ) -> gaanim_timeline::transition::TransitionType {
         use gaanim_timeline::transition::{MorphMapping, TransitionType};
         // Easing/overlay wrappers and drawable iris outlines carry authored ids too.
@@ -7524,7 +7552,7 @@ impl SceneModel {
                 sound,
             } => {
                 return TransitionType::Styled {
-                    base: Box::new(Self::runtime_transition(base, id_map)),
+                    base: Box::new(Self::runtime_transition(base, id_map, builder)),
                     easing: easing.clone(),
                     overlay: overlay.clone(),
                     sound: sound.clone(),
@@ -7543,6 +7571,33 @@ impl SceneModel {
                         .map_or(gaanim_timeline::transition::IrisShape::Circle, |id| {
                             gaanim_timeline::transition::IrisShape::Drawable(*id)
                         }),
+                };
+            }
+            // Reactive uniforms read the signals of the entities compiled
+            // for their parameters.
+            TransitionType::Shader {
+                duration,
+                shader,
+                uniforms,
+            } if !uniforms.is_empty() => {
+                return TransitionType::Shader {
+                    duration: *duration,
+                    shader: shader.clone(),
+                    uniforms: uniforms
+                        .iter()
+                        .map(|uniform| gaanim_animation::ResolvedScalarSource {
+                            source: uniform.source.clone(),
+                            parameters: uniform
+                                .source
+                                .parameter_ids()
+                                .into_iter()
+                                .filter_map(|logical| {
+                                    let actual = id_map.get(&logical)?;
+                                    Some((logical, builder.states.get(*actual)?.entity))
+                                })
+                                .collect(),
+                        })
+                        .collect(),
                 };
             }
             _ => {}

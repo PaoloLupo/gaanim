@@ -2458,7 +2458,15 @@ impl Timeline {
                     .iter()
                     .map(|&(entity, scene, _)| (entity, scene))
                     .collect();
-                apply_transition(world, &members, transition_type, t, from, to);
+                apply_transition(
+                    world,
+                    &members,
+                    transition_type,
+                    t,
+                    from,
+                    to,
+                    self.current_time,
+                );
             }
             let overlays = self.active_transition_overlays();
             crate::transition_mask::finish_transition_frame(
@@ -4705,6 +4713,7 @@ fn set_path_trim_window(
 /// Applies transition effects to scene entities based on the transition type and progress.
 ///
 /// `from` and `to` are the scene IDs involved in the transition.
+#[allow(clippy::too_many_arguments)]
 fn apply_transition(
     world: &mut World,
     scene_entities: &[(Entity, SceneId)],
@@ -4712,6 +4721,7 @@ fn apply_transition(
     t: f64,
     from: SceneId,
     to: SceneId,
+    time: f64,
 ) {
     use crate::transition::TransitionType;
 
@@ -4821,11 +4831,40 @@ fn apply_transition(
         TransitionType::Morph { mappings, .. } => {
             apply_morph_transition(world, scene_entities, mappings, t.clamp(0.0, 1.0), from, to);
         }
-        TransitionType::Shader { shader, .. } => {
+        TransitionType::Shader {
+            shader, uniforms, ..
+        } => {
+            let values = if uniforms.is_empty() {
+                shader.values.clone()
+            } else {
+                uniforms
+                    .iter()
+                    .enumerate()
+                    .map(|(index, uniform)| {
+                        uniform
+                            .source
+                            .evaluate(time, |logical| {
+                                uniform
+                                    .parameters
+                                    .iter()
+                                    .find(|(id, _)| *id == logical)
+                                    .and_then(|(_, entity)| {
+                                        world.get::<gaanim_animation::FloatSignal>(*entity)
+                                    })
+                                    .map(|signal| signal.value)
+                            })
+                            .map(|value| value as f32)
+                            // A source that cannot be read keeps the value it
+                            // was declared with.
+                            .unwrap_or_else(|_| shader.values.get(index).copied().unwrap_or(0.0))
+                    })
+                    .collect()
+            };
             crate::transition_mask::apply_shader_transition(
                 world,
                 scene_entities,
                 shader,
+                values,
                 t,
                 from,
                 to,
