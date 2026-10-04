@@ -10,8 +10,20 @@ use std::sync::{Arc, Mutex};
 use gaanim_animation::{ReactiveFunction, ReactiveInput, ScalarSource};
 use gaanim_media::AudioTrack;
 use gaanim_media::analysis::{
-    AnalysisError, AudioAnalysis, Series, analyze_file, file_fingerprint,
+    AnalysisError, AudioAnalysis, Series, TempoEstimate, analyze_file, file_fingerprint,
 };
+
+/// What each band of a spectrum is measured against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpectrumScale {
+    /// Each band against its own loud end: every band moves, even quiet
+    /// highs.
+    #[default]
+    Band,
+    /// Every band against the loudest of them: the spectrum keeps its real
+    /// shape (bass tall, highs low).
+    Global,
+}
 
 use super::AudioClip;
 
@@ -58,10 +70,19 @@ impl AudioClip {
         Ok(self.series_source(series, format!("band:{low}:{high}:{smoothing}")))
     }
 
-    /// 1 at each onset, decaying to 0 with time constant `decay` seconds.
-    pub fn pulse(&self, decay: f64) -> Result<ScalarSource, AnalysisError> {
+    /// 1 at each onset, decaying to 0 with time constant `decay` seconds;
+    /// with `band`, only the onsets between those frequencies (Hz), so a
+    /// kick drum does not pulse with the hi-hats.
+    pub fn pulse(
+        &self,
+        decay: f64,
+        band: Option<(f64, f64)>,
+    ) -> Result<ScalarSource, AnalysisError> {
         let analysis = self.analysis()?;
-        let onsets: Arc<[f64]> = analysis.onsets().into();
+        let onsets: Arc<[f64]> = match band {
+            Some((low, high)) => analysis.band_onsets(low, high)?.into(),
+            None => analysis.onsets().into(),
+        };
         let duration = analysis.duration;
         let plays = Arc::clone(&self.plays);
         let decay = decay.max(1e-6);
@@ -79,26 +100,29 @@ impl AudioClip {
                 Some((-elapsed / decay).exp())
             })
         };
-        Ok(self.source(sample, format!("pulse:{decay}")))
+        Ok(self.source(sample, format!("pulse:{decay}:{band:?}")))
     }
 
     /// `bands` amplitudes over log-spaced frequency bands from `low` to
-    /// `high` Hz (the analysis's top frequency when `None`), lowest first.
-    /// Each band is 0 to 1 against its own loud end, like [`Self::band`].
+    /// `high` Hz (the analysis's top frequency when `None`), lowest first,
+    /// 0 to 1 against each band's own loud end or, with
+    /// [`SpectrumScale::Global`], against the loudest band's.
     pub fn spectrum(
         &self,
         bands: usize,
         low: f64,
         high: Option<f64>,
         smoothing: f64,
+        scale: SpectrumScale,
     ) -> Result<Vec<ScalarSource>, AnalysisError> {
-        let nyquist = self.analysis()?.nyquist();
+        let analysis = self.analysis()?;
+        let nyquist = analysis.nyquist();
         let high = high.unwrap_or(nyquist);
         if !(low.is_finite() && low > 0.0 && high > low && high <= nyquist) || bands == 0 {
             return Err(AnalysisError::InvalidBand { low, high, nyquist });
         }
         let ratio = (high / low).powf(1.0 / bands as f64);
-        (0..bands)
+        let ranges: Vec<(f64, f64)> = (0..bands)
             .map(|index| {
                 let from = low * ratio.powi(index as i32);
                 let to = if index + 1 == bands {
@@ -106,9 +130,60 @@ impl AudioClip {
                 } else {
                     low * ratio.powi(index as i32 + 1)
                 };
-                self.band(from, to, smoothing)
+                (from, to)
             })
-            .collect()
+            .collect();
+        match scale {
+            SpectrumScale::Band => ranges
+                .into_iter()
+                .map(|(from, to)| self.band(from, to, smoothing))
+                .collect(),
+            SpectrumScale::Global => {
+                let amplitudes = ranges
+                    .iter()
+                    .map(|&(from, to)| analysis.band_amplitudes(from, to))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let reference = analysis.loud_end(amplitudes.iter().flatten().copied());
+                ranges
+                    .iter()
+                    .zip(amplitudes)
+                    .map(|(&(from, to), values)| {
+                        let series = Series {
+                            frame_rate: analysis.frame_rate,
+                            values: values
+                                .into_iter()
+                                .map(|value| (value / reference).clamp(0.0, 1.0))
+                                .collect(),
+                        }
+                        .smoothed(smoothing)?;
+                        Ok(self.series_source(
+                            series,
+                            format!("global:{low}:{high}:{bands}:{from}:{to}:{smoothing}"),
+                        ))
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// The steady tempo of the clip between `min_bpm` and `max_bpm`, in the
+    /// clip's own seconds: its BPM follows the clip's speed and its offset
+    /// is the first beat at or after the clip's start.
+    pub fn tempo(&self, min_bpm: f64, max_bpm: f64) -> Result<TempoEstimate, AnalysisError> {
+        let estimate = self.analysis()?.tempo(min_bpm, max_bpm)?;
+        let speed = if self.track.speed > 0.0 {
+            self.track.speed
+        } else {
+            1.0
+        };
+        let bpm = estimate.bpm * speed;
+        let beat = 60.0 / bpm;
+        let offset = ((estimate.offset - self.track.source_offset) / speed).rem_euclid(beat);
+        Ok(TempoEstimate {
+            bpm,
+            offset,
+            confidence: estimate.confidence,
+        })
     }
 
     /// The loudness (or the band `low`-`high` Hz) over the last `span`
@@ -147,12 +222,17 @@ impl AudioClip {
     }
 
     /// Seconds from the clip's start at which a sound starts (a drum hit, a
-    /// note, a syllable), following the clip's offset, speed and length.
-    pub fn onsets(&self) -> Result<Vec<f64>, AnalysisError> {
+    /// note, a syllable), following the clip's offset, speed and length;
+    /// with `band`, only the onsets between those frequencies (Hz).
+    pub fn onsets(&self, band: Option<(f64, f64)>) -> Result<Vec<f64>, AnalysisError> {
         let analysis = self.analysis()?;
+        let onsets = match band {
+            Some((low, high)) => analysis.band_onsets(low, high)?,
+            None => analysis.onsets().to_vec(),
+        };
         let mut track = self.track.clone();
         track.start_time = 0.0;
-        Ok(track.scene_times(analysis.onsets(), analysis.duration, f64::MAX))
+        Ok(track.scene_times(&onsets, analysis.duration, f64::MAX))
     }
 
     fn series_source(&self, series: Series, recipe: String) -> ScalarSource {
@@ -219,6 +299,7 @@ fn play_recipe(track: &AudioTrack) -> String {
 #[cfg(test)]
 mod tests {
     use super::super::{PlayItem, SceneModel};
+    use super::SpectrumScale;
     use gaanim_animation::ScalarSource;
 
     /// A WAV of `seconds` of silence with a loud 80 Hz tone in `[on, off)`.
@@ -270,7 +351,7 @@ mod tests {
         let clip = scene.audio(&path, None, 1.0, 0.0, 0.0).unwrap();
         let bass = clip.band(20.0, 150.0, 0.0).unwrap();
         let treble = clip.band(2000.0, 8000.0, 0.0).unwrap();
-        let pulse = clip.pulse(0.1).unwrap();
+        let pulse = clip.pulse(0.1, None).unwrap();
         let level = clip.level(0.0).unwrap();
         // Before the clip plays, every signal reads 0.
         assert_eq!(at(&bass, 1.7), 0.0);
@@ -288,7 +369,7 @@ mod tests {
         assert!(at(&treble, 1.75) < 0.05);
         assert_eq!(at(&bass, 3.5), 0.0, "silent once the clip has ended");
         // The onset at the tone's start pulses at 1.5 and decays.
-        let onsets = clip.onsets().unwrap();
+        let onsets = clip.onsets(None).unwrap();
         assert!(
             onsets.iter().any(|onset| (onset - 0.5).abs() < 0.04),
             "{onsets:?}"
@@ -311,17 +392,31 @@ mod tests {
         write_wav(&path, 2.0, 0.5, 1.0);
         let mut scene = SceneModel::new(16.0, 9.0);
         let clip = scene.audio(&path, None, 1.0, 0.0, 0.0).unwrap();
-        let spectrum = clip.spectrum(6, 40.0, None, 0.0).unwrap();
+        let spectrum = clip
+            .spectrum(6, 40.0, None, 0.0, SpectrumScale::Band)
+            .unwrap();
+        let shaped = clip
+            .spectrum(6, 40.0, None, 0.0, SpectrumScale::Global)
+            .unwrap();
         assert_eq!(spectrum.len(), 6);
         let wave = clip.waveform(5, 1.0, None, 0.0).unwrap();
-        assert!(clip.spectrum(4, 100.0, Some(50.0), 0.0).is_err());
-        assert!(clip.spectrum(0, 40.0, None, 0.0).is_err());
+        assert!(
+            clip.spectrum(4, 100.0, Some(50.0), 0.0, SpectrumScale::Band)
+                .is_err()
+        );
+        assert!(
+            clip.spectrum(0, 40.0, None, 0.0, SpectrumScale::Band)
+                .is_err()
+        );
         scene
             .play_items(vec![PlayItem::Audio(clip.clone())])
             .unwrap();
         // The lowest band holds the 80 Hz tone; the top ones stay quiet.
         assert!(at(&spectrum[0], 0.75) > 0.5, "{}", at(&spectrum[0], 0.75));
         assert!(at(&spectrum[5], 0.75) < 0.1);
+        // Against the loudest band the tone still fills the lowest one.
+        assert!(at(&shaped[0], 0.75) > 0.5, "{}", at(&shaped[0], 0.75));
+        assert!(at(&shaped[5], 0.75) < 0.01);
         // At 1.25 s the newest point is past the tone and the one a half
         // second older is inside it.
         assert!(at(&wave[4], 1.25) < 0.05);

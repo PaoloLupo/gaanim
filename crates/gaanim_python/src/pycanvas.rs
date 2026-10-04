@@ -1015,10 +1015,146 @@ pub struct PyAudio {
 fn analysis_error(error: gaanim_api::canvas::AudioAnalysisError) -> PyErr {
     use gaanim_api::canvas::AudioAnalysisError as AnalysisError;
     match error {
-        AnalysisError::InvalidBand { .. } | AnalysisError::InvalidSmoothing(_) => {
+        AnalysisError::InvalidBand { .. }
+        | AnalysisError::InvalidSmoothing(_)
+        | AnalysisError::InvalidTempoRange { .. } => {
             pyo3::exceptions::PyValueError::new_err(error.to_string())
         }
         _ => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
+    }
+}
+
+/// Both ends of a frequency band, or neither.
+fn optional_band(
+    method: &str,
+    low: Option<f64>,
+    high: Option<f64>,
+) -> PyResult<Option<(f64, f64)>> {
+    match (low, high) {
+        (None, None) => Ok(None),
+        (Some(low), Some(high)) => Ok(Some((low, high))),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{method} takes both low and high, or neither"
+        ))),
+    }
+}
+
+/// The steady tempo of an audio clip, from ``Audio.tempo``.
+#[pyclass(name = "AudioTempo", module = "gaanim_core", frozen)]
+pub struct PyAudioTempo {
+    #[pyo3(get)]
+    bpm: f64,
+    #[pyo3(get)]
+    offset: f64,
+    #[pyo3(get)]
+    confidence: f64,
+}
+
+#[pymethods]
+impl PyAudioTempo {
+    fn __repr__(&self) -> String {
+        format!(
+            "AudioTempo(bpm={:.2}, offset={:.3}, confidence={:.2})",
+            self.bpm, self.offset, self.confidence
+        )
+    }
+}
+
+/// The analysis of an audio file as plain numbers, from ``Audio.analysis``.
+#[pyclass(name = "AudioData", module = "gaanim_core", frozen)]
+pub struct PyAudioData {
+    analysis: std::sync::Arc<gaanim_api::canvas::AudioAnalysis>,
+}
+
+#[pymethods]
+impl PyAudioData {
+    /// Analysis frames per second of the file.
+    #[getter]
+    fn frame_rate(&self) -> f64 {
+        self.analysis.frame_rate
+    }
+
+    /// Seconds of audio in the file.
+    #[getter]
+    fn duration(&self) -> f64 {
+        self.analysis.duration
+    }
+
+    /// The file second of every frame.
+    #[getter]
+    fn times(&self) -> Vec<f64> {
+        (0..self.analysis.frames())
+            .map(|frame| frame as f64 / self.analysis.frame_rate)
+            .collect()
+    }
+
+    /// Loudness of every frame, 0 to 1 like ``Audio.level``.
+    #[getter]
+    fn level(&self) -> Vec<f32> {
+        self.analysis.level().values.to_vec()
+    }
+
+    /// Center frequency, in Hz, of every spectrum bin, lowest first.
+    #[getter]
+    fn frequencies(&self) -> Vec<f64> {
+        self.analysis
+            .bin_edges()
+            .windows(2)
+            .map(|edge| (edge[0] * edge[1]).sqrt())
+            .collect()
+    }
+
+    /// One row per frame with the amplitude of every bin, 0 to 1 against the
+    /// loud end of the whole file, so rows keep the spectrum's shape.
+    #[getter]
+    fn spectrum(&self) -> Vec<Vec<f32>> {
+        let rows: Vec<Vec<f32>> = (0..self.analysis.frames())
+            .map(|frame| {
+                self.analysis
+                    .spectrum_row(frame)
+                    .iter()
+                    .map(|power| power.sqrt())
+                    .collect()
+            })
+            .collect();
+        let reference = self.analysis.loud_end(rows.iter().flatten().copied());
+        rows.into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|value| (value / reference).clamp(0.0, 1.0))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// File seconds where a sound starts, or only between ``low`` and
+    /// ``high`` Hz.
+    #[pyo3(signature = (*, low=None, high=None))]
+    fn onsets(&self, low: Option<f64>, high: Option<f64>) -> PyResult<Vec<f64>> {
+        match optional_band("onsets", low, high)? {
+            Some((low, high)) => self.analysis.band_onsets(low, high).map_err(analysis_error),
+            None => Ok(self.analysis.onsets().to_vec()),
+        }
+    }
+
+    /// The amplitude between ``low`` and ``high`` Hz in every frame, 0 to 1
+    /// like ``Audio.band``.
+    fn band(&self, low: f64, high: f64) -> PyResult<Vec<f32>> {
+        Ok(self
+            .analysis
+            .band(low, high)
+            .map_err(analysis_error)?
+            .values
+            .to_vec())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "AudioData({} frames at {:.2} fps, {:.2} s)",
+            self.analysis.frames(),
+            self.analysis.frame_rate,
+            self.analysis.duration
+        )
     }
 }
 
@@ -1056,16 +1192,22 @@ impl PyAudio {
     }
 
     /// 1 at each onset (a hit, a note, a syllable), decaying to 0 with time
-    /// constant `decay` seconds.
-    #[pyo3(signature = (decay=0.15))]
-    fn pulse(&self, decay: f64) -> PyResult<crate::visualization::PyComputed> {
+    /// constant `decay` seconds; see `gaanim_core.pyi`.
+    #[pyo3(signature = (decay=0.15, *, low=None, high=None))]
+    fn pulse(
+        &self,
+        decay: f64,
+        low: Option<f64>,
+        high: Option<f64>,
+    ) -> PyResult<crate::visualization::PyComputed> {
         crate::custom::ensure_authoring_allowed()?;
         if !decay.is_finite() || decay <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "decay must be a positive number of seconds",
             ));
         }
-        let source = self.inner.pulse(decay).map_err(analysis_error)?;
+        let band = optional_band("pulse", low, high)?;
+        let source = self.inner.pulse(decay, band).map_err(analysis_error)?;
         Ok(crate::visualization::PyComputed::time_source(
             &self.canvas,
             source,
@@ -1074,15 +1216,25 @@ impl PyAudio {
 
     /// One signal per log-spaced frequency band, lowest first; see
     /// `gaanim_core.pyi`.
-    #[pyo3(signature = (bands=32, *, low=40.0, high=None, smoothing=0.0))]
+    #[pyo3(signature = (bands=32, *, low=40.0, high=None, smoothing=0.0, normalize="band"))]
     fn spectrum(
         &self,
         bands: usize,
         low: f64,
         high: Option<f64>,
         smoothing: f64,
+        normalize: &str,
     ) -> PyResult<Vec<crate::visualization::PyComputed>> {
         crate::custom::ensure_authoring_allowed()?;
+        let scale = match normalize {
+            "band" => gaanim_api::canvas::SpectrumScale::Band,
+            "global" => gaanim_api::canvas::SpectrumScale::Global,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "normalize must be \"band\" or \"global\", got {other:?}"
+                )));
+            }
+        };
         if !(1..=256).contains(&bands) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "bands must be between 1 and 256",
@@ -1090,7 +1242,7 @@ impl PyAudio {
         }
         let sources = self
             .inner
-            .spectrum(bands, low, high, smoothing)
+            .spectrum(bands, low, high, smoothing, scale)
             .map_err(analysis_error)?;
         Ok(sources
             .into_iter()
@@ -1120,15 +1272,7 @@ impl PyAudio {
                 "span must be a positive number of seconds",
             ));
         }
-        let band = match (low, high) {
-            (None, None) => None,
-            (Some(low), Some(high)) => Some((low, high)),
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "waveform takes both low and high, or neither",
-                ));
-            }
-        };
+        let band = optional_band("waveform", low, high)?;
         let sources = self
             .inner
             .waveform(points, span, band, smoothing)
@@ -1139,9 +1283,30 @@ impl PyAudio {
             .collect())
     }
 
-    /// Seconds from the clip's start at which a sound starts, in order.
-    fn beats(&self) -> PyResult<Vec<f64>> {
-        self.inner.onsets().map_err(analysis_error)
+    /// Seconds from the clip's start at which a sound starts, in order, or
+    /// only between ``low`` and ``high`` Hz.
+    #[pyo3(signature = (*, low=None, high=None))]
+    fn beats(&self, low: Option<f64>, high: Option<f64>) -> PyResult<Vec<f64>> {
+        let band = optional_band("beats", low, high)?;
+        self.inner.onsets(band).map_err(analysis_error)
+    }
+
+    /// The steady tempo of the clip; see `gaanim_core.pyi`.
+    #[pyo3(signature = (*, min_bpm=60.0, max_bpm=200.0))]
+    fn tempo(&self, min_bpm: f64, max_bpm: f64) -> PyResult<PyAudioTempo> {
+        let estimate = self.inner.tempo(min_bpm, max_bpm).map_err(analysis_error)?;
+        Ok(PyAudioTempo {
+            bpm: estimate.bpm,
+            offset: estimate.offset,
+            confidence: estimate.confidence,
+        })
+    }
+
+    /// The analysis of the clip's file as plain numbers.
+    fn analysis(&self) -> PyResult<PyAudioData> {
+        Ok(PyAudioData {
+            analysis: self.inner.analysis().map_err(analysis_error)?,
+        })
     }
 
     /// Seconds the clip plays for: its ``duration``, or the file from its start.

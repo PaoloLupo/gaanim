@@ -2637,19 +2637,54 @@ class Audio:
         raises ``ValueError``.
         """
         ...
-    def pulse(self, decay: float = 0.15) -> Computed:
+    def pulse(self, decay: float = 0.15, *, low: Optional[float] = None, high: Optional[float] = None) -> Computed:
         """1 at each onset (a hit, a note, a syllable), fading out over ``decay`` seconds.
 
         The easiest way to make something react on the beat:
         ``scale_to(computed(lambda p: 1 + 0.2 * p, inputs=[music.pulse()]))``.
-        A non-positive ``decay`` raises ``ValueError``.
+        With ``low`` and ``high`` only the onsets between those frequencies
+        count, so ``pulse(low=40, high=120)`` follows the kick drum and not
+        the hi-hats. A non-positive ``decay``, only one of ``low``/``high``
+        or an invalid band raises ``ValueError``.
         """
         ...
-    def beats(self) -> list[float]:
+    def beats(self, *, low: Optional[float] = None, high: Optional[float] = None) -> list[float]:
         """Seconds from the clip's start at which a sound starts, in order.
 
         These are onsets (hits, notes, syllables), not a tempo grid; add
         ``music.start`` once the clip has played to get timeline seconds.
+        With ``low`` and ``high``, only the onsets in that band (Hz). For the
+        beat grid itself use ``tempo``.
+        """
+        ...
+    def tempo(self, *, min_bpm: float = 60.0, max_bpm: float = 200.0) -> AudioTempo:
+        """Estimate the clip's steady tempo between ``min_bpm`` and ``max_bpm``.
+
+        The period is where the onsets repeat best, weighing the low hits
+        (kick and bass, 40-150 Hz), and the phase puts the beats on those
+        hits. ``offset`` is the first beat in seconds from the clip's start,
+        so ``scene.tempo(t.bpm, offset=music.start + t.offset)`` lines
+        ``wait_until(bar=...)`` up with the music. Both follow the clip's
+        ``speed`` and ``offset``. It suits music with a steady pulse; check
+        ``confidence`` (below about 0.3 there is no clear beat). A range
+        outside ``0 < min_bpm < max_bpm <= 400`` raises ``ValueError``.
+
+        Example:
+            scene.play(music)
+            beat = music.tempo()
+            scene.tempo(beat.bpm, offset=music.start + beat.offset)
+            scene.wait_until(bar=16)
+        """
+        ...
+    def analysis(self) -> AudioData:
+        """The analysis of the clip's file as plain numbers, for placing cuts by hand.
+
+        Times are seconds of the file, before the clip's ``offset`` and
+        ``speed``. Reading it never changes the scene.
+
+        Example:
+            data = music.analysis()
+            loud = [t for t, v in zip(data.times, data.band(40, 120)) if v > 0.9]
         """
         ...
     @property
@@ -2663,13 +2698,17 @@ class Audio:
         low: float = 40.0,
         high: Optional[float] = None,
         smoothing: float = 0.0,
+        normalize: Literal["band", "global"] = "band",
     ) -> list[Computed]:
         """One signal per frequency band, lowest first, each from 0 to 1.
 
         The ``bands`` (1-256) split ``low``-``high`` Hz on a logarithmic
         scale, as the ear hears pitch; ``high`` defaults to the analysis's
-        top frequency (about 11 kHz). Each band is measured against its own
-        loud end, like ``band``, so quiet treble still moves. They are
+        top frequency (about 11 kHz). With ``normalize="band"`` each band is
+        measured against its own loud end, like ``band``, so quiet treble
+        still moves; with ``"global"`` every band is measured against the
+        loudest one, so the bars keep the real shape of the spectrum (tall
+        bass, low treble). Any other ``normalize`` raises ``ValueError``. They are
         ordinary signals: pass them to ``scene.viz.equalizer``, to
         ``computed``, or as shader uniforms. An invalid range raises
         ``ValueError``.
@@ -2707,6 +2746,59 @@ class Audio:
         follow it with ``scene.wait(music.duration)`` to keep the scene
         running while the track sounds.
         """
+        ...
+
+class AudioTempo:
+    """A steady tempo estimated by ``Audio.tempo``."""
+    @property
+    def bpm(self) -> float:
+        """Beats per minute, following the clip's speed."""
+        ...
+    @property
+    def offset(self) -> float:
+        """Seconds from the clip's start to its first beat, less than one beat."""
+        ...
+    @property
+    def confidence(self) -> float:
+        """How clearly the onsets repeat at that period, 0 to 1; below about 0.3 there is no steady beat."""
+        ...
+
+class AudioData:
+    """The analysis of an audio file as plain numbers, from ``Audio.analysis``.
+
+    Frames are about 23 ms apart (``frame_rate`` per second); ``times`` gives
+    each frame's second of the file. Lists are plain Python lists, ready for
+    numpy if you use it.
+    """
+    @property
+    def frame_rate(self) -> float:
+        """Analysis frames per second of the file."""
+        ...
+    @property
+    def duration(self) -> float:
+        """Seconds of audio in the file."""
+        ...
+    @property
+    def times(self) -> list[float]:
+        """The file second of every frame."""
+        ...
+    @property
+    def level(self) -> list[float]:
+        """Loudness of every frame, 0 to 1 like ``Audio.level``."""
+        ...
+    @property
+    def frequencies(self) -> list[float]:
+        """Center frequency, in Hz, of each of the 96 log-spaced spectrum bins."""
+        ...
+    @property
+    def spectrum(self) -> list[list[float]]:
+        """One row per frame with the amplitude of every bin, 0 to 1 against the loud end of the file."""
+        ...
+    def onsets(self, *, low: Optional[float] = None, high: Optional[float] = None) -> list[float]:
+        """File seconds where a sound starts, or only between ``low`` and ``high`` Hz."""
+        ...
+    def band(self, low: float, high: float) -> list[float]:
+        """The amplitude between ``low`` and ``high`` Hz in every frame, 0 to 1 like ``Audio.band``; an invalid band raises ``ValueError``."""
         ...
 
 class Voiceover:

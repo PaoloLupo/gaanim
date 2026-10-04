@@ -42,11 +42,15 @@ interlineado por defecto es más compacto.
   un número, y siguen a la pista donde suena: `level()` (el volumen),
   `band(low, high)` (una banda de frecuencias) y `pulse(decay)` (los golpes).
   `beats()` da los instantes de los golpes y `duration`, lo que dura la pista.
+  `pulse` y `beats` aceptan una banda (`low=40, high=120` sigue el bombo).
+- `Audio.tempo()` estima el BPM y la fase del primer pulso para
+  `scene.tempo`, y `Audio.analysis()` da el análisis como listas de Python
+  para colocar cortes a mano.
 - `Updater.rotate`, `Updater.wiggle` y el nuevo `Falloff.source` aceptan una
   señal del tiempo, así que el audio también gira, hace temblar y tiñe con
   `drive("fill", ...)`. Lee #link("/referencia/audio/")[Audio].
-- `Audio.spectrum(bandas)` y `Audio.waveform(puntos, span=)` dan una señal
-  por banda o por instante reciente, y `scene.viz.equalizer` las dibuja con
+- `Audio.spectrum(bandas, normalize=)` y `Audio.waveform(puntos, span=)` dan
+  una señal por banda o por instante reciente, y `scene.viz.equalizer` las dibuja con
   la forma (`"bar"`, `"capsule"`, `"dot"`, `"line"`, `"area"` o la tuya), la
   disposición (`"row"`, `"mirror"`, `"radial"` o la tuya) y los colores que
   elijas. También sirven como uniforms de un shader. Lee

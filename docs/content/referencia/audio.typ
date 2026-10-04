@@ -217,17 +217,18 @@ está en el repositorio de Gaanim; no viene con el paquete instalado.
 #api-entry(
   name: "Audio.pulse",
   kind: "method",
-  params: ((name: "decay", type: "float", default: "0.15", desc: [Segundos en que el pulso cae a un tercio.]),),
+  params: ((name: "decay", type: "float", default: "0.15", desc: [Segundos en que el pulso cae a un tercio.]), (name: "low / high", type: "float | None", default: "None", desc: [Solo cuentan los golpes de esa banda, en Hz; los dos o ninguno.])),
   returns: (type: "Computed", desc: [1 en cada golpe y bajando hasta 0.]),
-  desc: [La forma más directa de reaccionar al ritmo: `scale_to(computed(lambda p: 1 + 0.2 * p, inputs=[musica.pulse()]))`. Un golpe es un *onset*: donde empieza un sonido (un bombo, una nota, una sílaba). Un `decay` no positivo lanza `ValueError`.],
+  desc: [La forma más directa de reaccionar al ritmo: `scale_to(computed(lambda p: 1 + 0.2 * p, inputs=[musica.pulse()]))`. Un golpe es un *onset*: donde empieza un sonido (un bombo, una nota, una sílaba). Sin banda salta con cualquiera, y en música electrónica los platillos lo disparan sin parar; `pulse(low=40, high=120)` sigue solo el bombo. Un `decay` no positivo, solo uno de `low`/`high` o una banda inválida lanzan `ValueError`.],
   none,
 )
 
 #api-entry(
   name: "Audio.beats",
   kind: "method",
+  params: ((name: "low / high", type: "float | None", default: "None", desc: [Solo los golpes de esa banda, en Hz, como en `pulse`.]),),
   returns: (type: "list[float]", desc: [Segundos desde el inicio de la pista en que empieza un sonido, en orden.]),
-  desc: [Son onsets, no una rejilla de tempo; para una rejilla regular usa `scene.tempo`. Suma `musica.start` cuando la pista ya sonó para obtener segundos de la línea de tiempo, por ejemplo para colocar marcas o animaciones en cada golpe.],
+  desc: [Son onsets, no una rejilla de tempo; para la rejilla usa `tempo`. Suma `musica.start` cuando la pista ya sonó para obtener segundos de la línea de tiempo, por ejemplo para colocar marcas o animaciones en cada golpe.],
 )[
 ```python
 >>>from gaanim import *
@@ -235,6 +236,41 @@ está en el repositorio de Gaanim; no viene con el paquete instalado.
 >>>musica = scene.media.audio("assets/ritmo.ogg")
 scene.play(musica)
 golpes = [musica.start + t for t in musica.beats()]
+bombos = [musica.start + t for t in musica.beats(low=40, high=120)]
+```
+]
+
+#api-entry(
+  name: "Audio.tempo",
+  kind: "method",
+  params: ((name: "min_bpm / max_bpm", type: "float", default: "60 / 200", desc: [Rango en que se busca el tempo.]),),
+  returns: (type: "AudioTempo", desc: [`bpm`, `offset` (segundos desde el inicio de la pista hasta su primer pulso, menos de un pulso) y `confidence`, de 0 a 1.]),
+  desc: [Estima un tempo estable: el periodo en que más se repiten los golpes, dando peso a los graves (bombo y bajo, 40–150 Hz), y la fase que pone los pulsos sobre esos golpes. Así `scene.tempo(t.bpm, offset=musica.start + t.offset)` alinea `wait_until(bar=...)` con la música. Sigue la `speed` y el `offset` de la pista. Sirve para música con pulso estable; con `confidence` por debajo de 0.3 no hay un pulso claro. No detecta secciones (drops, estribillos): el volumen confunde la entrada del bombo con un drop, así que esas marcas se colocan a mano con `analysis`. Un rango fuera de `0 < min_bpm < max_bpm <= 400` lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>musica = scene.media.audio("assets/ritmo.ogg")
+scene.play(musica)
+pulso = musica.tempo()
+scene.tempo(pulso.bpm, offset=musica.start + pulso.offset)
+scene.wait_until(bar=2)
+```
+]
+
+#api-entry(
+  name: "Audio.analysis",
+  kind: "method",
+  returns: (type: "AudioData", desc: [El análisis del archivo como números.]),
+  desc: [Para colocar cortes a mano con datos reales. `frame_rate` cuadros por segundo (unos 43) y `times`, el segundo del archivo de cada cuadro; `level`, el volumen de 0 a 1; `spectrum`, una fila por cuadro con la amplitud de 96 bandas logarítmicas (`frequencies`, en Hz), de 0 a 1 contra la parte fuerte de todo el archivo; `band(low, high)`, la amplitud de una banda por cuadro, y `onsets(low=, high=)`. Los tiempos son del archivo, antes del `offset` y la `speed` de la pista. Son listas de Python, listas para numpy si lo usas.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>musica = scene.media.audio("assets/ritmo.ogg")
+datos = musica.analysis()
+bombo = datos.band(40, 120)
+fuertes = [t for t, v in zip(datos.times, bombo) if v > 0.9]
 ```
 ]
 
@@ -269,9 +305,10 @@ también sirven para dibujar a mano o en un shader.
     (name: "bands", type: "int", default: "32", desc: [Bandas, de 1 a 256.]),
     (name: "low / high", type: "float", default: "40 / None", desc: [Rango en Hz; `high` es por defecto la frecuencia más alta del análisis, unos 11 kHz.]),
     (name: "smoothing", type: "float", default: "0.0", desc: [Suavizado de cada banda, en `[0, 1)`.]),
+    (name: "normalize", type: "str", default: "\"band\"", desc: [`"band"` mide cada banda contra su propio máximo; `"global"`, todas contra la más fuerte.]),
   ),
   returns: (type: "list[Computed]", desc: [Una señal de 0 a 1 por banda, de la más grave a la más aguda.]),
-  desc: [Reparte el rango en escala logarítmica, como el oído percibe el tono. Cada banda se mide contra su propio máximo, igual que `band`, así que los agudos también se mueven aunque suenen menos. Un rango inválido lanza `ValueError`.],
+  desc: [Reparte el rango en escala logarítmica, como el oído percibe el tono. Con `"band"`, igual que `band`, los agudos también se mueven aunque suenen menos; con `"global"` las barras conservan la forma real del espectro (graves altos, agudos bajos). Un rango inválido u otro `normalize` lanzan `ValueError`.],
   none,
 )
 

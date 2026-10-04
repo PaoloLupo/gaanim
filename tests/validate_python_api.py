@@ -2114,6 +2114,34 @@ def validate_audio_signals_contract(module):
     ):
         if not raises_error(ValueError, operation):
             failures.append("audio signals accepted an invalid band, smoothing, decay or source")
+    # The kick drum sounds on every beat at 120 BPM from second 2.
+    kicks = music.beats(low=40, high=120)
+    if not 10 <= len(kicks) < len(beats) or any(abs((k - 2.0) / 0.5 - round((k - 2.0) / 0.5)) > 0.1 for k in kicks):
+        failures.append(f"Audio.beats(low=, high=) did not keep only the kicks: {kicks}")
+    if not isinstance(music.pulse(0.1, low=40, high=120), module.Computed):
+        failures.append("Audio.pulse(low=, high=) is not a Computed")
+    tempo = music.tempo()
+    phase = tempo.offset % 0.5
+    if abs(tempo.bpm - 120) > 1 or min(phase, 0.5 - phase) > 0.04 or tempo.confidence < 0.3:
+        failures.append(f"Audio.tempo missed 120 BPM on the kicks: {tempo!r}")
+    data = music.analysis()
+    frames = len(data.times)
+    if not (len(data.level) == frames == len(data.spectrum) == len(data.band(40, 120))
+            and len(data.frequencies) == len(data.spectrum[0]) == 96
+            and abs(data.duration - 8.0) < 0.01 and data.onsets() and data.onsets(low=40, high=120)):
+        failures.append("Audio.analysis arrays do not line up")
+    for operation in (
+        lambda: music.tempo(min_bpm=0),
+        lambda: music.tempo(min_bpm=150, max_bpm=100),
+        lambda: music.pulse(0.1, low=40),
+        lambda: music.beats(high=100),
+        lambda: data.band(200, 100),
+        lambda: music.spectrum(8, normalize="loud"),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("audio analysis accepted an invalid tempo range, band or normalize")
+    if len(music.spectrum(8, normalize="global")) != 8:
+        failures.append("Audio.spectrum(normalize='global') does not return one Computed per band")
     return failures
 
 
