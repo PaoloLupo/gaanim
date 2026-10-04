@@ -161,8 +161,8 @@ pub(crate) fn active_segment<T>(
 }
 
 /// Resolve the background brush. With `gpu`, a shader paint draws a texture
-/// rendered on the render device and records its request there; otherwise
-/// the shader output is copied through the CPU.
+/// rendered on the render device and adds its request to the frame's
+/// requests there; otherwise the shader output is copied through the CPU.
 /// `rest` is the [`gaanim_animation::AmbientClock`] rest: the segment comes
 /// from `time_seconds`, and a shader animates `rest` seconds further.
 fn resolve_canvas_background_brush(
@@ -171,31 +171,51 @@ fn resolve_canvas_background_brush(
     pixel_size: (u32, u32),
     time_seconds: f64,
     rest: f64,
-    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> (peniko::Brush, Option<kurbo::Affine>) {
     let paint = background.paint_at(time_seconds);
     let shader_time = time_seconds + rest;
-    let resolved = match (paint, gpu) {
-        // Uniforms follow the scene time; only the shader's clock rests.
-        (BackgroundPaint::Shader(shader), Some(gpu)) => shader
-            .gpu_request(pixel_size.0, pixel_size.1, shader_time)
-            .map(|request| {
-                request
-                    .in_frame((rect.width(), rect.height()))
-                    .with_values(shader.values_at(time_seconds))
-            })
-            .map(|request| {
-                let brush = peniko::Brush::Image(peniko::ImageBrush::new(request.image().clone()));
-                *gpu = Some(request);
-                brush
-            }),
-        (BackgroundPaint::Shader(shader), None) => shader.resolve_with_values(
+    let cpu_copy = |shader: &crate::background::ShaderBackground| {
+        shader.resolve_with_values(
             pixel_size.0,
             pixel_size.1,
             shader_time,
             (rect.width(), rect.height()),
             &shader.values_at(time_seconds),
-        ),
+        )
+    };
+    let resolved = match (paint, gpu) {
+        // Uniforms follow the scene time; only the shader's clock rests.
+        (BackgroundPaint::Shader(shader), Some(gpu)) => match shader
+            .gpu_request(pixel_size.0, pixel_size.1, shader_time)
+            .map(|request| {
+                request
+                    .in_frame((rect.width(), rect.height()))
+                    .with_values(shader.values_at(time_seconds))
+            }) {
+            // Each image is one texture: every draw of the same shader frame
+            // shares it, such as the canvas and what a glass shows of it, and
+            // other shaders (the backgrounds of both segments of a
+            // transition) have textures of their own. Another frame of a
+            // shader already drawn is copied through the CPU.
+            Ok(request) => {
+                let brush = peniko::Brush::Image(peniko::ImageBrush::new(request.image().clone()));
+                let image = request.image().data.id();
+                match gpu
+                    .iter()
+                    .position(|drawn| drawn.image().data.id() == image)
+                {
+                    Some(index) if gpu[index].draws_same(&request) => Ok(brush),
+                    Some(_) => cpu_copy(shader),
+                    None => {
+                        gpu.push(request);
+                        Ok(brush)
+                    }
+                }
+            }
+            Err(error) => Err(error),
+        },
+        (BackgroundPaint::Shader(shader), None) => cpu_copy(shader),
         _ => paint.resolve_brush(
             pixel_size.0,
             pixel_size.1,
@@ -228,7 +248,7 @@ fn fill_canvas_background(
     pixel_size: (u32, u32),
     time_seconds: f64,
     rest: f64,
-    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> CanvasPaint {
     let (rect, transform) = canvas_background_geometry(background);
     let (brush, brush_transform) =
@@ -1187,6 +1207,7 @@ fn fill_transition_background(
     pixel_size: (u32, u32),
     transition: Option<&gaanim_scene::SceneTransitionFrame>,
     rest: f64,
+    gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) {
     let Some(frame) = transition else {
         return;
@@ -1198,7 +1219,7 @@ fn fill_transition_background(
         return;
     }
     push_transition_mask(scene, mask);
-    fill_canvas_background(scene, background, pixel_size, incoming, rest, None);
+    fill_canvas_background(scene, background, pixel_size, incoming, rest, gpu);
     pop_transition_mask(scene, mask);
 }
 
@@ -2364,6 +2385,9 @@ fn compile_scene_with_pins(
             .and_then(|width| output_pixels_per_unit(camera, width))
             .unwrap_or_else(|| camera.pixels_per_unit() * orthographic_zoom(camera))
     });
+    // A renderer that runs the effects draws shader backgrounds on its own
+    // device too, for the canvas and for what glass shows of it.
+    let mut background_requests = Vec::new();
     let effect_layers = if effects {
         let evaluated = world_effects(world, &extraction.elements, extraction.background_time);
         let mut layers = divert_effects(
@@ -2382,25 +2406,23 @@ fn compile_scene_with_pins(
             extraction.background_time,
             0.0,
             effect_density,
+            Some(&mut background_requests),
         ));
         layers
     } else {
         Vec::new()
     };
     let background = world.get_resource::<CanvasBackground>();
-    // A renderer that runs the effects draws a shader background on its own
-    // device too.
-    let mut background_request = None;
     let mut frame = compose_frame(
         &extraction.elements,
         extraction.transition.as_ref(),
         background.map(|background| (background, background.pixel_size)),
         extraction.background_time,
         0.0,
-        effects.then_some(&mut background_request),
+        effects.then_some(&mut background_requests),
     );
     frame.effects = effect_layers;
-    frame.background = background_request;
+    frame.backgrounds = background_requests;
     if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
         append_live_overlay(frame.top_mut(), overlay);
     }
@@ -3255,7 +3277,7 @@ fn compose_elements(
     background: Option<(&CanvasBackground, (u32, u32))>,
     time_seconds: f64,
     rest: f64,
-    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    mut gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> vello::Scene {
     let transition = transition.filter(|frame| !frame.is_empty());
     let mut main_scene = vello::Scene::new();
@@ -3267,9 +3289,16 @@ fn compose_elements(
             pixel_size,
             transition_background_time(transition, time_seconds),
             rest,
-            gpu,
+            gpu.as_deref_mut(),
         ));
-        fill_transition_background(&mut main_scene, canvas_bg, pixel_size, transition, rest);
+        fill_transition_background(
+            &mut main_scene,
+            canvas_bg,
+            pixel_size,
+            transition,
+            rest,
+            gpu,
+        );
     }
     append_extracted_elements(&mut main_scene, elements, transition, canvas_paint.as_ref());
     main_scene
@@ -3362,7 +3391,9 @@ fn world_glasses(world: &mut World) -> Vec<CapturedGlass> {
 /// it as glass: an image, cut to the drawable's outline, that the returned
 /// layers fill with everything drawn earlier (over the canvas `background`
 /// at `time_seconds`) through the glass passes, at `pixels_per_unit`. A
-/// glass drawable without an outline is drawn plainly.
+/// glass drawable without an outline is drawn plainly. With `gpu`, a shader
+/// background is the texture the renderer draws for the frame (see
+/// [`resolve_canvas_background_brush`]), not a CPU copy of it.
 fn divert_glass(
     elements: &mut Vec<ExtractedElement>,
     glasses: &[CapturedGlass],
@@ -3370,6 +3401,7 @@ fn divert_glass(
     time_seconds: f64,
     rest: f64,
     pixels_per_unit: f64,
+    mut gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> Vec<crate::object_effects::EffectLayer> {
     use crate::object_effects::{EffectLayer, effect_image, effect_texture_size, glass_passes};
     let time = time_seconds as f32;
@@ -3421,7 +3453,14 @@ fn divert_glass(
         let top = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         let mut behind = vello::Scene::new();
         if let Some((canvas, pixel_size)) = background {
-            fill_canvas_background(&mut behind, canvas, pixel_size, time_seconds, rest, None);
+            fill_canvas_background(
+                &mut behind,
+                canvas,
+                pixel_size,
+                time_seconds,
+                rest,
+                gpu.as_deref_mut(),
+            );
         }
         append_element_run(&mut behind, &elements[..first], None);
         let mut scene = vello::Scene::new();
@@ -3779,10 +3818,11 @@ pub struct ComposedFrame {
     /// draws into their images before the frame; see
     /// [`crate::object_effects`].
     pub effects: Vec<crate::object_effects::EffectLayer>,
-    /// The shader background the frame draws, which a GPU renderer draws
-    /// into its image with [`crate::background::GpuShaderBackgrounds`]
-    /// before the frame, without reading it back to the CPU.
-    pub background: Option<ShaderBackgroundRequest>,
+    /// The shader backgrounds the frame draws (both segments' under a
+    /// transition), which a GPU renderer draws into their images with
+    /// [`crate::background::GpuShaderBackgrounds`] before the frame,
+    /// without reading them back to the CPU.
+    pub backgrounds: Vec<ShaderBackgroundRequest>,
 }
 
 /// The parts of a frame under a shader transition besides the outgoing
@@ -3844,7 +3884,7 @@ impl ComposedFrame {
             // Effects and the background draw into textures of their own,
             // placed by their images in the scene.
             effects: self.effects,
-            background: self.background,
+            backgrounds: self.backgrounds,
         }
     }
 }
@@ -3858,7 +3898,7 @@ fn compose_frame(
     background: Option<(&CanvasBackground, (u32, u32))>,
     time_seconds: f64,
     rest: f64,
-    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    mut gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> ComposedFrame {
     let Some((frame, shader)) = transition
         .filter(|frame| !frame.is_empty())
@@ -3868,7 +3908,7 @@ fn compose_frame(
             scene: compose_elements(elements, transition, background, time_seconds, rest, gpu),
             transition: None,
             effects: Vec::new(),
-            background: None,
+            backgrounds: Vec::new(),
         };
     };
     let side = |side: gaanim_scene::TransitionSide| -> Vec<ExtractedElement> {
@@ -3881,7 +3921,14 @@ fn compose_frame(
     let (outgoing_time, incoming_time) = frame.backgrounds.unwrap_or((time_seconds, time_seconds));
     let mut outgoing = vello::Scene::new();
     let outgoing_paint = background.map(|(canvas, pixel_size)| {
-        fill_canvas_background(&mut outgoing, canvas, pixel_size, outgoing_time, rest, gpu)
+        fill_canvas_background(
+            &mut outgoing,
+            canvas,
+            pixel_size,
+            outgoing_time,
+            rest,
+            gpu.as_deref_mut(),
+        )
     });
     append_extracted_elements(
         &mut outgoing,
@@ -3891,7 +3938,7 @@ fn compose_frame(
     );
     let mut incoming = vello::Scene::new();
     let incoming_paint = background.map(|(canvas, pixel_size)| {
-        fill_canvas_background(&mut incoming, canvas, pixel_size, incoming_time, rest, None)
+        fill_canvas_background(&mut incoming, canvas, pixel_size, incoming_time, rest, gpu)
     });
     append_extracted_elements(
         &mut incoming,
@@ -3918,7 +3965,7 @@ fn compose_frame(
             shader,
         }),
         effects: Vec::new(),
-        background: None,
+        backgrounds: Vec::new(),
     }
 }
 
@@ -4159,7 +4206,7 @@ pub fn compose_captured(
     store: &mut crate::fragment::FragmentStore,
     background: Option<(&CanvasBackground, (u32, u32))>,
     pixels_per_unit: Option<f64>,
-    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> vello::Scene {
     compose_captured_layers(frame, store, background, pixels_per_unit, gpu, 0.0, None).flattened()
 }
@@ -4171,7 +4218,7 @@ pub fn compose_captured_at(
     store: &mut crate::fragment::FragmentStore,
     background: Option<(&CanvasBackground, (u32, u32))>,
     pixels_per_unit: Option<f64>,
-    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
     rest: f64,
 ) -> vello::Scene {
     compose_captured_layers(frame, store, background, pixels_per_unit, gpu, rest, None).flattened()
@@ -4186,7 +4233,7 @@ pub fn compose_captured_frame(
     store: &mut crate::fragment::FragmentStore,
     background: Option<(&CanvasBackground, (u32, u32))>,
     pixels_per_unit: Option<f64>,
-    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
     rest: f64,
     effect_density: f64,
 ) -> ComposedFrame {
@@ -4208,7 +4255,7 @@ fn compose_captured_layers(
     store: &mut crate::fragment::FragmentStore,
     background: Option<(&CanvasBackground, (u32, u32))>,
     pixels_per_unit: Option<f64>,
-    gpu: Option<&mut Option<ShaderBackgroundRequest>>,
+    mut gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
     rest: f64,
     effect_density: Option<f64>,
 ) -> ComposedFrame {
@@ -4296,6 +4343,7 @@ fn compose_captured_layers(
             frame.background_time,
             rest,
             density,
+            gpu.as_deref_mut(),
         ));
     }
     let transition = frame.transition.as_ref().map(CapturedTransition::frame);
@@ -4382,13 +4430,13 @@ pub fn external_frame_system(
         gaanim_math::Projection::Orthographic { zoom } => Some(zoom * cam.viewport.scale),
         _ => None,
     });
-    let mut shader_request = None;
+    let mut shader_requests = Vec::new();
     let mut composed = compose_captured_frame(
         &frame,
         &mut external.store,
         background,
         pixels_per_unit,
-        shader_frame.is_some().then_some(&mut shader_request),
+        shader_frame.is_some().then_some(&mut shader_requests),
         ambient.map_or(0.0, |clock| clock.rest),
         preview_effect_density(gaanim_camera.as_deref(), preview.as_deref()),
     );
@@ -4408,7 +4456,7 @@ pub fn external_frame_system(
     );
     external.store.end_frame();
     if let Some(frame) = shader_frame.as_mut() {
-        frame.0 = shader_request;
+        frame.0 = shader_requests;
     }
     if let Some(mut scene) = query_vello_scene.iter_mut().next() {
         if scene
@@ -5044,7 +5092,7 @@ pub fn gaanim_render_system(
         None => Vec::new(),
     };
     // Assemble the global composited Scene in Bevy world coordinates.
-    let mut shader_request = None;
+    let mut shader_requests = Vec::new();
     let background = canvas_bg.as_deref().map(|canvas_bg| {
         (
             canvas_bg,
@@ -5074,6 +5122,7 @@ pub fn gaanim_render_system(
             time_seconds,
             ambient.as_ref().map_or(0.0, |clock| clock.rest),
             preview_effect_density(gaanim_camera.as_deref(), preview.as_deref()),
+            shader_frame.is_some().then_some(&mut shader_requests),
         ));
     }
     if let Some(published) = effect_layers.as_deref_mut()
@@ -5093,10 +5142,10 @@ pub fn gaanim_render_system(
         background,
         time_seconds,
         ambient.map_or(0.0, |clock| clock.rest),
-        shader_frame.is_some().then_some(&mut shader_request),
+        shader_frame.is_some().then_some(&mut shader_requests),
     );
     if let Some(frame) = shader_frame.as_mut() {
-        frame.0 = shader_request;
+        frame.0 = shader_requests;
     }
     if let Some(overlay) = live.as_deref() {
         append_live_overlay(composed.top_mut(), overlay);
@@ -6780,16 +6829,21 @@ mod tests {
         };
         let (rect, _) = canvas_background_geometry(&background);
 
-        let mut request = None;
+        let mut requests = Vec::new();
         let (brush, transform) = resolve_canvas_background_brush(
             &background,
             rect,
             (480, 270),
             1.0,
             0.0,
-            Some(&mut request),
+            Some(&mut requests),
         );
-        let request = request.expect("the shader frame is drawn on the render device");
+        let [request] = requests.as_slice() else {
+            panic!(
+                "the shader frame is drawn on the render device: {}",
+                requests.len()
+            );
+        };
         assert_eq!(request.time(), 1.0);
         let peniko::Brush::Image(image) = brush else {
             panic!("expected the placeholder image brush, got {brush:?}");
@@ -6809,28 +6863,164 @@ mod tests {
 
         // A resting presentation animates the shader further, in the same
         // segment.
-        let mut request = None;
+        let mut requests = Vec::new();
         resolve_canvas_background_brush(
             &background,
             rect,
             (480, 270),
             1.0,
             4.0,
-            Some(&mut request),
+            Some(&mut requests),
         );
-        assert_eq!(request.expect("still the shader segment").time(), 5.0);
+        assert_eq!(
+            requests.first().expect("still the shader segment").time(),
+            5.0
+        );
 
-        let mut request = None;
+        let mut requests = Vec::new();
         let (brush, _) = resolve_canvas_background_brush(
             &background,
             rect,
             (480, 270),
             2.5,
             4.0,
-            Some(&mut request),
+            Some(&mut requests),
         );
-        assert!(request.is_none(), "solid segments need no shader frame");
+        assert!(requests.is_empty(), "solid segments need no shader frame");
         assert!(matches!(brush, peniko::Brush::Solid(color) if color == solid));
+    }
+
+    #[test]
+    fn glass_shows_the_shader_background_texture_the_frame_draws() {
+        let shader = crate::background::ShaderBackground::new(
+            "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
+             return vec4<f32>(uv, time + resolution.x * 0.0, 1.0);\n}",
+            peniko::Color::BLACK,
+        )
+        .unwrap();
+        let background = CanvasBackground {
+            paint: BackgroundPaint::Shader(shader.clone()),
+            segment_paints: Vec::new(),
+            pixel_size: (480, 270),
+            bounds: gaanim_math::Bounds3D::new_2d(-8.0, -4.5, 8.0, 4.5),
+            parameters: Vec::new(),
+        };
+        let canvas = Some((&background, background.pixel_size));
+        let root = Entity::from_raw_u32(21).unwrap();
+        let mut lens = group_member(root, 0.0, 1.0, 1.0);
+        lens.glass_root = Some(root);
+        lens.outline = Some(Arc::new(kurbo::Rect::new(0.0, 0.0, 1.0, 1.0).to_path(0.1)));
+        let mut elements = vec![group_member(Entity::PLACEHOLDER, -3.0, 1.0, 1.0), lens];
+        let glasses = [CapturedGlass {
+            root,
+            glass: crate::object_effects::Glass::LIQUID,
+        }];
+
+        let mut requests = Vec::new();
+        let layers = divert_glass(
+            &mut elements,
+            &glasses,
+            canvas,
+            1.0,
+            0.0,
+            10.0,
+            Some(&mut requests),
+        );
+        assert_eq!(layers.len(), 1);
+        let drawn = requests
+            .first()
+            .cloned()
+            .expect("the glass reads the texture the renderer draws");
+        // The canvas behind the glass draws the same texture.
+        compose_frame(&elements, None, canvas, 1.0, 0.0, Some(&mut requests));
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].draws_same(&drawn));
+        assert!(!shader.has_cpu_copy(), "nothing is copied through the CPU");
+
+        // Another frame of the shader in the same scene cannot share the
+        // texture, so it is copied through the CPU.
+        let paint = fill_canvas_background(
+            &mut vello::Scene::new(),
+            &background,
+            background.pixel_size,
+            2.0,
+            0.0,
+            Some(&mut requests),
+        );
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].draws_same(&drawn));
+        assert!(!matches!(
+            &paint.brush,
+            peniko::Brush::Image(image) if image.image.data.id() == drawn.image().data.id()
+        ));
+        assert!(shader.has_cpu_copy());
+    }
+
+    #[test]
+    fn both_segments_of_a_transition_draw_their_shader_backgrounds_on_the_gpu() {
+        let shader = |red: f32| {
+            crate::background::ShaderBackground::new(
+                format!(
+                    "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {{\n\
+                     return vec4<f32>({red:.1}, uv.y, time * 0.0 + resolution.x * 0.0, 1.0);\n}}"
+                ),
+                peniko::Color::BLACK,
+            )
+            .unwrap()
+        };
+        let (outgoing, incoming) = (shader(1.0), shader(0.0));
+        let segment = |start_time, end_time, shader: &crate::background::ShaderBackground| {
+            SegmentBackgroundPaint {
+                start_time,
+                end_time,
+                paint: Some(BackgroundPaint::Shader(shader.clone())),
+                hold_at_end: false,
+            }
+        };
+        let background = CanvasBackground {
+            paint: BackgroundPaint::solid(peniko::Color::BLACK),
+            segment_paints: vec![segment(0.0, 2.0, &outgoing), segment(2.0, 4.0, &incoming)],
+            pixel_size: (480, 270),
+            bounds: gaanim_math::Bounds3D::new_2d(-8.0, -4.5, 8.0, 4.5),
+            parameters: Vec::new(),
+        };
+        let canvas = Some((&background, background.pixel_size));
+        let blend = gaanim_scene::TransitionShaderFrame {
+            shader: Arc::new(gaanim_scene::TransitionShader {
+                source: String::new(),
+                uniforms: Vec::new(),
+                values: Vec::new(),
+                data: None,
+            }),
+            progress: 0.5,
+            values: Vec::new(),
+        };
+        let reveal = gaanim_scene::TransitionMask {
+            path: kurbo::Rect::new(-2.0, -2.0, 2.0, 2.0).to_path(0.1),
+            rule: peniko::Fill::NonZero,
+            fade: None,
+        };
+        // A shader transition draws each side over its own background; a
+        // geometric one draws the incoming background inside its reveal.
+        for frame in [
+            gaanim_scene::SceneTransitionFrame {
+                shader: Some(blend),
+                backgrounds: Some((1.9, 2.1)),
+                ..Default::default()
+            },
+            gaanim_scene::SceneTransitionFrame {
+                incoming_mask: Some(reveal),
+                backgrounds: Some((1.9, 2.1)),
+                ..Default::default()
+            },
+        ] {
+            let mut requests = Vec::new();
+            compose_frame(&[], Some(&frame), canvas, 2.0, 0.0, Some(&mut requests));
+            assert_eq!(requests.len(), 2, "one texture per segment");
+            assert_ne!(requests[0].image().data.id(), requests[1].image().data.id());
+            assert_eq!((requests[0].time(), requests[1].time()), (1.9, 2.1));
+        }
+        assert!(!outgoing.has_cpu_copy() && !incoming.has_cpu_copy());
     }
 
     #[test]
@@ -6858,7 +7048,7 @@ mod tests {
         let target = gpu.target(width, height);
         let mut backgrounds = crate::background::GpuShaderBackgrounds::default();
         for resident in [false, true] {
-            let mut request = None;
+            let mut requests = Vec::new();
             let mut world = vello::Scene::new();
             fill_canvas_background(
                 &mut world,
@@ -6866,10 +7056,10 @@ mod tests {
                 (width, height),
                 0.0,
                 0.0,
-                resident.then_some(&mut request),
+                resident.then_some(&mut requests),
             );
             if resident {
-                backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, request.as_ref());
+                backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &requests);
             }
             let mut screen = vello::Scene::new();
             screen.append(&world, Some(world_to_screen));

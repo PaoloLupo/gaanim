@@ -83,7 +83,7 @@ pub struct GpuContext {
     transition_targets: Option<[(vello::wgpu::Texture, vello::wgpu::TextureView); 2]>,
     /// Textures of drawables drawn through a shader effect.
     effects: gaanim_renderer::object_effects::ObjectEffects,
-    /// The texture of a shader background, drawn on this device.
+    /// The textures of shader backgrounds, drawn on this device.
     backgrounds: gaanim_renderer::background::GpuShaderBackgrounds,
     /// Multiplier of Vello's bump buffers; it only grows during an export.
     bump_scale: u32,
@@ -344,26 +344,26 @@ impl GpuContext {
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
-        self.render_frame_layers(scene, None, &[], None, base_color, post)
+        self.render_frame_layers(scene, None, &[], &[], base_color, post)
     }
 
     /// [`Self::render_frame`] for a frame under a shader transition: `scene`
     /// is the outgoing segment, `layers` the incoming one and the layer
     /// above, which `post` (with its transition) blends. `effects` fill the
-    /// images of drawables drawn through a shader effect, and `background`
-    /// the image of a shader background.
+    /// images of drawables drawn through a shader effect, and `backgrounds`
+    /// the images of shader backgrounds.
     pub fn render_frame_layers(
         &mut self,
         scene: &vello::Scene,
         layers: Option<&TransitionScenes>,
         effects: &[gaanim_renderer::object_effects::EffectLayer],
-        background: Option<&gaanim_renderer::background::ShaderBackgroundRequest>,
+        backgrounds: &[gaanim_renderer::background::ShaderBackgroundRequest],
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
         loop {
             if let Some(pixels) =
-                self.render_attempt(scene, layers, effects, background, base_color, post)?
+                self.render_attempt(scene, layers, effects, backgrounds, base_color, post)?
             {
                 return Ok(pixels);
             }
@@ -382,7 +382,7 @@ impl GpuContext {
         scene: &vello::Scene,
         layers: Option<&TransitionScenes>,
         effects: &[gaanim_renderer::object_effects::EffectLayer],
-        background: Option<&gaanim_renderer::background::ShaderBackgroundRequest>,
+        backgrounds: &[gaanim_renderer::background::ShaderBackgroundRequest],
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Option<Vec<u8>>, GpuContextError> {
@@ -412,11 +412,11 @@ impl GpuContext {
                 },
             );
         }
-        // The shader background and the effects fill images the frame
-        // draws, so they render first. The background stays on the GPU: no
-        // readback, no upload of its pixels.
+        // The shader backgrounds and the effects fill images the frame
+        // draws, so they render first. The backgrounds stay on the GPU: no
+        // readback, no upload of their pixels.
         self.backgrounds
-            .prepare(&self.device, &self.queue, &mut self.renderer, background);
+            .prepare(&self.device, &self.queue, &mut self.renderer, backgrounds);
         // Effects fill the images the frame draws, so they render first.
         if !effects.is_empty() || self.effects.is_active() {
             self.effects

@@ -697,7 +697,7 @@ where
             continue;
         }
 
-        let (vello_scene, layers, effects, background, post_process) = {
+        let (vello_scene, layers, effects, backgrounds, post_process) = {
             let resolved_camera = frame_camera(app.world());
             let composed = gaanim_renderer::pipeline::compile_frame_from_world(
                 app.world_mut(),
@@ -721,7 +721,7 @@ where
                 composed.scene,
                 composed.transition,
                 composed.effects,
-                composed.background,
+                composed.backgrounds,
                 post,
             )
         };
@@ -746,7 +746,7 @@ where
                 &vello_scene,
                 layers.as_ref(),
                 &effects,
-                background.as_ref(),
+                &backgrounds,
                 bg_color,
                 post_process.as_ref(),
             )
@@ -1074,7 +1074,7 @@ impl FrameRasterizer {
                 &composed.scene,
                 composed.transition.as_ref(),
                 &composed.effects,
-                composed.background.as_ref(),
+                &composed.backgrounds,
                 self.bg_color,
                 post.as_ref(),
             )
@@ -1111,11 +1111,11 @@ pub fn compose_bundle_layers(
     compose_bundle_parts(frame, background, store, width, height, fit, overlay, true)
 }
 
-/// [`compose_bundle_layers`]; with `gpu`, a shader background is left to
-/// the renderer's device as [`ComposedFrame::background`], otherwise it is
-/// drawn through the CPU.
+/// [`compose_bundle_layers`]; with `gpu`, shader backgrounds are left to
+/// the renderer's device as [`ComposedFrame::backgrounds`], otherwise they
+/// are drawn through the CPU.
 ///
-/// [`ComposedFrame::background`]: gaanim_renderer::pipeline::ComposedFrame::background
+/// [`ComposedFrame::backgrounds`]: gaanim_renderer::pipeline::ComposedFrame::backgrounds
 #[allow(clippy::too_many_arguments)]
 fn compose_bundle_parts(
     frame: &gaanim_bundle::Frame,
@@ -1133,17 +1133,17 @@ fn compose_bundle_parts(
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
     });
-    let mut background_request = None;
+    let mut background_requests = Vec::new();
     let mut composed = gaanim_renderer::pipeline::compose_captured_frame(
         &frame.capture,
         store,
         background.map(|background| (background, background.pixel_size)),
         pixels_per_unit,
-        gpu.then_some(&mut background_request),
+        gpu.then_some(&mut background_requests),
         0.0,
         pixels_per_unit.unwrap_or(gaanim_renderer::pipeline::DEFAULT_EFFECT_DENSITY),
     );
-    composed.background = background_request;
+    composed.backgrounds = background_requests;
     store.end_frame();
     if let Some(overlay) = overlay {
         gaanim_renderer::pipeline::append_live_overlay(composed.top_mut(), overlay);
@@ -1377,7 +1377,7 @@ where
                 &composed.scene,
                 composed.transition.as_ref(),
                 &composed.effects,
-                composed.background.as_ref(),
+                &composed.backgrounds,
                 background,
                 post_process.as_ref(),
             )
@@ -1461,7 +1461,7 @@ fn render_updated_world(
         &composed.scene,
         composed.transition.as_ref(),
         &composed.effects,
-        composed.background.as_ref(),
+        &composed.backgrounds,
         background,
         post_process.as_ref(),
     )
