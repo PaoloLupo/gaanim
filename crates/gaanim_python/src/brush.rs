@@ -40,7 +40,7 @@ impl PyBackground {
         py: Python<'_>,
         source: &Bound<'_, PyAny>,
         fallback: Option<PyColor>,
-        uniforms: Option<&Bound<'_, pyo3::types::PyDict>>,
+        uniforms: Option<&Bound<'_, pyo3::types::PyMapping>>,
         audio: Option<PyRef<'_, crate::pycanvas::PyAudio>>,
     ) -> PyResult<Self> {
         let fallback = fallback.map_or(peniko::Color::BLACK, |color| color.0);
@@ -64,7 +64,8 @@ impl PyBackground {
         };
         let mut named = Vec::new();
         if let Some(uniforms) = uniforms {
-            for (name, value) in uniforms.iter() {
+            for item in uniforms.items()?.iter() {
+                let (name, value) = item.extract::<(Bound<'_, PyAny>, Bound<'_, PyAny>)>()?;
                 let name = name.extract::<String>().map_err(|_| {
                     pyo3::exceptions::PyTypeError::new_err("uniform names must be strings")
                 })?;
@@ -231,13 +232,14 @@ impl PyPostProcess {
     fn shader(
         py: Python<'_>,
         source: &Bound<'_, PyAny>,
-        uniforms: Option<&Bound<'_, pyo3::types::PyDict>>,
+        uniforms: Option<&Bound<'_, pyo3::types::PyMapping>>,
         audio: Option<PyRef<'_, crate::pycanvas::PyAudio>>,
     ) -> PyResult<Self> {
         let mut names = Vec::new();
         let mut values = Vec::new();
         if let Some(uniforms) = uniforms {
-            for (name, value) in uniforms.iter() {
+            for item in uniforms.items()?.iter() {
+                let (name, value) = item.extract::<(Bound<'_, PyAny>, Bound<'_, PyAny>)>()?;
                 names.push(name.extract::<String>().map_err(|_| {
                     pyo3::exceptions::PyTypeError::new_err("uniform names must be strings")
                 })?);

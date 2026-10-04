@@ -2290,6 +2290,54 @@ def validate_shader_effect_contract(module):
     return failures
 
 
+def validate_shader_uniform_mappings(module, tree: ast.Module) -> list[str]:
+    """Shader ``uniforms=`` accept any mapping, and the stub says so.
+
+    A ``dict`` is invariant in its values, so typing the parameter as
+    ``dict[str, float | Parameter | ...]`` rejected a ``dict[str, Computed]``
+    of audio signals in pyright.
+    """
+    import types
+
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    amount = scene.viz.parameter(0.5)
+    uniforms = types.MappingProxyType({"amount": amount, "gain": 2.0})
+    post = (
+        "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> "
+        "{ return gaanim_scene(uv) * gaanim_uniforms.amount * gaanim_uniforms.gain; }"
+    )
+    background = (
+        "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> "
+        "{ return vec4<f32>(uv, gaanim_uniforms.amount * gaanim_uniforms.gain, 1.0); }"
+    )
+    transition = (
+        "fn transition(uv: vec2<f32>) -> vec4<f32> "
+        "{ return mix(gaanim_from(uv), gaanim_to(uv), progress * gaanim_uniforms.amount * gaanim_uniforms.gain); }"
+    )
+    for name, build in (
+        ("PostProcess.shader", lambda: module.PostProcess.shader(post, uniforms=uniforms)),
+        ("Background.shader", lambda: module.Background.shader(background, uniforms=uniforms)),
+        ("Transition.shader", lambda: module.Transition.shader(transition, 1.0, uniforms=uniforms)),
+    ):
+        try:
+            build()
+        except Exception as error:  # noqa: BLE001 - report any rejection
+            failures.append(f"{name} rejected a non-dict mapping of uniforms: {error}")
+    if module.PostProcess.shader(post, uniforms=uniforms).uniforms != ["amount", "gain"]:
+        failures.append("PostProcess.shader did not keep the mapping's uniform order")
+
+    for node in tree.body:
+        if not (isinstance(node, ast.ClassDef) and node.name in {"Background", "PostProcess", "Transition"}):
+            continue
+        for child in node.body:
+            if isinstance(child, ast.FunctionDef) and child.name == "shader":
+                for arg in child.args.kwonlyargs:
+                    if arg.arg == "uniforms" and "Mapping[" not in ast.unparse(arg.annotation):
+                        failures.append(f"{node.name}.shader types uniforms as {ast.unparse(arg.annotation)}")
+    return failures
+
+
 def validate_matte_metaballs_glass_contract(module):
     failures = []
     scene = module.Scene(frame=(16, 9))
@@ -3085,6 +3133,7 @@ def main() -> int:
     missing.extend(validate_copy_and_offset_contract(module))
     missing.extend(validate_audio_viz_contract(module))
     missing.extend(validate_shader_effect_contract(module))
+    missing.extend(validate_shader_uniform_mappings(module, tree))
     missing.extend(validate_matte_metaballs_glass_contract(module))
     missing.extend(validate_chalk_quantity_and_arc_contract(module))
     missing.extend(validate_layout_box_contract(module))
