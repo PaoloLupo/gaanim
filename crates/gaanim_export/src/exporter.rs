@@ -174,7 +174,8 @@ struct ExportPipeline {
     pub rx: Mutex<Receiver<Vec<u8>>>,
     pub waiting_for_gpu: bool,
     pub start_time: Instant,
-    pub last_frame_time: Instant,
+    /// When the progress bar last showed the speed, and at which frame.
+    pub last_report: (Instant, u64),
     pub export_width: u32,
     pub export_height: u32,
     pub resize_filter: image::imageops::FilterType,
@@ -332,10 +333,13 @@ fn export_pipeline_system(
                 if pipeline.rendered_frames.is_multiple_of(10)
                     || pipeline.rendered_frames == pipeline.total_frames
                 {
-                    let speed = 10.0 / pipeline.last_frame_time.elapsed().as_secs_f64();
+                    let (reported_at, reported_frames) = pipeline.last_report;
+                    let frames = pipeline.rendered_frames - reported_frames;
+                    let speed = frames as f64 / reported_at.elapsed().as_secs_f64();
                     pipeline
                         .progress_bar
                         .set_message(format!("{:.1} fps", speed));
+                    pipeline.last_report = (Instant::now(), pipeline.rendered_frames);
                 }
                 pipeline.progress_bar.inc(1);
 
@@ -404,8 +408,6 @@ fn export_pipeline_system(
             }
         }
     }
-
-    pipeline.last_frame_time = Instant::now();
 
     timeline.seek_request = Some(pipeline.current_time);
 
@@ -612,7 +614,7 @@ where
         rx: Mutex::new(rx),
         waiting_for_gpu: false,
         start_time,
-        last_frame_time: Instant::now(),
+        last_report: (Instant::now(), 0),
         export_width: config.width,
         export_height: config.height,
         resize_filter,
@@ -712,7 +714,7 @@ where
     let pb = create_progress_bar(total_frames);
 
     let mut current_time = render_start;
-    let mut last_report = Instant::now();
+    let mut last_report = (Instant::now(), 0_u64);
     let mut timings = ExportTimings {
         setup: start_time.elapsed(),
         ..Default::default()
@@ -727,12 +729,13 @@ where
                 other => ExportError::Capture(format!("Encoder push error: {}", other)),
             })?;
             timings.encoder_wait += encoder_wait_started_at.elapsed();
-            if delivered.is_multiple_of(10) || delivered == total_frames - 1 {
-                let speed = 10.0 / last_report.elapsed().as_secs_f64();
-                pb.set_message(format!("{:.1} fps", speed));
-                last_report = Instant::now();
-            }
             delivered += 1;
+            if delivered.is_multiple_of(10) || delivered == total_frames {
+                let (reported_at, reported) = last_report;
+                let speed = (delivered - reported) as f64 / reported_at.elapsed().as_secs_f64();
+                pb.set_message(format!("{:.1} fps", speed));
+                last_report = (Instant::now(), delivered);
+            }
             pb.inc(1);
             export_progress(&telemetry, delivered, total_frames);
             Ok(())
