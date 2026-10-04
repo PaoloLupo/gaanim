@@ -66,16 +66,9 @@ impl WatchScope {
             return Some(ProjectChange::Source);
         }
         let relative = path.strip_prefix(&self.root).ok()?;
-        let ignored = relative.components().any(|component| {
-            component.as_os_str().to_str().is_some_and(|name| {
-                // Hidden entries cover .git, .venv, and editor swap files.
-                name.starts_with('.')
-                    || matches!(
-                        name,
-                        "venv" | "env" | "__pycache__" | "exports" | "snapshots" | "target"
-                    )
-            })
-        });
+        let ignored = relative
+            .components()
+            .any(|component| component.as_os_str().to_str().is_some_and(is_ignored_name));
         if ignored {
             return None;
         }
@@ -101,6 +94,61 @@ impl WatchScope {
             ProjectChange::Assets
         })
     }
+
+    /// The project's top-level folders worth watching recursively.
+    fn watched_folders(&self) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
+        let mut folders: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .map(|entry| entry.path())
+            .filter(|path| self.is_watched_folder(path))
+            .collect();
+        folders.sort();
+        folders
+    }
+
+    /// Whether `path` is a top-level folder of the project that is watched.
+    fn is_watched_folder(&self, path: &Path) -> bool {
+        path.parent() == Some(self.root.as_path())
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| !is_ignored_name(name))
+    }
+}
+
+/// Entries whose changes never affect the scene. Hidden entries cover .git,
+/// .venv and editor swap files.
+fn is_ignored_name(name: &str) -> bool {
+    name.starts_with('.')
+        || matches!(
+            name,
+            "venv" | "env" | "__pycache__" | "exports" | "snapshots" | "target"
+        )
+}
+
+/// Watch the project root's own entries and each watched top-level folder
+/// recursively. Watching the root recursively would also register every
+/// folder of .venv and .git with the system, which can exhaust Linux's
+/// inotify watches and leave hot reload off.
+fn watch_project(watcher: &mut impl Watcher, scope: &WatchScope) -> notify::Result<()> {
+    watcher.watch(&scope.root, RecursiveMode::NonRecursive)?;
+    for folder in scope.watched_folders() {
+        watch_folder(watcher, &folder);
+    }
+    Ok(())
+}
+
+fn watch_folder(watcher: &mut impl Watcher, folder: &Path) {
+    if let Err(error) = watcher.watch(folder, RecursiveMode::Recursive) {
+        console::warn(
+            "watch",
+            format!("could not watch {}: {error}", folder.display()),
+        );
+    }
 }
 
 fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender<ProjectChange>) {
@@ -113,7 +161,7 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
         }
     };
 
-    if let Err(e) = watcher.watch(&scope.root, RecursiveMode::Recursive) {
+    if let Err(e) = watch_project(&mut watcher, &scope) {
         console::error(
             "watch",
             format!(
@@ -152,6 +200,14 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
                 );
                 if !relevant {
                     continue;
+                }
+                // A folder created at the top of the project is watched too.
+                if matches!(event.kind, EventKind::Create(_)) {
+                    for path in &event.paths {
+                        if path.is_dir() && scope.is_watched_folder(path) {
+                            watch_folder(&mut watcher, path);
+                        }
+                    }
                 }
                 let Some(change) = event_change(&event.paths, &scope) else {
                     continue;
@@ -222,6 +278,34 @@ mod tests {
             event_change(&[temp.path().join("exports/generated.py")], &scope),
             None
         );
+    }
+
+    #[test]
+    fn only_project_folders_are_watched_recursively() {
+        let temp = tempfile::tempdir().unwrap();
+        for folder in [
+            "src/sections",
+            "assets",
+            ".venv/Lib/site-packages",
+            ".git/objects",
+            "venv",
+            "target/release",
+            "exports",
+            "__pycache__",
+        ] {
+            std::fs::create_dir_all(temp.path().join(folder)).unwrap();
+        }
+        std::fs::write(temp.path().join("main.py"), "").unwrap();
+        let scope = WatchScope {
+            script_path: temp.path().join("main.py"),
+            root: temp.path().to_path_buf(),
+        };
+        assert_eq!(
+            scope.watched_folders(),
+            [temp.path().join("assets"), temp.path().join("src")]
+        );
+        // Nested folders are covered by their top-level folder's watch.
+        assert!(!scope.is_watched_folder(&temp.path().join("src/sections")));
     }
 
     #[test]
