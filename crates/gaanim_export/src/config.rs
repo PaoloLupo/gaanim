@@ -296,7 +296,9 @@ mod tests {
                 QualityPreset::Standard,
                 QualityPreset::Production,
             ] {
-                let config = ExportConfig::new(path).with_quality(quality).apply_presets();
+                let config = ExportConfig::new(path)
+                    .with_quality(quality)
+                    .apply_presets();
                 assert_eq!(config.fps, 30, "{path} {quality:?}");
                 assert_eq!(config.crf, quality.crf(), "{path} {quality:?}");
             }

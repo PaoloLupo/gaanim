@@ -136,11 +136,8 @@ fn note_playback_system(
         .iter()
         .any(|video| video.last_frame != Some(video.frame_index(time)));
     let sounding = sinks.iter().any(|sink| !sink.is_paused() && !sink.empty());
-    state.active |= moved
-        || timeline.is_playing
-        || timeline.seek_request.is_some()
-        || decoding
-        || sounding;
+    state.active |=
+        moved || timeline.is_playing || timeline.seek_request.is_some() || decoding || sounding;
 }
 
 /// A presentation, a drag, an animating playback bar, or a display that

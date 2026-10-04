@@ -1085,7 +1085,12 @@ mod tests {
         for frame_idx in 0..12u8 {
             let path = directory.join(format!("f_{frame_idx:03}.png"));
             let image = image::open(&path).expect("frame written").into_rgb8();
-            assert_eq!(image.get_pixel(0, 0).0, [frame_idx; 3], "{}", path.display());
+            assert_eq!(
+                image.get_pixel(0, 0).0,
+                [frame_idx; 3],
+                "{}",
+                path.display()
+            );
         }
         let _ = std::fs::remove_dir_all(directory);
     }

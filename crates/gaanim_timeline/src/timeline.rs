@@ -4368,8 +4368,7 @@ fn apply_lens_spec(
             // alpha, producing the cross-fade from outline to fill
             // that the Write animation needs.
             let v = *from + (*to - *from) * t as f32;
-            if let Some(mut progress) =
-                world.get_mut::<gaanim_animation::FillDrawProgress>(target)
+            if let Some(mut progress) = world.get_mut::<gaanim_animation::FillDrawProgress>(target)
             {
                 if progress.0 != v {
                     progress.0 = v;
