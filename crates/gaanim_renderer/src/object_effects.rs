@@ -13,7 +13,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use bevy::prelude::{Component, Entity};
 use gaanim_core::kurbo;
@@ -277,7 +277,8 @@ pub fn glass_passes(glass: &Glass, density: f64) -> Vec<(PostProcessShader, Vec<
 #[derive(Clone)]
 pub struct EffectLayer {
     /// What the drawable and its descendants draw, in world coordinates.
-    pub scene: Scene,
+    /// Shared, so publishing the layer to the render world copies a pointer.
+    pub scene: Arc<Scene>,
     /// Maps world coordinates onto the texture's pixels (Y down).
     pub to_pixels: kurbo::Affine,
     /// The image the frame draws in the drawable's place; its size is the
@@ -310,28 +311,55 @@ pub fn effect_texture_size(bounds: kurbo::Rect, pixels_per_unit: f64) -> Option<
     Some((side(bounds.width()), side(bounds.height()), density))
 }
 
+/// Compositions on a thread an image may go undrawn before
+/// [`effect_image`] forgets it. Several scenes composed in turn on one
+/// thread keep their images; despawned drawables release theirs.
+const IMAGE_RETENTION: u32 = 16;
+
+/// An image of [`effect_image`] and the compositions since it was last drawn.
+struct CachedImage {
+    image: ImageData,
+    idle: u32,
+}
+
+thread_local! {
+    static IMAGES: RefCell<HashMap<u64, CachedImage>> = RefCell::new(HashMap::new());
+}
+
 /// The image drawn in place of the drawable `key` at this size. The same
 /// key and size return the same image, so Vello refreshes one atlas slot.
 /// Images are kept per thread: two scenes composed at once, such as an
 /// export and a recording, share entity keys but never images.
 pub fn effect_image(key: u64, width: u32, height: u32) -> ImageData {
-    thread_local! {
-        static IMAGES: RefCell<HashMap<u64, ImageData>> = RefCell::new(HashMap::new());
-    }
     IMAGES.with_borrow_mut(|images| effect_image_in(images, key, width, height))
 }
 
+/// Call once per composition, before its effects take their images: forgets
+/// the images this thread has not drawn for [`IMAGE_RETENTION`]
+/// compositions, so drawables that are gone do not keep their pixels.
+pub fn age_effect_images() {
+    IMAGES.with_borrow_mut(age_images);
+}
+
+fn age_images(images: &mut HashMap<u64, CachedImage>) {
+    images.retain(|_, cached| {
+        cached.idle += 1;
+        cached.idle <= IMAGE_RETENTION
+    });
+}
+
 fn effect_image_in(
-    images: &mut HashMap<u64, ImageData>,
+    images: &mut HashMap<u64, CachedImage>,
     key: u64,
     width: u32,
     height: u32,
 ) -> ImageData {
-    if let Some(image) = images.get(&key)
-        && image.width == width
-        && image.height == height
+    if let Some(cached) = images.get_mut(&key)
+        && cached.image.width == width
+        && cached.image.height == height
     {
-        return image.clone();
+        cached.idle = 0;
+        return cached.image.clone();
     }
     // Vello copies the registered texture instead of reading these bytes; a
     // missing texture draws a transparent image.
@@ -342,7 +370,13 @@ fn effect_image_in(
         width,
         height,
     };
-    images.insert(key, image.clone());
+    images.insert(
+        key,
+        CachedImage {
+            image: image.clone(),
+            idle: 0,
+        },
+    );
     image
 }
 
@@ -536,5 +570,19 @@ mod tests {
         let first = effect_image(7, 10, 20);
         assert_eq!(first.data.id(), effect_image(7, 10, 20).data.id());
         assert_ne!(first.data.id(), effect_image(7, 11, 20).data.id());
+    }
+
+    #[test]
+    fn images_not_drawn_for_a_while_are_forgotten() {
+        let mut images = HashMap::new();
+        let kept = effect_image_in(&mut images, 1, 4, 4);
+        effect_image_in(&mut images, 2, 4, 4);
+        for _ in 0..IMAGE_RETENTION * 2 {
+            age_images(&mut images);
+            effect_image_in(&mut images, 1, 4, 4);
+        }
+        assert!(!images.contains_key(&2), "an undrawn image is released");
+        let again = effect_image_in(&mut images, 1, 4, 4);
+        assert_eq!(kept.data.id(), again.data.id(), "a drawn image is kept");
     }
 }

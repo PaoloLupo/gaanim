@@ -340,7 +340,7 @@ mod colors {
 }
 
 /// How long the coordinate label confirms a copy (seconds).
-const COPIED_FEEDBACK_SECS: f64 = 1.2;
+pub(crate) const COPIED_FEEDBACK_SECS: f64 = 1.2;
 
 /// Barra flotante con los modos de vista y los overlays.
 /// Solo visible cuando `enabled=true` (activado con `O`, como el modo interactivo con `I`).

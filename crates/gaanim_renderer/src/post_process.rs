@@ -621,14 +621,116 @@ struct PassBuffers {
     uniforms: Option<wgpu::Buffer>,
     data: Option<(Arc<[[f32; 4]]>, wgpu::Buffer)>,
     bloom: Option<BloomChain>,
+    /// The pass's bind group, kept while it binds the same resources.
+    bind_group: Option<(PassBindings, wgpu::BindGroup)>,
+}
+
+/// What a pass's bind group binds besides the sampler and the parameters,
+/// which last as long as the device.
+struct PassBindings {
+    pipeline: Arc<PostPipeline>,
+    source: wgpu::TextureView,
+    output: wgpu::TextureView,
+    uniforms: Option<wgpu::Buffer>,
+    data: Option<wgpu::Buffer>,
+    bloom: Option<wgpu::TextureView>,
+    /// The transition's incoming segment and layer above.
+    inputs: Option<[wgpu::TextureView; 2]>,
+}
+
+impl PassBindings {
+    fn matches(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.pipeline, &other.pipeline)
+            && self.source == other.source
+            && self.output == other.output
+            && self.uniforms == other.uniforms
+            && self.data == other.data
+            && self.bloom == other.bloom
+            && self.inputs == other.inputs
+    }
+
+    fn bind_group(
+        &self,
+        device: &wgpu::Device,
+        sampler: &wgpu::Sampler,
+        params: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        let mut entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&self.source),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&self.output),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params.as_entire_binding(),
+            },
+        ];
+        if let Some(buffer) = &self.uniforms {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 4,
+                resource: buffer.as_entire_binding(),
+            });
+        }
+        if let Some(buffer) = &self.data {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 5,
+                resource: buffer.as_entire_binding(),
+            });
+        }
+        if let Some(view) = &self.bloom {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(view),
+            });
+        }
+        if let Some([incoming, above]) = &self.inputs {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(incoming),
+            });
+            entries.push(wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::TextureView(above),
+            });
+        }
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("gaanim-post-process-bind-group"),
+            layout: &self.pipeline.layout,
+            entries: &entries,
+        })
+    }
+}
+
+/// The view of `texture`, kept in `cache` while the texture stays the same.
+fn cached_view(
+    cache: &mut Option<(wgpu::Texture, wgpu::TextureView)>,
+    texture: &wgpu::Texture,
+) -> wgpu::TextureView {
+    if let Some((cached, view)) = cache.as_ref()
+        && cached == texture
+    {
+        return view.clone();
+    }
+    let view = texture.create_view(&Default::default());
+    *cache = Some((texture.clone(), view.clone()));
+    view
 }
 
 /// Applies a [`PostProcessRequest`] to a render target on the GPU.
 ///
 /// Each pass writes a scratch texture the size of the camera frame, which is
 /// then copied back over the frame, so the next pass reads its result; pixels
-/// outside the frame are untouched. Used by both the interactive render world
-/// and the direct export.
+/// outside the frame are untouched. Views and bind groups are kept while the
+/// textures they bind stay the same. Used by both the interactive render
+/// world and the direct export.
 #[derive(Default)]
 pub struct GpuPostProcess {
     device: Option<wgpu::Device>,
@@ -638,7 +740,11 @@ pub struct GpuPostProcess {
     params: Option<wgpu::Buffer>,
     buffers: Vec<PassBuffers>,
     bloom: Option<BloomPipelines>,
-    scratch: Option<wgpu::Texture>,
+    scratch: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// The last target and its view.
+    target_view: Option<(wgpu::Texture, wgpu::TextureView)>,
+    /// The last transition inputs (incoming, above) and their views.
+    input_views: Option<([wgpu::Texture; 2], [wgpu::TextureView; 2])>,
     frame: Option<PreparedFrame>,
 }
 
@@ -664,6 +770,7 @@ impl GpuPostProcess {
             };
         }
         let Some(request) = request else {
+            self.release_bindings();
             return false;
         };
         let Some(region) = frame_region(request.frame, target.width(), target.height()) else {
@@ -695,9 +802,11 @@ impl GpuPostProcess {
             return false;
         }
 
-        let scratch = match &self.scratch {
-            Some(scratch) if scratch.width() == region[2] && scratch.height() == region[3] => {
-                scratch.clone()
+        let output_view = match &self.scratch {
+            Some((scratch, view))
+                if scratch.width() == region[2] && scratch.height() == region[3] =>
+            {
+                view.clone()
             }
             _ => {
                 let scratch = device.create_texture(&wgpu::TextureDescriptor {
@@ -714,8 +823,9 @@ impl GpuPostProcess {
                     usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
                     view_formats: &[],
                 });
-                self.scratch = Some(scratch.clone());
-                scratch
+                let view = scratch.create_view(&Default::default());
+                self.scratch = Some((scratch, view.clone()));
+                view
             }
         };
         let params = self
@@ -748,13 +858,21 @@ impl GpuPostProcess {
             &params_bytes(request, target.width(), target.height(), region),
         );
 
-        let source_view = target.create_view(&Default::default());
-        let output_view = scratch.create_view(&Default::default());
-        let input_views = inputs.map(|inputs| {
-            (
-                inputs.incoming.create_view(&Default::default()),
-                inputs.above.create_view(&Default::default()),
-            )
+        let source_view = cached_view(&mut self.target_view, target);
+        let input_views = inputs.map(|inputs| match &self.input_views {
+            Some(([incoming, above], views))
+                if incoming == inputs.incoming && above == inputs.above =>
+            {
+                views.clone()
+            }
+            _ => {
+                let textures = [inputs.incoming.clone(), inputs.above.clone()];
+                let views = textures
+                    .each_ref()
+                    .map(|texture| texture.create_view(&Default::default()));
+                self.input_views = Some((textures, views.clone()));
+                views
+            }
         });
         self.buffers.resize_with(jobs.len(), PassBuffers::default);
         let mut passes = Vec::with_capacity(jobs.len());
@@ -767,24 +885,6 @@ impl GpuPostProcess {
             let Some(pipeline) = pipeline else {
                 continue;
             };
-            let mut entries = vec![
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&source_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&output_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: params.as_entire_binding(),
-                },
-            ];
             let uniform_buffer = (!values.is_empty()).then(|| {
                 let bytes = uniform_bytes(values);
                 let buffer = match &buffers.uniforms {
@@ -803,12 +903,6 @@ impl GpuPostProcess {
                 queue.write_buffer(&buffer, 0, &bytes);
                 buffer
             });
-            if let Some(buffer) = &uniform_buffer {
-                entries.push(wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: buffer.as_entire_binding(),
-                });
-            }
             let data_buffer = shader.data.as_ref().map(|data| match &buffers.data {
                 Some((uploaded, buffer)) if Arc::ptr_eq(uploaded, data) => buffer.clone(),
                 _ => {
@@ -828,18 +922,12 @@ impl GpuPostProcess {
                     buffer
                 }
             });
-            if let Some(buffer) = &data_buffer {
-                entries.push(wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: buffer.as_entire_binding(),
-                });
-            }
             let mut bloom = Vec::new();
             let bloom_view = shader.bloom.then(|| {
                 let pipelines = self
                     .bloom
                     .get_or_insert_with(|| BloomPipelines::new(device));
-                let chain = match buffers.bloom.take() {
+                let mut chain = match buffers.bloom.take() {
                     Some(chain) if chain.fits(region[2], region[3]) => chain,
                     _ => BloomChain::new(device, region[2], region[3]),
                 };
@@ -853,34 +941,35 @@ impl GpuPostProcess {
                     shader.uniform_value(values, "threshold").unwrap_or(0.8),
                     shader.uniform_value(values, "radius").unwrap_or(0.5),
                 );
-                let view = chain.result().create_view(&Default::default());
+                let view = chain.result_view().clone();
                 buffers.bloom = Some(chain);
                 view
             });
-            if let Some(view) = &bloom_view {
-                entries.push(wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureView(view),
-                });
-            }
-            if shader.transition {
-                let Some((incoming, above)) = &input_views else {
+            let inputs = if shader.transition {
+                let Some(views) = &input_views else {
                     continue;
                 };
-                entries.push(wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::TextureView(incoming),
-                });
-                entries.push(wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: wgpu::BindingResource::TextureView(above),
-                });
-            }
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("gaanim-post-process-bind-group"),
-                layout: &pipeline.layout,
-                entries: &entries,
-            });
+                Some(views.clone())
+            } else {
+                None
+            };
+            let bindings = PassBindings {
+                pipeline: pipeline.clone(),
+                source: source_view.clone(),
+                output: output_view.clone(),
+                uniforms: uniform_buffer,
+                data: data_buffer,
+                bloom: bloom_view,
+                inputs,
+            };
+            let bind_group = match &buffers.bind_group {
+                Some((bound, bind_group)) if bound.matches(&bindings) => bind_group.clone(),
+                _ => {
+                    let bind_group = bindings.bind_group(device, &sampler, &params);
+                    buffers.bind_group = Some((bindings, bind_group.clone()));
+                    bind_group
+                }
+            };
             passes.push(PreparedPass {
                 pipeline,
                 bind_group,
@@ -898,11 +987,25 @@ impl GpuPostProcess {
     /// Drop the pending frame, keeping device resources for later frames.
     pub fn clear(&mut self) {
         self.frame = None;
+        self.release_bindings();
+    }
+
+    /// Forget the cached views and bind groups, which keep the textures
+    /// they bind alive, such as a canvas texture replaced by a resize.
+    fn release_bindings(&mut self) {
+        self.target_view = None;
+        self.input_views = None;
+        for buffers in &mut self.buffers {
+            buffers.bind_group = None;
+            if let Some(chain) = &mut buffers.bloom {
+                chain.unbind();
+            }
+        }
     }
 
     /// Record the passes prepared by [`Self::prepare`], if any.
     pub fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
-        let (Some(frame), Some(scratch)) = (&self.frame, &self.scratch) else {
+        let (Some(frame), Some((scratch, _))) = (&self.frame, &self.scratch) else {
             return;
         };
         let [x, y, width, height] = frame.region;

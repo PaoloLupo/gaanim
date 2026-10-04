@@ -31,12 +31,36 @@ pub enum OutputFit {
     Cover,
 }
 
+/// Highest frame rate a quality preset gives GIF and WebP output: animated
+/// images grow with every frame and gain little visibly above 30 fps.
+const ANIMATED_IMAGE_MAX_FPS: u32 = 30;
+
 impl QualityPreset {
     pub fn encoding_speed(self) -> EncodingSpeed {
         match self {
             Self::Draft => EncodingSpeed::Fast,
             Self::Standard => EncodingSpeed::Balanced,
             Self::Production => EncodingSpeed::Best,
+        }
+    }
+
+    /// Frame rate this preset exports `format` at.
+    pub fn fps_for(self, format: ExportFormat) -> u32 {
+        let fps = match self {
+            Self::Draft => 30,
+            Self::Standard | Self::Production => 60,
+        };
+        match format {
+            ExportFormat::Gif | ExportFormat::Webp => fps.min(ANIMATED_IMAGE_MAX_FPS),
+            _ => fps,
+        }
+    }
+
+    pub fn crf(self) -> u32 {
+        match self {
+            Self::Draft => 24,
+            Self::Standard => 18,
+            Self::Production => 14,
         }
     }
 }
@@ -135,6 +159,10 @@ pub struct ExportConfig {
     pub headless: bool,
     pub audio_tracks: Vec<AudioTrack>,
     pub telemetry: Option<ExportTelemetry>,
+    /// Quality and format whose preset last set `fps`, `crf` and
+    /// `encoding_speed`; `apply_presets` keeps later explicit values until
+    /// either changes.
+    applied_preset: Option<(QualityPreset, ExportFormat)>,
 }
 
 impl Default for ExportConfig {
@@ -157,6 +185,8 @@ impl Default for ExportConfig {
             headless: false,
             audio_tracks: Vec::new(),
             telemetry: None,
+            // The values above are the Standard preset for MP4.
+            applied_preset: Some((QualityPreset::Standard, ExportFormat::Mp4)),
         }
     }
 }
@@ -176,11 +206,9 @@ impl ExportConfig {
                 }
                 "webp" => {
                     config.format = ExportFormat::Webp;
-                    config.fps = 30;
                 }
                 "gif" => {
                     config.format = ExportFormat::Gif;
-                    config.fps = 30;
                 }
                 "png" => {
                     config.format = ExportFormat::PngSequence;
@@ -190,26 +218,23 @@ impl ExportConfig {
                 }
             }
         }
-        config
+        config.applied_preset = None;
+        config.apply_presets()
     }
 
+    /// Set `fps`, `crf` and `encoding_speed` from the quality preset for the
+    /// current format. Exporters call this again, so it changes nothing while
+    /// the quality and format it was last applied for are unchanged: values
+    /// set explicitly after a preset survive the export.
     pub fn apply_presets(mut self) -> Self {
-        self.encoding_speed = self.quality.encoding_speed();
-
-        match self.quality {
-            QualityPreset::Draft => {
-                self.fps = 30;
-                self.crf = 24;
-            }
-            QualityPreset::Standard => {
-                self.fps = 60;
-                self.crf = 18;
-            }
-            QualityPreset::Production => {
-                self.fps = 60;
-                self.crf = 14;
-            }
+        let preset = (self.quality, self.format);
+        if self.applied_preset == Some(preset) {
+            return self;
         }
+        self.encoding_speed = self.quality.encoding_speed();
+        self.fps = self.quality.fps_for(self.format);
+        self.crf = self.quality.crf();
+        self.applied_preset = Some(preset);
         self
     }
 
@@ -220,6 +245,7 @@ impl ExportConfig {
 
     pub fn with_quality(mut self, preset: QualityPreset) -> Self {
         self.quality = preset;
+        self.applied_preset = None;
         self.apply_presets()
     }
 
@@ -232,8 +258,8 @@ impl ExportConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioTrack, ExportConfig, ExportTelemetry};
-    use crate::encoder::VideoEncoder;
+    use super::{AudioTrack, ExportConfig, ExportTelemetry, QualityPreset};
+    use crate::encoder::{ExportFormat, VideoEncoder};
 
     #[test]
     fn presets_preserve_automatic_and_explicit_encoder_selection() {
@@ -246,6 +272,68 @@ mod tests {
 
         assert_eq!(automatic.video_encoder, VideoEncoder::Auto);
         assert_eq!(explicit.video_encoder, VideoEncoder::Libx264);
+    }
+
+    #[test]
+    fn default_config_matches_the_standard_mp4_preset() {
+        let default = ExportConfig::default();
+        let applied = ExportConfig {
+            applied_preset: None,
+            ..ExportConfig::default()
+        }
+        .apply_presets();
+
+        assert_eq!(default.fps, applied.fps);
+        assert_eq!(default.crf, applied.crf);
+        assert_eq!(default.encoding_speed, applied.encoding_speed);
+    }
+
+    #[test]
+    fn animated_image_presets_never_exceed_30_fps() {
+        for path in ["out.gif", "out.webp"] {
+            for quality in [
+                QualityPreset::Draft,
+                QualityPreset::Standard,
+                QualityPreset::Production,
+            ] {
+                let config = ExportConfig::new(path)
+                    .with_quality(quality)
+                    .apply_presets();
+                assert_eq!(config.fps, 30, "{path} {quality:?}");
+                assert_eq!(config.crf, quality.crf(), "{path} {quality:?}");
+            }
+        }
+        let video = ExportConfig::new("out.mp4").with_quality(QualityPreset::Production);
+        assert_eq!(video.fps, 60);
+    }
+
+    #[test]
+    fn exporter_presets_keep_explicit_fps_and_crf() {
+        let mut config = ExportConfig::new("out.mp4").with_quality(QualityPreset::Standard);
+        config.fps = 24;
+        config.crf = 20;
+        let config = config.apply_presets();
+        assert_eq!((config.fps, config.crf), (24, 20));
+
+        let mut config = ExportConfig::new("out.gif");
+        config.fps = 12;
+        assert_eq!(config.apply_presets().fps, 12);
+    }
+
+    #[test]
+    fn presets_reapply_when_quality_or_format_changes() {
+        let mut config = ExportConfig::new("out.mp4").with_quality(QualityPreset::Standard);
+        config.format = ExportFormat::Gif;
+        let mut config = config.apply_presets();
+        assert_eq!(config.fps, 30);
+
+        config.quality = QualityPreset::Draft;
+        let mut config = config.apply_presets();
+        assert_eq!(config.crf, 24);
+
+        // An explicit `with_quality` always applies its preset.
+        config.fps = 15;
+        assert_eq!(config.with_quality(QualityPreset::Draft).fps, 30);
     }
 
     #[test]

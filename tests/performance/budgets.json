@@ -1,5 +1,35 @@
 {
   "schema_version": 1,
+  "suites": {
+    "core": {
+      "description": "The medium reference scene that the profile budgets were calibrated on.",
+      "scenes": [
+        "examples/performance_benchmark.py"
+      ]
+    },
+    "gpu": {
+      "description": "Heavy scenes for the 0.10 performance work: objects, per-drawable effects, full-frame shaders, held frames and 3D. Budgets stay off until calibrated; compare runs with --compare.",
+      "scenes": [
+        { "scene": "examples/performance_objects.py", "budgets": false },
+        { "scene": "examples/performance_object_effects.py", "scenarios": ["seek", "preview", "export"], "budgets": false },
+        { "scene": "examples/performance_post.py", "scenarios": ["seek", "preview", "export"], "budgets": false },
+        { "scene": "examples/performance_heavy.py", "scenarios": ["seek", "preview", "export"], "budgets": false },
+        { "scene": "examples/performance_held.py", "scenarios": ["preview", "export"], "budgets": false },
+        { "scene": "examples/performance_3d.py", "scenarios": ["seek", "preview", "export"], "budgets": false },
+        { "scene": "examples/performance_particles.py", "scenarios": ["seek", "preview", "export"], "budgets": false },
+        { "scene": "examples/performance_repeater.py", "scenarios": ["seek", "preview", "export"], "budgets": false }
+      ]
+    },
+    "scaling": {
+      "description": "Cost against load: the same scenes at growing GAANIM_BENCHMARK_SCALE, to expose superlinear growth.",
+      "scenes": [
+        { "scene": "examples/performance_objects.py", "scenarios": ["reload", "preview"], "scales": [1, 2, 4], "budgets": false },
+        { "scene": "examples/performance_object_effects.py", "scenarios": ["preview"], "scales": [1, 2, 4], "budgets": false },
+        { "scene": "examples/performance_post.py", "scenarios": ["preview"], "scales": [1, 2, 4], "budgets": false },
+        { "scene": "examples/performance_3d.py", "scenarios": ["preview"], "scales": [1, 2], "budgets": false }
+      ]
+    }
+  },
   "profiles": {
     "smoke": {
       "warmups": 0,

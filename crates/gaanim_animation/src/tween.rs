@@ -804,7 +804,12 @@ pub fn evaluate_line_path_ranges_system(
             && source.0.strip
             && source.0.indices.is_none()
         {
-            *line = trim_line_strip_range(&source.0, start, end);
+            // Completed tweens keep producing the same strip; skip the write
+            // so the line is not reported as changed every frame.
+            let visible = trim_line_strip_range(&source.0, start, end);
+            if *line != visible {
+                *line = visible;
+            }
         }
     }
 }

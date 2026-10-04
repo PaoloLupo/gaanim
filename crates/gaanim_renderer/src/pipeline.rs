@@ -1681,7 +1681,11 @@ pub fn resolve_dynamic_clip_masks_system(
             .to_path(0.1);
             inverse.extend(local);
             local = inverse;
-            mask.rule = peniko::Fill::EvenOdd;
+            // Write only on a change, so an inverted mask does not read as
+            // changed every frame.
+            if mask.rule != peniko::Fill::EvenOdd {
+                mask.rule = peniko::Fill::EvenOdd;
+            }
         }
         if mask.path != local {
             mask.path = local;
@@ -2430,6 +2434,7 @@ fn compile_scene_with_pins(
     // device too, for the canvas and for what glass shows of it.
     let mut background_requests = Vec::new();
     let effect_layers = if effects {
+        crate::object_effects::age_effect_images();
         let evaluated = world_effects(world, &extraction.elements, extraction.background_time);
         let mut layers = divert_effects(
             &mut extraction.elements,
@@ -3557,7 +3562,7 @@ fn divert_glass(
         placeholder.backdrop = None;
         placeholder.view_bounds = Some(bounds);
         layers.push(EffectLayer {
-            scene,
+            scene: Arc::new(scene),
             to_pixels: kurbo::Affine::IDENTITY,
             image,
             request,
@@ -3831,7 +3836,7 @@ fn divert_effects(
         placeholder.tip = false;
         placeholder.backdrop = None;
         layers.push(EffectLayer {
-            scene,
+            scene: Arc::new(scene),
             to_pixels: image_to_world.inverse(),
             image,
             request,
@@ -4375,6 +4380,9 @@ fn compose_captured_layers(
         })
         .collect();
     divert_mattes(&mut elements, &frame.mattes);
+    if effect_density.is_some() {
+        crate::object_effects::age_effect_images();
+    }
     let effects = match effect_density {
         Some(density) if !frame.effects.is_empty() => divert_effects(
             &mut elements,
@@ -4415,7 +4423,26 @@ fn compose_captured_layers(
 /// transition; `None` the rest of the time. Written with the main scene by
 /// [`gaanim_render_system`] and [`external_frame_system`].
 #[derive(Resource, Default, Clone)]
-pub struct TransitionLayers(pub Option<TransitionScenes>);
+pub struct TransitionLayers(pub Option<SharedTransitionScenes>);
+
+/// [`TransitionScenes`] as published in [`TransitionLayers`]: the scenes are
+/// shared, so extracting them to the render world copies pointers.
+#[derive(Clone)]
+pub struct SharedTransitionScenes {
+    pub incoming: Arc<vello::Scene>,
+    pub above: Arc<vello::Scene>,
+    pub shader: gaanim_scene::TransitionShaderFrame,
+}
+
+impl From<TransitionScenes> for SharedTransitionScenes {
+    fn from(scenes: TransitionScenes) -> Self {
+        Self {
+            incoming: Arc::new(scenes.incoming),
+            above: Arc::new(scenes.above),
+            shader: scenes.shader,
+        }
+    }
+}
 
 /// Publish this frame's transition layers, keeping the resource unchanged
 /// while no transition runs.
@@ -4427,10 +4454,12 @@ fn publish_transition_layers(
     match layers {
         Some(layers) => {
             if layers.0.is_some() || transition.is_some() {
-                layers.0 = transition;
+                layers.0 = transition.map(SharedTransitionScenes::from);
             }
         }
-        None => commands.insert_resource(TransitionLayers(transition)),
+        None => commands.insert_resource(TransitionLayers(
+            transition.map(SharedTransitionScenes::from),
+        )),
     }
 }
 
@@ -4814,11 +4843,17 @@ pub fn gaanim_render_system(
             || reactive_readout_ref
                 .as_ref()
                 .is_some_and(|r| r.is_changed())
-            || lottie_ref.as_ref().is_some_and(|r| r.is_changed())
+            // A Lottie is sampled while hidden too, and marked changed only
+            // when its scene changes; that tick is stale once it reappears.
+            || lottie_ref
+                .as_ref()
+                .is_some_and(|r| r.is_changed() || revealed)
             || shadow_ref.as_ref().is_some_and(|r| r.is_changed())
             || glow_ref.as_ref().is_some_and(|r| r.is_changed())
             || blur_ref.as_ref().is_some_and(|r| r.is_changed())
-            || clip_ref.as_ref().is_some_and(|r| r.is_changed())
+            // `ClipMask` is not part of the fragment: it is applied when the
+            // frame is composed, and its presence reaches the fragment only
+            // through the shared group shadow, which is tracked below.
             || stroke_align_ref.as_ref().is_some_and(|r| r.is_changed())
             || stroke_profile_ref.as_ref().is_some_and(|r| r.is_changed())
             || chalk_ref.as_ref().is_some_and(|r| r.is_changed())
@@ -5131,6 +5166,7 @@ pub fn gaanim_render_system(
     // Drawables with a shader effect become images the canvas fills first.
     let layers = match effect_layers.as_deref_mut() {
         Some(_) => {
+            crate::object_effects::age_effect_images();
             let pixels_per_unit =
                 preview_effect_density(gaanim_camera.as_deref(), preview.as_deref());
             let evaluated = evaluate_effects(

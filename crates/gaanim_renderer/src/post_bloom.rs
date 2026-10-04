@@ -239,9 +239,21 @@ pub(crate) struct BloomChain {
     up: Vec<wgpu::Texture>,
     /// Uniforms of each down stage, then of each up stage.
     stages: Vec<wgpu::Buffer>,
+    /// View of the finest finished level, which the composite pass binds.
+    result_view: wgpu::TextureView,
+    /// The stages' bind groups, kept while the chain reads the same source.
+    bound: Option<BoundChain>,
+}
+
+/// Bind groups of a chain's stages and the source and sampler they bind.
+struct BoundChain {
+    source: wgpu::Texture,
+    sampler: wgpu::Sampler,
+    dispatches: Vec<BloomDispatch>,
 }
 
 /// One recorded dispatch of the chain.
+#[derive(Clone)]
 pub(crate) struct BloomDispatch {
     kind: StageKind,
     bind_group: wgpu::BindGroup,
@@ -305,11 +317,17 @@ impl BloomChain {
                 })
             })
             .collect();
+        let result_view = up
+            .first()
+            .unwrap_or(&down[0])
+            .create_view(&Default::default());
         Self {
             region: (width, height),
             down,
             up,
             stages,
+            result_view,
+            bound: None,
         }
     }
 
@@ -317,16 +335,23 @@ impl BloomChain {
         self.region == (width, height)
     }
 
-    /// The finest finished level, which the composite pass samples.
-    pub(crate) fn result(&self) -> &wgpu::Texture {
-        self.up.first().unwrap_or(&self.down[0])
+    /// A view of the finest finished level, which the composite pass
+    /// samples.
+    pub(crate) fn result_view(&self) -> &wgpu::TextureView {
+        &self.result_view
     }
 
-    /// Write this frame's stage uniforms and bind groups for a chain that
-    /// reads `region` of `source`.
+    /// Forget the bind groups, and with them the source they read.
+    pub(crate) fn unbind(&mut self) {
+        self.bound = None;
+    }
+
+    /// Write this frame's stage uniforms and return the dispatches of a
+    /// chain that reads `region` of `source`. Bind groups are rebuilt only
+    /// when `source` or `sampler` changes.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn prepare(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         pipelines: &BloomPipelines,
@@ -348,12 +373,9 @@ impl BloomChain {
         };
         let scatter = 0.35 + 0.6 * radius;
         let size = |texture: &wgpu::Texture| (texture.width(), texture.height());
-        let mut dispatches = Vec::with_capacity(self.stages.len());
         let mut stages = self.stages.iter();
 
-        let source_view = source.create_view(&Default::default());
         let mut input = (
-            source_view,
             [
                 region[0] as f32,
                 region[1] as f32,
@@ -362,16 +384,65 @@ impl BloomChain {
             ],
             size(source),
         );
+        for output in &self.down {
+            let stage = stages.next().expect("one stage per level");
+            let (rect, extent) = input;
+            queue.write_buffer(stage, 0, &stage_bytes(rect, extent, threshold, scatter));
+            let (w, h) = size(output);
+            input = ([0.0, 0.0, w as f32, h as f32], (w, h));
+        }
+        for index in (0..self.up.len()).rev() {
+            let stage = stages.next().expect("one stage per level");
+            let coarser = self.up.get(index + 1).unwrap_or(&self.down[index + 1]);
+            let extent = size(coarser);
+            queue.write_buffer(
+                stage,
+                0,
+                &stage_bytes(
+                    [0.0, 0.0, extent.0 as f32, extent.1 as f32],
+                    extent,
+                    threshold,
+                    scatter,
+                ),
+            );
+        }
+
+        if let Some(bound) = &self.bound
+            && bound.source == *source
+            && bound.sampler == *sampler
+        {
+            return bound.dispatches.clone();
+        }
+        let dispatches = self.bind(device, pipelines, sampler, source);
+        self.bound = Some(BoundChain {
+            source: source.clone(),
+            sampler: sampler.clone(),
+            dispatches: dispatches.clone(),
+        });
+        dispatches
+    }
+
+    /// Build the stages' bind groups, in the order of [`Self::stages`].
+    fn bind(
+        &self,
+        device: &wgpu::Device,
+        pipelines: &BloomPipelines,
+        sampler: &wgpu::Sampler,
+        source: &wgpu::Texture,
+    ) -> Vec<BloomDispatch> {
+        let size = |texture: &wgpu::Texture| (texture.width(), texture.height());
+        let mut dispatches = Vec::with_capacity(self.stages.len());
+        let mut stages = self.stages.iter();
+
+        let mut input = source.create_view(&Default::default());
         for (level, output) in self.down.iter().enumerate() {
             let stage = stages.next().expect("one stage per level");
-            let (view, rect, extent) = &input;
-            queue.write_buffer(stage, 0, &stage_bytes(*rect, *extent, threshold, scatter));
             let output_view = output.create_view(&Default::default());
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("gaanim-bloom-down"),
                 layout: &pipelines.down_layout,
                 entries: &[
-                    texture_entry(0, view),
+                    texture_entry(0, &input),
                     sampler_entry(sampler),
                     texture_entry(2, &output_view),
                     buffer_entry(3, stage),
@@ -386,24 +457,12 @@ impl BloomChain {
                 bind_group,
                 size: size(output),
             });
-            let (w, h) = size(output);
-            input = (output_view, [0.0, 0.0, w as f32, h as f32], (w, h));
+            input = output_view;
         }
 
         for (index, output) in self.up.iter().enumerate().rev() {
             let stage = stages.next().expect("one stage per level");
             let coarser = self.up.get(index + 1).unwrap_or(&self.down[index + 1]);
-            let extent = size(coarser);
-            queue.write_buffer(
-                stage,
-                0,
-                &stage_bytes(
-                    [0.0, 0.0, extent.0 as f32, extent.1 as f32],
-                    extent,
-                    threshold,
-                    scatter,
-                ),
-            );
             let coarser_view = coarser.create_view(&Default::default());
             let base_view = self.down[index].create_view(&Default::default());
             let output_view = output.create_view(&Default::default());

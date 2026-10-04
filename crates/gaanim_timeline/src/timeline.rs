@@ -1505,8 +1505,11 @@ impl Timeline {
             }
         }
 
-        // Ensure deterministic order
-        result.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
+        // The index already yields start order; the stable sort is a linear
+        // pass that only reorders clips whose `start` moved before
+        // `rebuild_clip_index`. It compares like the index keys, so a NaN
+        // start cannot panic and equal starts keep their index order.
+        result.sort_by_key(|clip| OrderedFloat(clip.start));
         result
     }
 
@@ -4148,35 +4151,53 @@ fn apply_lens_spec(
             }
         }
         PropertyLensSpec::FillColor { from, to } => {
-            if let Some(mut fill) = world.get_mut::<FillBrush>(target) {
-                let c = gaanim_core::interpolate_color(*from, *to, t);
-                *fill = FillBrush(Some(gaanim_core::peniko::Brush::Solid(c)));
+            let c = gaanim_core::interpolate_color(*from, *to, t);
+            let value = Some(gaanim_core::peniko::Brush::Solid(c));
+            if let Some(mut fill) = world.get_mut::<FillBrush>(target)
+                && fill.0 != value
+            {
+                fill.0 = value;
             }
         }
         PropertyLensSpec::FillPaint { from, to } => {
-            if let Some(mut fill) = world.get_mut::<FillBrush>(target) {
-                fill.0 = Some(gaanim_animation::paint::interpolate_paint(from, to, t));
+            let value = Some(gaanim_animation::paint::interpolate_paint(from, to, t));
+            if let Some(mut fill) = world.get_mut::<FillBrush>(target)
+                && fill.0 != value
+            {
+                fill.0 = value;
             }
         }
         PropertyLensSpec::StrokePaint { from, to } => {
-            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target) {
-                stroke.brush = Some(gaanim_animation::paint::interpolate_paint(from, to, t));
+            let value = Some(gaanim_animation::paint::interpolate_paint(from, to, t));
+            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target)
+                && stroke.brush != value
+            {
+                stroke.brush = value;
             }
         }
         PropertyLensSpec::StrokeColor { from, to } => {
-            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target) {
-                let c = gaanim_core::interpolate_color(*from, *to, t);
-                stroke.brush = Some(gaanim_core::peniko::Brush::Solid(c));
+            let c = gaanim_core::interpolate_color(*from, *to, t);
+            let value = Some(gaanim_core::peniko::Brush::Solid(c));
+            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target)
+                && stroke.brush != value
+            {
+                stroke.brush = value;
             }
         }
         PropertyLensSpec::StrokeWidth { from, to } => {
-            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target) {
-                stroke.style.width = *from + (*to - *from) * t;
+            let value = *from + (*to - *from) * t;
+            if let Some(mut stroke) = world.get_mut::<StrokeBrush>(target)
+                && stroke.style.width != value
+            {
+                stroke.style.width = value;
             }
         }
         PropertyLensSpec::Material3D { from, to } => {
-            if let Some(mut material) = world.get_mut::<gaanim_scene::Material3D>(target) {
-                *material = from.lerp(*to, t);
+            let value = from.lerp(*to, t);
+            if let Some(mut material) = world.get_mut::<gaanim_scene::Material3D>(target)
+                && *material != value
+            {
+                *material = value;
             }
         }
         PropertyLensSpec::PathCompletion { from, to } => {
@@ -4235,15 +4256,20 @@ fn apply_lens_spec(
             }
             if let Some(source) = world.get::<LineListSource>(target) {
                 let visible = trim_line_list(&source.0, completion);
-                if let Some(mut line) = world.get_mut::<LineListData>(target) {
+                if let Some(mut line) = world.get_mut::<LineListData>(target)
+                    && *line != visible
+                {
                     *line = visible;
                 }
-                if let Some(mut visibility) = world.get_mut::<bevy::prelude::Visibility>(target) {
-                    *visibility = if completion <= f64::EPSILON {
-                        bevy::prelude::Visibility::Hidden
-                    } else {
-                        bevy::prelude::Visibility::Inherited
-                    };
+                let shown = if completion <= f64::EPSILON {
+                    bevy::prelude::Visibility::Hidden
+                } else {
+                    bevy::prelude::Visibility::Inherited
+                };
+                if let Some(mut visibility) = world.get_mut::<bevy::prelude::Visibility>(target)
+                    && *visibility != shown
+                {
+                    *visibility = shown;
                 }
             }
             let reveal = gaanim_animation::PathReveal(completion);
@@ -4290,19 +4316,27 @@ fn apply_lens_spec(
             );
         }
         PropertyLensSpec::PathMorph { from, to } => {
+            // A completed morph borrows `to`; it is only cloned into a new
+            // `Arc` when the current geometry differs.
+            let interpolated;
             let morphed = if completed {
-                to.clone()
+                to
             } else {
-                gaanim_math::interpolate_paths_continuous(from, to, t)
+                interpolated = gaanim_math::interpolate_paths_continuous(from, to, t);
+                &interpolated
             };
-            if let Some(mut path) = world.get_mut::<Path2D>(target) {
+            if let Some(mut path) = world.get_mut::<Path2D>(target)
+                && *path.0 != *morphed
+            {
                 path.0 = std::sync::Arc::new(morphed.clone());
             }
             // Keep the stroke clipping source in lockstep with `Path2D`.
             // A stale source geometry otherwise leaks the previous outline
             // (notably the circle around a morphing diamond) during seeks.
-            if let Some(mut source) = world.get_mut::<gaanim_animation::PathSource>(target) {
-                source.0 = std::sync::Arc::new(morphed);
+            if let Some(mut source) = world.get_mut::<gaanim_animation::PathSource>(target)
+                && *source.0 != *morphed
+            {
+                source.0 = std::sync::Arc::new(morphed.clone());
             }
         }
         PropertyLensSpec::ConnectorGrow { from, to } => {
@@ -4334,7 +4368,12 @@ fn apply_lens_spec(
             // alpha, producing the cross-fade from outline to fill
             // that the Write animation needs.
             let v = *from + (*to - *from) * t as f32;
-            if let Ok(mut em) = world.get_entity_mut(target) {
+            if let Some(mut progress) = world.get_mut::<gaanim_animation::FillDrawProgress>(target)
+            {
+                if progress.0 != v {
+                    progress.0 = v;
+                }
+            } else if let Ok(mut em) = world.get_entity_mut(target) {
                 em.insert(gaanim_animation::FillDrawProgress(v));
             }
         }
@@ -4347,7 +4386,9 @@ fn apply_lens_spec(
         PropertyLensSpec::FillLevel { from, to } => {
             let value = (*from + (*to - *from) * t).clamp(0.0, 1.0);
             if let Some(mut level) = world.get_mut::<gaanim_scene::FillLevel>(target) {
-                level.0 = value;
+                if level.0 != value {
+                    level.0 = value;
+                }
             } else {
                 world
                     .entity_mut(target)
@@ -4355,10 +4396,13 @@ fn apply_lens_spec(
             }
         }
         PropertyLensSpec::SurroundingRectTargets { from, to } => {
-            if let Some(mut frame) = world.get_mut::<gaanim_animation::SurroundingRect>(target) {
+            let progress = t.clamp(0.0, 1.0);
+            if let Some(mut frame) = world.get_mut::<gaanim_animation::SurroundingRect>(target)
+                && (frame.from != *from || frame.to != *to || frame.progress != progress)
+            {
                 frame.from.clone_from(from);
                 frame.to.clone_from(to);
-                frame.progress = t.clamp(0.0, 1.0);
+                frame.progress = progress;
             }
         }
         PropertyLensSpec::CameraState { from, to } => {
@@ -4599,21 +4643,29 @@ fn apply_lens_spec(
             // entity's translation to the sampled world point.
             let p = gaanim_math::get_point_at_alpha(path, t);
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
-                transform.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
+                let mut value = *transform;
+                value.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
                 if *reset_anchor {
-                    transform.anchor = gaanim_core::glam::DVec3::ZERO;
+                    value.anchor = gaanim_core::glam::DVec3::ZERO;
                 }
                 if let Some(offset) = orient {
-                    transform.rotation = gaanim_core::glam::DQuat::from_rotation_z(
+                    value.rotation = gaanim_core::glam::DQuat::from_rotation_z(
                         gaanim_math::path_tangent_angle(path, t) + offset,
                     );
+                }
+                if *transform != value {
+                    *transform = value;
                 }
             }
         }
         PropertyLensSpec::PathFollow3D { points } => {
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
-                transform.translation = gaanim_math::get_point_on_polyline(points, t);
-                transform.anchor = gaanim_core::glam::DVec3::ZERO;
+                let mut value = *transform;
+                value.translation = gaanim_math::get_point_on_polyline(points, t);
+                value.anchor = gaanim_core::glam::DVec3::ZERO;
+                if *transform != value {
+                    *transform = value;
+                }
             }
         }
         PropertyLensSpec::SignalFloat { from, to } => {
@@ -4641,7 +4693,9 @@ fn apply_lens_spec(
             }
             if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
                 let trimmed = gaanim_math::get_subpath_range(&source.0, start, end);
-                if let Some(mut path) = world.get_mut::<Path2D>(target) {
+                if let Some(mut path) = world.get_mut::<Path2D>(target)
+                    && path.0.elements() != trimmed.elements()
+                {
                     path.0 = std::sync::Arc::new(trimmed);
                 }
             }
@@ -4668,7 +4722,9 @@ fn apply_lens_spec(
                 && source.0.indices.is_none()
             {
                 let visible = trim_line_strip_range(&source.0, start, end);
-                if let Some(mut line) = world.get_mut::<LineListData>(target) {
+                if let Some(mut line) = world.get_mut::<LineListData>(target)
+                    && *line != visible
+                {
                     *line = visible;
                 }
             }

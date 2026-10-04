@@ -97,6 +97,79 @@ class RuntimeBenchmarkTests(unittest.TestCase):
             self.assertEqual(report["encoder"], "h264_vaapi")
             self.assertEqual(report["phase_timings_ms"]["encode_active_ms"], 8.25)
 
+    def test_export_formats_pick_the_extension_and_drop_inapplicable_options(self) -> None:
+        def command(export_format: str) -> list[str]:
+            return benchmark_runtime.scenario_command(
+                "export",
+                executable=Path("gaanim"),
+                scene=Path("scene.py"),
+                artifact_dir=Path("out"),
+                encoder="nvenc",
+                export_format=export_format,
+            )
+
+        webm = command("webm")
+        self.assertIn(str(Path("out") / "benchmark.webm"), webm)
+        self.assertNotIn("--encoder", webm)
+        self.assertIn("--quality", webm)
+        bundle = command("gaanim")
+        self.assertNotIn("--quality", bundle)
+        self.assertNotIn("--encoder", bundle)
+
+    def test_png_sequence_export_accepts_numbered_files_without_timings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_dir = Path(temporary)
+            (artifact_dir / "benchmark_0001.png").write_bytes(b"png")
+            (artifact_dir / "command.log").write_text("", encoding="utf-8")
+
+            report = benchmark_runtime.validate_artifacts("export", artifact_dir, 1, "png")
+
+            self.assertIsNone(report["phase_timings_ms"])
+            with self.assertRaises(benchmark_runtime.BenchmarkFailure):
+                benchmark_runtime.validate_artifacts("export", artifact_dir, 1, "mp4")
+
+    def test_suites_fill_defaults_and_reject_unknown_scenarios(self) -> None:
+        configuration = {
+            "suites": {
+                "gpu": {"scenes": ["a.py", {"scene": "b.py", "scenarios": ["seek"], "scales": [1, 4], "budgets": False}]},
+                "bad": {"scenes": [{"scene": "c.py", "scenarios": ["render"]}]},
+            }
+        }
+
+        first, second = benchmark_runtime.suite_entries(configuration, "gpu")
+
+        self.assertEqual(first["scenarios"], benchmark_runtime.SCENARIOS)
+        self.assertEqual(first["scales"], [1])
+        self.assertTrue(first["budgets"])
+        self.assertEqual(second["scenarios"], ("seek",))
+        self.assertEqual(second["scales"], [1, 4])
+        self.assertFalse(second["budgets"])
+        for suite in ("bad", "missing"):
+            with self.assertRaises(benchmark_runtime.BenchmarkFailure):
+                benchmark_runtime.suite_entries(configuration, suite)
+
+    def test_baseline_comparison_flags_only_slowdowns_past_the_limit(self) -> None:
+        baseline = benchmark_runtime.baseline_p50s(
+            {
+                "schema_version": 2,
+                "export_format": "webm",
+                "runs": [
+                    {"scene": "examples/heavy.py", "scale": 2, "scenarios": {"export": {"p50_ms": 100.0}}}
+                ],
+            }
+        )
+
+        self.assertEqual(baseline, {"heavy@2:export/webm": 100.0})
+        change, violation = benchmark_runtime.regression_violation(105.0, 100.0, 0.10)
+        self.assertAlmostEqual(change, 0.05)
+        self.assertIsNone(violation)
+        change, violation = benchmark_runtime.regression_violation(125.0, 100.0, 0.10)
+        self.assertIsNotNone(violation)
+        _, violation = benchmark_runtime.regression_violation(50.0, 100.0, 0.10)
+        self.assertIsNone(violation)
+        with self.assertRaises(benchmark_runtime.BenchmarkFailure):
+            benchmark_runtime.baseline_p50s({"schema_version": 1, "scenarios": {}})
+
 
 if __name__ == "__main__":
     unittest.main()

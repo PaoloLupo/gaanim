@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use gaanim_api::canvas::SceneModel;
 use gaanim_api::export::export_canvas;
-use gaanim_export::encoder::{EncodingSpeed, ExportFormat, VideoEncoder};
+use gaanim_export::encoder::{ExportFormat, VideoEncoder};
 use gaanim_export::prelude::*;
 use gaanim_timeline::timeline::Timeline;
 use std::io::{BufRead, BufReader};
@@ -225,20 +225,6 @@ impl ExportQuality {
         match self {
             Self::Draft => 30,
             _ => 60,
-        }
-    }
-    fn crf(self) -> u32 {
-        match self {
-            Self::Draft => 24,
-            Self::Standard => 18,
-            Self::Production => 14,
-        }
-    }
-    fn encoding_speed(self) -> EncodingSpeed {
-        match self {
-            Self::Draft => EncodingSpeed::Fast,
-            Self::Standard => EncodingSpeed::Balanced,
-            Self::Production => EncodingSpeed::Best,
         }
     }
 }
@@ -516,7 +502,10 @@ pub fn export_dialog_system(
     let fps = bundle
         .as_ref()
         .map(|bundle| bundle.fps())
-        .unwrap_or_else(|| current_quality.fps());
+        .unwrap_or_else(|| match current_choice {
+            FormatChoice::Video(format) => current_quality.preset().fps_for(format),
+            FormatChoice::Bundle => current_quality.fps(),
+        });
     let total = (dur * fps as f64).ceil() as u64;
     // An open bundle exports video; a script's scene can also be recorded
     // into a bundle.
@@ -898,15 +887,14 @@ pub fn export_dialog_system(
                         None => Err("No replay data available".to_string()),
                     },
                     None => {
-                        let mut config = ExportConfig::new(&out).with_quality(qual.preset());
+                        let mut config = ExportConfig::new(&out);
+                        // The preset sets fps, CRF and speed for the format.
+                        config.format = fmt;
+                        let mut config = config.with_quality(qual.preset());
                         config.width = output_size.0;
                         config.height = output_size.1;
                         config.fit = output_fit;
                         config.aspect_ratio = AspectRatioPreset::Custom;
-                        config.fps = fps;
-                        config.crf = qual.crf();
-                        config.encoding_speed = qual.encoding_speed();
-                        config.format = fmt;
                         config.video_encoder = video_encoder;
                         config.headless = true;
                         config.telemetry = Some(telemetry.clone());

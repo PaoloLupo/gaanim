@@ -697,7 +697,9 @@ impl LottiePlayer {
         &self.scene
     }
 
-    fn sample(&mut self, scene_time: f64) {
+    /// Samples the playback at `scene_time`, returning whether the scene was
+    /// re-rendered.
+    fn sample(&mut self, scene_time: f64) -> bool {
         let mut frame = self.playback.source_frame(scene_time);
         let mut asset = self.playback.asset.clone();
         let mut background = None;
@@ -722,7 +724,9 @@ impl LottiePlayer {
         self.background = background;
         if changed || frame.to_bits() != self.sampled_frame.to_bits() {
             self.render(frame);
+            return true;
         }
+        false
     }
 
     fn render(&mut self, frame: f64) {
@@ -823,7 +827,11 @@ pub fn sample_lottie_system(
             player.draw_state = draw_state;
             player.sampled_frame = f64::NAN;
         }
-        player.sample(scene_time);
+        // Sampling every frame must not mark the player changed by itself;
+        // fragment rebuilds key off change detection.
+        if player.bypass_change_detection().sample(scene_time) {
+            player.set_changed();
+        }
     }
 }
 

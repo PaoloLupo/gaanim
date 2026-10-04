@@ -71,6 +71,10 @@ pub fn host_app(options: &HostOptions) -> App {
                     },
                     resolution: (1280, 720).into(),
                     present_mode: bevy::window::PresentMode::AutoVsync,
+                    // One frame in flight: a scrubbed or dragged frame shows
+                    // a vsync sooner.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    desired_maximum_frame_latency: std::num::NonZeroU32::new(1),
                     mode: if options.present {
                         bevy::window::WindowMode::BorderlessFullscreen(
                             options
@@ -127,6 +131,10 @@ pub fn host_app(options: &HostOptions) -> App {
             crate::volume::save_volume_system,
         ),
     );
+    // A native window rests while nothing moves; the web player keeps
+    // Bevy's default, which the browser paces.
+    #[cfg(not(target_arch = "wasm32"))]
+    app.add_plugins(crate::idle::IdlePlugin);
     if crate::frame_profile::enabled() {
         app.add_plugins(crate::frame_profile::FrameProfilePlugin);
     }
