@@ -2626,6 +2626,18 @@ def validate_readout_number_formats(module):
                 pass
             else:
                 failures.append(f"a readout accepted the unsupported format {spec!r}")
+    try:
+        scene.viz.readout(1.0, label="t", unit="s", font="DejaVu Sans", weight=700)
+        scene.viz.variable(1.0, label="x", font="DejaVu Sans")
+    except Exception as error:
+        failures.append(f"readout rejected font and weight: {error}")
+    for weight in (0, 1001):
+        try:
+            scene.viz.readout(1.0, weight=weight)
+        except ValueError:
+            pass
+        else:
+            failures.append(f"readout accepted weight={weight}")
     return failures
 
 

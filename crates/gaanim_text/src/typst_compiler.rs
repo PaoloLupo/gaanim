@@ -541,7 +541,7 @@ fn extract_frame_items(
                     let mut collector = OutlineCollector::new();
                     let glyph_id = ttf_parser::GlyphId(glyph.id);
                     if ttf.outline_glyph(glyph_id, &mut collector).is_some() {
-                        let mut path = collector.path;
+                        let mut path = collector.into_path();
 
                         let glyph_x = pen_x + glyph.x_offset.at(size).to_pt();
                         let glyph_y = pen_y + glyph.y_offset.at(size).to_pt();

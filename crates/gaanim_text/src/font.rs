@@ -18,6 +18,21 @@ impl OutlineCollector {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// The collected outline with overlapping contours merged, as variable
+    /// fonts draw strokes that overlap inside a glyph; a stroke or `write()`
+    /// would trace them. Other glyphs keep their curves.
+    pub fn into_path(self) -> BezPath {
+        use gaanim_core::kurbo::Shape;
+        let bounds = self.path.bounding_box();
+        // A 4000th of the glyph, in font units: far below a pixel.
+        let tolerance = bounds.width().max(bounds.height()) / 4000.0;
+        if !(tolerance.is_finite() && tolerance > 0.0) {
+            return self.path;
+        }
+        gaanim_objects::boolean::merge_overlapping_contours(&self.path, tolerance)
+            .unwrap_or(self.path)
+    }
 }
 
 impl OutlineBuilder for OutlineCollector {
@@ -432,7 +447,37 @@ pub fn regular_faces(fonts: &[FontFile]) -> Vec<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FontRegistry, regular_faces, scan_font_dir};
+    use super::{FontRegistry, OutlineCollector, regular_faces, scan_font_dir};
+
+    #[test]
+    fn overlapping_glyph_contours_merge_into_one_outline() {
+        use ttf_parser::OutlineBuilder;
+        let rect = |collector: &mut OutlineCollector, x0: f32, y0: f32, x1: f32, y1: f32| {
+            collector.move_to(x0, y0);
+            collector.line_to(x1, y0);
+            collector.line_to(x1, y1);
+            collector.line_to(x0, y1);
+            collector.close();
+        };
+        // An H as a variable font draws it: two stems and a crossing bar.
+        let mut h = OutlineCollector::new();
+        rect(&mut h, 0.0, 0.0, 100.0, 700.0);
+        rect(&mut h, 400.0, 0.0, 500.0, 700.0);
+        rect(&mut h, 50.0, 300.0, 450.0, 400.0);
+        let starts = |path: &gaanim_core::kurbo::BezPath| {
+            path.elements()
+                .iter()
+                .filter(|element| matches!(element, gaanim_core::kurbo::PathEl::MoveTo(_)))
+                .count()
+        };
+        assert_eq!(starts(&h.into_path()), 1);
+        // A glyph whose contours do not overlap keeps them as drawn.
+        let mut i = OutlineCollector::new();
+        rect(&mut i, 0.0, 0.0, 100.0, 500.0);
+        rect(&mut i, 0.0, 600.0, 100.0, 700.0);
+        let expected = i.path.clone();
+        assert_eq!(i.into_path(), expected);
+    }
 
     #[test]
     fn font_dir_scan_reads_family_weight_and_style_from_each_file() {
