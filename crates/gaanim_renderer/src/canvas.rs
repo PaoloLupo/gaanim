@@ -602,12 +602,7 @@ fn extract_canvas(
     extracted.transition = layers
         .as_ref()
         .and_then(|layers| layers.0.as_ref())
-        .map(|layers| {
-            (
-                Arc::new(layers.incoming.clone()),
-                Arc::new(layers.above.clone()),
-            )
-        });
+        .map(|layers| (Arc::clone(&layers.incoming), Arc::clone(&layers.above)));
     extracted.image = (canvas.image != Handle::default()).then(|| canvas.image.id());
     extracted.scale = preview.as_ref().map_or(1.0, |preview| preview.scale);
     extracted.scene = scenes
