@@ -3312,7 +3312,12 @@ class Drawable:
         ``source`` is bright, so a gradient rectangle makes a soft reveal;
         ``"alpha_inverted"`` and ``"luma_inverted"`` show the opposite. The
         matte follows ``source`` as it moves, scales, fades or is written,
-        but ``source`` is no longer drawn on its own. ``None`` removes the
+        but ``source`` is no longer drawn on its own. A blurred ``source``
+        (``blur``, ``blur_in``) softens the matte, not this drawable: the
+        edges of its parts stay sharp inside the soft region, so bars matted
+        by a text entering with ``blur_in`` show as whole bars where a glyph
+        is still a blur. To bring the result in softly, fade ``source`` with
+        ``animate.opacity`` or blur this drawable. ``None`` removes the
         matte. It is declaration state for the whole timeline and works in
         previews, exports and ``.gaanim`` bundles. A ``source`` from another
         scene, the drawable itself or an unknown ``mode`` raises
@@ -8512,7 +8517,7 @@ class Visualization:
         omitted axes retain the default ``Re`` and ``Im`` titles.
         """
         ...
-    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None, reserve: Optional[float] = None) -> Readout:
+    def readout(self, source: _ReactiveScalar | Callable[..., float], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (), label: Optional[str] = None, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None, reserve: Optional[float] = None, font: Optional[str] = None, weight: Optional[int] = None) -> Readout:
         """Create a native numeric display with equally spaced, baseline-aligned terms.
 
         The label, equality sign, number, and unit all use ``font_size``;
@@ -8521,6 +8526,10 @@ class Visualization:
         effect when the number changes or the timeline seeks. Without it, every
         term uses the theme's text color, or without a theme the body text
         color chosen for the scene background.
+        ``font`` and ``weight`` (1 to 1000) set the family and weight of the
+        number and of the plain-text label and unit, as in the dimensions;
+        a ``$…$`` label keeps the math font. Without them the number uses the
+        theme's math font. A weight out of range raises ``ValueError``.
         ``decimal_separator`` replaces the ``.`` between integer and fractional
         digits; ``","`` also turns ``,`` grouping into ``.`` (``1.234,50``).
         It must be one character that is not a digit, sign, space, ``e`` or
@@ -8547,13 +8556,13 @@ class Visualization:
         it counts. A non-finite ``reserve`` raises ``ValueError``.
         """
         ...
-    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None, reserve: Optional[float] = None) -> Variable:
+    def variable(self, initial: float, *, label: str, format: str = ".2f", prefix: str = "", suffix: str = "", unit: Optional[str] = None, font_size: Optional[float] = None, color: Optional[ColorLike] = None, invalid: str = "invalid", decimal_separator: str = ".", spacing: Optional[float] = None, reserve: Optional[float] = None, font: Optional[str] = None, weight: Optional[int] = None) -> Variable:
         """Create an animatable scalar displayed as an aligned equation row.
 
         Every visible term uses ``font_size``, or 0.48 units when omitted.
         ``color`` applies to every visible term, including the changing value.
-        ``decimal_separator``, ``spacing`` and ``reserve`` work as in
-        ``readout`` (for example ``","`` shows ``3,14``).
+        ``decimal_separator``, ``spacing``, ``reserve``, ``font`` and
+        ``weight`` work as in ``readout`` (for example ``","`` shows ``3,14``).
         """
         ...
     def number_line(

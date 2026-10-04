@@ -265,9 +265,61 @@ pub(crate) fn shapes_to_bezpath(shape: &[Vec<[f64; 2]>]) -> kurbo::BezPath {
     path
 }
 
+/// `path` with overlapping contours merged into one outline, or `None`
+/// when no two of its contours overlap. Variable fonts draw a glyph such as
+/// `H` from overlapping strokes: the nonzero fill hides the overlap, but a
+/// stroke or a `write()` traces every contour. Merging flattens the curves
+/// at `tolerance`, so a path whose contours do not overlap keeps its own.
+pub fn merge_overlapping_contours(path: &kurbo::BezPath, tolerance: f64) -> Option<kurbo::BezPath> {
+    use i_overlay::float::simplify::SimplifyShape;
+    let contours = path
+        .elements()
+        .iter()
+        .filter(|element| matches!(element, PathEl::MoveTo(_)))
+        .count();
+    if contours < 2 {
+        return None;
+    }
+    let merged: kurbo::BezPath = bezpath_to_shape_with_tolerance(path, tolerance)
+        .simplify_shape(FillRule::NonZero)
+        .iter()
+        .flat_map(|shape| shapes_to_bezpath(shape))
+        .collect();
+    // Under the nonzero rule, contours that overlap with the same winding
+    // count the shared area twice in the signed sum; holes subtract it.
+    let (summed, covered) = (path.area().abs(), merged.area().abs());
+    (summed > covered * 1.01 && covered > 0.0).then_some(merged)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlapping_contours_merge_and_separate_ones_stay() {
+        // An H drawn as two stems and a crossbar that overlaps both.
+        let mut h = rect_path(0.0, 0.0, 1.0, 5.0);
+        h.extend(rect_path(3.0, 0.0, 4.0, 5.0));
+        h.extend(rect_path(0.5, 2.0, 3.5, 3.0));
+        let merged = merge_overlapping_contours(&h, 0.01).expect("the bar overlaps the stems");
+        let contours = merged
+            .elements()
+            .iter()
+            .filter(|element| matches!(element, PathEl::MoveTo(_)))
+            .count();
+        assert_eq!(contours, 1);
+        assert!((merged.area().abs() - 12.0).abs() < 1e-6);
+        // An O: an outer contour and a hole, no overlap.
+        let mut o = rect_path(0.0, 0.0, 4.0, 4.0);
+        let hole: kurbo::BezPath = rect_path(1.0, 1.0, 3.0, 3.0).reverse_subpaths();
+        o.extend(hole);
+        assert!(merge_overlapping_contours(&o, 0.01).is_none());
+        // Two letters side by side and a single contour stay as they are.
+        let mut apart = rect_path(0.0, 0.0, 1.0, 1.0);
+        apart.extend(rect_path(2.0, 0.0, 3.0, 1.0));
+        assert!(merge_overlapping_contours(&apart, 0.01).is_none());
+        assert!(merge_overlapping_contours(&rect_path(0.0, 0.0, 1.0, 1.0), 0.01).is_none());
+    }
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> kurbo::BezPath {
         let mut p = kurbo::BezPath::new();
