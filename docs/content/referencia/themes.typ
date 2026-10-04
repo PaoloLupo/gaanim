@@ -321,9 +321,11 @@ scene.canvas.background = Brush.linear(["#071022", "#164E8A", "#7DD3FC"], start=
   params: (
     (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` (con `pathlib.Path`), que se lee al crear el fondo.]),
     (name: "fallback", type: "ColorLike | None", default: "None", desc: [Color fuera del marco, para calcular el contraste automático y si falla la rasterización; negro si se omite.]),
+    (name: "uniforms", type: "dict[str, float | Parameter | Computed] | None", default: "None", desc: [Campos `f32` de `gaanim_uniforms`, como en `PostProcess.shader`: números fijos o un `Parameter`, `Variable`, `Computed`, `scene.time` o una señal de audio, evaluados en cada fotograma, así que el fondo reacciona a la música. Como máximo 32, con nombres que sean identificadores WGSL.]),
+    (name: "audio", type: "Audio | None", default: "None", desc: [Da al fondo el espectrograma de la pista con `gaanim_audio_spectrum(x, ago)` y las demás funciones `gaanim_audio_*` (ver #link("/referencia/audio/")[Audio]); reserva el uniform `gaanim_audio_time`.]),
   ),
   returns: (type: "Background", desc: [Un fondo procedural que sigue la línea de tiempo.]),
-  desc: [WGSL inválido lanza `ValueError` y un asset ilegible, `RuntimeError`.],
+  desc: [WGSL inválido, un nombre de uniform inválido o reservado lanzan `ValueError` y un asset ilegible, `RuntimeError`. Como el `Parameter` o la pista se crean con la escena, un fondo con uniforms se asigna después: `scene.canvas.background = Background.shader(...)`. Los paquetes `.gaanim` guardan los valores de cada fotograma.],
 )[
 ```python
 from gaanim import Background, Scene

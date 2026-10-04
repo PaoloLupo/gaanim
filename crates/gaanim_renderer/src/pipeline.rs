@@ -38,6 +38,19 @@ pub struct CanvasBackground {
     pub pixel_size: (u32, u32),
     /// Frame bounds in world coordinates (Y-up, center-origin).
     pub bounds: gaanim_math::Bounds3D,
+    /// The entities holding the signals that shader uniforms read.
+    pub parameters: Vec<(gaanim_core::ObjectId, Entity)>,
+}
+
+/// The uniforms of one shader background at one scene time, as the scene
+/// evaluated them; a bundle records them so playback draws them without
+/// the world.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BackgroundValues {
+    /// 0 for the canvas paint, `i + 1` for segment `i`'s.
+    pub paint: u32,
+    pub time: f64,
+    pub values: Vec<f32>,
 }
 
 /// Background override and time range for one authored segment.
@@ -51,6 +64,70 @@ pub struct SegmentBackgroundPaint {
 }
 
 impl CanvasBackground {
+    /// The shader paints with uniforms and their [`BackgroundValues::paint`]
+    /// index.
+    fn uniform_paints(&self) -> impl Iterator<Item = (u32, &crate::background::ShaderBackground)> {
+        std::iter::once(Some(&self.paint))
+            .chain(
+                self.segment_paints
+                    .iter()
+                    .map(|segment| segment.paint.as_ref()),
+            )
+            .enumerate()
+            .filter_map(|(index, paint)| match paint {
+                Some(BackgroundPaint::Shader(shader)) if !shader.uniforms().is_empty() => {
+                    Some((index as u32, shader))
+                }
+                _ => None,
+            })
+    }
+
+    /// Evaluate every shader paint's uniforms at each of `times`, reading
+    /// parameters through `signal`, and keep them for drawing.
+    pub fn evaluate_uniforms(
+        &self,
+        times: &[f64],
+        signal: impl Fn(Entity) -> Option<f64>,
+    ) -> Vec<BackgroundValues> {
+        let mut evaluated = Vec::new();
+        for (paint, shader) in self.uniform_paints() {
+            for &time in times {
+                let values: Vec<f32> = shader
+                    .uniform_sources()
+                    .iter()
+                    .map(|source| {
+                        source
+                            .evaluate(time, |logical| {
+                                self.parameters
+                                    .iter()
+                                    .find(|(id, _)| *id == logical)
+                                    .and_then(|(_, entity)| signal(*entity))
+                            })
+                            .map_or(0.0, |value| value as f32)
+                    })
+                    .collect();
+                shader.record_values(time, &values);
+                evaluated.push(BackgroundValues {
+                    paint,
+                    time,
+                    values,
+                });
+            }
+        }
+        evaluated
+    }
+
+    /// Keep recorded uniform values for drawing, as a bundle replays them.
+    pub fn record_uniforms(&self, recorded: &[BackgroundValues]) {
+        let paints: Vec<(u32, &crate::background::ShaderBackground)> =
+            self.uniform_paints().collect();
+        for entry in recorded {
+            if let Some((_, shader)) = paints.iter().find(|(paint, _)| *paint == entry.paint) {
+                shader.record_values(entry.time, &entry.values);
+            }
+        }
+    }
+
     /// Resolve the segment paint at an exact timeline position.
     pub fn paint_at(&self, time_seconds: f64) -> &BackgroundPaint {
         active_segment(&self.segment_paints, time_seconds, |segment| {
@@ -99,14 +176,26 @@ fn resolve_canvas_background_brush(
     let paint = background.paint_at(time_seconds);
     let shader_time = time_seconds + rest;
     let resolved = match (paint, gpu) {
+        // Uniforms follow the scene time; only the shader's clock rests.
         (BackgroundPaint::Shader(shader), Some(gpu)) => shader
             .gpu_request(pixel_size.0, pixel_size.1, shader_time)
-            .map(|request| request.in_frame((rect.width(), rect.height())))
+            .map(|request| {
+                request
+                    .in_frame((rect.width(), rect.height()))
+                    .with_values(shader.values_at(time_seconds))
+            })
             .map(|request| {
                 let brush = peniko::Brush::Image(peniko::ImageBrush::new(request.image().clone()));
                 *gpu = Some(request);
                 brush
             }),
+        (BackgroundPaint::Shader(shader), None) => shader.resolve_with_values(
+            pixel_size.0,
+            pixel_size.1,
+            shader_time,
+            (rect.width(), rect.height()),
+            &shader.values_at(time_seconds),
+        ),
         _ => paint.resolve_brush(
             pixel_size.0,
             pixel_size.1,
@@ -2368,6 +2457,40 @@ struct WorldExtraction {
     elements: Vec<ExtractedElement>,
     transition: Option<gaanim_scene::SceneTransitionFrame>,
     background_time: f64,
+    background_values: Vec<BackgroundValues>,
+}
+
+/// The scene times whose backgrounds a frame may draw: the frame's and,
+/// while a transition splits it, both segments'.
+fn background_times(
+    time: f64,
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+) -> Vec<f64> {
+    let mut times = vec![time];
+    if let Some((outgoing, incoming)) = transition.and_then(|frame| frame.backgrounds) {
+        for time in [outgoing, incoming] {
+            if !times.contains(&time) {
+                times.push(time);
+            }
+        }
+    }
+    times
+}
+
+/// Evaluate the uniforms of the world's shader backgrounds for a frame.
+fn world_background_values(
+    world: &World,
+    time: f64,
+    transition: Option<&gaanim_scene::SceneTransitionFrame>,
+) -> Vec<BackgroundValues> {
+    let Some(background) = world.get_resource::<CanvasBackground>() else {
+        return Vec::new();
+    };
+    background.evaluate_uniforms(&background_times(time, transition), |entity| {
+        world
+            .get::<gaanim_animation::FloatSignal>(entity)
+            .map(|signal| signal.value)
+    })
 }
 
 /// Extract every drawable the world shows. `cull` leaves out drawables the
@@ -2792,10 +2915,13 @@ fn extract_world(
 
     extracted.sort_by(ExtractedElement::draw_order);
 
+    let background_values =
+        world_background_values(world, background_time, transition_frame.as_ref());
     WorldExtraction {
         elements: extracted,
         transition: transition_frame,
         background_time,
+        background_values,
     }
 }
 
@@ -3912,6 +4038,8 @@ pub struct FrameCapture {
     pub mattes: Vec<CapturedMatte>,
     /// Glass drawables.
     pub glasses: Vec<CapturedGlass>,
+    /// Uniforms of the shader backgrounds this frame draws.
+    pub background_values: Vec<BackgroundValues>,
 }
 
 /// Capture the drawables of the world as it stands, without culling, for a
@@ -3947,6 +4075,7 @@ fn capture_extraction(
 ) -> FrameCapture {
     FrameCapture {
         background_time: extraction.background_time,
+        background_values: extraction.background_values,
         effects,
         mattes,
         glasses,
@@ -4072,6 +4201,9 @@ fn compose_captured_layers(
     rest: f64,
     effect_density: Option<f64>,
 ) -> ComposedFrame {
+    if let Some((background, _)) = background {
+        background.record_uniforms(&frame.background_values);
+    }
     let margin = antialias_margin(pixels_per_unit);
     let mut elements: Vec<ExtractedElement> = frame
         .elements
@@ -4937,6 +5069,12 @@ pub fn gaanim_render_system(
         && !(published.0.is_empty() && layers.is_empty())
     {
         published.0 = layers;
+    }
+    if let Some(canvas_bg) = canvas_bg.as_deref() {
+        canvas_bg.evaluate_uniforms(
+            &background_times(time_seconds, transition_frame.as_deref()),
+            |entity| float_signals.get(entity).ok().map(|signal| signal.value),
+        );
     }
     let mut composed = compose_frame(
         local_extracted.as_slice(),
@@ -6470,6 +6608,7 @@ mod tests {
                 data: None,
             }),
             progress: 0.4,
+            values: Vec::new(),
         };
         let mut frame = gaanim_scene::SceneTransitionFrame {
             shader: Some(shader.clone()),
@@ -6526,6 +6665,7 @@ mod tests {
             segment_paints: Vec::new(),
             pixel_size: (1280, 720),
             bounds: gaanim_math::Bounds3D::new_2d(-640.0, -360.0, 640.0, 360.0),
+            parameters: Vec::new(),
         };
         let camera = gaanim_math::ResolvedCamera::new(
             gaanim_math::Camera::ortho_2d(1280, 720),
@@ -6560,6 +6700,7 @@ mod tests {
             segment_paints: Vec::new(),
             pixel_size: (960, 540),
             bounds: gaanim_math::Bounds3D::new_2d(-480.0, -270.0, 480.0, 270.0),
+            parameters: Vec::new(),
         };
         let (rect, transform) = canvas_background_geometry(&background);
 
@@ -6596,6 +6737,7 @@ mod tests {
             ],
             pixel_size: (960, 540),
             bounds: gaanim_math::Bounds3D::new_2d(-480.0, -270.0, 480.0, 270.0),
+            parameters: Vec::new(),
         };
 
         assert_eq!(background.paint_at(0.5).fallback_color(), first);
@@ -6623,6 +6765,7 @@ mod tests {
             }],
             pixel_size: (960, 540),
             bounds: gaanim_math::Bounds3D::new_2d(-480.0, -270.0, 480.0, 270.0),
+            parameters: Vec::new(),
         };
         let (rect, _) = canvas_background_geometry(&background);
 
@@ -6697,6 +6840,7 @@ mod tests {
             segment_paints: Vec::new(),
             pixel_size: (width, height),
             bounds: gaanim_math::Bounds3D::new_2d(-8.0, -4.5, 8.0, 4.5),
+            parameters: Vec::new(),
         };
         // The editor and exports both display world +y upwards.
         let world_to_screen = kurbo::Affine::new([4.0, 0.0, 0.0, -4.0, 32.0, 18.0]);

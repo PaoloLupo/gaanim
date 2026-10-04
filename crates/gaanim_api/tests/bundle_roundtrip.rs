@@ -732,3 +732,140 @@ fn a_video_exported_from_a_bundle_with_effects_matches_the_scene_export() {
         );
     }
 }
+
+/// A shader background whose uniform follows an animated parameter, then a
+/// shader transition whose uniform follows another.
+fn reactive_shaders() -> SceneModel {
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let red = canvas.parameter(0.0).unwrap();
+    let background = gaanim_renderer::background::ShaderBackground::with_uniforms(
+        "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n    \
+         return vec4<f32>(gaanim_uniforms.red, 0.1, uv.x * 0.3, 1.0);\n}",
+        Color::BLACK,
+        vec![("red".to_string(), red.source())],
+        None,
+    )
+    .unwrap();
+    canvas.set_background_paint(Some(gaanim_renderer::background::BackgroundPaint::Shader(
+        background,
+    )));
+    canvas.segment("a", None).unwrap();
+    canvas.circle(1.0).fill(Color::WHITE);
+    canvas.play(vec![red.animate().set(1.0).duration(0.5)]);
+    let blue = canvas.parameter(0.0).unwrap();
+    let shader = gaanim_scene::TransitionShader {
+        source: "fn transition(uv: vec2<f32>) -> vec4<f32> {\n    \
+                 return mix(gaanim_from(uv), vec4<f32>(0.0, 0.0, 1.0, 1.0), gaanim_uniforms.blue);\n}"
+            .to_string(),
+        uniforms: vec!["blue".to_string()],
+        values: vec![0.0],
+        data: None,
+    };
+    canvas
+        .segment(
+            "b",
+            Some(TransitionType::Shader {
+                duration: 0.5,
+                shader: std::sync::Arc::new(shader),
+                uniforms: vec![gaanim_animation::ResolvedScalarSource {
+                    source: blue.source(),
+                    parameters: Vec::new(),
+                }],
+            }),
+        )
+        .unwrap();
+    canvas
+        .rect(2.0, 1.0)
+        .fill(Color::from_rgb8(0x38, 0xbd, 0xf8));
+    canvas.play(vec![blue.animate().set(1.0).duration(0.5)]);
+    canvas.wait(0.25);
+    canvas
+}
+
+#[test]
+fn reactive_shader_uniforms_record_and_replay() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("reactive.gaanim");
+    let mut config = BundleConfig::new(&path);
+    config.fps = 12;
+    config.width = 160;
+    config.height = 90;
+    record_canvas(reactive_shaders(), config).expect("record reactive shaders");
+
+    let mut bundle = Bundle::open(&path).unwrap();
+    assert!(bundle.verify().unwrap().is_empty());
+    let red_at = |bundle: &mut Bundle, time: f64| {
+        let frame = bundle.frame(bundle.frame_index_at(time)).unwrap();
+        frame
+            .capture
+            .background_values
+            .iter()
+            .find(|entry| entry.paint == 0)
+            .map(|entry| entry.values[0])
+    };
+    let early = red_at(&mut bundle, 0.05).expect("the background records its uniform");
+    let late = red_at(&mut bundle, 0.45).unwrap();
+    assert!(
+        early < late,
+        "{early} then {late}: the uniform follows the parameter"
+    );
+    // In the transition the blend's uniform follows its parameter too.
+    let blue_at = |bundle: &mut Bundle, time: f64| {
+        let frame = bundle.frame(bundle.frame_index_at(time)).unwrap();
+        frame
+            .capture
+            .transition
+            .as_ref()
+            .and_then(|transition| transition.shader.as_ref())
+            .map(|shader| shader.values[0])
+    };
+    let start = blue_at(&mut bundle, 0.65).expect("a shader transition frame");
+    let end = blue_at(&mut bundle, 0.9).expect("a shader transition frame");
+    assert!(start < end, "{start} then {end}");
+}
+
+#[test]
+fn a_video_exported_from_a_bundle_with_reactive_shaders_matches_the_scene_export() {
+    if gaanim_export::prelude::GpuContext::new(16, 16).is_err() {
+        eprintln!("skipped: no GPU adapter");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let bundle_path = directory.path().join("reactive.gaanim");
+    let mut config = BundleConfig::new(&bundle_path);
+    config.fps = 30;
+    config.width = 160;
+    config.height = 90;
+    record_canvas(reactive_shaders(), config).unwrap();
+    let output = |name: &str| {
+        let directory = directory.path().join(name);
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut export =
+            gaanim_export::prelude::ExportConfig::new(&directory.join("f.png").to_string_lossy())
+                .with_quality(gaanim_export::prelude::QualityPreset::Draft);
+        export.width = 160;
+        export.height = 90;
+        export.aspect_ratio = gaanim_export::prelude::AspectRatioPreset::Custom;
+        export.format = gaanim_export::prelude::ExportFormat::PngSequence;
+        export.headless = true;
+        (directory, export)
+    };
+    let (direct, config) = output("direct");
+    gaanim_api::export::export_canvas(reactive_shaders(), config).unwrap();
+    let (replayed, config) = output("bundle");
+    gaanim_export::prelude::export_bundle(&bundle_path, config).unwrap();
+    let mut frames: Vec<_> = std::fs::read_dir(&direct)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    frames.sort();
+    assert!(frames.len() > 10);
+    assert_eq!(frames.len(), std::fs::read_dir(&replayed).unwrap().count());
+    for frame in frames {
+        assert!(
+            std::fs::read(direct.join(&frame)).unwrap()
+                == std::fs::read(replayed.join(&frame)).unwrap(),
+            "{frame:?} differs between the scene and the bundle"
+        );
+    }
+}

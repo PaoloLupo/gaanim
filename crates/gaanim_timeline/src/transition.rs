@@ -78,6 +78,9 @@ pub enum TransitionType {
     Shader {
         duration: f64,
         shader: std::sync::Arc<gaanim_scene::TransitionShader>,
+        /// One source per uniform when any of them is reactive, evaluated
+        /// every frame; empty when the shader's `values` are all fixed.
+        uniforms: Vec<gaanim_animation::ResolvedScalarSource>,
     },
     /// Another transition shaped by an easing curve, decorated by an
     /// overlay drawn above the cut and/or accompanied by a sound effect that

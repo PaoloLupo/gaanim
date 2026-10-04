@@ -62,11 +62,14 @@ pub struct TransitionShader {
     pub data: Option<Vec<[f32; 4]>>,
 }
 
-/// The shader transition at the playhead and its eased progress.
+/// The shader transition at the playhead, its eased progress and the
+/// values of its uniforms at this frame: the shader's own fixed `values`,
+/// or reactive ones (a `Parameter`, an audio signal) evaluated now.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransitionShaderFrame {
     pub shader: Arc<TransitionShader>,
     pub progress: f32,
+    pub values: Vec<f32>,
 }
 
 /// Which side of the active transition a drawable belongs to.

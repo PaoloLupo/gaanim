@@ -118,12 +118,28 @@ pub struct ShaderBackground {
     source: Arc<str>,
     fallback: Color,
     contract: ShaderContract,
+    /// Names of the `f32` fields of `gaanim_uniforms`, in order.
+    uniforms: Arc<[Arc<str>]>,
+    /// What each uniform reads, evaluated at the scene time.
+    sources: Arc<[gaanim_animation::ScalarSource]>,
+    /// Storage data the shader reads as `gaanim_data`, e.g. an audio track.
+    data: Option<Arc<[[f32; 4]]>>,
+    /// Uniform values the scene evaluated at recent times, keyed by the
+    /// time's bits: reading a `Parameter` needs the world, which drawing
+    /// the background does not have.
+    values: Arc<Mutex<Vec<RecordedValues>>>,
     compiled: Arc<Mutex<Option<Arc<CompiledShader>>>>,
     cache: Arc<Mutex<Option<CachedShaderRaster>>>,
     gpu_image: Arc<Mutex<Option<ImageData>>>,
 }
 
-type CachedShaderRaster = ([u32; 5], Result<Brush, ShaderBackgroundError>);
+/// Uniform values recorded for the time with these bits.
+type RecordedValues = (u64, Arc<[f32]>);
+
+/// Recent times whose uniform values a background keeps.
+const RECORDED_VALUE_TIMES: usize = 16;
+
+type CachedShaderRaster = (Vec<u32>, Result<Brush, ShaderBackgroundError>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShaderContract {
@@ -156,16 +172,110 @@ impl ShaderBackground {
         source: impl Into<Arc<str>>,
         fallback: Color,
     ) -> Result<Self, ShaderBackgroundError> {
+        Self::with_uniforms(source, fallback, Vec::new(), None)
+    }
+
+    /// A shader that also reads `f32` uniforms from `gaanim_uniforms`, one
+    /// per `(name, source)` in order, evaluated at the scene time, and
+    /// optional storage `data` from `gaanim_data`.
+    pub fn with_uniforms(
+        source: impl Into<Arc<str>>,
+        fallback: Color,
+        uniforms: Vec<(String, gaanim_animation::ScalarSource)>,
+        data: Option<Arc<[[f32; 4]]>>,
+    ) -> Result<Self, ShaderBackgroundError> {
         let source = source.into();
-        let contract = validate_shader_source(&source)?;
+        let (names, sources): (Vec<Arc<str>>, Vec<_>) = uniforms
+            .into_iter()
+            .map(|(name, source)| (Arc::<str>::from(name), source))
+            .unzip();
+        validate_uniform_names(&names)?;
+        if data.as_ref().is_some_and(|data| data.is_empty()) {
+            return Err(ShaderBackgroundError::InvalidWgsl(
+                "background shader data must not be empty".to_string(),
+            ));
+        }
+        let layout = ShaderLayout {
+            uniforms: &names,
+            data: data.is_some(),
+        };
+        let contract = validate_shader_source(&source, layout)?;
         Ok(Self {
             source,
             fallback,
             contract,
+            uniforms: names.into(),
+            sources: sources.into(),
+            data,
+            values: Arc::default(),
             compiled: Arc::default(),
             cache: Arc::default(),
             gpu_image: Arc::default(),
         })
+    }
+
+    fn layout(&self) -> ShaderLayout<'_> {
+        ShaderLayout {
+            uniforms: &self.uniforms,
+            data: self.data.is_some(),
+        }
+    }
+
+    /// Names of the uniforms, in declaration order.
+    pub fn uniforms(&self) -> &[Arc<str>] {
+        &self.uniforms
+    }
+
+    /// What each uniform reads.
+    pub fn uniform_sources(&self) -> &[gaanim_animation::ScalarSource] {
+        &self.sources
+    }
+
+    /// Storage data the shader reads as `gaanim_data`.
+    pub fn data(&self) -> Option<&Arc<[[f32; 4]]>> {
+        self.data.as_ref()
+    }
+
+    /// Keep `values` as the uniforms at scene second `time`, as the scene
+    /// evaluated them (or a bundle recorded them).
+    pub fn record_values(&self, time: f64, values: &[f32]) {
+        if self.uniforms.is_empty() {
+            return;
+        }
+        let mut recorded = self.values.lock().expect("background values poisoned");
+        let key = time.to_bits();
+        recorded.retain(|(time, _)| *time != key);
+        if recorded.len() >= RECORDED_VALUE_TIMES {
+            recorded.remove(0);
+        }
+        recorded.push((key, values.into()));
+    }
+
+    /// The uniforms at scene second `time`: the values recorded for that
+    /// time, or else the sources that read only the time (numbers, audio
+    /// signals), with 0 for those that need the world.
+    pub fn values_at(&self, time: f64) -> Arc<[f32]> {
+        if self.uniforms.is_empty() {
+            return Arc::default();
+        }
+        let key = time.to_bits();
+        if let Some((_, values)) = self
+            .values
+            .lock()
+            .expect("background values poisoned")
+            .iter()
+            .find(|(recorded, _)| *recorded == key)
+        {
+            return values.clone();
+        }
+        self.sources
+            .iter()
+            .map(|source| {
+                source
+                    .evaluate(time, |_| None)
+                    .map_or(0.0, |value| value as f32)
+            })
+            .collect()
     }
 
     /// Load WGSL source from an asset file.
@@ -215,25 +325,39 @@ impl ShaderBackground {
         time_seconds: f64,
         frame: (f64, f64),
     ) -> Result<Brush, ShaderBackgroundError> {
+        let values = self.values_at(time_seconds);
+        self.resolve_with_values(width, height, time_seconds, frame, &values)
+    }
+
+    /// [`Self::resolve_in_frame`] with its uniforms set to `values`.
+    pub fn resolve_with_values(
+        &self,
+        width: u32,
+        height: u32,
+        time_seconds: f64,
+        frame: (f64, f64),
+        values: &[f32],
+    ) -> Result<Brush, ShaderBackgroundError> {
         if width == 0 || height == 0 {
             return Err(ShaderBackgroundError::InvalidSize { width, height });
         }
         let time = shader_time(time_seconds, self.contract)?;
         let frame = frame_size(frame);
-        let key = [
+        let mut key = vec![
             width,
             height,
             time.to_bits(),
             frame[0].to_bits(),
             frame[1].to_bits(),
         ];
+        key.extend(values.iter().map(|value| value.to_bits()));
         let mut cache = self.cache.lock().expect("shader background cache poisoned");
         if let Some((cached_key, cached)) = &*cache
             && *cached_key == key
         {
             return cached.clone();
         }
-        let rendered = rasterize_shader(self, width, height, time, frame)
+        let rendered = rasterize_shader(self, width, height, time, frame, values)
             .map(|image| Brush::Image(ImageBrush::new(image)));
         if let Err(error) = &rendered {
             bevy::log::error!("background shader failed; using its fallback color: {error}");
@@ -258,6 +382,7 @@ impl ShaderBackground {
             image: self.gpu_image(width, height),
             time: shader_time(time_seconds, self.contract)?,
             frame: [0.0; 2],
+            values: self.values_at(time_seconds),
         })
     }
 
@@ -297,42 +422,139 @@ impl ShaderBackground {
         if let Some(compiled) = &*cached {
             return compiled.clone();
         }
-        let compiled = Arc::new(CompiledShader::new(device, &self.source, self.contract));
+        let compiled = Arc::new(CompiledShader::new(
+            device,
+            &self.source,
+            self.contract,
+            self.layout(),
+        ));
         *cached = Some(compiled.clone());
         compiled
     }
+
+    /// The uniform buffer bytes of `values`, padded to whole `vec4`s.
+    fn uniform_bytes(&self, values: &[f32]) -> Vec<u8> {
+        let mut bytes = vec![0_u8; self.uniforms.len().div_ceil(4).max(1) * 16];
+        for (index, value) in values.iter().take(self.uniforms.len()).enumerate() {
+            bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+        }
+        bytes
+    }
+
+    fn data_bytes(&self) -> Option<Vec<u8>> {
+        self.data.as_ref().map(|data| {
+            data.iter()
+                .flat_map(|texel| texel.iter().flat_map(|value| value.to_ne_bytes()))
+                .collect()
+        })
+    }
+}
+
+/// What a background shader declares beyond its output and time.
+#[derive(Clone, Copy)]
+struct ShaderLayout<'a> {
+    uniforms: &'a [Arc<str>],
+    data: bool,
+}
+
+/// The extra buffers a background shader binds: its uniforms and data.
+struct ShaderBuffers<'a> {
+    uniforms: Option<&'a wgpu::Buffer>,
+    data: Option<&'a wgpu::Buffer>,
+}
+
+/// Most named uniforms a background shader may declare.
+pub const MAX_BACKGROUND_UNIFORMS: usize = 32;
+
+fn validate_uniform_names(names: &[Arc<str>]) -> Result<(), ShaderBackgroundError> {
+    if names.len() > MAX_BACKGROUND_UNIFORMS {
+        return Err(ShaderBackgroundError::InvalidWgsl(format!(
+            "at most {MAX_BACKGROUND_UNIFORMS} uniforms per background, got {}",
+            names.len()
+        )));
+    }
+    for (index, name) in names.iter().enumerate() {
+        let mut chars = name.chars();
+        let valid = chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            && !name.starts_with("__")
+            && name.as_ref() != "_";
+        if !valid {
+            return Err(ShaderBackgroundError::InvalidWgsl(format!(
+                "{name:?} is not a WGSL identifier (letters, digits and '_', not starting with a digit)"
+            )));
+        }
+        if names[..index].contains(name) {
+            return Err(ShaderBackgroundError::InvalidWgsl(format!(
+                "uniform {name:?} is declared twice"
+            )));
+        }
+    }
+    Ok(())
 }
 
 impl CompiledShader {
-    fn new(device: &wgpu::Device, source: &str, contract: ShaderContract) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        source: &str,
+        contract: ShaderContract,
+        layout: ShaderLayout<'_>,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gaanim-background-shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Owned(complete_shader(source, contract))),
+            source: wgpu::ShaderSource::Wgsl(Cow::Owned(complete_shader(source, contract, layout))),
         });
+        let mut entries = vec![
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ];
+        if !layout.uniforms.is_empty() {
+            entries.push(wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+        if layout.data {
+            entries.push(wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gaanim-background-shader-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
+            entries: &entries,
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gaanim-background-shader-pipeline-layout"),
@@ -358,21 +580,35 @@ impl CompiledShader {
         device: &wgpu::Device,
         output: &wgpu::Texture,
         time: &wgpu::Buffer,
+        buffers: ShaderBuffers<'_>,
     ) -> wgpu::BindGroup {
         let view = output.create_view(&Default::default());
+        let mut entries = vec![
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: time.as_entire_binding(),
+            },
+        ];
+        if let Some(uniforms) = buffers.uniforms {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 2,
+                resource: uniforms.as_entire_binding(),
+            });
+        }
+        if let Some(data) = buffers.data {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 3,
+                resource: data.as_entire_binding(),
+            });
+        }
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("gaanim-background-shader-bind-group"),
             layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: time.as_entire_binding(),
-                },
-            ],
+            entries: &entries,
         })
     }
 
@@ -440,6 +676,7 @@ pub struct ShaderBackgroundRequest {
     image: ImageData,
     time: f32,
     frame: [f32; 2],
+    values: Arc<[f32]>,
 }
 
 impl ShaderBackgroundRequest {
@@ -463,6 +700,17 @@ impl ShaderBackgroundRequest {
         self.frame = frame_size(frame);
         self
     }
+
+    /// The shader's uniform values.
+    pub fn values(&self) -> &[f32] {
+        &self.values
+    }
+
+    /// Set the shader's uniform values.
+    pub fn with_values(mut self, values: Arc<[f32]>) -> Self {
+        self.values = values;
+        self
+    }
 }
 
 /// Shader backgrounds rendered on the device of a Vello renderer.
@@ -481,14 +729,17 @@ struct GpuShaderTarget {
     image: ImageData,
     source: Arc<str>,
     contract: ShaderContract,
+    uniform_count: usize,
+    has_data: bool,
     texture: wgpu::Texture,
     time: wgpu::Buffer,
+    uniforms: Option<wgpu::Buffer>,
     /// `None` when the pipeline failed to build; the texture holds the fallback.
     pipeline: Option<(Arc<CompiledShader>, wgpu::BindGroup)>,
     /// Set while WebGPU has not validated `pipeline`; it is not run until then.
     checking: Option<crate::gpu_scope::PendingScope>,
-    /// Time and frame size bits of the texture contents.
-    rendered_time: Option<[u32; 3]>,
+    /// Time, frame size and uniform bits of the texture contents.
+    rendered_time: Option<Vec<u32>>,
 }
 
 impl GpuShaderTarget {
@@ -533,6 +784,8 @@ impl GpuShaderBackgrounds {
                 .find(|target| {
                     target.contract == request.shader.contract
                         && *target.source == *request.shader.source
+                        && target.uniform_count == request.shader.uniforms.len()
+                        && target.has_data == request.shader.data.is_some()
                 })
                 .filter(|target| target.checking.is_none())
                 .and_then(|target| target.pipeline.as_ref())
@@ -556,11 +809,12 @@ impl GpuShaderBackgrounds {
                 renderer.override_image(&target.image, Some(target.texture_copy()));
                 target
             });
-        let time = [
+        let mut time = vec![
             request.time.to_bits(),
             request.frame[0].to_bits(),
             request.frame[1].to_bits(),
         ];
+        time.extend(request.values.iter().map(|value| value.to_bits()));
         if let Some(scope) = &target.checking {
             let Some(outcome) = scope.poll() else {
                 return;
@@ -570,7 +824,7 @@ impl GpuShaderBackgrounds {
                 target.fail(queue, &request.shader, &error);
             }
         }
-        if target.rendered_time == Some(time) {
+        if target.rendered_time.as_ref() == Some(&time) {
             return;
         }
         if let Some((compiled, bind_group)) = &target.pipeline {
@@ -579,6 +833,9 @@ impl GpuShaderBackgrounds {
                 0,
                 &time_uniform_bytes(request.time, request.frame),
             );
+            if let Some(uniforms) = &target.uniforms {
+                queue.write_buffer(uniforms, 0, &request.shader.uniform_bytes(&request.values));
+            }
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("gaanim-background-shader-commands"),
             });
@@ -632,17 +889,47 @@ impl GpuShaderTarget {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let uniforms = (!shader.uniforms.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gaanim-background-shader-uniforms"),
+                contents: &shader.uniform_bytes(&request.values),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            })
+        });
+        let data = shader.data_bytes().map(|bytes| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("gaanim-background-shader-data"),
+                contents: &bytes,
+                usage: wgpu::BufferUsages::STORAGE,
+            })
+        });
         let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let compiled = compiled.unwrap_or_else(|| {
-            Arc::new(CompiledShader::new(device, &shader.source, shader.contract))
+            Arc::new(CompiledShader::new(
+                device,
+                &shader.source,
+                shader.contract,
+                shader.layout(),
+            ))
         });
-        let bind_group = compiled.bind_group(device, &texture, &time);
+        let bind_group = compiled.bind_group(
+            device,
+            &texture,
+            &time,
+            ShaderBuffers {
+                uniforms: uniforms.as_ref(),
+                data: data.as_ref(),
+            },
+        );
         let mut target = Self {
             image: image.clone(),
             source: shader.source.clone(),
             contract: shader.contract,
+            uniform_count: shader.uniforms.len(),
+            has_data: shader.data.is_some(),
             texture,
             time,
+            uniforms,
             pipeline: Some((compiled, bind_group)),
             checking: None,
             rendered_time: None,
@@ -695,16 +982,35 @@ pub enum ShaderBackgroundError {
     Readback(String),
 }
 
-fn complete_shader(source: &str, contract: ShaderContract) -> String {
+fn complete_shader(source: &str, contract: ShaderContract, layout: ShaderLayout<'_>) -> String {
     let entry_point = match contract {
         ShaderContract::Animated => ANIMATED_SHADER_ENTRY_POINT,
         ShaderContract::StaticLegacy => STATIC_SHADER_ENTRY_POINT,
     };
-    format!("{SHADER_PREAMBLE}\n{source}\n{entry_point}")
+    let mut declarations = String::new();
+    if !layout.uniforms.is_empty() {
+        declarations.push_str("struct GaanimUniforms {\n");
+        for name in layout.uniforms {
+            declarations.push_str(&format!("    {name}: f32,\n"));
+        }
+        declarations.push_str(
+            "}\n\n@group(0) @binding(2)\nvar<uniform> gaanim_uniforms: GaanimUniforms;\n",
+        );
+    }
+    if layout.data {
+        declarations.push_str(
+            "\n@group(0) @binding(3)\nvar<storage, read> gaanim_data: array<vec4<f32>>;\n",
+        );
+    }
+    format!("{SHADER_PREAMBLE}\n{declarations}\n{source}\n{entry_point}")
 }
 
-fn validate_complete_shader(source: &str, contract: ShaderContract) -> Result<(), String> {
-    let complete = complete_shader(source, contract);
+fn validate_complete_shader(
+    source: &str,
+    contract: ShaderContract,
+    layout: ShaderLayout<'_>,
+) -> Result<(), String> {
+    let complete = complete_shader(source, contract, layout);
     let module =
         naga::front::wgsl::parse_str(&complete).map_err(|error| error.emit_to_string(&complete))?;
     Validator::new(ValidationFlags::all(), Capabilities::all())
@@ -713,16 +1019,19 @@ fn validate_complete_shader(source: &str, contract: ShaderContract) -> Result<()
     Ok(())
 }
 
-fn validate_shader_source(source: &str) -> Result<ShaderContract, ShaderBackgroundError> {
+fn validate_shader_source(
+    source: &str,
+    layout: ShaderLayout<'_>,
+) -> Result<ShaderContract, ShaderBackgroundError> {
     if !source.contains("gaanim_background") {
         return Err(ShaderBackgroundError::InvalidWgsl(
             "source must define gaanim_background(uv, resolution, time)".to_string(),
         ));
     }
-    match validate_complete_shader(source, ShaderContract::Animated) {
+    match validate_complete_shader(source, ShaderContract::Animated, layout) {
         Ok(()) => Ok(ShaderContract::Animated),
         Err(animated_error) => {
-            if validate_complete_shader(source, ShaderContract::StaticLegacy).is_ok() {
+            if validate_complete_shader(source, ShaderContract::StaticLegacy, layout).is_ok() {
                 Ok(ShaderContract::StaticLegacy)
             } else {
                 Err(ShaderBackgroundError::InvalidWgsl(animated_error))
@@ -790,6 +1099,7 @@ fn rasterize_shader(
     height: u32,
     time: f32,
     frame: [f32; 2],
+    values: &[f32],
 ) -> Result<ImageData, ShaderBackgroundError> {
     let gpu = shader_gpu()?;
     let _operation = gpu
@@ -807,7 +1117,29 @@ fn rasterize_shader(
         contents: &time_uniform_bytes(time, frame),
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    let bind_group = compiled.bind_group(device, &texture, &uniform);
+    let uniforms = (!shader.uniforms.is_empty()).then(|| {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gaanim-background-shader-uniforms"),
+            contents: &shader.uniform_bytes(values),
+            usage: wgpu::BufferUsages::UNIFORM,
+        })
+    });
+    let data = shader.data_bytes().map(|bytes| {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("gaanim-background-shader-data"),
+            contents: &bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+        })
+    });
+    let bind_group = compiled.bind_group(
+        device,
+        &texture,
+        &uniform,
+        ShaderBuffers {
+            uniforms: uniforms.as_ref(),
+            data: data.as_ref(),
+        },
+    );
 
     let padded_width = (width + 63) & !63;
     let staging = device.create_buffer(&wgpu::BufferDescriptor {

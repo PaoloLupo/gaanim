@@ -339,7 +339,13 @@ class Background:
         """Wrap a solid or gradient Brush for use inside the full scene bounds."""
         ...
     @staticmethod
-    def shader(source: str | os.PathLike[str], *, fallback: Optional[ColorLike] = None) -> Background:
+    def shader(
+        source: str | os.PathLike[str],
+        *,
+        fallback: Optional[ColorLike] = None,
+        uniforms: Optional[dict[str, float | Parameter | Variable | Computed | TimeInput]] = None,
+        audio: Optional[Audio] = None,
+    ) -> Background:
         """Create a timeline-driven WGSL scene background.
 
         A string is inline WGSL. An ``os.PathLike`` value loads a WGSL asset
@@ -354,6 +360,21 @@ class Background:
         rasterization is unavailable. The shader may
         call ``gaanim_frame_size(resolution)`` for the scene frame size in
         world units, e.g. to draw a grid in scene units.
+
+        ``uniforms`` maps names to values the shader reads as ``f32`` fields
+        of ``gaanim_uniforms``, as in ``PostProcess.shader``: numbers or a
+        ``Parameter``, ``Variable``, ``Computed``, ``scene.time`` or audio
+        signal, evaluated every frame, so the background reacts to the
+        music. ``audio`` gives it the track's spectrogram through
+        ``gaanim_audio_spectrum(x, ago)`` and the other ``gaanim_audio_*``
+        functions (see ``PostProcess.shader``). ``.gaanim`` bundles record
+        the values of every frame. Names must be WGSL identifiers (at most
+        32); a bad name or ``gaanim_audio_time`` with ``audio`` raises
+        ``ValueError``.
+
+        Example:
+            bass = music.band(30, 120, smoothing=0.4)
+            scene.canvas.background = Background.shader(src, uniforms={"bass": bass})
         """
         ...
     @staticmethod
@@ -1406,7 +1427,7 @@ class Transition:
         source: str | os.PathLike[str],
         duration: float,
         *,
-        uniforms: Optional[Mapping[str, float]] = None,
+        uniforms: Optional[Mapping[str, float | Parameter | Variable | Computed | TimeInput]] = None,
         easing: Optional[Easing] = None,
         overlay: Optional[Overlay] = None,
         sound: Optional[str] = None,
@@ -1420,8 +1441,11 @@ class Transition:
         ``progress`` goes from 0 to 1 (linear unless ``easing`` is given).
         ``uv`` has (0, 0) at the top-left of the camera frame;
         ``gaanim_resolution()`` is its size in pixels and ``gaanim_time()`` the
-        timeline seconds. ``uniforms`` become fixed ``f32`` fields of
-        ``gaanim_uniforms``. Drawables of neither segment and the ``overlay``
+        timeline seconds. ``uniforms`` become ``f32`` fields of
+        ``gaanim_uniforms``: numbers stay fixed, and a ``Parameter``,
+        ``Variable``, ``Computed``, ``scene.time`` or audio signal of the same
+        scene is evaluated every frame of the transition, so it can pulse with
+        the kick (``.gaanim`` bundles record the values). Drawables of neither segment and the ``overlay``
         stay sharp above the blend. Seeks render the same frame as playback.
         Invalid WGSL or uniform names raise ``ValueError``.
 

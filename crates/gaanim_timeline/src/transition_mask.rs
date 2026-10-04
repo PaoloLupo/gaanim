@@ -586,6 +586,7 @@ pub(crate) fn apply_shader_transition(
     world: &mut World,
     scene_entities: &[(Entity, SceneId)],
     shader: &std::sync::Arc<gaanim_scene::TransitionShader>,
+    values: Vec<f32>,
     t: f64,
     from: SceneId,
     to: SceneId,
@@ -601,6 +602,7 @@ pub(crate) fn apply_shader_transition(
     frame.shader = Some(gaanim_scene::TransitionShaderFrame {
         shader: shader.clone(),
         progress: t as f32,
+        values,
     });
     world.insert_resource(frame);
 }
@@ -855,6 +857,7 @@ mod tests {
             TransitionType::Shader {
                 duration: 1.0,
                 shader: shader.clone(),
+                uniforms: Vec::new(),
             },
         );
         let mut spawn = |raw, scene| {

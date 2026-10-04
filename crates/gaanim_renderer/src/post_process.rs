@@ -581,7 +581,7 @@ impl PostProcessRequest {
         });
         request.transition = Some(TransitionPass {
             shader,
-            values: transition.shader.values.clone(),
+            values: transition.values.clone(),
             progress: transition.progress,
         });
         Some(request)
@@ -1467,6 +1467,7 @@ mod tests {
         let request = PostProcessRequest::with_transition(
             None,
             Some(&gaanim_scene::TransitionShaderFrame {
+                values: shader.values.clone(),
                 shader,
                 progress: 0.25,
             }),

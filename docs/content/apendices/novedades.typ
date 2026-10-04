@@ -56,7 +56,9 @@ interlineado por defecto es más compacto.
   disposición (`"row"`, `"mirror"`, `"radial"` o la tuya) y los colores que
   elijas. También sirven como uniforms de un shader, y
   `PostProcess.shader(..., audio=)` le da el espectrograma entero
-  (`gaanim_audio_spectrum(x, ago)`). Lee
+  (`gaanim_audio_spectrum(x, ago)`). `Background.shader` y
+  `Transition.shader` aceptan uniforms que siguen señales (y el fondo,
+  `audio=`). Lee
   #link("/referencia/audio/")[Audio].
 - `scene.geometry.polyline` acepta señales en sus coordenadas y
   `closed=True`.
@@ -107,7 +109,7 @@ interlineado por defecto es más compacto.
 
 == Al actualizar
 
-- Los paquetes `.gaanim` pasan a la versión 4 del formato: Gaanim 0.9 no abre
+- Los paquetes `.gaanim` pasan a la versión 5 del formato: Gaanim 0.9 no abre
   los grabados con 0.8 ni anteriores. Vuelve a grabarlos con
   `gaanim export <proyecto> --output charla.gaanim`.
 - `line_spacing` vale 1.0 por defecto en lugar de 1.2: las líneas quedan a

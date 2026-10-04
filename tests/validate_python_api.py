@@ -2160,6 +2160,27 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
         failures.append(f"PostProcess.shader(audio=) failed: {error}")
     if not raises_error(ValueError, lambda: module.PostProcess.shader(spectro, uniforms={"gaanim_audio_time": 0}, audio=music)):
         failures.append("PostProcess.shader(audio=) accepted the reserved uniform name")
+    background = """
+fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    return vec4<f32>(gaanim_uniforms.bass + gaanim_audio_level(0.0), 0.0, gaanim_uniforms.fixed, 1.0);
+}
+"""
+    try:
+        scene.canvas.background = module.Background.shader(
+            background, uniforms={"bass": music.band(30, 120), "fixed": 0.2}, audio=music)
+        blend = scene.viz.parameter(0.0)
+        scene.segment("reactive", module.Transition.shader(
+            "fn transition(uv: vec2<f32>) -> vec4<f32> { return mix(gaanim_from(uv), gaanim_to(uv), gaanim_uniforms.mix_amount); }",
+            0.5, uniforms={"mix_amount": blend}))
+    except Exception as error:
+        failures.append(f"reactive background or transition uniforms failed: {error}")
+    for operation in (
+        lambda: module.Background.shader(background, uniforms={"bass": 0.0, "fixed": 0.0, "gaanim_audio_time": 0.0}, audio=music),
+        lambda: module.Background.shader(background, uniforms={"1bad": 0.0}),
+        lambda: module.Background.shader(background),
+    ):
+        if not raises_error(ValueError, operation):
+            failures.append("Background.shader accepted a reserved, invalid or undeclared uniform")
     if len(music.spectrum(8, normalize="global")) != 8:
         failures.append("Audio.spectrum(normalize='global') does not return one Computed per band")
     return failures
