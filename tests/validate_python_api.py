@@ -2130,7 +2130,12 @@ def validate_audio_signals_contract(module):
             and len(data.frequencies) == len(data.spectrum[0]) == 96
             and abs(data.duration - 8.0) < 0.01 and data.onsets() and data.onsets(low=40, high=120)):
         failures.append("Audio.analysis arrays do not line up")
+    if (len(data.level_db) != frames or max(data.level_db) > 6.0 or min(data.level_db) < -120.0
+            or not isinstance(music.level(range_db=24), module.Computed)):
+        failures.append("Audio.level(range_db=) or AudioData.level_db is wrong")
     for operation in (
+        lambda: music.level(range_db=0),
+        lambda: music.level(range_db=200),
         lambda: music.tempo(min_bpm=0),
         lambda: music.tempo(min_bpm=150, max_bpm=100),
         lambda: music.pulse(0.1, low=40),

@@ -45,7 +45,8 @@ interlineado por defecto es más compacto.
   `pulse` y `beats` aceptan una banda (`low=40, high=120` sigue el bombo).
 - `Audio.tempo()` estima el BPM y la fase del primer pulso para
   `scene.tempo`, y `Audio.analysis()` da el análisis como listas de Python
-  para colocar cortes a mano.
+  para colocar cortes a mano. `Audio.level(range_db=24)` mide el volumen en
+  decibelios.
 - `Updater.rotate`, `Updater.wiggle` y el nuevo `Falloff.source` aceptan una
   señal del tiempo, así que el audio también gira, hace temblar y tiñe con
   `drive("fill", ...)`. Lee #link("/referencia/audio/")[Audio].
