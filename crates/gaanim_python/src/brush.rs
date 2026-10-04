@@ -192,10 +192,12 @@ impl PyPostProcess {
     /// Build a post-process from inline WGSL or an os.PathLike asset, with
     /// optional named uniforms read as `gaanim_uniforms.<name>`.
     #[staticmethod]
-    #[pyo3(signature = (source, *, uniforms=None))]
+    #[pyo3(signature = (source, *, uniforms=None, audio=None))]
     fn shader(
+        py: Python<'_>,
         source: &Bound<'_, PyAny>,
         uniforms: Option<&Bound<'_, pyo3::types::PyDict>>,
+        audio: Option<PyRef<'_, crate::pycanvas::PyAudio>>,
     ) -> PyResult<Self> {
         let mut names = Vec::new();
         let mut values = Vec::new();
@@ -206,6 +208,37 @@ impl PyPostProcess {
                 })?);
                 values.push(crate::visualization::extract_deferred_scalar(value)?);
             }
+        }
+        if let Some(audio) = audio {
+            let name = gaanim_api::canvas::AUDIO_TIME_UNIFORM;
+            if names.iter().any(|existing| existing == name) {
+                return Err(PyValueError::new_err(format!(
+                    "the uniform {name:?} is reserved for audio="
+                )));
+            }
+            let text = match source.extract::<String>() {
+                Ok(text) => text,
+                Err(_) => {
+                    let path = source.extract::<PathBuf>().map_err(|_| {
+                        pyo3::exceptions::PyTypeError::new_err(
+                            "source must be inline WGSL text or an os.PathLike .wgsl asset",
+                        )
+                    })?;
+                    std::fs::read_to_string(&path).map_err(|error| {
+                        pyo3::exceptions::PyRuntimeError::new_err(format!(
+                            "could not read {}: {error}",
+                            path.display()
+                        ))
+                    })?
+                }
+            };
+            let (data, time) = audio.shader_input(py)?;
+            names.push(name.to_string());
+            values.push(time);
+            let source = format!("{}\n{text}", gaanim_api::canvas::AUDIO_SHADER_FUNCTIONS);
+            return gaanim_api::canvas::PostProcessShader::with_data(source, &names, data)
+                .map(|shader| Self::new(shader, values))
+                .map_err(post_process_error);
         }
         let shader = if let Ok(source) = source.extract::<String>() {
             gaanim_api::canvas::PostProcessShader::with_uniforms(source, &names)

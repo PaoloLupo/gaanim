@@ -54,7 +54,9 @@ interlineado por defecto es más compacto.
   dan una señal por banda o por instante reciente, y `scene.viz.equalizer` las dibuja con
   la forma (`"bar"`, `"capsule"`, `"dot"`, `"line"`, `"area"` o la tuya), la
   disposición (`"row"`, `"mirror"`, `"radial"` o la tuya) y los colores que
-  elijas. También sirven como uniforms de un shader. Lee
+  elijas. También sirven como uniforms de un shader, y
+  `PostProcess.shader(..., audio=)` le da el espectrograma entero
+  (`gaanim_audio_spectrum(x, ago)`). Lee
   #link("/referencia/audio/")[Audio].
 - `scene.geometry.polyline` acepta señales en sus coordenadas y
   `closed=True`.

@@ -413,6 +413,39 @@ scene.wait(music.duration)
 scene.render()
 ```
 
+Para más detalle, `audio=` le da al shader el espectrograma entero de la
+pista sin gastar uniforms (usa uno, `gaanim_audio_time`, reservado). El
+shader llama a:
+
+- `gaanim_audio_spectrum(x, ago)`: el espectro en `x`, de 0 (20 Hz) a 1
+  (unos 11 kHz) en escala logarítmica, cada frecuencia de 0 a 1 contra su
+  propio máximo, tal como sonaba hace `ago` segundos;
+- `gaanim_audio_level(ago)`: el volumen;
+- `gaanim_audio_band(low, high, ago)`: la media entre dos frecuencias en Hz;
+- `gaanim_audio_x(hz)`: dónde cae una frecuencia en la escala de `x`.
+
+Leer varios `ago` dibuja la historia del espectro: un espectrograma que
+avanza mientras suena. Todas valen 0 mientras la pista no suena. Los paquetes
+`.gaanim` guardan los datos una sola vez. También sirve en `shader_effect`.
+
+```python
+# show-code: true
+from gaanim import PostProcess, Scene
+scene = Scene(frame=(16, 9), background="#0b1020")
+music = scene.media.audio("assets/ritmo.ogg")
+scene.canvas.post = PostProcess.shader("""
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    // Izquierda: hace 3 s; derecha: ahora. Abajo los graves.
+    let energy = gaanim_audio_spectrum(1.0 - uv.y, 3.0 * (1.0 - uv.x));
+    let heat = vec3<f32>(energy, energy * energy, 0.3 + 0.7 * energy * energy * energy);
+    return vec4<f32>(mix(gaanim_scene(uv).rgb, heat, energy), 1.0);
+}
+""", audio=music)
+scene.play(music)
+scene.wait(music.duration)
+scene.render()
+```
+
 == Narración
 
 Gaanim graba tu voz sin salir del editor y la sincroniza con la escena, sin
