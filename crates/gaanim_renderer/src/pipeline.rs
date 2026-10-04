@@ -2388,15 +2388,19 @@ fn compile_scene_with_pins(
         Vec::new()
     };
     let background = world.get_resource::<CanvasBackground>();
+    // A renderer that runs the effects draws a shader background on its own
+    // device too.
+    let mut background_request = None;
     let mut frame = compose_frame(
         &extraction.elements,
         extraction.transition.as_ref(),
         background.map(|background| (background, background.pixel_size)),
         extraction.background_time,
         0.0,
-        None,
+        effects.then_some(&mut background_request),
     );
     frame.effects = effect_layers;
+    frame.background = background_request;
     if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
         append_live_overlay(frame.top_mut(), overlay);
     }
@@ -3775,6 +3779,10 @@ pub struct ComposedFrame {
     /// draws into their images before the frame; see
     /// [`crate::object_effects`].
     pub effects: Vec<crate::object_effects::EffectLayer>,
+    /// The shader background the frame draws, which a GPU renderer draws
+    /// into its image with [`crate::background::GpuShaderBackgrounds`]
+    /// before the frame, without reading it back to the CPU.
+    pub background: Option<ShaderBackgroundRequest>,
 }
 
 /// The parts of a frame under a shader transition besides the outgoing
@@ -3833,9 +3841,10 @@ impl ComposedFrame {
                 above: place(&transition.above),
                 shader: transition.shader,
             }),
-            // Effects draw into textures of their own, placed by their
-            // images in the scene.
+            // Effects and the background draw into textures of their own,
+            // placed by their images in the scene.
             effects: self.effects,
+            background: self.background,
         }
     }
 }
@@ -3859,6 +3868,7 @@ fn compose_frame(
             scene: compose_elements(elements, transition, background, time_seconds, rest, gpu),
             transition: None,
             effects: Vec::new(),
+            background: None,
         };
     };
     let side = |side: gaanim_scene::TransitionSide| -> Vec<ExtractedElement> {
@@ -3908,6 +3918,7 @@ fn compose_frame(
             shader,
         }),
         effects: Vec::new(),
+        background: None,
     }
 }
 

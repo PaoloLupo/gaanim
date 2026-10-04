@@ -697,7 +697,7 @@ where
             continue;
         }
 
-        let (vello_scene, layers, effects, post_process) = {
+        let (vello_scene, layers, effects, background, post_process) = {
             let resolved_camera = frame_camera(app.world());
             let composed = gaanim_renderer::pipeline::compile_frame_from_world(
                 app.world_mut(),
@@ -717,7 +717,13 @@ where
                 config.fit,
             );
             let post = export_post_process(app.world(), frame, composed.transition.as_ref());
-            (composed.scene, composed.transition, composed.effects, post)
+            (
+                composed.scene,
+                composed.transition,
+                composed.effects,
+                composed.background,
+                post,
+            )
         };
 
         let bg_color = app
@@ -740,6 +746,7 @@ where
                 &vello_scene,
                 layers.as_ref(),
                 &effects,
+                background.as_ref(),
                 bg_color,
                 post_process.as_ref(),
             )
@@ -1067,6 +1074,7 @@ impl FrameRasterizer {
                 &composed.scene,
                 composed.transition.as_ref(),
                 &composed.effects,
+                composed.background.as_ref(),
                 self.bg_color,
                 post.as_ref(),
             )
@@ -1086,7 +1094,7 @@ pub fn compose_bundle_frame(
     fit: crate::config::OutputFit,
     overlay: Option<&gaanim_animation::live::LiveOverlay>,
 ) -> vello::Scene {
-    compose_bundle_layers(frame, background, store, width, height, fit, overlay).flattened()
+    compose_bundle_parts(frame, background, store, width, height, fit, overlay, false).flattened()
 }
 
 /// [`compose_bundle_frame`] keeping a shader transition's segments apart,
@@ -1100,21 +1108,42 @@ pub fn compose_bundle_layers(
     fit: crate::config::OutputFit,
     overlay: Option<&gaanim_animation::live::LiveOverlay>,
 ) -> gaanim_renderer::pipeline::ComposedFrame {
+    compose_bundle_parts(frame, background, store, width, height, fit, overlay, true)
+}
+
+/// [`compose_bundle_layers`]; with `gpu`, a shader background is left to
+/// the renderer's device as [`ComposedFrame::background`], otherwise it is
+/// drawn through the CPU.
+///
+/// [`ComposedFrame::background`]: gaanim_renderer::pipeline::ComposedFrame::background
+#[allow(clippy::too_many_arguments)]
+fn compose_bundle_parts(
+    frame: &gaanim_bundle::Frame,
+    background: Option<&gaanim_renderer::pipeline::CanvasBackground>,
+    store: &mut gaanim_renderer::fragment::FragmentStore,
+    width: u32,
+    height: u32,
+    fit: crate::config::OutputFit,
+    overlay: Option<&gaanim_animation::live::LiveOverlay>,
+    gpu: bool,
+) -> gaanim_renderer::pipeline::ComposedFrame {
     let resolved =
         gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
     // Pad opacity layers for this output, as a direct export does.
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
     });
+    let mut background_request = None;
     let mut composed = gaanim_renderer::pipeline::compose_captured_frame(
         &frame.capture,
         store,
         background.map(|background| (background, background.pixel_size)),
         pixels_per_unit,
-        None,
+        gpu.then_some(&mut background_request),
         0.0,
         pixels_per_unit.unwrap_or(gaanim_renderer::pipeline::DEFAULT_EFFECT_DENSITY),
     );
+    composed.background = background_request;
     store.end_frame();
     if let Some(overlay) = overlay {
         gaanim_renderer::pipeline::append_live_overlay(composed.top_mut(), overlay);
@@ -1348,6 +1377,7 @@ where
                 &composed.scene,
                 composed.transition.as_ref(),
                 &composed.effects,
+                composed.background.as_ref(),
                 background,
                 post_process.as_ref(),
             )
@@ -1431,6 +1461,7 @@ fn render_updated_world(
         &composed.scene,
         composed.transition.as_ref(),
         &composed.effects,
+        composed.background.as_ref(),
         background,
         post_process.as_ref(),
     )
