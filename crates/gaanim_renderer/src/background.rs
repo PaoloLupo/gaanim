@@ -1100,16 +1100,8 @@ struct ShaderGpu {
 
 impl ShaderGpu {
     fn new() -> Result<Self, ShaderBackgroundError> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all().with_env(),
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .map_err(|_| ShaderBackgroundError::NoAdapter)?;
+        let adapter = crate::adapter::request_headless_adapter()
+            .map_err(|_| ShaderBackgroundError::NoAdapter)?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("gaanim-background-shader-device"),
             required_features: wgpu::Features::empty(),

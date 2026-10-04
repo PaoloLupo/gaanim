@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+pub mod adapter;
 pub mod background;
 mod background_gpu;
 pub mod background_presets;
