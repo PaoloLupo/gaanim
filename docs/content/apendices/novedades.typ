@@ -94,6 +94,8 @@ interlineado por defecto es más compacto.
 
 == Correcciones
 
+- Un `blur_in` con `.delay(...)` mantiene sus glifos transparentes durante
+  el retardo; antes dejaba una trama tenue donde iba a entrar el texto.
 - Los degradados y los `clip-path` de un SVG bajo `<g transform>` o un
   `viewBox` desplazado siguen la transformación, y el trazo de una figura
   cerrada va centrado, como en SVG.
