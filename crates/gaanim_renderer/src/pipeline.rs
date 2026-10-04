@@ -3131,14 +3131,37 @@ fn three_d_elements<'a>(
     let Some(projector) = Projector::new(camera) else {
         return;
     };
+    // Drawables project independently, so they spread over the compute
+    // threads; their items keep the order of `sources`.
+    let sources: Vec<ThreeDSource<'a>> = sources.collect();
+    let projected = parallel_map(sources.iter().collect(), 1, |(entity, content, ..)| {
+        let mut items = Vec::new();
+        projector.push(*entity, content, lighting, &mut items);
+        items
+    });
+    // How each drawable's elements compose, the same for all of them.
     let mut composition = HashMap::new();
     let mut items = Vec::new();
-    for (entity, content, hud, layer) in sources {
-        let before = items.len();
-        projector.push(entity, &content, lighting, &mut items);
-        if items.len() > before {
-            composition.insert(entity, (hud, layer));
+    for ((entity, _, hud, layer), projected) in sources.into_iter().zip(projected) {
+        if projected.is_empty() {
+            continue;
         }
+        items.extend(projected);
+        composition.insert(
+            entity,
+            ThreeDComposition {
+                in_views: !hud,
+                layer,
+                transition_side: transition_frame.map_or_else(Default::default, |frame| {
+                    frame.side_of(entity, &mut parent_of)
+                }),
+                lineage: if with_lineage {
+                    element_lineage(entity, &mut parent_of)
+                } else {
+                    Vec::new()
+                },
+            },
+        );
     }
     if items.is_empty() {
         return;
@@ -3200,85 +3223,130 @@ fn three_d_elements<'a>(
         }
     }
 
-    for (creation_order, run) in runs.into_iter().enumerate() {
-        let Run {
-            entity,
-            opacity,
-            path,
-            paint,
-            kind,
-        } = run;
-        // A fading drawable composites its runs in one layer, clipped to
-        // what they draw.
-        let reach = projector.line_width().max(projector.seam_width());
-        let opacity_bounds = if opacity < 1.0 {
-            path.bounding_box().inflate(reach, reach)
-        } else {
-            opacity_fallback
-        };
-        let brush = paint.brush();
-        let stroke = match kind {
-            RunKind::Line => Some(StrokeBrush {
-                brush: Some(brush.clone()),
-                style: kurbo::Stroke::new(projector.line_width()).with_caps(kurbo::Cap::Round),
-            }),
-            RunKind::SealedFill => Some(StrokeBrush {
-                brush: Some(brush.clone()),
-                style: kurbo::Stroke::new(projector.seam_width()),
-            }),
-            RunKind::Fill => None,
-        };
-        let recipe = FragmentRecipe {
-            path: Some(Arc::new(path)),
-            fill: (kind != RunKind::Line).then_some(brush),
-            stroke,
-            ..Default::default()
-        };
-        let scene = build_fragment(&recipe, None).scene;
-        let (hud, layer) = composition.get(&entity).cloned().unwrap_or_default();
-        extracted.push(ExtractedElement {
-            persistent: false,
-            entity,
-            recipe: Some(Arc::new(recipe)),
-            lottie: None,
-            transform: kurbo::Affine::IDENTITY,
-            opacity,
-            opacity_bounds,
-            opacity_extent: None,
-            opacity_group: entity,
-            group_opacity: 1.0,
-            group_shadow: None,
-            effect_root: None,
-            effect_extent: None,
-            matte_root: None,
-            matte_of: None,
-            glass_root: None,
-            outline: None,
-            // Beneath every 2D drawable, in depth order.
-            render_order: RenderOrder {
-                z_index: i32::MIN,
-                creation_order: creation_order as u64,
-            },
-            scene: Arc::new(scene),
-            clip_mask: None,
-            blend: None,
-            transition_side: transition_frame.map_or_else(Default::default, |frame| {
-                frame.side_of(entity, &mut parent_of)
-            }),
-            lineage: if with_lineage {
-                element_lineage(entity, &mut parent_of)
+    // Each run builds its fragment on its own: chunks of runs spread over
+    // the compute threads, and the elements keep the order of the runs.
+    let reach = projector.line_width().max(projector.seam_width());
+    let elements = parallel_map(
+        runs.into_iter().enumerate().collect(),
+        RUNS_PER_TASK,
+        |(creation_order, run)| {
+            let Run {
+                entity,
+                opacity,
+                path,
+                paint,
+                kind,
+            } = run;
+            // A fading drawable composites its runs in one layer, clipped to
+            // what they draw.
+            let opacity_bounds = if opacity < 1.0 {
+                path.bounding_box().inflate(reach, reach)
             } else {
-                Vec::new()
-            },
-            view_bounds: None,
-            in_views: !hud,
-            layer,
-            screen: None,
-            echo_rank: 0,
-            tip: false,
-            backdrop: None,
-        });
-    }
+                opacity_fallback
+            };
+            let brush = paint.brush();
+            let stroke = match kind {
+                RunKind::Line => Some(StrokeBrush {
+                    brush: Some(brush.clone()),
+                    style: kurbo::Stroke::new(projector.line_width()).with_caps(kurbo::Cap::Round),
+                }),
+                RunKind::SealedFill => Some(StrokeBrush {
+                    brush: Some(brush.clone()),
+                    style: kurbo::Stroke::new(projector.seam_width()),
+                }),
+                RunKind::Fill => None,
+            };
+            let recipe = FragmentRecipe {
+                path: Some(Arc::new(path)),
+                fill: (kind != RunKind::Line).then_some(brush),
+                stroke,
+                ..Default::default()
+            };
+            let scene = build_fragment(&recipe, None).scene;
+            let composition = &composition[&entity];
+            ExtractedElement {
+                persistent: false,
+                entity,
+                recipe: Some(Arc::new(recipe)),
+                lottie: None,
+                transform: kurbo::Affine::IDENTITY,
+                opacity,
+                opacity_bounds,
+                opacity_extent: None,
+                opacity_group: entity,
+                group_opacity: 1.0,
+                group_shadow: None,
+                effect_root: None,
+                effect_extent: None,
+                matte_root: None,
+                matte_of: None,
+                glass_root: None,
+                outline: None,
+                // Beneath every 2D drawable, in depth order.
+                render_order: RenderOrder {
+                    z_index: i32::MIN,
+                    creation_order: creation_order as u64,
+                },
+                scene: Arc::new(scene),
+                clip_mask: None,
+                blend: None,
+                transition_side: composition.transition_side,
+                lineage: composition.lineage.clone(),
+                view_bounds: None,
+                in_views: composition.in_views,
+                layer: composition.layer.clone(),
+                screen: None,
+                echo_rank: 0,
+                tip: false,
+                backdrop: None,
+            }
+        },
+    );
+    extracted.extend(elements);
+}
+
+/// Runs of 3D primitives below which building their elements stays on one
+/// thread: a run takes about 2 µs, so a task of fewer would cost more to
+/// schedule than it saves.
+const RUNS_PER_TASK: usize = 128;
+
+/// How the elements of one drawable with 3D content compose.
+struct ThreeDComposition {
+    in_views: bool,
+    layer: Option<Arc<str>>,
+    transition_side: gaanim_scene::TransitionSide,
+    lineage: Vec<Entity>,
+}
+
+/// `f` of every item, in order. With enough items for two chunks of at
+/// least `min_chunk`, the chunks run on the compute task pool; the result is
+/// the same as on one thread.
+fn parallel_map<T: Send, R: Send + 'static>(
+    items: Vec<T>,
+    min_chunk: usize,
+    f: impl Fn(T) -> R + Sync,
+) -> Vec<R> {
+    let pool = bevy::tasks::ComputeTaskPool::try_get();
+    let tasks = pool
+        .map_or(1, |pool| pool.thread_num())
+        .min(items.len() / min_chunk.max(1));
+    let Some(pool) = pool.filter(|_| tasks > 1) else {
+        return items.into_iter().map(f).collect();
+    };
+    let chunk = items.len().div_ceil(tasks);
+    let f = &f;
+    let mut items = items.into_iter();
+    let mut parts = pool.scope(|scope| {
+        for index in 0.. {
+            let part: Vec<T> = items.by_ref().take(chunk).collect();
+            if part.is_empty() {
+                break;
+            }
+            scope.spawn(async move { (index, part.into_iter().map(f).collect::<Vec<R>>()) });
+        }
+    });
+    parts.sort_unstable_by_key(|(index, _)| *index);
+    parts.into_iter().flat_map(|(_, part)| part).collect()
 }
 
 /// Consecutive 3D primitives drawn as one element: one path, one paint.
@@ -5358,6 +5426,20 @@ mod tests {
         push_triangle(&mut path, &[a, b, c]);
         push_triangle(&mut path, &[a, c, b]);
         assert_eq!(path.winding(kurbo::Point::new(2.0, 2.0)).abs(), 2);
+    }
+
+    #[test]
+    fn parallel_map_keeps_the_order_of_the_items() {
+        let items: Vec<usize> = (0..1000).collect();
+        let doubled: Vec<usize> = items.iter().map(|item| item * 2).collect();
+        // On one thread when no pool exists or the items are too few.
+        assert_eq!(parallel_map(vec![3, 1, 2], 128, |item| item), [3, 1, 2]);
+        bevy::tasks::ComputeTaskPool::get_or_init(|| {
+            bevy::tasks::TaskPoolBuilder::new().num_threads(4).build()
+        });
+        assert_eq!(parallel_map(items.clone(), 7, |item| item * 2), doubled);
+        assert_eq!(parallel_map(items, 999, |item| item * 2), doubled);
+        assert!(parallel_map(Vec::<usize>::new(), 1, |item| item).is_empty());
     }
 
     #[test]
