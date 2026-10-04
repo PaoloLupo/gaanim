@@ -163,6 +163,12 @@ impl GpuContext {
             .max_storage_buffer_binding_size
             .min(max_buffer_size)
             .max(defaults.max_storage_buffer_binding_size);
+        // Vello's gradient ramps are one texture row each: a smooth-shaded 3D
+        // mesh draws thousands, past wgpu's default 8192. The preview gets
+        // the adapter's limit from Bevy; so does the exporter.
+        let max_texture_dimension_2d = supported
+            .max_texture_dimension_2d
+            .max(defaults.max_texture_dimension_2d);
         let (device, queue) =
             pollster::block_on(adapter.request_device(&vello::wgpu::DeviceDescriptor {
                 label: Some("gaanim-export-gpu"),
@@ -170,6 +176,7 @@ impl GpuContext {
                 required_limits: Limits {
                     max_buffer_size,
                     max_storage_buffer_binding_size: max_storage,
+                    max_texture_dimension_2d,
                     ..defaults
                 },
                 ..Default::default()
@@ -848,6 +855,43 @@ mod tests {
             );
             assert_eq!(replay, first, "replay must reproduce the complete image");
         }
+    }
+
+    #[test]
+    fn frames_with_more_gradients_than_wgpu_default_texture_rows_render() {
+        use vello::{Scene, kurbo, peniko};
+
+        let Ok(mut gpu) = GpuContext::new(64, 64) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        // Each distinct gradient takes a row of Vello's ramp texture; a
+        // smooth-shaded 3D mesh draws one per visible triangle.
+        let gradients = 9000;
+        if gpu.device.limits().max_texture_dimension_2d < gradients {
+            eprintln!("skipped: the adapter allows fewer texture rows");
+            return;
+        }
+        let mut scene = Scene::new();
+        for index in 0..gradients {
+            let shade = index as f32 / gradients as f32;
+            let gradient = peniko::Gradient::new_linear((0.0, 0.0), (64.0, 0.0)).with_stops([
+                peniko::Color::new([shade, 0.0, 1.0 - shade, 1.0]),
+                peniko::Color::new([0.0, shade, 0.0, 1.0]),
+            ]);
+            scene.fill(
+                peniko::Fill::NonZero,
+                kurbo::Affine::IDENTITY,
+                &peniko::Brush::Gradient(gradient),
+                None,
+                &kurbo::Rect::new(0.0, 0.0, 64.0, 64.0),
+            );
+        }
+        let pixels = gpu
+            .render_frame(&scene, peniko::Color::BLACK, None)
+            .expect("a frame with 9000 gradients renders");
+        // The last gradient covers the frame.
+        assert_ne!(&pixels[..4], &[0, 0, 0, 255]);
     }
 
     #[test]
