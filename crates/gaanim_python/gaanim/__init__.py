@@ -9,6 +9,12 @@ if f"{__name__}.gaanim_core" not in sys.modules:
         "Run animation scripts with `gaanim <script.py>` or open them in the Gaanim editor."
     )
 
+# The stub declares type aliases such as Paint on gaanim_core, but the native
+# module only defines classes: give it the aliases before anything imports them.
+from . import _type_aliases
+
+_type_aliases.install(sys.modules[f"{__name__}.gaanim_core"])
+
 from . import colors
 from .gaanim_core import (
     Anchor,
@@ -60,6 +66,10 @@ from .gaanim_core import (
     ColorMap,
     Brush,
     Background,
+    ColorLike,
+    ColorMapLike,
+    Paint,
+    BackgroundLike,
     Distribution,
     Emitter,
     PostProcess,
@@ -290,6 +300,10 @@ __all__ = [
     "ColorMap",
     "Brush",
     "Background",
+    "ColorLike",
+    "ColorMapLike",
+    "Paint",
+    "BackgroundLike",
     "Distribution",
     "Emitter",
     "PostProcess",

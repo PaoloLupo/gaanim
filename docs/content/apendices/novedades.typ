@@ -94,6 +94,10 @@ interlineado por defecto es más compacto.
 
 == Correcciones
 
+- Los alias de tipo de los stubs (`Paint`, `ColorLike`, `Padding`…) existen
+  también al ejecutar la escena: `from gaanim.gaanim_core import Paint` ya no
+  lanza `ImportError`. `Paint`, `ColorLike`, `ColorMapLike` y
+  `BackgroundLike` se importan también desde `gaanim`.
 - Un `blur_in` con `.delay(...)` mantiene sus glifos transparentes durante
   el retardo; antes dejaba una trama tenue donde iba a entrar el texto.
 - Un `Background.shader` sigue animándose y siguiendo el audio durante una

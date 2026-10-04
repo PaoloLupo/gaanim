@@ -13,14 +13,6 @@ import typing
 
 ROOT = Path(__file__).resolve().parents[1]
 STUB = ROOT / "crates" / "gaanim_python" / "gaanim" / "gaanim_core.pyi"
-TYPE_CHECKING_ONLY = {
-    "CurvePoint",
-    "CurveControl",
-    "CurveCommand",
-    "ColorLike",
-    "ColorMapLike",
-    "Paint",
-}
 TEXT_API_CLASSES = {
     "TextAnchor",
     "TextStyle",
@@ -80,7 +72,7 @@ def declared_members(node: ast.ClassDef) -> set[str]:
 
 
 def is_type_alias(node: ast.AnnAssign) -> bool:
-    """Return whether an annotated assignment exists only for static typing."""
+    """Return whether an annotated assignment declares a type alias."""
     annotation = node.annotation
     return (
         isinstance(annotation, ast.Name) and annotation.id == "TypeAlias"
@@ -152,6 +144,37 @@ def documented_editorial_api_failures(tree: ast.Module) -> list[str]:
             failures.append(f"SlideKit.{name} is missing a docstring")
         elif "Example:" not in doc:
             failures.append(f"SlideKit.{name} is missing an Example: block")
+    return failures
+
+
+def validate_stub_type_aliases(module: object, tree: ast.Module) -> list[str]:
+    """Every public stub alias exists at runtime with the stub's own value.
+
+    ``from gaanim.gaanim_core import Paint`` type-checks against the stub, so
+    it must also work when a script runs, and mean the same thing.
+    """
+    failures: list[str] = []
+    namespace = {**vars(typing), **vars(module)}
+    for node in tree.body:
+        if not (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and is_type_alias(node)
+            and not node.target.id.startswith("_")
+        ):
+            continue
+        name = node.target.id
+        runtime = getattr(module, name, None)
+        if runtime is None:
+            failures.append(f"gaanim_core.{name} is a stub alias missing at runtime")
+            continue
+        expected = eval(compile(ast.Expression(node.value), str(STUB), "eval"), namespace)
+        if runtime != expected:
+            failures.append(f"gaanim_core.{name} is {runtime!r} at runtime, not the stub's {expected!r}")
+    package = importlib.import_module("gaanim")
+    for name in ("ColorLike", "ColorMapLike", "Paint", "BackgroundLike"):
+        if getattr(package, name, None) is not getattr(module, name, None) or name not in package.__all__:
+            failures.append(f"gaanim.{name} is not exported at runtime")
     return failures
 
 
@@ -3028,8 +3051,7 @@ def main() -> int:
         elif (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
-            and not is_type_alias(node)
-            and node.target.id not in TYPE_CHECKING_ONLY
+            and not node.target.id.startswith("_")
             and not hasattr(module, node.target.id)
         ):
             missing.append(node.target.id)
@@ -3083,6 +3105,7 @@ def main() -> int:
     missing.extend(validate_shader_transition_contract(module))
     missing.extend(validate_text_scene_unit_defaults(module))
     missing.extend(validate_runtime_type_aliases(module))
+    missing.extend(validate_stub_type_aliases(module, tree))
     missing.extend(documented_text_api_failures(tree))
     missing.extend(documented_editorial_api_failures(tree))
 

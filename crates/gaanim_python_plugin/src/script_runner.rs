@@ -212,6 +212,7 @@ const GAANIM_SECTIONS: &str = include_str!("../../gaanim_python/gaanim/sections.
 const GAANIM_MATRIX: &str = include_str!("../../gaanim_python/gaanim/matrix.py");
 const GAANIM_AUDIO_VIZ: &str = include_str!("../../gaanim_python/gaanim/audio_viz.py");
 const GAANIM_ANIMATION_TYPES: &str = include_str!("../../gaanim_python/gaanim/animation_types.py");
+const GAANIM_TYPE_ALIASES: &str = include_str!("../../gaanim_python/gaanim/_type_aliases.py");
 const GAANIM_LIVE: &str = include_str!("../../gaanim_python/gaanim/live.py");
 const GAANIM_QUESTIONS: &str = include_str!("../../gaanim_python/gaanim/questions.py");
 
@@ -270,6 +271,14 @@ fn bootstrap_gaanim_package(py: Python<'_>) -> PyResult<()> {
     let types_name = std::ffi::CString::new("gaanim.animation_types").unwrap();
     let animation_types = PyModule::from_code(py, &types_source, &types_file, &types_name)?;
     modules.set_item("gaanim.animation_types", &animation_types)?;
+
+    // The stub's type aliases (Paint, ColorLike...), which the package
+    // initializer installs on `gaanim_core`.
+    let aliases_source = std::ffi::CString::new(GAANIM_TYPE_ALIASES).unwrap();
+    let aliases_file = std::ffi::CString::new("gaanim/_type_aliases.py").unwrap();
+    let aliases_name = std::ffi::CString::new("gaanim._type_aliases").unwrap();
+    let aliases = PyModule::from_code(py, &aliases_source, &aliases_file, &aliases_name)?;
+    modules.set_item("gaanim._type_aliases", &aliases)?;
 
     // Live behaviors: the compiler scene.live_zone calls. Registered before
     // execution, like sections, so its dataclasses resolve their module.
