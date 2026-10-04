@@ -32,6 +32,11 @@ exportaciones respetan los fps que pidas.
 - Las mallas 3D se proyectan y se preparan en varios núcleos: la escena 3D del
   benchmark exporta en la mitad de tiempo que en la 0.9 y se reproduce en el
   editor a unos 130 fps en lugar de 90.
+- Los ecos de un grupo se evalúan una vez por nivel de eco en lugar de una vez
+  por copia, y los efectos por objeto que cambian de tamaño ya no recompilan
+  sus pases en cada fotograma.
+- Las capturas de `--diff` codifican los PNG en varios hilos mientras se
+  dibujan los fotogramas siguientes.
 - Exportar arranca entre 0,3 y 0,5 s antes en Windows, porque la GPU se busca
   primero en Vulkan.
 - Saltar en la línea de tiempo reutiliza lo ya dibujado: la línea de tiempo
