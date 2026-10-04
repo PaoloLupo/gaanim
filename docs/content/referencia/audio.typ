@@ -199,9 +199,9 @@ está en el repositorio de Gaanim; no viene con el paquete instalado.
 #api-entry(
   name: "Audio.level",
   kind: "method",
-  params: ((name: "smoothing", type: "float", default: "0.0", desc: [En `[0, 1)`: cada cuadro conserva esa parte del anterior, así que cerca de 1 cambia despacio.]),),
+  params: ((name: "smoothing", type: "float", default: "0.0", desc: [En `[0, 1)`: cada cuadro conserva esa parte del anterior, así que cerca de 1 cambia despacio.]), (name: "range_db", type: "float | None", default: "None", desc: [Mide en decibelios, como el oído: 0 a `range_db` dB por debajo de la parte fuerte y 1 en ella. Con `24`, un drop se distingue de un verso más suave.])),
   returns: (type: "Computed", desc: [El volumen donde suena la pista: 0 en silencio, 1 en su parte fuerte.]),
-  desc: [Envolvente de volumen (RMS), normalizada al percentil 99 del archivo para que unos pocos picos no aplasten el resto. Un `smoothing` fuera de rango lanza `ValueError`.],
+  desc: [Envolvente de volumen (RMS), normalizada al percentil 99 del archivo para que unos pocos picos no aplasten el resto. En una pista masterizada las partes fuertes quedan todas cerca de 1; `range_db` las separa. Un `smoothing` fuera de rango o un `range_db` fuera de `(0, 120]` lanzan `ValueError`.],
   none,
 )
 
@@ -245,7 +245,7 @@ bombos = [musica.start + t for t in musica.beats(low=40, high=120)]
   kind: "method",
   params: ((name: "min_bpm / max_bpm", type: "float", default: "60 / 200", desc: [Rango en que se busca el tempo.]),),
   returns: (type: "AudioTempo", desc: [`bpm`, `offset` (segundos desde el inicio de la pista hasta su primer pulso, menos de un pulso) y `confidence`, de 0 a 1.]),
-  desc: [Estima un tempo estable: el periodo en que más se repiten los golpes, dando peso a los graves (bombo y bajo, 40–150 Hz), y la fase que pone los pulsos sobre esos golpes. Así `scene.tempo(t.bpm, offset=musica.start + t.offset)` alinea `wait_until(bar=...)` con la música. Sigue la `speed` y el `offset` de la pista. Sirve para música con pulso estable; con `confidence` por debajo de 0.3 no hay un pulso claro. No detecta secciones (drops, estribillos): el volumen confunde la entrada del bombo con un drop, así que esas marcas se colocan a mano con `analysis`. Un rango fuera de `0 < min_bpm < max_bpm <= 400` lanza `ValueError`.],
+  desc: [Estima un tempo estable: el periodo en que más se repiten los golpes, dando peso a los graves (bombo y bajo, 40–150 Hz), y la fase que pone los pulsos sobre esos golpes. `confidence` mide cuánto se repiten los golpes en la rejilla de ese tempo, a uno, dos o cuatro pulsos: un bombo a medio tiempo, cada dos pulsos, también da un pulso claro. Si el rango no contiene el tempo de la música, se devuelve el mejor pico dentro del rango con una confianza baja, nunca uno de sus extremos. El tempo y el pulso que se siente pueden estar en proporción 4:3 o 2:1, así que conviene comparar con el tempo publicado del tema. Así `scene.tempo(t.bpm, offset=musica.start + t.offset)` alinea `wait_until(bar=...)` con la música. Sigue la `speed` y el `offset` de la pista. Sirve para música con pulso estable; con `confidence` por debajo de 0.3 no hay un pulso claro. No detecta secciones (drops, estribillos): el volumen confunde la entrada del bombo con un drop, así que esas marcas se colocan a mano con `analysis`. Un rango fuera de `0 < min_bpm < max_bpm <= 400` lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -262,7 +262,7 @@ scene.wait_until(bar=2)
   name: "Audio.analysis",
   kind: "method",
   returns: (type: "AudioData", desc: [El análisis del archivo como números.]),
-  desc: [Para colocar cortes a mano con datos reales. `frame_rate` cuadros por segundo (unos 43) y `times`, el segundo del archivo de cada cuadro; `level`, el volumen de 0 a 1; `spectrum`, una fila por cuadro con la amplitud de 96 bandas logarítmicas (`frequencies`, en Hz), de 0 a 1 contra la parte fuerte de todo el archivo; `band(low, high)`, la amplitud de una banda por cuadro, y `onsets(low=, high=)`. Los tiempos son del archivo, antes del `offset` y la `speed` de la pista. Son listas de Python, listas para numpy si lo usas.],
+  desc: [Para colocar cortes a mano con datos reales. `frame_rate` cuadros por segundo (unos 43) y `times`, el segundo del archivo de cada cuadro; `level`, el volumen de 0 a 1, y `level_db`, en decibelios por debajo de la parte fuerte (0 en ella, -120 en silencio); `spectrum`, una fila por cuadro con la amplitud de 96 bandas logarítmicas (`frequencies`, en Hz), de 0 a 1 contra la parte fuerte de todo el archivo; `band(low, high)`, la amplitud de una banda por cuadro, y `onsets(low=, high=)`. Los tiempos son del archivo, antes del `offset` y la `speed` de la pista. Son listas de Python, listas para numpy si lo usas.],
 )[
 ```python
 >>>from gaanim import *

@@ -205,10 +205,24 @@ impl AudioClip {
         Ok((analysis.duration - self.track.source_offset).max(0.0) / speed)
     }
 
-    /// Loudness, 0 to 1, smoothed by `smoothing` in `[0, 1)`.
-    pub fn level(&self, smoothing: f64) -> Result<ScalarSource, AnalysisError> {
-        let series = self.analysis()?.level().smoothed(smoothing)?;
-        Ok(self.series_source(series, format!("level:{smoothing}")))
+    /// Loudness, 0 to 1, smoothed by `smoothing` in `[0, 1)`; with
+    /// `range_db`, on a decibel scale from that far below the loud end.
+    pub fn level(
+        &self,
+        smoothing: f64,
+        range_db: Option<f64>,
+    ) -> Result<ScalarSource, AnalysisError> {
+        let analysis = self.analysis()?;
+        let series = match range_db {
+            Some(range) => analysis.level_in_db(range)?,
+            None => analysis.level(),
+        }
+        .smoothed(smoothing)?;
+        let key = match range_db {
+            Some(range) => format!("level:{smoothing}:db{range}"),
+            None => format!("level:{smoothing}"),
+        };
+        Ok(self.series_source(series, key))
     }
 
     /// Amplitude of the frequencies between `low` and `high` Hz, 0 to 1,
@@ -532,7 +546,7 @@ mod tests {
         let bass = clip.band(20.0, 150.0, 0.0).unwrap();
         let treble = clip.band(2000.0, 8000.0, 0.0).unwrap();
         let pulse = clip.pulse(0.1, None).unwrap();
-        let level = clip.level(0.0).unwrap();
+        let level = clip.level(0.0, None).unwrap();
         // Before the clip plays, every signal reads 0.
         assert_eq!(at(&bass, 1.7), 0.0);
         assert_eq!(clip.start_time(), None);
@@ -625,7 +639,7 @@ mod tests {
         write_wav(&path, 1.0, 0.0, 1.0);
         let mut scene = SceneModel::new(16.0, 9.0);
         let clip = scene.audio(&path, None, 1.0, 0.0, 0.0).unwrap();
-        let ScalarSource::Function(function) = clip.level(0.5).unwrap() else {
+        let ScalarSource::Function(function) = clip.level(0.5, None).unwrap() else {
             panic!("audio signals are functions of time");
         };
         let before = function.recipe();

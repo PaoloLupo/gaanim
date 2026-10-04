@@ -1017,7 +1017,8 @@ fn analysis_error(error: gaanim_api::canvas::AudioAnalysisError) -> PyErr {
     match error {
         AnalysisError::InvalidBand { .. }
         | AnalysisError::InvalidSmoothing(_)
-        | AnalysisError::InvalidTempoRange { .. } => {
+        | AnalysisError::InvalidTempoRange { .. }
+        | AnalysisError::InvalidDecibelRange(_) => {
             pyo3::exceptions::PyValueError::new_err(error.to_string())
         }
         _ => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
@@ -1092,6 +1093,12 @@ impl PyAudioData {
     #[getter]
     fn level(&self) -> Vec<f32> {
         self.analysis.level().values.to_vec()
+    }
+
+    /// Loudness of every frame in decibels below the loud end of the file.
+    #[getter]
+    fn level_db(&self) -> Vec<f32> {
+        self.analysis.level_db()
     }
 
     /// Center frequency, in Hz, of every spectrum bin, lowest first.
@@ -1182,11 +1189,19 @@ impl PyAudio {
 #[pymethods]
 impl PyAudio {
     /// Loudness of the clip where it plays, from 0 (silence) to 1 (its loud
-    /// end), as a signal that animates anything that takes a number.
-    #[pyo3(signature = (*, smoothing=0.0))]
-    fn level(&self, smoothing: f64) -> PyResult<crate::visualization::PyComputed> {
+    /// end), as a signal that animates anything that takes a number; with
+    /// `range_db`, on a decibel scale from that far below the loud end.
+    #[pyo3(signature = (*, smoothing=0.0, range_db=None))]
+    fn level(
+        &self,
+        smoothing: f64,
+        range_db: Option<f64>,
+    ) -> PyResult<crate::visualization::PyComputed> {
         crate::custom::ensure_authoring_allowed()?;
-        let source = self.inner.level(smoothing).map_err(analysis_error)?;
+        let source = self
+            .inner
+            .level(smoothing, range_db)
+            .map_err(analysis_error)?;
         Ok(crate::visualization::PyComputed::time_source(
             &self.canvas,
             source,

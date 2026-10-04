@@ -2657,11 +2657,16 @@ class Audio:
         scene.play(music)
         scene.wait(music.duration)
     """
-    def level(self, *, smoothing: float = 0.0) -> Computed:
+    def level(self, *, smoothing: float = 0.0, range_db: Optional[float] = None) -> Computed:
         """Loudness where the clip plays, 0 in silence and 1 at its loud end.
 
         ``smoothing`` in ``[0, 1)`` keeps that share of the previous frame, so
         values near 1 move slowly; outside that range raises ``ValueError``.
+        The loud end is the file's 99th percentile, so in a mastered track
+        the loud passages all sit near 1. ``range_db`` measures in decibels
+        instead, as the ear does: 0 at ``range_db`` dB below the loud end, 1
+        at it, so ``range_db=24`` tells a drop from a quieter verse. It must
+        be in ``(0, 120]`` or raises ``ValueError``.
         """
         ...
     def band(self, low: float, high: float, *, smoothing: float = 0.0) -> Computed:
@@ -2702,7 +2707,11 @@ class Audio:
         so ``scene.tempo(t.bpm, offset=music.start + t.offset)`` lines
         ``wait_until(bar=...)`` up with the music. Both follow the clip's
         ``speed`` and ``offset``. It suits music with a steady pulse; check
-        ``confidence`` (below about 0.3 there is no clear beat). A range
+        ``confidence`` (below about 0.3 there is no clear beat), which
+        measures how strongly the onsets repeat on the beat grid at one, two
+        or four beats, so a half-time kick still counts. A range that does
+        not contain the music's tempo returns the best peak inside it with a
+        low confidence, never one of its ends. A range
         outside ``0 < min_bpm < max_bpm <= 400`` raises ``ValueError``.
 
         Example:
@@ -2811,7 +2820,7 @@ class AudioTempo:
         ...
     @property
     def confidence(self) -> float:
-        """How clearly the onsets repeat at that period, 0 to 1; below about 0.3 there is no steady beat."""
+        """How strongly the onsets repeat on the beat grid (at one, two or four beats), 0 to 1; below about 0.3 there is no steady beat."""
         ...
 
 class AudioData:
@@ -2836,6 +2845,10 @@ class AudioData:
     @property
     def level(self) -> list[float]:
         """Loudness of every frame, 0 to 1 like ``Audio.level``."""
+        ...
+    @property
+    def level_db(self) -> list[float]:
+        """Loudness of every frame in decibels below the loud end of the file (the 99th percentile): 0 there, negative below, -120 in silence."""
         ...
     @property
     def frequencies(self) -> list[float]:

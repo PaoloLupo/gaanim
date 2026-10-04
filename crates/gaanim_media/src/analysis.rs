@@ -43,7 +43,12 @@ pub enum AnalysisError {
     InvalidSmoothing(f64),
     #[error("a tempo range needs 0 < min_bpm < max_bpm <= 400, got {min} to {max} BPM")]
     InvalidTempoRange { min: f64, max: f64 },
+    #[error("a decibel range must be positive and at most {max} dB, got {0}", max = SILENCE_DB.abs())]
+    InvalidDecibelRange(f64),
 }
+
+/// The level, in decibels below the loud end of the file, of silence.
+pub const SILENCE_DB: f32 = -120.0;
 
 /// A steady tempo estimated from the onsets of a file.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,8 +58,9 @@ pub struct TempoEstimate {
     /// Source second of the first beat: every beat falls at
     /// `offset + k * 60 / bpm`.
     pub offset: f64,
-    /// How clearly the onsets repeat at that period, 0 to 1: above about
-    /// 0.3 a steady beat; near 0 no regular pulse.
+    /// How strongly the onsets repeat on the beat grid, at one, two or four
+    /// beats, 0 to 1: above about 0.3 a steady beat; near 0 no regular
+    /// pulse.
     pub confidence: f64,
 }
 
@@ -271,6 +277,41 @@ impl AudioAnalysis {
     /// Loudness envelope (RMS), 1 at the loud end of the file.
     pub fn level(&self) -> Series {
         self.normalized(self.rms.clone())
+    }
+
+    /// Loudness of every frame in decibels below the loud end of the file:
+    /// 0 there (and up to a few dB above at the loudest peaks), negative
+    /// below, [`SILENCE_DB`] in silence. Unlike [`Self::level`], loud parts
+    /// of a mastered track stay apart instead of all reaching 1.
+    pub fn level_db(&self) -> Vec<f32> {
+        let reference = self.loud_end(self.rms.iter().copied());
+        self.rms
+            .iter()
+            .map(|&rms| {
+                if rms > 0.0 && reference > 0.0 {
+                    (20.0 * (rms / reference).log10()).max(SILENCE_DB)
+                } else {
+                    SILENCE_DB
+                }
+            })
+            .collect()
+    }
+
+    /// Loudness on a decibel scale: 0 at `range_db` below the loud end of
+    /// the file and below, 1 at the loud end and above.
+    pub fn level_in_db(&self, range_db: f64) -> Result<Series, AnalysisError> {
+        if !range_db.is_finite() || range_db <= 0.0 || range_db > f64::from(SILENCE_DB.abs()) {
+            return Err(AnalysisError::InvalidDecibelRange(range_db));
+        }
+        let range = range_db as f32;
+        Ok(Series {
+            frame_rate: self.frame_rate,
+            values: self
+                .level_db()
+                .into_iter()
+                .map(|db| ((db + range) / range).clamp(0.0, 1.0))
+                .collect(),
+        })
     }
 
     /// Amplitude of the frequencies between `low` and `high` Hz, 1 at the
@@ -580,19 +621,30 @@ fn estimate_tempo(
         let fraction = lag - below as f64;
         correlation(below) * (1.0 - fraction) + correlation(below + 1) * fraction
     };
-    // A beat also repeats at two and three periods; crediting them, and a
-    // gentle preference for tempos near 120 BPM, settles whether the felt
-    // beat is a period or its double.
+    // A beat also repeats at two and four periods, as bars do; crediting
+    // them, and a gentle preference for tempos near 120 BPM, settles
+    // whether the felt beat is a period or its double. Three periods are
+    // left out: they would credit a tempo 4:3 off the beat, whose third
+    // period spans four beats.
     let score = |bpm: f64| -> f64 {
         let lag = 60.0 * frame_rate / bpm;
         let prior = (-0.5 * ((bpm / 120.0).log2() / 1.5).powi(2)).exp();
-        prior * (interpolated(lag) + 0.5 * interpolated(2.0 * lag) + 0.33 * interpolated(3.0 * lag))
+        prior * (interpolated(lag) + 0.5 * interpolated(2.0 * lag) + 0.25 * interpolated(4.0 * lag))
     };
     let steps = ((max_bpm - min_bpm) / 0.25).ceil() as usize;
-    let coarse_bpm = (0..=steps)
+    let grid: Vec<(f64, f64)> = (0..=steps)
         .map(|step| (min_bpm + step as f64 * 0.25).min(max_bpm))
-        .max_by(|&a, &b| score(a).total_cmp(&score(b)))
-        .unwrap_or(120.0);
+        .map(|bpm| (bpm, score(bpm)))
+        .collect();
+    // A peak inside the range: a score still rising at an end of the range
+    // belongs to a tempo outside it.
+    let peak = (1..grid.len().saturating_sub(1))
+        .filter(|&index| grid[index].1 >= grid[index - 1].1 && grid[index].1 >= grid[index + 1].1)
+        .max_by(|&a, &b| grid[a].1.total_cmp(&grid[b].1))
+        .map(|index| grid[index].0);
+    let Some(coarse_bpm) = peak else {
+        return silent;
+    };
     let coarse = 60.0 * frame_rate / coarse_bpm;
     // An error of a tenth of a frame drifts a beat off within a minute:
     // the period that also fits its later multiples is much sharper.
@@ -609,7 +661,12 @@ fn estimate_tempo(
             fit(a).total_cmp(&fit(b))
         })
         .unwrap_or(coarse);
-    let center = interpolated(period);
+    // How strongly the onsets repeat on this beat's grid: at one beat, or
+    // at two or four when the kick plays every other beat.
+    let center = [1.0, 2.0, 4.0]
+        .into_iter()
+        .map(|k| interpolated(k * period))
+        .fold(f64::NEG_INFINITY, f64::max);
     let bpm = (60.0 * frame_rate / period).clamp(min_bpm, max_bpm);
     // The phase whose beats land on the most flux.
     let flux = phase_flux;
@@ -909,6 +966,23 @@ mod tests {
     }
 
     #[test]
+    fn a_half_time_kick_keeps_the_beat_and_its_confidence() {
+        // The kick on every other beat and a hi-hat halfway between, as in
+        // a half-time drop: the onsets repeat at two beats more than at one.
+        let bpm = 93.0;
+        let samples = kick_and_hat(bpm / 2.0, 0.3, 24.0);
+        let analysis = AudioAnalysis::from_samples(&samples, RATE);
+        let tempo = analysis.tempo(60.0, 200.0).unwrap();
+        assert!((tempo.bpm - bpm).abs() < 1.0, "{tempo:?}");
+        assert!(tempo.confidence > 0.3, "{tempo:?}");
+        // A range without the beat finds a peak inside it, with a low
+        // confidence, not its end.
+        let off = analysis.tempo(100.0, 140.0).unwrap();
+        assert!(off.bpm > 100.5 && off.bpm < 139.5, "{off:?}");
+        assert!(off.confidence < tempo.confidence, "{off:?} vs {tempo:?}");
+    }
+
+    #[test]
     fn band_onsets_hear_only_the_kick() {
         let samples = kick_and_hat(120.0, 0.5, 6.0);
         let analysis = AudioAnalysis::from_samples(&samples, RATE);
@@ -946,6 +1020,35 @@ mod tests {
         assert!(analysis.tempo(0.0, 200.0).is_err());
         assert!(analysis.tempo(120.0, 100.0).is_err());
         assert!(analysis.tempo(60.0, 1000.0).is_err());
+    }
+
+    #[test]
+    fn the_level_in_decibels_keeps_loud_passages_apart() {
+        // Full scale, then 6 dB and 20 dB quieter, then silence.
+        let mut samples = tone(440.0, 1.0, 0.8);
+        samples.extend(tone(440.0, 1.0, 0.4));
+        samples.extend(tone(440.0, 1.0, 0.08));
+        samples.extend(vec![0.0; RATE as usize]);
+        let analysis = AudioAnalysis::from_samples(&samples, RATE);
+        let db = analysis.level_db();
+        let at = |time: f64| db[(time * analysis.frame_rate) as usize];
+        assert!(at(0.5).abs() < 0.5, "{}", at(0.5));
+        assert!((at(1.5) + 6.0).abs() < 0.5, "{}", at(1.5));
+        assert!((at(2.5) + 20.0).abs() < 0.5, "{}", at(2.5));
+        assert_eq!(at(3.5), SILENCE_DB);
+        let scaled = analysis.level_in_db(30.0).unwrap();
+        assert!((scaled.at(1.5) - 0.8).abs() < 0.02, "{}", scaled.at(1.5));
+        assert!(
+            (scaled.at(2.5) - 1.0 / 3.0).abs() < 0.02,
+            "{}",
+            scaled.at(2.5)
+        );
+        assert_eq!(scaled.at(3.5), 0.0);
+        // The linear level squeezes the same passages toward 1 and 0.
+        assert!((analysis.level().at(1.5) - 0.5).abs() < 0.03);
+        for invalid in [0.0, -10.0, 200.0, f64::NAN] {
+            assert!(analysis.level_in_db(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]
