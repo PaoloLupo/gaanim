@@ -2738,6 +2738,21 @@ class Audio:
             trace = scene.viz.equalizer(music.waveform(96, span=3), shape="line", layout="mirror")
         """
         ...
+    def samples(self, points: int = 256, *, span: float = 0.05) -> list[Computed]:
+        """The sound wave itself over the last ``span`` seconds, oldest first, from -1 to 1.
+
+        Unlike ``waveform``, which follows the loudness (0 to 1), these are
+        the signed samples against the file's peak: an oscilloscope. Point
+        ``i`` reads the clip ``span * (1 - i / (points - 1))`` seconds ago.
+        A short ``span`` (a few hundredths of a second) shows the shape of
+        the notes. ``points`` is 2-1024 and ``span`` positive; otherwise
+        ``ValueError``.
+
+        Example:
+            wave = music.samples(200, span=0.03)
+            scope = scene.geometry.polyline([(-6 + 12 * i / 199, computed(lambda v: 1.5 * v, inputs=[s])) for i, s in enumerate(wave)])
+        """
+        ...
     @property
     def duration(self) -> float:
         """Seconds the clip plays: its ``duration``, or the whole file.

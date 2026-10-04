@@ -49,8 +49,9 @@ interlineado por defecto es más compacto.
 - `Updater.rotate`, `Updater.wiggle` y el nuevo `Falloff.source` aceptan una
   señal del tiempo, así que el audio también gira, hace temblar y tiñe con
   `drive("fill", ...)`. Lee #link("/referencia/audio/")[Audio].
-- `Audio.spectrum(bandas, normalize=)` y `Audio.waveform(puntos, span=)` dan
-  una señal por banda o por instante reciente, y `scene.viz.equalizer` las dibuja con
+- `Audio.spectrum(bandas, normalize=)`, `Audio.waveform(puntos, span=)` y
+  `Audio.samples(puntos, span=)` (la onda con signo, para un osciloscopio)
+  dan una señal por banda o por instante reciente, y `scene.viz.equalizer` las dibuja con
   la forma (`"bar"`, `"capsule"`, `"dot"`, `"line"`, `"area"` o la tuya), la
   disposición (`"row"`, `"mirror"`, `"radial"` o la tuya) y los colores que
   elijas. También sirven como uniforms de un shader. Lee

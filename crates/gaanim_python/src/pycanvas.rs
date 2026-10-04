@@ -1283,6 +1283,28 @@ impl PyAudio {
             .collect())
     }
 
+    /// The signed waveform over the last `span` seconds, oldest first; see
+    /// `gaanim_core.pyi`.
+    #[pyo3(signature = (points=256, *, span=0.05))]
+    fn samples(&self, points: usize, span: f64) -> PyResult<Vec<crate::visualization::PyComputed>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !(2..=1024).contains(&points) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "points must be between 2 and 1024",
+            ));
+        }
+        if !(span.is_finite() && span > 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "span must be a positive number of seconds",
+            ));
+        }
+        let sources = self.inner.samples(points, span).map_err(analysis_error)?;
+        Ok(sources
+            .into_iter()
+            .map(|source| crate::visualization::PyComputed::time_source(&self.canvas, source))
+            .collect())
+    }
+
     /// Seconds from the clip's start at which a sound starts, in order, or
     /// only between ``low`` and ``high`` Hz.
     #[pyo3(signature = (*, low=None, high=None))]
