@@ -39,7 +39,7 @@ pub use types::{
 pub type ImageHandle = DrawableHandle;
 
 mod audio_signals;
-pub use audio_signals::SpectrumScale;
+pub use audio_signals::{AUDIO_SHADER_FUNCTIONS, AUDIO_TIME_UNIFORM, SpectrumScale};
 pub use gaanim_media::analysis::AnalysisError as AudioAnalysisError;
 pub use gaanim_media::analysis::{AudioAnalysis, TempoEstimate};
 mod bar_race;

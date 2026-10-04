@@ -516,6 +516,7 @@ class PostProcess:
         source: str | os.PathLike[str],
         *,
         uniforms: Optional[dict[str, float | Parameter | Variable | Computed | TimeInput]] = None,
+        audio: Optional[Audio] = None,
     ) -> PostProcess:
         """Create a WGSL post-process applied to the rendered 2D scene.
 
@@ -539,6 +540,17 @@ class PostProcess:
         Invalid WGSL, an undeclared field or a bad name raises ``ValueError``,
         a non-finite number raises ``ValueError`` and an unreadable asset
         raises ``RuntimeError``.
+
+        ``audio`` gives the shader a whole track's spectrogram at no uniform
+        cost (it uses one, ``gaanim_audio_time``, which is reserved). The
+        shader can then call ``gaanim_audio_spectrum(x, ago)`` (``x`` from 0,
+        20 Hz, to 1, about 11 kHz, on a log scale; each frequency 0 to 1
+        against its own loud end), ``gaanim_audio_level(ago)``,
+        ``gaanim_audio_band(low_hz, high_hz, ago)`` and ``gaanim_audio_x(hz)``,
+        where ``ago`` is seconds before the current frame: reading several
+        ``ago`` values draws the spectrum's history, a spectrogram. They read
+        0 while the clip is silent. The data is stored once in ``.gaanim``
+        bundles. It works for ``shader_effect`` as well.
 
         Example:
             amount = scene.viz.parameter(0.0)

@@ -27,7 +27,155 @@ pub enum SpectrumScale {
 
 use super::AudioClip;
 
+/// WGSL functions that read an audio clip's analysis from `gaanim_data`, put
+/// before the source of a shader built with [`AudioClip::shader_data`].
+/// `ago` is in scene seconds before the current frame; `x` runs from 0 (20
+/// Hz) to 1 (the top of the analysis, about 11 kHz) on a log scale. All
+/// read 0 while the clip does not play.
+pub const AUDIO_SHADER_FUNCTIONS: &str = r#"
+fn gaanim_audio_frames() -> i32 {
+    return i32(gaanim_data[0].x);
+}
+
+fn gaanim_audio_bin(frame: i32, bin: i32) -> f32 {
+    if (frame < 0 || frame >= gaanim_audio_frames()) {
+        return 0.0;
+    }
+    let b = clamp(bin, 0, 95);
+    return gaanim_data[1 + frame * 24 + b / 4][b % 4];
+}
+
+fn gaanim_audio_level_at(frame: i32) -> f32 {
+    if (frame < 0 || frame >= gaanim_audio_frames()) {
+        return 0.0;
+    }
+    return gaanim_data[1 + gaanim_audio_frames() * 24 + frame / 4][frame % 4];
+}
+
+// The analysis frame the clip played `ago` scene seconds ago, or -1.
+fn gaanim_audio_position(ago: f32) -> f32 {
+    if (gaanim_uniforms.gaanim_audio_time < 0.0) {
+        return -1.0;
+    }
+    let source = gaanim_uniforms.gaanim_audio_time - max(ago, 0.0) * gaanim_data[0].z;
+    if (source < 0.0) {
+        return -1.0;
+    }
+    return source * gaanim_data[0].y;
+}
+
+// The spectrum at `x` (0 = 20 Hz, 1 = the top, log scale), 0 to 1 against
+// each frequency's own loud end, `ago` seconds ago.
+fn gaanim_audio_spectrum(x: f32, ago: f32) -> f32 {
+    let position = gaanim_audio_position(ago);
+    if (position < 0.0) {
+        return 0.0;
+    }
+    let frame = i32(floor(position));
+    let along = fract(position);
+    let place = clamp(x, 0.0, 1.0) * 96.0 - 0.5;
+    let bin = i32(floor(place));
+    let across = fract(place);
+    let now = mix(gaanim_audio_bin(frame, bin), gaanim_audio_bin(frame, bin + 1), across);
+    let next = mix(gaanim_audio_bin(frame + 1, bin), gaanim_audio_bin(frame + 1, bin + 1), across);
+    return mix(now, next, along);
+}
+
+// The loudness, 0 to 1, `ago` seconds ago.
+fn gaanim_audio_level(ago: f32) -> f32 {
+    let position = gaanim_audio_position(ago);
+    if (position < 0.0) {
+        return 0.0;
+    }
+    let frame = i32(floor(position));
+    return mix(gaanim_audio_level_at(frame), gaanim_audio_level_at(frame + 1), fract(position));
+}
+
+// Where `hz` falls on the `x` scale of gaanim_audio_spectrum.
+fn gaanim_audio_x(hz: f32) -> f32 {
+    return log(max(hz, 20.0) / 20.0) / log(gaanim_data[0].w / 20.0);
+}
+
+// The mean spectrum between `low` and `high` Hz, `ago` seconds ago.
+fn gaanim_audio_band(low: f32, high: f32, ago: f32) -> f32 {
+    let lowest = gaanim_audio_x(low);
+    let highest = gaanim_audio_x(max(high, low));
+    var total = 0.0;
+    for (var i = 0; i < 8; i += 1) {
+        total += gaanim_audio_spectrum(mix(lowest, highest, (f32(i) + 0.5) / 8.0), ago);
+    }
+    return total / 8.0;
+}
+"#;
+
+/// The uniform holding the clip's source second, read by
+/// [`AUDIO_SHADER_FUNCTIONS`].
+pub const AUDIO_TIME_UNIFORM: &str = "gaanim_audio_time";
+
+/// A clip packed for a shader: its data and its time uniform's signal.
+pub type AudioShaderData = (Arc<[[f32; 4]]>, ScalarSource);
+
 impl AudioClip {
+    /// The clip's analysis packed for [`AUDIO_SHADER_FUNCTIONS`], and the
+    /// signal of its [`AUDIO_TIME_UNIFORM`]: the source second where the
+    /// clip plays, or -1. `gaanim_data[0]` holds the frame count, the frame
+    /// rate, the clip's speed and the top frequency; then 24 `vec4`s per
+    /// frame hold its 96 bins, each against its own loud end; then the
+    /// loudness, four frames per `vec4`.
+    pub fn shader_data(&self) -> Result<AudioShaderData, AnalysisError> {
+        use gaanim_media::analysis::BINS;
+        let analysis = self.analysis()?;
+        let frames = analysis.frames();
+        let speed = if self.track.speed > 0.0 {
+            self.track.speed
+        } else {
+            1.0
+        };
+        let references: Vec<f32> = (0..BINS)
+            .map(|bin| {
+                analysis.loud_end((0..frames).map(|frame| analysis.spectrum_row(frame)[bin].sqrt()))
+            })
+            .collect();
+        let mut data = Vec::with_capacity(1 + frames * BINS / 4 + frames.div_ceil(4));
+        data.push([
+            frames as f32,
+            analysis.frame_rate as f32,
+            speed as f32,
+            analysis.nyquist() as f32,
+        ]);
+        for frame in 0..frames {
+            let row = analysis.spectrum_row(frame);
+            for chunk in 0..BINS / 4 {
+                data.push(std::array::from_fn(|lane| {
+                    let bin = chunk * 4 + lane;
+                    let reference = references[bin];
+                    if reference > 0.0 {
+                        (row[bin].sqrt() / reference).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    }
+                }));
+            }
+        }
+        let level = analysis.level();
+        for chunk in level.values.chunks(4) {
+            data.push(std::array::from_fn(|lane| {
+                chunk.get(lane).copied().unwrap_or(0.0)
+            }));
+        }
+        let duration = analysis.duration;
+        let plays = Arc::clone(&self.plays);
+        let time = move |time: f64| {
+            let plays = plays.lock().expect("audio plays poisoned");
+            plays
+                .iter()
+                .rev()
+                .find_map(|track| track.source_time(time, duration))
+                .unwrap_or(-1.0)
+        };
+        Ok((data.into(), self.source(time, "shader-time".to_string())))
+    }
+
     /// The analysis of the clip's file, computed once per file.
     pub fn analysis(&self) -> Result<Arc<AudioAnalysis>, AnalysisError> {
         analyze_file(&self.track.path)

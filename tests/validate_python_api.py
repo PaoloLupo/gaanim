@@ -2146,6 +2146,20 @@ def validate_audio_signals_contract(module):
     for operation in (lambda: music.samples(1), lambda: music.samples(16, span=0)):
         if not raises_error(ValueError, operation):
             failures.append("Audio.samples accepted invalid points or span")
+    spectro = """
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let e = gaanim_audio_spectrum(uv.x, 1.0 - uv.y) + gaanim_audio_level(0.0) + gaanim_audio_band(40.0, 120.0, 0.5);
+    return vec4<f32>(gaanim_scene(uv).rgb + vec3<f32>(e * gaanim_uniforms.gain), 1.0);
+}
+"""
+    try:
+        post = module.PostProcess.shader(spectro, uniforms={"gain": 0.2}, audio=music)
+        scene.canvas.post = post
+        scene.geometry.circle(1).shader_effect(post)
+    except Exception as error:
+        failures.append(f"PostProcess.shader(audio=) failed: {error}")
+    if not raises_error(ValueError, lambda: module.PostProcess.shader(spectro, uniforms={"gaanim_audio_time": 0}, audio=music)):
+        failures.append("PostProcess.shader(audio=) accepted the reserved uniform name")
     if len(music.spectrum(8, normalize="global")) != 8:
         failures.append("Audio.spectrum(normalize='global') does not return one Computed per band")
     return failures

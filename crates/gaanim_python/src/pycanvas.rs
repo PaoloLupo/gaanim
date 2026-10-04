@@ -1158,6 +1158,27 @@ impl PyAudioData {
     }
 }
 
+impl PyAudio {
+    /// The clip's analysis packed for a shader and its time uniform, for
+    /// `PostProcess.shader(audio=...)`.
+    pub(crate) fn shader_input(
+        &self,
+        py: Python<'_>,
+    ) -> PyResult<(
+        std::sync::Arc<[[f32; 4]]>,
+        crate::visualization::DeferredScalar,
+    )> {
+        let (data, time) = self.inner.shader_data().map_err(analysis_error)?;
+        let computed = Py::new(
+            py,
+            crate::visualization::PyComputed::time_source(&self.canvas, time),
+        )?;
+        let time =
+            crate::visualization::extract_deferred_scalar(computed.into_bound(py).into_any())?;
+        Ok((data, time))
+    }
+}
+
 #[pymethods]
 impl PyAudio {
     /// Loudness of the clip where it plays, from 0 (silence) to 1 (its loud

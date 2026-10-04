@@ -443,6 +443,7 @@ exacto de la línea de tiempo.
   params: (
     (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` que se lee al crear el objeto.]),
     (name: "uniforms", type: "dict[str, float | Parameter | Computed] | None", default: "None", desc: [Valores que el shader lee como campos `f32` de `gaanim_uniforms` (`gaanim_uniforms.amount`). Un `Parameter`, `Variable`, `Computed` o `scene.time` se evalúa en cada fotograma, así que animarlo anima el efecto. Como máximo 32 por pasada, con nombres que sean identificadores WGSL.]),
+    (name: "audio", type: "Audio | None", default: "None", desc: [Da al shader el espectrograma de la pista: `gaanim_audio_spectrum(x, ago)`, `gaanim_audio_level(ago)`, `gaanim_audio_band(low, high, ago)` y `gaanim_audio_x(hz)`. Reserva el uniform `gaanim_audio_time`. Ver #link("/referencia/audio/")[Audio].]),
   ),
   returns: (type: "PostProcess", desc: [Un postprocesado para `Scene(post=...)`, `scene.canvas.post` o `scene.segment(..., post=...)`.]),
   desc: [WGSL inválido, un campo sin declarar, un nombre inválido o un número no finito lanzan `ValueError`, y un asset ilegible, `RuntimeError`.],
