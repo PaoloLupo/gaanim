@@ -13,8 +13,8 @@ pub use components::{
     LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame, LayoutInspectionKind,
     LayoutZoneRecord, LayoutZones, Lighting3D, LineListData, LineListSource, LocalBounds,
     Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity, Path2D,
-    PathRevealOrder, PathSource, Presence, RasterImage, RenderLayer, RenderOrder, ShapeDeform,
-    StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds,
+    PathRevealOrder, PathSource, Presence, RasterImage, RenderLayer, RenderOrder, SegmentContent,
+    ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use systems::{

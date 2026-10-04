@@ -93,75 +93,280 @@ pub fn localize_decimal_separator(number: &str, separator: char) -> String {
         .collect()
 }
 
+/// A parsed Python format specification for one number:
+/// `[[fill]align][sign][z][#][0][width][grouping][.precision][type]`.
+#[derive(Clone, Debug, PartialEq)]
+struct NumberFormat {
+    fill: char,
+    align: char,
+    sign: char,
+    no_negative_zero: bool,
+    alternate: bool,
+    width: usize,
+    grouping: Option<char>,
+    precision: Option<usize>,
+    kind: Option<char>,
+}
+
+/// Check that `specification` is a Python format specification for a
+/// float, as `format(value, specification)` accepts it.
+pub fn validate_number_format(specification: &str) -> Result<(), String> {
+    parse_number_format(specification).map(|_| ())
+}
+
+fn parse_number_format(specification: &str) -> Result<NumberFormat, String> {
+    let invalid = |reason: &str| {
+        Err(format!(
+            "invalid number format {specification:?}: {reason}; use a Python format \
+             specification for floats such as \".2f\", \"05.1f\", \"+,.0f\", \".1%\" or \".3e\""
+        ))
+    };
+    let chars: Vec<char> = specification.chars().collect();
+    let mut index = 0;
+    let is_align = |c: char| matches!(c, '<' | '>' | '^' | '=');
+    let (mut fill, mut align) = (' ', None);
+    if chars.len() >= 2 && is_align(chars[1]) {
+        (fill, align) = (chars[0], Some(chars[1]));
+        index = 2;
+    } else if chars.first().copied().is_some_and(is_align) {
+        align = Some(chars[0]);
+        index = 1;
+    }
+    let mut sign = '-';
+    if let Some(&c @ ('+' | '-' | ' ')) = chars.get(index) {
+        sign = c;
+        index += 1;
+    }
+    let no_negative_zero = chars.get(index) == Some(&'z');
+    index += usize::from(no_negative_zero);
+    let alternate = chars.get(index) == Some(&'#');
+    index += usize::from(alternate);
+    if chars.get(index) == Some(&'0') {
+        // A leading zero pads with zeros after the sign, unless an explicit
+        // alignment says otherwise.
+        if align.is_none() {
+            (fill, align) = ('0', Some('='));
+        }
+        index += 1;
+    }
+    let digits = |index: &mut usize| {
+        let start = *index;
+        while chars.get(*index).is_some_and(char::is_ascii_digit) {
+            *index += 1;
+        }
+        (*index > start).then(|| chars[start..*index].iter().collect::<String>())
+    };
+    let width = match digits(&mut index) {
+        Some(text) => match text.parse::<usize>() {
+            Ok(width) if width <= 256 => width,
+            _ => return invalid("the width is above 256"),
+        },
+        None => 0,
+    };
+    let mut grouping = None;
+    if let Some(&c @ (',' | '_')) = chars.get(index) {
+        grouping = Some(c);
+        index += 1;
+    }
+    let mut precision = None;
+    if chars.get(index) == Some(&'.') {
+        index += 1;
+        match digits(&mut index).map(|text| text.parse::<usize>()) {
+            Some(Ok(value)) if value <= 64 => precision = Some(value),
+            Some(_) => return invalid("the precision is above 64"),
+            None => return invalid("a precision must follow the point"),
+        }
+    }
+    let kind = match chars.get(index) {
+        None => None,
+        Some(&c @ ('f' | 'F' | 'e' | 'E' | 'g' | 'G' | '%')) => {
+            index += 1;
+            Some(c)
+        }
+        Some(&c @ ('d' | 'n' | 'b' | 'o' | 'x' | 'X' | 'c' | 's')) => {
+            return invalid(&format!(
+                "the type {c:?} does not format floats (\".0f\" shows whole numbers)"
+            ));
+        }
+        Some(&c) => return invalid(&format!("unexpected {c:?}")),
+    };
+    if index != chars.len() {
+        return invalid(&format!("unexpected {:?}", chars[index]));
+    }
+    Ok(NumberFormat {
+        fill,
+        align: align.unwrap_or('>'),
+        sign,
+        no_negative_zero,
+        alternate,
+        width,
+        grouping,
+        precision,
+        kind,
+    })
+}
+
+/// Python's exponent notation: `1.50e+03`.
+fn python_exponent(value: f64, precision: usize, upper: bool) -> String {
+    let rust = format!("{value:.precision$e}");
+    let (mantissa, exponent) = rust.split_once('e').expect("Rust exponent notation");
+    let exponent: i32 = exponent.parse().expect("Rust exponent");
+    let sign = if exponent < 0 { '-' } else { '+' };
+    let e = if upper { 'E' } else { 'e' };
+    format!("{mantissa}{e}{sign}{:02}", exponent.abs())
+}
+
+/// Python's general format: `precision` significant digits, fixed point
+/// unless the exponent is below -4 or reaches the precision.
+fn python_general(value: f64, precision: usize, alternate: bool, upper: bool) -> String {
+    let precision = precision.max(1);
+    let exponent = if value == 0.0 {
+        0
+    } else {
+        // Round first: 9.99 at two digits is 10, whose exponent is 1.
+        let rounded = format!("{value:.*e}", precision - 1);
+        rounded
+            .split_once('e')
+            .expect("Rust exponent notation")
+            .1
+            .parse::<i32>()
+            .expect("Rust exponent")
+    };
+    let mut text = if (-4..precision as i32).contains(&exponent) {
+        let decimals = (precision as i32 - 1 - exponent).max(0) as usize;
+        format!("{value:.decimals$}")
+    } else {
+        python_exponent(value, precision - 1, upper)
+    };
+    if !alternate {
+        let (mantissa, exponent) = match text.find(['e', 'E']) {
+            Some(at) => text.split_at(at),
+            None => (text.as_str(), ""),
+        };
+        let mantissa = if mantissa.contains('.') {
+            mantissa.trim_end_matches('0').trim_end_matches('.')
+        } else {
+            mantissa
+        };
+        text = format!("{mantissa}{exponent}");
+    } else if !text.contains('.') {
+        let at = text.find(['e', 'E']).unwrap_or(text.len());
+        text.insert(at, '.');
+    }
+    text
+}
+
+fn group_digits(integer: &str, separator: char) -> String {
+    let count = integer.chars().count();
+    let mut grouped = String::with_capacity(count + count / 3);
+    for (index, digit) in integer.chars().enumerate() {
+        if index > 0 && (count - index).is_multiple_of(3) {
+            grouped.push(separator);
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
+/// Format `value` like Python's `format(value, specification)`, or
+/// `invalid` when the value is not finite. An unsupported specification,
+/// which [`validate_number_format`] rejects, falls back to `.2f`.
 pub fn format_reactive_number(value: f64, specification: &str, invalid: &str) -> String {
     if !value.is_finite() {
         return invalid.to_owned();
     }
-    let mut rest = specification.trim();
-    let explicit_sign = rest.starts_with('+');
-    if explicit_sign {
-        rest = &rest[1..];
-    }
-    let grouped = rest.contains(',');
-    let normalized = rest.replace(',', "");
-    rest = &normalized;
-    let ty = rest
-        .chars()
-        .last()
-        .filter(|c| matches!(c, 'f' | 'e' | 'g' | '%'))
-        .unwrap_or('g');
-    if rest.ends_with(ty) {
-        rest = &rest[..rest.len() - ty.len_utf8()];
-    }
-    let (width_text, precision) = match rest.split_once('.') {
-        Some((width, precision)) => (width, precision.parse::<usize>().unwrap_or(6)),
-        None => (rest, 6),
+    let spec = parse_number_format(specification)
+        .or_else(|_| parse_number_format(".2f"))
+        .expect("the fallback format parses");
+    let magnitude = if spec.kind == Some('%') {
+        value.abs() * 100.0
+    } else {
+        value.abs()
     };
-    let width = width_text.parse::<usize>().unwrap_or(0);
-    let percent = ty == '%';
-    let magnitude = if percent { value * 100.0 } else { value };
-    let mut text = match ty {
-        'f' | '%' => format!("{magnitude:.precision$}"),
-        'e' => format!("{magnitude:.precision$e}"),
-        _ => {
-            let absolute = magnitude.abs();
-            let raw = if absolute != 0.0 && !(1e-4..1e6).contains(&absolute) {
-                format!("{magnitude:.precision$e}")
-            } else {
-                format!("{magnitude:.precision$}")
-            };
-            raw.trim_end_matches('0').trim_end_matches('.').to_owned()
+    let upper = matches!(spec.kind, Some('F' | 'E' | 'G'));
+    let mut body = match spec.kind {
+        Some('f' | 'F' | '%') => {
+            let precision = spec.precision.unwrap_or(6);
+            let mut text = format!("{magnitude:.precision$}");
+            if spec.alternate && precision == 0 {
+                text.push('.');
+            }
+            text
         }
+        Some('e' | 'E') => python_exponent(magnitude, spec.precision.unwrap_or(6), upper),
+        Some(_) => python_general(
+            magnitude,
+            spec.precision.unwrap_or(6),
+            spec.alternate,
+            upper,
+        ),
+        None => match spec.precision {
+            // Like `g`, but a fixed-point result keeps one decimal.
+            Some(precision) => {
+                let mut text = python_general(magnitude, precision, spec.alternate, false);
+                if !text.contains(['.', 'e']) {
+                    text.push_str(".0");
+                }
+                text
+            }
+            // Like `str(value)`: the shortest text that reads back exactly.
+            None if magnitude != 0.0 && !(1e-4..1e16).contains(&magnitude) => {
+                let shortest = format!("{magnitude:e}");
+                let (mantissa, exponent) =
+                    shortest.split_once('e').expect("Rust exponent notation");
+                let exponent: i32 = exponent.parse().expect("Rust exponent");
+                let sign = if exponent < 0 { '-' } else { '+' };
+                format!("{mantissa}e{sign}{:02}", exponent.abs())
+            }
+            None => {
+                let mut text = format!("{magnitude}");
+                if !text.contains('.') {
+                    text.push_str(".0");
+                }
+                text
+            }
+        },
     };
-    if grouped && !text.contains(['e', 'E']) {
-        let (sign, digits) = text
-            .strip_prefix('-')
-            .map_or(("", text.as_str()), |digits| ("-", digits));
-        let (integer, fraction) = digits.split_once('.').unwrap_or((digits, ""));
-        let reversed = integer.chars().rev().collect::<Vec<_>>();
-        let mut grouped_integer = String::new();
-        for (index, digit) in reversed.iter().enumerate().rev() {
-            grouped_integer.push(*digit);
-            if index > 0 && index % 3 == 0 {
-                grouped_integer.push(',');
+    if spec.kind == Some('%') {
+        body.push('%');
+    }
+    // A value that rounds to zero keeps its sign unless `z` drops it.
+    let rounds_to_zero = !body.chars().any(|c| c.is_ascii_digit() && c != '0');
+    let negative = value.is_sign_negative() && !(spec.no_negative_zero && rounds_to_zero);
+    let sign = match (negative, spec.sign) {
+        (true, _) => "-",
+        (false, '+') => "+",
+        (false, ' ') => " ",
+        _ => "",
+    };
+    if let Some(separator) = spec.grouping {
+        let split = body.find(['.', 'e', 'E', '%']).unwrap_or(body.len());
+        let (integer, rest) = body.split_at(split);
+        let mut integer = integer.to_owned();
+        let mut grouped = group_digits(&integer, separator);
+        // Zero padding is grouped too: `015,.2f` reads `0,001,234,567.89`.
+        if spec.fill == '0' && spec.align == '=' {
+            let others = sign.len() + rest.chars().count();
+            while others + grouped.chars().count() < spec.width {
+                integer.insert(0, '0');
+                grouped = group_digits(&integer, separator);
             }
         }
-        text = format!(
-            "{sign}{grouped_integer}{}",
-            if fraction.is_empty() {
-                String::new()
-            } else {
-                format!(".{fraction}")
-            }
-        );
+        body = format!("{grouped}{rest}");
     }
-    if explicit_sign && value >= 0.0 {
-        text.insert(0, '+');
+    let length = sign.chars().count() + body.chars().count();
+    let padding = spec.width.saturating_sub(length);
+    let fill = |count: usize| spec.fill.to_string().repeat(count);
+    match spec.align {
+        '<' => format!("{sign}{body}{}", fill(padding)),
+        '^' => format!(
+            "{}{sign}{body}{}",
+            fill(padding / 2),
+            fill(padding - padding / 2)
+        ),
+        '=' => format!("{sign}{}{body}", fill(padding)),
+        _ => format!("{}{sign}{body}", fill(padding)),
     }
-    if percent {
-        text.push('%');
-    }
-    format!("{:>width$}", text, width = width)
 }
 
 /// Center digits vertically and anchor their right edge at the local origin.

@@ -106,6 +106,13 @@ interlineado por defecto es más compacto.
 - Los trazos de los SVG importados van centrados; usa
   `.stroke_align("inside")` si un dibujo dependía del trazo hacia dentro.
 - La sombra de un grupo es una sola, bajo todos sus miembros.
+- Un emisor de partículas con `opacity()` se funde como una sola capa: las
+  partículas solapadas ya no suman su brillo.
+- Con el mismo `z_index`, un objeto de `scene.persist(...)` queda encima del
+  contenido de los segmentos, también al terminar una transición por shader.
+- `format` en `readout`, `variable` y las cotas sigue la especificación de
+  Python: `"05.2f"` rellena con ceros y un formato no admitido (`d`, `s`…)
+  lanza `ValueError`.
 
 = 0.8.1
 

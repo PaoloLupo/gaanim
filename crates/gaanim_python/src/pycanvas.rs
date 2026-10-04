@@ -7261,6 +7261,7 @@ impl PyMechanics {
         label_style: Option<PyTextStyle>,
     ) -> PyResult<Py<PyDimension>> {
         crate::custom::ensure_authoring_allowed()?;
+        crate::visualization::check_number_format(format)?;
         if !offset.is_finite() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "offset must be finite",
@@ -7388,6 +7389,7 @@ impl PyMechanics {
         color: Option<PyColor>,
     ) -> PyResult<Py<PyAngleDimension>> {
         crate::custom::ensure_authoring_allowed()?;
+        crate::visualization::check_number_format(format)?;
         if !radius.is_finite() || radius <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "radius must be finite and positive",
@@ -7478,6 +7480,7 @@ impl PyMechanics {
         color: Option<PyColor>,
     ) -> PyResult<Py<PyForceVector>> {
         crate::custom::ensure_authoring_allowed()?;
+        crate::visualization::check_number_format(format)?;
         if !scale.is_finite() || scale <= 0.0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "scale must be finite and greater than zero",
@@ -7526,6 +7529,7 @@ impl PyMechanics {
         color: Option<PyColor>,
     ) -> PyResult<Py<PyForceVector>> {
         crate::custom::ensure_authoring_allowed()?;
+        crate::visualization::check_number_format(format)?;
         validate_force_metrics(visual_scale, label_gap, font_size)?;
         let magnitude = extract_scalar_source(magnitude, &self.inner)?;
         let direction = direction
@@ -7571,6 +7575,7 @@ impl PyMechanics {
         color: Option<PyColor>,
     ) -> PyResult<Py<PyForceVector>> {
         crate::custom::ensure_authoring_allowed()?;
+        crate::visualization::check_number_format(format)?;
         validate_force_metrics(visual_scale, label_gap, font_size)?;
         let fx = extract_scalar_source(fx, &self.inner)?;
         let fy = extract_scalar_source(fy, &self.inner)?;

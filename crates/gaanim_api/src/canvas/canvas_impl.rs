@@ -10145,6 +10145,12 @@ mod tests {
 
         timeline.seek(&mut world, 1.25);
         assert_eq!(world.get::<SceneMember>(title_entity), None);
+        // The renderer draws it above segment content with the same z-index.
+        assert!(
+            world
+                .get::<gaanim_scene::SegmentContent>(title_entity)
+                .is_none()
+        );
         assert!(world.get::<gaanim_scene::Visible>(title_entity).is_some());
         assert_eq!(
             world.get::<gaanim_scene::Opacity>(title_entity).unwrap().0,
@@ -10167,6 +10173,11 @@ mod tests {
                 .get::<SceneMember>(title_entity)
                 .map(|member| member.0),
             Some(reused_scene)
+        );
+        assert!(
+            world
+                .get::<gaanim_scene::SegmentContent>(title_entity)
+                .is_some()
         );
 
         timeline.seek(&mut world, 1.75);
@@ -10203,6 +10214,11 @@ mod tests {
                 .get::<SceneMember>(title_entity)
                 .map(|member| member.0),
             Some(initial_scene)
+        );
+        assert!(
+            world
+                .get::<gaanim_scene::SegmentContent>(title_entity)
+                .is_some()
         );
 
         assert_ne!(reused_scene, released_scene);

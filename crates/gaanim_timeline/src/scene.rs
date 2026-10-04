@@ -8,8 +8,11 @@ use crate::clip::{SceneId, TrackId};
 ///
 /// Used for per-scene visibility toggling during seek. Entities without
 /// this component are considered "global" and remain visible across all scenes.
+/// It requires [`gaanim_scene::SegmentContent`], the marker the renderer
+/// reads; whoever removes a `SceneMember` removes the marker too.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[require(gaanim_scene::SegmentContent)]
 pub struct SceneMember(pub SceneId);
 
 /// Per-scene camera state override.
