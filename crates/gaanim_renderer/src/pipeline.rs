@@ -2567,12 +2567,31 @@ fn world_background_values(
 
 /// Extract every drawable the world shows. `cull` leaves out drawables the
 /// camera cannot see.
+/// Resource: the fragments [`extract_world`] built for its last frame, by
+/// drawable. A drawable whose recipe and Lottie frame are unchanged reuses
+/// its fragment instead of encoding its paths, shadows and glows again.
+#[derive(Resource, Default)]
+pub struct ExtractedFragments(HashMap<Entity, ExtractedFragment>);
+
+struct ExtractedFragment {
+    recipe: Arc<FragmentRecipe>,
+    lottie: Option<Arc<vello::Scene>>,
+    scene: Arc<vello::Scene>,
+    overlay: Option<Arc<vello::Scene>>,
+}
+
 fn extract_world(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
     mut pins: Option<&mut PinnedElements>,
     cull: bool,
 ) -> WorldExtraction {
+    // Fragments of drawables not extracted this frame are dropped with it.
+    let mut previous_fragments = world
+        .remove_resource::<ExtractedFragments>()
+        .unwrap_or_default()
+        .0;
+    let mut fragments = HashMap::with_capacity(previous_fragments.len());
     let replaying_pins = pins.as_ref().is_some_and(|pins| pins.recorded);
     let background_time = world
         .get_resource::<gaanim_animation::PlaybackState>()
@@ -2840,10 +2859,27 @@ fn extract_world(
         if group_shadow.is_some() {
             parts.shadow = None;
         }
-        let recipe = Arc::new(fragment_recipe(parts));
-        let built = build_fragment(&recipe, lottie_opt.map(|lottie| lottie.scene().as_ref()));
-        let scene = built.scene;
-        let overlay = built.overlay;
+        let recipe = fragment_recipe(parts);
+        let lottie_scene = lottie_opt.map(|lottie| lottie.scene());
+        let fragment = previous_fragments
+            .remove(&entity)
+            .filter(|cached| {
+                cached.lottie.as_ref().map(Arc::as_ptr) == lottie_scene.map(Arc::as_ptr)
+                    && *cached.recipe == recipe
+            })
+            .unwrap_or_else(|| {
+                let built = build_fragment(&recipe, lottie_scene.map(Arc::as_ref));
+                ExtractedFragment {
+                    recipe: Arc::new(recipe),
+                    lottie: lottie_scene.cloned(),
+                    scene: Arc::new(built.scene),
+                    overlay: built.overlay.map(Arc::new),
+                }
+            });
+        let recipe = Arc::clone(&fragment.recipe);
+        let scene = Arc::clone(&fragment.scene);
+        let overlay = fragment.overlay.clone();
+        fragments.insert(entity, fragment);
         // Only translucent or blended elements open a layer; a Lottie draws
         // geometry that `Path2D` does not describe.
         let opacity_extent = if global_opacity.0 >= 1.0 && blend.is_none() || lottie_opt.is_some() {
@@ -2924,7 +2960,7 @@ fn extract_world(
                         .map_or(0, |(order, _)| order.z_index)
                 },
             ),
-            scene: Arc::new(scene),
+            scene,
             clip_mask: clip_opt.cloned(),
             blend,
             transition_side: transition_frame
@@ -2954,7 +2990,7 @@ fn extract_world(
                 .map(|layer| Arc::clone(&layer.0)),
             screen: camera_view.map(|view| ExtractedScreen {
                 view: Arc::clone(view),
-                overlay: overlay.map(Arc::new),
+                overlay,
             }),
             echo_rank: world
                 .get::<gaanim_animation::EchoGhost>(entity)
@@ -2986,6 +3022,7 @@ fn extract_world(
     }
 
     extracted.sort_by(ExtractedElement::draw_order);
+    world.insert_resource(ExtractedFragments(fragments));
 
     let background_values =
         world_background_values(world, background_time, transition_frame.as_ref());
