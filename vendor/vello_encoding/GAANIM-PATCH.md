@@ -59,6 +59,9 @@ frame are enough, because `tile_alloc` allocates every tile of each path's box.
   (`crates/gaanim_export/src/gpu.rs`) raises them for its own device: it
   detects a skipped frame with sentinel probe pixels, retries it with a
   larger scale, and reports a clear error past 8×.
+- The walk runs on every render, so `segment_estimate` keeps a segment's
+  points on the stack; it used to allocate a `Vec` per segment, which made
+  the walk cost 2 to 3 ms per 1080p frame in scenes of a few thousand paths.
 
 Regression checks:
 
@@ -71,6 +74,34 @@ Regression checks:
 
 Keep this patch while Vello sizes these buffers statically (true in 0.9 and
 0.10).
+
+## Gradient ramps
+
+`src/ramp_cache.rs` changes how `RampCache` keeps ramps and how
+`make_ramp` (now `write_ramp`) samples them; the sampled values are the
+same.
+
+- Upstream keeps only the first 64 ramps between renders: once a scene has
+  more, `maintain` drops every other ramp and each one is sampled again on
+  every render. A smooth-shaded 3D mesh has one gradient per triangle, so
+  `performance_3d.py` sampled about 1800 ramps per frame. Ramps now stay
+  while one of the last 8 renders used them, and the rows of dropped ramps
+  are reused. Past 1024 rows, a render reuses the rows of ramps it does not
+  draw instead of adding rows, so colors that change every frame keep the
+  ramp texture at the size of one render (it must fit a texture's height).
+- `write_ramp` interpolates between the premultiplied ends of each run of
+  samples in a plain loop, instead of premultiplying both ends again for
+  every sample inside an iterator, and reads sample positions from a table.
+  It performs the same floating-point operations in the same order, so every
+  ramp is bit-identical to upstream's (about 40 % faster per ramp).
+
+Regression checks:
+
+- `cargo test -p vello_encoding --lib ramp`: ramps equal upstream's sampling
+  for even, uneven, repeated and single stops; many ramps survive between
+  renders; changing ramps add no rows; unused ramps free their rows.
+- Exported PNG frames of `examples/performance_3d.py` equal those of the
+  unpatched build.
 
 ## Lint expectation on `encode_brush`
 

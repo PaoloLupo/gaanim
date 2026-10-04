@@ -269,10 +269,15 @@ fn segment_estimate(words: &[u32], transform: &Transform) -> (u64, f32) {
     const TOLERANCE: f32 = 0.25;
     let [a, b, c, d] = transform.matrix;
     let stretch = (a * a + b * b + c * c + d * d).sqrt();
-    let points: Vec<(f32, f32)> = words
-        .chunks_exact(2)
-        .map(|point| (f32::from_bits(point[0]), f32::from_bits(point[1])))
-        .collect();
+    // A segment has at most four points (a cubic); this runs for every
+    // segment of every frame, so they stay on the stack.
+    let mut storage = [(0.0_f32, 0.0_f32); 4];
+    let mut count = 0;
+    for (point, word) in storage.iter_mut().zip(words.chunks_exact(2)) {
+        *point = (f32::from_bits(word[0]), f32::from_bits(word[1]));
+        count += 1;
+    }
+    let points = &storage[..count];
     let length = points
         .windows(2)
         .map(|pair| (pair[1].0 - pair[0].0).hypot(pair[1].1 - pair[0].1))
