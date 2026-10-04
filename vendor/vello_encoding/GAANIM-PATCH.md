@@ -99,6 +99,11 @@ same.
   (which map NaN to 0, as the saturating cast does), so the loop vectorizes.
   An opaque ramp, such as every gradient of a lit 3D mesh, takes about 0.4 µs
   instead of upstream's 4 µs, a translucent one about 1.6 µs.
+- The ramp map hashes with FxHash instead of SipHash. A lit 3D mesh looks
+  up thousands of ramps per render (a sealed triangle's fill and seam stroke
+  share one), and hashing was most of the time spent outside sampling.
+  Which row a ramp takes does not change what is drawn; with SipHash's
+  random keys it already varied between runs.
 
 Regression checks:
 

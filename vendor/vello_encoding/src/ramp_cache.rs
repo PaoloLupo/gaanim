@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use peniko::color::cache_key::CacheKey;
 use peniko::color::Srgb;
@@ -46,12 +47,59 @@ pub struct Ramps<'a> {
 #[derive(Default)]
 pub(crate) struct RampCache {
     epoch: u64,
-    map: HashMap<CacheKey<ColorStops>, (u32, u64)>,
+    map: HashMap<CacheKey<ColorStops>, (u32, u64), BuildHasherDefault<FxHasher>>,
     data: Vec<u32>,
     /// Rows of `data` that no ramp uses.
     free: Vec<u32>,
     /// The epoch whose undrawn ramps were last released into `free`.
     released: u64,
+}
+
+/// Gaanim patch: FxHash, rustc's hasher, for the ramp map. A lit 3D mesh
+/// looks up thousands of ramps per render, and SipHash took most of the
+/// time spent outside sampling. Ramps are colors, not untrusted keys, and
+/// which row a ramp lands in does not change what is drawn.
+#[derive(Default)]
+struct FxHasher(u64);
+
+impl FxHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+impl Hasher for FxHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.add(value.into());
+    }
+
+    fn write_u16(&mut self, value: u16) {
+        self.add(value.into());
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.add(value.into());
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.add(value);
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.add(value as u64);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
 }
 
 impl RampCache {
