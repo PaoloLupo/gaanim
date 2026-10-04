@@ -121,25 +121,44 @@ pub(crate) fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64,
     }
 }
 
-fn publish_benchmark_timings(
-    encoder: VideoEncoder,
+/// Where the time of one headless export went, for the benchmark harness.
+#[derive(Default)]
+struct ExportTimings {
+    /// GPU context, ECS setup and the first update, before the first frame.
+    setup: Duration,
+    /// Seeking the timeline and running the ECS schedule for each frame.
+    update: Duration,
+    /// Composing each frame's Vello scene, effects and post-processing.
+    scene_build: Duration,
     render_gpu: Duration,
+    /// The part of `render_gpu` spent waiting for the GPU to finish a frame.
+    readback_wait: Duration,
     encoder_wait: Duration,
     encode_active: Duration,
     finalize: Duration,
     total: Duration,
-) {
+    /// Frames sent again because they equal the frame before.
+    reused_frames: u64,
+}
+
+fn publish_benchmark_timings(encoder: VideoEncoder, timings: &ExportTimings) {
     if std::env::var("GAANIM_BENCHMARK_SCENARIO").as_deref() != Ok("export") {
         return;
     }
+    let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
     println!(
-        "GAANIM_EXPORT_TIMINGS encoder={} render_gpu_ms={:.3} encoder_wait_ms={:.3} encode_active_ms={:.3} finalize_ms={:.3} total_ms={:.3}",
+        "GAANIM_EXPORT_TIMINGS encoder={} setup_ms={:.3} update_ms={:.3} scene_build_ms={:.3} render_gpu_ms={:.3} readback_wait_ms={:.3} encoder_wait_ms={:.3} encode_active_ms={:.3} finalize_ms={:.3} total_ms={:.3} reused_frames={}",
         encoder.ffmpeg_name(),
-        render_gpu.as_secs_f64() * 1000.0,
-        encoder_wait.as_secs_f64() * 1000.0,
-        encode_active.as_secs_f64() * 1000.0,
-        finalize.as_secs_f64() * 1000.0,
-        total.as_secs_f64() * 1000.0,
+        ms(timings.setup),
+        ms(timings.update),
+        ms(timings.scene_build),
+        ms(timings.render_gpu),
+        ms(timings.readback_wait),
+        ms(timings.encoder_wait),
+        ms(timings.encode_active),
+        ms(timings.finalize),
+        ms(timings.total),
+        timings.reused_frames,
     );
 }
 
@@ -166,6 +185,39 @@ struct ExportPipeline {
 }
 
 /// Name the frame whose scene did not fit the GPU renderer.
+/// Read back the frame `in_flight` names, if any, timing it as rendering.
+fn finish_in_flight(
+    gpu: &mut GpuContext,
+    in_flight: &mut Option<f64>,
+    timings: &mut ExportTimings,
+) -> Result<Option<crate::gpu::FramePixels>> {
+    let Some(time) = in_flight.take() else {
+        return Ok(None);
+    };
+    let started = Instant::now();
+    let pixels = gpu
+        .finish_frame()
+        .map_err(|error| frame_render_error(error, time))?;
+    timings.render_gpu += started.elapsed();
+    Ok(Some(pixels))
+}
+
+/// The scene's clear color, which an exported frame is drawn over.
+fn clear_color(world: &World) -> vello::peniko::Color {
+    world
+        .get_resource::<ClearColor>()
+        .map(|cc| {
+            let rgba = cc.0.to_srgba();
+            vello::peniko::Color::from_rgba8(
+                (rgba.red * 255.0) as u8,
+                (rgba.green * 255.0) as u8,
+                (rgba.blue * 255.0) as u8,
+                (rgba.alpha * 255.0) as u8,
+            )
+        })
+        .unwrap_or(vello::peniko::Color::BLACK)
+}
+
 fn frame_render_error(error: crate::gpu::GpuContextError, time: f64) -> ExportError {
     match error {
         crate::gpu::GpuContextError::SceneTooComplex { .. } => {
@@ -661,10 +713,39 @@ where
 
     let mut current_time = render_start;
     let mut last_report = Instant::now();
-    let mut render_gpu_time = Duration::ZERO;
-    let mut encoder_wait_time = Duration::ZERO;
+    let mut timings = ExportTimings {
+        setup: start_time.elapsed(),
+        ..Default::default()
+    };
+    let mut delivered = 0_u64;
+    let mut deliver =
+        |pixels: crate::gpu::FramePixels, timings: &mut ExportTimings| -> Result<()> {
+            let encoder_wait_started_at = Instant::now();
+            encoder.push_frame(pixels).map_err(|e| match e {
+                // FFmpeg failures already explain the cause and the fix.
+                ExportError::FFmpeg(_) => e,
+                other => ExportError::Capture(format!("Encoder push error: {}", other)),
+            })?;
+            timings.encoder_wait += encoder_wait_started_at.elapsed();
+            if delivered.is_multiple_of(10) || delivered == total_frames - 1 {
+                let speed = 10.0 / last_report.elapsed().as_secs_f64();
+                pb.set_message(format!("{:.1} fps", speed));
+                last_report = Instant::now();
+            }
+            delivered += 1;
+            pb.inc(1);
+            export_progress(&telemetry, delivered, total_frames);
+            Ok(())
+        };
+    // The time of the frame the GPU is drawing: the next frame is updated
+    // and composed meanwhile, and the frame is read back after that.
+    let mut in_flight: Option<f64> = None;
+    // While frames repeat the last one (a wait() or a stop), its pixels are
+    // sent again instead of rendering it.
+    let mut held: Option<(crate::gpu::FrameJob, std::sync::Arc<[u8]>)> = None;
 
-    for frame_idx in 0..total_frames {
+    for _ in 0..total_frames {
+        let update_started_at = Instant::now();
         {
             let world = app.world_mut();
             let mut timeline = world.resource_mut::<Timeline>();
@@ -673,8 +754,12 @@ where
 
         app.update();
         check_custom_animation_errors(app.world())?;
+        timings.update += update_started_at.elapsed();
 
         if let Some(blur) = frame_motion_blur(app.world()) {
+            if let Some(pixels) = finish_in_flight(&mut gpu, &mut in_flight, &mut timings)? {
+                deliver(pixels, &mut timings)?;
+            }
             let render_started_at = Instant::now();
             let frame_data = render_motion_blurred(
                 &mut app,
@@ -684,20 +769,14 @@ where
                 f64::from(config.fps),
                 blur,
             )?;
-            render_gpu_time += render_started_at.elapsed();
-            let encoder_wait_started_at = Instant::now();
-            encoder.push_frame(frame_data).map_err(|e| match e {
-                ExportError::FFmpeg(_) => e,
-                other => ExportError::Capture(format!("Encoder push error: {}", other)),
-            })?;
-            encoder_wait_time += encoder_wait_started_at.elapsed();
-            pb.inc(1);
-            export_progress(&telemetry, frame_idx + 1, total_frames);
+            timings.render_gpu += render_started_at.elapsed();
+            deliver(frame_data.into(), &mut timings)?;
             current_time += frame_time_step;
             continue;
         }
 
-        let (vello_scene, layers, effects, backgrounds, post_process) = {
+        let scene_build_started_at = Instant::now();
+        let frame = {
             let resolved_camera = frame_camera(app.world());
             let composed = gaanim_renderer::pipeline::compile_frame_from_world(
                 app.world_mut(),
@@ -717,59 +796,65 @@ where
                 config.fit,
             );
             let post = export_post_process(app.world(), frame, composed.transition.as_ref());
-            (
-                composed.scene,
-                composed.transition,
-                composed.effects,
-                composed.backgrounds,
+            crate::gpu::FrameJob {
+                scene: composed.scene,
+                layers: composed.transition,
+                effects: composed.effects,
+                backgrounds: composed.backgrounds,
+                base_color: clear_color(app.world()),
                 post,
-            )
+            }
         };
+        timings.scene_build += scene_build_started_at.elapsed();
 
-        let bg_color = app
-            .world()
-            .get_resource::<ClearColor>()
-            .map(|cc| {
-                let rgba = cc.0.to_srgba();
-                vello::peniko::Color::from_rgba8(
-                    (rgba.red * 255.0) as u8,
-                    (rgba.green * 255.0) as u8,
-                    (rgba.blue * 255.0) as u8,
-                    (rgba.alpha * 255.0) as u8,
-                )
-            })
-            .unwrap_or(vello::peniko::Color::BLACK);
-
-        let render_started_at = Instant::now();
-        let frame_data = gpu
-            .render_frame_layers(
-                &vello_scene,
-                layers.as_ref(),
-                &effects,
-                &backgrounds,
-                bg_color,
-                post_process.as_ref(),
-            )
-            .map_err(|error| frame_render_error(error, current_time))?;
-        render_gpu_time += render_started_at.elapsed();
-
-        let encoder_wait_started_at = Instant::now();
-        encoder.push_frame(frame_data).map_err(|e| match e {
-            // FFmpeg failures already explain the cause and the fix.
-            ExportError::FFmpeg(_) => e,
-            other => ExportError::Capture(format!("Encoder push error: {}", other)),
-        })?;
-        encoder_wait_time += encoder_wait_started_at.elapsed();
-
-        if frame_idx.is_multiple_of(10) || frame_idx == total_frames - 1 {
-            let speed = 10.0 / last_report.elapsed().as_secs_f64();
-            pb.set_message(format!("{:.1} fps", speed));
-            last_report = Instant::now();
+        if let Some((job, pixels)) = &held
+            && frame.same_output(job)
+        {
+            timings.reused_frames += 1;
+            deliver(
+                crate::gpu::FramePixels::Shared(pixels.clone()),
+                &mut timings,
+            )?;
+            current_time += frame_time_step;
+            continue;
         }
-        pb.inc(1);
-        export_progress(&telemetry, frame_idx + 1, total_frames);
+        held = None;
+        if gpu
+            .pending_frame()
+            .is_some_and(|pending| frame.same_output(pending))
+        {
+            // The frame in flight is held from here on: keep its pixels.
+            let pixels: std::sync::Arc<[u8]> =
+                match finish_in_flight(&mut gpu, &mut in_flight, &mut timings)? {
+                    Some(pixels) => pixels.into_pixels().into(),
+                    None => unreachable!("a pending frame is in flight"),
+                };
+            deliver(
+                crate::gpu::FramePixels::Shared(pixels.clone()),
+                &mut timings,
+            )?;
+            timings.reused_frames += 1;
+            deliver(
+                crate::gpu::FramePixels::Shared(pixels.clone()),
+                &mut timings,
+            )?;
+            held = Some((frame, pixels));
+            current_time += frame_time_step;
+            continue;
+        }
+        if let Some(pixels) = finish_in_flight(&mut gpu, &mut in_flight, &mut timings)? {
+            deliver(pixels, &mut timings)?;
+        }
+        let render_started_at = Instant::now();
+        gpu.submit_frame(frame)
+            .map_err(|error| frame_render_error(error, current_time))?;
+        timings.render_gpu += render_started_at.elapsed();
+        in_flight = Some(current_time);
 
         current_time += frame_time_step;
+    }
+    if let Some(pixels) = finish_in_flight(&mut gpu, &mut in_flight, &mut timings)? {
+        deliver(pixels, &mut timings)?;
     }
 
     pb.finish_and_clear();
@@ -781,21 +866,16 @@ where
     );
 
     let finalize_started_at = Instant::now();
-    let encode_active_time = encoder.finalize_with_timings().inspect_err(|e| {
+    timings.encode_active = encoder.finalize_with_timings().inspect_err(|e| {
         export_log(&telemetry, console::Level::Error, "error", e.to_string());
         bevy::prelude::error!("Encoder finalization error: {}", e);
     })?;
-    let finalize_time = finalize_started_at.elapsed();
+    timings.finalize = finalize_started_at.elapsed();
+    timings.readback_wait = gpu.readback_wait();
 
     let duration = start_time.elapsed();
-    publish_benchmark_timings(
-        config.video_encoder,
-        render_gpu_time,
-        encoder_wait_time,
-        encode_active_time,
-        finalize_time,
-        duration,
-    );
+    timings.total = duration;
+    publish_benchmark_timings(config.video_encoder, &timings);
     export_log(
         &telemetry,
         console::Level::Success,
@@ -1303,6 +1383,16 @@ where
     let mut timeline_update = Duration::ZERO;
     let mut scene_compile = Duration::ZERO;
     let mut render_readback = Duration::ZERO;
+    let frame = |time: f64, rgba: Vec<u8>| CapturedFrame {
+        time,
+        width: config.width,
+        height: config.height,
+        rgba,
+    };
+    // The time of the frame the GPU is drawing: the next frame is seeked
+    // and composed meanwhile, and the frame is read back after that.
+    let mut in_flight: Option<f64> = None;
+    let mut cancelled = false;
     for (&time, &seek_time) in times.iter().zip(&seek_times) {
         let phase_started = Instant::now();
         app.world_mut().resource_mut::<Timeline>().seek_request = Some(seek_time);
@@ -1310,8 +1400,19 @@ where
         check_custom_animation_errors(app.world())?;
         timeline_update += phase_started.elapsed();
 
+        let phase_started = Instant::now();
+        let pending = in_flight.take();
         if let Some(blur) = frame_motion_blur(app.world()) {
-            let phase_started = Instant::now();
+            if let Some(pending) = pending {
+                let rgba = gpu
+                    .finish_frame()
+                    .map_err(|error| frame_render_error(error, pending))?
+                    .into_pixels();
+                if on_frame(frame(pending, rgba)).is_break() {
+                    cancelled = true;
+                    break;
+                }
+            }
             let rgba = render_motion_blurred(
                 &mut app,
                 &mut gpu,
@@ -1321,13 +1422,8 @@ where
                 blur,
             )?;
             render_readback += phase_started.elapsed();
-            let flow = on_frame(CapturedFrame {
-                time,
-                width: config.width,
-                height: config.height,
-                rgba,
-            });
-            if flow.is_break() {
+            if on_frame(frame(time, rgba)).is_break() {
+                cancelled = true;
                 break;
             }
             continue;
@@ -1345,7 +1441,7 @@ where
             config.height,
             config.fit,
         ));
-        let post_process = export_post_process(
+        let post = export_post_process(
             app.world(),
             capture_camera_frame(
                 resolved_camera.as_ref(),
@@ -1355,43 +1451,40 @@ where
             ),
             composed.transition.as_ref(),
         );
+        let job = crate::gpu::FrameJob {
+            scene: composed.scene,
+            layers: composed.transition,
+            effects: composed.effects,
+            backgrounds: composed.backgrounds,
+            base_color: clear_color(app.world()),
+            post,
+        };
         scene_compile += phase_started.elapsed();
 
-        let background = app
-            .world()
-            .get_resource::<ClearColor>()
-            .map(|clear| {
-                let rgba = clear.0.to_srgba();
-                vello::peniko::Color::from_rgba8(
-                    (rgba.red * 255.0) as u8,
-                    (rgba.green * 255.0) as u8,
-                    (rgba.blue * 255.0) as u8,
-                    (rgba.alpha * 255.0) as u8,
-                )
-            })
-            .unwrap_or(vello::peniko::Color::BLACK);
-
+        let phase_started = Instant::now();
+        if let Some(pending) = pending {
+            let rgba = gpu
+                .finish_frame()
+                .map_err(|error| frame_render_error(error, pending))?
+                .into_pixels();
+            if on_frame(frame(pending, rgba)).is_break() {
+                cancelled = true;
+                break;
+            }
+        }
+        gpu.submit_frame(job)
+            .map_err(|error| frame_render_error(error, time))?;
+        in_flight = Some(time);
+        render_readback += phase_started.elapsed();
+    }
+    if let Some(pending) = in_flight.filter(|_| !cancelled) {
         let phase_started = Instant::now();
         let rgba = gpu
-            .render_frame_layers(
-                &composed.scene,
-                composed.transition.as_ref(),
-                &composed.effects,
-                &composed.backgrounds,
-                background,
-                post_process.as_ref(),
-            )
-            .map_err(|error| frame_render_error(error, time))?;
+            .finish_frame()
+            .map_err(|error| frame_render_error(error, pending))?
+            .into_pixels();
         render_readback += phase_started.elapsed();
-        let flow = on_frame(CapturedFrame {
-            time,
-            width: config.width,
-            height: config.height,
-            rgba,
-        });
-        if flow.is_break() {
-            break;
-        }
+        let _ = on_frame(frame(pending, rgba));
     }
 
     if std::env::var_os("GAANIM_CAPTURE_TELEMETRY").is_some() {
@@ -1444,19 +1537,7 @@ fn render_updated_world(
         ),
         composed.transition.as_ref(),
     );
-    let background = app
-        .world()
-        .get_resource::<ClearColor>()
-        .map(|clear| {
-            let rgba = clear.0.to_srgba();
-            vello::peniko::Color::from_rgba8(
-                (rgba.red * 255.0) as u8,
-                (rgba.green * 255.0) as u8,
-                (rgba.blue * 255.0) as u8,
-                (rgba.alpha * 255.0) as u8,
-            )
-        })
-        .unwrap_or(vello::peniko::Color::BLACK);
+    let background = clear_color(app.world());
     gpu.render_frame_layers(
         &composed.scene,
         composed.transition.as_ref(),

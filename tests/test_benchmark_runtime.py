@@ -75,12 +75,15 @@ class RuntimeBenchmarkTests(unittest.TestCase):
                 benchmark_runtime.validate_artifacts("preview", artifact_dir, 3)
 
     def test_windows_child_path_contains_the_python_runtime(self) -> None:
+        # Windows separates PATH entries with ";" whatever the host running the test.
         with mock.patch.object(benchmark_runtime.os, "name", "nt"), mock.patch.object(
+            benchmark_runtime.os, "pathsep", ";"
+        ), mock.patch.object(
             benchmark_runtime.sys, "base_prefix", r"C:\Python"
         ), mock.patch.dict(benchmark_runtime.os.environ, {"PATH": r"C:\Tools"}, clear=True):
             environment = benchmark_runtime.child_environment()
 
-        self.assertEqual(environment["PATH"].split(benchmark_runtime.os.pathsep)[0], r"C:\Python")
+        self.assertEqual(environment["PATH"].split(";"), [r"C:\Python", r"C:\Tools"])
 
     def test_export_artifact_validation_reads_phase_timings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -96,6 +99,35 @@ class RuntimeBenchmarkTests(unittest.TestCase):
 
             self.assertEqual(report["encoder"], "h264_vaapi")
             self.assertEqual(report["phase_timings_ms"]["encode_active_ms"], 8.25)
+
+    def test_export_artifact_validation_reads_optional_phases_and_the_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_dir = Path(temporary)
+            (artifact_dir / "benchmark.mp4").write_bytes(b"video")
+            log = artifact_dir / "command.log"
+            log.write_text(
+                "GAANIM_GPU_ADAPTER backend=Vulkan type=DiscreteGpu name=Some GPU\n"
+                "GAANIM_EXPORT_TIMINGS encoder=libx264 setup_ms=300 update_ms=40 "
+                "scene_build_ms=60 render_gpu_ms=10.5 readback_wait_ms=0.5 encoder_wait_ms=2.0 "
+                "encode_active_ms=8.25 finalize_ms=1.0 total_ms=15.0\n",
+                encoding="utf-8",
+            )
+
+            report = benchmark_runtime.validate_artifacts("export", artifact_dir, 1)
+
+            self.assertEqual(report["phase_timings_ms"]["scene_build_ms"], 60.0)
+            self.assertEqual(report["phase_timings_ms"]["readback_wait_ms"], 0.5)
+            self.assertEqual(
+                benchmark_runtime.parse_adapter(log),
+                "backend=Vulkan type=DiscreteGpu name=Some GPU",
+            )
+            self.assertIsNone(benchmark_runtime.parse_adapter(artifact_dir / "missing.log"))
+
+    @unittest.skipUnless(benchmark_runtime.os.name == "nt", "reads a Windows process")
+    def test_windows_reports_the_peak_working_set(self) -> None:
+        peak, scope = benchmark_runtime.process_rss_kib(benchmark_runtime.os.getpid())
+        self.assertGreater(peak, 0)
+        self.assertEqual(scope, "process-peak-working-set")
 
     def test_export_formats_pick_the_extension_and_drop_inapplicable_options(self) -> None:
         def command(export_format: str) -> list[str]:

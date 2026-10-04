@@ -23,7 +23,17 @@ generated artifacts remain under `target/performance/artifacts/`.
 The report records p50/p95 scenario latency, FPS at those latency percentiles,
 and peak RSS when available. Reload latency excludes process startup; its raw
 process duration remains diagnostic. Linux samples the process tree, including
-FFmpeg; other platforms may report a narrower scope or no memory value.
+FFmpeg; Windows reports the peak working set of the Gaanim process alone
+(`memory_scope: process-peak-working-set`); macOS samples the process RSS.
+
+Each run records the `gpu_adapter` the executable announced
+(`GAANIM_GPU_ADAPTER backend=... type=... name=...`). Export runs split their
+time into `setup`, `update` (timeline and ECS), `scene_build` (composition),
+`render_gpu` (Vello and readback calls, of which `readback_wait` is blocked on
+the GPU), `encoder_wait` and `finalize`; the timing line also counts
+`reused_frames`, held frames sent again without rendering. Exports compose
+frame N+1 while the GPU draws frame N, so `readback_wait` near zero means the
+GPU is hidden behind the CPU work.
 
 ## Suites, scales and comparisons
 

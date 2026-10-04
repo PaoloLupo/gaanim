@@ -3,6 +3,8 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+
+use crate::gpu::FramePixels;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -370,7 +372,7 @@ pub struct EncoderConfig {
 
 /// A highly optimized parallel frame encoder that pipes raw RGBA frames into FFmpeg in a background thread.
 pub struct ParallelEncoder {
-    sender: SyncSender<Option<Vec<u8>>>,
+    sender: SyncSender<Option<FramePixels>>,
     thread_handle: Option<JoinHandle<Result<Duration>>>,
 }
 
@@ -492,7 +494,7 @@ impl ParallelEncoder {
             _ => Some(Self::spawn_ffmpeg(&config, program)?),
         };
         let depth = adaptive_buffer_depth(config.width, config.height);
-        let (sender, receiver) = sync_channel::<Option<Vec<u8>>>(depth);
+        let (sender, receiver) = sync_channel::<Option<FramePixels>>(depth);
 
         let thread_handle =
             std::thread::spawn(move || Self::encoder_worker(config, receiver, child));
@@ -503,8 +505,8 @@ impl ParallelEncoder {
         })
     }
 
-    pub fn push_frame(&mut self, frame: Vec<u8>) -> Result<()> {
-        if self.sender.send(Some(frame)).is_err() {
+    pub fn push_frame(&mut self, frame: impl Into<FramePixels>) -> Result<()> {
+        if self.sender.send(Some(frame.into())).is_err() {
             // The worker only drops its receiver after it stopped; report why
             // (for example FFmpeg exiting) instead of the closed channel.
             return Err(self.worker_error());
@@ -843,7 +845,7 @@ impl ParallelEncoder {
 
     fn encoder_worker(
         config: EncoderConfig,
-        receiver: Receiver<Option<Vec<u8>>>,
+        receiver: Receiver<Option<FramePixels>>,
         child: Option<Child>,
     ) -> Result<Duration> {
         let mut encode_time = Duration::ZERO;
@@ -874,7 +876,7 @@ impl ParallelEncoder {
                 let mut write_error = None;
                 while let Ok(Some(frame)) = receiver.recv() {
                     let encode_started_at = Instant::now();
-                    if let Err(error) = stdin.write_all(&frame) {
+                    if let Err(error) = frame.write_to(&mut stdin) {
                         write_error = Some(error);
                         break;
                     }
@@ -916,7 +918,7 @@ impl ParallelEncoder {
     /// arriving in order. Returns the encode time summed over every frame.
     fn encode_png_sequence(
         config: &EncoderConfig,
-        receiver: &Receiver<Option<Vec<u8>>>,
+        receiver: &Receiver<Option<FramePixels>>,
     ) -> Result<Duration> {
         let base_path = std::path::Path::new(&config.output_path);
         if let Some(parent) = base_path.parent() {
@@ -934,7 +936,7 @@ impl ParallelEncoder {
             .map_or(1, std::num::NonZeroUsize::get)
             .min(adaptive_buffer_depth(width, height));
         // A rendezvous channel hands each frame straight to an idle worker.
-        let (jobs, job_receiver) = crossbeam_channel::bounded::<(usize, Vec<u8>)>(0);
+        let (jobs, job_receiver) = crossbeam_channel::bounded::<(usize, FramePixels)>(0);
         let failed = AtomicBool::new(false);
 
         std::thread::scope(|scope| {
@@ -948,9 +950,13 @@ impl ParallelEncoder {
                             let encode_started_at = Instant::now();
                             let dest_path =
                                 directory.join(png_sequence_frame_name(file_name, frame_idx));
-                            if let Err(error) =
-                                write_png_frame(&dest_path, frame, width, height, transparent)
-                            {
+                            if let Err(error) = write_png_frame(
+                                &dest_path,
+                                frame.into_pixels(),
+                                width,
+                                height,
+                                transparent,
+                            ) {
                                 failed.store(true, Ordering::Relaxed);
                                 return (encode_time, Some((frame_idx, error)));
                             }

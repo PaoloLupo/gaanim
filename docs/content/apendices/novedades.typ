@@ -13,17 +13,26 @@ instalar una versión nueva, sigue
 
 = 0.10.0
 
-Sin publicar. Rendimiento de la vista previa y de la exportación: saltar en la
-línea de tiempo reutiliza lo ya dibujado, el editor descansa cuando no hay
-nada que cambiar y GIF, WebP, WebM y secuencias PNG se exportan más rápido.
+Sin publicar. Rendimiento de la vista previa y de la exportación: exportar es
+entre un 13 y un 49 % más rápido, saltar en la línea de tiempo cuesta entre un
+7 y un 35 % menos, el editor descansa cuando no hay nada que cambiar y GIF,
+WebP, WebM y secuencias PNG se exportan más rápido.
 Lee «Al actualizar»: los GIF y WebP salen a 30 fps como mucho y las
 exportaciones respetan los fps que pidas.
 
 == Cambios
 
-- Saltar a cualquier instante reutiliza lo ya dibujado: la línea de tiempo
-  ya no reescribe valores que no cambian. En la escena de referencia del
-  benchmark, un salto aleatorio pasa de 296 a 111 ms por fotograma.
+- La exportación prepara el fotograma siguiente mientras la GPU dibuja el
+  actual, y los fotogramas que repiten el anterior (un `wait()`, una pausa)
+  no se vuelven a dibujar.
+- La exportación y las capturas reutilizan el dibujo de cada objeto que no
+  cambió; los efectos por objeto independientes se dibujan con un solo
+  render, y las mallas 3D con sombreado suave ya no recalculan sus
+  degradados en cada fotograma.
+- Exportar arranca entre 0,3 y 0,5 s antes en Windows, porque la GPU se busca
+  primero en Vulkan.
+- Saltar en la línea de tiempo reutiliza lo ya dibujado: la línea de tiempo
+  ya no reescribe valores que no cambian.
 - Con la vista previa en pausa o en el Inicio, el editor espera a la
   siguiente entrada en lugar de recalcular la escena en cada refresco.
 - WebM usa varios núcleos y se exporta un tercio más rápido; las secuencias
