@@ -4,8 +4,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use thiserror::Error;
 use vello::RendererOptions;
 use vello::wgpu::{
-    Backends, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, Instance,
-    InstanceDescriptor, Limits, MapMode, Origin3d, PowerPreference, RequestAdapterOptions,
+    BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, Limits, MapMode, Origin3d,
     TexelCopyBufferInfo, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect,
     TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
@@ -20,6 +19,8 @@ const PROBE_STRIDE: u64 = 256;
 const MAX_BUMP_SCALE: u32 = 8;
 /// Largest storage binding requested from the adapter for Vello's buffers.
 const MAX_STORAGE_BINDING: u64 = 512 << 20;
+/// Bytes of staging buffers frames may hold while the encoder writes them.
+const STAGING_BUDGET: u64 = 256 << 20;
 
 /// A recoverable GPU failure reported while running a direct Vello export.
 ///
@@ -64,13 +65,56 @@ impl GpuContextError {
     }
 }
 
+/// Everything [`GpuContext::submit_frame`] renders for one frame; see
+/// [`GpuContext::render_frame_layers`] for each part.
+pub struct FrameJob {
+    pub scene: vello::Scene,
+    pub layers: Option<TransitionScenes>,
+    pub effects: Vec<gaanim_renderer::object_effects::EffectLayer>,
+    pub backgrounds: Vec<gaanim_renderer::background::ShaderBackgroundRequest>,
+    pub base_color: vello::peniko::Color,
+    pub post: Option<PostProcessRequest>,
+}
+
+impl FrameJob {
+    /// Whether this frame renders the same pixels as `other`, so that
+    /// `other`'s can be reused. Shader backgrounds and transitions always
+    /// count as different.
+    pub fn same_output(&self, other: &Self) -> bool {
+        self.layers.is_none()
+            && other.layers.is_none()
+            && self.backgrounds.is_empty()
+            && other.backgrounds.is_empty()
+            && self.base_color == other.base_color
+            && self.effects.len() == other.effects.len()
+            && self
+                .effects
+                .iter()
+                .zip(&other.effects)
+                .all(|(effect, other)| effect.same_output(other))
+            && match (&self.post, &other.post) {
+                (None, None) => true,
+                (Some(post), Some(other)) => post.same_output(other),
+                _ => false,
+            }
+            && gaanim_renderer::canvas::draws_same(&self.scene, &other.scene)
+    }
+}
+
 pub struct GpuContext {
     device: vello::wgpu::Device,
     queue: vello::wgpu::Queue,
     renderer: vello::Renderer,
     texture: vello::wgpu::Texture,
     texture_view: vello::wgpu::TextureView,
-    staging: vello::wgpu::Buffer,
+    /// The buffer the next frame is copied into.
+    staging: Option<vello::wgpu::Buffer>,
+    /// Staging buffers that [`MappedFrame`]s released.
+    spare_staging: mpsc::Receiver<vello::wgpu::Buffer>,
+    release_staging: mpsc::Sender<vello::wgpu::Buffer>,
+    /// Staging buffers created so far, up to `max_staging`.
+    staging_count: usize,
+    max_staging: usize,
     /// One probe pixel per `PROBE_STRIDE` bytes, read before post-processing.
     probe: vello::wgpu::Buffer,
     width: u32,
@@ -89,23 +133,23 @@ pub struct GpuContext {
     bump_scale: u32,
     /// Largest Vello buffer the device can bind.
     max_bump_bytes: u64,
+    /// The frame of [`Self::submit_frame`] whose pixels are not read yet.
+    pending: Option<FrameJob>,
+    /// Time spent blocked on readbacks, for the benchmark harness.
+    readback_wait: std::cell::Cell<std::time::Duration>,
 }
 
 impl GpuContext {
     pub fn new(width: u32, height: u32) -> Result<Self, GpuContextError> {
-        // `WGPU_BACKEND` (vulkan, dx12, metal, gl) narrows the search like it
-        // does for the preview window; CI uses it to skip broken adapters.
-        let instance = Instance::new(InstanceDescriptor {
-            backends: Backends::all().with_env(),
-            ..InstanceDescriptor::new_without_display_handle()
-        });
-
-        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
-            power_preference: PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))
-        .map_err(|e| GpuContextError::Adapter(e.to_string()))?;
+        let adapter = gaanim_renderer::adapter::request_headless_adapter()
+            .map_err(|e| GpuContextError::Adapter(e.to_string()))?;
+        if std::env::var_os("GAANIM_BENCHMARK_SCENARIO").is_some() {
+            let info = adapter.get_info();
+            println!(
+                "GAANIM_GPU_ADAPTER backend={:?} type={:?} name={}",
+                info.backend, info.device_type, info.name
+            );
+        }
 
         // Complex scenes need larger Vello buffers than wgpu's default
         // 128 MiB binding; request what the adapter allows, up to a bound.
@@ -194,13 +238,10 @@ impl GpuContext {
         let texture_view = texture.create_view(&Default::default());
 
         let padded_width = (width + 63) & !63;
-        let buffer_size = (padded_width as u64) * (height as u64) * 4;
-        let staging = device.create_buffer(&BufferDescriptor {
-            label: Some("gaanim-export-staging"),
-            size: buffer_size,
-            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let staging = create_staging(&device, padded_width, height);
+        let (release_staging, spare_staging) = mpsc::channel();
+        let frame_bytes = u64::from(padded_width) * u64::from(height) * 4;
+        let max_staging = (STAGING_BUDGET / frame_bytes).clamp(3, 10) as usize;
         let probe = device.create_buffer(&BufferDescriptor {
             label: Some("gaanim-export-probe"),
             size: PROBE_STRIDE * 5,
@@ -214,7 +255,11 @@ impl GpuContext {
             renderer,
             texture,
             texture_view,
-            staging,
+            staging: Some(staging),
+            spare_staging,
+            release_staging,
+            staging_count: 1,
+            max_staging,
             probe,
             width,
             height,
@@ -226,6 +271,8 @@ impl GpuContext {
             backgrounds: Default::default(),
             bump_scale: 1,
             max_bump_bytes: max_storage,
+            pending: None,
+            readback_wait: Default::default(),
         })
     }
 
@@ -296,8 +343,21 @@ impl GpuContext {
         ]
     }
 
+    /// Time spent so far blocked on frame readbacks.
+    pub fn readback_wait(&self) -> std::time::Duration {
+        self.readback_wait.get()
+    }
+
     /// Block until `buffer` is mapped for reading.
     fn map_read(&self, buffer: &vello::wgpu::Buffer) -> Result<(), GpuContextError> {
+        let started = std::time::Instant::now();
+        let result = self.map_read_blocking(buffer);
+        self.readback_wait
+            .set(self.readback_wait.get() + started.elapsed());
+        result
+    }
+
+    fn map_read_blocking(&self, buffer: &vello::wgpu::Buffer) -> Result<(), GpuContextError> {
         let (tx, rx) = mpsc::channel::<Result<(), String>>();
         buffer.slice(..).map_async(MapMode::Read, move |result| {
             let _ = tx.send(result.map_err(|e| format!("Buffer map failed: {e}")));
@@ -376,6 +436,60 @@ impl GpuContext {
         }
     }
 
+    /// The frame given to [`Self::submit_frame`] and not finished yet.
+    pub fn pending_frame(&self) -> Option<&FrameJob> {
+        self.pending.as_ref()
+    }
+
+    /// Render `frame` and leave its readback pending, so that the caller can
+    /// prepare the next frame while the GPU draws this one;
+    /// [`Self::finish_frame`] returns its pixels. A frame already pending
+    /// must be finished first.
+    pub fn submit_frame(&mut self, frame: FrameJob) -> Result<(), GpuContextError> {
+        assert!(
+            self.pending.is_none(),
+            "finish the pending frame before submitting another"
+        );
+        self.submit_attempt(
+            &frame.scene,
+            frame.layers.as_ref(),
+            &frame.effects,
+            &frame.backgrounds,
+            frame.base_color,
+            frame.post.as_ref(),
+        )?;
+        self.pending = Some(frame);
+        Ok(())
+    }
+
+    /// The pixels of the frame given to [`Self::submit_frame`], as
+    /// [`Self::render_frame_layers`] returns them: a frame Vello skipped is
+    /// rendered again with larger buffers.
+    pub fn finish_frame(&mut self) -> Result<FramePixels, GpuContextError> {
+        let frame = self
+            .pending
+            .take()
+            .expect("finish_frame needs a frame given to submit_frame");
+        if self.read_probes()? {
+            return self.read_mapped().map(FramePixels::Mapped);
+        }
+        if self.bump_scale >= MAX_BUMP_SCALE {
+            return Err(GpuContextError::SceneTooComplex {
+                scale: self.bump_scale,
+            });
+        }
+        self.bump_scale *= 2;
+        self.render_frame_layers(
+            &frame.scene,
+            frame.layers.as_ref(),
+            &frame.effects,
+            &frame.backgrounds,
+            frame.base_color,
+            frame.post.as_ref(),
+        )
+        .map(FramePixels::Owned)
+    }
+
     /// One render and readback; `None` when Vello skipped the frame.
     fn render_attempt(
         &mut self,
@@ -386,6 +500,21 @@ impl GpuContext {
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Option<Vec<u8>>, GpuContextError> {
+        self.submit_attempt(scene, layers, effects, backgrounds, base_color, post)?;
+        self.read_attempt()
+    }
+
+    /// Render a frame and queue the copies of its probes and pixels, without
+    /// waiting for the GPU; [`Self::read_attempt`] reads them.
+    fn submit_attempt(
+        &mut self,
+        scene: &vello::Scene,
+        layers: Option<&TransitionScenes>,
+        effects: &[gaanim_renderer::object_effects::EffectLayer],
+        backgrounds: &[gaanim_renderer::background::ShaderBackgroundRequest],
+        base_color: vello::peniko::Color,
+        post: Option<&PostProcessRequest>,
+    ) -> Result<(), GpuContextError> {
         self.check_error()?;
         // Vello reads these on the thread that renders.
         vello_encoding::set_bump_buffer_scale(self.bump_scale);
@@ -490,10 +619,11 @@ impl GpuContext {
             self.post.encode(&mut encoder);
         }
 
+        let staging = self.take_staging();
         encoder.copy_texture_to_buffer(
             self.texture.as_image_copy(),
             TexelCopyBufferInfo {
-                buffer: &self.staging,
+                buffer: &staging,
                 layout: TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(self.padded_width * 4),
@@ -507,46 +637,172 @@ impl GpuContext {
             },
         );
 
-        self.queue.submit(Some(encoder.finish()));
-        self.check_error()?;
+        self.staging = Some(staging);
 
+        self.queue.submit(Some(encoder.finish()));
+        self.check_error()
+    }
+
+    /// A staging buffer no frame holds: the current one, one a frame
+    /// released, a new one, or the next one released once `max_staging`
+    /// frames hold one.
+    fn take_staging(&mut self) -> vello::wgpu::Buffer {
+        if let Some(staging) = self.staging.take() {
+            return staging;
+        }
+        if let Ok(staging) = self.spare_staging.try_recv() {
+            return staging;
+        }
+        if self.staging_count < self.max_staging {
+            self.staging_count += 1;
+            return create_staging(&self.device, self.padded_width, self.height);
+        }
+        // This context keeps a sender, so the channel never disconnects; a
+        // frame held by the encoder is released when it is written or dropped.
+        self.spare_staging
+            .recv()
+            .expect("the GPU context keeps a sender of staging buffers")
+    }
+
+    /// Wait for the frame of the last [`Self::submit_attempt`] and read it
+    /// back; `None` when Vello skipped it.
+    fn read_attempt(&mut self) -> Result<Option<Vec<u8>>, GpuContextError> {
+        if !self.read_probes()? {
+            return Ok(None);
+        }
+        Ok(Some(self.read_mapped()?.into_pixels()))
+    }
+
+    /// Whether Vello drew the frame of the last [`Self::submit_attempt`],
+    /// read from its probe pixels.
+    fn read_probes(&mut self) -> Result<bool, GpuContextError> {
         self.map_read(&self.probe)?;
         let skipped = {
             let probes = self.probe.slice(..).get_mapped_range();
-            let skipped = probes
+            probes
                 .chunks(PROBE_STRIDE as usize)
-                .all(|probe| probe[..4] == PROBE_SENTINEL);
-            drop(probes);
-            skipped
+                .all(|probe| probe[..4] == PROBE_SENTINEL)
         };
         self.probe.unmap();
-        if skipped {
-            return Ok(None);
+        Ok(!skipped)
+    }
+
+    /// The pixels of the last [`Self::submit_attempt`], left in its mapped
+    /// staging buffer.
+    fn read_mapped(&mut self) -> Result<MappedFrame, GpuContextError> {
+        let staging = self
+            .staging
+            .take()
+            .expect("a submitted frame has a staging buffer");
+        if let Err(error) = self.map_read(&staging) {
+            self.staging = Some(staging);
+            return Err(error);
         }
+        Ok(MappedFrame {
+            buffer: Some(staging),
+            width: self.width,
+            height: self.height,
+            padded_width: self.padded_width,
+            release: self.release_staging.clone(),
+        })
+    }
+}
 
-        self.map_read(&self.staging)?;
-        let slice = self.staging.slice(..);
-        let pixels = {
-            let data = slice.get_mapped_range();
-            let mut pixels = Vec::with_capacity((self.width * self.height * 4) as usize);
-            for row in 0..self.height {
-                let start = (row * self.padded_width * 4) as usize;
-                let end = start + (self.width * 4) as usize;
-                pixels.extend_from_slice(&data[start..end]);
-            }
-            drop(data);
-            pixels
-        };
+fn create_staging(
+    device: &vello::wgpu::Device,
+    padded_width: u32,
+    height: u32,
+) -> vello::wgpu::Buffer {
+    device.create_buffer(&BufferDescriptor {
+        label: Some("gaanim-export-staging"),
+        size: u64::from(padded_width) * u64::from(height) * 4,
+        usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
 
-        self.staging.unmap();
+/// The pixels of a frame, as tightly packed RGBA8 rows.
+pub enum FramePixels {
+    Owned(Vec<u8>),
+    /// The pixels of a frame repeated while the scene holds still.
+    Shared(Arc<[u8]>),
+    /// Still in the GPU's staging buffer: the thread that writes the frame
+    /// reads them, so the render loop never copies them.
+    Mapped(MappedFrame),
+}
 
-        Ok(Some(pixels))
+impl FramePixels {
+    pub fn into_pixels(self) -> Vec<u8> {
+        match self {
+            Self::Owned(pixels) => pixels,
+            Self::Shared(pixels) => pixels.to_vec(),
+            Self::Mapped(frame) => frame.into_pixels(),
+        }
+    }
+
+    /// Write the rows to `out`, without copying a mapped frame first.
+    pub fn write_to(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        match self {
+            Self::Owned(pixels) => out.write_all(pixels),
+            Self::Shared(pixels) => out.write_all(pixels),
+            Self::Mapped(frame) => frame.write_to(out),
+        }
+    }
+}
+
+impl From<Vec<u8>> for FramePixels {
+    fn from(pixels: Vec<u8>) -> Self {
+        Self::Owned(pixels)
+    }
+}
+
+/// A frame read back into a staging buffer that stays mapped until the
+/// frame is dropped, which unmaps it and returns it to its GPU context.
+pub struct MappedFrame {
+    buffer: Option<vello::wgpu::Buffer>,
+    width: u32,
+    height: u32,
+    /// Row stride of the buffer in pixels (rows are aligned for the copy).
+    padded_width: u32,
+    release: mpsc::Sender<vello::wgpu::Buffer>,
+}
+
+impl MappedFrame {
+    pub fn into_pixels(self) -> Vec<u8> {
+        let mut pixels = Vec::with_capacity(self.width as usize * self.height as usize * 4);
+        self.write_to(&mut pixels)
+            .expect("writing to a Vec does not fail");
+        pixels
+    }
+
+    pub fn write_to(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
+        let buffer = self.buffer.as_ref().expect("the buffer is held until drop");
+        let data = buffer.slice(..).get_mapped_range();
+        let row = self.width as usize * 4;
+        if self.padded_width == self.width {
+            return out.write_all(&data[..row * self.height as usize]);
+        }
+        let stride = self.padded_width as usize * 4;
+        for start in (0..self.height as usize).map(|y| y * stride) {
+            out.write_all(&data[start..start + row])?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for MappedFrame {
+    fn drop(&mut self) {
+        if let Some(buffer) = self.buffer.take() {
+            buffer.unmap();
+            // The context may be gone already; the buffer is then freed.
+            let _ = self.release.send(buffer);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GpuContext, GpuContextError};
+    use super::{FrameJob, FramePixels, GpuContext, GpuContextError};
 
     #[test]
     #[ignore = "requires a GPU adapter; run explicitly for raster replay validation"]
@@ -722,6 +978,95 @@ mod tests {
             [9, 11, 23, 255],
             "background"
         );
+        assert_ne!(
+            pixel(&rendered, 1920, 1, 1),
+            [9, 11, 23, 255],
+            "first square"
+        );
+    }
+
+    fn frame_job(scene: vello::Scene) -> FrameJob {
+        FrameJob {
+            scene,
+            layers: None,
+            effects: Vec::new(),
+            backgrounds: Vec::new(),
+            base_color: vello::peniko::Color::from_rgb8(9, 11, 23),
+            post: None,
+        }
+    }
+
+    #[test]
+    fn submitted_frames_match_rendered_ones_and_recycle_their_buffers() {
+        use vello::{Scene, kurbo, peniko};
+
+        let Ok(mut gpu) = GpuContext::new(100, 30) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let scene = |index: u8| {
+            let mut scene = Scene::new();
+            scene.fill(
+                peniko::Fill::NonZero,
+                kurbo::Affine::IDENTITY,
+                peniko::Color::from_rgb8(index * 20, 200, 40),
+                None,
+                &kurbo::Circle::new((f64::from(index) * 9.0, 15.0), 12.0),
+            );
+            scene
+        };
+        let mut held = Vec::new();
+        for index in 0..10 {
+            let expected = gpu
+                .render_frame(&scene(index), peniko::Color::from_rgb8(9, 11, 23), None)
+                .unwrap();
+            gpu.submit_frame(frame_job(scene(index))).unwrap();
+            let frame = gpu.finish_frame().unwrap();
+            assert!(matches!(frame, FramePixels::Mapped(_)));
+            let mut written = Vec::new();
+            frame.write_to(&mut written).unwrap();
+            assert_eq!(written, expected, "frame {index}");
+            // Frames the encoder still holds keep their buffers.
+            held.push(frame);
+            if held.len() > 2 {
+                assert_eq!(held.remove(0).into_pixels().len(), 100 * 30 * 4);
+            }
+        }
+        assert!(gpu.staging_count <= 4, "{} buffers", gpu.staging_count);
+    }
+
+    #[test]
+    fn overflowing_submitted_frames_retry_with_larger_buffers() {
+        use vello::{Scene, kurbo, peniko};
+
+        let Ok(mut gpu) = GpuContext::new(1920, 1080) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let frame = kurbo::Rect::new(0.0, 0.0, 1920.0, 1080.0);
+        let mut scene = Scene::new();
+        for index in 0..1000 {
+            scene.push_layer(
+                peniko::Fill::NonZero,
+                peniko::BlendMode::default(),
+                0.5,
+                kurbo::Affine::IDENTITY,
+                &frame,
+            );
+            let x = f64::from(index % 40) * 48.0;
+            let y = f64::from(index / 40) * 43.0;
+            scene.fill(
+                peniko::Fill::NonZero,
+                kurbo::Affine::IDENTITY,
+                peniko::Color::WHITE,
+                None,
+                &kurbo::Rect::new(x, y, x + 4.0, y + 4.0),
+            );
+            scene.pop_layer();
+        }
+        gpu.submit_frame(frame_job(scene)).unwrap();
+        let rendered = gpu.finish_frame().unwrap().into_pixels();
+        assert!(gpu.bump_scale > 1, "the first attempt overflowed");
         assert_ne!(
             pixel(&rendered, 1920, 1, 1),
             [9, 11, 23, 255],
