@@ -155,7 +155,7 @@ pub fn compile_text_to_hierarchy(
 
         // Query OpenType outline for this specific glyph
         if let Some(_bounding_box) = parser_face.outline_glyph(glyph_id, &mut collector) {
-            let mut path = collector.path;
+            let mut path = collector.into_path();
 
             // Apply horizontal Pen offsets and EM scale
             let glyph_x = pen_x + glyph.x_offset;
@@ -322,7 +322,7 @@ pub fn compile_text_to_path(
         let mut collector = OutlineCollector::new();
 
         if let Some(_bounding_box) = parser_face.outline_glyph(glyph_id, &mut collector) {
-            let mut path = collector.path;
+            let mut path = collector.into_path();
             let glyph_x = pen_x + glyph.x_offset;
             let glyph_y = pen_y + glyph.y_offset;
 

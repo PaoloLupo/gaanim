@@ -80,6 +80,7 @@ interlineado por defecto es más compacto.
   carpeta `assets/` del script y en la del script.
 - `GAANIM_FRAME_PROFILE=1` informa de caminos, segmentos y recortes.
 - El fondo llena la vista aunque la cámara salga del cuadro de la escena.
+- `readout` y `variable` aceptan `font` y `weight`.
 
 == Correcciones
 
@@ -94,6 +95,8 @@ interlineado por defecto es más compacto.
 - `quantity(1600, "kg/m^3")` escribe «kg/m³» sin hueco antes de la barra.
 - La vista previa ya no desborda los búferes de Vello con muchas curvas
   (decenas de fórmulas o tiza), que dejaban una mancha blanca.
+- Con fuentes variables, `write()` y los trazos de texto ya no muestran los
+  contornos que se solapan dentro de cada glifo.
 
 == Al actualizar
 

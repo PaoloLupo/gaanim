@@ -427,6 +427,13 @@ fn field_evaluator_3d(
 /// One visible character that cannot be read as part of the number.
 /// Reject a number format that `format(value, spec)` would not accept for
 /// a float, instead of silently showing it another way.
+fn check_readout_weight(weight: Option<u16>) -> PyResult<()> {
+    if weight.is_some_and(|weight| !(1..=1000).contains(&weight)) {
+        return Err(PyValueError::new_err("weight must be between 1 and 1000"));
+    }
+    Ok(())
+}
+
 pub(crate) fn check_number_format(format: &str) -> PyResult<()> {
     gaanim_animation::validate_number_format(format).map_err(PyValueError::new_err)
 }
@@ -464,6 +471,8 @@ fn build_readout_parts(
     invalid: String,
     decimal_separator: char,
     spacing: Option<f64>,
+    font: Option<String>,
+    weight: Option<u16>,
 ) -> (
     gaanim_api::canvas::DrawableHandle,
     Option<PyDrawable>,
@@ -472,8 +481,16 @@ fn build_readout_parts(
     Option<PyDrawable>,
 ) {
     let font_size = font_size.unwrap_or(DEFAULT_REACTIVE_TEXT_SIZE);
-    let mut number =
-        canvas.reactive_readout(source, format, prefix, suffix, invalid, Some(font_size));
+    let mut number = canvas.reactive_readout_with_font(
+        source,
+        format,
+        prefix,
+        suffix,
+        invalid,
+        Some(font_size),
+        font.clone(),
+        weight,
+    );
     if decimal_separator != '.' {
         number = number
             .readout_decimal_separator(decimal_separator)
@@ -486,6 +503,8 @@ fn build_readout_parts(
     let mut text_part = |value: &str| {
         let style = gaanim_text::prelude::TextStyle {
             size: Some(font_size),
+            font: font.clone(),
+            weight,
             ..gaanim_text::prelude::TextStyle::default()
         };
         let spec = gaanim_text::prelude::TextSpec::new(
@@ -2937,7 +2956,7 @@ impl PyVisualization {
         Ok(PyParameter { inner })
     }
 
-    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None, reserve=None))]
+    #[pyo3(signature = (source, *, inputs=Vec::new(), label=None, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None, reserve=None, font=None, weight=None))]
     #[allow(clippy::too_many_arguments)]
     fn readout<'py>(
         &self,
@@ -2955,8 +2974,11 @@ impl PyVisualization {
         decimal_separator: &str,
         spacing: Option<f64>,
         reserve: Option<f64>,
+        font: Option<String>,
+        weight: Option<u16>,
     ) -> PyResult<Py<PyReadout>> {
         crate::custom::ensure_authoring_allowed()?;
+        check_readout_weight(weight)?;
         check_number_format(format)?;
         let decimal_separator = parse_decimal_separator(decimal_separator)?;
         check_readout_spacing(spacing)?;
@@ -2984,6 +3006,8 @@ impl PyVisualization {
             invalid.to_owned(),
             decimal_separator,
             spacing,
+            font,
+            weight,
         );
         if let Some(value) = reserve {
             number_part
@@ -2997,7 +3021,7 @@ impl PyVisualization {
         )
     }
 
-    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None, reserve=None))]
+    #[pyo3(signature = (initial, *, label, format=".2f", prefix="", suffix="", unit=None, font_size=None, color=None, invalid="invalid", decimal_separator=".", spacing=None, reserve=None, font=None, weight=None))]
     #[allow(clippy::too_many_arguments)]
     fn variable<'py>(
         &self,
@@ -3014,8 +3038,11 @@ impl PyVisualization {
         decimal_separator: &str,
         spacing: Option<f64>,
         reserve: Option<f64>,
+        font: Option<String>,
+        weight: Option<u16>,
     ) -> PyResult<Py<PyVariable>> {
         crate::custom::ensure_authoring_allowed()?;
+        check_readout_weight(weight)?;
         check_number_format(format)?;
         let decimal_separator = parse_decimal_separator(decimal_separator)?;
         check_readout_spacing(spacing)?;
@@ -3037,6 +3064,8 @@ impl PyVisualization {
             invalid.to_owned(),
             decimal_separator,
             spacing,
+            font,
+            weight,
         );
         if let Some(value) = reserve {
             number_part
