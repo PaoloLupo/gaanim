@@ -96,6 +96,8 @@ interlineado por defecto es más compacto.
 
 - Un `blur_in` con `.delay(...)` mantiene sus glifos transparentes durante
   el retardo; antes dejaba una trama tenue donde iba a entrar el texto.
+- Un `Background.shader` sigue animándose y siguiendo el audio durante una
+  transición por shader o con máscara; antes se congelaba hasta que acababa.
 - Los degradados y los `clip-path` de un SVG bajo `<g transform>` o un
   `viewBox` desplazado siguen la transformación, y el trazo de una figura
   cerrada va centrado, como en SVG.

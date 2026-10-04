@@ -9,20 +9,21 @@ use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use crate::background::{GpuShaderBackgrounds, ShaderBackgroundRequest};
 use crate::canvas::VelloRenderer;
 
-/// Shader background drawn by the latest composed scene.
+/// Shader backgrounds drawn by the latest composed scene: the canvas, or
+/// both segments of a transition.
 ///
-/// Present only when a render world draws it on the GPU; otherwise the scene
-/// falls back to a CPU copy of the shader output.
+/// Present only when a render world draws them on the GPU; otherwise the
+/// scene falls back to a CPU copy of the shader output.
 #[derive(Resource, Default)]
-pub struct ShaderBackgroundFrame(pub(crate) Option<ShaderBackgroundRequest>);
+pub struct ShaderBackgroundFrame(pub(crate) Vec<ShaderBackgroundRequest>);
 
 #[derive(Resource, Default)]
-pub(crate) struct ExtractedShaderBackground(Option<ShaderBackgroundRequest>);
+pub(crate) struct ExtractedShaderBackground(Vec<ShaderBackgroundRequest>);
 
 impl ExtractedShaderBackground {
     /// Whether this frame draws a shader background.
     pub(crate) fn is_active(&self) -> bool {
-        self.0.is_some()
+        !self.0.is_empty()
     }
 }
 
@@ -56,7 +57,10 @@ fn extract_shader_background(
     frame: Extract<Option<Res<ShaderBackgroundFrame>>>,
     mut extracted: ResMut<ExtractedShaderBackground>,
 ) {
-    extracted.0 = frame.as_ref().and_then(|frame| frame.0.clone());
+    extracted.0 = frame
+        .as_ref()
+        .map(|frame| frame.0.clone())
+        .unwrap_or_default();
 }
 
 fn prepare_shader_background(
@@ -77,10 +81,7 @@ fn prepare_shader_background(
             .renderer_replaced(device.wgpu_device(), &mut renderer);
         state.renderer = Arc::downgrade(shared);
     }
-    state.backgrounds.prepare(
-        device.wgpu_device(),
-        &queue,
-        &mut renderer,
-        extracted.0.as_ref(),
-    );
+    state
+        .backgrounds
+        .prepare(device.wgpu_device(), &queue, &mut renderer, &extracted.0);
 }

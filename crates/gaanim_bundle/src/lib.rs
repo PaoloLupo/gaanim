@@ -1711,16 +1711,16 @@ impl Bundle {
 }
 
 /// Composite a frame as the preview draws it: over `background` (left out
-/// in perspective), with a shader background returned as a GPU request.
+/// in perspective), with shader backgrounds returned as GPU requests.
 /// Opacity layers are padded for the background's pixel size, as the scene
 /// pads them when it renders at that size.
 pub fn compose_frame(
     frame: &Frame,
     background: Option<&CanvasBackground>,
     store: &mut FragmentStore,
-) -> (vello::Scene, Option<ShaderBackgroundRequest>) {
-    let (composed, request) = compose_frame_layers(frame, background, store);
-    (composed.flattened(), request)
+) -> (vello::Scene, Vec<ShaderBackgroundRequest>) {
+    let (composed, requests) = compose_frame_layers(frame, background, store);
+    (composed.flattened(), requests)
 }
 
 /// [`compose_frame`] with its shader transition and the drawables under a
@@ -1730,8 +1730,8 @@ pub fn compose_frame_layers(
     frame: &Frame,
     background: Option<&CanvasBackground>,
     store: &mut FragmentStore,
-) -> (ComposedFrame, Option<ShaderBackgroundRequest>) {
-    let mut request = None;
+) -> (ComposedFrame, Vec<ShaderBackgroundRequest>) {
+    let mut requests = Vec::new();
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
     });
@@ -1740,21 +1740,21 @@ pub fn compose_frame_layers(
         store,
         background.map(|background| (background, background.pixel_size)),
         pixels_per_unit,
-        Some(&mut request),
+        Some(&mut requests),
         0.0,
         pixels_per_unit.unwrap_or(gaanim_renderer::pipeline::DEFAULT_EFFECT_DENSITY),
     );
-    (composed, request)
+    (composed, requests)
 }
 
 /// Digest of what a frame hands the renderer: its composed scene, the
-/// shader background it requests, its camera and its post-processing.
+/// shader backgrounds it requests, its camera and its post-processing.
 pub fn frame_digest(
     frame: &Frame,
     background: Option<&CanvasBackground>,
     store: &mut FragmentStore,
 ) -> [u8; 32] {
-    let (mut composed, request) = compose_frame_layers(frame, background, store);
+    let (mut composed, requests) = compose_frame_layers(frame, background, store);
     let effects = std::mem::take(&mut composed.effects);
     let mut hasher = blake3::Hasher::new();
     hasher.update(&scene_digest(&composed.flattened()));
@@ -1774,7 +1774,7 @@ pub fn frame_digest(
             }
         }
     }
-    if let Some(request) = request {
+    for request in &requests {
         hasher.update(&request.time().to_bits().to_le_bytes());
         for value in request.values() {
             hasher.update(&value.to_bits().to_le_bytes());

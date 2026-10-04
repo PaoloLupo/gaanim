@@ -386,6 +386,15 @@ impl ShaderBackground {
         })
     }
 
+    /// Whether a frame of this shader was copied through the CPU.
+    #[cfg(test)]
+    pub(crate) fn has_cpu_copy(&self) -> bool {
+        self.cache
+            .lock()
+            .expect("shader background cache poisoned")
+            .is_some()
+    }
+
     /// Placeholder image that Vello replaces with the GPU texture. The same
     /// size returns the same image, so Vello refreshes one atlas slot in place.
     fn gpu_image(&self, width: u32, height: u32) -> ImageData {
@@ -711,6 +720,21 @@ impl ShaderBackgroundRequest {
         self.values = values;
         self
     }
+
+    /// Whether `other` draws the same pixels into the same image, so one
+    /// texture serves both.
+    pub fn draws_same(&self, other: &Self) -> bool {
+        let bits = |values: &[f32]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        self.image.data.id() == other.image.data.id()
+            && self.time.to_bits() == other.time.to_bits()
+            && bits(&self.frame) == bits(&other.frame)
+            && bits(&self.values) == bits(&other.values)
+    }
 }
 
 /// Shader backgrounds rendered on the device of a Vello renderer.
@@ -762,7 +786,8 @@ impl GpuShaderBackgrounds {
         }
     }
 
-    /// Draw `request` for the next frame of `renderer` and release the
+    /// Draw `requests` for the next frame of `renderer`, such as the
+    /// backgrounds of both segments of a transition, and release the
     /// textures of images that frame no longer draws.
     ///
     /// Call before the frame is submitted to `queue`.
@@ -771,36 +796,52 @@ impl GpuShaderBackgrounds {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         renderer: &mut vello::Renderer,
-        request: Option<&ShaderBackgroundRequest>,
+        requests: &[ShaderBackgroundRequest],
     ) {
         self.adopt_device(device, renderer);
-        let requested = request.map(|request| request.image.data.id());
-        let new_target =
-            request.filter(|request| !self.targets.contains_key(&request.image.data.id()));
         // A reload rebuilds the same shader; keep its pipeline.
-        let reusable = new_target.and_then(|request| {
-            self.targets
-                .values()
-                .find(|target| {
-                    target.contract == request.shader.contract
-                        && *target.source == *request.shader.source
-                        && target.uniform_count == request.shader.uniforms.len()
-                        && target.has_data == request.shader.data.is_some()
-                })
-                .filter(|target| target.checking.is_none())
-                .and_then(|target| target.pipeline.as_ref())
-                .map(|(compiled, _)| compiled.clone())
-        });
+        let reusable: Vec<Option<Arc<CompiledShader>>> = requests
+            .iter()
+            .map(|request| {
+                if self.targets.contains_key(&request.image.data.id()) {
+                    return None;
+                }
+                self.targets
+                    .values()
+                    .find(|target| {
+                        target.contract == request.shader.contract
+                            && *target.source == *request.shader.source
+                            && target.uniform_count == request.shader.uniforms.len()
+                            && target.has_data == request.shader.data.is_some()
+                    })
+                    .filter(|target| target.checking.is_none())
+                    .and_then(|target| target.pipeline.as_ref())
+                    .map(|(compiled, _)| compiled.clone())
+            })
+            .collect();
         self.targets.retain(|id, target| {
-            let keep = Some(*id) == requested;
+            let keep = requests
+                .iter()
+                .any(|request| request.image.data.id() == *id);
             if !keep {
                 renderer.override_image(&target.image, None);
             }
             keep
         });
-        let Some(request) = request else {
-            return;
-        };
+        for (request, reusable) in requests.iter().zip(reusable) {
+            self.draw(device, queue, renderer, request, reusable);
+        }
+    }
+
+    /// Render `request` into its image's texture unless it already holds it.
+    fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        renderer: &mut vello::Renderer,
+        request: &ShaderBackgroundRequest,
+        reusable: Option<Arc<CompiledShader>>,
+    ) {
         let target = self
             .targets
             .entry(request.image.data.id())
@@ -1398,7 +1439,12 @@ mod tests {
         // The repeated time checks a frame that skips the dispatch.
         for time in [0.0, 1.5, 1.5, 4.0] {
             let request = shader.gpu_request(width, height, time).unwrap();
-            backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, Some(&request));
+            backgrounds.prepare(
+                &gpu.device,
+                &gpu.queue,
+                &mut gpu.renderer,
+                std::slice::from_ref(&request),
+            );
             let brush = Brush::Image(ImageBrush::new(request.image().clone()));
             gpu.render(&background_scene(&brush, width, height), &target);
             let resident = gpu.read(&target);
@@ -1420,14 +1466,62 @@ mod tests {
         assert_eq!(backgrounds.texture_count(), 1);
 
         let resized = shader.gpu_request(width * 2, height, 4.0).unwrap();
-        backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, Some(&resized));
+        backgrounds.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &mut gpu.renderer,
+            std::slice::from_ref(&resized),
+        );
         assert_eq!(
             backgrounds.texture_count(),
             1,
             "resizing releases the old texture"
         );
-        backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, None);
+        backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &[]);
         assert_eq!(backgrounds.texture_count(), 0);
+    }
+
+    #[test]
+    fn two_backgrounds_draw_in_the_same_frame() {
+        let Some(mut gpu) = test_gpu() else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let (width, height) = (96, 54);
+        let first = ShaderBackground::new(ANIMATED_SOURCE, Color::BLACK).unwrap();
+        let second = ShaderBackground::new(
+            "fn gaanim_background(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+             return vec4<f32>(1.0 - uv.x, fract(time * 0.21) + resolution.x * 0.0, uv.y, 1.0);
+}",
+            Color::BLACK,
+        )
+        .unwrap();
+        let mut backgrounds = GpuShaderBackgrounds::default();
+        let target = gpu.target(width, height);
+        // Both segments of a transition, each at its own time.
+        let requests = [
+            first.gpu_request(width, height, 1.5).unwrap(),
+            second.gpu_request(width, height, 3.0).unwrap(),
+        ];
+        backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &requests);
+        assert_eq!(backgrounds.texture_count(), 2);
+        for (shader, request, time) in [(&first, &requests[0], 1.5), (&second, &requests[1], 3.0)] {
+            let brush = Brush::Image(ImageBrush::new(request.image().clone()));
+            gpu.render(&background_scene(&brush, width, height), &target);
+            let resident = gpu.read(&target);
+            let copied = shader.resolve(width, height, time).unwrap();
+            gpu.render(&background_scene(&copied, width, height), &target);
+            let copy = gpu.read(&target);
+            let worst = resident
+                .iter()
+                .zip(&copy)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max();
+            assert!(worst <= Some(1), "t = {time}: channels differ by {worst:?}");
+        }
+        // The next frame draws only the second; the first texture goes.
+        backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &requests[1..]);
+        assert_eq!(backgrounds.texture_count(), 1);
     }
 
     #[test]
@@ -1463,7 +1557,12 @@ mod tests {
                 let time = f64::from(frame) / 60.0 + if resident { 100.0 } else { 0.0 };
                 let brush = if resident {
                     let request = shader.gpu_request(width, height, time).unwrap();
-                    backgrounds.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, Some(&request));
+                    backgrounds.prepare(
+                        &gpu.device,
+                        &gpu.queue,
+                        &mut gpu.renderer,
+                        std::slice::from_ref(&request),
+                    );
                     Brush::Image(ImageBrush::new(request.image().clone()))
                 } else {
                     shader.resolve(width, height, time).unwrap()
