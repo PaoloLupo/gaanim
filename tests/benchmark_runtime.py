@@ -35,6 +35,7 @@ POLL_SECONDS = 0.025
 EXPORT_TIMING_PREFIX = "GAANIM_EXPORT_TIMINGS "
 CAPTURE_TIMING_PREFIX = "GAANIM_CAPTURE_TIMINGS "
 PNG_TIMING_PREFIX = "GAANIM_PNG_TIMINGS "
+ADAPTER_PREFIX = "GAANIM_GPU_ADAPTER "
 EXPORT_PHASES = (
     "render_gpu_ms",
     "encoder_wait_ms",
@@ -42,6 +43,8 @@ EXPORT_PHASES = (
     "finalize_ms",
     "total_ms",
 )
+# Reported since 0.10; optional so that older executables can be compared.
+OPTIONAL_EXPORT_PHASES = ("setup_ms", "update_ms", "scene_build_ms", "readback_wait_ms")
 CAPTURE_PHASES = (
     "setup_ms",
     "timeline_update_ms",
@@ -115,9 +118,55 @@ def linux_process_tree_rss_kib(root_pid: int) -> int | None:
     return sum(rss.get(pid, 0) for pid in descendants)
 
 
+def windows_peak_working_set_kib(pid: int) -> int | None:
+    """Read the peak working set Windows keeps for one process."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessMemoryCounters(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    process_query_limited_information = 0x1000
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.K32GetProcessMemoryInfo.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(ProcessMemoryCounters),
+        wintypes.DWORD,
+    )
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        return None
+    try:
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        if not kernel32.K32GetProcessMemoryInfo(
+            handle, ctypes.byref(counters), counters.cb
+        ):
+            return None
+        return counters.PeakWorkingSetSize // 1024
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def process_rss_kib(pid: int) -> tuple[int | None, str]:
     if sys.platform.startswith("linux"):
         return linux_process_tree_rss_kib(pid), "process-tree"
+    if os.name == "nt":
+        # Excludes child processes such as FFmpeg.
+        return windows_peak_working_set_kib(pid), "process-peak-working-set"
     if os.name == "posix":
         result = subprocess.run(
             ["ps", "-o", "rss=", "-p", str(pid)],
@@ -258,12 +307,29 @@ def budget_violations(result: dict[str, Any], budget: dict[str, float]) -> list[
     return violations
 
 
+def parse_adapter(log_path: Path) -> str | None:
+    """Return the GPU adapter a run reported, as ``backend=... type=... name=...``."""
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    return next(
+        (line[len(ADAPTER_PREFIX):].strip() for line in lines if line.startswith(ADAPTER_PREFIX)),
+        None,
+    )
+
+
 def parse_export_metrics(log_path: Path) -> dict[str, Any]:
     try:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
         marker = next(line for line in reversed(lines) if line.startswith(EXPORT_TIMING_PREFIX))
         fields = dict(part.split("=", 1) for part in marker.split()[1:])
         timings = {phase: float(fields[phase]) for phase in EXPORT_PHASES}
+        timings.update(
+            (phase, float(fields[phase]))
+            for phase in OPTIONAL_EXPORT_PHASES
+            if phase in fields
+        )
         if any(not math.isfinite(value) or value < 0 for value in timings.values()):
             raise ValueError("phase timings must be finite and non-negative")
         encoder = fields["encoder"]
@@ -432,9 +498,12 @@ def measure_scene(
         process_timings = []
         peak_rss_values = []
         memory_scope = "unavailable"
-        export_phase_samples = {phase: [] for phase in EXPORT_PHASES}
+        export_phase_samples = {
+            phase: [] for phase in (*EXPORT_PHASES, *OPTIONAL_EXPORT_PHASES)
+        }
         capture_phase_samples = {phase: [] for phase in CAPTURE_PHASES}
         export_encoder = None
+        adapter = None
 
         for sample_index in range(warmups + samples):
             is_warmup = sample_index < warmups
@@ -474,6 +543,7 @@ def measure_scene(
                         f"export requested {encoder} but reported {actual_encoder}"
                     )
             memory_scope = sampled_scope
+            adapter = adapter or parse_adapter(artifact_dir / "command.log")
             if is_warmup:
                 continue
             if scenario == "export" and artifact_report is not None:
@@ -519,6 +589,7 @@ def measure_scene(
             "fps_at_p50": round(frames / (p50_ms / 1000.0), 3) if counts_frames else None,
             "fps_at_p95": round(frames / (p95_ms / 1000.0), 3) if counts_frames else None,
             "budget": scenario_config["budget"] if apply_budgets else None,
+            "gpu_adapter": adapter,
         }
         phase_samples = (
             export_phase_samples if scenario == "export"
@@ -529,6 +600,11 @@ def measure_scene(
             result["requested_encoder"] = encoder if export_format == "mp4" else None
             result["export_format"] = export_format
             result["encoder"] = export_encoder
+        phase_samples = {
+            phase: values
+            for phase, values in phase_samples.items()
+            if values or phase not in OPTIONAL_EXPORT_PHASES
+        }
         if phase_samples and all(phase_samples.values()):
             result["phases"] = {
                 phase: {
@@ -708,6 +784,15 @@ def main() -> int:
             "python": platform.python_version(),
         },
         "executable": str(executable),
+        "gpu_adapter": next(
+            (
+                result["gpu_adapter"]
+                for run in runs
+                for result in run["scenarios"].values()
+                if result.get("gpu_adapter")
+            ),
+            None,
+        ),
         "requested_encoder": args.encoder,
         "export_format": args.export_format,
         "baseline": str(args.compare) if args.compare else None,
