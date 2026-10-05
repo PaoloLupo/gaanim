@@ -2222,6 +2222,49 @@ pub(crate) fn draw_shadow_on_gpu(
     crate::soft_effects::draw_shadow_image(scene, silhouette, bounds, shadow)
 }
 
+/// A [`GaussianBlur`] of the fill (unless `None`) and stroke of `path` as
+/// an image blurred on the GPU (see [`crate::soft_effects`]), returning the
+/// layer that fills it; `None`, having drawn nothing, when there is nothing
+/// to blur. `fill_alpha` is the fill's write-on opacity.
+pub(crate) fn draw_blur_on_gpu(
+    scene: &mut vello::Scene,
+    path: &kurbo::BezPath,
+    fill: Option<&peniko::Brush>,
+    stroke: Option<(&peniko::Brush, &kurbo::Stroke)>,
+    view: Option<kurbo::Affine>,
+    sigma: f64,
+    fill_alpha: f32,
+) -> Option<crate::object_effects::EffectLayer> {
+    if fill.is_none() && stroke.is_none() || path.elements().is_empty() {
+        return None;
+    }
+    let mut content = vello::Scene::new();
+    if let Some(brush) = fill {
+        content.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            brush,
+            None,
+            path,
+        );
+    }
+    let mut reach = 0.0;
+    if let Some((brush, style)) = stroke {
+        draw_stroke(
+            &mut content,
+            style,
+            kurbo::Affine::IDENTITY,
+            brush,
+            view,
+            path,
+        );
+        reach = shadow_stroke_reach(style, view);
+    }
+    let bounds = path.bounding_box().inflate(reach, reach);
+    let alpha = if fill.is_some() { fill_alpha } else { 1.0 };
+    crate::soft_effects::draw_blur_image(scene, content, bounds, sigma, alpha)
+}
+
 pub(crate) fn draw_soft_stroke(
     scene: &mut vello::Scene,
     path: &kurbo::BezPath,

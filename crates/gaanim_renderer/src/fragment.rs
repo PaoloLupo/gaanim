@@ -171,8 +171,8 @@ pub fn build_fragment_with(
     gpu: bool,
 ) -> BuiltFragment {
     use crate::pipeline::{
-        ShadowCaster, animated_stroke_paint, draw_aligned_stroke, draw_glow, draw_shadow,
-        draw_shadow_on_gpu, draw_soft_fill, draw_soft_stroke, modulate_brush_alpha,
+        ShadowCaster, animated_stroke_paint, draw_aligned_stroke, draw_blur_on_gpu, draw_glow,
+        draw_shadow, draw_shadow_on_gpu, draw_soft_fill, draw_soft_stroke, modulate_brush_alpha,
     };
 
     let mut soft = Vec::new();
@@ -268,7 +268,20 @@ pub fn build_fragment_with(
         .blur
         .map(|blur| blur.sigma)
         .filter(|sigma| sigma.is_finite() && *sigma > 0.0);
-    let blurred_vector = if let Some(sigma) = blur_sigma {
+    let blurred_vector = if let Some(sigma) = blur_sigma
+        && gpu
+        && let Some(layer) = draw_blur_on_gpu(
+            &mut scene,
+            elem_path,
+            elem_fill.filter(|_| !is_trimmed_closed),
+            elem_stroke.zip(elem_stroke_style),
+            stroke_view,
+            sigma,
+            fill_alpha,
+        ) {
+        soft.push(layer);
+        true
+    } else if let Some(sigma) = blur_sigma {
         if let Some(fill_brush) = elem_fill
             && !is_trimmed_closed
         {

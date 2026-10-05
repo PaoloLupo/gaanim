@@ -26,12 +26,16 @@ const TEXELS_PER_SIGMA: f64 = 3.0;
 /// Largest side of a soft effect's texture; a larger effect gets fewer
 /// texels per sigma.
 const MAX_SOFT_TEXTURE: f64 = 2048.0;
-/// The blur reaches this many sigmas from the silhouette.
-const SOFT_REACH: f64 = 3.0;
+/// The blur reaches this many sigmas from the silhouette: as far as the
+/// vector effects' copies, which is the extent opacity layers and culling
+/// give the drawable.
+const SOFT_REACH: f64 = 2.5;
 
-/// Blurs the texture's alpha along one axis; the vertical pass then tints
-/// it with an alpha that saturates as `1 - exp(-gain * coverage)`, like the
-/// vector effects, which stack translucent copies instead of averaging them.
+/// Blurs the texture (premultiplied, so transparent texels add no color)
+/// along one axis. The vertical pass then sets an alpha that saturates as
+/// `1 - exp(-gain * coverage)`, like the vector effects, which stack
+/// translucent copies instead of averaging them, and either tints the
+/// result or (`own`) keeps its blurred colors.
 const SOFT_BLUR: &str = r#"
 fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     let p = uv * resolution;
@@ -39,7 +43,7 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     let horizontal = gaanim_uniforms.horizontal > 0.5;
     let radius = ceil(3.0 * sigma);
     let step = max(1.0, radius / 32.0);
-    var sum = 0.0;
+    var sum = vec4<f32>(0.0);
     var total = 0.0;
     for (var i = -32; i <= 32; i++) {
         let x = f32(i) * step;
@@ -48,20 +52,18 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
         }
         let weight = exp(-0.5 * x * x / (sigma * sigma));
         let offset = select(vec2<f32>(0.0, x), vec2<f32>(x, 0.0), horizontal);
-        sum += gaanim_scene((p + offset) / resolution).a * weight;
+        let texel = gaanim_scene((p + offset) / resolution);
+        sum += vec4<f32>(texel.rgb * texel.a, texel.a) * weight;
         total += weight;
     }
-    let coverage = sum / total;
+    let blurred = sum / total;
+    let color = select(vec3<f32>(0.0), blurred.rgb / blurred.a, blurred.a > 1e-6);
     if (horizontal) {
-        return vec4<f32>(0.0, 0.0, 0.0, coverage);
+        return vec4<f32>(color, blurred.a);
     }
-    let alpha = 1.0 - exp(-gaanim_uniforms.gain * coverage);
-    return vec4<f32>(
-        gaanim_uniforms.red,
-        gaanim_uniforms.green,
-        gaanim_uniforms.blue,
-        clamp(alpha * gaanim_uniforms.alpha, 0.0, 1.0),
-    );
+    let alpha = clamp((1.0 - exp(-gaanim_uniforms.gain * blurred.a)) * gaanim_uniforms.alpha, 0.0, 1.0);
+    let tint = vec3<f32>(gaanim_uniforms.red, gaanim_uniforms.green, gaanim_uniforms.blue);
+    return vec4<f32>(select(tint, color, gaanim_uniforms.own > 0.5), alpha);
 }
 "#;
 
@@ -79,6 +81,7 @@ fn soft_blur_shader() -> Option<&'static PostProcessShader> {
                     "blue",
                     "alpha",
                     "gain",
+                    "own",
                 ],
             )
             .ok()
@@ -86,17 +89,26 @@ fn soft_blur_shader() -> Option<&'static PostProcessShader> {
         .as_ref()
 }
 
-/// Draw into `scene` the image of `silhouette` (drawn in black within
-/// `bounds`, local coordinates) blurred by `sigma` local units and tinted
-/// `color` with an alpha of `1 - exp(-gain * coverage)`, and return the
-/// layer that fills it. `None` when the blur is not finite and positive, or
-/// the shader is unavailable.
+/// The colors of a blurred image.
+#[derive(Clone, Copy)]
+enum Paint {
+    /// One color, whose alpha scales the image's.
+    Tint(peniko::Color),
+    /// What the silhouette draws, blurred, with its alpha scaled by this.
+    Own(f32),
+}
+
+/// Draw into `scene` the image of `silhouette` (drawn within `bounds`,
+/// local coordinates) blurred by `sigma` local units, painted `paint` with
+/// an alpha of `1 - exp(-gain * coverage)`, and return the layer that
+/// fills it. `None` when the blur is not finite and positive, or the shader
+/// is unavailable.
 fn draw_soft_image(
     scene: &mut vello::Scene,
     silhouette: vello::Scene,
     bounds: kurbo::Rect,
     sigma: f64,
-    color: peniko::Color,
+    paint: Paint,
     gain: f64,
 ) -> Option<EffectLayer> {
     let shader = soft_blur_shader()?;
@@ -137,12 +149,15 @@ fn draw_soft_image(
         &area,
     );
     let sigma_pixels = (sigma * f64::from(width) / area.width()) as f32;
-    let [red, green, blue, alpha] = color.components;
+    let ([red, green, blue, alpha], own) = match paint {
+        Paint::Tint(color) => (color.components, 0.0),
+        Paint::Own(alpha) => ([0.0, 0.0, 0.0, alpha], 1.0),
+    };
     let gain = gain as f32;
     let pass = |horizontal: f32| {
         (
             shader.clone(),
-            vec![sigma_pixels, horizontal, red, green, blue, alpha, gain],
+            vec![sigma_pixels, horizontal, red, green, blue, alpha, gain, own],
         )
     };
     Some(EffectLayer {
@@ -177,7 +192,7 @@ pub(crate) fn draw_shadow_image(
         silhouette,
         bounds,
         shadow.blur_radius,
-        shadow.color,
+        Paint::Tint(shadow.color),
         -(1.0 - SHADOW_CORE).ln(),
     )
 }
@@ -286,6 +301,27 @@ pub(crate) fn group_shadow_image(
     })
 }
 
+/// A drawable blurred by `sigma` (a [`crate::effects::GaussianBlur`]) as an
+/// image: `content` is its fill and stroke drawn sharp within `bounds`,
+/// and `alpha` the fill's write-on opacity. The vector blur's copies
+/// compose to the same core opacity as a shadow's.
+pub(crate) fn draw_blur_image(
+    scene: &mut vello::Scene,
+    content: vello::Scene,
+    bounds: kurbo::Rect,
+    sigma: f64,
+    alpha: f32,
+) -> Option<EffectLayer> {
+    draw_soft_image(
+        scene,
+        content,
+        bounds,
+        sigma,
+        Paint::Own(alpha.clamp(0.0, 1.0)),
+        -(1.0 - SHADOW_CORE).ln(),
+    )
+}
+
 /// Width of the line a glow blurs, as a share of its radius.
 const GLOW_LINE: f64 = 0.15;
 /// A glow's radius in sigmas of its blur: the vector glow's rings fade as
@@ -321,7 +357,14 @@ pub(crate) fn draw_glow_image(
     );
     let bounds = path.bounding_box().inflate(width, width);
     let gain = glow_depth(glow.intensity) / line_coverage(width, sigma);
-    draw_soft_image(scene, silhouette, bounds, sigma, glow.color, gain)
+    draw_soft_image(
+        scene,
+        silhouette,
+        bounds,
+        sigma,
+        Paint::Tint(glow.color),
+        gain,
+    )
 }
 
 /// Optical depth of a glow on its outline: the vector glow stacks rings
@@ -372,8 +415,8 @@ mod tests {
         };
         let bounds = kurbo::Rect::new(0.0, 0.0, 1.0, 0.5);
         let layer = draw_shadow_image(&mut scene, vello::Scene::new(), bounds, &shadow).unwrap();
-        // 1.6 by 1.1 units with the reach, at 30 texels per unit.
-        assert_eq!((layer.image.width, layer.image.height), (48, 33));
+        // 1.5 by 1 units with the reach, at 30 texels per unit.
+        assert_eq!((layer.image.width, layer.image.height), (45, 30));
         assert!(layer.fixed);
         assert_eq!(layer.request.passes.len(), 2);
         let sharp = DropShadow {
