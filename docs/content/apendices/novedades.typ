@@ -11,6 +11,19 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.10.1
+
+Publicada el 4 de octubre de 2026. Corrige una caída de fotogramas al mostrar
+la barra de reproducción en presentaciones largas abiertas desde su script.
+
+== Correcciones
+
+- La barra de reproducción ya no frena el editor en presentaciones con muchas
+  diapositivas. Calculaba los capítulos recorriendo todos los clips una vez
+  por escena en cada fotograma, y la vista previa bajaba a unos 30 fps
+  mientras la barra estaba visible. Los paquetes `.gaanim` no se veían
+  afectados.
+
 = 0.10.0
 
 Publicada el 4 de octubre de 2026. Rendimiento de la vista previa y de la
