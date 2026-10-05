@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_bundle"
-version = "0.10.0"
+version = "0.10.1"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "Playback bundles: scenes and presentations recorded into one file that replays without Python"
