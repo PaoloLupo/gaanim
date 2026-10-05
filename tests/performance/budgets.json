@@ -57,6 +57,12 @@
           "frames": 30,
           "timeout_seconds": 120,
           "budget": { "p95_ms": 60000, "peak_rss_mb": 3000, "min_fps": 0.5 }
+        },
+        "playback": {
+          "samples": 1,
+          "frames": 30,
+          "timeout_seconds": 120,
+          "budget": { "p95_ms": 50, "peak_rss_mb": 3500, "min_fps": 20.0 }
         }
       }
     },
@@ -86,6 +92,12 @@
           "frames": 300,
           "timeout_seconds": 300,
           "budget": { "p95_ms": 180000, "peak_rss_mb": 4000, "min_fps": 1.5 }
+        },
+        "playback": {
+          "samples": 3,
+          "frames": 300,
+          "timeout_seconds": 240,
+          "budget": { "p95_ms": 50, "peak_rss_mb": 4000, "min_fps": 20.0 }
         }
       }
     }

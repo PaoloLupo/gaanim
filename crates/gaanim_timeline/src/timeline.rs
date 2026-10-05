@@ -724,6 +724,12 @@ impl GameStage {
 /// Most segment checkpoints kept at once; each holds a whole world snapshot.
 const MAX_CHECKPOINTS: usize = 4;
 
+/// Clips that must start between two checkpoints taken outside segment
+/// starts: replaying fewer costs less than capturing the world. A scene that
+/// fades in a thousand copies, then moves them, replayed every fade on every
+/// later frame.
+const CHECKPOINT_CLIPS: usize = 256;
+
 /// How far past a segment start an earlier clip may end, from floating-point
 /// accumulation, and still count as finished there.
 const CHECKPOINT_SLACK: f64 = 1e-9;
@@ -732,8 +738,9 @@ fn segment_checkpoints_enabled() -> bool {
     std::env::var_os("GAANIM_SEGMENT_CHECKPOINTS").is_none_or(|value| value != "0")
 }
 
-/// World snapshots at segment starts, captured when playback crosses into a
-/// segment or a second seek in a row needs one.
+/// World snapshots at segment starts (and, after many clips, at the start of
+/// a `play`), captured when playback crosses into one or a second seek in a
+/// row needs one.
 ///
 /// A checkpoint at `t` holds the world with every clip that starts before
 /// `t` applied and none of the others, which is what restoring the t=0
@@ -745,7 +752,8 @@ struct Checkpoints {
     /// Timeline revision and segment starts `times` and `snapshots` belong to.
     revision: Option<u64>,
     starts: Vec<f64>,
-    /// Segment starts where every earlier clip has finished.
+    /// Segment and play starts where every earlier clip has finished; see
+    /// [`Timeline::settled_segment_starts`].
     times: Vec<OrderedFloat<f64>>,
     snapshots: BTreeMap<OrderedFloat<f64>, WorldSnapshot>,
     /// Captured times, least recently used first.
@@ -1635,25 +1643,30 @@ impl Timeline {
         Some(&self.checkpoints.times)
     }
 
-    /// Segment starts after t=0 where every clip that starts earlier has
-    /// finished, up to the first ungrouping, which replay repeats in place.
+    /// Times after t=0 where every clip that starts earlier has finished, up
+    /// to the first ungrouping, which replay repeats in place: every segment
+    /// start, and a clip start (a `play` without segments) once at least
+    /// [`CHECKPOINT_CLIPS`] clips started since the previous one.
     fn settled_segment_starts(&self) -> Vec<OrderedFloat<f64>> {
-        let mut starts: Vec<f64> = self
+        // (time, whether a segment starts there), in time order.
+        let mut starts: Vec<(f64, bool)> = self
             .segments
             .iter()
-            .map(|segment| segment.start_time)
-            .filter(|time| *time > 0.0)
+            .map(|segment| (segment.start_time, true))
+            .chain(self.clip_index.keys().map(|start| (start.0, false)))
+            .filter(|(time, _)| *time > 0.0)
             .collect();
-        starts.sort_by(f64::total_cmp);
-        starts.dedup();
+        starts.sort_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
+        starts.dedup_by(|later, earlier| later.0 == earlier.0);
         let mut clips = self
             .clip_index
             .iter()
             .flat_map(|(start, ids)| ids.iter().map(move |id| (start.0, *id)))
             .peekable();
         let mut latest_end = f64::NEG_INFINITY;
+        let mut since_checkpoint = 0;
         let mut times = Vec::new();
-        for time in starts {
+        for (time, segment) in starts {
             while let Some(&(start, id)) = clips.peek() {
                 if start >= time {
                     break;
@@ -1666,9 +1679,13 @@ impl Timeline {
                     return times;
                 }
                 latest_end = latest_end.max(clip.end());
+                since_checkpoint += 1;
             }
-            if latest_end <= time + CHECKPOINT_SLACK {
+            if latest_end <= time + CHECKPOINT_SLACK
+                && (segment || since_checkpoint >= CHECKPOINT_CLIPS)
+            {
                 times.push(OrderedFloat(time));
+                since_checkpoint = 0;
             }
         }
         times
@@ -1936,11 +1953,11 @@ impl Timeline {
     /// absolute 2D property clips may replay from an already-restored keyframe without repeating
     /// the full world restore; every other payload keeps the deterministic restore path.
     ///
-    /// Past the first segment start where every earlier clip has finished, a seek restores a
-    /// checkpoint of that instant instead of the t=0 keyframe, and replays only the clips from
-    /// there on. The checkpoint is captured when playback crosses into its segment, replaying
-    /// incrementally from the previous one, or when a second seek in a row lands past it, so a
-    /// one-off seek never pays for it (see [`Self::segment_checkpoints`]).
+    /// Past the first segment start (or, after many clips, `play`) where every earlier clip has
+    /// finished, a seek restores a checkpoint of that instant instead of the t=0 keyframe, and
+    /// replays only the clips from there on. The checkpoint is captured when playback crosses
+    /// into it, replaying incrementally from the previous one, or when a second seek in a row
+    /// lands past it, so a one-off seek never pays for it (see [`Self::segment_checkpoints`]).
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
         self.seek_with(world, target_time, None);
     }
@@ -4330,14 +4347,14 @@ fn apply_lens_spec(
                 }),
             );
         }
-        PropertyLensSpec::PathMorph { from, to } => {
+        PropertyLensSpec::PathMorph { from, to, table } => {
             // A completed morph borrows `to`; it is only cloned into a new
             // `Arc` when the current geometry differs.
             let interpolated;
             let morphed = if completed {
                 to
             } else {
-                interpolated = gaanim_math::interpolate_paths_continuous(from, to, t);
+                interpolated = table.path(from, to, t);
                 &interpolated
             };
             if let Some(mut path) = world.get_mut::<Path2D>(target)
@@ -6509,6 +6526,7 @@ mod tests {
                 lens: PropertyLensSpec::PathMorph {
                     from,
                     to: to.clone(),
+                    table: Default::default(),
                 },
                 rate_func: RateFunc::Spring {
                     stiffness: 90.0,
@@ -7233,6 +7251,49 @@ mod tests {
             assert_eq!(timeline.checkpoints.snapshots.len(), 2);
             assert!(reference.checkpoints.snapshots.is_empty());
         }
+    }
+
+    #[test]
+    fn many_clips_checkpoint_the_next_play_without_segments() {
+        let fixture = |checkpoints| {
+            let (world, mut timeline, entities) = checkpoint_fixture(checkpoints, false, false);
+            timeline.set_segments(Vec::new());
+            let track = timeline.add_track("fades", 2);
+            for index in 0..CHECKPOINT_CLIPS {
+                timeline.add_clip(track, index as f64 / 1000.0, 0.5, ClipPayload::Wait);
+            }
+            (world, timeline, entities)
+        };
+        let (mut world, mut timeline, entities) = fixture(true);
+        let (mut reference_world, mut reference, reference_entities) = fixture(false);
+        for time in (0..=60)
+            .map(|step| f64::from(step) / 16.0)
+            .chain([1.1, 0.3, 3.5, 1.0, 0.0, 2.95])
+        {
+            timeline.seek(&mut world, time);
+            reference.seek(&mut reference_world, time);
+            for (&entity, &reference_entity) in entities.iter().zip(&reference_entities) {
+                assert_eq!(
+                    world.get::<SpatialTransform>(entity),
+                    reference_world.get::<SpatialTransform>(reference_entity),
+                    "transform at t={time}"
+                );
+                assert_eq!(
+                    world.get::<Opacity>(entity),
+                    reference_world.get::<Opacity>(reference_entity),
+                    "opacity at t={time}"
+                );
+                assert_eq!(
+                    world.get::<Path2D>(entity),
+                    reference_world.get::<Path2D>(reference_entity),
+                    "path at t={time}"
+                );
+            }
+        }
+        // The first start after the fades with every earlier clip finished;
+        // the later ones follow too few clips.
+        assert_eq!(timeline.checkpoints.times, [OrderedFloat(1.0)]);
+        assert_eq!(timeline.checkpoints.snapshots.len(), 1);
     }
 
     #[test]

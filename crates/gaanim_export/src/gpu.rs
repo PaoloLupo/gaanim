@@ -19,6 +19,8 @@ const PROBE_STRIDE: u64 = 256;
 const MAX_BUMP_SCALE: u32 = 8;
 /// Largest storage binding requested from the adapter for Vello's buffers.
 const MAX_STORAGE_BINDING: u64 = 512 << 20;
+/// How every export render antialiases; the renderer builds no other mode.
+const EXPORT_ANTIALIASING: vello::AaConfig = vello::AaConfig::Msaa16;
 /// Bytes of staging buffers frames may hold while the encoder writes them.
 const STAGING_BUDGET: u64 = 256 << 20;
 
@@ -137,6 +139,9 @@ pub struct GpuContext {
     pending: Option<FrameJob>,
     /// Time spent blocked on readbacks, for the benchmark harness.
     readback_wait: std::cell::Cell<std::time::Duration>,
+    /// Converts frames to NV12 before the readback, for a video export
+    /// (see [`Self::read_nv12`]).
+    nv12: Option<crate::nv12::Nv12Converter>,
 }
 
 impl GpuContext {
@@ -217,7 +222,13 @@ impl GpuContext {
             &device,
             RendererOptions {
                 use_cpu: false,
-                antialiasing_support: vello::AaSupport::all(),
+                // Every export render uses MSAA16 (`EXPORT_ANTIALIASING`);
+                // other modes would only lengthen startup.
+                antialiasing_support: vello::AaSupport {
+                    area: false,
+                    msaa8: false,
+                    msaa16: true,
+                },
                 num_init_threads: None,
                 pipeline_cache: None,
             },
@@ -280,7 +291,18 @@ impl GpuContext {
             max_bump_bytes: max_storage,
             pending: None,
             readback_wait: Default::default(),
+            nv12: None,
         })
+    }
+
+    /// Read frames back as NV12 (BT.601, limited range) instead of RGBA,
+    /// for an encoder that converts to YUV 4:2:0 anyway. Returns whether
+    /// frames are NV12 from now on: the width must be a multiple of 4 and
+    /// the height even.
+    pub fn read_nv12(&mut self) -> bool {
+        self.nv12 =
+            crate::nv12::Nv12Converter::new(&self.device, &self.texture, self.width, self.height);
+        self.nv12.is_some()
     }
 
     /// Render the incoming segment over `base_color` and the layer above
@@ -330,7 +352,7 @@ impl GpuContext {
                         base_color: base,
                         width,
                         height,
-                        antialiasing_method: vello::AaConfig::Msaa16,
+                        antialiasing_method: EXPORT_ANTIALIASING,
                     },
                 )
                 .map_err(|e| GpuContextError::Render(e.to_string()))?;
@@ -561,7 +583,7 @@ impl GpuContext {
                     &self.queue,
                     &mut self.renderer,
                     effects,
-                    vello::AaConfig::Msaa16,
+                    EXPORT_ANTIALIASING,
                 )
                 .map_err(|e| GpuContextError::Render(e.to_string()))?;
         }
@@ -575,7 +597,7 @@ impl GpuContext {
                     base_color,
                     width: self.width,
                     height: self.height,
-                    antialiasing_method: vello::AaConfig::Msaa16,
+                    antialiasing_method: EXPORT_ANTIALIASING,
                 },
             )
             .map_err(|e| GpuContextError::Render(e.to_string()))?;
@@ -627,22 +649,25 @@ impl GpuContext {
         }
 
         let staging = self.take_staging();
-        encoder.copy_texture_to_buffer(
-            self.texture.as_image_copy(),
-            TexelCopyBufferInfo {
-                buffer: &staging,
-                layout: TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.padded_width * 4),
-                    rows_per_image: None,
+        match &self.nv12 {
+            Some(nv12) => nv12.encode(&mut encoder, &staging),
+            None => encoder.copy_texture_to_buffer(
+                self.texture.as_image_copy(),
+                TexelCopyBufferInfo {
+                    buffer: &staging,
+                    layout: TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(self.padded_width * 4),
+                        rows_per_image: None,
+                    },
                 },
-            },
-            Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
-        );
+                Extent3d {
+                    width: self.width,
+                    height: self.height,
+                    depth_or_array_layers: 1,
+                },
+            ),
+        }
 
         self.staging = Some(staging);
 
@@ -710,6 +735,10 @@ impl GpuContext {
             width: self.width,
             height: self.height,
             padded_width: self.padded_width,
+            nv12_bytes: self
+                .nv12
+                .as_ref()
+                .map(crate::nv12::Nv12Converter::frame_bytes),
             release: self.release_staging.clone(),
         })
     }
@@ -728,7 +757,8 @@ fn create_staging(
     })
 }
 
-/// The pixels of a frame, as tightly packed RGBA8 rows.
+/// The pixels of a frame, as tightly packed RGBA8 rows, or as an NV12
+/// frame from a context that reads NV12 (see [`GpuContext::read_nv12`]).
 pub enum FramePixels {
     Owned(Vec<u8>),
     /// The pixels of a frame repeated while the scene holds still.
@@ -744,6 +774,27 @@ impl FramePixels {
             Self::Owned(pixels) => pixels,
             Self::Shared(pixels) => pixels.to_vec(),
             Self::Mapped(frame) => frame.into_pixels(),
+        }
+    }
+
+    /// `f` of the frame's bytes and the bytes from one row to the next,
+    /// which is `row` (a packed row) except in a mapped frame, whose rows
+    /// are aligned for the copy.
+    pub fn with_rows<R>(&self, row: usize, f: impl FnOnce(&[u8], usize) -> R) -> R {
+        match self {
+            Self::Owned(pixels) => f(pixels, row),
+            Self::Shared(pixels) => f(pixels, row),
+            Self::Mapped(frame) => {
+                assert!(frame.nv12_bytes.is_none(), "an NV12 frame has no RGBA rows");
+                let buffer = frame
+                    .buffer
+                    .as_ref()
+                    .expect("the buffer is held until drop");
+                f(
+                    &buffer.slice(..).get_mapped_range(),
+                    frame.padded_width as usize * 4,
+                )
+            }
         }
     }
 
@@ -771,6 +822,9 @@ pub struct MappedFrame {
     height: u32,
     /// Row stride of the buffer in pixels (rows are aligned for the copy).
     padded_width: u32,
+    /// Length of an NV12 frame held at the start of the buffer instead of
+    /// RGBA rows.
+    nv12_bytes: Option<usize>,
     release: mpsc::Sender<vello::wgpu::Buffer>,
 }
 
@@ -785,6 +839,9 @@ impl MappedFrame {
     pub fn write_to(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
         let buffer = self.buffer.as_ref().expect("the buffer is held until drop");
         let data = buffer.slice(..).get_mapped_range();
+        if let Some(bytes) = self.nv12_bytes {
+            return out.write_all(&data[..bytes]);
+        }
         let row = self.width as usize * 4;
         if self.padded_width == self.width {
             return out.write_all(&data[..row * self.height as usize]);

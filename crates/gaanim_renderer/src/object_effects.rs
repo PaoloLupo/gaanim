@@ -286,6 +286,9 @@ pub struct EffectLayer {
     pub image: ImageData,
     /// The passes, with the frame set to the whole texture.
     pub request: PostProcessRequest,
+    /// The image always holds the same pixels (a soft effect of one built
+    /// fragment), so its texture is drawn once and kept while it is drawn.
+    pub fixed: bool,
 }
 
 impl EffectLayer {
@@ -293,6 +296,7 @@ impl EffectLayer {
     pub fn same_output(&self, other: &Self) -> bool {
         self.to_pixels == other.to_pixels
             && self.image == other.image
+            && self.fixed == other.fixed
             && crate::canvas::draws_same(&self.scene, &other.scene)
             && self.request.same_output(&other.request)
     }
@@ -395,6 +399,8 @@ struct Slot {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     post: GpuPostProcess,
+    /// The texture holds the pixels of a fixed layer.
+    drawn: bool,
 }
 
 /// Runs the shader effects of a frame on the GPU, before the frame itself
@@ -463,10 +469,12 @@ impl ObjectEffects {
                             // passes of the image it replaces, whose
                             // pipelines took about 0.5 ms each to build.
                             post: spare.pop().map(|slot| slot.post).unwrap_or_default(),
+                            drawn: false,
                         }
                     }
                 };
                 slot.image = layer.image.clone();
+                slot.drawn = false;
                 renderer.override_image(
                     &slot.image,
                     Some(wgpu::TexelCopyTextureInfoBase {
@@ -483,23 +491,38 @@ impl ObjectEffects {
         // has taken one back by now.
         self.spare.clear();
 
+        // Fixed layers drawn by an earlier frame keep their pixels, in their
+        // textures and in Vello's image atlas, which recopies an image only
+        // when it is marked dirty.
+        let pending: Vec<EffectLayer> = layers
+            .iter()
+            .filter(|layer| {
+                !(layer.fixed
+                    && self
+                        .slots
+                        .get(&layer.image.data.id())
+                        .is_some_and(|slot| slot.drawn))
+            })
+            .cloned()
+            .collect();
         let atlas_side = device.limits().max_texture_dimension_2d.min(MAX_ATLAS_SIDE);
         let mut start = 0;
-        while start < layers.len() {
-            let batch = next_batch(layers, start, atlas_side);
+        while start < pending.len() {
+            let batch = next_batch(&pending, start, atlas_side);
             self.render_batch(
                 device,
                 queue,
                 renderer,
-                &layers[start..batch.end],
+                &pending[start..batch.end],
                 &batch,
                 antialiasing,
             )?;
             // A later batch may draw these images (glass shows what is
             // behind it), so its render copies them.
-            for layer in &layers[start..batch.end] {
-                if let Some(slot) = self.slots.get(&layer.image.data.id()) {
+            for layer in &pending[start..batch.end] {
+                if let Some(slot) = self.slots.get_mut(&layer.image.data.id()) {
                     renderer.mark_override_image_dirty(&slot.image);
+                    slot.drawn = layer.fixed;
                 }
             }
             start = batch.end;
@@ -507,7 +530,7 @@ impl ObjectEffects {
         // Each render consumes the pending copies of overridden images, so
         // the images are marked only once every texture is drawn: the frame
         // then copies all of them.
-        for layer in layers {
+        for layer in &pending {
             if let Some(slot) = self.slots.get(&layer.image.data.id()) {
                 renderer.mark_override_image_dirty(&slot.image);
             }
@@ -780,6 +803,7 @@ mod tests {
                 time: 0.0,
                 transition: None,
             },
+            fixed: false,
         }
     }
 

@@ -100,6 +100,35 @@ class RuntimeBenchmarkTests(unittest.TestCase):
             self.assertEqual(report["encoder"], "h264_vaapi")
             self.assertEqual(report["phase_timings_ms"]["encode_active_ms"], 8.25)
 
+    def test_playback_opens_the_editor_and_reads_its_frame_times(self) -> None:
+        command = benchmark_runtime.scenario_command(
+            "playback",
+            executable=Path("gaanim"),
+            scene=Path("scene.py"),
+            artifact_dir=Path("target/performance/playback"),
+        )
+        self.assertEqual(command, ["gaanim", "scene.py"])
+        self.assertNotIn("playback", benchmark_runtime.SCENARIOS)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact_dir = Path(temporary)
+            log = artifact_dir / "command.log"
+            log.write_text(
+                "GAANIM_FRAME_PROFILE slowest windows:\n"
+                "GAANIM_PLAYBACK_TIMINGS frames=1440 seconds=10.0 frame_p50_ms=6.9 "
+                "frame_p95_ms=7.8 main_p50_ms=1.3 main_p95_ms=1.9 seek_ms=0.3 "
+                "compile_ms=0.9 render_ms=6.9\n",
+                encoding="utf-8",
+            )
+
+            report = benchmark_runtime.validate_artifacts("playback", artifact_dir, 300)
+
+            self.assertEqual(report["phase_timings_ms"]["frame_p95_ms"], 7.8)
+            self.assertEqual(report["phase_timings_ms"]["main_p50_ms"], 1.3)
+            log.write_text("GAANIM_PLAYBACK_TIMINGS frames=0\n", encoding="utf-8")
+            with self.assertRaises(benchmark_runtime.BenchmarkFailure):
+                benchmark_runtime.validate_artifacts("playback", artifact_dir, 300)
+
     def test_export_artifact_validation_reads_optional_phases_and_the_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             artifact_dir = Path(temporary)
@@ -175,7 +204,7 @@ class RuntimeBenchmarkTests(unittest.TestCase):
     def test_suites_fill_defaults_and_reject_unknown_scenarios(self) -> None:
         configuration = {
             "suites": {
-                "gpu": {"scenes": ["a.py", {"scene": "b.py", "scenarios": ["seek"], "scales": [1, 4], "budgets": False}]},
+                "gpu": {"scenes": ["a.py", {"scene": "b.py", "scenarios": ["seek", "playback"], "scales": [1, 4], "budgets": False}]},
                 "bad": {"scenes": [{"scene": "c.py", "scenarios": ["render"]}]},
             }
         }
@@ -185,7 +214,7 @@ class RuntimeBenchmarkTests(unittest.TestCase):
         self.assertEqual(first["scenarios"], benchmark_runtime.SCENARIOS)
         self.assertEqual(first["scales"], [1])
         self.assertTrue(first["budgets"])
-        self.assertEqual(second["scenarios"], ("seek",))
+        self.assertEqual(second["scenarios"], ("seek", "playback"))
         self.assertEqual(second["scales"], [1, 4])
         self.assertFalse(second["budgets"])
         for suite in ("bad", "missing"):

@@ -561,68 +561,101 @@ pub fn interpolate_paths(a: &BezPath, b: &BezPath, t: f64) -> BezPath {
 /// representation while crossing `t = 1`. The animation system is responsible
 /// for assigning the exact target path once the clip has actually completed.
 pub fn interpolate_paths_continuous(a: &BezPath, b: &BezPath, t: f64) -> BezPath {
-    let subs_a: Vec<_> = split_subpaths(a)
-        .into_iter()
-        .map(|path| SampledContour::new(path, 64))
-        .collect();
-    let subs_b: Vec<_> = split_subpaths(b)
-        .into_iter()
-        .map(|path| SampledContour::new(path, 64))
-        .collect();
+    MorphPlan::new(a, b).at(t)
+}
 
-    if subs_a.is_empty() || subs_b.is_empty() {
-        return if t < 0.5 { a.clone() } else { b.clone() };
+/// What [`interpolate_paths_continuous`] computes from two paths before
+/// interpolating: the contours paired and cut into as many cubics each.
+/// A morph builds it once and interpolates it at every `t`, with the same
+/// result as interpolating the paths.
+#[derive(Debug, Clone)]
+pub struct MorphPlan {
+    /// Paired contours: source cubics, target cubics, and whether closed.
+    contours: Vec<(Vec<CubicBez>, Vec<CubicBez>, bool)>,
+    /// The paths themselves when either has no contour: the morph cuts
+    /// from one to the other halfway.
+    cut: Option<(BezPath, BezPath)>,
+}
+
+impl MorphPlan {
+    pub fn new(a: &BezPath, b: &BezPath) -> Self {
+        let subs_a: Vec<_> = split_subpaths(a)
+            .into_iter()
+            .map(|path| SampledContour::new(path, 64))
+            .collect();
+        let subs_b: Vec<_> = split_subpaths(b)
+            .into_iter()
+            .map(|path| SampledContour::new(path, 64))
+            .collect();
+
+        if subs_a.is_empty() || subs_b.is_empty() {
+            return Self {
+                contours: Vec::new(),
+                cut: Some((a.clone(), b.clone())),
+            };
+        }
+
+        let contours = match_contours(&subs_a, &subs_b)
+            .into_iter()
+            .filter_map(|(source, target)| match (source, target) {
+                (Some(source_idx), Some(target_idx)) => {
+                    let source = &subs_a[source_idx];
+                    let target = &subs_b[target_idx];
+                    Some(normalize_contour_pair(source, target))
+                }
+                (Some(source_idx), None) => {
+                    let source = &subs_a[source_idx];
+                    let center = nearest_center(source.center, &subs_b);
+                    Some((
+                        source.segments.clone(),
+                        degenerate_segments(center, source.segments.len()),
+                        source.closed,
+                    ))
+                }
+                (None, Some(target_idx)) => {
+                    let target = &subs_b[target_idx];
+                    let center = nearest_center(target.center, &subs_a);
+                    Some((
+                        degenerate_segments(center, target.segments.len()),
+                        target.segments.clone(),
+                        target.closed,
+                    ))
+                }
+                (None, None) => None,
+            })
+            .collect();
+        Self {
+            contours,
+            cut: None,
+        }
     }
 
-    let mut result = BezPath::new();
-
-    for (source, target) in match_contours(&subs_a, &subs_b) {
-        let (source_segments, target_segments, closed) = match (source, target) {
-            (Some(source_idx), Some(target_idx)) => {
-                let source = &subs_a[source_idx];
-                let target = &subs_b[target_idx];
-                normalize_contour_pair(source, target)
-            }
-            (Some(source_idx), None) => {
-                let source = &subs_a[source_idx];
-                let center = nearest_center(source.center, &subs_b);
-                (
-                    source.segments.clone(),
-                    degenerate_segments(center, source.segments.len()),
-                    source.closed,
-                )
-            }
-            (None, Some(target_idx)) => {
-                let target = &subs_b[target_idx];
-                let center = nearest_center(target.center, &subs_a);
-                (
-                    degenerate_segments(center, target.segments.len()),
-                    target.segments.clone(),
-                    target.closed,
-                )
-            }
-            (None, None) => continue,
-        };
-
-        let Some((first_source, first_target)) =
-            source_segments.first().zip(target_segments.first())
-        else {
-            continue;
-        };
-        result.move_to(first_source.p0.lerp(first_target.p0, t));
-        for (source, target) in source_segments.iter().zip(&target_segments) {
-            result.curve_to(
-                source.p1.lerp(target.p1, t),
-                source.p2.lerp(target.p2, t),
-                source.p3.lerp(target.p3, t),
-            );
+    /// The morph at `t`, past 0 and 1 too.
+    pub fn at(&self, t: f64) -> BezPath {
+        if let Some((a, b)) = &self.cut {
+            return if t < 0.5 { a.clone() } else { b.clone() };
         }
-        if closed {
-            result.close_path();
+        let mut result = BezPath::new();
+        for (source_segments, target_segments, closed) in &self.contours {
+            let Some((first_source, first_target)) =
+                source_segments.first().zip(target_segments.first())
+            else {
+                continue;
+            };
+            result.move_to(first_source.p0.lerp(first_target.p0, t));
+            for (source, target) in source_segments.iter().zip(target_segments) {
+                result.curve_to(
+                    source.p1.lerp(target.p1, t),
+                    source.p2.lerp(target.p2, t),
+                    source.p3.lerp(target.p3, t),
+                );
+            }
+            if *closed {
+                result.close_path();
+            }
         }
+        result
     }
-
-    result
 }
 
 /// Splits a `BezPath` into its constituent subpaths at `MoveTo` boundaries.

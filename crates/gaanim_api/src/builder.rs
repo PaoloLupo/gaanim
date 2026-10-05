@@ -1936,6 +1936,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             PropertyLensSpec::PathMorph {
                 from: (*from_state.path).clone(),
                 to: (*to_state.path).clone(),
+                table: Default::default(),
             },
             Some("EquationSemanticMorph".to_string()),
         );
@@ -4666,6 +4667,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 lens: PropertyLensSpec::PathMorph {
                     from: (*source_state.path).clone(),
                     to: (*target_state.path).clone(),
+                    table: Default::default(),
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -4838,6 +4840,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 lens: PropertyLensSpec::PathMorph {
                     from: (*target_state.path).clone(),
                     to: (*target_state.path).clone(),
+                    table: Default::default(),
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
                 delay: 0.0,
@@ -5172,6 +5175,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     lens: PropertyLensSpec::PathMorph {
                         from: (*src_state.path).clone(),
                         to: (*dst_state.path).clone(),
+                        table: Default::default(),
                     },
                     rate_func: rate_func.clone(),
                     delay: 0.0,
@@ -5314,6 +5318,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     lens: PropertyLensSpec::PathMorph {
                         from: (*dst_state.path).clone(),
                         to: (*dst_state.path).clone(),
+                        table: Default::default(),
                     },
                     rate_func: gaanim_math::RateFunc::Linear,
                     delay: 0.0,

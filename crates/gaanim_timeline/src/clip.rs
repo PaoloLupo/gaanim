@@ -220,6 +220,9 @@ pub enum PropertyLensSpec {
     PathMorph {
         from: BezPath,
         to: BezPath,
+        /// Contour matching of `from` and `to`, built on the first frame.
+        #[cfg_attr(feature = "serde", serde(default))]
+        table: gaanim_animation::MorphTable,
     },
     /// Cross-fade the fill alpha from `from` to `to` (both in `[0, 1]`).
     /// Used by the Write animation to reveal the fill after the path
@@ -488,10 +491,10 @@ impl PropertyLensSpec {
                 to: *to,
                 sequential: *sequential,
             },
-            Self::PathMorph { from, to } => PropertyLens::PathMorph {
+            Self::PathMorph { from, to, table } => PropertyLens::PathMorph {
                 from: from.clone(),
                 to: to.clone(),
-                table: gaanim_animation::MorphTable,
+                table: table.clone(),
             },
             Self::FillDrawProgress { from, to } => PropertyLens::FillDrawProgress {
                 from: *from,

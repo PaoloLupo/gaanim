@@ -591,6 +591,7 @@ where
         audio_tracks: config.audio_tracks.clone(),
         render_start,
         render_duration: render_length,
+        nv12_input: false,
     })?;
 
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
@@ -691,6 +692,14 @@ where
     let render_length = render_end - render_start;
     validate_render_range(render_start, render_end, timeline_duration)?;
 
+    // Video encoders convert to YUV 4:2:0: the GPU does it and the readback
+    // carries less than half the bytes. Motion blur averages RGBA frames.
+    let nv12 = match config.format {
+        crate::encoder::ExportFormat::Mp4 => true,
+        crate::encoder::ExportFormat::Webm => !config.transparent,
+        _ => false,
+    } && frame_motion_blur(app.world()).is_none()
+        && gpu.read_nv12();
     let mut encoder = ParallelEncoder::new(EncoderConfig {
         output_path: config.output_path.clone(),
         width: config.width,
@@ -704,6 +713,7 @@ where
         audio_tracks: config.audio_tracks.clone(),
         render_start,
         render_duration: render_length,
+        nv12_input: nv12,
     })?;
 
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
@@ -969,6 +979,7 @@ pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Res
         audio_tracks: config.audio_tracks.clone(),
         render_start,
         render_duration: render_length,
+        nv12_input: false,
     })?;
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
     if let Some(telemetry) = &telemetry {
@@ -1099,21 +1110,55 @@ impl FrameRasterizer {
         overlay: Option<&gaanim_animation::live::LiveOverlay>,
     ) -> Result<Vec<u8>> {
         if frame.motion_blur.is_empty() {
-            return self.render_frame(frame, time, overlay);
+            let job = self.frame_job(frame, overlay);
+            return self
+                .gpu
+                .render_frame_layers(
+                    &job.scene,
+                    job.layers.as_ref(),
+                    &job.effects,
+                    &job.backgrounds,
+                    job.base_color,
+                    job.post.as_ref(),
+                )
+                .map_err(|error| frame_render_error(error, time));
         }
-        let mut average = LinearAverage::new(self.width as usize * self.height as usize);
+        let mut average = LinearAverage::new(self.width as usize, self.height as usize);
+        // The GPU draws each sub-frame while the next one is composed.
+        let mut in_flight: Option<f64> = None;
         for sample in &frame.motion_blur {
-            average.add(&self.render_frame(sample, sample.time, overlay)?);
+            let job = self.frame_job(sample, overlay);
+            let drawn = in_flight
+                .take()
+                .map(|previous| {
+                    self.gpu
+                        .finish_frame()
+                        .map_err(|error| frame_render_error(error, previous))
+                })
+                .transpose()?;
+            self.gpu
+                .submit_frame(job)
+                .map_err(|error| frame_render_error(error, sample.time))?;
+            in_flight = Some(sample.time);
+            if let Some(pixels) = drawn {
+                average.add_frame(&pixels);
+            }
+        }
+        if let Some(previous) = in_flight {
+            let pixels = self
+                .gpu
+                .finish_frame()
+                .map_err(|error| frame_render_error(error, previous))?;
+            average.add_frame(&pixels);
         }
         Ok(average.finish())
     }
 
-    fn render_frame(
+    fn frame_job(
         &mut self,
         frame: &gaanim_bundle::Frame,
-        time: f64,
         overlay: Option<&gaanim_animation::live::LiveOverlay>,
-    ) -> Result<Vec<u8>> {
+    ) -> crate::gpu::FrameJob {
         let resolved =
             gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
         let composed = compose_bundle_layers(
@@ -1152,16 +1197,14 @@ impl FrameRasterizer {
             camera_frame,
             frame.time as f32,
         );
-        self.gpu
-            .render_frame_layers(
-                &composed.scene,
-                composed.transition.as_ref(),
-                &composed.effects,
-                &composed.backgrounds,
-                self.bg_color,
-                post.as_ref(),
-            )
-            .map_err(|error| frame_render_error(error, time))
+        crate::gpu::FrameJob {
+            scene: composed.scene,
+            layers: composed.transition,
+            effects: composed.effects,
+            backgrounds: composed.backgrounds,
+            base_color: self.bg_color,
+            post,
+        }
     }
 }
 
@@ -1510,14 +1553,12 @@ pub(crate) fn frame_motion_blur(world: &World) -> Option<gaanim_renderer::effect
         .copied()
 }
 
-/// Compile and render the frame the world was just updated to.
-fn render_updated_world(
+/// Compile the frame the world was just updated to.
+fn updated_world_job(
     app: &mut App,
-    gpu: &mut GpuContext,
     config: &ExportConfig,
-    time: f64,
     pins: &mut gaanim_renderer::pipeline::PinnedElements,
-) -> Result<Vec<u8>> {
+) -> crate::gpu::FrameJob {
     let resolved_camera = frame_camera(app.world());
     let composed = gaanim_renderer::pipeline::compile_frame_pinned(
         app.world_mut(),
@@ -1540,16 +1581,14 @@ fn render_updated_world(
         ),
         composed.transition.as_ref(),
     );
-    let background = clear_color(app.world());
-    gpu.render_frame_layers(
-        &composed.scene,
-        composed.transition.as_ref(),
-        &composed.effects,
-        &composed.backgrounds,
-        background,
-        post_process.as_ref(),
-    )
-    .map_err(|error| frame_render_error(error, time))
+    crate::gpu::FrameJob {
+        scene: composed.scene,
+        layers: composed.transition,
+        effects: composed.effects,
+        backgrounds: composed.backgrounds,
+        base_color: clear_color(app.world()),
+        post: post_process,
+    }
 }
 
 /// Render the frame at `time`, which the world was just updated to, as the
@@ -1599,66 +1638,134 @@ fn render_motion_blurred(
         );
     }
     let times = motion_blur_times(app.world(), time, fps, blur);
-    let mut average = LinearAverage::new(config.width as usize * config.height as usize);
+    let mut average = LinearAverage::new(config.width as usize, config.height as usize);
+    // The sub-frame the GPU is drawing: the next one is updated and composed
+    // meanwhile, and the one before it is added after that.
+    let mut in_flight: Option<f64> = None;
     for &sample in &times {
         app.world_mut().resource_mut::<Timeline>().seek_request = Some(sample);
         app.update();
         check_custom_animation_errors(app.world())?;
-        let rgba = render_updated_world(app, gpu, config, sample, &mut pins)?;
-        average.add(&rgba);
+        let job = updated_world_job(app, config, &mut pins);
+        let drawn = in_flight
+            .take()
+            .map(|previous| {
+                gpu.finish_frame()
+                    .map_err(|error| frame_render_error(error, previous))
+            })
+            .transpose()?;
+        gpu.submit_frame(job)
+            .map_err(|error| frame_render_error(error, sample))?;
+        in_flight = Some(sample);
+        if let Some(pixels) = drawn {
+            average.add_frame(&pixels);
+        }
+    }
+    if let Some(previous) = in_flight {
+        let pixels = gpu
+            .finish_frame()
+            .map_err(|error| frame_render_error(error, previous))?;
+        average.add_frame(&pixels);
     }
     Ok(average.finish())
 }
 
 /// Running sum of RGBA8 frames as premultiplied linear light.
+///
+/// Bands of rows are summed and encoded on the compute task pool; each
+/// pixel's arithmetic is the same as on one thread.
 struct LinearAverage {
     sum: Vec<f32>,
+    width: usize,
     frames: u32,
 }
 
 impl LinearAverage {
-    fn new(pixels: usize) -> Self {
+    fn new(width: usize, height: usize) -> Self {
         Self {
-            sum: vec![0.0; pixels * 4],
+            sum: vec![0.0; width * height * 4],
+            width,
             frames: 0,
         }
     }
 
-    fn add(&mut self, rgba: &[u8]) {
+    /// Add a frame read back from the GPU, reading a mapped frame in place.
+    fn add_frame(&mut self, pixels: &crate::gpu::FramePixels) {
+        pixels.with_rows(self.width * 4, |rgba, stride| self.add_rows(rgba, stride));
+    }
+
+    /// Add RGBA8 rows that start every `stride` bytes.
+    fn add_rows(&mut self, rgba: &[u8], stride: usize) {
         let linear = srgb_to_linear_table();
-        for (sum, pixel) in self
-            .sum
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(rgba.as_chunks::<4>().0)
-        {
-            let alpha = f32::from(pixel[3]) / 255.0;
-            for channel in 0..3 {
-                sum[channel] += linear[usize::from(pixel[channel])] * alpha;
+        let row = self.width * 4;
+        for_row_bands(&mut self.sum, row, |first_row, band| {
+            for (y, sums) in band.chunks_exact_mut(row).enumerate() {
+                let start = (first_row + y) * stride;
+                for (sum, pixel) in sums
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(rgba[start..start + row].as_chunks::<4>().0)
+                {
+                    let alpha = f32::from(pixel[3]) / 255.0;
+                    for channel in 0..3 {
+                        sum[channel] += linear[usize::from(pixel[channel])] * alpha;
+                    }
+                    sum[3] += alpha;
+                }
             }
-            sum[3] += alpha;
-        }
+        });
         self.frames += 1;
     }
 
     fn finish(self) -> Vec<u8> {
         let frames = self.frames.max(1) as f32;
-        let mut rgba = Vec::with_capacity(self.sum.len());
-        for sum in self.sum.as_chunks::<4>().0 {
-            let alpha = sum[3] / frames;
-            for channel in 0..3 {
-                let straight = if sum[3] > 0.0 {
-                    sum[channel] / sum[3]
-                } else {
-                    0.0
-                };
-                rgba.push(linear_to_srgb_u8(straight));
+        let row = self.width * 4;
+        let mut rgba = vec![0_u8; self.sum.len()];
+        let sums = &self.sum;
+        for_row_bands(&mut rgba, row, |first_row, band| {
+            let start = first_row * row;
+            let sums = &sums[start..start + band.len()];
+            for (out, sum) in band
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(sums.as_chunks::<4>().0)
+            {
+                let alpha = sum[3] / frames;
+                for channel in 0..3 {
+                    let straight = if sum[3] > 0.0 {
+                        sum[channel] / sum[3]
+                    } else {
+                        0.0
+                    };
+                    out[channel] = linear_to_srgb_u8(straight);
+                }
+                out[3] = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
             }
-            rgba.push((alpha.clamp(0.0, 1.0) * 255.0).round() as u8);
-        }
+        });
         rgba
     }
+}
+
+/// `f` of consecutive bands of whole rows of `values` (`row` values each),
+/// given the index of each band's first row, on the compute task pool
+/// (started here when no app did, as when a bundle is rendered).
+fn for_row_bands<T: Send>(values: &mut [T], row: usize, f: impl Fn(usize, &mut [T]) + Sync) {
+    let rows = values.len() / row.max(1);
+    let pool = bevy::tasks::ComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+    let tasks = pool.thread_num().min(rows);
+    if tasks < 2 {
+        f(0, values);
+        return;
+    }
+    let band = rows.div_ceil(tasks);
+    let f = &f;
+    pool.scope(|scope| {
+        for (index, part) in values.chunks_mut(band * row).enumerate() {
+            scope.spawn(async move { f(index * band, part) });
+        }
+    });
 }
 
 fn srgb_to_linear_table() -> &'static [f32; 256] {
@@ -1857,9 +1964,9 @@ mod tests {
 
     #[test]
     fn linear_average_blends_in_linear_light() {
-        let mut average = LinearAverage::new(2);
-        average.add(&[0, 0, 0, 255, 255, 255, 255, 255]);
-        average.add(&[255, 255, 255, 255, 255, 255, 255, 0]);
+        let mut average = LinearAverage::new(2, 1);
+        average.add_rows(&[0, 0, 0, 255, 255, 255, 255, 255], 8);
+        average.add_rows(&[255, 255, 255, 255, 255, 255, 255, 0], 8);
         let out = average.finish();
         // Black and white average to linear 0.5, sRGB 188.
         assert_eq!(&out[..4], &[188, 188, 188, 255]);
@@ -1868,6 +1975,36 @@ mod tests {
         for value in [0_u8, 1, 17, 128, 254, 255] {
             let linear = srgb_to_linear_table()[usize::from(value)];
             assert_eq!(linear_to_srgb_u8(linear), value);
+        }
+    }
+
+    #[test]
+    fn linear_average_reads_padded_rows_in_bands() {
+        // Rows of 3 pixels padded to 4, as a mapped GPU frame aligns them.
+        let (width, height) = (3, 40);
+        let frame = |seed: u8| -> Vec<u8> {
+            (0..height * 16)
+                .map(|i| (i as u8).wrapping_mul(seed).wrapping_add(seed))
+                .collect()
+        };
+        let mut banded = LinearAverage::new(width, height);
+        let mut row_by_row = Vec::new();
+        for seed in [3, 7, 11] {
+            let rgba = frame(seed);
+            banded.add_rows(&rgba, 16);
+            row_by_row.push(rgba);
+        }
+        let out = banded.finish();
+        for y in 0..height {
+            let mut single = LinearAverage::new(width, 1);
+            for rgba in &row_by_row {
+                single.add_rows(&rgba[y * 16..y * 16 + 12], 12);
+            }
+            assert_eq!(
+                &out[y * 12..y * 12 + 12],
+                single.finish().as_slice(),
+                "row {y}"
+            );
         }
     }
 

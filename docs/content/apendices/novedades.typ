@@ -35,6 +35,18 @@ exportaciones respetan los fps que pidas.
 - Los ecos de un grupo se evalúan una vez por nivel de eco en lugar de una vez
   por copia, y los efectos por objeto que cambian de tamaño ya no recompilan
   sus pases en cada fotograma.
+- El motion blur prepara cada subfotograma mientras la GPU dibuja el anterior
+  y los promedia en varios núcleos: exportar con motion blur tarda la mitad.
+- Las sombras difuminadas, los brillos y el desenfoque se difuminan en la
+  GPU una sola vez por objeto: un texto con sombra que se mueve exporta cinco
+  veces más rápido.
+- Los MP4 y WebM pasan a YUV en la GPU, que envía a FFmpeg menos de la mitad
+  de bytes por fotograma.
+- Los morph de una figura, un texto o una fórmula a otra emparejan sus
+  contornos una vez por animación en lugar de en cada fotograma.
+- Una escena sin segmentos que encadena cientos de animaciones salta desde el
+  último `play` en el que todas terminaron, en lugar de repetirlas desde el
+  principio.
 - Las capturas de `--diff` codifican los PNG en varios hilos mientras se
   dibujan los fotogramas siguientes.
 - Exportar arranca entre 0,3 y 0,5 s antes en Windows, porque la GPU se busca
@@ -74,6 +86,9 @@ exportaciones respetan los fps que pidas.
   preset.
 - Los MP4 con `libx264` usan `-tune animation`, y los WebM salen algo más
   grandes con la misma CRF.
+- Las sombras difuminadas, los brillos y el desenfoque son un difuminado
+  gaussiano real: sus bordes cambian levemente y un objeto desenfocado
+  muestra su color exacto.
 - Las aristas de las mallas 3D opacas se sellan con un trazo centrado: la
   silueta sobresale medio píxel más que antes.
 - Un objeto con `Updater.pulse` y `Updater.rotate` ahora late y gira; antes

@@ -364,6 +364,9 @@ pub struct GaanimRenderCache {
     /// Fragments built without their drop shadow, which the composition
     /// draws for their group.
     shared_shadows: std::collections::HashSet<ObjectId>,
+    /// Layers of the soft effects of fragments built for a canvas that runs
+    /// object effects (see [`crate::soft_effects`]).
+    soft_layers: HashMap<ObjectId, Arc<[crate::object_effects::EffectLayer]>>,
 }
 
 /// Values of the timeline-driven components a retained fragment was built from.
@@ -468,6 +471,10 @@ pub struct ExtractedElement {
     outline: Option<Arc<kurbo::BezPath>>,
     render_order: RenderOrder,
     scene: Arc<vello::Scene>,
+    /// The soft shadow and glow images `scene` draws, which a renderer that
+    /// runs object effects fills before the frame (see
+    /// [`crate::soft_effects`]).
+    soft: Arc<[crate::object_effects::EffectLayer]>,
     clip_mask: Option<ClipMask>,
     /// Blend mode of an [`ElementBlend`] element, drawn in its own layer
     /// clipped to `opacity_bounds`.
@@ -583,6 +590,7 @@ impl ExtractedElement {
     /// the screen.
     fn seen_through(&self, content: kurbo::Affine) -> Self {
         Self {
+            soft: self.soft.clone(),
             entity: self.entity,
             recipe: self.recipe.clone(),
             lottie: self.lottie.clone(),
@@ -1074,6 +1082,12 @@ fn append_group_shadow(scene: &mut vello::Scene, run: &[ExtractedElement]) {
                     .map(|element| placed * *element),
             );
         }
+    }
+    if let Some(image) =
+        crate::soft_effects::group_shadow_image(first.entity.to_bits(), &outline, &shared.shadow)
+    {
+        scene.append(&image, Some(first.transform));
+        return;
     }
     let mut local = vello::Scene::new();
     draw_shadow(&mut local, &outline, &shared.shadow, ShadowCaster::Fill);
@@ -2051,6 +2065,7 @@ pub(crate) fn draw_soft_fill(
 }
 
 /// The painted silhouette a drop shadow copies.
+#[derive(Clone, Copy)]
 pub(crate) enum ShadowCaster<'a> {
     /// The region the fill (or clipped raster) covers.
     Fill,
@@ -2087,15 +2102,7 @@ pub(crate) fn draw_shadow(
     let sharp = shadow.blur_radius.is_nan() || shadow.blur_radius <= 0.0;
     let stroke_reach = match &caster {
         ShadowCaster::Fill => 0.0,
-        ShadowCaster::Stroke { style, view, .. } => {
-            let corner = style.miter_limit.max(std::f64::consts::SQRT_2);
-            let pen_scale = view.map_or(1.0, |view| {
-                let [a, b, c, d, _, _] = view.inverse().as_coeffs();
-                (a * a + b * b + c * c + d * d).sqrt()
-            });
-            let reach = style.width.abs() * corner * pen_scale;
-            if reach.is_finite() { reach } else { 0.0 }
-        }
+        ShadowCaster::Stroke { style, view, .. } => shadow_stroke_reach(style, *view),
         ShadowCaster::None => return,
     };
     if sharp {
@@ -2163,6 +2170,99 @@ pub(crate) fn draw_shadow(
     }
     scene.pop_layer();
     scene.pop_layer();
+}
+
+/// How far a stroke casting a shadow reaches beyond its path.
+fn shadow_stroke_reach(style: &kurbo::Stroke, view: Option<kurbo::Affine>) -> f64 {
+    let corner = style.miter_limit.max(std::f64::consts::SQRT_2);
+    let pen_scale = view.map_or(1.0, |view| {
+        let [a, b, c, d, _, _] = view.inverse().as_coeffs();
+        (a * a + b * b + c * c + d * d).sqrt()
+    });
+    let reach = style.width.abs() * corner * pen_scale;
+    if reach.is_finite() { reach } else { 0.0 }
+}
+
+/// [`draw_shadow`] as an image blurred on the GPU (see
+/// [`crate::soft_effects`]), returning the layer that fills it; `None`,
+/// having drawn nothing, for a sharp shadow or one nothing casts.
+pub(crate) fn draw_shadow_on_gpu(
+    scene: &mut vello::Scene,
+    path: &kurbo::BezPath,
+    shadow: &DropShadow,
+    caster: ShadowCaster<'_>,
+) -> Option<crate::object_effects::EffectLayer> {
+    if !(shadow.blur_radius.is_finite() && shadow.blur_radius > 0.0) {
+        return None;
+    }
+    let offset = kurbo::Affine::translate((shadow.offset.x, shadow.offset.y));
+    let shifted = offset * path;
+    let black = peniko::Brush::Solid(peniko::Color::BLACK);
+    let mut silhouette = vello::Scene::new();
+    let reach = match caster {
+        ShadowCaster::Fill => {
+            silhouette.fill(peniko::Fill::NonZero, offset, &black, None, path);
+            0.0
+        }
+        // The vector shadow stacks copies of the plain stroke too.
+        ShadowCaster::Stroke { style, view, .. } => {
+            draw_stroke(
+                &mut silhouette,
+                style,
+                kurbo::Affine::IDENTITY,
+                &black,
+                view,
+                &shifted,
+            );
+            shadow_stroke_reach(style, view)
+        }
+        ShadowCaster::None => return None,
+    };
+    let bounds = shifted.bounding_box().inflate(reach, reach);
+    crate::soft_effects::draw_shadow_image(scene, silhouette, bounds, shadow)
+}
+
+/// A [`GaussianBlur`] of the fill (unless `None`) and stroke of `path` as
+/// an image blurred on the GPU (see [`crate::soft_effects`]), returning the
+/// layer that fills it; `None`, having drawn nothing, when there is nothing
+/// to blur. `fill_alpha` is the fill's write-on opacity.
+pub(crate) fn draw_blur_on_gpu(
+    scene: &mut vello::Scene,
+    path: &kurbo::BezPath,
+    fill: Option<&peniko::Brush>,
+    stroke: Option<(&peniko::Brush, &kurbo::Stroke)>,
+    view: Option<kurbo::Affine>,
+    sigma: f64,
+    fill_alpha: f32,
+) -> Option<crate::object_effects::EffectLayer> {
+    if fill.is_none() && stroke.is_none() || path.elements().is_empty() {
+        return None;
+    }
+    let mut content = vello::Scene::new();
+    if let Some(brush) = fill {
+        content.fill(
+            peniko::Fill::NonZero,
+            kurbo::Affine::IDENTITY,
+            brush,
+            None,
+            path,
+        );
+    }
+    let mut reach = 0.0;
+    if let Some((brush, style)) = stroke {
+        draw_stroke(
+            &mut content,
+            style,
+            kurbo::Affine::IDENTITY,
+            brush,
+            view,
+            path,
+        );
+        reach = shadow_stroke_reach(style, view);
+    }
+    let bounds = path.bounding_box().inflate(reach, reach);
+    let alpha = if fill.is_some() { fill_alpha } else { 1.0 };
+    crate::soft_effects::draw_blur_image(scene, content, bounds, sigma, alpha)
 }
 
 pub(crate) fn draw_soft_stroke(
@@ -2347,6 +2447,7 @@ pub fn gaanim_render_cache_sweep_system(
     }
     let active: std::collections::HashSet<ObjectId> = query_mobj_ids.iter().map(|m| m.0).collect();
     cache.fragment_cache.retain(|id, _| active.contains(id));
+    cache.soft_layers.retain(|id, _| active.contains(id));
     cache.stroke_views.retain(|id, _| active.contains(id));
     cache.fragment_inputs.retain(|id, _| active.contains(id));
     cache.screen_overlays.retain(|id, _| active.contains(id));
@@ -2419,7 +2520,11 @@ fn compile_scene_with_pins(
     pins: Option<&mut PinnedElements>,
     effects: bool,
 ) -> ComposedFrame {
-    let mut extraction = extract_world(world, camera, pins, true);
+    let mut extraction = extract_world(world, camera, pins, true, effects);
+    let soft = soft_layers(&extraction.elements);
+    if effects {
+        crate::soft_effects::collect_group_shadows();
+    }
     divert_mattes(&mut extraction.elements, &world_mattes(world));
     // As dense as the output, like a replay of the captured frame.
     let output_width = world
@@ -2436,12 +2541,13 @@ fn compile_scene_with_pins(
     let effect_layers = if effects {
         crate::object_effects::age_effect_images();
         let evaluated = world_effects(world, &extraction.elements, extraction.background_time);
-        let mut layers = divert_effects(
+        let mut layers = soft;
+        layers.extend(divert_effects(
             &mut extraction.elements,
             &evaluated,
             extraction.background_time,
             effect_density,
-        );
+        ));
         // Glass reads what is drawn behind it, effects included.
         let glasses = world_glasses(world);
         let background = world.get_resource::<CanvasBackground>();
@@ -2467,13 +2573,41 @@ fn compile_scene_with_pins(
         0.0,
         effects.then_some(&mut background_requests),
     );
-    frame.effects = effect_layers;
+    frame.effects = with_group_shadows(effect_layers, effects);
     frame.backgrounds = background_requests;
     if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
         append_live_overlay(frame.top_mut(), overlay);
     }
     clear_elements(&mut extraction.elements);
     frame
+}
+
+/// `layers` after the group shadows the composition drew, when it
+/// collected them (`collected`): they draw first, since a shader effect may
+/// draw them.
+fn with_group_shadows(
+    layers: Vec<crate::object_effects::EffectLayer>,
+    collected: bool,
+) -> Vec<crate::object_effects::EffectLayer> {
+    if !collected {
+        return layers;
+    }
+    let mut all = crate::soft_effects::take_group_shadows();
+    all.extend(layers);
+    all
+}
+
+/// The layers of the soft effects `elements` draw, each image once (camera
+/// views draw copies of elements). Collected before mattes and shader
+/// effects take elements away, since they still draw the images.
+fn soft_layers(elements: &[ExtractedElement]) -> Vec<crate::object_effects::EffectLayer> {
+    let mut seen = std::collections::HashSet::new();
+    elements
+        .iter()
+        .flat_map(|element| element.soft.iter())
+        .filter(|layer| seen.insert(layer.image.data.id()))
+        .cloned()
+        .collect()
 }
 
 /// Pixels per scene unit of an effect texture without a camera.
@@ -2579,13 +2713,20 @@ struct ExtractedFragment {
     lottie: Option<Arc<vello::Scene>>,
     scene: Arc<vello::Scene>,
     overlay: Option<Arc<vello::Scene>>,
+    /// Built for a renderer that runs object effects, with these soft
+    /// effects (see [`crate::fragment::build_fragment_with`]).
+    gpu: bool,
+    soft: Arc<[crate::object_effects::EffectLayer]>,
 }
 
+/// With `gpu`, fragments draw their soft effects as images that the
+/// elements' [`ExtractedElement::soft`] layers fill.
 fn extract_world(
     world: &mut World,
     camera: Option<&gaanim_math::Camera>,
     mut pins: Option<&mut PinnedElements>,
     cull: bool,
+    gpu: bool,
 ) -> WorldExtraction {
     // Fragments of drawables not extracted this frame are dropped with it.
     let mut previous_fragments = world
@@ -2866,19 +3007,27 @@ fn extract_world(
             .remove(&entity)
             .filter(|cached| {
                 cached.lottie.as_ref().map(Arc::as_ptr) == lottie_scene.map(Arc::as_ptr)
+                    && cached.gpu == gpu
                     && *cached.recipe == recipe
             })
             .unwrap_or_else(|| {
-                let built = build_fragment(&recipe, lottie_scene.map(Arc::as_ref));
+                let built = crate::fragment::build_fragment_with(
+                    &recipe,
+                    lottie_scene.map(Arc::as_ref),
+                    gpu,
+                );
                 ExtractedFragment {
                     recipe: Arc::new(recipe),
                     lottie: lottie_scene.cloned(),
                     scene: Arc::new(built.scene),
                     overlay: built.overlay.map(Arc::new),
+                    gpu,
+                    soft: built.soft.into(),
                 }
             });
         let recipe = Arc::clone(&fragment.recipe);
         let scene = Arc::clone(&fragment.scene);
+        let soft = Arc::clone(&fragment.soft);
         let overlay = fragment.overlay.clone();
         fragments.insert(entity, fragment);
         // Only translucent or blended elements open a layer; a Lottie draws
@@ -2935,6 +3084,7 @@ fn extract_world(
         }
         let outline = glass_root.and_then(|_| recipe.path.clone());
         extracted.push(ExtractedElement {
+            soft,
             entity,
             recipe: Some(recipe),
             lottie: lottie_opt.map(|lottie| Arc::clone(lottie.scene())),
@@ -3276,6 +3426,7 @@ fn three_d_elements<'a>(
                 let scene = build_fragment(&recipe, None).scene;
                 let composition = &composition[&entity];
                 ExtractedElement {
+                    soft: Default::default(),
                     persistent: false,
                     entity,
                     recipe: Some(Arc::new(recipe)),
@@ -3701,6 +3852,7 @@ fn divert_glass(
             to_pixels: kurbo::Affine::IDENTITY,
             image,
             request,
+            fixed: false,
         });
         for element in elements
             .iter_mut()
@@ -3975,6 +4127,7 @@ fn divert_effects(
             to_pixels: image_to_world.inverse(),
             image,
             request,
+            fixed: false,
         });
         let first = members[0];
         let mut index = 0;
@@ -4295,7 +4448,7 @@ pub struct FrameCapture {
 /// Capture the drawables of the world as it stands, without culling, for a
 /// replay that composites the same frame with [`compose_captured`].
 pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) -> FrameCapture {
-    let extraction = extract_world(world, camera, None, false);
+    let extraction = extract_world(world, camera, None, false, false);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
     let mattes = world_mattes(world);
     let glasses = world_glasses(world);
@@ -4310,7 +4463,7 @@ pub fn capture_frame_pinned(
     camera: Option<&gaanim_math::Camera>,
     pins: &mut PinnedElements,
 ) -> FrameCapture {
-    let extraction = extract_world(world, camera, Some(pins), false);
+    let extraction = extract_world(world, camera, Some(pins), false, false);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
     let mattes = world_mattes(world);
     let glasses = world_glasses(world);
@@ -4459,8 +4612,13 @@ fn compose_captured_layers(
         .elements
         .iter()
         .map(|element| {
-            let (scene, overlay) = store.get(&element.recipe, element.lottie.as_ref());
+            let (scene, overlay, soft) = store.get_with(
+                &element.recipe,
+                element.lottie.as_ref(),
+                effect_density.is_some(),
+            );
             ExtractedElement {
+                soft,
                 persistent: false,
                 entity: element.entity,
                 recipe: None,
@@ -4514,20 +4672,24 @@ fn compose_captured_layers(
             }
         })
         .collect();
+    let mut effects = soft_layers(&elements);
+    if effect_density.is_some() {
+        crate::soft_effects::collect_group_shadows();
+    }
     divert_mattes(&mut elements, &frame.mattes);
     if effect_density.is_some() {
         crate::object_effects::age_effect_images();
     }
-    let effects = match effect_density {
-        Some(density) if !frame.effects.is_empty() => divert_effects(
+    if let Some(density) = effect_density
+        && !frame.effects.is_empty()
+    {
+        effects.extend(divert_effects(
             &mut elements,
             &frame.effects,
             frame.background_time,
             density,
-        ),
-        _ => Vec::new(),
-    };
-    let mut effects = effects;
+        ));
+    }
     if let Some(density) = effect_density
         && !frame.glasses.is_empty()
     {
@@ -4550,7 +4712,7 @@ fn compose_captured_layers(
         rest,
         gpu,
     );
-    composed.effects = effects;
+    composed.effects = with_group_shadows(effects, effect_density.is_some());
     composed
 }
 
@@ -5133,19 +5295,37 @@ pub fn gaanim_render_system(
             cache.fragment_inputs.insert(mobj_id.0, inputs);
         }
         let mut rebuilt_overlay = None;
+        let mut rebuilt_soft = None;
+        let gpu = effect_layers.is_some();
         let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
             let recipe = fragment_recipe(FragmentParts {
                 shadow: if shared { None } else { parts.shadow },
                 ..parts
             });
-            let built = build_fragment(
+            let built = crate::fragment::build_fragment_with(
                 &recipe,
                 lottie_ref.as_deref().map(|lottie| lottie.scene().as_ref()),
+                gpu,
             );
             rebuilt_overlay = Some(built.overlay);
+            rebuilt_soft = Some(built.soft);
             Arc::new(built.scene)
         });
         let fragment = Arc::clone(fragment);
+        match rebuilt_soft {
+            Some(soft) if soft.is_empty() => {
+                cache.soft_layers.remove(&mobj_id.0);
+            }
+            Some(soft) => {
+                cache.soft_layers.insert(mobj_id.0, soft.into());
+            }
+            None => {}
+        }
+        let soft = cache
+            .soft_layers
+            .get(&mobj_id.0)
+            .cloned()
+            .unwrap_or_default();
         match rebuilt_overlay {
             Some(Some(overlay)) => {
                 cache.screen_overlays.insert(mobj_id.0, Arc::new(overlay));
@@ -5210,6 +5390,7 @@ pub fn gaanim_render_system(
             })
             .map(reached_rect);
         local_extracted.push(ExtractedElement {
+            soft,
             entity,
             recipe: None,
             lottie: None,
@@ -5285,6 +5466,10 @@ pub fn gaanim_render_system(
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
     local_extracted.sort_by(ExtractedElement::draw_order);
+    let soft = soft_layers(local_extracted);
+    if effect_layers.is_some() {
+        crate::soft_effects::collect_group_shadows();
+    }
 
     // Drawables with a matte draw through it, before any effect takes them.
     let mut mattes: Vec<CapturedMatte> = matte_query
@@ -5310,7 +5495,14 @@ pub fn gaanim_render_system(
                 |entity| effect_query.get(entity).ok().cloned(),
                 |entity| signal_query.get(entity).ok().map(|signal| signal.value),
             );
-            divert_effects(local_extracted, &evaluated, time_seconds, pixels_per_unit)
+            let mut layers = soft;
+            layers.extend(divert_effects(
+                local_extracted,
+                &evaluated,
+                time_seconds,
+                pixels_per_unit,
+            ));
+            layers
         }
         None => Vec::new(),
     };
@@ -5348,11 +5540,6 @@ pub fn gaanim_render_system(
             shader_frame.is_some().then_some(&mut shader_requests),
         ));
     }
-    if let Some(published) = effect_layers.as_deref_mut()
-        && !(published.0.is_empty() && layers.is_empty())
-    {
-        published.0 = layers;
-    }
     if let Some(canvas_bg) = canvas_bg.as_deref() {
         canvas_bg.evaluate_uniforms(
             &background_times(time_seconds, transition_frame.as_deref()),
@@ -5367,6 +5554,13 @@ pub fn gaanim_render_system(
         ambient.map_or(0.0, |clock| clock.rest),
         shader_frame.is_some().then_some(&mut shader_requests),
     );
+    // Composing drew the group shadows, whose images the canvas fills too.
+    let layers = with_group_shadows(layers, effect_layers.is_some());
+    if let Some(published) = effect_layers.as_deref_mut()
+        && !(published.0.is_empty() && layers.is_empty())
+    {
+        published.0 = layers;
+    }
     if let Some(frame) = shader_frame.as_mut() {
         frame.0 = shader_requests;
     }
@@ -6470,6 +6664,7 @@ mod tests {
     #[test]
     fn opacity_runs_clip_to_their_own_elements_not_the_frame() {
         let element = |rect| ExtractedElement {
+            soft: Default::default(),
             persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
@@ -6523,6 +6718,7 @@ mod tests {
             &path,
         );
         ExtractedElement {
+            soft: Default::default(),
             persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
@@ -6644,6 +6840,7 @@ mod tests {
         let faded: Vec<ExtractedElement> = glyphs
             .iter()
             .map(|glyph| ExtractedElement {
+                soft: Default::default(),
                 opacity: 0.5,
                 group_opacity: 0.5,
                 ..glyph.clone()
@@ -6676,6 +6873,7 @@ mod tests {
     #[test]
     fn consecutive_glyphs_with_the_same_opacity_share_one_compositor_run() {
         let element = |opacity| ExtractedElement {
+            soft: Default::default(),
             persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
@@ -6716,6 +6914,7 @@ mod tests {
     #[test]
     fn a_translucent_single_solid_paint_is_faded_without_a_layer() {
         let element = |scene: vello::Scene| ExtractedElement {
+            soft: Default::default(),
             persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
@@ -6785,6 +6984,7 @@ mod tests {
     #[test]
     fn blended_elements_never_join_a_shared_opacity_layer() {
         let element = |blend| ExtractedElement {
+            soft: Default::default(),
             persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
@@ -6832,6 +7032,7 @@ mod tests {
             ..ClipMask::default()
         };
         let element = |clip_mask| ExtractedElement {
+            soft: Default::default(),
             persistent: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
