@@ -14,18 +14,12 @@ gaanim_animation = { path = "../gaanim_animation" }
 gaanim_objects = { path = "../gaanim_objects" }
 
 # Third-party dependencies from workspace
-bevy = { workspace = true, features = [
-    "bevy_core_pipeline",
-    "bevy_image",
-    "bevy_log",
-    "bevy_render",
-    "bevy_window",
-    "hdr",
-] }
+bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 serde_json = { workspace = true }
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 base64 = "0.22"
@@ -41,6 +35,24 @@ pollster = "0.4"
 
 # Serialization (conditional)
 serde = { version = "1.0", features = ["derive"], optional = true }
+
+# The playground's Pyodide extension (wasm32-unknown-emscripten) only captures
+# frames on the CPU; Bevy's render subsystems enable `bevy_app/web` on wasm32,
+# whose wasm-bindgen glue Pyodide cannot load.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+bevy = { workspace = true, features = [
+    "bevy_core_pipeline",
+    "bevy_image",
+    "bevy_log",
+    "bevy_render",
+    "bevy_window",
+    "hdr",
+] }
+
+# Without Bevy's renderer, which sets it on wasm32, Vello's wgpu resources are
+# not Send without threads; the extension runs on one thread.
+[target.'cfg(target_os = "emscripten")'.dependencies]
+wgpu = { version = "29", default-features = false, features = ["fragile-send-sync-non-atomic-wasm"] }
 
 [features]
 dev-dynamic = [

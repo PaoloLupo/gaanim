@@ -2,7 +2,9 @@
 
 use bevy::prelude::*;
 use gaanim_math::Camera;
+#[cfg(not(target_os = "emscripten"))]
 use gaanim_renderer::pipeline::GaanimFullWindowClearCamera;
+#[cfg(not(target_os = "emscripten"))]
 use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
@@ -40,14 +42,14 @@ fn replay_prepared<R>(
     let mut timeline = match world.remove_resource::<Timeline>() {
         Some(res) => res,
         None => {
-            bevy::prelude::error!("Timeline resource missing");
+            tracing::error!("Timeline resource missing");
             return None;
         }
     };
     let mut font_registry = match world.remove_resource::<gaanim_text::font::FontRegistry>() {
         Some(res) => res,
         None => {
-            bevy::prelude::error!("FontRegistry resource missing");
+            tracing::error!("FontRegistry resource missing");
             world.insert_resource(timeline);
             return None;
         }
@@ -55,7 +57,7 @@ fn replay_prepared<R>(
     let mut text_config = match world.remove_resource::<gaanim_text::prelude::TextConfig>() {
         Some(res) => res,
         None => {
-            bevy::prelude::error!("TextConfig resource missing");
+            tracing::error!("TextConfig resource missing");
             world.insert_resource(timeline);
             world.insert_resource(font_registry);
             return None;
@@ -65,6 +67,46 @@ fn replay_prepared<R>(
     canvas.register_theme_fonts(&mut font_registry);
 
     let result = {
+        #[cfg(not(target_os = "emscripten"))]
+        let cameras = PreviewCameras::prepare(world);
+
+        let mut commands = world.commands();
+        commands.insert_resource(Camera::ortho_2d_frame(
+            frame.width,
+            frame.height,
+            width,
+            height,
+        ));
+        #[cfg(not(target_os = "emscripten"))]
+        cameras.spawn(&mut commands);
+
+        compile(&mut commands, &mut timeline, &font_registry, &text_config)
+    };
+
+    let cached_duration = timeline.cached_duration;
+    world.insert_resource(timeline);
+    world.insert_resource(font_registry);
+    world.insert_resource(text_config);
+
+    if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
+        tl.loop_range = Some((0.0, cached_duration));
+    }
+    Some(result)
+}
+
+/// The Bevy cameras that show the Vello canvas in a window. The playground's
+/// Pyodide extension (wasm32-unknown-emscripten) records without them.
+#[cfg(not(target_os = "emscripten"))]
+struct PreviewCameras {
+    has_camera_2d: bool,
+    has_clear_camera: bool,
+}
+
+#[cfg(not(target_os = "emscripten"))]
+impl PreviewCameras {
+    /// Find the cameras the world already has, and give a retained Vello
+    /// camera the overlay policy of a new one.
+    fn prepare(world: &mut World) -> Self {
         let has_camera_2d = world
             .query_filtered::<Entity, With<Camera2d>>()
             .iter(world)
@@ -84,18 +126,18 @@ fn replay_prepared<R>(
             camera.order = 1;
             camera.clear_color = ClearColorConfig::None;
         }
+        Self {
+            has_camera_2d,
+            has_clear_camera,
+        }
+    }
 
-        let mut commands = world.commands();
-        commands.insert_resource(Camera::ortho_2d_frame(
-            frame.width,
-            frame.height,
-            width,
-            height,
-        ));
+    /// Spawn the cameras the world lacks.
+    fn spawn(self, commands: &mut Commands) {
         // Spawn the Vello camera first. bevy_egui assigns the primary context
         // to the first camera created, so this must be the camera that renders
         // last and therefore owns the egui pass.
-        if !has_camera_2d {
+        if !self.has_camera_2d {
             commands.spawn((
                 Camera2d,
                 VelloView,
@@ -107,7 +149,7 @@ fn replay_prepared<R>(
                 bevy::core_pipeline::tonemapping::Tonemapping::None,
             ));
         }
-        if !has_clear_camera {
+        if !self.has_clear_camera {
             // Clear the complete render target before the canvas is drawn.
             // RenderLayers::none keeps this camera color-only.
             commands.spawn((
@@ -121,19 +163,7 @@ fn replay_prepared<R>(
                 bevy::camera::visibility::RenderLayers::none(),
             ));
         }
-
-        compile(&mut commands, &mut timeline, &font_registry, &text_config)
-    };
-
-    let cached_duration = timeline.cached_duration;
-    world.insert_resource(timeline);
-    world.insert_resource(font_registry);
-    world.insert_resource(text_config);
-
-    if let Some(mut tl) = world.get_resource_mut::<Timeline>() {
-        tl.loop_range = Some((0.0, cached_duration));
     }
-    Some(result)
 }
 
 /// Entities that belong to a replayed scene and are removed with it.

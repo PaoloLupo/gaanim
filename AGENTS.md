@@ -20,7 +20,7 @@ This file guides repository work; model selection belongs to the calling client.
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 24 workspace members: 23 crates under
+- **Workspace root:** `Cargo.toml` defines 25 workspace members: 24 crates under
   `crates/` plus the `docs` application. `crates/gaanim_engine` is excluded on
   purpose (see below).
 - **Key crates (bottom-up):**
@@ -76,6 +76,19 @@ This file guides repository work; model selection belongs to the calling client.
     compiled to wasm32 + WebGPU. `just web` builds it into `dist/web/`. Code the
     web cannot run (native windows, files, threads, FFmpeg) is gated on
     `target_arch = "wasm32"` or goes through `gaanim_editor::platform`.
+  - `gaanim_pyodide` — the web playground: `gaanim.gaanim_core` built for
+    `wasm32-unknown-emscripten` as a Pyodide extension (empty on other
+    targets), plus the page in `crates/gaanim_pyodide/web` (Monaco, Jedi
+    completions over the stubs, uploads kept in IndexedDB). Scripts run in
+    Pyodide; `scene.render()` submits to the playground host
+    (`gaanim_python/src/playground.rs`), which records a `.gaanim` bundle that
+    the embedded web player (`?embed`) plays. `just playground` builds
+    `dist/playground/`. On Emscripten, Bevy's `wasm32` web glue cannot load, so
+    the engine builds without Bevy's render, asset, log, window and audio
+    subsystems: those features and the code that needs them are gated on
+    `not(target_os = "emscripten")`, with stand-ins for `Visibility` and
+    `ClearColor` in `gaanim_scene`. Log with `tracing::*!`, not Bevy's macros.
+    Check with `cargo check -p gaanim_python --target wasm32-unknown-emscripten`.
 - **Repository overview:** `README.md` is the current user/developer entry point.
   Planned work lives in GitHub issues; verify proposals against code and tests.
 
@@ -103,6 +116,7 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 | Measure runtime budgets | `just benchmark smoke` (or `standard`) |
 | Build documentation | `just docs` |
 | Build the web player | `just web` → `dist/web/` (needs the `wasm32-unknown-unknown` target and a matching `wasm-bindgen-cli`) |
+| Build the web playground | `just playground` → `dist/playground/` (also needs the `wasm32-unknown-emscripten` target and Emscripten 5.0.3 in `EMSDK`) |
 | Sanity check | `just doctor` — checks workspace, builds application binaries, and runs `--help` |
 | Bootstrap venv | `just bootstrap` — creates `.venv` and installs `build`/`hatchling` |
 | Full clean | `just clean` — deletes `.venv` and `cargo clean` |

@@ -1,0 +1,220 @@
+/* Gaanim Playground: the web player's palette, with a code editor beside it. */
+:root {
+  --ink: #0f1015;
+  --surface: #16171e;
+  --raised: #1c1d26;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --text: #eceef3;
+  --muted: #9499a6;
+  --faint: #5c616e;
+  --accent: #70aaff;
+  --loop: #60ce98;
+  --warn: #f0c674;
+  --danger: #ff7676;
+  --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --side: 46%;
+  --player: 58%;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--ink);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+button, select, input { font: inherit; color: inherit; }
+code { font-family: var(--mono); font-size: 0.92em; color: var(--text); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.spacer { flex: 1; }
+[hidden] { display: none !important; }
+
+/* ---- Top bar ------------------------------------------------------------ */
+.bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface);
+  min-width: 0;
+}
+.brand { display: flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; margin-right: 6px; white-space: nowrap; }
+.brand img { image-rendering: pixelated; }
+.brand strong { font-weight: 600; color: var(--loop); }
+button.primary, button.ghost, .select select {
+  height: 32px; padding: 0 12px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+button.primary {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 0; background: var(--loop); color: #0d1a13; font-weight: 600;
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+button.primary:disabled { background: #2a3a32; color: #6f8a7c; cursor: progress; }
+button.ghost { border: 1px solid var(--line-strong); background: transparent; }
+button.ghost:hover:not(:disabled) { background: var(--raised); }
+button.ghost.danger { color: var(--danger); border-color: rgba(255, 118, 118, 0.4); }
+button:disabled { opacity: 0.6; cursor: default; }
+button:focus-visible, select:focus-visible, .splitter:focus-visible, .drop:focus-within {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.select select {
+  appearance: none; border: 1px solid var(--line-strong); background: var(--ink);
+  padding-right: 28px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 14px, calc(100% - 10px) 14px;
+  background-size: 5px 5px; background-repeat: no-repeat;
+  max-width: 260px;
+}
+.select.compact select { max-width: 96px; }
+.menu { position: relative; }
+.menu-list {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 170px;
+  display: flex; flex-direction: column; padding: 4px;
+  background: var(--raised); border: 1px solid var(--line-strong); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.menu-list button {
+  text-align: left; padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; cursor: pointer;
+  font-family: var(--mono); font-size: 13px;
+}
+.menu-list button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+
+/* ---- Layout ------------------------------------------------------------- */
+#layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6px minmax(300px, var(--side));
+  min-height: 0;
+}
+.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.side { display: grid; grid-template-rows: minmax(120px, var(--player)) 6px minmax(100px, 1fr); }
+.splitter { background: var(--line); transition: background 0.15s; }
+.splitter:hover, .splitter.dragging { background: var(--accent); }
+.splitter.vertical { cursor: col-resize; }
+.splitter.horizontal { cursor: row-resize; }
+
+.tabs {
+  display: flex; align-items: center; gap: 2px; padding: 0 8px; min-height: 34px;
+  border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.tab {
+  padding: 8px 10px; border: 0; background: transparent; color: var(--muted);
+  border-bottom: 2px solid transparent; font-size: 13px; cursor: pointer;
+}
+span.tab { cursor: default; font-family: var(--mono); }
+.tab.active { color: var(--text); border-bottom-color: var(--loop); }
+.tab .count { margin-left: 4px; padding: 0 6px; border-radius: 9px; background: var(--raised); color: var(--muted); font-size: 11px; }
+.tabs .hint { margin-left: auto; color: var(--faint); font-size: 12px; font-family: var(--mono); }
+button.icon {
+  display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+button.icon:hover { background: var(--raised); color: var(--text); }
+
+.editor { flex: 1; min-height: 0; position: relative; }
+.placeholder { display: grid; place-items: center; height: 100%; color: var(--faint); }
+
+/* ---- Player ------------------------------------------------------------- */
+.player-wrap { position: relative; background: #000; min-height: 0; }
+#player { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+.player-overlay {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; padding: 6px 14px;
+  background: rgba(22, 23, 30, 0.92); border: 1px solid var(--line-strong); border-radius: 18px;
+  color: var(--muted); font-size: 13px; pointer-events: none;
+}
+.spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--line-strong); border-top-color: var(--loop);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Console and files -------------------------------------------------- */
+.panel { display: flex; flex-direction: column; min-height: 0; background: var(--ink); }
+.tab-body { flex: 1; min-height: 0; overflow: auto; }
+#console {
+  padding: 8px 12px; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word;
+}
+#console .line { margin: 0; }
+#console .stderr { color: #d7b3b3; }
+#console .error { color: var(--danger); }
+#console .info { color: var(--muted); }
+#console .ok { color: var(--loop); }
+#console a { color: var(--accent); cursor: pointer; text-decoration: underline dotted; }
+#console .empty { color: var(--faint); font-family: system-ui, sans-serif; }
+
+.files { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.drop {
+  display: block; padding: 18px 14px; text-align: center; cursor: pointer;
+  border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface);
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop:hover, .drop.over { border-color: var(--loop); background: var(--raised); }
+.drop strong { display: block; font-weight: 500; }
+.drop span { color: var(--faint); font-size: 12.5px; }
+.file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.file-list li {
+  display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 6px 8px; border-radius: 6px; background: var(--surface);
+}
+.file-list .thumb {
+  width: 36px; height: 36px; border-radius: 4px; background: var(--raised) center / cover no-repeat;
+  display: grid; place-items: center; color: var(--muted); font-size: 10px; font-family: var(--mono);
+}
+.file-list .name { font-family: var(--mono); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-list .meta { color: var(--faint); font-size: 12px; }
+.file-list .actions { display: flex; gap: 4px; }
+.file-list .actions button {
+  height: 26px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--line-strong);
+  background: transparent; cursor: pointer; font-size: 12px;
+}
+.file-list .actions button:hover { background: var(--raised); }
+.file-list .actions button.remove { color: var(--danger); border-color: transparent; }
+.note { margin: 0; color: var(--faint); font-size: 12.5px; }
+
+/* ---- Status bar --------------------------------------------------------- */
+.status {
+  display: flex; align-items: center; gap: 8px; padding: 4px 12px; min-height: 26px;
+  border-top: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 12px;
+}
+.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.status .dot.busy { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.status .dot.ready { background: var(--loop); }
+.status .dot.error { background: var(--danger); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.status progress { width: 140px; height: 4px; appearance: none; border: 0; background: #262833; }
+.status progress::-webkit-progress-bar { background: #262833; }
+.status progress::-webkit-progress-value { background: var(--loop); }
+.status progress::-moz-progress-bar { background: var(--loop); }
+#versions { color: var(--faint); font-family: var(--mono); }
+
+#toast {
+  position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 30;
+  max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 8px;
+  background: var(--raised); border: 1px solid var(--line-strong); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+#dropping {
+  position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
+  background: rgba(15, 16, 21, 0.8); pointer-events: none;
+}
+#dropping div {
+  padding: 28px 40px; border: 2px dashed var(--loop); border-radius: 12px; font-size: 16px; background: var(--surface);
+}
+
+/* Error lines in the editor. */
+.monaco-editor .gaanim-error-line { background: rgba(255, 118, 118, 0.12); }
+.monaco-editor .gaanim-error-glyph { background: var(--danger); width: 4px !important; margin-left: 4px; }
+
+/* ---- Narrow screens: editor above, player and panel below. -------------- */
+@media (max-width: 860px) {
+  body { overflow: auto; }
+  #layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+  .splitter.vertical { display: none; }
+  .side { grid-template-rows: auto 6px 40vh; }
+  .player-wrap { aspect-ratio: 16 / 9; }
+  .brand span { display: none; }
+  .select select { max-width: 150px; }
+  #share { display: none; }
+}

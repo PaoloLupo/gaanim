@@ -13,6 +13,7 @@ use gaanim_bundle::{AudioData, BundleWriter, Frame, PostPass, SceneData, SceneSp
 use gaanim_core::console;
 use gaanim_renderer::pipeline::{CanvasBackground, capture_frame, capture_frame_pinned};
 use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessShader};
+use gaanim_scene::ClearColor;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::config::ExportTelemetry;
@@ -437,13 +438,30 @@ struct SinkState {
     cover: Option<ThumbnailPicker>,
 }
 
+impl SinkState {
+    /// Digest, encode and compress `frame` into the bundle.
+    fn write(&mut self, frame: Frame, background: Option<&CanvasBackground>) -> Result<()> {
+        let digest = gaanim_bundle::frame_digest(&frame, background, &mut self.fragments);
+        if let Some(cover) = &mut self.cover {
+            cover.offer(&frame);
+        }
+        self.writer
+            .push_frame(&frame, digest)
+            .map_err(bundle_error)?;
+        self.fragments.end_frame();
+        Ok(())
+    }
+}
+
 /// Frames a recording captured in flight to a thread that digests, encodes
 /// and compresses them, in order, while the world steps the next frames.
+#[cfg(not(target_os = "emscripten"))]
 struct FrameSink {
     sender: std::sync::mpsc::SyncSender<Frame>,
     worker: std::thread::JoinHandle<Result<SinkState>>,
 }
 
+#[cfg(not(target_os = "emscripten"))]
 impl FrameSink {
     /// Captured frames waiting for the worker; enough to absorb a chunk
     /// being compressed without holding many frames in memory.
@@ -455,19 +473,7 @@ impl FrameSink {
             .name("gaanim-bundle-writer".into())
             .spawn(move || {
                 for frame in frames {
-                    let digest = gaanim_bundle::frame_digest(
-                        &frame,
-                        background.as_ref(),
-                        &mut state.fragments,
-                    );
-                    if let Some(cover) = &mut state.cover {
-                        cover.offer(&frame);
-                    }
-                    state
-                        .writer
-                        .push_frame(&frame, digest)
-                        .map_err(bundle_error)?;
-                    state.fragments.end_frame();
+                    state.write(frame, background.as_ref())?;
                 }
                 Ok(state)
             })
@@ -487,6 +493,41 @@ impl FrameSink {
         self.worker
             .join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    }
+}
+
+/// The playground's Pyodide extension (wasm32-unknown-emscripten) has no
+/// threads: each frame is written as soon as it is captured.
+#[cfg(target_os = "emscripten")]
+struct FrameSink {
+    state: Result<SinkState>,
+    background: Option<CanvasBackground>,
+}
+
+#[cfg(target_os = "emscripten")]
+impl FrameSink {
+    fn spawn(state: SinkState, background: Option<CanvasBackground>) -> Self {
+        Self {
+            state: Ok(state),
+            background,
+        }
+    }
+
+    /// Write `frame`; `false` once writing failed, which [`Self::finish`]
+    /// returns.
+    fn push(&mut self, frame: Frame) -> bool {
+        let Ok(state) = &mut self.state else {
+            return false;
+        };
+        if let Err(error) = state.write(frame, self.background.as_ref()) {
+            self.state = Err(error);
+            return false;
+        }
+        true
+    }
+
+    fn finish(self) -> Result<SinkState> {
+        self.state
     }
 }
 

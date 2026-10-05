@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Playground Gaanim</title>
+  <meta name="description" content="Escribe escenas de Gaanim en Python y míralas en el navegador, sin instalar nada.">
+  <link rel="icon" href="favicon.ico">
+  <link rel="stylesheet" href="playground.css">
+  <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min/vs/editor/editor.main.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="../" title="Documentación de Gaanim">
+      <img src="gaanim-icon-512.png" alt="" width="22" height="22">
+      <span>Gaanim <strong>Playground</strong></span>
+    </a>
+    <label class="select" title="Cargar un ejemplo">
+      <span class="sr-only">Ejemplo</span>
+      <select id="examples" aria-label="Ejemplos">
+        <option value="">Ejemplos…</option>
+      </select>
+    </label>
+    <div class="spacer"></div>
+    <label class="select compact" title="Fotogramas por segundo de la grabación">
+      <span class="sr-only">FPS</span>
+      <select id="fps" aria-label="Fotogramas por segundo">
+        <option value="24">24 fps</option>
+        <option value="30" selected>30 fps</option>
+        <option value="60">60 fps</option>
+      </select>
+    </label>
+    <button type="button" id="share" class="ghost" title="Copiar un enlace con este código">Compartir</button>
+    <div class="menu">
+      <button type="button" id="download-toggle" class="ghost" aria-haspopup="true" aria-expanded="false">Descargar</button>
+      <div class="menu-list" id="download-menu" hidden>
+        <button type="button" id="download-py">main.py</button>
+        <button type="button" id="download-bundle" disabled>escena.gaanim</button>
+      </div>
+    </div>
+    <button type="button" id="stop" class="ghost danger" hidden title="Detener (reinicia Python)">Detener</button>
+    <button type="button" id="run" class="primary" disabled title="Ejecutar (Ctrl+S o Ctrl+Enter)">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+      <span>Ejecutar</span>
+    </button>
+  </header>
+
+  <main id="layout">
+    <section class="pane editor-pane" aria-label="Editor">
+      <div class="tabs">
+        <span class="tab active">main.py</span>
+        <span class="hint" id="cursor"></span>
+      </div>
+      <div id="editor" class="editor"><div class="placeholder">Cargando editor…</div></div>
+    </section>
+
+    <div class="splitter vertical" id="split-x" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Redimensionar"></div>
+
+    <section class="pane side" id="side">
+      <div class="player-wrap" id="player-wrap">
+        <iframe id="player" title="Reproductor Gaanim" allow="fullscreen; clipboard-write"></iframe>
+        <div class="player-overlay" id="player-overlay" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <span id="player-overlay-text">Grabando escena…</span>
+        </div>
+      </div>
+
+      <div class="splitter horizontal" id="split-y" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Redimensionar"></div>
+
+      <div class="panel">
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="console" id="tab-console">Consola</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="files" id="tab-files">Archivos <span class="count" id="files-count" hidden></span></button>
+          <span class="spacer"></span>
+          <button type="button" class="icon" id="clear-console" title="Limpiar consola" aria-label="Limpiar consola">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+          </button>
+        </div>
+        <div class="tab-body" id="console" role="tabpanel" aria-labelledby="tab-console" aria-live="polite"></div>
+        <div class="tab-body files" id="files" role="tabpanel" aria-labelledby="tab-files" hidden>
+          <label class="drop" id="drop">
+            <strong>Suelta aquí imágenes o música</strong>
+            <span>o haz clic para elegirlas. Se quedan en tu navegador.</span>
+            <input type="file" id="file-input" multiple accept="image/*,audio/*,.svg,.json,.lottie,.ttf,.otf,.csv,.txt" hidden>
+          </label>
+          <ul class="file-list" id="file-list"></ul>
+          <p class="note">Usa el nombre del archivo en tu código, por ejemplo <code>scene.media.image("foto.png")</code> o <code>scene.media.audio("musica.mp3")</code>.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status">
+    <span class="dot" id="status-dot"></span>
+    <span id="status">Cargando…</span>
+    <progress id="progress" max="1" value="0" hidden></progress>
+    <span class="spacer"></span>
+    <span id="versions"></span>
+  </footer>
+
+  <div id="toast" role="status" hidden></div>
+  <div id="dropping" hidden><div>Suelta para añadir a Archivos</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min/vs/loader.js"></script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

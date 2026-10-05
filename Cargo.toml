@@ -2,7 +2,7 @@
 resolver = "2"
 # `gaanim_engine` is a Rust dylib that must always build as a dependency (see
 # its manifest), so it is not a member.
-exclude = ["vendor/vello_encoding", "crates/gaanim_engine"]
+exclude = ["vendor/vello_encoding", "vendor/web-task", "crates/gaanim_engine"]
 members = [
   "crates/gaanim_core",
   "crates/gaanim_math",
@@ -18,6 +18,7 @@ members = [
   "crates/gaanim_text",
   "crates/gaanim_python",
   "crates/gaanim_python_plugin",
+  "crates/gaanim_pyodide",
   "crates/gaanim_editor",
   "crates/gaanim_export",
   "crates/gaanim_diff",
@@ -35,6 +36,9 @@ members = [
 # and size its GPU buffers from the scene instead of fixed limits.
 # See vendor/vello_encoding/GAANIM-PATCH.md for the upstream source and fixes.
 vello_encoding = { path = "vendor/vello_encoding" }
+# Build bevy_tasks for wasm32-unknown-emscripten, where panics unwind (the
+# playground's Pyodide extension). See vendor/web-task/GAANIM-PATCH.md.
+web-task = { path = "vendor/web-task" }
 
 # Workspace crates build at opt-level 2: at 0 or 1 rustc shares generic
 # instances between crates, and gaanim_engine.dll then exports every one it
@@ -68,6 +72,12 @@ inherits = "release"
 panic = "abort"
 opt-level = "s"
 
+# The playground's Pyodide extension (scripts/build_playground.py): release
+# code sized for download. Panics unwind into Python exceptions, as PyO3 needs.
+[profile.playground]
+inherits = "release"
+opt-level = "s"
+
 [workspace.dependencies]
 # Keep the shared ECS foundation small; consumers opt into rendering, audio,
 # asset loading, and native windows in their own manifests.
@@ -75,6 +85,9 @@ bevy = {version = "0.19.1", default-features = false, features = [
   "multi_threaded",   # parallel execution
 ]}
 thiserror = "2.0"
+# Log macros (Bevy re-exports them only with `bevy_log`, which the playground's
+# Pyodide extension leaves out).
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 peniko = "0.6.1"
 kurbo = "0.13.1"
 glam = {version = "0.33.0", features = ["f64"]}

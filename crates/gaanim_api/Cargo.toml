@@ -32,6 +32,7 @@ crossbeam-channel = { workspace = true }
 codex = { version = "0.3.0", default-features = false, features = ["styling"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 typst-syntax = "0.15.0"
 
 # Serialization (conditional)

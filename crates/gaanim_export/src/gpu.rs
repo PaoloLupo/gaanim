@@ -99,7 +99,7 @@ impl FrameJob {
                 (Some(post), Some(other)) => post.same_output(other),
                 _ => false,
             }
-            && gaanim_renderer::canvas::draws_same(&self.scene, &other.scene)
+            && gaanim_renderer::fragment::draws_same(&self.scene, &other.scene)
     }
 }
 

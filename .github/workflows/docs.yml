@@ -2,7 +2,7 @@ name: Docs
 
 # Build the Typst documentation site, rendering every example preview with the
 # real runtime, and publish it to GitHub Pages together with the web player
-# for .gaanim files (/reproductor/).
+# for .gaanim files (/reproductor/) and the playground (/playground/).
 on:
   push:
     branches: [main]
@@ -11,6 +11,8 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "scripts/build_web.py"
+      - "scripts/build_playground.py"
+      - "tests/playground_smoke.mjs"
       - ".github/workflows/docs.yml"
   # Pull requests use the same paths as main: an API change that breaks an
   # example must fail before it merges.
@@ -20,6 +22,8 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "scripts/build_web.py"
+      - "scripts/build_playground.py"
+      - "tests/playground_smoke.mjs"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -107,6 +111,28 @@ jobs:
           name: gaanim-web-player
           path: dist/site/reproductor
           if-no-files-found: error
+
+      # The playground runs scripts in Pyodide: gaanim_core is built with the
+      # Emscripten version of the Pyodide release the page loads, and the
+      # page embeds the player built above.
+      - name: Add the Emscripten target
+        run: rustup target add wasm32-unknown-emscripten
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 5.0.3
+          actions-cache-folder: emsdk-cache
+
+      - name: Build the playground
+        run: python scripts/build_playground.py --out dist/site/playground --player ../reproductor/
+
+      # Runs every example the playground offers, and an uploaded image and
+      # music, through its wheel in Pyodide for Node.
+      - name: Test the playground
+        run: |
+          version=$(python -c "import json, re; print(re.search(r'/v([^/]+)/', json.load(open('dist/site/playground/config.json'))['pyodide'])[1])")
+          npm install --prefix "$RUNNER_TEMP/pyodide" --no-save "pyodide@$version"
+          PYODIDE_DIR="$RUNNER_TEMP/pyodide/node_modules/pyodide" node tests/playground_smoke.mjs dist/site/playground
 
       - uses: actions/upload-pages-artifact@v3
         with:

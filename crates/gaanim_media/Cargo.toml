@@ -9,6 +9,18 @@ description = "Timeline-synchronized video and embedded-audio playback for gaani
 gaanim_core = { path = "../gaanim_core" }
 gaanim_scene = { path = "../gaanim_scene" }
 gaanim_timeline = { path = "../gaanim_timeline" }
+bevy = { workspace = true }
+crossbeam-channel = { workspace = true }
+# Already built for Bevy's WAV support; reads and writes narration takes.
+hound = "3.5"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Audio output (cpal) does not build for the playground's Pyodide extension
+# (wasm32-unknown-emscripten), which only records scenes.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
 bevy = { workspace = true, features = [
     "bevy_audio",
     "wav",           # registers Bevy's generic AudioSource asset
@@ -16,12 +28,6 @@ bevy = { workspace = true, features = [
     "mp4",
     "symphonia-wav", # decodes FFmpeg's streaming in-memory WAV output
 ] }
-crossbeam-channel = { workspace = true }
-# Already built for Bevy's WAV support; reads and writes narration takes.
-hound = "3.5"
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

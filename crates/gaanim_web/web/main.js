@@ -56,6 +56,12 @@ const buffering = document.getElementById("buffering");
 const presentCard = document.getElementById("present-card");
 
 const presenterSession = new URLSearchParams(location.search).get("presenter");
+// Embedded in the playground (`?embed`): the parent page sends the bundles it
+// records and hears what the player reports; there is nothing to drop here.
+const embedded = new URLSearchParams(location.search).has("embed");
+function tellParent(message) {
+  if (embedded && window.parent !== window) window.parent.postMessage(message, location.origin);
+}
 const linkParams = new URLSearchParams(location.hash.slice(1));
 // A presenter key from the link, kept out of the address bar from now on.
 const linkKey = linkParams.get("clave");
@@ -210,6 +216,7 @@ function say(message, error = false) {
 // Called by the player: "ready", "opened", "damaged" (not a .gaanim, or
 // damaged) or "error".
 window.gaanimStatus = (kind, message) => {
+  tellParent({ type: "gaanim:status", kind, message: message ?? null });
   if (kind === "ready") {
     ready = true;
     const tasks = waiting;
@@ -901,7 +908,7 @@ window.gaanimDownload = (name, bytes) => {
 fileInput.addEventListener("change", () => {
   if (fileInput.files[0]) playFile(fileInput.files[0]);
 });
-for (const target of [drop, document.body]) {
+for (const target of embedded ? [] : [drop, document.body]) {
   target.addEventListener("dragover", (event) => {
     event.preventDefault();
     drop.classList.add("over");
@@ -942,6 +949,21 @@ if (!navigator.gpu) {
   } else {
     say("Presenter View se abre desde el reproductor: abre allí tu archivo, presenta y pulsa P.", true);
   }
+} else if (embedded) {
+  document.body.classList.add("embedded");
+  drop.hidden = true;
+  say("Ejecuta el código para ver la escena aquí.");
+  startPlayer();
+  const volume = rememberedVolume();
+  if (volume) whenReady(() => setVolume(volume.level, volume.muted));
+  window.addEventListener("message", (event) => {
+    if (event.origin !== location.origin || event.source !== window.parent) return;
+    const message = event.data;
+    if (message?.type === "gaanim:open" && message.bytes) {
+      play(message.name ?? "escena.gaanim", new Uint8Array(message.bytes));
+    }
+  });
+  tellParent({ type: "gaanim:status", kind: "loaded", message: null });
 } else {
   startPlayer();
   const volume = rememberedVolume();

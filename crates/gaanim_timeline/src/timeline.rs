@@ -4316,11 +4316,11 @@ fn apply_lens_spec(
                     *line = visible;
                 }
                 let shown = if completion <= f64::EPSILON {
-                    bevy::prelude::Visibility::Hidden
+                    gaanim_scene::Visibility::Hidden
                 } else {
-                    bevy::prelude::Visibility::Inherited
+                    gaanim_scene::Visibility::Inherited
                 };
-                if let Some(mut visibility) = world.get_mut::<bevy::prelude::Visibility>(target)
+                if let Some(mut visibility) = world.get_mut::<gaanim_scene::Visibility>(target)
                     && *visibility != shown
                 {
                     *visibility = shown;
@@ -6036,7 +6036,7 @@ mod tests {
                     colors: None,
                 },
                 SpatialTransform::default(),
-                bevy::prelude::Visibility::Inherited,
+                gaanim_scene::Visibility::Inherited,
             ))
             .id();
         let snapshot = WorldSnapshot::capture(&mut world);
@@ -6078,8 +6078,8 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(
-            *world.get::<bevy::prelude::Visibility>(line_entity).unwrap(),
-            bevy::prelude::Visibility::Hidden
+            *world.get::<gaanim_scene::Visibility>(line_entity).unwrap(),
+            gaanim_scene::Visibility::Hidden
         );
 
         timeline.seek(&mut world, 1.5);
@@ -6088,8 +6088,8 @@ mod tests {
             2
         );
         assert_eq!(
-            *world.get::<bevy::prelude::Visibility>(line_entity).unwrap(),
-            bevy::prelude::Visibility::Inherited
+            *world.get::<gaanim_scene::Visibility>(line_entity).unwrap(),
+            gaanim_scene::Visibility::Inherited
         );
     }
 

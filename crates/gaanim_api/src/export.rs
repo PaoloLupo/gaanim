@@ -5,7 +5,9 @@
 
 use std::collections::HashSet;
 
-use gaanim_export::prelude::{ExportError, export_scene, export_scene_direct};
+#[cfg(not(target_os = "emscripten"))]
+use gaanim_export::prelude::export_scene;
+use gaanim_export::prelude::{ExportError, export_scene_direct};
 
 use crate::canvas::SceneModel;
 use crate::runtime::replay_canvas_into;
@@ -50,11 +52,12 @@ pub fn export_canvas(canvas: SceneModel, mut config: ExportConfig) -> Result<(),
         }
     }
     config.audio_tracks.extend(canvas.audio_tracks.clone());
-    if config.headless {
-        export_scene_direct(config, move |world| replay_canvas_into(world, canvas))
-    } else {
-        export_scene(config, move |world| replay_canvas_into(world, canvas))
+    // The playground's Pyodide extension has no windows: it exports headless.
+    #[cfg(not(target_os = "emscripten"))]
+    if !config.headless {
+        return export_scene(config, move |world| replay_canvas_into(world, canvas));
     }
+    export_scene_direct(config, move |world| replay_canvas_into(world, canvas))
 }
 
 /// Record a SceneModel into a playback bundle (`.gaanim`) that replays

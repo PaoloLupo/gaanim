@@ -18,12 +18,12 @@ gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_text = { path = "../gaanim_text" }
 
 # Third-party dependencies
-# Export hosts use a native viewport, including the offscreen-window path.
-bevy = { workspace = true, features = ["bevy_winit", "wayland"] }
+bevy = { workspace = true }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 vello = "0.9.0"
 # Patched in vendor/vello_encoding: sizes and scales Vello's GPU buffers.
@@ -31,6 +31,12 @@ vello_encoding = "0.9.0"
 indicatif = "0.17"
 pollster = "0.3"
 crossbeam-channel = "0.5"
+
+# Export hosts use a native viewport, including the offscreen-window path. The
+# playground's Pyodide extension (wasm32-unknown-emscripten) only records
+# bundles, and winit does not support Emscripten.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+bevy = { workspace = true, features = ["bevy_winit", "wayland"] }
 
 [features]
 dev-dynamic = [

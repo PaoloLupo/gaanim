@@ -1,4 +1,5 @@
 use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
+#[cfg(not(target_os = "emscripten"))]
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
     BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ChalkBrush, ClipMask,
@@ -21,6 +22,7 @@ use gaanim_scene::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[cfg(not(target_os = "emscripten"))]
 use crate::canvas::VelloScene2d;
 
 /// Resource: stores the canvas background paint and logical frame bounds.
@@ -301,6 +303,7 @@ fn fill_segment_background(
 }
 
 /// Keep Bevy's native clear pass aligned with the active segment background.
+#[cfg(not(target_os = "emscripten"))]
 pub fn sync_canvas_background_clear_system(
     playback_state: Option<Res<gaanim_animation::PlaybackState>>,
     canvas_bg: Option<Res<CanvasBackground>>,
@@ -316,6 +319,7 @@ pub fn sync_canvas_background_clear_system(
     clear_color.0 = Color::srgba_u8(rgba.r, rgba.g, rgba.b, rgba.a);
 }
 
+#[cfg(not(target_os = "emscripten"))]
 fn interactive_background_pixel_size(
     background: &CanvasBackground,
     camera: Option<&gaanim_math::ResolvedCamera>,
@@ -2329,6 +2333,7 @@ pub(crate) fn draw_glow(
 ///
 /// This ensures that zoom, pan, and rotation configured on the gaanim camera are reflected
 /// in the actual rendered output, since the Vello canvas is projected through the Bevy camera.
+#[cfg(not(target_os = "emscripten"))]
 pub fn sync_gaanim_camera_to_bevy_system(
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     mut bevy_cameras: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
@@ -2395,6 +2400,7 @@ pub fn sync_gaanim_camera_to_bevy_system(
 }
 
 /// The window viewport of the fitted canvas under a perspective camera.
+#[cfg(not(target_os = "emscripten"))]
 pub(crate) fn fitted_canvas_viewport(
     cam: &gaanim_math::Camera,
     viewport: gaanim_math::CameraViewport,
@@ -2615,6 +2621,7 @@ pub const DEFAULT_EFFECT_DENSITY: f64 = 120.0;
 
 /// Pixels per scene unit of an effect texture in the interactive preview:
 /// as many as the preview shows.
+#[cfg(not(target_os = "emscripten"))]
 fn preview_effect_density(
     camera: Option<&gaanim_math::ResolvedCamera>,
     preview: Option<&crate::canvas::PreviewResolution>,
@@ -4774,6 +4781,7 @@ pub struct ExternalFrame {
 
 /// System: composites the [`ExternalFrame`] into the main Vello scene.
 #[allow(clippy::type_complexity)]
+#[cfg(not(target_os = "emscripten"))]
 pub fn external_frame_system(
     mut commands: Commands,
     mut external: ResMut<ExternalFrame>,
@@ -4906,6 +4914,7 @@ type CameraSourceQuery<'w, 's> = Query<
 /// of `.at(x, y)` or requiring per-object coordinate workarounds.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
+#[cfg(not(target_os = "emscripten"))]
 pub fn gaanim_render_system(
     mut commands: Commands,
     mut cache: ResMut<GaanimRenderCache>,

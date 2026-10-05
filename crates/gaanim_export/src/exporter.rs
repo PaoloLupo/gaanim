@@ -1,7 +1,15 @@
+//! Video, image and frame exports.
+//!
+//! The playground's Pyodide extension (wasm32-unknown-emscripten) builds
+//! without Bevy's windows and renderer, so the windowed export path is left out
+//! there; it only records playback bundles.
+
 use bevy::app::AppExit;
+#[cfg(not(target_os = "emscripten"))]
 use bevy::camera::Viewport;
 use bevy::ecs::observer::On;
 use bevy::prelude::*;
+#[cfg(not(target_os = "emscripten"))]
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use gaanim_core::console;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -9,7 +17,9 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 use std::time::{Duration, Instant};
 
+#[cfg(not(target_os = "emscripten"))]
 use gaanim_renderer::prelude::VelloView;
+use gaanim_scene::ClearColor;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::config::{ExportConfig, ExportTelemetry};
@@ -162,6 +172,7 @@ fn publish_benchmark_timings(encoder: VideoEncoder, timings: &ExportTimings) {
     );
 }
 
+#[cfg(not(target_os = "emscripten"))]
 #[derive(Resource)]
 struct ExportPipeline {
     pub encoder: ParallelEncoder,
@@ -266,12 +277,14 @@ impl SetupCallback {
     }
 }
 
+#[cfg(not(target_os = "emscripten"))]
 #[derive(Resource, Clone, Copy)]
 struct WindowRenderSize {
     width: u32,
     height: u32,
 }
 
+#[cfg(not(target_os = "emscripten"))]
 fn export_pipeline_system(
     mut commands: Commands,
     custom_errors: Option<Res<gaanim_animation::CustomAnimationDiagnostics>>,
@@ -316,7 +329,7 @@ fn export_pipeline_system(
                         "error",
                         e.to_string(),
                     );
-                    bevy::prelude::error!("Encoder error: {}", e);
+                    tracing::error!("Encoder error: {}", e);
                     publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(e));
                     exit.write(AppExit::Success);
                     return;
@@ -360,7 +373,7 @@ fn export_pipeline_system(
                             "error",
                             e.to_string(),
                         );
-                        bevy::prelude::error!("Encoder finalization error: {}", e);
+                        tracing::error!("Encoder finalization error: {}", e);
                         publish_export_result(
                             &pipeline.result_tx,
                             &mut pipeline.result_sent,
@@ -401,7 +414,7 @@ fn export_pipeline_system(
                     "error",
                     error.to_string(),
                 );
-                bevy::prelude::error!("{error}");
+                tracing::error!("{error}");
                 publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(error));
                 exit.write(AppExit::Success);
                 return;
@@ -471,6 +484,7 @@ pub(crate) fn setup_scene_system(world: &mut World) {
 /// Replay a window-backed scene before Vello creates its render target, then
 /// give the Vello camera an explicit physical viewport. This removes the
 /// startup race between WindowPlugin and the Vello canvas texture setup.
+#[cfg(not(target_os = "emscripten"))]
 fn setup_window_scene_system(world: &mut World) {
     setup_scene_system(world);
     world.flush();
@@ -496,6 +510,7 @@ fn filter_for_quality(speed: crate::encoder::EncodingSpeed) -> image::imageops::
     }
 }
 
+#[cfg(not(target_os = "emscripten"))]
 pub fn export_scene<F>(config: ExportConfig, setup_world_fn: F) -> Result<()>
 where
     F: FnOnce(&mut World) + Send + Sync + 'static,
@@ -881,7 +896,7 @@ where
     let finalize_started_at = Instant::now();
     timings.encode_active = encoder.finalize_with_timings().inspect_err(|e| {
         export_log(&telemetry, console::Level::Error, "error", e.to_string());
-        bevy::prelude::error!("Encoder finalization error: {}", e);
+        tracing::error!("Encoder finalization error: {}", e);
     })?;
     timings.finalize = finalize_started_at.elapsed();
     timings.readback_wait = gpu.readback_wait();

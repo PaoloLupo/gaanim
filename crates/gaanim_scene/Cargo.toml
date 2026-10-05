@@ -11,17 +11,24 @@ gaanim_core = { path = "../gaanim_core" }
 gaanim_math = { path = "../gaanim_math" }
 
 # Re-use workspace dependencies
-bevy = { workspace = true, features = [
-    "async_executor",
-    "bevy_asset",
-    "bevy_log",
-    "bevy_render",
-] }
+# Colors and input types build on every target, the playground's Pyodide
+# extension included (see below).
+bevy = { workspace = true, features = ["async_executor", "bevy_color", "keyboard", "mouse"] }
 glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
+
+# The playground's Pyodide extension (wasm32-unknown-emscripten) records scenes
+# without assets, logging or rendering: on wasm32 these Bevy subsystems enable
+# `bevy_app/web`, whose wasm-bindgen glue Pyodide cannot load.
+[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+bevy = { workspace = true, features = [
+    "bevy_asset",
+    "bevy_log",
+    "bevy_render",
+] }
 
 [features]
 dev-dynamic = [

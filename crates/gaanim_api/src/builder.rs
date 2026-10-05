@@ -1,8 +1,6 @@
 use crate::anim::{AnimationBuilder, AnimationType, TextSelectionEffect, ValueTrackerRef};
 use crate::canvas::MagicMoveUnmatched;
-use bevy::prelude::{
-    BuildChildrenTransformExt, Commands, Entity, GlobalTransform, Transform, Visibility,
-};
+use bevy::prelude::{BuildChildrenTransformExt, Commands, Entity, GlobalTransform, Transform};
 use codex::{Def as CodexDef, ModifierSet};
 use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec3;
@@ -14,7 +12,7 @@ use gaanim_math::{Bounds3D, EasingCurve, GlobalSpatialTransform, RateFunc, Spati
 use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{
     FillBrush, GroupMarker, LineListData, LocalBounds, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
-    StrokeBrush, TriangleMeshData, Visible, WorldBounds,
+    StrokeBrush, TriangleMeshData, Visibility, Visible, WorldBounds,
 };
 use gaanim_text::font::FontRegistry;
 use gaanim_text::shaper::{HierarchyChild, compile_text_to_hierarchy};
@@ -2491,9 +2489,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .select_occurrence(MobjectRef { id: anim.target }, &fragment, occurrence)
             .child_ids;
         if selected.is_empty() {
-            bevy::prelude::warn!(
-                "text selection animation could not resolve fragment '{fragment}'"
-            );
+            tracing::warn!("text selection animation could not resolve fragment '{fragment}'");
             return;
         }
         match effect {
@@ -3339,7 +3335,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let anchor_point_target = match anim.anim_type {
             AnimationType::TranslateToAnchorPoint { point } => {
                 let Some(reference_state) = self.states.get(point.object) else {
-                    bevy::prelude::warn!(
+                    tracing::warn!(
                         "Anchor-point animation skipped: missing reference object {:?}",
                         point.object
                     );
@@ -3368,7 +3364,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => {
-                bevy::prelude::warn!(
+                tracing::warn!(
                     "Attempted to animate unregistered Mobject: {:?}",
                     anim.target
                 );
@@ -3772,7 +3768,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let state = match self.states.get(anim.target) {
                 Some(s) => s,
                 None => {
-                    bevy::prelude::warn!(
+                    tracing::warn!(
                         "Attempted to animate unregistered Mobject: {:?}",
                         anim.target
                     );
@@ -4217,7 +4213,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
             None => {
-                bevy::prelude::warn!(
+                tracing::warn!(
                     "Attempted to SpinInFromNothing unregistered Mobject: {:?}",
                     anim.target
                 );
@@ -4313,7 +4309,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let state = match self.states.get(anim.target) {
                 Some(s) => s,
                 None => {
-                    bevy::prelude::warn!(
+                    tracing::warn!(
                         "Attempted to Indicate unregistered Mobject: {:?}",
                         anim.target
                     );
@@ -5786,7 +5782,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             return;
         };
         let Some(to) = crate::stroke_lens::with_vertices(&state.path, &points) else {
-            bevy::prelude::warn!(
+            tracing::warn!(
                 "points() skipped: {} points do not match the vertices of {:?}",
                 points.len(),
                 anim.target
@@ -6809,7 +6805,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// spawning, falls back to `Create`.
     fn play_grow_arrow_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let Some(state) = self.states.get(anim.target) else {
-            bevy::prelude::warn!(
+            tracing::warn!(
                 "Attempted to GrowArrow unregistered Mobject: {:?}",
                 anim.target
             );
@@ -8483,7 +8479,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         ) {
             Ok(res) => res,
             Err(e) => {
-                bevy::prelude::error!("Text compilation failed: {}", e);
+                tracing::error!("Text compilation failed: {}", e);
                 let bounds = Bounds3D::default();
                 let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
                 let entity = self.commands.spawn(bundle).id();
@@ -8562,7 +8558,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         ) {
             Ok(res) => res,
             Err(e) => {
-                bevy::prelude::error!("Text compilation failed: {}", e);
+                tracing::error!("Text compilation failed: {}", e);
                 let bounds = Bounds3D::default();
                 let bundle = MobjectBundle::new(parent_id, kurbo::BezPath::new(), bounds);
                 let entity = self.commands.spawn(bundle).id();
@@ -8602,7 +8598,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let signal_entity_bevy = match self.states.get(signal_ref.id) {
             Some(state) => state.entity,
             None => {
-                bevy::prelude::warn!("ValueTrackerRef id {:?} not found", signal_ref.id);
+                tracing::warn!("ValueTrackerRef id {:?} not found", signal_ref.id);
                 let bundle =
                     MobjectBundle::new(parent_id, kurbo::BezPath::new(), Bounds3D::default());
                 self.commands.spawn(bundle);
@@ -8634,7 +8630,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         ) {
             Ok(res) => res,
             Err(e) => {
-                bevy::prelude::error!("DecimalNumber initial text compilation failed: {}", e);
+                tracing::error!("DecimalNumber initial text compilation failed: {}", e);
                 (kurbo::BezPath::new(), Bounds3D::default())
             }
         };

@@ -297,7 +297,7 @@ impl EffectLayer {
         self.to_pixels == other.to_pixels
             && self.image == other.image
             && self.fixed == other.fixed
-            && crate::canvas::draws_same(&self.scene, &other.scene)
+            && crate::fragment::draws_same(&self.scene, &other.scene)
             && self.request.same_output(&other.request)
     }
 }

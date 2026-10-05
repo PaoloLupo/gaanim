@@ -23,6 +23,10 @@ gaanim_text = { path = "../gaanim_text" }
 gaanim_timeline = { path = "../gaanim_timeline" }
 gaanim_visualization = { path = "../gaanim_visualization" }
 
+# The web playground's host (src/playground.rs), built only for Pyodide.
+[target.'cfg(target_os = "emscripten")'.dependencies]
+crossbeam-channel = { workspace = true }
+
 [features]
 dev-dynamic = [
     "gaanim_animation/dev-dynamic",

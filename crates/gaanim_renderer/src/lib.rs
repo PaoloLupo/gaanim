@@ -1,22 +1,35 @@
+//! Gaanim's Vello renderer.
+//!
+//! The playground's Pyodide extension (wasm32-unknown-emscripten) builds this
+//! crate without Bevy's render subsystems: it only captures frames on the CPU
+//! for playback bundles. The modules and systems that draw through Bevy's
+//! renderer are left out there.
+#![cfg_attr(target_os = "emscripten", allow(dead_code, unused_imports))]
+
 use bevy::prelude::*;
 
 pub mod adapter;
 pub mod background;
+#[cfg(not(target_os = "emscripten"))]
 mod background_gpu;
 pub mod background_presets;
+#[cfg(not(target_os = "emscripten"))]
 pub mod canvas;
 mod chalk;
+#[cfg(not(target_os = "emscripten"))]
 pub mod diagnostics;
 pub mod effects;
 pub mod fragment;
 mod gpu_scope;
 pub mod lottie;
 pub mod object_effects;
+#[cfg(not(target_os = "emscripten"))]
 pub mod offscreen;
 pub mod pipeline;
 mod post_bloom;
 pub mod post_presets;
 pub mod post_process;
+#[cfg(not(target_os = "emscripten"))]
 mod post_process_gpu;
 pub mod prelude;
 mod soft_effects;
@@ -29,6 +42,7 @@ pub mod transition_presets;
 use pipeline::MainVelloScene;
 
 /// Bevy integration plugin for the high-performance Vello vector renderer.
+#[cfg(not(target_os = "emscripten"))]
 pub struct GaanimRendererPlugin;
 
 /// Resolves vector geometry derived from other drawables without requiring a
@@ -67,6 +81,7 @@ impl Plugin for GaanimDerivedGeometryPlugin {
     }
 }
 
+#[cfg(not(target_os = "emscripten"))]
 impl Plugin for GaanimRendererPlugin {
     fn build(&self, app: &mut App) {
         // Rasterize the composed scene with Vello and draw it in the window.

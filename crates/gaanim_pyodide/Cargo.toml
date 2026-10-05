@@ -1,0 +1,15 @@
+[package]
+name = "gaanim_pyodide"
+version = "0.10.1"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+description = "Gaanim's Python module for Pyodide: runs and records scenes in the web playground"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+# Built only for wasm32-unknown-emscripten by scripts/build_playground.py; on
+# other targets the crate is empty.
+[target.'cfg(target_os = "emscripten")'.dependencies]
+gaanim_python = { path = "../gaanim_python" }

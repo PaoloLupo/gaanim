@@ -11,8 +11,8 @@ use gaanim_core::kurbo::{BezPath, Point, Rect, Shape, Vec2};
 use gaanim_core::peniko::Color as PenikoColor;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform};
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, MobjectId, ObjectTag,
-    Opacity, RenderOrder, StrokeBrush, TriangleMeshData, Visible, WorldBounds,
+    ClearColor, FillBrush, GlobalOpacity, GroupMarker, LineListData, LocalBounds, MobjectId,
+    ObjectTag, Opacity, RenderOrder, StrokeBrush, TriangleMeshData, Visible, WorldBounds,
 };
 use gaanim_timeline::clip::SceneId;
 use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop, Timeline};
@@ -2449,7 +2449,7 @@ impl SceneModel {
                 GlobalSpatialTransform::default(),
                 bevy::prelude::Transform::default(),
                 bevy::prelude::GlobalTransform::default(),
-                bevy::prelude::Visibility::default(),
+                gaanim_scene::Visibility::default(),
                 Opacity(1.0),
                 GlobalOpacity(1.0),
                 LocalBounds(bounds),
@@ -4275,7 +4275,7 @@ impl SceneModel {
                         *target_occurrence,
                     );
                     if sources.is_empty() || targets.is_empty() {
-                        bevy::prelude::warn!(
+                        tracing::warn!(
                             "equation fragment transform could not resolve '{source_fragment}' -> '{target_fragment}'"
                         );
                     } else if let (Some(&source_parent), Some(&target_parent)) =
@@ -4316,7 +4316,7 @@ impl SceneModel {
                             *target_occurrence,
                         );
                         if sources.is_empty() || targets.is_empty() {
-                            bevy::prelude::warn!(
+                            tracing::warn!(
                                 "equation tag transform could not resolve '{source_fragment}' -> '{target_fragment}'"
                             );
                         } else {
@@ -4370,7 +4370,7 @@ impl SceneModel {
                         (id_map.get(source), id_map.get(target))
                     {
                         if sources.is_empty() || targets.is_empty() {
-                            bevy::prelude::warn!(
+                            tracing::warn!(
                                 "equation expansion could not resolve '{source_fragment}' -> '{target_fragment}'"
                             );
                         } else {
@@ -4425,7 +4425,7 @@ impl SceneModel {
                                         *target_occurrence,
                                     );
                                     if sources.is_empty() || targets.is_empty() {
-                                        bevy::prelude::warn!(
+                                        tracing::warn!(
                                             "equation step could not resolve semantic match '{source_fragment}' -> '{target_fragment}'"
                                         );
                                         None
@@ -11296,7 +11296,7 @@ impl SceneModel {
                 LayoutOp::MoveToAnchorPoint { point } => {
                     pending_text_anchor = None;
                     let Some(reference_id) = id_map.get(&point.object).copied() else {
-                        bevy::prelude::warn!(
+                        tracing::warn!(
                             "SceneModel layout skipped: anchor point object {:?} was not spawned before {:?}",
                             point.object,
                             spec.id
@@ -11304,7 +11304,7 @@ impl SceneModel {
                         continue;
                     };
                     let Some(reference_state) = builder.states.get(reference_id) else {
-                        bevy::prelude::warn!(
+                        tracing::warn!(
                             "SceneModel layout skipped: missing state for anchor point object {:?}",
                             reference_id
                         );
@@ -11337,7 +11337,7 @@ impl SceneModel {
                 } => {
                     pending_text_anchor = None;
                     let Some(reference_id) = id_map.get(reference).copied() else {
-                        bevy::prelude::warn!(
+                        tracing::warn!(
                             "SceneModel layout skipped: reference object {:?} was not spawned before {:?}",
                             reference,
                             spec.id
@@ -11345,7 +11345,7 @@ impl SceneModel {
                         continue;
                     };
                     let Some(reference_state) = builder.states.get(reference_id) else {
-                        bevy::prelude::warn!(
+                        tracing::warn!(
                             "SceneModel layout skipped: missing state for reference object {:?}",
                             reference_id
                         );
@@ -11370,7 +11370,7 @@ impl SceneModel {
                 } => {
                     pending_text_anchor = None;
                     let Some(reference_id) = id_map.get(reference).copied() else {
-                        bevy::prelude::warn!(
+                        tracing::warn!(
                             "SceneModel layout skipped: reference object {:?} was not spawned before {:?}",
                             reference,
                             spec.id
@@ -11378,7 +11378,7 @@ impl SceneModel {
                         continue;
                     };
                     let Some(reference_state) = builder.states.get(reference_id) else {
-                        bevy::prelude::warn!(
+                        tracing::warn!(
                             "SceneModel layout skipped: missing state for reference object {:?}",
                             reference_id
                         );

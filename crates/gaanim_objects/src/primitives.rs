@@ -5,7 +5,7 @@ use gaanim_math::arrow::arc_steps;
 use gaanim_math::{Bounds3D, GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
     FillBrush, GlobalOpacity, LocalBounds, MobjectId, ObjectTag, Opacity, Path2D, PathRevealOrder,
-    PathSource, RasterImage, RenderLayer, RenderOrder, StrokeBrush, Visible,
+    PathSource, RasterImage, RenderLayer, RenderOrder, StrokeBrush, Visibility, Visible,
 };
 
 /// The source pixels and destination geometry for an image mobject.
