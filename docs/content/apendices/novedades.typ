@@ -13,10 +13,10 @@ instalar una versión nueva, sigue
 
 = 0.10.0
 
-Sin publicar. Rendimiento de la vista previa y de la exportación: exportar es
-entre un 13 y un 49 % más rápido, saltar en la línea de tiempo cuesta entre un
-7 y un 35 % menos, el editor descansa cuando no hay nada que cambiar y GIF,
-WebP, WebM y secuencias PNG se exportan más rápido.
+Publicada el 4 de octubre de 2026. Rendimiento de la vista previa y de la
+exportación: exportar es entre un 13 y un 49 % más rápido, saltar en la línea
+de tiempo cuesta entre un 7 y un 35 % menos, el editor descansa cuando no hay
+nada que cambiar y GIF, WebP, WebM y secuencias PNG se exportan más rápido.
 Lee «Al actualizar»: los GIF y WebP salen a 30 fps como mucho y las
 exportaciones respetan los fps que pidas.
 
