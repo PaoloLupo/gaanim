@@ -738,11 +738,12 @@ fn editor_ui_system(
                             .map(|stop| stop.time as f32 / total_f32)
                             .collect();
 
+                        let scene_bounds = timeline.scene_bounds_all();
                         let scene_segs: Vec<SceneSegment> = timeline
                             .scene_index
                             .iter()
                             .filter_map(|(&_start_time, &scene_id)| {
-                                let (s, e) = timeline.scene_bounds(scene_id)?;
+                                let &(s, e) = scene_bounds.get(&scene_id)?;
                                 let name = timeline.scenes.get(scene_id)?.name.clone();
                                 Some(SceneSegment {
                                     name,
@@ -2830,10 +2831,11 @@ fn global_playback_keys_system(
     // Prev / Next scene via arrow keys
     if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::ArrowRight) {
         let go_next = keys.just_pressed(KeyCode::ArrowRight);
+        let bounds = timeline.scene_bounds_all();
         let starts: Vec<f64> = timeline
             .scene_index
             .values()
-            .filter_map(|&scene_id| timeline.scene_bounds(scene_id).map(|(start, _)| start))
+            .filter_map(|scene_id| bounds.get(scene_id).map(|&(start, _)| start))
             .collect();
         let current = timeline.current_time.clamp(0.0, total);
         if let Some(target) = adjacent_scene_start(&starts, current, go_next) {

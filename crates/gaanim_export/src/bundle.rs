@@ -179,11 +179,12 @@ impl RecordingProgress {
 }
 
 fn scene_spans(timeline: &Timeline) -> Vec<SceneSpan> {
+    let bounds = timeline.scene_bounds_all();
     timeline
         .scene_index
         .values()
         .filter_map(|id| {
-            let (start, end) = timeline.scene_bounds(*id)?;
+            let &(start, end) = bounds.get(id)?;
             Some(SceneSpan {
                 name: timeline.scenes.get(*id)?.name.clone(),
                 start,

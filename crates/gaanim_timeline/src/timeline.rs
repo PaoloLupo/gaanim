@@ -1269,6 +1269,28 @@ impl Timeline {
         }
     }
 
+    /// Every scene's [`Self::scene_bounds`] in one pass over the clips. Use it
+    /// when bounding many scenes: each `scene_bounds` call scans every clip.
+    pub fn scene_bounds_all(&self) -> HashMap<SceneId, (f64, f64)> {
+        let mut starts = HashMap::new();
+        let mut ends = HashMap::new();
+        for clip in self.clips.values() {
+            match &clip.payload {
+                ClipPayload::SceneStart(id) => {
+                    starts.insert(*id, clip.start);
+                }
+                ClipPayload::SceneEnd(id) => {
+                    ends.insert(*id, clip.start);
+                }
+                _ => {}
+            }
+        }
+        starts
+            .into_iter()
+            .filter_map(|(id, start)| Some((id, (start, *ends.get(&id)?))))
+            .collect()
+    }
+
     /// Overlays whose window contains the playhead, with their progress in `[0, 1]`.
     ///
     /// Overlays are centered on their transition's midpoint and never change
@@ -5632,6 +5654,13 @@ mod tests {
         timeline.add_clip(track, 1.0, 0.0, ClipPayload::SceneEnd(first));
         timeline.add_clip(track, 1.0, 0.0, ClipPayload::SceneStart(second));
         timeline.add_clip(track, 3.0, 0.0, ClipPayload::SceneEnd(second));
+        let open = timeline.add_scene("open");
+        timeline.add_clip(track, 3.0, 0.0, ClipPayload::SceneStart(open));
+        let bounds = timeline.scene_bounds_all();
+        assert_eq!(bounds.len(), 2);
+        for scene in [first, second, open] {
+            assert_eq!(bounds.get(&scene).copied(), timeline.scene_bounds(scene));
+        }
         timeline.connect(
             first,
             second,
