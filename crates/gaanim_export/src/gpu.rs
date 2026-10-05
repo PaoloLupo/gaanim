@@ -19,6 +19,8 @@ const PROBE_STRIDE: u64 = 256;
 const MAX_BUMP_SCALE: u32 = 8;
 /// Largest storage binding requested from the adapter for Vello's buffers.
 const MAX_STORAGE_BINDING: u64 = 512 << 20;
+/// How every export render antialiases; the renderer builds no other mode.
+const EXPORT_ANTIALIASING: vello::AaConfig = vello::AaConfig::Msaa16;
 /// Bytes of staging buffers frames may hold while the encoder writes them.
 const STAGING_BUDGET: u64 = 256 << 20;
 
@@ -217,7 +219,13 @@ impl GpuContext {
             &device,
             RendererOptions {
                 use_cpu: false,
-                antialiasing_support: vello::AaSupport::all(),
+                // Every export render uses MSAA16 (`EXPORT_ANTIALIASING`);
+                // other modes would only lengthen startup.
+                antialiasing_support: vello::AaSupport {
+                    area: false,
+                    msaa8: false,
+                    msaa16: true,
+                },
                 num_init_threads: None,
                 pipeline_cache: None,
             },
@@ -330,7 +338,7 @@ impl GpuContext {
                         base_color: base,
                         width,
                         height,
-                        antialiasing_method: vello::AaConfig::Msaa16,
+                        antialiasing_method: EXPORT_ANTIALIASING,
                     },
                 )
                 .map_err(|e| GpuContextError::Render(e.to_string()))?;
@@ -561,7 +569,7 @@ impl GpuContext {
                     &self.queue,
                     &mut self.renderer,
                     effects,
-                    vello::AaConfig::Msaa16,
+                    EXPORT_ANTIALIASING,
                 )
                 .map_err(|e| GpuContextError::Render(e.to_string()))?;
         }
@@ -575,7 +583,7 @@ impl GpuContext {
                     base_color,
                     width: self.width,
                     height: self.height,
-                    antialiasing_method: vello::AaConfig::Msaa16,
+                    antialiasing_method: EXPORT_ANTIALIASING,
                 },
             )
             .map_err(|e| GpuContextError::Render(e.to_string()))?;
