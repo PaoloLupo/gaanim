@@ -79,10 +79,30 @@ impl Tween {
     }
 }
 
-/// Bounding table for SVG/geometry path morphing matches.
-#[derive(Debug, Clone, PartialEq)]
+/// The contour matching of a path morph, built on its first frame and
+/// shared by its clones: every later frame only interpolates. It belongs to
+/// the `from` and `to` paths beside it, so tables always compare equal.
+#[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct MorphTable;
+pub struct MorphTable(
+    #[cfg_attr(feature = "serde", serde(skip))] Arc<std::sync::OnceLock<gaanim_math::MorphPlan>>,
+);
+
+impl MorphTable {
+    /// The morph from `from` to `to` at `t`, as
+    /// [`gaanim_math::interpolate_paths_continuous`] computes it.
+    pub fn path(&self, from: &BezPath, to: &BezPath, t: f64) -> BezPath {
+        self.0
+            .get_or_init(|| gaanim_math::MorphPlan::new(from, to))
+            .at(t)
+    }
+}
+
+impl PartialEq for MorphTable {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
 
 /// Concrete or timeline-captured source for a complete authored camera pose.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -683,12 +703,12 @@ pub fn evaluate_tweens_system(
             PropertyLens::CameraOrbit { .. } => {}
             PropertyLens::CameraLookAtSource { .. } => {}
             PropertyLens::CameraPerspective { .. } => {}
-            PropertyLens::PathMorph { from, to, table: _ } => {
+            PropertyLens::PathMorph { from, to, table } => {
                 let completed = tween.state == TweenState::Completed;
                 let morphed = if completed {
                     to.clone()
                 } else {
-                    gaanim_math::interpolate_paths_continuous(from, to, t)
+                    table.path(from, to, t)
                 };
                 let morphed = std::sync::Arc::new(morphed);
                 if let Ok(mut path) = paths.get_mut(tween.target) {

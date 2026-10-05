@@ -4347,14 +4347,14 @@ fn apply_lens_spec(
                 }),
             );
         }
-        PropertyLensSpec::PathMorph { from, to } => {
+        PropertyLensSpec::PathMorph { from, to, table } => {
             // A completed morph borrows `to`; it is only cloned into a new
             // `Arc` when the current geometry differs.
             let interpolated;
             let morphed = if completed {
                 to
             } else {
-                interpolated = gaanim_math::interpolate_paths_continuous(from, to, t);
+                interpolated = table.path(from, to, t);
                 &interpolated
             };
             if let Some(mut path) = world.get_mut::<Path2D>(target)
@@ -6526,6 +6526,7 @@ mod tests {
                 lens: PropertyLensSpec::PathMorph {
                     from,
                     to: to.clone(),
+                    table: Default::default(),
                 },
                 rate_func: RateFunc::Spring {
                     stiffness: 90.0,
