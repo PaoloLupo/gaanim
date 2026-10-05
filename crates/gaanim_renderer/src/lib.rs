@@ -19,6 +19,7 @@ pub mod post_presets;
 pub mod post_process;
 mod post_process_gpu;
 pub mod prelude;
+mod soft_effects;
 mod stroke;
 mod three_d;
 pub mod transition_presets;

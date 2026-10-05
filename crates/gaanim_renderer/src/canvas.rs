@@ -707,11 +707,12 @@ fn render_canvas(
     };
     // Post-processing rewrites the texture in place, and shader backgrounds
     // animate outside the scene encoding: frames with either are always drawn.
+    // A soft effect's image keeps its pixels while the scene draws it.
     let (post, shader, transition_targets) = effects;
     let volatile = post.is_some_and(|post| post.is_active())
         || shader.is_some_and(|shader| shader.is_active())
         || extracted.transition.is_some()
-        || !extracted.effects.is_empty();
+        || extracted.effects.iter().any(|layer| !layer.fixed);
     if !volatile && rendered.0.as_ref().is_some_and(|last| last.same(&current)) {
         return;
     }

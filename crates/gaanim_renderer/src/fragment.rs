@@ -134,10 +134,12 @@ pub(crate) fn fragment_recipe(parts: FragmentParts<'_>) -> FragmentRecipe {
     }
 }
 
-/// A built fragment: its commands, and the stroke of a camera view screen.
+/// A built fragment: its commands, the stroke of a camera view screen, and
+/// the layers that fill its soft shadow and glow images.
 pub struct BuiltFragment {
     pub scene: vello::Scene,
     pub overlay: Option<vello::Scene>,
+    pub soft: Vec<crate::object_effects::EffectLayer>,
 }
 
 impl FragmentRecipe {
@@ -157,11 +159,23 @@ impl FragmentRecipe {
 /// Build the fragment a recipe describes. `lottie` is the Lottie scene of a
 /// recipe with [`FragmentRecipe::lottie`] set.
 pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) -> BuiltFragment {
+    build_fragment_with(recipe, lottie, false)
+}
+
+/// [`build_fragment`]; with `gpu`, a blurred drop shadow and a glow are
+/// images that [`BuiltFragment::soft`] fills on the GPU, for a renderer that
+/// runs object effects, instead of stacks of vector copies.
+pub fn build_fragment_with(
+    recipe: &FragmentRecipe,
+    lottie: Option<&vello::Scene>,
+    gpu: bool,
+) -> BuiltFragment {
     use crate::pipeline::{
         ShadowCaster, animated_stroke_paint, draw_aligned_stroke, draw_glow, draw_shadow,
-        draw_soft_fill, draw_soft_stroke, modulate_brush_alpha,
+        draw_shadow_on_gpu, draw_soft_fill, draw_soft_stroke, modulate_brush_alpha,
     };
 
+    let mut soft = Vec::new();
     let mut scene = vello::Scene::new();
     if let Some(lottie) = lottie {
         scene.append(lottie, None);
@@ -233,10 +247,22 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
         } else {
             ShadowCaster::None
         };
-        draw_shadow(&mut scene, elem_path, shadow, caster);
+        match gpu
+            .then(|| draw_shadow_on_gpu(&mut scene, elem_path, shadow, caster))
+            .flatten()
+        {
+            Some(layer) => soft.push(layer),
+            None => draw_shadow(&mut scene, elem_path, shadow, caster),
+        }
     }
     if let Some(glow) = &recipe.glow {
-        draw_glow(&mut scene, elem_path, glow, stroke_view);
+        match gpu
+            .then(|| crate::soft_effects::draw_glow_image(&mut scene, elem_path, glow, stroke_view))
+            .flatten()
+        {
+            Some(layer) => soft.push(layer),
+            None => draw_glow(&mut scene, elem_path, glow, stroke_view),
+        }
     }
     let blur_sigma = recipe
         .blur
@@ -360,14 +386,18 @@ pub fn build_fragment(recipe: &FragmentRecipe, lottie: Option<&vello::Scene>) ->
         scene.pop_layer();
     }
 
-    BuiltFragment { scene, overlay }
+    BuiltFragment {
+        scene,
+        overlay,
+        soft,
+    }
 }
 
 /// Built fragments of recorded recipes, shared by every frame that draws
 /// the same recipe (and, for a Lottie, the same Lottie frame).
 #[derive(Default)]
 pub struct FragmentStore {
-    built: std::collections::HashMap<(usize, usize), StoredFragment>,
+    built: std::collections::HashMap<(usize, usize, bool), StoredFragment>,
     /// Frames composed so far, for evicting fragments no longer drawn.
     generation: u64,
 }
@@ -377,6 +407,7 @@ struct StoredFragment {
     lottie: Option<Arc<vello::Scene>>,
     scene: Arc<vello::Scene>,
     overlay: Option<Arc<vello::Scene>>,
+    soft: Arc<[crate::object_effects::EffectLayer]>,
     last_used: u64,
 }
 
@@ -397,23 +428,45 @@ impl FragmentStore {
         recipe: &Arc<FragmentRecipe>,
         lottie: Option<&Arc<vello::Scene>>,
     ) -> (Arc<vello::Scene>, Option<Arc<vello::Scene>>) {
+        let (scene, overlay, _) = self.get_with(recipe, lottie, false);
+        (scene, overlay)
+    }
+
+    /// [`Self::get`] built with [`build_fragment_with`], and the layers of
+    /// its soft effects.
+    pub fn get_with(
+        &mut self,
+        recipe: &Arc<FragmentRecipe>,
+        lottie: Option<&Arc<vello::Scene>>,
+        gpu: bool,
+    ) -> (
+        Arc<vello::Scene>,
+        Option<Arc<vello::Scene>>,
+        Arc<[crate::object_effects::EffectLayer]>,
+    ) {
         let key = (
             Arc::as_ptr(recipe) as usize,
             lottie.map_or(0, |scene| Arc::as_ptr(scene) as usize),
+            gpu,
         );
         let generation = self.generation;
         let entry = self.built.entry(key).or_insert_with(|| {
-            let built = build_fragment(recipe, lottie.map(Arc::as_ref));
+            let built = build_fragment_with(recipe, lottie.map(Arc::as_ref), gpu);
             StoredFragment {
                 recipe: Arc::clone(recipe),
                 lottie: lottie.cloned(),
                 scene: Arc::new(built.scene),
                 overlay: built.overlay.map(Arc::new),
+                soft: built.soft.into(),
                 last_used: generation,
             }
         });
         entry.last_used = generation;
-        (Arc::clone(&entry.scene), entry.overlay.clone())
+        (
+            Arc::clone(&entry.scene),
+            entry.overlay.clone(),
+            Arc::clone(&entry.soft),
+        )
     }
 
     /// Forget fragments whose recipes (or Lottie scenes) nothing else holds.
