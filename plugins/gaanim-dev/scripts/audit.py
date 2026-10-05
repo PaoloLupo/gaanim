@@ -36,6 +36,8 @@ REQUIRED_RECIPES = {
 }
 
 PERFORMANCE_SCENARIOS = {"reload", "seek", "preview", "export"}
+# Scenarios a profile may also configure; the harness runs them only on request.
+OPTIONAL_PERFORMANCE_SCENARIOS = {"playback"}
 PERFORMANCE_FILES = {
     "examples/performance_benchmark.py",
     "tests/benchmark_runtime.py",
@@ -204,9 +206,12 @@ def performance_contract_findings(repo: Path) -> list[Finding]:
             raise ValueError("schema_version must be 1")
         for profile in ("smoke", "standard"):
             scenarios = set(profiles[profile]["scenarios"])
-            if scenarios != PERFORMANCE_SCENARIOS:
+            if not PERFORMANCE_SCENARIOS <= scenarios <= (
+                PERFORMANCE_SCENARIOS | OPTIONAL_PERFORMANCE_SCENARIOS
+            ):
                 raise ValueError(
                     f"{profile} scenarios are {sorted(scenarios)}, expected {sorted(PERFORMANCE_SCENARIOS)}"
+                    f" and optionally {sorted(OPTIONAL_PERFORMANCE_SCENARIOS)}"
                 )
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         findings.append(

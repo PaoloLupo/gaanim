@@ -6,7 +6,9 @@
 //! the frame into main-world phases (timeline seek, fragment compilation) and
 //! render-world phases (surface acquire, render graph and present), with the
 //! largest Vello scene of the second (paths, segments and clips). The editor
-//! exits with a summary of the slowest windows when the timeline ends.
+//! exits with a summary of the slowest windows when the timeline ends, and
+//! one `GAANIM_PLAYBACK_TIMINGS` line of the whole playback for
+//! `tests/benchmark_runtime.py --scenarios playback`.
 
 use crate::EditorState;
 use bevy::platform::time::Instant;
@@ -139,11 +141,56 @@ struct WindowReport {
     avg_dt_ms: f64,
 }
 
+/// Frame times and phase totals of the whole playback.
+#[derive(Default)]
+struct Playback {
+    started: Option<Instant>,
+    /// Milliseconds between consecutive frames, and of each main-world frame.
+    frame_ms: Vec<f64>,
+    main_ms: Vec<f64>,
+    seek: Duration,
+    compile: Duration,
+    render: Duration,
+    render_frames: u32,
+}
+
+impl Playback {
+    fn summary(&self) -> String {
+        let frames = self.main_ms.len();
+        let per_frame =
+            |total: Duration, frames: usize| total.as_secs_f64() * 1000.0 / frames.max(1) as f64;
+        format!(
+            "GAANIM_PLAYBACK_TIMINGS frames={frames} seconds={:.3} frame_p50_ms={:.3} frame_p95_ms={:.3} main_p50_ms={:.3} main_p95_ms={:.3} seek_ms={:.3} compile_ms={:.3} render_ms={:.3}",
+            self.started
+                .map_or(0.0, |started| started.elapsed().as_secs_f64()),
+            percentile(&self.frame_ms, 0.50),
+            percentile(&self.frame_ms, 0.95),
+            percentile(&self.main_ms, 0.50),
+            percentile(&self.main_ms, 0.95),
+            per_frame(self.seek, frames),
+            per_frame(self.compile, frames),
+            per_frame(self.render, self.render_frames as usize),
+        )
+    }
+}
+
+/// The value below which `fraction` of `values` lie (nearest rank).
+fn percentile(values: &[f64], fraction: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let rank = (fraction * sorted.len() as f64).ceil() as usize;
+    sorted[rank.clamp(1, sorted.len()) - 1]
+}
+
 #[derive(Resource, Default)]
 struct FrameProfile {
     state: ProfileState,
     window: Option<Window>,
     reports: Vec<WindowReport>,
+    playback: Playback,
     main_start: Option<Instant>,
     seek_start: Option<Instant>,
     compile_start: Option<Instant>,
@@ -213,6 +260,10 @@ fn drive_playback(
             timeline.is_playing = true;
             profile.state = ProfileState::Playing;
             profile.window = Some(Window::new(0.0));
+            profile.playback = Playback {
+                started: Some(Instant::now()),
+                ..default()
+            };
             profile.last_frame = None;
             eprintln!(
                 "GAANIM_FRAME_PROFILE playing {:.2}s timeline (all ms are per-frame averages; max in brackets)",
@@ -225,6 +276,7 @@ fn drive_playback(
         {
             flush_window(&mut profile);
             print_summary(&profile.reports);
+            eprintln!("{}", profile.playback.summary());
             profile.state = ProfileState::Done;
             exit.write(AppExit::Success);
         }
@@ -237,9 +289,11 @@ fn seek_start(mut profile: ResMut<FrameProfile>) {
 }
 
 fn seek_end(mut profile: ResMut<FrameProfile>) {
+    let profile = &mut *profile;
     let elapsed = profile.seek_start.take().map(|start| start.elapsed());
     if let (Some(window), Some(elapsed)) = (profile.window.as_mut(), elapsed) {
         window.seek.add(elapsed);
+        profile.playback.seek += elapsed;
     }
 }
 
@@ -259,6 +313,7 @@ fn compile_end(mut profile: ResMut<FrameProfile>, cache: Option<Res<GaanimRender
         }
     }
     if let (Some(window), Some(elapsed)) = (profile.window.as_mut(), elapsed) {
+        profile.playback.compile += elapsed;
         window.compile.add(elapsed);
         window.rebuilt += rebuilt;
         window.fragments = cache.fragment_cache.len();
@@ -277,6 +332,13 @@ fn main_frame_end(
     let dt = profile.last_frame.replace(now).map(|last| now - last);
     if profile.state != ProfileState::Playing {
         return;
+    }
+    let playback = &mut profile.playback;
+    if let Some(main) = main {
+        playback.main_ms.push(main.as_secs_f64() * 1000.0);
+    }
+    if let Some(dt) = dt {
+        playback.frame_ms.push(dt.as_secs_f64() * 1000.0);
     }
     let Some(window) = profile.window.as_mut() else {
         return;
@@ -324,6 +386,8 @@ fn flush_window(profile: &mut FrameProfile) {
         &mut *RENDER_TIMES.lock().expect("frame profile poisoned"),
         RenderWorldTimes::EMPTY,
     );
+    profile.playback.render += render.frame.total;
+    profile.playback.render_frames += render.frames;
     if window.frames == 0 {
         return;
     }

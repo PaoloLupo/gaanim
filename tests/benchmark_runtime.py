@@ -21,6 +21,9 @@ from typing import Any
 
 
 SCENARIOS = ("reload", "seek", "preview", "export")
+# Run only when named with --scenarios: interactive playback opens the
+# editor's window, which a headless runner cannot.
+OPT_IN_SCENARIOS = ("playback",)
 ENCODERS = ("auto", "libx264", "nvenc", "amf", "qsv", "vaapi")
 EXPORT_FORMATS = ("mp4", "webm", "webp", "gif", "png", "gaanim")
 REPORT_SCHEMA_VERSION = 2
@@ -35,6 +38,16 @@ POLL_SECONDS = 0.025
 EXPORT_TIMING_PREFIX = "GAANIM_EXPORT_TIMINGS "
 CAPTURE_TIMING_PREFIX = "GAANIM_CAPTURE_TIMINGS "
 PNG_TIMING_PREFIX = "GAANIM_PNG_TIMINGS "
+PLAYBACK_TIMING_PREFIX = "GAANIM_PLAYBACK_TIMINGS "
+PLAYBACK_PHASES = (
+    "frame_p50_ms",
+    "frame_p95_ms",
+    "main_p50_ms",
+    "main_p95_ms",
+    "seek_ms",
+    "compile_ms",
+    "render_ms",
+)
 ADAPTER_PREFIX = "GAANIM_GPU_ADAPTER "
 EXPORT_PHASES = (
     "render_gpu_ms",
@@ -269,6 +282,9 @@ def scenario_command(
             str(artifact_dir),
             "--capture-only",
         ]
+    if scenario == "playback":
+        # The editor plays the timeline once and exits (GAANIM_FRAME_PROFILE).
+        return [str(executable), str(scene)]
     if scenario == "export":
         command = [
             str(executable),
@@ -361,6 +377,25 @@ def parse_capture_metrics(log_path: Path) -> dict[str, float]:
         ) from error
 
 
+def parse_playback_metrics(log_path: Path) -> dict[str, float]:
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        marker = next(
+            line for line in reversed(lines) if line.startswith(PLAYBACK_TIMING_PREFIX)
+        )
+        fields = dict(part.split("=", 1) for part in marker.split()[1:])
+        if int(fields["frames"]) < 1:
+            raise ValueError("playback rendered no frames")
+        timings = {phase: float(fields[phase]) for phase in PLAYBACK_PHASES}
+        if any(not math.isfinite(value) or value < 0 for value in timings.values()):
+            raise ValueError("phase timings must be finite and non-negative")
+        return timings
+    except (OSError, KeyError, StopIteration, ValueError) as error:
+        raise BenchmarkFailure(
+            f"playback did not report valid timings in {log_path}"
+        ) from error
+
+
 def validate_artifacts(
     scenario: str, artifact_dir: Path, frames: int, export_format: str = "mp4"
 ) -> dict[str, Any] | None:
@@ -392,6 +427,8 @@ def validate_artifacts(
                 f"{scenario} produced {actual_frames} frames; expected {frames}"
             )
         return {"phase_timings_ms": parse_capture_metrics(artifact_dir / "command.log")}
+    elif scenario == "playback":
+        return {"phase_timings_ms": parse_playback_metrics(artifact_dir / "command.log")}
     elif scenario == "export":
         # A PNG sequence writes numbered files next to the requested name.
         outputs = [
@@ -424,7 +461,7 @@ def suite_entries(configuration: dict[str, Any], suite: str) -> list[dict[str, A
         if isinstance(entry, str):
             entry = {"scene": entry}
         scenarios = tuple(entry.get("scenarios", SCENARIOS))
-        unknown = set(scenarios) - set(SCENARIOS)
+        unknown = set(scenarios) - set(SCENARIOS) - set(OPT_IN_SCENARIOS)
         if unknown:
             raise BenchmarkFailure(f"suite {suite} names unknown scenarios: {sorted(unknown)}")
         resolved.append(
@@ -515,6 +552,7 @@ def measure_scene(
             phase: [] for phase in (*EXPORT_PHASES, *OPTIONAL_EXPORT_PHASES)
         }
         capture_phase_samples = {phase: [] for phase in CAPTURE_PHASES}
+        playback_phase_samples = {phase: [] for phase in PLAYBACK_PHASES}
         export_encoder = None
         adapter = None
 
@@ -532,6 +570,8 @@ def measure_scene(
             environment["GAANIM_BENCHMARK_SCALE"] = str(scale)
             if scenario in {"seek", "preview"}:
                 environment["GAANIM_CAPTURE_TELEMETRY"] = "1"
+            if scenario == "playback":
+                environment["GAANIM_FRAME_PROFILE"] = "1"
             command = scenario_command(
                 scenario,
                 executable=executable,
@@ -574,18 +614,25 @@ def measure_scene(
             if scenario in {"seek", "preview"} and artifact_report is not None:
                 for phase, value in artifact_report["phase_timings_ms"].items():
                     capture_phase_samples[phase].append(float(value))
+            if scenario == "playback" and artifact_report is not None:
+                for phase, value in artifact_report["phase_timings_ms"].items():
+                    playback_phase_samples[phase].append(float(value))
             process_timings.append(elapsed_ms)
-            timings.append(
-                float(artifact_report["total_ms"])
-                if scenario == "reload" and artifact_report is not None
-                else elapsed_ms
-            )
+            if scenario == "reload" and artifact_report is not None:
+                timings.append(float(artifact_report["total_ms"]))
+            elif scenario == "playback" and artifact_report is not None:
+                # A sample is the 95th-percentile frame time of one playback.
+                timings.append(float(artifact_report["phase_timings_ms"]["frame_p95_ms"]))
+            else:
+                timings.append(elapsed_ms)
             if peak_rss_mb is not None:
                 peak_rss_values.append(peak_rss_mb)
 
         p50_ms = percentile(timings, 0.50)
         p95_ms = percentile(timings, 0.95)
-        counts_frames = scenario != "reload"
+        counts_frames = scenario not in {"reload", "playback"}
+        # Playback samples are already per frame.
+        per_frame = scenario == "playback"
         result: dict[str, Any] = {
             "samples": samples,
             "warmups": warmups,
@@ -596,19 +643,26 @@ def measure_scene(
             else None,
             "p50_ms": round(p50_ms, 3),
             "p95_ms": round(p95_ms, 3),
-            "ms_per_frame_p50": round(p50_ms / frames, 3) if counts_frames else None,
+            "ms_per_frame_p50": round(p50_ms / frames, 3)
+            if counts_frames
+            else round(p50_ms, 3) if per_frame else None,
             "peak_rss_mb": round(max(peak_rss_values), 3)
             if peak_rss_values
             else None,
             "memory_scope": memory_scope,
-            "fps_at_p50": round(frames / (p50_ms / 1000.0), 3) if counts_frames else None,
-            "fps_at_p95": round(frames / (p95_ms / 1000.0), 3) if counts_frames else None,
+            "fps_at_p50": round(frames / (p50_ms / 1000.0), 3)
+            if counts_frames
+            else round(1000.0 / p50_ms, 3) if per_frame and p50_ms > 0 else None,
+            "fps_at_p95": round(frames / (p95_ms / 1000.0), 3)
+            if counts_frames
+            else round(1000.0 / p95_ms, 3) if per_frame and p95_ms > 0 else None,
             "budget": scenario_config["budget"] if apply_budgets else None,
             "gpu_adapter": adapter,
         }
         phase_samples = (
             export_phase_samples if scenario == "export"
             else capture_phase_samples if scenario in {"seek", "preview"}
+            else playback_phase_samples if scenario == "playback"
             else {}
         )
         if scenario == "export":
@@ -686,7 +740,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path, default=Path("target/performance"))
     parser.add_argument("--profile", choices=("smoke", "standard"), default="smoke")
-    parser.add_argument("--scenarios", nargs="+", choices=SCENARIOS)
+    parser.add_argument(
+        "--scenarios",
+        nargs="+",
+        choices=(*SCENARIOS, *OPT_IN_SCENARIOS),
+        help="Scenarios to run (default: each scene's). playback opens the editor's "
+        "window and plays the timeline once; it runs only when named here.",
+    )
     parser.add_argument("--encoder", choices=ENCODERS, default="libx264")
     parser.add_argument("--export-format", choices=EXPORT_FORMATS, default="mp4")
     parser.add_argument(
@@ -759,9 +819,13 @@ def main() -> int:
     try:
         for entry in entries:
             scene = resolve(repo, Path(entry["scene"]))
-            scenarios = tuple(
-                scenario for scenario in entry["scenarios"]
-                if args.scenarios is None or scenario in args.scenarios
+            scenarios = (
+                tuple(
+                    scenario for scenario in args.scenarios
+                    if scenario in entry["scenarios"] or scenario in OPT_IN_SCENARIOS
+                )
+                if args.scenarios
+                else tuple(entry["scenarios"])
             )
             for scale in args.scales or entry["scales"]:
                 if scale < 1:

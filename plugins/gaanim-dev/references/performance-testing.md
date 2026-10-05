@@ -21,6 +21,15 @@ scene writes about 500 MB); pass `--keep-artifacts` to inspect them.
 | `seek` | Deterministically dispersed exact seeks through timeline, GPU rendering, readback, and PNG capture |
 | `preview` | Dense 1920x1080 headless capture; excludes window presentation and vsync |
 | `export` | H.264 draft export; `standard` renders 300 frames at 1920x1080 |
+| `playback` | Opt-in: the editor's window plays the timeline once (`GAANIM_FRAME_PROFILE`), with vsync |
+
+`playback` runs only when named (`--scenarios playback`), since it opens a
+window. A sample is the 95th-percentile frame time of one playback; its
+phases are frame time p50/p95, main-world time p50/p95 (the CPU work of a
+frame, which vsync does not hide), and per-frame seek, fragment compile and
+render-world averages from the `GAANIM_PLAYBACK_TIMINGS` line. A frame time
+at the display's refresh means playback keeps up; compare `main_*` between
+builds.
 
 The report records p50/p95 scenario latency, FPS at those latency percentiles,
 and peak RSS when available. Reload latency excludes process startup; its raw
@@ -51,6 +60,7 @@ GPU is hidden behind the CPU work.
 python tests/benchmark_runtime.py --suite gpu --profile standard
 python tests/benchmark_runtime.py --suite scaling --scales 1 2 4
 python tests/benchmark_runtime.py --suite gpu --scenarios export --export-format webm
+python tests/benchmark_runtime.py --scene examples/performance_repeater.py --scenarios playback
 python tests/benchmark_runtime.py --suite gpu --compare before.json --max-regression 0.10
 ```
 
