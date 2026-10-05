@@ -368,6 +368,9 @@ pub struct EncoderConfig {
     pub audio_tracks: Vec<AudioTrack>,
     pub render_start: f64,
     pub render_duration: f64,
+    /// Frames arrive as NV12 (BT.601, limited range) rather than RGBA; see
+    /// [`crate::gpu::GpuContext::read_nv12`].
+    pub nv12_input: bool,
 }
 
 /// A highly optimized parallel frame encoder that pipes raw RGBA frames into FFmpeg in a background thread.
@@ -682,7 +685,7 @@ impl ParallelEncoder {
         cmd.arg("-f")
             .arg("rawvideo")
             .arg("-pix_fmt")
-            .arg("rgba")
+            .arg(if config.nv12_input { "nv12" } else { "rgba" })
             .arg("-s")
             .arg(format!("{}x{}", config.width, config.height))
             .arg("-r")
@@ -1030,6 +1033,7 @@ mod tests {
             audio_tracks: Vec::new(),
             render_start: 0.0,
             render_duration: 1.0,
+            nv12_input: false,
         }
     }
 

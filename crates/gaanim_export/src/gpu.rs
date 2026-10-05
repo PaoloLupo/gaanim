@@ -139,6 +139,9 @@ pub struct GpuContext {
     pending: Option<FrameJob>,
     /// Time spent blocked on readbacks, for the benchmark harness.
     readback_wait: std::cell::Cell<std::time::Duration>,
+    /// Converts frames to NV12 before the readback, for a video export
+    /// (see [`Self::read_nv12`]).
+    nv12: Option<crate::nv12::Nv12Converter>,
 }
 
 impl GpuContext {
@@ -288,7 +291,18 @@ impl GpuContext {
             max_bump_bytes: max_storage,
             pending: None,
             readback_wait: Default::default(),
+            nv12: None,
         })
+    }
+
+    /// Read frames back as NV12 (BT.601, limited range) instead of RGBA,
+    /// for an encoder that converts to YUV 4:2:0 anyway. Returns whether
+    /// frames are NV12 from now on: the width must be a multiple of 4 and
+    /// the height even.
+    pub fn read_nv12(&mut self) -> bool {
+        self.nv12 =
+            crate::nv12::Nv12Converter::new(&self.device, &self.texture, self.width, self.height);
+        self.nv12.is_some()
     }
 
     /// Render the incoming segment over `base_color` and the layer above
@@ -635,22 +649,25 @@ impl GpuContext {
         }
 
         let staging = self.take_staging();
-        encoder.copy_texture_to_buffer(
-            self.texture.as_image_copy(),
-            TexelCopyBufferInfo {
-                buffer: &staging,
-                layout: TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.padded_width * 4),
-                    rows_per_image: None,
+        match &self.nv12 {
+            Some(nv12) => nv12.encode(&mut encoder, &staging),
+            None => encoder.copy_texture_to_buffer(
+                self.texture.as_image_copy(),
+                TexelCopyBufferInfo {
+                    buffer: &staging,
+                    layout: TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(self.padded_width * 4),
+                        rows_per_image: None,
+                    },
                 },
-            },
-            Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
-        );
+                Extent3d {
+                    width: self.width,
+                    height: self.height,
+                    depth_or_array_layers: 1,
+                },
+            ),
+        }
 
         self.staging = Some(staging);
 
@@ -718,6 +735,10 @@ impl GpuContext {
             width: self.width,
             height: self.height,
             padded_width: self.padded_width,
+            nv12_bytes: self
+                .nv12
+                .as_ref()
+                .map(crate::nv12::Nv12Converter::frame_bytes),
             release: self.release_staging.clone(),
         })
     }
@@ -736,7 +757,8 @@ fn create_staging(
     })
 }
 
-/// The pixels of a frame, as tightly packed RGBA8 rows.
+/// The pixels of a frame, as tightly packed RGBA8 rows, or as an NV12
+/// frame from a context that reads NV12 (see [`GpuContext::read_nv12`]).
 pub enum FramePixels {
     Owned(Vec<u8>),
     /// The pixels of a frame repeated while the scene holds still.
@@ -763,6 +785,7 @@ impl FramePixels {
             Self::Owned(pixels) => f(pixels, row),
             Self::Shared(pixels) => f(pixels, row),
             Self::Mapped(frame) => {
+                assert!(frame.nv12_bytes.is_none(), "an NV12 frame has no RGBA rows");
                 let buffer = frame
                     .buffer
                     .as_ref()
@@ -799,6 +822,9 @@ pub struct MappedFrame {
     height: u32,
     /// Row stride of the buffer in pixels (rows are aligned for the copy).
     padded_width: u32,
+    /// Length of an NV12 frame held at the start of the buffer instead of
+    /// RGBA rows.
+    nv12_bytes: Option<usize>,
     release: mpsc::Sender<vello::wgpu::Buffer>,
 }
 
@@ -813,6 +839,9 @@ impl MappedFrame {
     pub fn write_to(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
         let buffer = self.buffer.as_ref().expect("the buffer is held until drop");
         let data = buffer.slice(..).get_mapped_range();
+        if let Some(bytes) = self.nv12_bytes {
+            return out.write_all(&data[..bytes]);
+        }
         let row = self.width as usize * 4;
         if self.padded_width == self.width {
             return out.write_all(&data[..row * self.height as usize]);

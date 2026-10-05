@@ -591,6 +591,7 @@ where
         audio_tracks: config.audio_tracks.clone(),
         render_start,
         render_duration: render_length,
+        nv12_input: false,
     })?;
 
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
@@ -691,6 +692,14 @@ where
     let render_length = render_end - render_start;
     validate_render_range(render_start, render_end, timeline_duration)?;
 
+    // Video encoders convert to YUV 4:2:0: the GPU does it and the readback
+    // carries less than half the bytes. Motion blur averages RGBA frames.
+    let nv12 = match config.format {
+        crate::encoder::ExportFormat::Mp4 => true,
+        crate::encoder::ExportFormat::Webm => !config.transparent,
+        _ => false,
+    } && frame_motion_blur(app.world()).is_none()
+        && gpu.read_nv12();
     let mut encoder = ParallelEncoder::new(EncoderConfig {
         output_path: config.output_path.clone(),
         width: config.width,
@@ -704,6 +713,7 @@ where
         audio_tracks: config.audio_tracks.clone(),
         render_start,
         render_duration: render_length,
+        nv12_input: nv12,
     })?;
 
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
@@ -969,6 +979,7 @@ pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Res
         audio_tracks: config.audio_tracks.clone(),
         render_start,
         render_duration: render_length,
+        nv12_input: false,
     })?;
     let total_frames = (render_length * config.fps as f64).ceil() as u64;
     if let Some(telemetry) = &telemetry {

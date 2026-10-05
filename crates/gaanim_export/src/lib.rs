@@ -4,6 +4,7 @@ pub mod encoder;
 pub mod exporter;
 pub mod gpu;
 pub mod live_polls;
+mod nv12;
 
 pub mod prelude {
     pub use crate::config::{
