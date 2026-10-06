@@ -1633,13 +1633,14 @@ impl Timeline {
     /// Segment starts where checkpoints can be taken, or `None` when this
     /// world cannot use them.
     fn checkpoint_times(&mut self, world: &mut World) -> Option<&[OrderedFloat<f64>]> {
-        // Reactive state is rebuilt by running it from t=0, not replayed
-        // from a checkpoint; property preparation seeks to clip starts
-        // inside an unfinished revision. Scene membership is restored with
-        // the snapshot and scene visibility follows the playhead.
+        // Updaters and sampled series run from t=0, not from a checkpoint;
+        // traces are rebuilt from t=0 after any restore, so they allow them.
+        // Property preparation seeks to clip starts inside an unfinished
+        // revision. Scene membership is restored with the snapshot and scene
+        // visibility follows the playhead.
         if !self.segment_checkpoints
             || world.contains_resource::<gaanim_animation::PreparingPropertySources>()
-            || has_replayed_state(world)
+            || has_simulated_state(world)
         {
             return None;
         }
@@ -2547,7 +2548,10 @@ impl Timeline {
                 truncate_traced_paths(world, self.current_time);
                 resync_updaters(world, self.current_time);
             }
-        } else {
+        } else if before.is_none() {
+            // A checkpoint keeps no trail: every seek that restores it
+            // rebuilds the trails from t=0, and checkpoints exist only
+            // without updaters to resync (see `checkpoint_times`).
             self.rebuild_traced_paths(world, self.current_time);
         }
 
@@ -3425,11 +3429,148 @@ fn resync_updaters(world: &mut World, target_time: f64) {
     gaanim_animation::seek_updaters(world, target_time);
 }
 
+/// A 2D trace being rebuilt: its entity, source, minimum distance between
+/// points, maximum points, start time and dissipating time.
+type TraceRebuild = (Entity, Entity, f64, Option<usize>, f64, Option<f64>);
+
+/// A 3D trace being rebuilt, as [`TraceRebuild`] plus its colormap.
+type TraceRebuild3D = (
+    Entity,
+    Entity,
+    f64,
+    Option<usize>,
+    Option<gaanim_core::ColorMap>,
+    f64,
+    Option<f64>,
+);
+
+type TracePosition = gaanim_core::glam::DVec3;
+
+/// Where the sources of the 2D and of the 3D traces are at one sample.
+type SourcePositions = (Vec<Option<TracePosition>>, Vec<Option<TracePosition>>);
+
+#[cfg(test)]
+thread_local! {
+    /// Samples a trace rebuild took without replaying the world.
+    static HELD_TRACE_SAMPLES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Add each trace's source position at `sample_time` to its trail, as a
+/// rebuild samples playback. A source without a position adds nothing.
+fn sample_traces(
+    world: &mut World,
+    traces: &[TraceRebuild],
+    traces_3d: &[TraceRebuild3D],
+    positions: &[Option<TracePosition>],
+    positions_3d: &[Option<TracePosition>],
+    sample_time: f64,
+) {
+    for (&(trace, _, min_distance, max_points, start_at, dissipating_time), position) in
+        traces.iter().zip(positions)
+    {
+        if sample_time + f64::EPSILON < start_at {
+            continue;
+        }
+        let Some(position) = *position else {
+            continue;
+        };
+        if let Some(mut traced) = world.get_mut::<gaanim_animation::TracedPath>(trace) {
+            let traced = &mut *traced;
+            push_trace_sample(
+                &mut traced.points,
+                &mut traced.sample_times,
+                position,
+                sample_time,
+                (min_distance, max_points, dissipating_time),
+            );
+        }
+    }
+    for (&(trace, _, min_distance, max_points, _, start_at, dissipating_time), position) in
+        traces_3d.iter().zip(positions_3d)
+    {
+        if sample_time + f64::EPSILON < start_at {
+            continue;
+        }
+        let Some(position) = *position else {
+            continue;
+        };
+        if let Some(mut traced) = world.get_mut::<gaanim_animation::TracedPath3D>(trace) {
+            let traced = &mut *traced;
+            push_trace_sample(
+                &mut traced.points,
+                &mut traced.sample_times,
+                position,
+                sample_time,
+                (min_distance, max_points, dissipating_time),
+            );
+        }
+    }
+}
+
+/// Drop the points older than the dissipating time, then add `position`
+/// when it is at least the minimum distance from the last point, keeping at
+/// most the maximum number of points.
+fn push_trace_sample(
+    points: &mut Vec<TracePosition>,
+    sample_times: &mut Vec<f64>,
+    position: TracePosition,
+    sample_time: f64,
+    (min_distance, max_points, dissipating_time): (f64, Option<usize>, Option<f64>),
+) {
+    if let Some(duration) = dissipating_time {
+        let cutoff = sample_time - duration;
+        let expired = sample_times.partition_point(|time| *time < cutoff);
+        points.drain(0..expired);
+        sample_times.drain(0..expired);
+    }
+    let should_add = match points.last() {
+        Some(last) => last.distance(position) >= min_distance,
+        None => true,
+    };
+    if should_add {
+        points.push(position);
+        sample_times.push(sample_time);
+        if let Some(max) = max_points
+            && points.len() > max
+        {
+            let overflow = points.len() - max;
+            points.drain(0..overflow);
+            sample_times.drain(0..overflow);
+        }
+    }
+}
+
+/// How little of the world a trace rebuild may replay at each sample; see
+/// [`Timeline::trace_sampling`].
+struct TraceSampling {
+    /// From this time on, the sources hold their positions.
+    settled_at: f64,
+    /// Whether the drivers that place a source are all that moves one.
+    /// Otherwise a source may read a signal, so every driver replays.
+    placing_only: bool,
+    /// Times where a property binding starts or ends, in order. Bindings set
+    /// their targets from the time and signals alone, so the world they
+    /// leave depends only on the last sample before each of these.
+    binding_changes: Vec<f64>,
+}
+
+impl TraceSampling {
+    /// Whether a property binding starts or ends in `(from, to]`.
+    fn bindings_change(&self, from: f64, to: f64) -> bool {
+        let next = self.binding_changes.partition_point(|time| *time <= from);
+        self.binding_changes
+            .get(next)
+            .is_some_and(|time| *time <= to)
+    }
+}
+
 /// A clip-driven input of the traced paths: an entity whose animation clips
 /// are replayed onto `probe` at each sample of a rebuild.
 struct TraceDriver<'a> {
     id: gaanim_core::ObjectId,
     entity: Entity,
+    /// A source or one of its ancestors, rather than only a signal.
+    places: bool,
     clips: Vec<&'a Clip>,
     probe: Entity,
 }
@@ -3439,9 +3580,8 @@ impl Timeline {
     /// source as playback moves it: animation clips on the source, its
     /// ancestors and the signals that bindings read, then updaters and
     /// reactive positions.
-    #[allow(clippy::type_complexity)]
     fn rebuild_traced_paths(&self, world: &mut World, target_time: f64) {
-        let traces: Vec<(Entity, Entity, f64, Option<usize>, f64, Option<f64>)> = {
+        let traces: Vec<TraceRebuild> = {
             let mut query = world.query::<(Entity, &gaanim_animation::TracedPath)>();
             query
                 .iter(world)
@@ -3457,15 +3597,7 @@ impl Timeline {
                 })
                 .collect()
         };
-        let traces_3d: Vec<(
-            Entity,
-            Entity,
-            f64,
-            Option<usize>,
-            Option<gaanim_core::ColorMap>,
-            f64,
-            Option<f64>,
-        )> = {
+        let traces_3d: Vec<TraceRebuild3D> = {
             let mut query = world.query::<(Entity, &gaanim_animation::TracedPath3D)>();
             query
                 .iter(world)
@@ -3532,106 +3664,91 @@ impl Timeline {
         }
         sample_times.push(target_time);
 
+        // Unless something else may move a source, only the clips of the
+        // drivers that place the sources move them, so a sample replays just
+        // those, and none once they have all ended. Signals and bindings
+        // would change only the rest of the world, and the world a binding
+        // leaves is the one the sample before each change to the bindings
+        // sets, so only those samples and the last one, which leaves the
+        // world as at `target_time`, replay it all.
+        let mut drivers = drivers;
+        drivers.sort_by_key(|driver| !driver.places);
+        let placing = drivers.iter().take_while(|driver| driver.places).count();
+        let plan = self.trace_sampling(
+            world,
+            &drivers,
+            traces
+                .iter()
+                .flat_map(|trace| [trace.0, trace.1])
+                .chain(traces_3d.iter().flat_map(|trace| [trace.0, trace.1])),
+        );
+        let mut held: Option<SourcePositions> = None;
         let mut previous_sample_time = 0.0;
-        for sample_time in sample_times {
-            self.replay_trace_drivers(world, &drivers, sample_time);
-            gaanim_animation::advance_updaters_by(world, sample_time - previous_sample_time);
-            previous_sample_time = sample_time;
-            // Sample sources exactly as playback moves them; stale reactive
-            // positions would otherwise join old points to the live trail.
-            gaanim_animation::evaluate_reactive_positions(world, sample_time);
-
-            for (
-                trace_entity,
-                source_entity,
-                min_distance,
-                max_points,
-                start_at,
-                dissipating_time,
-            ) in &traces
-            {
-                if sample_time + f64::EPSILON < *start_at {
-                    continue;
+        for (index, &sample_time) in sample_times.iter().enumerate() {
+            let partial = plan
+                .as_ref()
+                .zip(sample_times.get(index + 1))
+                .filter(|(plan, next)| !plan.bindings_change(sample_time, **next))
+                .map(|(plan, _)| plan);
+            match partial {
+                Some(_) if held.is_some() => {
+                    #[cfg(test)]
+                    HELD_TRACE_SAMPLES.with(|held| held.set(held.get() + 1));
                 }
-                let Some(source_pos) =
-                    gaanim_animation::traced_source_position(*trace_entity, *source_entity, world)
-                else {
-                    continue;
-                };
-
-                if let Some(mut traced_path) =
-                    world.get_mut::<gaanim_animation::TracedPath>(*trace_entity)
-                {
-                    if let Some(duration) = dissipating_time {
-                        let cutoff = sample_time - duration;
-                        let expired = traced_path
-                            .sample_times
-                            .partition_point(|time| *time < cutoff);
-                        traced_path.points.drain(0..expired);
-                        traced_path.sample_times.drain(0..expired);
-                    }
-                    let should_add = match traced_path.points.last() {
-                        Some(last_point) => last_point.distance(source_pos) >= *min_distance,
-                        None => true,
-                    };
-
-                    if should_add {
-                        traced_path.points.push(source_pos);
-                        traced_path.sample_times.push(sample_time);
-                        if let Some(max) = max_points
-                            && traced_path.points.len() > *max
-                        {
-                            let overflow = traced_path.points.len() - *max;
-                            traced_path.points.drain(0..overflow);
-                            traced_path.sample_times.drain(0..overflow);
-                        }
-                    }
+                Some(plan) if plan.placing_only => {
+                    self.replay_trace_drivers(world, &drivers[..placing], sample_time);
+                }
+                _ => {
+                    self.replay_trace_drivers(world, &drivers, sample_time);
+                    gaanim_animation::advance_updaters_by(
+                        world,
+                        sample_time - previous_sample_time,
+                    );
+                    previous_sample_time = sample_time;
+                    // Sample sources exactly as playback moves them; stale
+                    // reactive positions would otherwise join old points to
+                    // the live trail.
+                    gaanim_animation::evaluate_reactive_positions(world, sample_time);
                 }
             }
-            for (
-                trace_entity,
-                source_entity,
-                min_distance,
-                max_points,
-                _colormap,
-                start_at,
-                dissipating_time,
-            ) in &traces_3d
+            if let Some((positions, positions_3d)) = &held {
+                sample_traces(
+                    world,
+                    &traces,
+                    &traces_3d,
+                    positions,
+                    positions_3d,
+                    sample_time,
+                );
+                continue;
+            }
+            let positions: Vec<_> = traces
+                .iter()
+                .map(|(trace, source, ..)| {
+                    gaanim_animation::traced_source_position(*trace, *source, world)
+                })
+                .collect();
+            let positions_3d: Vec<_> = traces_3d
+                .iter()
+                .map(|(_, source, ..)| {
+                    world
+                        .get::<SpatialTransform>(*source)
+                        .map(|transform| transform.translation)
+                })
+                .collect();
+            sample_traces(
+                world,
+                &traces,
+                &traces_3d,
+                &positions,
+                &positions_3d,
+                sample_time,
+            );
+            if plan
+                .as_ref()
+                .is_some_and(|plan| sample_time >= plan.settled_at)
             {
-                if sample_time + f64::EPSILON < *start_at {
-                    continue;
-                }
-                let Some(source_pos) = world
-                    .get::<SpatialTransform>(*source_entity)
-                    .map(|t| t.translation)
-                else {
-                    continue;
-                };
-                if let Some(mut traced) =
-                    world.get_mut::<gaanim_animation::TracedPath3D>(*trace_entity)
-                {
-                    if let Some(duration) = dissipating_time {
-                        let cutoff = sample_time - duration;
-                        let expired = traced.sample_times.partition_point(|time| *time < cutoff);
-                        traced.points.drain(0..expired);
-                        traced.sample_times.drain(0..expired);
-                    }
-                    let should_add = match traced.points.last() {
-                        Some(last) => last.distance(source_pos) >= *min_distance,
-                        None => true,
-                    };
-                    if should_add {
-                        traced.points.push(source_pos);
-                        traced.sample_times.push(sample_time);
-                        if let Some(max) = max_points
-                            && traced.points.len() > *max
-                        {
-                            let overflow = traced.points.len() - *max;
-                            traced.points.drain(0..overflow);
-                            traced.sample_times.drain(0..overflow);
-                        }
-                    }
-                }
+                held = Some((positions, positions_3d));
             }
         }
 
@@ -3641,6 +3758,69 @@ impl Timeline {
         }
     }
 
+    /// What a trace rebuild must replay, when nothing but clips and bindings
+    /// moves drawables and no binding moves a trace or its source: the
+    /// clips of the `drivers` that place a source, or every driver's when one
+    /// of those clips reads the world (and may read a signal). The sources
+    /// hold still once these have ended and replay from the latest keyframe.
+    /// `None` when something else may move a source.
+    fn trace_sampling(
+        &self,
+        world: &mut World,
+        drivers: &[TraceDriver<'_>],
+        traces: impl IntoIterator<Item = Entity>,
+    ) -> Option<TraceSampling> {
+        if gaanim_animation::has_reactive_positions(world) {
+            return None;
+        }
+        // Each trace and source, with their ancestors, places the trail.
+        let mut placing = HashSet::new();
+        for mut entity in traces {
+            for _ in 0..64 {
+                if !placing.insert(entity) {
+                    break;
+                }
+                match world.get::<ChildOf>(entity) {
+                    Some(relation) => entity = relation.parent(),
+                    None => break,
+                }
+            }
+        }
+        let mut changes = Vec::new();
+        let mut bindings = world.query::<&gaanim_animation::PropertyBinding>();
+        for binding in bindings.iter(world) {
+            if placing.contains(&binding.target) {
+                return None;
+            }
+            changes.push(binding.start);
+            changes.extend(binding.end);
+        }
+        changes.sort_by(f64::total_cmp);
+        changes.dedup();
+        let reads_world = drivers
+            .iter()
+            .filter(|driver| driver.places)
+            .flat_map(|driver| &driver.clips)
+            .any(|clip| {
+                matches!(
+                    &clip.payload,
+                    ClipPayload::Animation(anim) if matches!(anim.lens, PropertyLensSpec::Dynamic(_))
+                )
+            });
+        let clips_end = drivers
+            .iter()
+            .filter(|driver| driver.places || reads_world)
+            .flat_map(|driver| &driver.clips)
+            .map(|clip| clip.end())
+            .fold(0.0, f64::max);
+        let keyframe = self.keyframes.keys().next_back().map_or(0.0, |time| time.0);
+        Some(TraceSampling {
+            settled_at: clips_end.max(keyframe),
+            placing_only: !reads_world,
+            binding_changes: changes,
+        })
+    }
+
     /// The clip-driven inputs of traces whose sources are `sources`: each
     /// source and its ancestors, and every signal, when they have clips.
     fn trace_drivers(&self, world: &mut World, sources: &[Entity]) -> Vec<TraceDriver<'_>> {
@@ -3648,11 +3828,13 @@ impl Timeline {
             .query_filtered::<Entity, With<gaanim_animation::FloatSignal>>()
             .iter(world)
             .collect();
+        let mut placing = HashSet::new();
         for &source in sources {
             let mut entity = source;
             let mut depth = 0;
             loop {
                 candidates.push(entity);
+                placing.insert(entity);
                 depth += 1;
                 match world.get::<ChildOf>(entity) {
                     Some(relation) if depth < 64 => entity = relation.parent(),
@@ -3684,6 +3866,7 @@ impl Timeline {
             .map(|(id, clips)| TraceDriver {
                 id,
                 entity: ids[&id],
+                places: placing.contains(&ids[&id]),
                 clips,
                 probe: world.spawn_empty().id(),
             })
@@ -3834,15 +4017,13 @@ fn replay_baseline_now(
     }
 }
 
-/// Whether the world holds state a seek rebuilds by running it from t=0
-/// (updaters, sampled series, traces) rather than restoring it.
-fn has_replayed_state(world: &mut World) -> bool {
+/// Whether the world holds state a seek simulates from t=0 (updaters,
+/// sampled series) rather than restoring it.
+fn has_simulated_state(world: &mut World) -> bool {
     world
         .query_filtered::<Entity, Or<(
             With<gaanim_animation::Updater>,
             With<gaanim_animation::SampledSeriesDrivers>,
-            With<gaanim_animation::TracedPath>,
-            With<gaanim_animation::TracedPath3D>,
         )>>()
         .iter(world)
         .next()
@@ -6270,6 +6451,292 @@ mod tests {
                 .iter()
                 .all(|time| *time <= 1.45 + 1e-9)
         );
+    }
+
+    /// Minimum distance, maximum points, start and dissipating time.
+    type TraceParams = (f64, Option<usize>, f64, Option<f64>);
+
+    /// What property bindings a [`settling_trace_world`] has.
+    #[derive(Clone, Copy, PartialEq)]
+    enum TraceBindings {
+        None,
+        /// Bindings with windows on another drawable: one follows time, one a
+        /// signal animated after the source stops.
+        Elsewhere,
+        /// A binding that moves the trace's source.
+        OnSource,
+    }
+
+    /// A trace of a source that clips move for its first two seconds, and
+    /// its group from 6 to 7 s, with `checkpoints` at segment starts every
+    /// 2 s up to 40 s. `reactive` adds an updater on another entity, so
+    /// rebuilds replay every sample. The drawable the bindings target, if
+    /// any, is the last entity returned.
+    fn settling_trace_world(
+        reactive: bool,
+        checkpoints: bool,
+        (min_distance, max_points, start_at, dissipating_time): TraceParams,
+        bindings: TraceBindings,
+    ) -> (World, Timeline, Entity, Entity) {
+        let mut world = World::new();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        let source_id = ObjectId::from_raw(0);
+        let group_id = ObjectId::from_raw(5);
+        let group = world
+            .spawn((MobjectId(group_id), SpatialTransform::default()))
+            .id();
+        let source = world
+            .spawn((
+                MobjectId(source_id),
+                SpatialTransform::default(),
+                ChildOf(group),
+            ))
+            .id();
+        let trace = world
+            .spawn((
+                MobjectId(ObjectId::from_raw(1)),
+                SpatialTransform::default(),
+                Path2D(Arc::new(BezPath::new())),
+                gaanim_animation::TracedPath::new(source, min_distance, max_points)
+                    .starting_at(start_at)
+                    .with_dissipating_time(dissipating_time),
+            ))
+            .id();
+        if reactive {
+            world.spawn((
+                MobjectId(ObjectId::from_raw(2)),
+                SpatialTransform::default(),
+                gaanim_animation::Updater::new(|_, _, _, _| true),
+            ));
+        }
+        let bound = match bindings {
+            TraceBindings::OnSource => source,
+            _ => world
+                .spawn((
+                    MobjectId(ObjectId::from_raw(3)),
+                    SpatialTransform::default(),
+                ))
+                .id(),
+        };
+        let signal_id = ObjectId::from_raw(4);
+        if bindings != TraceBindings::None {
+            use gaanim_animation::{
+                PropertyBinding, PropertyParameter, PropertySources, PropertyValue,
+                ResolvedPropertySources, ScalarSource,
+            };
+            let signal = world
+                .spawn((
+                    MobjectId(signal_id),
+                    SpatialTransform::default(),
+                    gaanim_animation::FloatSignal::new(0.0),
+                ))
+                .id();
+            let binding = |sources, fallback, start, end| PropertyBinding {
+                target: bound,
+                source: ResolvedPropertySources {
+                    sources,
+                    parameters: vec![PropertyParameter {
+                        logical: signal_id,
+                        native: signal_id,
+                        entity: signal,
+                        initial: 0.0,
+                    }],
+                    anchor_offset: gaanim_core::glam::DVec3::ZERO,
+                    local_anchor: None,
+                },
+                start,
+                end,
+                fallback,
+            };
+            let constant = ScalarSource::Constant;
+            world.spawn(binding(
+                PropertySources::Translation {
+                    values: [ScalarSource::Time, constant(1.0), constant(0.0)],
+                    anchor: None,
+                },
+                PropertyValue::Translation(gaanim_core::glam::DVec3::ZERO),
+                5.0,
+                Some(15.0),
+            ));
+            // Its own channel, so its last write survives the other binding.
+            world.spawn(binding(
+                PropertySources::Scale([
+                    ScalarSource::Signal(signal_id),
+                    constant(1.0),
+                    constant(1.0),
+                ]),
+                PropertyValue::Scale(gaanim_core::glam::DVec3::ONE),
+                10.0,
+                Some(12.5),
+            ));
+        }
+        let mut timeline = Timeline {
+            segment_checkpoints: checkpoints,
+            ..Timeline::default()
+        };
+        let track = timeline.add_track("move", 0);
+        for (start, to) in [(0.0, (4.0, 2.0)), (1.2, (-1.0, 3.0))] {
+            timeline.add_clip(
+                track,
+                start,
+                0.8,
+                ClipPayload::Animation(AnimationSpec {
+                    target: source_id,
+                    lens: PropertyLensSpec::Translation {
+                        from: gaanim_core::glam::DVec3::ZERO,
+                        to: gaanim_core::glam::DVec3::new(to.0, to.1, 0.0),
+                    },
+                    rate_func: RateFunc::Smooth,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+        timeline.add_clip(
+            track,
+            6.0,
+            1.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: group_id,
+                lens: PropertyLensSpec::Translation {
+                    from: gaanim_core::glam::DVec3::ZERO,
+                    to: gaanim_core::glam::DVec3::new(0.0, -2.0, 0.0),
+                },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        if bindings != TraceBindings::None {
+            timeline.add_clip(
+                track,
+                8.0,
+                12.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: signal_id,
+                    lens: PropertyLensSpec::SignalFloat { from: 0.0, to: 6.0 },
+                    rate_func: RateFunc::Linear,
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+        timeline.add_clip(track, 40.0, 0.0, ClipPayload::Wait);
+        let segments = (0..20)
+            .map(|index| SegmentMetadata {
+                id: index + 1,
+                name: format!("segment {index}"),
+                notes: None,
+                start_time: f64::from(index) * 2.0,
+                end_time: f64::from(index + 1) * 2.0,
+                stops: Vec::new(),
+            })
+            .collect();
+        timeline.set_segments(segments);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        (world, timeline, trace, bound)
+    }
+
+    #[test]
+    fn settled_traces_rebuild_like_sampling_every_frame() {
+        let traces: [TraceParams; 4] = [
+            (0.01, None, 0.0, Some(0.3)),
+            (0.0, None, 0.0, Some(1.0)),
+            (0.05, Some(40), 0.0, None),
+            (0.01, None, 1.0, None),
+        ];
+        let cases = traces
+            .into_iter()
+            .map(|trace| (trace, TraceBindings::None))
+            .chain([
+                (traces[0], TraceBindings::Elsewhere),
+                (traces[0], TraceBindings::OnSource),
+            ]);
+        for (trace, bindings) in cases {
+            let (mut world, mut timeline, entity, bound) =
+                settling_trace_world(false, false, trace, bindings);
+            let (mut reference_world, mut reference, reference_entity, reference_bound) =
+                settling_trace_world(true, false, trace, bindings);
+            // Far apart, so every seek rebuilds the trace.
+            for time in [
+                30.0, 2.0, 1.5, 0.5, 12.345, 39.99, 2.6, 11.0, 14.99, 0.3, 15.01,
+            ] {
+                HELD_TRACE_SAMPLES.with(|held| held.set(0));
+                timeline.seek(&mut world, time);
+                let held = HELD_TRACE_SAMPLES.with(std::cell::Cell::get);
+                reference.seek(&mut reference_world, time);
+                assert_eq!(
+                    HELD_TRACE_SAMPLES.with(std::cell::Cell::get),
+                    held,
+                    "the reference replays every sample"
+                );
+                assert_eq!(
+                    held > 0,
+                    time > 7.1 && bindings != TraceBindings::OnSource,
+                    "t={time}: {held} held samples"
+                );
+                assert_eq!(
+                    world.get::<SpatialTransform>(bound),
+                    reference_world.get::<SpatialTransform>(reference_bound),
+                    "bound drawable at t={time}"
+                );
+                let trail = |world: &World, entity| {
+                    let trace = world.get::<gaanim_animation::TracedPath>(entity).unwrap();
+                    (trace.points.clone(), trace.sample_times.clone())
+                };
+                assert_eq!(
+                    trail(&world, entity),
+                    trail(&reference_world, reference_entity),
+                    "t={time}"
+                );
+                assert_eq!(
+                    world.get::<Path2D>(entity),
+                    reference_world.get::<Path2D>(reference_entity),
+                    "t={time}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn traces_keep_segment_checkpoints() {
+        let trace = (0.01, None, 0.0, Some(0.3));
+        let (mut world, mut timeline, entity, _) =
+            settling_trace_world(false, true, trace, TraceBindings::Elsewhere);
+        let (mut reference_world, mut reference, reference_entity, _) =
+            settling_trace_world(false, false, trace, TraceBindings::Elsewhere);
+        let times = (0..=40)
+            .map(|step| f64::from(step) * 0.75)
+            .chain([31.0, 13.0, 35.5, 1.5, 0.9, 23.9, 23.95, 24.0, 6.1]);
+        for time in times {
+            timeline.seek(&mut world, time);
+            reference.seek(&mut reference_world, time);
+            for (component, same) in [
+                (
+                    "trail",
+                    world
+                        .get::<gaanim_animation::TracedPath>(entity)
+                        .unwrap()
+                        .points
+                        == reference_world
+                            .get::<gaanim_animation::TracedPath>(reference_entity)
+                            .unwrap()
+                            .points,
+                ),
+                (
+                    "path",
+                    world.get::<Path2D>(entity) == reference_world.get::<Path2D>(reference_entity),
+                ),
+            ] {
+                assert!(same, "{component} at t={time}");
+            }
+        }
+        assert!(
+            timeline.checkpoints.snapshots.len() > 2,
+            "{} checkpoints",
+            timeline.checkpoints.snapshots.len()
+        );
+        assert!(reference.checkpoints.snapshots.is_empty());
     }
 
     #[test]
