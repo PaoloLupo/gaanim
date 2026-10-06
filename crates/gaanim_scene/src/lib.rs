@@ -14,7 +14,7 @@ pub use components::{
     LayoutZoneRecord, LayoutZones, Lighting3D, LineListData, LineListSource, LocalBounds,
     Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity, Path2D,
     PathRevealOrder, PathSource, Presence, RasterImage, RenderLayer, RenderOrder, SegmentContent,
-    ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds,
+    ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds, ZLayer,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use systems::{

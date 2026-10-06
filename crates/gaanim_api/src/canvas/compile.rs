@@ -10500,6 +10500,14 @@ impl SceneModel {
                 mref
             }
         };
+        if let Some((_, rank)) = &spec.z_layer
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(gaanim_scene::ZLayer(*rank));
+        }
         // Applies to primitives as well as groups/text, which skip `post_apply`
         // when they finish through `finish_spawn_builder`.
         if let Some(align) = spec.stroke_align
@@ -16544,6 +16552,47 @@ mod tests {
             .find(|(object, _)| object.0 == id)
             .map(|(_, order)| order.z_index);
         assert_eq!(order, Some(4));
+    }
+
+    #[test]
+    fn z_layers_rank_drawables_for_the_whole_scene() {
+        let mut canvas = SceneModel::new(640, 360);
+        let wall = canvas.rect(1.0, 1.0).z_index(400);
+        assert!(wall.clone().z_layer("model").is_err());
+        assert!(canvas.z_layers(&[], None).is_err());
+        assert!(canvas.z_layers(&["model", "model"], None).is_err());
+        assert!(canvas.z_layers(&["model", " "], None).is_err());
+        assert!(canvas.z_layers(&["model"], Some("overlay")).is_err());
+        canvas
+            .z_layers(&["back", "model", "overlay"], Some("model"))
+            .unwrap();
+        canvas
+            .z_layers(&["back", "model", "overlay"], Some("model"))
+            .unwrap();
+        assert!(canvas.z_layers(&["model", "overlay"], None).is_err());
+        assert!(wall.clone().z_layer("front").is_err());
+        let lens = canvas.circle(0.5).z_layer("overlay").unwrap();
+        let floor = canvas.rect(2.0, 2.0).z_layer("back").unwrap();
+        canvas.play(vec![lens.animate().move_to(1.0, 0.0).duration(1.0)]);
+        // Draw order holds for the whole scene, so a later call applies too.
+        let wall = wall.z_layer("model").unwrap();
+        let unlayered = canvas.circle(0.2);
+        canvas.wait(1.0);
+        let (mut world, _) = compiled_world(&canvas);
+        let mut layer = |handle: &DrawableHandle| {
+            let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+            world
+                .query::<(&MobjectId, Option<&gaanim_scene::ZLayer>)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .map(|layer| layer.0)
+        };
+        assert_eq!(
+            [&lens, &floor, &wall, &unlayered].map(&mut layer),
+            [Some(1), Some(-1), Some(0), None]
+        );
     }
 
     fn opacity_of(world: &mut World, handle: &DrawableHandle) -> f32 {

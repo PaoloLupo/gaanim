@@ -3968,10 +3968,26 @@ class Drawable:
         """Set the stacking layer; higher values draw on top.
 
         A group's or text's ``z_index`` is added to every descendant's, so it
-        moves the whole subtree. Ties keep creation order.
+        moves the whole subtree. Ties keep creation order. With
+        ``scene.z_layers``, it orders the drawable within its layer.
 
         Example:
             card = scene.geometry.group([box, label]).z_index(5)
+        """
+        ...
+    def z_layer(self, name: str) -> Self:
+        """Draw this drawable in the named layer ``name`` of ``scene.z_layers``.
+
+        Every drawable of a layer draws above every drawable of the layers
+        behind it, whatever their ``z_index``, which only orders drawables
+        within a layer. A group or text takes its members with it, unless a
+        member names its own layer. Draw order holds for the whole scene, so
+        a call after the drawable is shown applies from its start. A name the
+        scene has not declared raises ``ValueError``.
+
+        Example:
+            scene.z_layers("model", "overlay")
+            lens = scene.geometry.circle(0.8).z_layer("overlay")
         """
         ...
     @overload
@@ -9689,6 +9705,23 @@ class Scene:
 
         Raises:
             ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def z_layers(self, *names: str, default: Optional[str] = None) -> None:
+        """Name the scene's draw layers, from the back to the front.
+
+        ``Drawable.z_layer`` puts a drawable in one of them: it then draws
+        above every drawable of the layers behind it, whatever their
+        ``z_index``, which only orders drawables within a layer. Drawables
+        without a layer draw in ``default``, the first layer when omitted, so
+        an overlay can sit above any ``z_index`` the rest of the scene uses.
+        A scene names its layers once (naming the same ones again is
+        allowed); no names, an empty or repeated name, a ``default`` that is
+        not one of them, or different layers raise ``ValueError``.
+
+        Example:
+            scene.z_layers("background", "content", "overlay", default="content")
+            cursor = scene.geometry.dot(0.1).z_layer("overlay")
         """
         ...
     def persist(self, object: Drawable, *others: Drawable) -> None:

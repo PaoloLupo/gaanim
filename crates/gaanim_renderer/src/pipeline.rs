@@ -470,6 +470,9 @@ pub struct ExtractedElement {
     glass_root: Option<Entity>,
     outline: Option<Arc<kurbo::BezPath>>,
     render_order: RenderOrder,
+    /// [`gaanim_scene::ZLayer`] rank the element draws in, before its
+    /// `render_order`.
+    z_layer: i32,
     scene: Arc<vello::Scene>,
     /// The soft shadow and glow images `scene` draws, which a renderer that
     /// runs object effects fills before the frame (see
@@ -554,13 +557,14 @@ impl ExtractedCameraView {
 }
 
 impl ExtractedElement {
-    /// Deterministic layering: z-index, then persistent objects above
-    /// segment content, then creation order, then echo copies beneath their
-    /// source and stroke tips beneath the stroke they share an order with.
+    /// Deterministic layering: named layer, z-index, then persistent objects
+    /// above segment content, then creation order, then echo copies beneath
+    /// their source and stroke tips beneath the stroke they share an order
+    /// with.
     fn draw_order(a: &Self, b: &Self) -> std::cmp::Ordering {
-        a.render_order
-            .z_index
-            .cmp(&b.render_order.z_index)
+        a.z_layer
+            .cmp(&b.z_layer)
+            .then(a.render_order.z_index.cmp(&b.render_order.z_index))
             .then(a.persistent.cmp(&b.persistent))
             .then(
                 a.render_order
@@ -608,6 +612,7 @@ impl ExtractedElement {
             glass_root: self.glass_root,
             outline: self.outline.clone(),
             render_order: self.render_order,
+            z_layer: self.z_layer,
             scene: Arc::clone(&self.scene),
             clip_mask: self.clip_mask.clone(),
             blend: self.blend,
@@ -860,6 +865,23 @@ fn stacked_render_order(
         current = parent;
     }
     RenderOrder { z_index, ..own }
+}
+
+/// Named layer of a drawn element: its own [`gaanim_scene::ZLayer`] or its
+/// nearest ancestor's, else the default layer.
+fn inherited_z_layer(
+    entity: Entity,
+    mut parent_of: impl FnMut(Entity) -> Option<Entity>,
+    mut layer_of: impl FnMut(Entity) -> Option<i32>,
+) -> i32 {
+    let mut current = Some(entity);
+    while let Some(node) = current {
+        if let Some(layer) = layer_of(node) {
+            return layer;
+        }
+        current = parent_of(node);
+    }
+    0
 }
 
 /// World rectangle of the opacity layer that composites an element.
@@ -2839,8 +2861,12 @@ fn extract_world(
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
-    let mut order_query = world.query::<(&RenderOrder, Has<gaanim_scene::SegmentContent>)>();
-    let segmented = order_query.iter(world).any(|(_, member)| member);
+    let mut order_query = world.query::<(
+        &RenderOrder,
+        Has<gaanim_scene::SegmentContent>,
+        Option<&gaanim_scene::ZLayer>,
+    )>();
+    let segmented = order_query.iter(world).any(|(_, member, _)| member);
     let mut blend_query = world.query::<&ElementBlend>();
 
     for (
@@ -3108,7 +3134,17 @@ fn extract_world(
                 |e| {
                     order_query
                         .get(world, e)
-                        .map_or(0, |(order, _)| order.z_index)
+                        .map_or(0, |(order, _, _)| order.z_index)
+                },
+            ),
+            z_layer: inherited_z_layer(
+                entity,
+                |e| child_query.get(world, e).ok().map(ChildOf::parent),
+                |e| {
+                    order_query
+                        .get(world, e)
+                        .ok()
+                        .and_then(|(_, _, layer)| layer.map(|layer| layer.0))
                 },
             ),
             scene,
@@ -3125,7 +3161,7 @@ fn extract_world(
                 && outside_segments(
                     entity,
                     |e| child_query.get(world, e).ok().map(ChildOf::parent),
-                    |e| order_query.get(world, e).is_ok_and(|(_, member)| member),
+                    |e| order_query.get(world, e).is_ok_and(|(_, member, _)| member),
                 ),
             lineage: if camera_views.is_empty() {
                 Vec::new()
@@ -3449,6 +3485,7 @@ fn three_d_elements<'a>(
                         z_index: i32::MIN,
                         creation_order: creation_order as u64,
                     },
+                    z_layer: i32::MIN,
                     scene: Arc::new(scene),
                     clip_mask: None,
                     blend: None,
@@ -4646,6 +4683,8 @@ fn compose_captured_layers(
                 glass_root: element.glass_root,
                 outline: element.glass_root.and_then(|_| element.recipe.path.clone()),
                 render_order: element.render_order,
+                // Captured elements are already in draw order.
+                z_layer: 0,
                 scene,
                 clip_mask: element.clip_mask.clone(),
                 blend: element.blend,
@@ -4914,7 +4953,11 @@ pub fn gaanim_render_system(
     canvas_bg: Option<Res<CanvasBackground>>,
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
-    order_query: Query<(&RenderOrder, Has<gaanim_scene::SegmentContent>)>,
+    order_query: Query<(
+        &RenderOrder,
+        Has<gaanim_scene::SegmentContent>,
+        Option<&gaanim_scene::ZLayer>,
+    )>,
     (
         blend_query,
         echo_query,
@@ -5037,7 +5080,7 @@ pub fn gaanim_render_system(
             None
         }
     });
-    let segmented = order_query.iter().any(|(_, member)| member);
+    let segmented = order_query.iter().any(|(_, member, _)| member);
     let opacity_fallback = canvas_bg
         .as_ref()
         .map(|background| {
@@ -5411,7 +5454,17 @@ pub fn gaanim_render_system(
                 *render_order,
                 entity,
                 |e| child_query.get(e).ok().map(ChildOf::parent),
-                |e| order_query.get(e).map_or(0, |(order, _)| order.z_index),
+                |e| order_query.get(e).map_or(0, |(order, _, _)| order.z_index),
+            ),
+            z_layer: inherited_z_layer(
+                entity,
+                |e| child_query.get(e).ok().map(ChildOf::parent),
+                |e| {
+                    order_query
+                        .get(e)
+                        .ok()
+                        .and_then(|(_, _, layer)| layer.map(|layer| layer.0))
+                },
             ),
             scene: fragment,
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
@@ -5426,7 +5479,7 @@ pub fn gaanim_render_system(
                 && outside_segments(
                     entity,
                     |e| child_query.get(e).ok().map(ChildOf::parent),
-                    |e| order_query.get(e).is_ok_and(|(_, member)| member),
+                    |e| order_query.get(e).is_ok_and(|(_, member, _)| member),
                 ),
             lineage: if camera_views.is_empty() {
                 Vec::new()
@@ -5724,6 +5777,40 @@ mod tests {
         assert_eq!(stacked(&world, glyph), order(6, 4));
         assert!(stacked(&world, boxed).z_index > circle.z_index);
         assert!(stacked(&world, glyph).z_index > stacked(&world, boxed).z_index);
+    }
+
+    #[test]
+    fn a_named_layer_draws_above_every_z_index_behind_it() {
+        let mut world = World::new();
+        let overlay = world.spawn(gaanim_scene::ZLayer(1)).id();
+        let inside = world.spawn(ChildOf(overlay)).id();
+        let own = world
+            .spawn((gaanim_scene::ZLayer(-1), ChildOf(overlay)))
+            .id();
+        let plain = world.spawn_empty().id();
+        let layer = |entity| {
+            inherited_z_layer(
+                entity,
+                |e| world.get::<ChildOf>(e).map(ChildOf::parent),
+                |e| world.get::<gaanim_scene::ZLayer>(e).map(|layer| layer.0),
+            )
+        };
+        assert_eq!([layer(inside), layer(own), layer(plain)], [1, -1, 0]);
+
+        let mut lens = group_member(inside, 0.0, 1.0, 1.0);
+        lens.z_layer = 1;
+        lens.render_order.z_index = -5;
+        let mut wall = group_member(plain, 1.0, 1.0, 1.0);
+        wall.render_order.z_index = 400;
+        assert_eq!(
+            ExtractedElement::draw_order(&lens, &wall),
+            std::cmp::Ordering::Greater
+        );
+        wall.z_layer = 1;
+        assert_eq!(
+            ExtractedElement::draw_order(&lens, &wall),
+            std::cmp::Ordering::Less
+        );
     }
 
     fn assert_affine_near(actual: kurbo::Affine, expected: kurbo::Affine) {
@@ -6683,6 +6770,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
             blend: None,
@@ -6737,6 +6825,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(scene),
             clip_mask: None,
             blend: None,
@@ -6892,6 +6981,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
             blend: None,
@@ -6933,6 +7023,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(scene),
             clip_mask: None,
             blend: None,
@@ -7003,6 +7094,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
             blend,
@@ -7051,6 +7143,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(vello::Scene::new()),
             clip_mask,
             blend: None,

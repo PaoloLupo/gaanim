@@ -182,13 +182,28 @@ scene.play([level.animate.set(1.0).duration(1)])
   name: "Drawable.z_index",
   kind: "method",
   params: ((name: "z", type: "int", default: none, desc: [Capa de dibujo; los valores mayores quedan encima.]),),
-  desc: [El `z_index` de un grupo o de un texto se suma al de cada descendiente, así que mueve todo el subárbol. Los empates conservan el orden de creación.],
+  desc: [El `z_index` de un grupo o de un texto se suma al de cada descendiente, así que mueve todo el subárbol. Los empates conservan el orden de creación. Con capas (`Scene.z_layers`), ordena solo dentro de la capa del objeto.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 front = scene.geometry.circle(1).fill(GOLD).z_index(5)
 back = scene.geometry.rect(3, 1).fill(BLUE)
+```
+]
+
+#api-entry(
+  name: "Drawable.z_layer",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Una de las capas nombradas con `Scene.z_layers`.]),),
+  desc: [Dibuja el objeto en la capa `name`: queda encima de todo lo que está en las capas de detrás, sea cual sea su `z_index`, que solo ordena dentro de la capa. Un grupo o un texto se lleva a sus miembros, salvo a los que nombran su propia capa. El orden de dibujo vale para toda la escena, así que una llamada después de mostrar el objeto también rige desde el principio. Un nombre que la escena no declaró lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.z_layers("modelo", "overlay")
+muro = scene.geometry.rect(4, 3).fill(BLUE).z_index(400)
+lupa = scene.geometry.circle(0.8).fill(GOLD).z_layer("overlay")
 ```
 ]
 

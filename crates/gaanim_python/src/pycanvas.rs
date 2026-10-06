@@ -6443,6 +6443,18 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
+    /// Name the draw layers, from the back to the front.
+    #[pyo3(signature = (*names, default=None))]
+    fn z_layers(&self, names: Vec<String>, default: Option<String>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .z_layers(&names, default.as_deref())
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     /// Keep one or more drawables available across future segments.
     #[pyo3(signature = (object, *others))]
     fn persist(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {

@@ -76,6 +76,25 @@ pub(crate) struct CanvasState {
     pub(crate) stop_gates: Vec<(usize, f64, gaanim_timeline::timeline::GateCondition)>,
     /// Live zones in authoring order.
     pub(crate) live_zones: Vec<super::live::LiveZoneRecord>,
+    /// Draw layers named with `SceneModel::z_layers`.
+    pub(crate) z_layers: Option<ZLayers>,
+}
+
+/// The named draw layers of a scene, from the back to the front.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ZLayers {
+    pub names: Vec<String>,
+    /// Index in `names` of the layer drawables without one draw in.
+    pub default: usize,
+}
+
+impl ZLayers {
+    /// Rank of layer `name`: how many layers in front of the default one it
+    /// is, which the renderer orders by.
+    pub fn rank(&self, name: &str) -> Option<i32> {
+        let index = self.names.iter().position(|layer| layer == name)?;
+        Some(index as i32 - self.default as i32)
+    }
 }
 
 impl CanvasState {
@@ -109,6 +128,7 @@ impl CanvasState {
             poll_ask: None,
             stop_gates: Vec::new(),
             live_zones: Vec::new(),
+            z_layers: None,
         }
     }
 
@@ -214,6 +234,36 @@ impl CanvasState {
         if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
             frozen.glass = glass;
         }
+    }
+
+    /// Draw `spec` in the named layer `name` for the whole scene, like
+    /// [`Self::set_glass`]: draw order does not change over time.
+    pub(crate) fn set_z_layer(
+        &mut self,
+        spec: &SharedObjectSpec,
+        name: &str,
+    ) -> Result<(), String> {
+        let Some(layers) = &self.z_layers else {
+            return Err(format!(
+                "no layer `{name}`: name the layers first with scene.z_layers(...)"
+            ));
+        };
+        let Some(rank) = layers.rank(name) else {
+            return Err(format!(
+                "no layer `{name}`; the scene's layers are {}",
+                layers.names.join(", ")
+            ));
+        };
+        let layer = Some((name.to_string(), rank));
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.z_layer = layer.clone();
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.z_layer = layer;
+        }
+        Ok(())
     }
 
     pub(crate) fn set_chalk(

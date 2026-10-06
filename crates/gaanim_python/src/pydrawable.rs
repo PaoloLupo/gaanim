@@ -2457,6 +2457,15 @@ impl PyDrawable {
         Ok(Self(self.0.clone().z_index(z)))
     }
 
+    pub(crate) fn z_layer_impl(&self, name: &str) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .z_layer(name)
+            .map(Self)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     pub(crate) fn move_to_impl(
         &self,
         x: &Bound<'_, PyAny>,
@@ -3631,6 +3640,11 @@ impl PyDrawable {
 
     fn z_index<'py>(slf: &Bound<'py, Self>, z: i32) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().z_index_impl(z);
+        same_drawable(slf, result)
+    }
+
+    fn z_layer<'py>(slf: &Bound<'py, Self>, name: &str) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().z_layer_impl(name);
         same_drawable(slf, result)
     }
 
