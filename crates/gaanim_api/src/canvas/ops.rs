@@ -18,6 +18,7 @@ use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::SegmentId;
+use crate::canvas::authored::Authored;
 use crate::canvas::types::{LayoutTreeSnapshot, ObjectSpec};
 
 // -----------------------------------------------------------------------
@@ -168,7 +169,7 @@ impl CanvasState {
     /// not animated, so a spec already frozen by a `play` takes it too.
     pub(crate) fn set_shader_effect(
         &mut self,
-        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: &SharedObjectSpec,
         effect: Option<super::types::ShaderEffectSpec>,
     ) {
         let id = {
@@ -185,7 +186,7 @@ impl CanvasState {
     /// [`Self::set_shader_effect`].
     pub(crate) fn set_matte(
         &mut self,
-        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: &SharedObjectSpec,
         matte: Option<(ObjectId, gaanim_renderer::object_effects::MatteMode)>,
     ) {
         let id = {
@@ -202,7 +203,7 @@ impl CanvasState {
     /// [`Self::set_shader_effect`].
     pub(crate) fn set_glass(
         &mut self,
-        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: &SharedObjectSpec,
         glass: Option<gaanim_renderer::object_effects::Glass>,
     ) {
         let id = {
@@ -217,7 +218,7 @@ impl CanvasState {
 
     pub(crate) fn set_chalk(
         &mut self,
-        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: &SharedObjectSpec,
         chalk: gaanim_renderer::effects::ChalkBrush,
     ) {
         let id = {
@@ -346,10 +347,10 @@ impl CanvasState {
     }
 }
 
-pub(crate) type SharedCanvasState = Arc<Mutex<CanvasState>>;
-pub(crate) type SharedObjectSpec = Arc<Mutex<ObjectSpec>>;
+pub(crate) type SharedCanvasState = Arc<Authored<CanvasState>>;
+pub(crate) type SharedObjectSpec = Arc<Authored<ObjectSpec>>;
 
-pub(crate) type SharedCameraBindingSpec = Arc<Mutex<CameraBindingSpec>>;
+pub(crate) type SharedCameraBindingSpec = Arc<Authored<CameraBindingSpec>>;
 
 /// Authoring-time activation window for a persistent camera constraint.
 #[derive(Debug, Clone, Copy, PartialEq)]

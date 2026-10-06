@@ -5,8 +5,10 @@
 //! inputs. Two revisions whose scene-wide inputs and leading segments have
 //! equal fingerprints therefore compile those segments identically.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hasher};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use gaanim_core::fingerprint::DebugFingerprint;
 
@@ -49,6 +51,37 @@ impl SceneModel {
         text_config: &gaanim_text::prelude::TextConfig,
         font_registry: &gaanim_text::font::FontRegistry,
     ) -> SceneFingerprints {
+        let mut global = self.scene_wide_fingerprint();
+        add_text_config(&mut global, text_config);
+        global.add(&gaanim_text::typst_compiler::registered_fonts_fingerprint(
+            font_registry,
+        ));
+
+        let state = self.state.lock().expect("canvas state poisoned");
+        let segments = state
+            .segments
+            .iter()
+            .map(|segment| {
+                let mut fingerprint = DebugFingerprint::new();
+                fingerprint.add(segment);
+                for op in &segment.ops {
+                    if let Op::Spawn(spec) = op {
+                        let id = spec.lock().expect("object spec poisoned").id;
+                        fingerprint.add(&state.frozen_spawn_specs.get(&id));
+                    }
+                }
+                fingerprint.finish()
+            })
+            .collect();
+        SceneFingerprints {
+            global: global.finish(),
+            segments,
+        }
+    }
+
+    /// Fingerprint the scene-wide inputs of the compilation: every field of
+    /// the scene outside its authored state.
+    pub(crate) fn scene_wide_fingerprint(&self) -> DebugFingerprint {
         // Exhaustive on purpose: a new scene-wide field must be fingerprinted.
         let SceneModel {
             frame,
@@ -79,7 +112,10 @@ impl SceneModel {
             branding,
             camera_position,
             lighting_3d,
-            state,
+            // Authored state, fingerprinted per segment by `fingerprints`.
+            state: _,
+            // Derived from the rest.
+            measured: _,
         } = self;
         let mut global = DebugFingerprint::new();
         global.add(frame);
@@ -104,31 +140,7 @@ impl SceneModel {
         global.add(branding);
         global.add(camera_position);
         global.add(lighting_3d);
-        add_text_config(&mut global, text_config);
-        global.add(&gaanim_text::typst_compiler::registered_fonts_fingerprint(
-            font_registry,
-        ));
-
-        let state = state.lock().expect("canvas state poisoned");
-        let segments = state
-            .segments
-            .iter()
-            .map(|segment| {
-                let mut fingerprint = DebugFingerprint::new();
-                fingerprint.add(segment);
-                for op in &segment.ops {
-                    if let Op::Spawn(spec) = op {
-                        let id = spec.lock().expect("object spec poisoned").id;
-                        fingerprint.add(&state.frozen_spawn_specs.get(&id));
-                    }
-                }
-                fingerprint.finish()
-            })
-            .collect();
-        SceneFingerprints {
-            global: global.finish(),
-            segments,
-        }
+        global
     }
 }
 
@@ -180,8 +192,61 @@ fn add_theme(fingerprint: &mut DebugFingerprint, theme: &CanvasTheme) {
     add_sorted(fingerprint, colors);
     add_sorted(fingerprint, styles);
     for font in fonts {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(&font.bytes);
-        fingerprint.add(&(font.family, font.bytes.len(), hasher.finish()));
+        fingerprint.add(&(
+            font.family,
+            font.bytes.len(),
+            font_content_hash(&font.bytes),
+        ));
+    }
+}
+
+/// Hash of a font file's bytes, computed once per allocation: the bytes
+/// behind an `Arc` never change while it lives, and scenes fingerprint their
+/// theme on every reload and measurement.
+fn font_content_hash(bytes: &Arc<[u8]>) -> u64 {
+    type Hashes = HashMap<usize, (Weak<[u8]>, u64)>;
+    static HASHES: OnceLock<Mutex<Hashes>> = OnceLock::new();
+    let address = Arc::as_ptr(bytes).cast::<u8>() as usize;
+    let mut hashes = HASHES
+        .get_or_init(Default::default)
+        .lock()
+        .expect("font hashes poisoned");
+    if let Some((allocation, hash)) = hashes.get(&address)
+        && allocation
+            .upgrade()
+            .is_some_and(|allocation| Arc::ptr_eq(&allocation, bytes))
+    {
+        return *hash;
+    }
+    let mut hasher = DefaultHasher::new();
+    hasher.write(bytes);
+    let hash = hasher.finish();
+    hashes.retain(|_, (allocation, _)| allocation.strong_count() > 0);
+    hashes.insert(address, (Arc::downgrade(bytes), hash));
+    hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn font_hashes_follow_content_across_allocations() {
+        let hash = |bytes: &[u8]| {
+            let mut hasher = DefaultHasher::new();
+            hasher.write(bytes);
+            hasher.finish()
+        };
+        let font: Arc<[u8]> = Arc::from(&b"font one"[..]);
+        assert_eq!(font_content_hash(&font), hash(b"font one"));
+        assert_eq!(font_content_hash(&font.clone()), hash(b"font one"));
+        let copy: Arc<[u8]> = Arc::from(&b"font one"[..]);
+        assert_eq!(font_content_hash(&copy), hash(b"font one"));
+        drop((font, copy));
+        // A new allocation, possibly at a freed address, hashes its own bytes.
+        for _ in 0..8 {
+            let other: Arc<[u8]> = Arc::from(&b"font two"[..]);
+            assert_eq!(font_content_hash(&other), hash(b"font two"));
+        }
     }
 }

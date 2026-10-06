@@ -8,6 +8,8 @@ use gaanim_math::Bounds3D;
 use gaanim_timeline::snapshot::WorldSnapshot;
 use gaanim_timeline::timeline::Timeline;
 
+use super::authored::Authored;
+use super::compile::CompileCursor;
 use super::ops::{CanvasState, Op, Segment};
 use super::types::{LayoutOp, ObjectSpec, SpawnKind};
 use super::{DrawableHandle, SceneModel};
@@ -45,20 +47,81 @@ impl SceneModel {
     /// of its members and, inside a box, those of its box tree when that was
     /// declared since then too and placed without animation. It is measured
     /// by compiling just them. Otherwise this compiles the scene authored so
-    /// far.
+    /// far. Measurements with nothing authored in between share one
+    /// compilation.
     pub fn bounds_of(&self, handle: &DrawableHandle) -> Result<Bounds3D, BoundsError> {
         if !self.owns(handle) {
             return Err(BoundsError::ForeignScene);
         }
-        if let Some(isolated) = self.isolated_declaration(handle.id) {
-            return isolated.compiled_bounds(handle.id, 0.0);
+        if let Some((isolated, closure)) = self.isolated_declaration(handle.id) {
+            return self.measure(handle.id, MeasureScope::Isolated(closure), || {
+                isolated.compile_measure(0.0)
+            });
         }
-        self.compiled_bounds(handle.id, self.current_time())
+        self.measured_bounds(handle.id)
+    }
+
+    /// Box of the object `id` in this scene compiled up to the authoring
+    /// cursor.
+    fn measured_bounds(&self, id: ObjectId) -> Result<Bounds3D, BoundsError> {
+        let time = self.current_time();
+        self.measure(id, MeasureScope::Cursor(time), || {
+            self.compile_measure(time)
+        })
+    }
+
+    /// Box of the object `id` in the compilation `scope` names, compiled
+    /// with `compile` unless the last one is still current. Measurements
+    /// between two changes to the scene share one compilation: nothing it
+    /// reads changed while the authored state's revision and the scene-wide
+    /// settings stayed the same.
+    fn measure(
+        &self,
+        id: ObjectId,
+        scope: MeasureScope,
+        compile: impl FnOnce() -> CompiledMeasure,
+    ) -> Result<Bounds3D, BoundsError> {
+        // Busy when a callback measures from inside a measurement.
+        let (Ok(mut cache), Some(scene_wide)) = (
+            self.measured.0.try_lock(),
+            self.scene_wide_fingerprint().finish(),
+        ) else {
+            return compile().bounds(id);
+        };
+        let slot = match scope {
+            MeasureScope::Cursor(_) => &mut cache.cursor,
+            MeasureScope::Isolated(_) => &mut cache.isolated,
+        };
+        let key = MeasureKey {
+            revision: self.state.revision(),
+            scene_wide,
+            scope,
+        };
+        if slot.as_ref().is_none_or(|(current, _)| *current != key) {
+            // Free the previous world before compiling the next one.
+            *slot = None;
+            let compiled = compile();
+            // Compiling records diagnostics in the authored state, so the
+            // revision it compiled is the one after it.
+            let key = MeasureKey {
+                revision: self.state.revision(),
+                ..key
+            };
+            *slot = Some((key, compiled));
+        }
+        let (_, compiled) = slot.as_mut().expect("measurement compiled above");
+        compiled.bounds(id)
     }
 
     /// Box of the object `id` in this scene compiled up to the authoring
     /// cursor and seeked to `time`.
+    #[cfg(test)]
     fn compiled_bounds(&self, id: ObjectId, time: f64) -> Result<Bounds3D, BoundsError> {
+        self.compile_measure(time).bounds(id)
+    }
+
+    /// The scene compiled up to the authoring cursor and seeked to `time`.
+    fn compile_measure(&self, time: f64) -> CompiledMeasure {
         let segments = self
             .state
             .lock()
@@ -85,20 +148,57 @@ impl SceneModel {
             )
         };
         queue.apply(&mut world);
-        let runtime = checkpoint
-            .and_then(|checkpoint| checkpoint.cursor.runtime_id(id))
-            .ok_or(BoundsError::Empty)?;
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         timeline.seek(&mut world, time);
         // Boxes and their backgrounds take their layout box every frame.
         gaanim_animation::updaters::resolve_layout_boxes(&mut world, time);
+        CompiledMeasure {
+            cursor: checkpoint.map(|checkpoint| checkpoint.cursor),
+            world,
+        }
+    }
+}
 
+/// What a measurement compiled.
+#[derive(Debug, Clone, PartialEq)]
+enum MeasureScope {
+    /// The scene up to the authoring cursor at this time.
+    Cursor(f64),
+    /// These declarations on their own; see [`SceneModel::bounds_of`].
+    Isolated(Vec<ObjectId>),
+}
+
+/// The inputs a compiled measurement is current for.
+#[derive(Debug, Clone, PartialEq)]
+struct MeasureKey {
+    /// Revision of the authored state.
+    revision: u64,
+    /// Fingerprint of the scene-wide settings, which live outside that state.
+    scene_wide: u64,
+    scope: MeasureScope,
+}
+
+/// A scene compiled to measure its drawables.
+pub(crate) struct CompiledMeasure {
+    cursor: Option<CompileCursor>,
+    world: World,
+}
+
+impl CompiledMeasure {
+    /// Box of the object `id` in this compilation.
+    fn bounds(&mut self, id: ObjectId) -> Result<Bounds3D, BoundsError> {
+        let runtime = self
+            .cursor
+            .as_ref()
+            .and_then(|cursor| cursor.runtime_id(id))
+            .ok_or(BoundsError::Empty)?;
+        let world = &mut self.world;
         let entity = world
             .query::<(bevy::prelude::Entity, &gaanim_scene::MobjectId)>()
-            .iter(&world)
+            .iter(world)
             .find_map(|(entity, id)| (id.0 == runtime).then_some(entity))
             .ok_or(BoundsError::Empty)?;
-        let bounds = gaanim_animation::updaters::resolve_entity_bounds(entity, &world)
+        let bounds = gaanim_animation::updaters::resolve_entity_bounds(entity, world)
             .ok_or(BoundsError::Empty)?;
         if !(bounds.min.is_finite() && bounds.max.is_finite()) || bounds.min.x > bounds.max.x {
             return Err(BoundsError::Empty);
@@ -107,11 +207,41 @@ impl SceneModel {
     }
 }
 
+/// The compilations a scene's measurements share while the scene stays
+/// unchanged. Copies of a scene share them, since drawables measure in a
+/// copy of their scene.
+#[derive(Clone, Default)]
+pub(crate) struct MeasureCache(Arc<Mutex<Measurements>>);
+
+#[derive(Default)]
+struct Measurements {
+    /// The scene compiled up to the authoring cursor.
+    cursor: Option<(MeasureKey, CompiledMeasure)>,
+    /// The last declarations measured on their own, such as the members of
+    /// one box tree.
+    isolated: Option<(MeasureKey, CompiledMeasure)>,
+}
+
+impl MeasureCache {
+    /// Forget the compilations, e.g. once authoring is over.
+    pub(crate) fn clear(&self) {
+        if let Ok(mut measurements) = self.0.lock() {
+            *measurements = Measurements::default();
+        }
+    }
+}
+
+impl std::fmt::Debug for MeasureCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MeasureCache")
+    }
+}
+
 impl SceneModel {
     /// This scene reduced to the declarations of the object `id` and its
-    /// members, when they are all that decides its box; see
-    /// [`SceneModel::bounds_of`].
-    fn isolated_declaration(&self, id: ObjectId) -> Option<SceneModel> {
+    /// members, when they are all that decides its box, and those objects
+    /// in order; see [`SceneModel::bounds_of`].
+    fn isolated_declaration(&self, id: ObjectId) -> Option<(SceneModel, Vec<ObjectId>)> {
         let state = self.state.lock().expect("canvas state poisoned");
         let closure = independent_closure(&state, id)?;
         let segment = state.segments.get(state.active_idx)?;
@@ -184,8 +314,11 @@ impl SceneModel {
         }];
         drop(state);
         let mut isolated = self.clone();
-        isolated.state = Arc::new(Mutex::new(isolated_state));
-        Some(isolated)
+        isolated.state = Arc::new(Authored::new(isolated_state));
+        isolated.measured = MeasureCache::default();
+        let mut closure: Vec<_> = closure.into_iter().collect();
+        closure.sort_unstable();
+        Some((isolated, closure))
     }
 }
 
@@ -312,7 +445,7 @@ impl super::Anim {
             .ok_or(BoundsError::SceneDropped)?;
         let scene = owner.upgrade().ok_or(BoundsError::SceneDropped)?;
         let scene = scene.lock().expect("scene poisoned").clone();
-        scene.compiled_bounds(self.inner.target, scene.current_time())
+        scene.measured_bounds(self.inner.target)
     }
 }
 
@@ -728,6 +861,84 @@ mod tests {
             .collect();
         scene.reflow_layout(&row, members, Default::default(), 2, Some(0.5), None, None);
         assert!(scene.isolated_declaration(fresh.id).is_none());
+    }
+
+    /// The world the scene's measurements at the cursor currently share.
+    fn measured_world(scene: &SceneModel) -> Option<bevy::ecs::world::WorldId> {
+        let measurements = scene.measured.0.lock().unwrap();
+        let (_, compiled) = measurements.cursor.as_ref()?;
+        Some(compiled.world.id())
+    }
+
+    #[test]
+    fn measurements_share_a_compilation_until_the_scene_changes() {
+        let mut scene = busy_scene();
+        let label = scene.text("medido").move_to(1.0, 1.0);
+        let dot = scene.circle(0.3).move_to(-1.0, 0.0);
+        scene.play(vec![label.animate().shift_by(1.0, 0.0).duration(0.4)]);
+        assert!(scene.isolated_declaration(label.id).is_none());
+
+        let first = scene.bounds_of(&label).unwrap();
+        let world = measured_world(&scene).expect("a compiled measurement");
+        assert_eq!(scene.bounds_of(&label).unwrap(), first);
+        scene.bounds_of(&dot).unwrap();
+        assert_eq!(measured_world(&scene), Some(world), "nothing changed");
+
+        // A cut on an animated drawable moves it from the cursor on.
+        let label = label.move_to(-2.0, 1.0);
+        scene.wait(0.1);
+        let moved = scene.bounds_of(&label).unwrap();
+        assert!((moved.center().x + 2.0).abs() < 1e-6, "{moved:?}");
+        let world = measured_world(&scene).unwrap();
+
+        // A declaration changes what the scene compiles.
+        let fresh = scene.rect(1.0, 1.0);
+        assert_eq!(scene.bounds_of(&label).unwrap(), moved);
+        assert_ne!(measured_world(&scene), Some(world));
+        let world = measured_world(&scene).unwrap();
+        fresh.fill(Color::BLACK);
+        scene.bounds_of(&label).unwrap();
+        assert_ne!(measured_world(&scene), Some(world), "a spec changed");
+
+        // So does a scene-wide setting, which lives outside the authored state.
+        let world = measured_world(&scene).unwrap();
+        scene.background = Some(Color::BLACK);
+        scene.bounds_of(&label).unwrap();
+        assert_ne!(measured_world(&scene), Some(world));
+
+        // Copies measure in the same compilation; a submitted scene drops it.
+        let world = measured_world(&scene).unwrap();
+        assert_eq!(scene.clone().bounds_of(&label).unwrap(), moved);
+        assert_eq!(measured_world(&scene), Some(world));
+        scene.render();
+        assert_eq!(measured_world(&scene), None);
+    }
+
+    #[test]
+    fn a_box_tree_compiles_once_for_all_its_members() {
+        let mut scene = busy_scene();
+        let (row, card, slot) = card_row(&mut scene);
+        let isolated_world = |scene: &SceneModel| {
+            let measurements = scene.measured.0.lock().unwrap();
+            let (_, compiled) = measurements.isolated.as_ref()?;
+            Some(compiled.world.id())
+        };
+        let boxes = [&slot, &card, &row].map(|member| {
+            assert!(scene.isolated_declaration(member.id).is_some());
+            scene.bounds_of(member).unwrap()
+        });
+        let world = isolated_world(&scene).expect("an isolated measurement");
+        assert_eq!(scene.bounds_of(&slot).unwrap(), boxes[0]);
+        assert_eq!(isolated_world(&scene), Some(world), "one box tree");
+
+        let fresh = scene.text("suelto");
+        scene.bounds_of(&fresh).unwrap();
+        assert_ne!(isolated_world(&scene), Some(world));
+        let world = isolated_world(&scene).unwrap();
+        // Another closure, measured after a declaration: compiled again.
+        assert_eq!(scene.bounds_of(&card).unwrap(), boxes[1]);
+        assert_ne!(isolated_world(&scene), Some(world));
+        assert_same(&scene, &row);
     }
 
     #[test]

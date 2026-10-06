@@ -17,6 +17,7 @@ use gaanim_text::prelude::TextAnchor;
 use crate::anim::{
     AnimationBuilder, AnimationType, DrawAnimationConfig, PropertyAnimation, TextSelectionEffect,
 };
+use crate::canvas::authored::Authored;
 use crate::canvas::ops::{
     AnchorPoint, FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
 };
@@ -670,7 +671,7 @@ impl DrawableHandle {
     ) -> Self {
         Self {
             id,
-            spec: std::sync::Arc::new(std::sync::Mutex::new(ObjectSpec::new(id, kind))),
+            spec: Arc::new(Authored::sharing(ObjectSpec::new(id, kind), &state)),
             state,
             segment_idx,
             named_parts: None,

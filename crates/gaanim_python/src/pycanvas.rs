@@ -7095,13 +7095,7 @@ impl PyScene {
         crate::custom::ensure_authoring_allowed()?;
         // Every value a callback reads is final now; see `callback_recipe`.
         crate::callback_recipe::resolve_pending(py)?;
-        if self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .clone()
-            .render()
-        {
+        if self.inner.lock().expect("scene canvas poisoned").render() {
             Ok(())
         } else {
             Err(pyo3::exceptions::PyRuntimeError::new_err(

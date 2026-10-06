@@ -21,6 +21,7 @@ use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType, BoundsTarget};
 use crate::canvas::SceneMarker;
+use crate::canvas::authored::Authored;
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
     CameraBindingSpec, CameraBindingWindowSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay,
@@ -2284,6 +2285,8 @@ pub struct SceneModel {
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) lighting_3d: gaanim_scene::Lighting3D,
     pub(crate) state: SharedCanvasState,
+    /// The compilation that [`Self::bounds_of`] measures in.
+    pub(crate) measured: super::measure::MeasureCache,
 }
 
 impl SceneModel {
@@ -2327,7 +2330,8 @@ impl SceneModel {
             branding: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
             lighting_3d: gaanim_scene::Lighting3D::default(),
-            state: Arc::new(Mutex::new(CanvasState::new())),
+            state: Arc::new(Authored::new(CanvasState::new())),
+            measured: Default::default(),
         }
     }
 
@@ -5173,15 +5177,18 @@ impl SceneModel {
         let mut state = self.state.lock().expect("canvas state poisoned");
         let start = state.segments.iter().map(|segment| segment.cursor).sum();
         let order = state.next_camera_binding_order();
-        let spec = Arc::new(Mutex::new(CameraBindingSpec {
-            order,
-            kind,
-            influence,
-            windows: enabled
-                .then_some(CameraBindingWindowSpec { start, end: None })
-                .into_iter()
-                .collect(),
-        }));
+        let spec = Arc::new(Authored::sharing(
+            CameraBindingSpec {
+                order,
+                kind,
+                influence,
+                windows: enabled
+                    .then_some(CameraBindingWindowSpec { start, end: None })
+                    .into_iter()
+                    .collect(),
+            },
+            &self.state,
+        ));
         state
             .active_mut()
             .ops
@@ -7859,7 +7866,10 @@ impl SceneModel {
     /// Submit the scene to the host. Narration takes still playing at the
     /// cursor extend the timeline until they end.
     pub fn render(&self) -> bool {
+        // Authoring is over; measurements no longer need their compilation.
+        self.measured.clear();
         let mut scene = self.clone();
+        scene.measured = Default::default();
         scene.complete_narration();
         crate::host::send_to_host(scene)
     }

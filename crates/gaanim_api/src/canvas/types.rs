@@ -1228,7 +1228,7 @@ pub struct Anim {
     consumed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     duration_explicit: bool,
     rate_explicit: bool,
-    pub(crate) property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
+    pub(crate) property_spec: Option<crate::canvas::ops::SharedObjectSpec>,
     camera_capture_before_play: Option<u64>,
     repeat: Option<AnimRepeat>,
     /// Sound effect anchored to the animation's resolved start.
@@ -1374,7 +1374,7 @@ impl Anim {
         target: ObjectId,
         state: SharedCanvasState,
         _segment_idx: usize,
-        spec: std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: crate::canvas::ops::SharedObjectSpec,
     ) -> Self {
         let mut anim = Self::new(
             target,
@@ -2988,7 +2988,7 @@ impl Anim {
 /// `canvas::text_motion`).
 impl Anim {
     /// The object spec behind a `.animate` proxy.
-    pub(crate) fn text_motion_spec(&self) -> Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>> {
+    pub(crate) fn text_motion_spec(&self) -> Option<crate::canvas::ops::SharedObjectSpec> {
         self.property_spec.clone()
     }
 

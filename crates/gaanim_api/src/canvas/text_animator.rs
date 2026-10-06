@@ -269,7 +269,7 @@ fn text_units(
 }
 
 fn spec_for(
-    spec: &Mutex<super::ObjectSpec>,
+    spec: &super::ops::SharedObjectSpec,
     kind: TextAnimatorKind,
     unit: TextRevealUnit,
     shape: SelectorShape,
