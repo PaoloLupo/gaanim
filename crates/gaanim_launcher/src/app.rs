@@ -20,7 +20,8 @@ use std::sync::mpsc;
 
 use crate::hot_reload::{
     ReloadReceiver, ReloadStatus, ScriptError, ScriptErrorReceiver, reload_listener_system,
-    reload_status_overlay_system, script_error_listener_system, script_error_overlay_system,
+    reload_ready_system, reload_status_overlay_system, script_error_listener_system,
+    script_error_overlay_system,
 };
 
 pub fn run() {
@@ -76,6 +77,8 @@ pub fn run() {
             (
                 script_error_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
                 reload_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
+                // After the timeline seek of the Animation phase.
+                reload_ready_system.in_set(gaanim_scene::hierarchy::SceneSet::Camera),
             ),
         )
         .add_systems(

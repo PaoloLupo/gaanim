@@ -99,8 +99,9 @@ La vista previa vuelve a ejecutar la escena cada vez que guardas.
 
 Los segmentos anteriores al primero que cambió conservan su escena compilada
 y solo se recompila desde ahí. El aviso de recarga lo indica, por ejemplo
-`replay 0.12s (reused 37/40 segments)`. La primera edición en una zona nueva
-recompila todo una vez; las siguientes en esa zona ya son incrementales.
+`replay 0.12s (reused 37/40 segments)`, y `seek` dice cuánto tardó en volver
+a la posición donde estabas. La primera edición en una zona nueva recompila
+todo una vez; las siguientes en esa zona ya son incrementales.
 
 Si nada de lo que se compila cambió, por ejemplo al guardar sin cambios o al
 editar solo un comentario, la escena se conserva tal cual y el aviso dice

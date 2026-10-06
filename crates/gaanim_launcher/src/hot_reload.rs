@@ -26,6 +26,18 @@ pub struct ReloadStatus {
     pub replay_duration_seconds: Option<f64>,
     /// `Some(seconds_since_startup)` when the message was set.
     pub shown_at: Option<f64>,
+    /// A replayed scene whose t=0 keyframe and seek back to the working
+    /// position are still to run; see [`reload_ready_system`].
+    pending: Option<PendingReady>,
+}
+
+/// What the "Scene ready" line of a replay reports, before its seek.
+struct PendingReady {
+    python: f64,
+    replay: f64,
+    kind: runtime::ReplayKind,
+    size: (u32, u32),
+    replayed_at: Instant,
 }
 
 /// Ultimo traceback de error del script, mostrado en el editor.
@@ -213,15 +225,14 @@ pub fn reload_listener_system(world: &mut World) {
     if let Some(mut status) = world.get_resource_mut::<ReloadStatus>() {
         status.compile_duration_seconds = Some(compile_duration);
         status.replay_duration_seconds = Some(replay_duration);
-        status.last_message = reload_status_message(
-            compile_duration,
-            replay_duration,
-            replay_kind,
-            width,
-            height,
-        );
-        gaanim_core::console::success("ready", &status.last_message);
-        status.shown_at = Some(now);
+        // Reported once the t=0 keyframe and the seek back have run.
+        status.pending = Some(PendingReady {
+            python: compile_duration,
+            replay: replay_duration,
+            kind: replay_kind,
+            size: (width, height),
+            replayed_at: Instant::now(),
+        });
     }
     // Éxito limpia el error previo
     if let Some(mut err) = world.get_resource_mut::<ScriptError>() {
@@ -258,9 +269,31 @@ fn apply_segment_selection(world: &mut World) -> Option<String> {
     }
 }
 
+/// System: report a reload as ready once its scene is shown at the working
+/// position. It runs after the timeline seek, in the frame of the reload, so
+/// the time it reports includes the t=0 keyframe capture and the seek back,
+/// which a replay schedules for later in that frame.
+pub fn reload_ready_system(mut status: ResMut<ReloadStatus>, time: Res<Time>) {
+    let Some(pending) = status.pending.take() else {
+        return;
+    };
+    let seek = pending.replayed_at.elapsed().as_secs_f64();
+    status.last_message = reload_status_message(
+        pending.python,
+        pending.replay,
+        seek,
+        pending.kind,
+        pending.size.0,
+        pending.size.1,
+    );
+    gaanim_core::console::success("ready", &status.last_message);
+    status.shown_at = Some(time.elapsed_secs_f64());
+}
+
 fn reload_status_message(
     python_duration: f64,
     replay_duration: f64,
+    seek_duration: f64,
     replay_kind: runtime::ReplayKind,
     width: u32,
     height: u32,
@@ -275,11 +308,12 @@ fn reload_status_message(
         }
     };
     format!(
-        "Scene ready in {:.2}s · Python {:.2}s · replay {:.2}s{} · {}×{}",
-        python_duration + replay_duration,
+        "Scene ready in {:.2}s · Python {:.2}s · replay {:.2}s{} · seek {:.2}s · {}×{}",
+        python_duration + replay_duration + seek_duration,
         python_duration,
         replay_duration,
         reuse,
+        seek_duration,
         width,
         height
     )
@@ -503,15 +537,46 @@ mod tests {
     }
 
     #[test]
+    fn a_reload_is_ready_after_the_seek_back() {
+        let mut world = World::new();
+        world.insert_resource(Time::<()>::default());
+        world.insert_resource(ReloadStatus {
+            pending: Some(PendingReady {
+                python: 0.5,
+                replay: 0.25,
+                kind: runtime::ReplayKind::Full,
+                size: (1920, 1080),
+                replayed_at: Instant::now() - std::time::Duration::from_millis(300),
+            }),
+            ..Default::default()
+        });
+        let mut schedule = Schedule::default();
+        schedule.add_systems(reload_ready_system);
+        schedule.run(&mut world);
+
+        let status = world.resource::<ReloadStatus>();
+        assert!(status.pending.is_none() && status.shown_at.is_some());
+        let seek: f64 = status
+            .last_message
+            .split("seek ")
+            .nth(1)
+            .and_then(|rest| rest.split('s').next())
+            .and_then(|seconds| seconds.parse().ok())
+            .unwrap();
+        assert!(seek >= 0.3, "{}", status.last_message);
+    }
+
+    #[test]
     fn reload_status_separates_python_from_scene_replay() {
         assert_eq!(
-            reload_status_message(0.125, 1.5, runtime::ReplayKind::Full, 1920, 1080),
-            "Scene ready in 1.62s · Python 0.12s · replay 1.50s · 1920×1080"
+            reload_status_message(0.125, 1.5, 0.25, runtime::ReplayKind::Full, 1920, 1080),
+            "Scene ready in 1.88s · Python 0.12s · replay 1.50s · seek 0.25s · 1920×1080"
         );
         assert_eq!(
             reload_status_message(
                 0.125,
                 0.25,
+                0.0,
                 runtime::ReplayKind::Incremental {
                     reused: 37,
                     segments: 40
@@ -519,17 +584,18 @@ mod tests {
                 1920,
                 1080
             ),
-            "Scene ready in 0.38s · Python 0.12s · replay 0.25s (reused 37/40 segments) · 1920×1080"
+            "Scene ready in 0.38s · Python 0.12s · replay 0.25s (reused 37/40 segments) · seek 0.00s · 1920×1080"
         );
         assert_eq!(
             reload_status_message(
                 0.125,
                 0.01,
+                0.0,
                 runtime::ReplayKind::Unchanged { segments: 40 },
                 1920,
                 1080
             ),
-            "Scene ready in 0.14s · Python 0.12s · replay 0.01s (unchanged, 40 segments) · 1920×1080"
+            "Scene ready in 0.14s · Python 0.12s · replay 0.01s (unchanged, 40 segments) · seek 0.00s · 1920×1080"
         );
     }
 
