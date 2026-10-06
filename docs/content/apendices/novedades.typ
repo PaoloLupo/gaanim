@@ -16,7 +16,10 @@ instalar una versión nueva, sigue
 Sin publicar. Recargar y abrir presentaciones largas es más rápido: medir con
 `bounds()` reutiliza lo ya compilado, un `traced_path` ya no encarece los
 saltos, guardar sin cambios conserva la escena y `GAANIM_RELOAD_PROFILE=1`
-dice en qué se va el tiempo. Corrige un fallo de Typst en sesiones largas.
+dice en qué se va el tiempo. Trae capas de dibujo con nombre, un aviso de
+textos tapados en `gaanim check` y dibujos axonométricos, y corrige un fallo
+de Typst en sesiones largas y tres detalles de la API. Lee «Al actualizar» si
+alguna escena entra con `fade_in` a un objeto con opacidad declarada.
 
 == Cambios
 
@@ -45,6 +48,19 @@ dice en qué se va el tiempo. Corrige un fallo de Typst en sesiones largas.
 - La vista previa arranca en Vulkan (Metal en macOS) cuando la GPU lo admite,
   sin iniciar también DX12: en Windows llega al primer fotograma unos 0,3 s
   antes y sin las esperas de varios segundos que a veces causaba DX12.
+- Capas de dibujo con nombre: `scene.z_layers("modelo", "overlay")` y
+  `drawable.z_layer("overlay")` dejan lo que va encima (ventanas, lupas,
+  etiquetas) sobre cualquier `z_index` del resto, que pasa a ordenar solo
+  dentro de cada capa. Sin capas, todo se dibuja como antes.
+- `gaanim check` avisa cuando una figura opaca dibujada encima tapa por
+  completo un texto en una pausa o al final de un segmento, y dice cuál,
+  detrás de qué y dónde.
+- Dibujos axonométricos: `scene.geometry.axonometric("isometric", ...)`
+  dibuja puntos de un modelo 3D (con `z` hacia arriba) como polígonos y
+  polilíneas planos, con el mismo estilo que el resto de la escena.
+  `depth_sort` ordena las caras como un pintor y `animate_to` pasa de una
+  vista a otra (de planta a isométrica, por ejemplo) moviendo los vértices.
+  Ver #link("/referencia/geometria/")[Geometría].
 
 == Correcciones
 
@@ -62,9 +78,13 @@ dice en qué se va el tiempo. Corrige un fallo de Typst en sesiones largas.
   sigue cerrada. Antes lanzaban `ValueError`.
 - `fade_in()` termina en la opacidad declarada o fijada del objeto, o en la
   que tenía antes de un `fade_out`, en lugar de 1. También las entradas por
-  trazo (`create`, `write`) tras un `fade_out`. Si una escena contaba con
-  llegar a 1 desde otra opacidad declarada, quita esa opacidad de la
-  declaración.
+  trazo (`create`, `write`) tras un `fade_out`.
+
+== Al actualizar
+
+- Un objeto declarado con una opacidad menor que 1 que entra con `fade_in`
+  (o con `create` o `write` tras un `fade_out`) termina en esa opacidad, no
+  en 1. Si contabas con llegar a 1, quita la opacidad de la declaración.
 
 = 0.10.1
 
