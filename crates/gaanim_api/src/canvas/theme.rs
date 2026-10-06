@@ -970,7 +970,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::CurvedArrow { .. }
         | SpawnKind::CurvedArrowArc { .. }
         | SpawnKind::Dimension { .. }
-        | SpawnKind::Polyline(_)
+        | SpawnKind::Polyline { .. }
         | SpawnKind::ReactivePolyline { .. }
         | SpawnKind::Connect { .. }
         | SpawnKind::Bezier { .. }
@@ -1027,7 +1027,7 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Arc { .. } => "arc",
         SpawnKind::CurvedArrow { .. } | SpawnKind::CurvedArrowArc { .. } => "curved_arrow",
         SpawnKind::Dimension { .. } => "dimension",
-        SpawnKind::Polyline(_) | SpawnKind::ReactivePolyline { .. } => "polyline",
+        SpawnKind::Polyline { .. } | SpawnKind::ReactivePolyline { .. } => "polyline",
         SpawnKind::Bezier { .. } => "bezier",
         SpawnKind::Curve(_) => "curve",
         SpawnKind::ReactivePlot { .. } => "expression_plot",

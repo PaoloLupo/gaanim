@@ -4475,13 +4475,13 @@ impl PyGeometry {
             .iter()
             .map(|(x, y)| Some((constant(x)?, constant(y)?)))
             .collect();
-        if let (Some(fixed), false) = (&fixed, closed) {
-            return Ok(PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .polyline(fixed),
-            ));
+        if let Some(fixed) = &fixed {
+            let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+            return Ok(PyDrawable(if closed {
+                canvas.closed_polyline(fixed)
+            } else {
+                canvas.polyline(fixed)
+            }));
         }
         // Signals in the coordinates make a polyline redrawn every frame.
         let mut sources = Vec::with_capacity(points.len());

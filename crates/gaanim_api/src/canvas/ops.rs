@@ -250,11 +250,18 @@ impl CanvasState {
                 AnimationType::SignalFloat { .. } | AnimationType::SignalKeyframes(_) => "signal",
                 AnimationType::PathTrim { .. } => "trim",
                 AnimationType::PathPointsTo { .. } => "points",
+                AnimationType::PivotTo { .. } => "pivot",
                 AnimationType::TextAnimator(_) => "text_animator",
                 _ => "other",
             }
         }
 
+        // A pivot change compensates the translation it finds, so it stays
+        // where it was made among the other changes.
+        if matches!(builder.anim_type, AnimationType::PivotTo { .. }) {
+            self.active_mut().ops.push(Op::Immediate(builder));
+            return;
+        }
         let incoming_channel = channel(&builder.anim_type);
         for op in self.active_mut().ops.iter_mut().rev() {
             match op {
@@ -330,6 +337,13 @@ impl CanvasState {
                         *previous = builder;
                     }
                     return;
+                }
+                // Nor can a later change merge with one made before it.
+                Op::Immediate(previous)
+                    if previous.target == builder.target
+                        && matches!(previous.anim_type, AnimationType::PivotTo { .. }) =>
+                {
+                    break;
                 }
                 Op::Wait(_) | Op::Play(_) | Op::Launch(_) | Op::Animate { active: true, .. } => {
                     break;

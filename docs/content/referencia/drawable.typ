@@ -366,7 +366,7 @@ view = scene.camera.inset(ui.pixel(812, 240), zoom=3)
 #api-entry(
   name: "Drawable.with_pivot",
   kind: "method",
-  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. `pivot(x, y)` es un alias.],
+  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. Una vez mostrado el objeto, el pivote cambia en el cursor sin moverlo y vale para las animaciones siguientes. `pivot(x, y)` es un alias.],
 )[
 ```python
 # show-code: true
@@ -758,7 +758,7 @@ ring = scene.geometry.duplicate(scene.geometry.dot(0.1), Distribution.circle(16,
   params: (
     (name: "points", type: "Sequence[tuple[float, float]]", default: none, desc: [Un punto por vértice, en las coordenadas en que se declaró la figura.]),
   ),
-  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. `animate.points` sigue desde ahí. Otro número de puntos, un valor no finito o un objeto que no sea polígono ni polilínea lanzan `ValueError`.],
+  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. `animate.points` sigue desde ahí. Una polilínea con `closed=True` sigue cerrada. Otro número de puntos, un valor no finito, un objeto que no sea polígono ni polilínea o una polilínea con coordenadas reactivas lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *

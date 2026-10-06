@@ -481,7 +481,7 @@ scene.render()
     (name: "points", type: "Sequence[tuple[ScalarSource, ScalarSource]]", default: none, desc: [Puntos en orden, en coordenadas de la escena.]),
     (name: "closed", type: "bool", default: "False", desc: [Une el último punto con el primero.]),
   ),
-  desc: [Polilínea que une los puntos en orden. Una coordenada puede ser un `Parameter`, un `Computed` o `scene.time`: entonces la polilínea se redibuja en cada fotograma con sus valores, lo que da forma a cualquier línea o contorno a partir de señales (la traza de un audio, un gráfico en vivo). Un punto cuyo valor no se puede leer queda fuera de ese fotograma.],
+  desc: [Polilínea que une los puntos en orden. Con coordenadas fijas, abierta o cerrada, `points` cambia sus vértices. Una coordenada puede ser un `Parameter`, un `Computed` o `scene.time`: entonces la polilínea se redibuja en cada fotograma con sus valores, lo que da forma a cualquier línea o contorno a partir de señales (la traza de un audio, un gráfico en vivo). Un punto cuyo valor no se puede leer queda fuera de ese fotograma.],
 )[
 ```python
 >>>import math

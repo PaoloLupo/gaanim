@@ -1718,7 +1718,10 @@ class Anim:
         """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``.
 
         The drawable stays hidden before the scheduled fade, including when
-        declared after earlier animations or placed inside a group.
+        declared after earlier animations or placed inside a group. It fades
+        in to the opacity it was declared or last set with, or had before a
+        ``fade_out``: ``opacity(0.3).hidden()`` ends at 0.3. A drawable
+        declared with ``opacity(0)`` ends at 1.
         """
         ...
     def fade_in_from(self, direction: Direction, distance: float = 0.48) -> Anim: ...
@@ -2010,8 +2013,8 @@ class Anim:
         ``transform_to`` nothing is resampled, so every frame is the exact blend
         of both outlines and pixel-art or technical shapes keep their corners.
         The shape keeps its number of vertices: a different count, a shape that
-        is not a polygon or polyline, or a non-finite point raises
-        ``ValueError``. Combine with ``fill``, ``move_to`` and the other
+        is not a polygon or polyline (or is one with reactive coordinates), or
+        a non-finite point raises ``ValueError``. Combine with ``fill``, ``move_to`` and the other
         property targets in one ``Anim``.
 
         Example:
@@ -3699,9 +3702,10 @@ class Drawable:
 
         Before the first ``scene.play`` it replaces the declared shape; later it
         changes the shape at the cursor. ``animate.points`` then moves the
-        vertices on from there. It needs one finite point per vertex; another
-        count, a non-finite value, or a drawable that is not a polygon or
-        polyline raises ``ValueError``.
+        vertices on from there; a ``closed=True`` polyline stays closed. It
+        needs one finite point per vertex; another count, a non-finite value,
+        a drawable that is not a polygon or polyline, or a polyline with
+        reactive coordinates raises ``ValueError``.
 
         Example:
             frame = scene.geometry.polygon([(0, 0), (1, 0), (0, 1)]).points([(0, 0), (1, 0), (1, 1)])
@@ -4220,7 +4224,8 @@ class Drawable:
 
         Without a pivot, shapes turn about their own origin; shapes declared
         in scene coordinates (``line``, ``polygon``, arcs, arrows, curves)
-        turn about the center of their box instead.
+        turn about the center of their box instead. Once the drawable has
+        been shown, the pivot changes at the cursor without moving it.
 
         Example:
             result = drawable.with_pivot(1.0, 1.0)

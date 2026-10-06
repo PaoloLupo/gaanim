@@ -855,6 +855,18 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// reflow keeps the child's own offset from it, so a child animated
     /// inside its box stays where it was moved.
     pub(crate) layout_rests: HashMap<ObjectId, LayoutRest>,
+    /// Opacity each object had before an animation took it to zero, which
+    /// an entrance shows it at again.
+    faded_opacities: HashMap<ObjectId, f32>,
+}
+
+/// The opacity an entrance shows `target` at: its `current` one, or the one
+/// it had before it faded out; 1 for an object that never had one.
+fn shown_opacity(faded: &HashMap<ObjectId, f32>, target: ObjectId, current: f32) -> f32 {
+    if current > 0.0 {
+        return current;
+    }
+    faded.get(&target).copied().unwrap_or(1.0)
 }
 
 /// A box child's place in its layout, apart from its own animations.
@@ -910,6 +922,7 @@ pub(crate) struct SceneBuilderState {
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
     text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
     layout_rests: HashMap<ObjectId, LayoutRest>,
+    faded_opacities: HashMap<ObjectId, f32>,
 }
 
 impl SceneBuilderState {
@@ -954,6 +967,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: self.text_cancellation_marks.clone(),
             text_canceled_term_children: self.text_canceled_term_children.clone(),
             layout_rests: self.layout_rests.clone(),
+            faded_opacities: self.faded_opacities.clone(),
         }
     }
 
@@ -998,6 +1012,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            faded_opacities,
         } = state;
         Self {
             property_source_cursors,
@@ -1038,6 +1053,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            faded_opacities,
         }
     }
 
@@ -1348,6 +1364,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: HashMap::new(),
             text_canceled_term_children: HashMap::new(),
             layout_rests: HashMap::new(),
+            faded_opacities: HashMap::new(),
         }
     }
 
@@ -1570,6 +1587,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::EffectsTo { .. } => "Effects",
             AnimationType::DashOffsetTo { .. } => "DashOffset",
             AnimationType::PathPointsTo { .. } => "Points",
+            AnimationType::PivotTo { .. } => "Pivot",
             AnimationType::CountTo { .. } => "Count",
             AnimationType::ParticleBurst { .. } => "Burst",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
@@ -3269,6 +3287,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_path_points_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::PivotTo { .. }) {
+            self.play_pivot_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::CountTo { .. }) {
             self.play_count_internal(anim, track);
             return;
@@ -3460,13 +3482,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
             AnimationType::FadeTo { to } => {
                 let from = state.opacity;
+                if to <= 0.0 && from > 0.0 {
+                    self.faded_opacities.insert(anim.target, from);
+                }
                 state.opacity = to;
                 PropertyLensSpec::Opacity { from, to }
             }
             AnimationType::FadeIn => {
                 let from = 0.0;
-                let to = 1.0;
-                state.opacity = 1.0;
+                let to = shown_opacity(&self.faded_opacities, anim.target, state.opacity);
+                state.opacity = to;
                 self.commands.entity(state.entity).insert(Opacity(from));
                 PropertyLensSpec::Opacity { from, to }
             }
@@ -3476,6 +3501,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FadeOut => {
                 let from = state.opacity;
                 let to = 0.0;
+                if from > 0.0 {
+                    self.faded_opacities.insert(anim.target, from);
+                }
                 state.opacity = 0.0;
                 PropertyLensSpec::Opacity { from, to }
             }
@@ -3632,6 +3660,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::EffectsTo { .. }
             | AnimationType::DashOffsetTo { .. }
             | AnimationType::PathPointsTo { .. }
+            | AnimationType::PivotTo { .. }
             | AnimationType::CountTo { .. }
             | AnimationType::ParticleBurst { .. }
             | AnimationType::DrawBorderThenFill { .. }
@@ -3869,11 +3898,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
 
         // A draw entrance after a `fade_out()` must show the object again.
+        let shown = shown_opacity(&self.faded_opacities, anim.target, 0.0);
         if !schedule.reversed
             && let Some(state) = self.states.get_mut(anim.target)
             && state.opacity <= 0.0
         {
-            state.opacity = 1.0;
+            state.opacity = shown;
             self.commands.entity(state.entity).insert(Opacity(0.0));
             self.timeline.add_clip(
                 parent_track,
@@ -3881,7 +3911,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 0.0,
                 ClipPayload::Animation(AnimationSpec {
                     target: anim.target,
-                    lens: PropertyLensSpec::Opacity { from: 0.0, to: 1.0 },
+                    lens: PropertyLensSpec::Opacity {
+                        from: 0.0,
+                        to: shown,
+                    },
                     rate_func: gaanim_math::RateFunc::Linear,
                     delay: 0.0,
                     label: self.current_label.clone(),
@@ -5820,6 +5853,34 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
     }
 
+    /// Move the pivot of `target`'s rotations, scales and skews to a scene
+    /// point; the translation compensates, so nothing moves.
+    fn play_pivot_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::PivotTo { pivot } = anim.anim_type else {
+            return;
+        };
+        let Some(state) = self.states.get_mut(anim.target) else {
+            return;
+        };
+        let from = state.transform;
+        let to = from.about_pivot(pivot);
+        state.transform = to;
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time + anim.delay,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                    std::sync::Arc::new(crate::pivot_lens::PivotLens::between(&from, &to)),
+                )),
+                rate_func: anim.rate_func,
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+    }
+
     fn play_path_trim_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let AnimationType::PathTrim {
             start,
@@ -7474,8 +7535,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Spawns an open path (polyline) primitive.
     pub fn open_path(&mut self, points: &[kurbo::Point]) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        self.polyline(points, false)
+    }
+
+    /// Spawns a polyline primitive; `closed` joins its ends.
+    pub fn polyline(
+        &mut self,
+        points: &[kurbo::Point],
+        closed: bool,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle = gaanim_objects::primitives::open_path(id, points);
+        let bundle = gaanim_objects::primitives::polyline(id, points, closed);
         MobjectSpawnBuilder {
             builder: self,
             id,

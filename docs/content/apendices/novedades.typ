@@ -55,6 +55,16 @@ dice en qué se va el tiempo. Corrige un fallo de Typst en sesiones largas.
 - `bounds()` justo después de un cambio inmediato sobre un objeto ya animado,
   como un `move_to`, mide la posición nueva. Según cómo sumaran las
   duraciones de la escena, medía un instante antes del cambio.
+- `with_pivot` sobre un objeto ya mostrado cambia el pivote en el cursor sin
+  moverlo, y las rotaciones, escalas y sesgos siguientes lo usan. Antes se
+  ignoraba sin aviso.
+- `points()` y `animate.points()` aceptan una polilínea con `closed=True`, que
+  sigue cerrada. Antes lanzaban `ValueError`.
+- `fade_in()` termina en la opacidad declarada o fijada del objeto, o en la
+  que tenía antes de un `fade_out`, en lugar de 1. También las entradas por
+  trazo (`create`, `write`) tras un `fade_out`. Si una escena contaba con
+  llegar a 1 desde otra opacidad declarada, quita esa opacidad de la
+  declaración.
 
 = 0.10.1
 

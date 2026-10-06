@@ -6,6 +6,7 @@ pub mod effect_lens;
 pub mod export;
 pub mod host;
 pub mod matrix;
+pub mod pivot_lens;
 pub mod prelude;
 pub mod runtime;
 pub mod stroke_lens;

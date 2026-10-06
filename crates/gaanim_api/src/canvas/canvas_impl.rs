@@ -3229,7 +3229,7 @@ impl SceneModel {
                     | SpawnKind::DashedLine { .. }
                     | SpawnKind::DoubleArrow { .. }
                     | SpawnKind::Arc { .. }
-                    | SpawnKind::Polyline(_)
+                    | SpawnKind::Polyline { .. }
                     | SpawnKind::ReactivePolyline { .. }
                     | SpawnKind::Bezier { .. }
                     | SpawnKind::Curve(_)
@@ -3757,7 +3757,19 @@ impl SceneModel {
     ///
     /// Use this for technical geometry such as springs, rails, or trajectories.
     pub fn polyline(&mut self, points: &[(f64, f64)]) -> DrawableHandle {
-        self.spawn(SpawnKind::Polyline(points.to_vec()))
+        self.spawn(SpawnKind::Polyline {
+            points: points.to_vec(),
+            closed: false,
+        })
+    }
+
+    /// Creates a path connecting the given points in order and the last one
+    /// to the first. Unlike [`Self::polygon`], it has no fill of its own.
+    pub fn closed_polyline(&mut self, points: &[(f64, f64)]) -> DrawableHandle {
+        self.spawn(SpawnKind::Polyline {
+            points: points.to_vec(),
+            closed: true,
+        })
     }
 
     /// The outline of `balls` melted together like drops of liquid: each
