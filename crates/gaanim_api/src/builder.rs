@@ -7474,8 +7474,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Spawns an open path (polyline) primitive.
     pub fn open_path(&mut self, points: &[kurbo::Point]) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        self.polyline(points, false)
+    }
+
+    /// Spawns a polyline primitive; `closed` joins its ends.
+    pub fn polyline(
+        &mut self,
+        points: &[kurbo::Point],
+        closed: bool,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle = gaanim_objects::primitives::open_path(id, points);
+        let bundle = gaanim_objects::primitives::polyline(id, points, closed);
         MobjectSpawnBuilder {
             builder: self,
             id,

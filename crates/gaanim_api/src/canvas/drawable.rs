@@ -136,6 +136,18 @@ fn math_source_terms(source: &str) -> Vec<String> {
     terms
 }
 
+/// Number of vertices `points()` sets on a drawable of `kind`.
+pub(crate) fn declared_vertices(kind: &SpawnKind) -> Result<usize, String> {
+    match kind {
+        SpawnKind::Polygon(points) | SpawnKind::Polyline { points, .. } => Ok(points.len()),
+        SpawnKind::ReactivePolyline { .. } => Err(
+            "points() requires fixed coordinates; this polyline follows reactive values"
+                .to_string(),
+        ),
+        _ => Err("points() requires a polygon or polyline".to_string()),
+    }
+}
+
 #[allow(dead_code)]
 impl DrawableHandle {
     /// Source pixel width for raster images and video.
@@ -1780,10 +1792,7 @@ impl DrawableHandle {
     /// declared in. Before the first play this is the declared shape; after
     /// it, a cut at the cursor that `animate.points` can continue from.
     pub fn points(self, points: Vec<(f64, f64)>) -> Result<Self, String> {
-        let declared = match &self.spec.lock().expect("object spec poisoned").kind {
-            SpawnKind::Polygon(declared) | SpawnKind::Polyline(declared) => declared.len(),
-            _ => return Err("points() requires a polygon or polyline".to_string()),
-        };
+        let declared = declared_vertices(&self.spec.lock().expect("object spec poisoned").kind)?;
         if points.len() != declared {
             return Err(format!(
                 "points() needs {declared} points, one per vertex of the shape, got {}",
@@ -1794,7 +1803,11 @@ impl DrawableHandle {
             return Err("points must be finite".to_string());
         }
         let this = self.update_spec(|spec| {
-            if let SpawnKind::Polygon(vertices) | SpawnKind::Polyline(vertices) = &mut spec.kind {
+            if let SpawnKind::Polygon(vertices)
+            | SpawnKind::Polyline {
+                points: vertices, ..
+            } = &mut spec.kind
+            {
                 *vertices = points.clone();
             }
         });

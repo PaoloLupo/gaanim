@@ -758,7 +758,7 @@ ring = scene.geometry.duplicate(scene.geometry.dot(0.1), Distribution.circle(16,
   params: (
     (name: "points", type: "Sequence[tuple[float, float]]", default: none, desc: [Un punto por vértice, en las coordenadas en que se declaró la figura.]),
   ),
-  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. `animate.points` sigue desde ahí. Otro número de puntos, un valor no finito o un objeto que no sea polígono ni polilínea lanzan `ValueError`.],
+  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. `animate.points` sigue desde ahí. Una polilínea con `closed=True` sigue cerrada. Otro número de puntos, un valor no finito, un objeto que no sea polígono ni polilínea o una polilínea con coordenadas reactivas lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *

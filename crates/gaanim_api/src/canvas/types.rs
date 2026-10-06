@@ -656,8 +656,12 @@ pub enum SpawnKind {
         end: (f64, f64),
         offset: f64,
     },
-    /// Open sequence of straight segments. Useful for springs, rails, and paths.
-    Polyline(Vec<(f64, f64)>),
+    /// Sequence of straight segments, for springs, rails, and paths;
+    /// `closed` joins the last point to the first.
+    Polyline {
+        points: Vec<(f64, f64)>,
+        closed: bool,
+    },
     /// A polyline whose coordinates are reactive sources, redrawn every
     /// frame from their current values; closed joins the last point to the
     /// first.
@@ -2160,10 +2164,8 @@ impl Anim {
             .property_spec
             .as_ref()
             .ok_or("points() requires Drawable.animate()")?;
-        let declared = match &spec.lock().expect("object spec poisoned").kind {
-            SpawnKind::Polygon(declared) | SpawnKind::Polyline(declared) => declared.len(),
-            _ => return Err("points() requires a polygon or polyline".to_string()),
-        };
+        let declared =
+            super::drawable::declared_vertices(&spec.lock().expect("object spec poisoned").kind)?;
         if points.len() != declared {
             return Err(format!(
                 "points() needs {declared} points, one per vertex of the shape, got {}",

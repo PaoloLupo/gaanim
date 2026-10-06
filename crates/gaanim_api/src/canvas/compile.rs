@@ -9359,9 +9359,9 @@ impl SceneModel {
                     group
                 }
             }
-            SpawnKind::Polyline(points) => {
+            SpawnKind::Polyline { points, closed } => {
                 let points: Vec<Point> = points.iter().map(|&(x, y)| Point::new(x, y)).collect();
-                let b = builder.open_path(&points);
+                let b = builder.polyline(&points, *closed);
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
@@ -11099,7 +11099,7 @@ impl SceneModel {
                 | SpawnKind::CurvedArrow { .. }
                 | SpawnKind::CurvedArrowArc { .. }
                 | SpawnKind::Dimension { .. }
-                | SpawnKind::Polyline(_)
+                | SpawnKind::Polyline { .. }
                 | SpawnKind::ReactivePolyline { .. }
                 | SpawnKind::Bezier { .. }
                 | SpawnKind::Curve(_)
@@ -15909,6 +15909,57 @@ mod tests {
         assert_eq!(
             vertices_at(0.0),
             [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
+        );
+    }
+
+    #[test]
+    fn a_closed_polyline_takes_new_points_and_stays_closed() {
+        let mut canvas = SceneModel::new(640, 360);
+        let outline = canvas.closed_polyline(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]);
+        let outline = outline
+            .points(vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0)])
+            .unwrap();
+        canvas.play(vec![
+            outline
+                .animate()
+                .points(vec![(0.0, 0.0), (3.0, 0.0), (3.0, 3.0)])
+                .unwrap()
+                .duration(1.0),
+        ]);
+        let reactive = canvas.reactive_polyline(vec![(0.0.into(), 0.0.into()); 3], true);
+        assert!(reactive.points(vec![(0.0, 0.0); 3]).is_err());
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(outline.id.as_raw() - 1);
+        let mut outline_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            world
+                .query::<(&MobjectId, &gaanim_scene::Path2D)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+                .elements()
+                .to_vec()
+        };
+        use gaanim_core::kurbo::PathEl::{ClosePath, LineTo, MoveTo};
+        assert_eq!(
+            outline_at(0.0),
+            [
+                MoveTo(Point::new(0.0, 0.0)),
+                LineTo(Point::new(2.0, 0.0)),
+                LineTo(Point::new(2.0, 2.0)),
+                ClosePath
+            ]
+        );
+        assert_eq!(
+            outline_at(1.0),
+            [
+                MoveTo(Point::new(0.0, 0.0)),
+                LineTo(Point::new(3.0, 0.0)),
+                LineTo(Point::new(3.0, 3.0)),
+                ClosePath
+            ]
         );
     }
 
