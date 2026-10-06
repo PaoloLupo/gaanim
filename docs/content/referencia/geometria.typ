@@ -4,7 +4,7 @@
 
 #show: docs-chapter.with(
   title: "Geometría",
-  description: "Fábricas de scene.geometry: primitivas, líneas, flechas, trayectorias, grupos, booleanas, geometría reactiva y 3D",
+  description: "Fábricas de scene.geometry: primitivas, líneas, flechas, trayectorias, grupos, booleanas, geometría reactiva, dibujos axonométricos y 3D",
   route: "/referencia/geometria/",
   nav: "Geometría",
 )
@@ -1020,6 +1020,191 @@ scene.wait(1.6)
 scene.render()
 ```
 ]
+
+== Dibujos axonométricos
+
+Para planos técnicos en isométrica o dimétrica, con el estilo plano del resto
+de la escena. `scene.geometry.axonometric(...)` devuelve una proyección que
+dibuja puntos de un modelo 3D como polígonos y polilíneas 2D normales: se
+rellenan, se trazan y se animan como cualquier otro `Drawable`. No usa el 3D
+experimental de la sección siguiente.
+
+El modelo tiene `z` hacia arriba y su planta en `x`/`y`, como un modelo
+estructural. Un metro del eje menos acortado mide `scale` unidades de escena,
+así que la isométrica conserva la longitud de los tres ejes, como un dibujo
+isométrico, y el origen del modelo se dibuja en `origin`. Los trazos de estos
+dibujos van centrados en el contorno, de modo que una cara vista de canto
+(un muro en planta) se sigue viendo como línea.
+
+`depth_sort` ordena las caras como un pintor: donde dos dibujos se solapan en
+pantalla, el más cercano queda encima. Llámalo antes de mostrarlos, como
+`z_index`, con la vista en la que importa el orden (`view=` toma la de otra
+proyección, como la vista final de una animación): el orden no se recalcula
+al cambiar de vista. Tres caras que se tapan en ciclo, o dos que se atraviesan,
+no tienen un orden exacto; parte esas caras en piezas. `animate_to` lleva
+todos los dibujos de la proyección a otra vista, vértice a vértice, y la
+proyección dibuja desde entonces con esa vista.
+
+```python
+# show-code: true
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9), background="#f5f1ea")
+plan = scene.geometry.axonometric("plan", origin=(-2.5, -2), scale=0.9)
+iso = scene.geometry.axonometric("isometric", origin=(-2.5, -2), scale=0.9)
+H = 2.5
+faces = [
+    plan.polygon([(0, 0, 0), (5, 0, 0), (5, 4, 0), (0, 4, 0)]).fill("#d8d2c6"),
+    plan.polygon([(0, 4, 0), (5, 4, 0), (5, 4, H), (0, 4, H)]).fill("#c46a45"),
+    plan.polygon([(0, 0, 0), (0, 4, 0), (0, 4, H), (0, 0, H)]).fill("#9c4f32"),
+    plan.polygon([(0, 0, H), (5, 0, H), (5, 2, H), (0, 2, H)]).fill("#9aa3ad"),
+]
+for face in faces:
+    face.stroke("#2b2b2b", 0.03)
+columns = [plan.line((x, y, 0), (x, y, H)).stroke("#4e535c", 0.06) for x, y in [(5, 2), (5, 4)]]
+plan.depth_sort(faces + columns, z_index=10, view=iso)
+scene.wait(0.4)
+scene.play(plan.animate_to(iso).defaults(duration=1.6))
+scene.wait(0.6)
+# output: preview.webp
+scene.render()
+```
+
+#api-entry(
+  name: "Geometry.axonometric",
+  kind: "factory",
+  params: (
+    (name: "view", type: "str", default: "\"isometric\"", desc: [`"isometric"`, `"dimetric"` (la 2:1, cuyos ejes que se alejan suben una unidad cada dos), `"plan"`, `"front"` (mirando hacia `+y`) o `"side"` (desde `+x`).]),
+    (name: "azimuth", type: "float | None", default: "None", desc: [Radianes que la vista gira alrededor de `z` desde la vista frontal; sustituye al de `view`.]),
+    (name: "elevation", type: "float | None", default: "None", desc: [Radianes que la vista sube sobre el horizonte; negativa, se ve desde abajo. Sustituye a la de `view`.]),
+    (name: "origin", type: "tuple[float, float]", default: "(0, 0)", desc: [Punto de la escena donde se dibuja el origen del modelo.]),
+    (name: "scale", type: "float", default: "1", desc: [Unidades de escena por unidad del modelo en el eje menos acortado.]),
+  ),
+  returns: (type: "Axonometric", desc: [Proyección que dibuja y anima puntos del modelo.]),
+  desc: [Un ángulo u origen no finito, un `scale` que no sea positivo u otro nombre de vista lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+iso = scene.geometry.axonometric("isometric", origin=(0, -1), scale=0.5)
+below = scene.geometry.axonometric("isometric", elevation=-0.5)
+```
+]
+
+#api-entry(
+  name: "Axonometric.polygon",
+  kind: "method",
+  params: ((name: "points", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Vértices en coordenadas del modelo, como una cara.]),),
+  returns: (type: "Drawable", desc: [Un `polygon` en coordenadas de escena.]),
+  desc: [Menos de tres puntos o una coordenada no finita lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>iso = scene.geometry.axonometric()
+wall = iso.polygon([(0, 0, 0), (5, 0, 0), (5, 0, 3), (0, 0, 3)]).fill(GRAY)
+```
+]
+
+#api-entry(
+  name: "Axonometric.polyline",
+  kind: "method",
+  params: (
+    (name: "points", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Puntos del modelo, en orden.]),
+    (name: "closed", type: "bool", default: "False", desc: [Une el último punto con el primero.]),
+  ),
+  returns: (type: "Drawable", desc: [Una `polyline` en coordenadas de escena.]),
+  desc: [Menos de dos puntos o una coordenada no finita lanzan `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Axonometric.line",
+  kind: "method",
+  params: (
+    (name: "start", type: "tuple[float, float, float]", default: none, desc: [Un extremo, en el modelo.]),
+    (name: "end", type: "tuple[float, float, float]", default: none, desc: [El otro extremo.]),
+  ),
+  returns: (type: "Drawable", desc: [Una polilínea de dos puntos, que `animate.points` también mueve.]),
+  none,
+)
+
+#api-entry(
+  name: "Axonometric.point",
+  kind: "method",
+  params: (
+    (name: "x", type: "float", default: none, desc: [Coordenadas del punto del modelo.]),
+    (name: "y", type: "float", default: none, desc: []),
+    (name: "z", type: "float", default: none, desc: []),
+  ),
+  returns: (type: "tuple[float, float]", desc: [Dónde se dibuja, en unidades de escena, con la vista actual.]),
+  desc: [Sirve para colocar etiquetas y cotas junto al dibujo; un texto colocado así no sigue a `animate_to`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>iso = scene.geometry.axonometric()
+label = scene.text("A").move_to(*iso.point(0, 0, 3))
+```
+]
+
+#api-entry(
+  name: "Axonometric.depth",
+  kind: "method",
+  params: (
+    (name: "x", type: "float", default: none, desc: [Coordenadas del punto del modelo.]),
+    (name: "y", type: "float", default: none, desc: []),
+    (name: "z", type: "float", default: none, desc: []),
+  ),
+  returns: (type: "float", desc: [Cuán cerca del observador está el punto: mayor es más cerca.]),
+  none,
+)
+
+#api-entry(
+  name: "Axonometric.depth_sort",
+  kind: "method",
+  params: (
+    (name: "drawables", type: "Sequence[Drawable]", default: none, desc: [Dibujos hechos con esta proyección.]),
+    (name: "z_index", type: "int", default: "0", desc: [`z_index` del dibujo más lejano; cada siguiente suma uno.]),
+    (name: "view", type: "Axonometric | None", default: "None", desc: [Ordena según la vista de esta proyección en lugar de la actual.]),
+  ),
+  returns: (type: "None"),
+  desc: [Asigna `z_index` de atrás hacia delante en la vista actual o en la de `view`. Donde dos dibujos se solapan en pantalla, el más cercano allí queda encima; el resto sigue su profundidad media, aunque solo se toquen en un vértice o una arista. Un dibujo de otra proyección, uno repetido o un `z_index` sin sitio para todos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>iso = scene.geometry.axonometric()
+floor = iso.polygon([(0, 0, 0), (4, 0, 0), (4, 4, 0), (0, 4, 0)])
+slab = iso.polygon([(0, 0, 3), (4, 0, 3), (4, 4, 3), (0, 4, 3)])
+column = iso.line((0, 4, 0), (0, 4, 3))
+iso.depth_sort([slab, column, floor], z_index=10)
+```
+]
+
+#api-entry(
+  name: "Axonometric.animate_to",
+  kind: "method",
+  params: ((name: "other", type: "Axonometric", default: none, desc: [Proyección cuya vista se adopta.]),),
+  returns: (type: "Composition", desc: [Un `animate.points` por dibujo, en paralelo.]),
+  desc: [Lleva cada vértice en línea recta a donde lo dibuja la vista de `other`; fija la duración con `defaults(duration=...)`. Desde entonces esta proyección dibuja con esa vista, y `other` no se lleva los dibujos. Una proyección que no ha dibujado nada lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>iso = scene.geometry.axonometric()
+>>>iso.polygon([(0, 0, 0), (4, 0, 0), (4, 4, 0)])
+plan = scene.geometry.axonometric("plan")
+scene.play(iso.animate_to(plan).defaults(duration=1.5))
+```
+]
+
+#api-entry(
+  name: "Axonometric.azimuth",
+  kind: "property",
+  returns: (type: "float", desc: [Giro de la vista actual alrededor de `z`, en radianes. `elevation`, `origin` y `scale` dan el resto de la vista.]),
+  none,
+)
 
 == Geometría 3D
 

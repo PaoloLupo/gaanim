@@ -39,6 +39,7 @@ mod poll;
 mod procedural;
 mod progress_ring;
 mod py3d;
+mod pyaxonometric;
 mod pycamera_view;
 mod pycanvas;
 mod pydrawable;
@@ -142,6 +143,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyCameraState>()?;
     m.add_class::<pycanvas::PyCameraConstraint>()?;
     m.add_class::<pycamera_view::PyCameraView>()?;
+    m.add_class::<pyaxonometric::PyAxonometric>()?;
     m.add_class::<pycamera_view::PyCameraViewAnimation>()?;
     m.add_class::<pycanvas::PyScene>()?;
     m.add_class::<pycanvas::PySceneStop>()?;

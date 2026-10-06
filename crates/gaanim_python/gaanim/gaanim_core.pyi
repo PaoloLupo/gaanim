@@ -5482,6 +5482,95 @@ class Camera:
         """
         ...
 
+class Axonometric:
+    """An axonometric view of a 3D model and the drawings made with it.
+
+    ``polygon``, ``polyline`` and ``line`` draw model points as ordinary
+    flat drawables, styled and animated like any other (``fill``,
+    ``fade_in``, ``animate.points``...), with their strokes centered on the
+    outline, so a face seen edge-on still draws as a line. ``depth_sort``
+    orders them like a painter and ``animate_to`` moves them to another view.
+    """
+    @property
+    def azimuth(self) -> float:
+        """Radians the view turns about ``z`` from the front view."""
+        ...
+    @property
+    def elevation(self) -> float:
+        """Radians the view rises above the horizon."""
+        ...
+    @property
+    def origin(self) -> tuple[float, float]:
+        """Scene point where the model origin is drawn."""
+        ...
+    @property
+    def scale(self) -> float:
+        """Scene units per model unit along the least shortened axis."""
+        ...
+    def point(self, x: float, y: float, z: float) -> tuple[float, float]:
+        """Return where the model point ``(x, y, z)`` is drawn, in scene units.
+
+        Example:
+            label = scene.text("A").move_to(*iso.point(0, 0, 3))
+        """
+        ...
+    def depth(self, x: float, y: float, z: float) -> float:
+        """Return how near the viewer the model point is; larger is nearer."""
+        ...
+    def polygon(self, points: Sequence[tuple[float, float, float]]) -> Drawable:
+        """Draw a polygon through the model points ``points``, such as a face.
+
+        The result is a regular ``polygon`` in scene coordinates. Fewer than
+        three points or a non-finite coordinate raise ``ValueError``.
+
+        Example:
+            wall = iso.polygon([(0, 0, 0), (5, 0, 0), (5, 0, 3), (0, 0, 3)]).fill(GRAY)
+        """
+        ...
+    def polyline(self, points: Sequence[tuple[float, float, float]], *, closed: bool = False) -> Drawable:
+        """Draw a polyline through the model points ``points``.
+
+        ``closed=True`` joins the last point to the first. Fewer than two
+        points or a non-finite coordinate raise ``ValueError``.
+        """
+        ...
+    def line(self, start: tuple[float, float, float], end: tuple[float, float, float]) -> Drawable:
+        """Draw the segment between two model points, as a polyline of two points.
+
+        Example:
+            column = iso.line((0, 0, 0), (0, 0, 3)).stroke(BLACK, 0.06)
+        """
+        ...
+    def depth_sort(self, drawables: Sequence[Drawable], *, z_index: int = 0, view: Optional[Axonometric] = None) -> None:
+        """Give ``drawables`` drawn with this projection ``z_index`` values back to front.
+
+        The farthest gets ``z_index``, the next ``z_index + 1``, and so on, as
+        seen in the current view, or in ``view``'s when given, such as the
+        view the drawings will move to. Where two drawings overlap on screen,
+        the one nearer the viewer there draws above; the rest follow their
+        mean depth. Call it before the drawings are shown, like ``z_index``.
+        A drawable this projection did not draw, a repeated one, or a
+        ``z_index`` without room for all of them raise ``ValueError``.
+
+        Example:
+            plan.depth_sort([floor, wall, slab, column], z_index=10, view=iso)
+        """
+        ...
+    def animate_to(self, other: Axonometric) -> Composition:
+        """Move every drawing of this projection to ``other``'s view.
+
+        Each drawing's vertices travel straight to where ``other`` draws its
+        model points, as ``animate.points`` does, all in one composition; set
+        its duration with ``defaults(duration=...)``. From then on this
+        projection draws with ``other``'s view. A projection that has drawn
+        nothing raises ``ValueError``.
+
+        Example:
+            plan = scene.geometry.axonometric("plan", origin=(0, -1), scale=0.5)
+            scene.play(iso.animate_to(plan).defaults(duration=1.5))
+        """
+        ...
+
 class CameraView:
     """A second camera shown inside a screen drawable.
 
@@ -7529,6 +7618,33 @@ class Geometry:
 
         Example:
             section = scene.geometry.points(poincare_points, radius=0.02).fill(GOLD)
+        """
+        ...
+    def axonometric(
+        self,
+        view: Literal["isometric", "dimetric", "plan", "front", "side"] = "isometric",
+        *,
+        azimuth: Optional[float] = None,
+        elevation: Optional[float] = None,
+        origin: tuple[float, float] = (0.0, 0.0),
+        scale: float = 1.0,
+    ) -> Axonometric:
+        """Draw a 3D model as flat shapes seen from an orthographic view.
+
+        The model has ``z`` up and its plan on ``x``/``y``. ``view`` names
+        the angles: ``"isometric"``, ``"dimetric"`` (the 2:1 drawing, whose
+        receding axes rise one unit every two), ``"plan"``, ``"front"``
+        (looking along ``+y``) or ``"side"`` (from ``+x``). ``azimuth``
+        (radians about ``z`` from the front view) and ``elevation`` (radians
+        above the horizon) replace its angles. A model unit along the least
+        shortened axis measures ``scale`` scene units, so an isometric
+        drawing keeps every axis at full length, and the model origin is
+        drawn at ``origin``. A non-finite angle or origin, a ``scale`` that is
+        not positive or another view name raise ``ValueError``.
+
+        Example:
+            iso = scene.geometry.axonometric("isometric", origin=(0, -1), scale=0.5)
+            slab = iso.polygon([(0, 0, 3), (5, 0, 3), (5, 4, 3), (0, 4, 3)])
         """
         ...
     def polygon(self, points: Sequence[tuple[float, float]]) -> Drawable:
