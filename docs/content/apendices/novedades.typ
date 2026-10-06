@@ -13,7 +13,7 @@ instalar una versión nueva, sigue
 
 = 0.10.2
 
-Sin publicar. Recargar y abrir presentaciones largas es más rápido: medir con
+Publicada el 6 de octubre de 2026. Recargar y abrir presentaciones largas es más rápido: medir con
 `bounds()` reutiliza lo ya compilado, un `traced_path` ya no encarece los
 saltos, guardar sin cambios conserva la escena y `GAANIM_RELOAD_PROFILE=1`
 dice en qué se va el tiempo. Trae capas de dibujo con nombre, un aviso de
