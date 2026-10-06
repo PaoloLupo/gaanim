@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_engine"
-version = "0.10.1"
+version = "0.10.2"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "The Gaanim engine as one shared library for the gaanim executable and its Python plugin"

@@ -6216,6 +6216,49 @@ impl SceneModel {
         self.persist_many(std::slice::from_ref(o))
     }
 
+    /// Name the scene's draw layers, from the back to the front. Every
+    /// drawable of a layer draws above every drawable of the layers behind
+    /// it, whatever their `z_index`, which only orders drawables within a
+    /// layer. Drawables without a layer draw in `default`, the first layer
+    /// when `None`. A scene names its layers once; naming the same layers
+    /// again is allowed.
+    pub fn z_layers(&mut self, names: &[&str], default: Option<&str>) -> Result<(), String> {
+        if names.is_empty() {
+            return Err("z_layers needs at least one layer name".to_string());
+        }
+        if let Some(name) = names.iter().find(|name| name.trim().is_empty()) {
+            return Err(format!("layer names cannot be empty, got {name:?}"));
+        }
+        for (index, name) in names.iter().enumerate() {
+            if names[..index].contains(name) {
+                return Err(format!("layer `{name}` is named twice"));
+            }
+        }
+        let default = match default {
+            Some(default) => names
+                .iter()
+                .position(|name| *name == default)
+                .ok_or_else(|| format!("default layer `{default}` is not one of the layers"))?,
+            None => 0,
+        };
+        let layers = super::ops::ZLayers {
+            names: names.iter().map(|name| (*name).to_string()).collect(),
+            default,
+        };
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        match &state.z_layers {
+            Some(declared) if *declared != layers => Err(format!(
+                "the scene's layers are already {} (default {}); a scene names them once",
+                declared.names.join(", "),
+                declared.names[declared.default]
+            )),
+            _ => {
+                state.z_layers = Some(layers);
+                Ok(())
+            }
+        }
+    }
+
     /// Keep several existing drawables visible and animatable across future segments.
     pub fn persist_many(&mut self, objects: &[DrawableHandle]) -> Result<(), SceneObjectError> {
         self.queue_scene_objects(objects, SceneObjectAction::Persist)

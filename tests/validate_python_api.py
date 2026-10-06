@@ -1840,7 +1840,7 @@ def validate_scene_capability_surface(module) -> list[str]:
     """Keep Scene limited to orchestration and scene-owned capabilities."""
     expected = {
         "assets", "camera", "canvas", "fx", "geometry", "layout", "mechanics",
-        "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
+        "media", "slides", "text", "viz", "fade_out_all", "link", "persist", "z_layers",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
         "voiceover", "live_take", "narration_script", "marker", "markers",

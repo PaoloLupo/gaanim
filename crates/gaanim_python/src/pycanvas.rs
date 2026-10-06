@@ -3964,6 +3964,26 @@ impl PyGeometry {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
+    #[pyo3(signature = (view="isometric", *, azimuth=None, elevation=None, origin=(0.0, 0.0), scale=1.0))]
+    fn axonometric(
+        &self,
+        view: &str,
+        azimuth: Option<f64>,
+        elevation: Option<f64>,
+        origin: (f64, f64),
+        scale: f64,
+    ) -> PyResult<crate::pyaxonometric::PyAxonometric> {
+        crate::custom::ensure_authoring_allowed()?;
+        let view = crate::pyaxonometric::axonometric_view(view, azimuth, elevation, origin, scale)?;
+        Ok(crate::pyaxonometric::PyAxonometric {
+            inner: self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .axonometric(view),
+        })
+    }
+
     fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         if points.len() < 3 || points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
@@ -6441,6 +6461,18 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .reuse_many(&drawables)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Name the draw layers, from the back to the front.
+    #[pyo3(signature = (*names, default=None))]
+    fn z_layers(&self, names: Vec<String>, default: Option<String>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .z_layers(&names, default.as_deref())
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     /// Keep one or more drawables available across future segments.

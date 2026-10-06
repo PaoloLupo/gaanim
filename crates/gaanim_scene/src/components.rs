@@ -215,6 +215,14 @@ pub struct RenderOrder {
     pub creation_order: u64,
 }
 
+/// Rank of the named draw layer (`scene.z_layers`) an entity and its
+/// descendants draw in: every element of a higher layer draws above every
+/// element of a lower one, whatever their `z_index`. An entity without one
+/// takes its nearest ancestor's, or draws in the default layer, rank 0.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ZLayer(pub i32);
+
 /// Marks an entity that belongs to one segment of the timeline. In a scene
 /// with segments, a drawable whose chain of parents carries no marker is
 /// persistent (`scene.persist`) and draws above segment content with the

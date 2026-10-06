@@ -1820,6 +1820,19 @@ impl DrawableHandle {
         self.update_spec(|spec| spec.z_index = z)
     }
 
+    /// Draw this drawable, and its members, in the layer `name` named with
+    /// [`SceneModel::z_layers`](super::SceneModel::z_layers), above every
+    /// layer behind it whatever their `z_index`; `z_index` orders it within
+    /// its layer. Draw order holds for the whole scene, so a call after the
+    /// drawable is shown applies from its start.
+    pub fn z_layer(self, name: &str) -> Result<Self, String> {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_z_layer(&self.spec, name)?;
+        Ok(self)
+    }
+
     pub fn move_to(self, x: impl Into<ScalarSource>, y: impl Into<ScalarSource>) -> Self {
         let x = x.into();
         let y = y.into();

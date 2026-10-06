@@ -1019,6 +1019,8 @@ pub struct ObjectSpec {
     /// If true, keep this reactive visual hidden until an animation targets it.
     pub defer_visibility_until_play: bool,
     pub z_index: i32,
+    /// Named draw layer (`SceneModel::z_layers`) and its rank.
+    pub z_layer: Option<(String, i32)>,
     /// If true, this object is a HUD overlay (screen-space, fixed).
     pub hud: bool,
     /// If true, this object was attached to a coordinate space as data.
@@ -1196,6 +1198,7 @@ impl ObjectSpec {
             theme_selector: None,
             defer_visibility_until_play: false,
             z_index: 0,
+            z_layer: None,
             billboard: false,
             coordinate_view_role: None,
             coordinate_label_offset: None,

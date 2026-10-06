@@ -739,6 +739,25 @@ sin alterar su estado visual. Un objeto de otra escena lanza `ValueError`.
 )
 
 #api-entry(
+  name: "Scene.z_layers",
+  kind: "method",
+  params: (
+    (name: "names", type: "str", default: none, desc: [Nombres de las capas, de atrás hacia adelante.]),
+    (name: "default", type: "str | None", default: "None", desc: [Capa de los objetos sin `z_layer`; sin él, la primera.]),
+  ),
+  returns: (type: "None"),
+  desc: [Nombra las capas de dibujo de la escena. Todo objeto de una capa (`Drawable.z_layer`) se dibuja encima de todos los de las capas de detrás, sea cual sea su `z_index`, que solo ordena dentro de cada capa. Sirve para que lo que va encima (ventanas, lupas, etiquetas, un cursor) no dependa de un `z_index` mayor que cualquiera del resto del diagrama. Una escena nombra sus capas una vez; repetir las mismas no hace nada. Sin nombres, con un nombre vacío o repetido, con un `default` que no está entre ellos o con capas distintas a las ya nombradas lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.z_layers("fondo", "contenido", "overlay", default="contenido")
+rejilla = scene.geometry.rect(14, 8).fill(GRAY).z_layer("fondo")
+cursor = scene.geometry.dot(0.1).fill(GOLD).z_layer("overlay")
+```
+]
+
+#api-entry(
   name: "Scene.persist",
   kind: "method",
   params: (
