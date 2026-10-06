@@ -289,6 +289,7 @@ pub fn reload_ready_system(mut status: ResMut<ReloadStatus>, time: Res<Time>) {
     );
     gaanim_core::console::success("ready", &status.last_message);
     status.shown_at = Some(time.elapsed_secs_f64());
+    crate::startup::report("first scene ready");
 }
 
 fn reload_status_message(

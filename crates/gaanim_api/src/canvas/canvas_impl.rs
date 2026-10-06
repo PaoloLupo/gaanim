@@ -7871,6 +7871,7 @@ impl SceneModel {
     /// cursor extend the timeline until they end.
     pub fn render(&self) -> bool {
         // Authoring is over; measurements no longer need their compilation.
+        self.profile.rendered();
         self.measured.clear();
         let mut scene = self.clone();
         scene.measured = Default::default();

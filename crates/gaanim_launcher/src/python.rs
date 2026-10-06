@@ -26,9 +26,12 @@ pub fn runtime(hint: &Path) -> Result<&'static PythonPlugin, String> {
     }
     let probe = EnvironmentProbe::detect(Some(hint));
     let venv = gaanim_project::activate_environment(&probe)?;
+    crate::startup::mark("python environment");
     prepare_loader(&probe)?;
     let plugin = load_plugin()?;
+    crate::startup::mark("python plugin");
     (plugin.initialize)(venv.as_deref());
+    crate::startup::mark("python interpreter");
     *loaded = Some(plugin);
     Ok(plugin)
 }

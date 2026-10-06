@@ -70,8 +70,10 @@ pub fn run() {
         selection: launch.selection.clone(),
         ..Default::default()
     });
+    crate::startup::mark("app setup");
     app.insert_resource(ReloadStatus::default())
         .insert_resource(ScriptError::default())
+        .add_systems(Last, crate::startup::first_frame_system)
         .add_systems(
             Update,
             (
@@ -417,6 +419,7 @@ fn load_python(
             format!("authoring environment not ready: {error}"),
         );
     }
+    crate::startup::mark("authoring package");
     let hint = project
         .map(|project| project.root.as_path())
         .unwrap_or(script_path);
@@ -436,6 +439,7 @@ fn start_script_session(
     let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
     let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
     let runner = (python.spawn_script)(script_path.clone(), payload_tx, error_tx);
+    crate::startup::mark("script started");
     world.insert_resource(gaanim_editor::narration::ScriptReload(
         runner.asset_reload_handle().into(),
     ));

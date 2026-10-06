@@ -45,6 +45,8 @@ impl Compiles {
 #[derive(Debug)]
 pub(crate) struct AuthoringProfile {
     created: Instant,
+    /// When the script handed the scene to the host.
+    rendered: Option<Instant>,
     /// Each explicit segment and when the script started it.
     segments: Vec<(String, Instant)>,
     /// Declarations measured on their own.
@@ -63,6 +65,7 @@ impl Default for AuthoringProfile {
     fn default() -> Self {
         Self {
             created: Instant::now(),
+            rendered: None,
             segments: Vec::new(),
             isolated: Compiles::default(),
             scene: Compiles::default(),
@@ -100,6 +103,11 @@ const SLOW_MEASUREMENT: Duration = Duration::from_millis(100);
 impl SharedProfile {
     fn with<R>(&self, f: impl FnOnce(&mut AuthoringProfile) -> R) -> Option<R> {
         self.0.lock().ok().map(|mut profile| f(&mut profile))
+    }
+
+    /// Record that the script handed the scene to the host now.
+    pub(crate) fn rendered(&self) {
+        self.with(|profile| profile.rendered = Some(Instant::now()));
     }
 
     pub(crate) fn segment_started(&self, name: &str) {
@@ -180,11 +188,13 @@ impl SharedProfile {
         .flatten()
     }
 
-    /// The lines of the full profile, as of `now`.
+    /// The lines of the full profile, as of when the scene was rendered, or
+    /// of `now` before that.
     pub(crate) fn report(&self, now: Instant) -> Vec<String> {
         self.with(|profile| {
+            let now = profile.rendered.unwrap_or(now);
             let mut lines = vec![format!(
-                "script {} · measurements: {} isolated ({}), {} compiled the scene ({}), \
+                "authoring {} · measurements: {} isolated ({}), {} compiled the scene ({}), \
                  {} reused",
                 seconds(now - profile.created),
                 profile.isolated.count,
