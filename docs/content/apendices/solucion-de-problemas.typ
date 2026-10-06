@@ -97,7 +97,9 @@ están explicados en la sección de problemas de
   el logo solo aparece cuando la salida es una terminal.
 - *La vista previa o la exportación fallan al iniciar la GPU:* prueba otro
   backend con `WGPU_BACKEND`, por ejemplo `WGPU_BACKEND=vulkan` o
-  `WGPU_BACKEND=dx12` en Windows y `WGPU_BACKEND=gl` en Linux.
+  `WGPU_BACKEND=dx12` en Windows y `WGPU_BACKEND=gl` en Linux. Sin esa
+  variable, la vista previa usa Vulkan (Metal en macOS) cuando hay una GPU
+  que lo admite y, si no, prueba todos los backends.
 - *Dos superficies 3D que se cruzan se ven mal ordenadas:* el 3D no tiene
   búfer de profundidad y ordena los triángulos por profundidad. Separa las
   superficies o subdivídelas (ver #link("/guias/camara-y-3d/")[Cámara y 3D]).

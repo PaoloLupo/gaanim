@@ -45,6 +45,8 @@ pub fn run() {
     }
 
     let launch = parse_args();
+    // The window's GPU backends are found while Python loads.
+    gaanim_renderer::adapter::start_window_backends_probe();
     // Load Python before the app starts its threads (see `python::runtime`).
     let python = launch
         .script_path
