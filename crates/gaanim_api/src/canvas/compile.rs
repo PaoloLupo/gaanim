@@ -16558,6 +16558,31 @@ mod tests {
     }
 
     #[test]
+    fn entrances_show_the_opacity_an_object_was_declared_or_left_with() {
+        let mut canvas = SceneModel::new(640, 360);
+        let faint = canvas.rect(1.0, 1.0).opacity(0.3).hidden().unwrap();
+        let unset = canvas.rect(1.0, 1.0).opacity(0.0).hidden().unwrap();
+        canvas.play(vec![
+            faint.animate().fade_in().duration(1.0),
+            unset.animate().fade_in().duration(1.0),
+        ]);
+        canvas.play(vec![faint.animate().fade_out().duration(1.0)]);
+        canvas.play(vec![faint.animate().fade_in().duration(1.0)]);
+        canvas.play(vec![faint.animate().opacity(0.0).duration(1.0)]);
+        canvas.wait(1.0);
+        canvas.play(vec![faint.animate().create().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        for (time, expected) in [(1.0, 0.3), (2.0, 0.0), (3.0, 0.3), (4.5, 0.0), (6.0, 0.3)] {
+            timeline.seek(&mut world, time);
+            let opacity = opacity_of(&mut world, &faint);
+            assert!((opacity - expected).abs() < 1e-6, "{opacity} at {time}");
+        }
+        timeline.seek(&mut world, 1.0);
+        assert_eq!(opacity_of(&mut world, &unset), 1.0);
+    }
+
+    #[test]
     fn absolute_geometry_turns_scales_and_skews_about_its_box_center() {
         use std::f64::consts::PI;
 

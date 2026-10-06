@@ -425,6 +425,7 @@ visible del objeto: si no debe verse antes, empieza con una entrada o dale
   name: "Anim.fade_in",
   kind: "method",
   returns: (type: "Anim", desc: [Aparición por opacidad.]),
+  desc: [Lleva la opacidad de 0 a la que el objeto tenía declarada o fijada, o a la que tenía antes de un `fade_out`: `opacity(0.3).hidden()` termina en 0.3. Un objeto declarado con `opacity(0)` termina en 1.],
 )[
 ```python
 # show-code: true

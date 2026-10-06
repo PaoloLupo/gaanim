@@ -1718,7 +1718,10 @@ class Anim:
         """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``.
 
         The drawable stays hidden before the scheduled fade, including when
-        declared after earlier animations or placed inside a group.
+        declared after earlier animations or placed inside a group. It fades
+        in to the opacity it was declared or last set with, or had before a
+        ``fade_out``: ``opacity(0.3).hidden()`` ends at 0.3. A drawable
+        declared with ``opacity(0)`` ends at 1.
         """
         ...
     def fade_in_from(self, direction: Direction, distance: float = 0.48) -> Anim: ...
