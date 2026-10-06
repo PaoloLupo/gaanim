@@ -135,6 +135,7 @@ pub use theme::{
     CanvasTheme, LayoutTokens, ThemeFont, ThemePaint, ThemePalette, ThemeStrokeStyle, ThemeStyle,
 };
 mod compile;
+mod coverage;
 pub(crate) use compile::{
     CompileCheckpoint, SegmentMarker, split_text_math, take_segment_times,
     text_inline_typst_source, time_segments,

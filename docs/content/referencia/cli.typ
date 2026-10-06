@@ -141,6 +141,11 @@ termina con `pass` o `fail`:
   `set_theme(None)`), que el fondo no sea blanco o casi blanco, porque el
   texto, las formas y los ejes sin color propio también son blancos y no se
   verían.
+- Que ningún texto quede tapado por completo por una figura opaca dibujada
+  encima en una pausa o al final de un segmento. El aviso dice el texto, la
+  figura y dónde se tapa por primera vez; súbelo con `z_layer` o `z_index`.
+  Un texto oculto a propósito (con opacidad 0) o detrás de una figura
+  translúcida o de una imagen no cuenta.
 - Si la escena usa segmentos (una presentación): que exista al menos un
   segmento, que ninguno dure cero segundos, que cada uno tenga notas y que
   las pausas tengan nombre; avisa si el marco no es 16:9 o si la escena dura

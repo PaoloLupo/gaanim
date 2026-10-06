@@ -716,6 +716,7 @@ fn presentation_preflight(
     report.warnings.extend(canvas.unthemed_contrast_warning());
     report.warnings.extend(canvas.launched_past_end_warning());
     report.warnings.extend(canvas.measurement_warning());
+    report.warnings.extend(canvas.covered_text_warnings());
     report.warnings.extend(
         canvas
             .compiled_layout_diagnostics()
@@ -787,6 +788,7 @@ fn scene_preflight(canvas: &gaanim_api::canvas::SceneModel, source: &str) -> Pre
     report.warnings.extend(canvas.unthemed_contrast_warning());
     report.warnings.extend(canvas.launched_past_end_warning());
     report.warnings.extend(canvas.measurement_warning());
+    report.warnings.extend(canvas.covered_text_warnings());
     report.warnings.extend(
         canvas
             .compiled_layout_diagnostics()
