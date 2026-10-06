@@ -64,7 +64,14 @@ pub fn capture_initial_keyframe_system(world: &mut World) {
 /// would clobber the playback position that `reload_listener_system` restored.
 fn deferred_keyframe_capture_system(world: &mut World) {
     if world.remove_resource::<NeedsKeyframeCapture>().is_some() {
+        let started = std::time::Instant::now();
         capture_reload_keyframe(world);
+        if std::env::var_os("GAANIM_RELOAD_TIMINGS").is_some_and(|value| value != "0") {
+            eprintln!(
+                "GAANIM_RELOAD_TIMINGS keyframe {:.1} ms",
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
     }
 }
 

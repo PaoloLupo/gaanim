@@ -186,6 +186,10 @@ pub enum ReplayKind {
     /// The first `reused` of `segments` segments were kept from the previous
     /// revision; only the rest were compiled.
     Incremental { reused: usize, segments: usize },
+    /// Nothing that the compilation reads changed: the world and its
+    /// timeline, with their keyframes and checkpoints, already hold the
+    /// `segments` segments of this revision, so nothing was compiled.
+    Unchanged { segments: usize },
 }
 
 /// Replay a new revision of the scene already in `world`, compiling only from
@@ -194,26 +198,45 @@ pub enum ReplayKind {
 /// Otherwise `clear_scene` removes the previous scene and every segment is
 /// compiled. Either way the world keeps a [`RetainedReplay`] for the next
 /// revision; `allow_reuse = false` forces a full replay but still retains it.
+/// When nothing that the compilation reads changed, the world is left as it
+/// is ([`ReplayKind::Unchanged`]).
 ///
-/// Either way the t=0 keyframe must then be captured with
+/// Unless nothing changed, the t=0 keyframe must then be captured with
 /// [`gaanim_timeline::capture_reload_keyframe`] (or the deferred capture that
 /// `NeedsKeyframeCapture` schedules) once the new entities exist.
+///
+/// `GAANIM_RELOAD_TIMINGS=1` prints how long each phase took.
 pub fn replay_canvas_incremental(
     world: &mut World,
     canvas: SceneModel,
     allow_reuse: bool,
     clear_scene: impl FnOnce(&mut World),
 ) -> ReplayKind {
+    let mut timings = ReloadTimings::start();
     let previous = world.remove_resource::<RetainedReplay>();
     let Some(fingerprints) = scene_fingerprints(world, &canvas) else {
         clear_scene(world);
         replay_canvas_into(world, canvas);
+        timings.phase("full compile");
+        timings.report(ReplayKind::Full);
         return ReplayKind::Full;
     };
+    timings.phase("fingerprints");
     let previous = match previous {
+        Some(previous) if allow_reuse && previous.fingerprints.unchanged(&fingerprints) => {
+            // The previous revision's entities, timeline and callbacks are
+            // this one's.
+            let kind = ReplayKind::Unchanged {
+                segments: fingerprints.segment_count(),
+            };
+            world.insert_resource(previous);
+            timings.report(kind);
+            return kind;
+        }
         Some(previous) if allow_reuse => {
-            match try_incremental(world, &canvas, &fingerprints, previous) {
+            match try_incremental(world, &canvas, &fingerprints, previous, &mut timings) {
                 Ok(kind) => {
+                    timings.report(kind);
                     return kind;
                 }
                 Err(previous) => previous,
@@ -222,8 +245,47 @@ pub fn replay_canvas_incremental(
         previous => previous.map(|previous| previous.fingerprints),
     };
     clear_scene(world);
+    timings.phase("clear");
     replay_full_retained(world, canvas, fingerprints, previous.as_ref());
+    timings.phase("full compile");
+    timings.report(ReplayKind::Full);
     ReplayKind::Full
+}
+
+/// How long each phase of a replay took, printed with
+/// `GAANIM_RELOAD_TIMINGS=1`.
+struct ReloadTimings {
+    phases: Option<(std::time::Instant, Vec<(&'static str, f64)>)>,
+}
+
+impl ReloadTimings {
+    fn start() -> Self {
+        let enabled = std::env::var_os("GAANIM_RELOAD_TIMINGS").is_some_and(|value| value != "0");
+        Self {
+            phases: enabled.then(|| (std::time::Instant::now(), Vec::new())),
+        }
+    }
+
+    /// End the phase named `name` now.
+    fn phase(&mut self, name: &'static str) {
+        if let Some((started, phases)) = &mut self.phases {
+            let now = std::time::Instant::now();
+            phases.push((name, (now - *started).as_secs_f64() * 1000.0));
+            *started = now;
+        }
+    }
+
+    fn report(&self, kind: ReplayKind) {
+        let Some((_, phases)) = &self.phases else {
+            return;
+        };
+        let phases = phases
+            .iter()
+            .map(|(name, ms)| format!("{name} {ms:.1} ms"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!("GAANIM_RELOAD_TIMINGS {kind:?}: {phases}");
+    }
 }
 
 fn scene_fingerprints(world: &mut World, canvas: &SceneModel) -> Option<SceneFingerprints> {
@@ -396,6 +458,7 @@ fn try_incremental(
     canvas: &SceneModel,
     fingerprints: &SceneFingerprints,
     previous: RetainedReplay,
+    timings: &mut ReloadTimings,
 ) -> Result<ReplayKind, Option<SceneFingerprints>> {
     let RetainedReplay {
         fingerprints: previous_fingerprints,
@@ -439,6 +502,7 @@ fn try_incremental(
             world.despawn(entity);
         }
     }
+    timings.phase("despawn");
     if let Some(mut cache) =
         world.get_resource_mut::<gaanim_renderer::pipeline::GaanimRenderCache>()
     {
@@ -471,6 +535,7 @@ fn try_incremental(
     restored.loop_range = timeline.loop_range;
     restored.is_playing = false;
     *timeline = restored;
+    timings.phase("restore");
 
     // Move the checkpoint to this revision's first change so the next edit
     // at the same place recompiles as little as possible.
@@ -497,6 +562,7 @@ fn try_incremental(
         )
     });
     world.flush();
+    timings.phase("compile");
     let Some(advanced) = advanced else {
         return Err(Some(previous_fingerprints));
     };
@@ -819,20 +885,23 @@ mod tests {
         );
         assert_matches_full_replay(&mut world, &edits, slides);
 
-        for (edit, reused) in [
-            (Edit::Retitle(3), 4),
-            (Edit::Insert(3), 4),
-            (Edit::Retitle(4), 4),
-            (Edit::Retitle(4), 5),
-            (Edit::None, 5),
-            (Edit::None, 6),
+        let reused = |reused| ReplayKind::Incremental { reused, segments };
+        for (edit, kind) in [
+            (Edit::Retitle(3), reused(4)),
+            (Edit::Insert(3), reused(4)),
+            (Edit::Retitle(4), reused(4)),
+            (Edit::Retitle(4), reused(5)),
+            // The same deck again: the world already holds it.
+            (Edit::None, ReplayKind::Unchanged { segments }),
+            (Edit::None, ReplayKind::Unchanged { segments }),
+            (Edit::Retitle(4), reused(5)),
         ] {
             // Playback changes kept entities before the next reload.
             seek(&mut world, 1.3);
             edits.push(edit);
             assert_eq!(
                 hot_reload(&mut world, incremental_deck(slides, &edits)),
-                ReplayKind::Incremental { reused, segments }
+                kind
             );
             assert_matches_full_replay(&mut world, &edits, slides);
         }
@@ -1201,20 +1270,19 @@ mod tests {
             hot_reload(&mut world, thesis_deck(slides, &edits)),
             ReplayKind::Full
         );
-        for (edit, reused) in [
-            (Edit::Retitle(2), 2),
-            (Edit::Retitle(3), 2),
-            (Edit::None, 3),
+        let reused = |reused| ReplayKind::Incremental {
+            reused,
+            segments: slides,
+        };
+        for (edit, kind) in [
+            (Edit::Retitle(2), reused(2)),
+            (Edit::Retitle(3), reused(2)),
+            (Edit::None, ReplayKind::Unchanged { segments: slides }),
+            (Edit::Retitle(3), reused(3)),
         ] {
             seek(&mut world, 2.0);
             edits.push(edit);
-            assert_eq!(
-                hot_reload(&mut world, thesis_deck(slides, &edits)),
-                ReplayKind::Incremental {
-                    reused,
-                    segments: slides
-                }
-            );
+            assert_eq!(hot_reload(&mut world, thesis_deck(slides, &edits)), kind);
             let incremental = observe(&mut world);
             let mut full = incremental_world();
             replay_canvas_into(&mut full, thesis_deck(slides, &edits));

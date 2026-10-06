@@ -23,6 +23,10 @@ pub(crate) struct SceneFingerprints {
     global: Option<u64>,
     /// One entry per segment; `None` marks a segment that always recompiles.
     segments: Vec<Option<u64>>,
+    /// The authored state that the compilation reads after the last
+    /// segment, outside the segments (polls, live zones, parameter ranges).
+    /// An incremental replay compiles that part again anyway.
+    after_segments: Option<u64>,
 }
 
 impl SceneFingerprints {
@@ -40,6 +44,15 @@ impl SceneFingerprints {
 
     pub(crate) fn segment_count(&self) -> usize {
         self.segments.len()
+    }
+
+    /// Whether every input that compiling either revision reads is provably
+    /// identical, so both compile to the same scene.
+    pub(crate) fn unchanged(&self, other: &Self) -> bool {
+        self.segments.len() == other.segments.len()
+            && self.shared_prefix(other) == self.segments.len()
+            && self.after_segments.is_some()
+            && self.after_segments == other.after_segments
     }
 }
 
@@ -73,9 +86,22 @@ impl SceneModel {
                 fingerprint.finish()
             })
             .collect();
+        let mut after_segments = DebugFingerprint::new();
+        after_segments.add(&state.polls);
+        after_segments.add(&state.poll_session);
+        after_segments.add(&state.poll_lobby);
+        after_segments.add(&state.poll_lobby_at);
+        after_segments.add(&state.rehearsal);
+        after_segments.add(&state.poll_teams);
+        after_segments.add(&state.poll_ask);
+        after_segments.add(&state.stop_gates);
+        after_segments.add(&state.live_zones);
+        // Readouts inside layouts keep room for the values parameters take.
+        add_sorted(&mut after_segments, &state.parameter_ranges);
         SceneFingerprints {
             global: global.finish(),
             segments,
+            after_segments: after_segments.finish(),
         }
     }
 
@@ -229,6 +255,33 @@ fn font_content_hash(bytes: &Arc<[u8]>) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn state_read_after_the_segments_decides_whether_a_scene_is_unchanged() {
+        let scene = || {
+            let mut scene = SceneModel::new(640, 360);
+            let dot = scene.circle(0.3);
+            scene.play(vec![dot.animate().shift_by(1.0, 0.0).duration(0.5)]);
+            scene
+        };
+        let text = gaanim_text::prelude::TextConfig::default();
+        let fonts = gaanim_text::font::FontRegistry::without_system_fonts();
+        let first = scene().fingerprints(&text, &fonts);
+        assert!(first.unchanged(&scene().fingerprints(&text, &fonts)));
+
+        let gated = scene();
+        gated.state.lock().unwrap().stop_gates.push((
+            0,
+            0.5,
+            gaanim_timeline::timeline::GateCondition::Answers {
+                poll: "votes".into(),
+                count: 3,
+            },
+        ));
+        let gated = gated.fingerprints(&text, &fonts);
+        assert_eq!(gated.shared_prefix(&first), first.segment_count());
+        assert!(!gated.unchanged(&first));
+    }
 
     #[test]
     fn font_hashes_follow_content_across_allocations() {

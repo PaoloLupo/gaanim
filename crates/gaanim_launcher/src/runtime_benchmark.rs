@@ -1,6 +1,7 @@
 //! Internal runtime benchmark entrypoints used by the repository harness.
 
 use bevy::prelude::World;
+use gaanim_editor::python_plugin::PythonPlugin;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -19,6 +20,36 @@ struct ReloadBenchmarkReport {
     total_ms: f64,
     width: u32,
     height: u32,
+    /// How the measured load replayed: every segment, as the first edit
+    /// after opening a script does.
+    replay_kind: String,
+    /// A third load of the same script, which reuses what the second one
+    /// retained, as every later reload does.
+    steady_python_ms: f64,
+    steady_replay_ms: f64,
+    steady_replay_kind: String,
+}
+
+/// A load of the script and its replay into `world`, in milliseconds;
+/// `full` replays every segment.
+fn timed_reload(
+    python: &PythonPlugin,
+    script: &Path,
+    world: &mut World,
+    full: bool,
+) -> Result<(f64, f64, gaanim_api::runtime::ReplayKind, (u32, u32)), String> {
+    let python_started = Instant::now();
+    let canvas = (python.load_script_canvas)(script)?;
+    let python_ms = python_started.elapsed().as_secs_f64() * 1000.0;
+    let size = canvas.frame.preview_pixel_size();
+    let replay_started = Instant::now();
+    let kind = if full {
+        crate::hot_reload::reload_with_full_replay(world, canvas)
+    } else {
+        crate::hot_reload::reload_with(world, canvas)
+    };
+    let replay_ms = replay_started.elapsed().as_secs_f64() * 1000.0;
+    Ok((python_ms, replay_ms, kind, size))
 }
 
 fn parse_reload_benchmark_args(args: &[String]) -> Result<ReloadBenchmarkArgs, String> {
@@ -62,14 +93,10 @@ fn benchmark_reload(script: &Path, output: &Path) -> Result<ReloadBenchmarkRepor
     world.insert_resource(gaanim_renderer::pipeline::GaanimRenderCache::default());
     crate::hot_reload::reload_with(&mut world, initial_canvas);
 
-    let python_started = Instant::now();
-    let canvas = (python.load_script_canvas)(&script)?;
-    let python_ms = python_started.elapsed().as_secs_f64() * 1000.0;
-
-    let (width, height) = canvas.frame.preview_pixel_size();
-    let replay_started = Instant::now();
-    crate::hot_reload::reload_with(&mut world, canvas);
-    let replay_ms = replay_started.elapsed().as_secs_f64() * 1000.0;
+    let (python_ms, replay_ms, kind, (width, height)) =
+        timed_reload(python, &script, &mut world, true)?;
+    let (steady_python_ms, steady_replay_ms, steady_kind, _) =
+        timed_reload(python, &script, &mut world, false)?;
     let report = ReloadBenchmarkReport {
         schema_version: 1,
         python_ms,
@@ -77,6 +104,10 @@ fn benchmark_reload(script: &Path, output: &Path) -> Result<ReloadBenchmarkRepor
         total_ms: python_ms + replay_ms,
         width,
         height,
+        replay_kind: format!("{kind:?}"),
+        steady_python_ms,
+        steady_replay_ms,
+        steady_replay_kind: format!("{steady_kind:?}"),
     };
 
     if let Some(parent) = output.parent()
@@ -103,10 +134,19 @@ pub fn dispatch_reload_benchmark_mode() -> bool {
         std::process::exit(2);
     });
     match benchmark_reload(&parsed.script, &parsed.output) {
-        Ok(report) => println!(
-            "Persistent reload: Python {:.2}ms + replay {:.2}ms = {:.2}ms",
-            report.python_ms, report.replay_ms, report.total_ms
-        ),
+        Ok(report) => {
+            println!(
+                "Persistent reload: Python {:.2}ms + replay {:.2}ms = {:.2}ms ({})",
+                report.python_ms, report.replay_ms, report.total_ms, report.replay_kind
+            );
+            println!(
+                "Next reload: Python {:.2}ms + replay {:.2}ms = {:.2}ms ({})",
+                report.steady_python_ms,
+                report.steady_replay_ms,
+                report.steady_python_ms + report.steady_replay_ms,
+                report.steady_replay_kind
+            );
+        }
         Err(error) => {
             eprintln!("gaanim reload benchmark: {error}");
             std::process::exit(1);

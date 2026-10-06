@@ -270,6 +270,9 @@ fn reload_status_message(
         runtime::ReplayKind::Incremental { reused, segments } => {
             format!(" (reused {reused}/{segments} segments)")
         }
+        runtime::ReplayKind::Unchanged { segments } => {
+            format!(" (unchanged, {segments} segments)")
+        }
     };
     format!(
         "Scene ready in {:.2}s · Python {:.2}s · replay {:.2}s{} · {}×{}",
@@ -322,10 +325,16 @@ fn replay(
         revision,
     });
     let kind = runtime::replay_canvas_incremental(world, canvas, allow_reuse, clear_scene_entities);
-    if kind != runtime::ReplayKind::Full {
+    match kind {
+        // The scene, its timeline and its t=0 keyframe are still the ones in
+        // the world.
+        runtime::ReplayKind::Unchanged { .. } => return kind,
         // The replay dropped the runtime diagnostics these counters index.
-        world.remove_resource::<CustomErrorsShown>();
-        world.remove_resource::<PropertyErrorsShown>();
+        runtime::ReplayKind::Incremental { .. } => {
+            world.remove_resource::<CustomErrorsShown>();
+            world.remove_resource::<PropertyErrorsShown>();
+        }
+        runtime::ReplayKind::Full => {}
     }
     // `replay_canvas_into` records entity spawns and component inserts in the
     // World's internal command queue.  Materialize them now: the deferred
@@ -511,6 +520,16 @@ mod tests {
                 1080
             ),
             "Scene ready in 0.38s · Python 0.12s · replay 0.25s (reused 37/40 segments) · 1920×1080"
+        );
+        assert_eq!(
+            reload_status_message(
+                0.125,
+                0.01,
+                runtime::ReplayKind::Unchanged { segments: 40 },
+                1920,
+                1080
+            ),
+            "Scene ready in 0.14s · Python 0.12s · replay 0.01s (unchanged, 40 segments) · 1920×1080"
         );
     }
 

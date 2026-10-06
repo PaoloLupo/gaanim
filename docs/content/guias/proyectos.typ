@@ -102,6 +102,11 @@ y solo se recompila desde ahí. El aviso de recarga lo indica, por ejemplo
 `replay 0.12s (reused 37/40 segments)`. La primera edición en una zona nueva
 recompila todo una vez; las siguientes en esa zona ya son incrementales.
 
+Si nada de lo que se compila cambió, por ejemplo al guardar sin cambios o al
+editar solo un comentario, la escena se conserva tal cual y el aviso dice
+`(unchanged, 40 segments)`. Volver a la posición de trabajo cuesta entonces
+lo mismo que un salto cualquiera.
+
 Se recompila todo cuando:
 
 - cambia algo global (tema, fuentes, tamaño del lienzo);
