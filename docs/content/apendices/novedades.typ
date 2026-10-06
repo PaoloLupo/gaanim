@@ -11,6 +11,51 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.10.2
+
+Sin publicar. Recargar y abrir presentaciones largas es más rápido: medir con
+`bounds()` reutiliza lo ya compilado, un `traced_path` ya no encarece los
+saltos, guardar sin cambios conserva la escena y `GAANIM_RELOAD_PROFILE=1`
+dice en qué se va el tiempo. Corrige un fallo de Typst en sesiones largas.
+
+== Cambios
+
+- Las mediciones con `bounds()` (y `Anim.target_bounds`, `scatter` y
+  `avoid_boxes`) comparten una compilación mientras no escribas nada entre
+  ellas, y los miembros de un mismo layout recién creado se miden con una
+  sola. Junto con el cambio siguiente, el Python de una recarga de la
+  presentación de prueba (43 segmentos) bajó de 3,5 a 1,8 s.
+- Un `traced_path` ya no obliga a cada salto en la línea de tiempo a recorrer
+  la escena entera desde t=0, ni desactiva los puntos de control de los
+  segmentos: en esa presentación, capturar sus 95 pausas pasó de casi tres
+  minutos a 13 s. El rastro sale idéntico.
+- Si guardas sin cambiar nada de lo que se compila (por ejemplo, solo un
+  comentario), la recarga conserva la escena y sus puntos de control, y el
+  aviso dice `(unchanged, N segments)`.
+- Las recargas ya no recompilan los módulos de Python del proyecto que no
+  cambiaron.
+- El aviso de recarga incluye `seek`: lo que tardó volver a la posición donde
+  estabas, que antes no contaba en el total.
+- `GAANIM_RELOAD_PROFILE=1` escribe en la terminal qué costó cada recarga (el
+  script por segmento, las mediciones y las líneas que compilaron la escena,
+  las fases de la recompilación) y el arranque, fase por fase. Sin esa
+  variable, Gaanim avisa en la terminal y en `gaanim check` cuando medir con
+  `bounds()` compiló la escena a un coste notable, con las líneas del script
+  responsables.
+- La vista previa arranca en Vulkan (Metal en macOS) cuando la GPU lo admite,
+  sin iniciar también DX12: en Windows llega al primer fotograma unos 0,3 s
+  antes y sin las esperas de varios segundos que a veces causaba DX12.
+
+== Correcciones
+
+- Compilar Typst en una sesión larga ya no falla con «out of file ids». Cada
+  compilación gastaba uno de los ~65 000 identificadores de archivo de Typst;
+  al agotarse, las miniaturas del presentador dejaban de generarse y fallaba
+  toda compilación Typst posterior.
+- `bounds()` justo después de un cambio inmediato sobre un objeto ya animado,
+  como un `move_to`, mide la posición nueva. Según cómo sumaran las
+  duraciones de la escena, medía un instante antes del cambio.
+
 = 0.10.1
 
 Publicada el 4 de octubre de 2026. Corrige una caída de fotogramas al mostrar

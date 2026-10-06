@@ -13,6 +13,7 @@ mod file_watcher;
 mod hot_reload;
 mod python;
 mod runtime_benchmark;
+mod startup;
 
 use gaanim_core::console;
 use gaanim_project::help::{self, Topic};
@@ -20,6 +21,7 @@ use gaanim_project::{CreateProjectOptions, ProjectKind, create_project};
 use std::path::{Path, PathBuf};
 
 fn main() {
+    startup::begin();
     let args: Vec<String> = std::env::args().collect();
     if handle_no_python_commands(&args) {
         return;

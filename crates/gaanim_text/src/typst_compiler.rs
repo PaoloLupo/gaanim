@@ -391,6 +391,20 @@ impl FileLoader for UniverseFileLoader {
     }
 }
 
+/// The id of every world's in-memory `/main.typ`. Typst interns file ids for
+/// the life of the process in 16 bits, so each compilation must reuse one id:
+/// a fresh id per world runs out after ~65 000 compilations. Worlds sharing it
+/// still compile their own text, since `World::source` is tracked by content.
+fn main_file_id() -> FileId {
+    static MAIN_ID: OnceLock<FileId> = OnceLock::new();
+    *MAIN_ID.get_or_init(|| {
+        FileId::new(RootedPath::new(
+            VirtualRoot::Project,
+            VirtualPath::new("/main.typ").unwrap(),
+        ))
+    })
+}
+
 impl GaanimTypstWorld {
     /// Creates a new `GaanimTypstWorld` with the user source, Typst default fonts,
     /// system fonts, and any additional fonts registered in the `FontRegistry`.
@@ -400,10 +414,7 @@ impl GaanimTypstWorld {
     }
 
     fn with_resources(source_code: &str, resources: Arc<TypstResources>) -> Self {
-        let main_id = FileId::unique(RootedPath::new(
-            VirtualRoot::Project,
-            VirtualPath::new("/main.typ").unwrap(),
-        ));
+        let main_id = main_file_id();
         let source = Source::new(main_id, source_code.to_string());
 
         Self {
@@ -1352,6 +1363,39 @@ mod tests {
             has_math_font,
             "Default Typst math font (New Computer Modern Math) must be loaded in the GaanimTypstWorld"
         );
+    }
+
+    #[test]
+    fn compilations_share_one_main_file_id_but_not_its_source() {
+        let registry = FontRegistry::new();
+        assert_eq!(
+            GaanimTypstWorld::new("a", &registry).main(),
+            GaanimTypstWorld::new("b", &registry).main(),
+            "each compilation must not intern another file id"
+        );
+
+        let width = |source: &str| {
+            let hierarchy = compile_typst_source(
+                &registry,
+                source,
+                true,
+                None,
+                None,
+                Some(32.0),
+                Some(32.0),
+                &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+                &StrokeBrush::transparent(),
+            )
+            .unwrap();
+            hierarchy.parent_bounds.max.x - hierarchy.parent_bounds.min.x
+        };
+        let short = width("x");
+        let long = width("x + y + z");
+        assert!(
+            long > short * 2.0,
+            "the second compilation reused the first one's source: {short} vs {long}"
+        );
+        assert_eq!(width("x"), short);
     }
 
     #[test]

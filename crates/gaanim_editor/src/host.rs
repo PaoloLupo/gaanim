@@ -58,8 +58,18 @@ pub const WEB_CANVAS: &str = "#gaanim-canvas";
 /// a playback bundle, or show the project hub.
 pub fn host_app(options: &HostOptions) -> App {
     let mut app = App::new();
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+    let mut gpu = bevy::render::settings::WgpuSettings::default();
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(backends) = gaanim_renderer::adapter::window_backends() {
+        gpu.backends = Some(backends);
+    }
     app.add_plugins(
         DefaultPlugins
+            .set(bevy::render::RenderPlugin {
+                render_creation: gpu.into(),
+                ..default()
+            })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: if options.presenter_page {

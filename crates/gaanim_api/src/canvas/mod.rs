@@ -39,6 +39,7 @@ pub use types::{
 pub type ImageHandle = DrawableHandle;
 
 mod audio_signals;
+mod authored;
 pub use audio_signals::{AUDIO_SHADER_FUNCTIONS, AUDIO_TIME_UNIFORM, SpectrumScale};
 pub use gaanim_media::analysis::AnalysisError as AudioAnalysisError;
 pub use gaanim_media::analysis::{AudioAnalysis, TempoEstimate};
@@ -135,11 +136,14 @@ pub use theme::{
 };
 mod compile;
 pub(crate) use compile::{
-    CompileCheckpoint, SegmentMarker, split_text_math, text_inline_typst_source,
+    CompileCheckpoint, SegmentMarker, split_text_math, take_segment_times,
+    text_inline_typst_source, time_segments,
 };
 mod incremental;
 mod measure;
 pub use measure::{BoundsError, ScatterLayoutError, avoid_boxes, scatter};
+mod profile;
+pub use profile::{reload_profile_enabled, set_call_site_provider};
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
 pub mod text_animator;

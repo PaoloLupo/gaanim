@@ -912,6 +912,13 @@ pub(crate) struct SceneBuilderState {
     layout_rests: HashMap<ObjectId, LayoutRest>,
 }
 
+impl SceneBuilderState {
+    /// The builder's clock: where the next animation starts.
+    pub(crate) fn current_time(&self) -> f64 {
+        self.current_time
+    }
+}
+
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Copy every piece of compilation state that is not an ECS or timeline borrow.
     pub(crate) fn state(&self) -> SceneBuilderState {

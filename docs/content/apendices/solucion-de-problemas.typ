@@ -83,16 +83,23 @@ están explicados en la sección de problemas de
   proyecto y no en una carpeta ignorada (`exports`, `snapshots`, `target`,
   carpetas ocultas o de entornos). Los paquetes instalados fuera del proyecto
   no se recargan hasta reiniciar Gaanim.
-- *La recarga tarda más de lo normal:* los segmentos con funciones de Python
-  (updaters, funciones reactivas, easings propios) se recompilan siempre.
-  Para comparar con una recarga completa, arranca con `GAANIM_INCREMENTAL=0`.
+- *La recarga tarda más de lo normal:* arranca con `GAANIM_RELOAD_PROFILE=1`
+  para ver en la terminal el tiempo de cada segmento del script, las
+  mediciones con `bounds()` que compilaron la escena y en qué línea, y qué
+  segmentos tardan más en compilarse. Cuando medir compiló la escena a un
+  coste notable, Gaanim lo avisa siempre en la terminal y en `gaanim check`.
+  Los segmentos con funciones de Python (updaters, funciones reactivas,
+  easings propios) se recompilan siempre. Para comparar con una recarga
+  completa, arranca con `GAANIM_INCREMENTAL=0`.
 - *Necesito los mensajes del motor:* Gaanim oculta los avisos de Bevy, wgpu,
   winit y el audio. Para verlos, arranca con `RUST_LOG=info` (o
   `RUST_LOG=wgpu=warn` para un solo módulo). `NO_COLOR=1` quita los colores;
   el logo solo aparece cuando la salida es una terminal.
 - *La vista previa o la exportación fallan al iniciar la GPU:* prueba otro
   backend con `WGPU_BACKEND`, por ejemplo `WGPU_BACKEND=vulkan` o
-  `WGPU_BACKEND=dx12` en Windows y `WGPU_BACKEND=gl` en Linux.
+  `WGPU_BACKEND=dx12` en Windows y `WGPU_BACKEND=gl` en Linux. Sin esa
+  variable, la vista previa usa Vulkan (Metal en macOS) cuando hay una GPU
+  que lo admite y, si no, prueba todos los backends.
 - *Dos superficies 3D que se cruzan se ven mal ordenadas:* el 3D no tiene
   búfer de profundidad y ordena los triángulos por profundidad. Separa las
   superficies o subdivídelas (ver #link("/guias/camara-y-3d/")[Cámara y 3D]).

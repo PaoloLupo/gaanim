@@ -595,6 +595,28 @@ pub fn evaluate_reactive_positions(world: &mut World, time: f64) {
     crate::signals::followed_position_binding_system(world);
 }
 
+/// Whether anything but animation clips and property bindings can move
+/// drawables in `world`: the updaters or the other systems of
+/// [`evaluate_reactive_positions`]. A property binding sets its target from
+/// the time and signals alone, so without these a drawable that no binding
+/// targets holds still once its clips have ended.
+pub fn has_reactive_positions(world: &mut World) -> bool {
+    fn any<C: Component>(world: &mut World) -> bool {
+        world.query::<&C>().iter(world).next().is_some()
+    }
+    any::<Updater>(world)
+        || any::<SampledSeriesDrivers>(world)
+        || any::<crate::signals::PointOnCurve>(world)
+        || any::<crate::signals::TangentOnCurve>(world)
+        || any::<crate::signals::NormalOnCurve>(world)
+        || any::<crate::signals::CurvatureOnCurve>(world)
+        || any::<crate::signals::PositionBinding>(world)
+        || any::<RotationBinding>(world)
+        || any::<RotationTranslationBinding>(world)
+        || any::<EndpointFollow>(world)
+        || any::<TrackingAngle>(world)
+}
+
 /// Sistema exclusivo que lee la posición del source de cada TracedPath y regenera su Path2D.
 pub fn traced_path_system(world: &mut World) {
     let current_time = world

@@ -4005,17 +4005,20 @@ class Drawable:
 
         Works for any object (shapes, text, math, SVG, images, groups): the
         box includes descendants and reflects layout, transforms, text
-        shaping and every animation that ended before ``scene.cursor``, as it
-        would render there. Geometry that reactive updaters rebuild every
+        shaping, every animation that ended by ``scene.cursor`` and every
+        setter applied at it (such as ``move_to`` on an animated object), as
+        it would render there. Geometry that reactive updaters rebuild every
         frame is measured as declared. Raises ``ValueError`` when the object
         has no geometry at the cursor.
 
         Measuring an object declared since the last ``play``/``wait`` that
         nothing else acts on yet (no animation, later group or layout) takes
         about a millisecond: only its declaration, its members and its
-        ``next_to``/``align_to`` references are compiled. Otherwise each call
-        compiles the scene authored so far, so measure before animating or
-        reuse the result.
+        ``next_to``/``align_to`` references are compiled. Otherwise the call
+        compiles the scene authored so far. Calls with nothing authored in
+        between share one compilation, and so do the members of one fresh
+        layout, so measure before animating and measure the boxes you need
+        together.
 
         Example:
             label = scene.text("PGA = 0.35 g", role="label").move_to(0, 1)

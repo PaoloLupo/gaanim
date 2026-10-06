@@ -20,7 +20,8 @@ use std::sync::mpsc;
 
 use crate::hot_reload::{
     ReloadReceiver, ReloadStatus, ScriptError, ScriptErrorReceiver, reload_listener_system,
-    reload_status_overlay_system, script_error_listener_system, script_error_overlay_system,
+    reload_ready_system, reload_status_overlay_system, script_error_listener_system,
+    script_error_overlay_system,
 };
 
 pub fn run() {
@@ -44,6 +45,8 @@ pub fn run() {
     }
 
     let launch = parse_args();
+    // The window's GPU backends are found while Python loads.
+    gaanim_renderer::adapter::start_window_backends_probe();
     // Load Python before the app starts its threads (see `python::runtime`).
     let python = launch
         .script_path
@@ -69,13 +72,17 @@ pub fn run() {
         selection: launch.selection.clone(),
         ..Default::default()
     });
+    crate::startup::mark("app setup");
     app.insert_resource(ReloadStatus::default())
         .insert_resource(ScriptError::default())
+        .add_systems(Last, crate::startup::first_frame_system)
         .add_systems(
             Update,
             (
                 script_error_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
                 reload_listener_system.in_set(gaanim_scene::hierarchy::SceneSet::Input),
+                // After the timeline seek of the Animation phase.
+                reload_ready_system.in_set(gaanim_scene::hierarchy::SceneSet::Camera),
             ),
         )
         .add_systems(
@@ -414,6 +421,7 @@ fn load_python(
             format!("authoring environment not ready: {error}"),
         );
     }
+    crate::startup::mark("authoring package");
     let hint = project
         .map(|project| project.root.as_path())
         .unwrap_or(script_path);
@@ -433,6 +441,7 @@ fn start_script_session(
     let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
     let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
     let runner = (python.spawn_script)(script_path.clone(), payload_tx, error_tx);
+    crate::startup::mark("script started");
     world.insert_resource(gaanim_editor::narration::ScriptReload(
         runner.asset_reload_handle().into(),
     ));
@@ -706,6 +715,7 @@ fn presentation_preflight(
     };
     report.warnings.extend(canvas.unthemed_contrast_warning());
     report.warnings.extend(canvas.launched_past_end_warning());
+    report.warnings.extend(canvas.measurement_warning());
     report.warnings.extend(
         canvas
             .compiled_layout_diagnostics()
@@ -776,6 +786,7 @@ fn scene_preflight(canvas: &gaanim_api::canvas::SceneModel, source: &str) -> Pre
     };
     report.warnings.extend(canvas.unthemed_contrast_warning());
     report.warnings.extend(canvas.launched_past_end_warning());
+    report.warnings.extend(canvas.measurement_warning());
     report.warnings.extend(
         canvas
             .compiled_layout_diagnostics()

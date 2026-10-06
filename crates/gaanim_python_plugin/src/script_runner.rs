@@ -9,7 +9,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyBytes, PyDict};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -470,6 +470,8 @@ fn prepare_script_execution(py: Python<'_>, path: &Path) -> PyResult<()> {
     Ok(())
 }
 
+/// Remove the project's modules from `sys.modules`, so the next run imports
+/// them again, keeping the bytecode of those that did not change.
 fn evict_project_modules(py: Python<'_>, root: &Path) -> PyResult<()> {
     let sys = py.import("sys")?;
     let modules = sys.getattr("modules")?;
@@ -489,20 +491,92 @@ fn evict_project_modules(py: Python<'_>, root: &Path) -> PyResult<()> {
             continue;
         }
         module_names.push(name.unbind());
-        if let Ok(cached) = module.getattr("__cached__")
+        let is_source = file
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("py"));
+        if is_source
+            && let Ok(cached) = module.getattr("__cached__")
             && let Ok(cached) = cached.extract::<String>()
         {
-            bytecode_paths.push(PathBuf::from(cached));
+            bytecode_paths.push((file, PathBuf::from(cached)));
         }
     }
 
     for name in module_names {
         modules.del_item(name.bind(py))?;
     }
-    for bytecode in bytecode_paths {
-        let _ = std::fs::remove_file(bytecode);
+    for (source, bytecode) in bytecode_paths {
+        if checked_bytecode(py, &source, &bytecode).is_none() {
+            let _ = std::fs::remove_file(bytecode);
+        }
     }
     Ok(())
+}
+
+/// Flags of a pyc that Python validates against its source's hash.
+const CHECKED_HASH_PYC: u32 = 0b11;
+
+/// Make `bytecode`, Python's cache of `source`, one that it validates by the
+/// source's hash, when it provably holds the current source. `None` when it
+/// may not and must be removed.
+///
+/// Python validates a timestamp pyc by the source's size and mtime in whole
+/// seconds, so an edit that keeps the size within the second it was cached
+/// would run stale code. A timestamp pyc written after the source last
+/// changed holds the current source, and becomes a hash-checked one; Python
+/// then writes hash-checked pycs for that module, so unchanged modules
+/// never compile again.
+fn checked_bytecode(py: Python<'_>, source: &Path, bytecode: &Path) -> Option<()> {
+    let util = py.import("importlib.util").ok()?;
+    let magic = util.getattr("MAGIC_NUMBER").ok()?;
+    let magic = magic.cast::<PyBytes>().ok()?.as_bytes();
+    let mut pyc = std::fs::read(bytecode).ok()?;
+    if pyc.len() < 16 || pyc[..4] != *magic {
+        return None;
+    }
+    let word = |at: usize| u32::from_le_bytes(pyc[at..at + 4].try_into().unwrap());
+    match word(4) {
+        CHECKED_HASH_PYC => return Some(()),
+        0 => {}
+        // Python never checks an unchecked hash pyc against its source.
+        _ => return None,
+    }
+    let stamp = |metadata: &std::fs::Metadata| {
+        let modified = metadata.modified().ok()?;
+        let seconds = modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        // Python records both in 32 bits.
+        Some((modified, seconds as u32, metadata.len() as u32))
+    };
+    let (modified, seconds, size) = stamp(&std::fs::metadata(source).ok()?)?;
+    let cached_at = std::fs::metadata(bytecode).ok()?.modified().ok()?;
+    if (word(8), word(12)) != (seconds, size) || cached_at <= modified {
+        return None;
+    }
+    let content = std::fs::read(source).ok()?;
+    // The source must not change while it is hashed.
+    if stamp(&std::fs::metadata(source).ok()?)?.0 != modified {
+        return None;
+    }
+    let hash = util
+        .call_method1("source_hash", (PyBytes::new(py, &content),))
+        .ok()?;
+    let hash = hash.cast::<PyBytes>().ok()?.as_bytes();
+    if hash.len() != 8 {
+        return None;
+    }
+    pyc[4..8].copy_from_slice(&CHECKED_HASH_PYC.to_le_bytes());
+    pyc[8..16].copy_from_slice(hash);
+    // Replace the file whole, as Python writes it, so no import reads half.
+    let staged = bytecode.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&staged, &pyc).ok()?;
+    if std::fs::rename(&staged, bytecode).is_err() {
+        let _ = std::fs::remove_file(&staged);
+        return None;
+    }
+    Some(())
 }
 
 fn is_reloadable_project_module(path: &Path, root: &Path) -> bool {
@@ -637,6 +711,67 @@ mod tests {
         Python::attach(|py| run_script_file(py, &entry)).unwrap();
 
         assert_eq!(std::fs::read_to_string(output).unwrap(), "second-value");
+    }
+
+    #[test]
+    fn reruns_keep_unchanged_bytecode_and_see_edits_of_the_same_size() {
+        let _python = python_lock();
+        Python::initialize();
+        if Python::attach(|py| {
+            py.import("sys")
+                .and_then(|sys| sys.getattr("dont_write_bytecode"))
+                .and_then(|flag| flag.extract::<bool>())
+                .unwrap_or(true)
+        }) {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        write_project_manifest(temp.path());
+        let module = temp.path().join("same_size_case.py");
+        std::fs::write(&module, "VALUE = 'first'\n").unwrap();
+        let output = temp.path().join("result.txt");
+        let entry = temp.path().join("main.py");
+        std::fs::write(
+            &entry,
+            format!(
+                "from pathlib import Path\nimport same_size_case\n\
+                 Path({output:?}).write_text(same_size_case.VALUE)\n"
+            ),
+        )
+        .unwrap();
+        let run = || {
+            Python::attach(|py| run_script_file(py, &entry)).unwrap();
+            std::fs::read_to_string(&output).unwrap()
+        };
+        let flags = || {
+            let cache = std::fs::read_dir(temp.path().join("__pycache__"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with("same_size_case."))
+                })
+                .unwrap();
+            let pyc = std::fs::read(cache).unwrap();
+            u32::from_le_bytes(pyc[4..8].try_into().unwrap())
+        };
+
+        assert_eq!(run(), "first");
+        assert_eq!(flags(), 0, "Python caches a new module by timestamp");
+        // Same size, most likely within the second the bytecode records.
+        std::fs::write(&module, "VALUE = 'other'\n").unwrap();
+        assert_eq!(run(), "other");
+        // Unchanged since: kept, and checked by the source's hash.
+        assert_eq!(run(), "other");
+        assert_eq!(flags(), CHECKED_HASH_PYC);
+        std::fs::write(&module, "VALUE = 'third'\n").unwrap();
+        assert_eq!(run(), "third");
+        assert_eq!(
+            flags(),
+            CHECKED_HASH_PYC,
+            "Python keeps checking it by hash"
+        );
     }
 
     #[test]
