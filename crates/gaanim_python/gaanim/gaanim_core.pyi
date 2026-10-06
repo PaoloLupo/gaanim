@@ -4005,8 +4005,9 @@ class Drawable:
 
         Works for any object (shapes, text, math, SVG, images, groups): the
         box includes descendants and reflects layout, transforms, text
-        shaping and every animation that ended before ``scene.cursor``, as it
-        would render there. Geometry that reactive updaters rebuild every
+        shaping, every animation that ended by ``scene.cursor`` and every
+        setter applied at it (such as ``move_to`` on an animated object), as
+        it would render there. Geometry that reactive updaters rebuild every
         frame is measured as declared. Raises ``ValueError`` when the object
         has no geometry at the cursor.
 

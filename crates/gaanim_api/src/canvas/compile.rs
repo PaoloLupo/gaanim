@@ -1034,6 +1034,13 @@ pub(crate) struct CompileCheckpoint {
 }
 
 impl CompileCursor {
+    /// The compiled clock where the next segment starts.
+    pub(crate) fn time(&self) -> Option<f64> {
+        self.builder
+            .as_ref()
+            .map(crate::builder::SceneBuilderState::current_time)
+    }
+
     /// The compiled object that stands for authored object `id`.
     pub(crate) fn runtime_id(&self, id: ObjectId) -> Option<ObjectId> {
         self.id_map.get(&id).copied()

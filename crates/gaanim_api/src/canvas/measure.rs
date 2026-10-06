@@ -37,10 +37,10 @@ impl SceneModel {
     }
 
     /// Scene-space box of `handle` and its descendants at the authoring
-    /// cursor, as they would render there: layout, transforms, text shaping
-    /// and animations that ended before the cursor all count, and so do the
-    /// boxes' backgrounds. Geometry that reactive updaters rebuild every
-    /// frame is measured as declared.
+    /// cursor, as they would render there: layout, transforms, text shaping,
+    /// animations that ended by the cursor and setters applied at it all
+    /// count, and so do the boxes' backgrounds. Geometry that reactive
+    /// updaters rebuild every frame is measured as declared.
     ///
     /// A drawable declared since the scene last advanced (by `play`, `wait`
     /// and the like) that nothing else refers to yet has no animation, cut or
@@ -56,7 +56,7 @@ impl SceneModel {
         }
         if let Some((isolated, closure)) = self.isolated_declaration(handle.id) {
             return self.measure(handle.id, MeasureScope::Isolated(closure), || {
-                isolated.compile_measure(0.0)
+                isolated.compile_measure(Some(0.0))
             });
         }
         self.measured_bounds(handle.id)
@@ -67,7 +67,7 @@ impl SceneModel {
     fn measured_bounds(&self, id: ObjectId) -> Result<Bounds3D, BoundsError> {
         let time = self.current_time();
         self.measure(id, MeasureScope::Cursor(time), || {
-            self.compile_measure(time)
+            self.compile_measure(None)
         })
     }
 
@@ -128,14 +128,18 @@ impl SceneModel {
     }
 
     /// Box of the object `id` in this scene compiled up to the authoring
-    /// cursor and seeked to `time`.
+    /// cursor, without reusing a compilation.
     #[cfg(test)]
-    fn compiled_bounds(&self, id: ObjectId, time: f64) -> Result<Bounds3D, BoundsError> {
-        self.compile_measure(time).bounds(id)
+    fn compiled_bounds(&self, id: ObjectId) -> Result<Bounds3D, BoundsError> {
+        self.compile_measure(None).bounds(id)
     }
 
-    /// The scene compiled up to the authoring cursor and seeked to `time`.
-    fn compile_measure(&self, time: f64) -> CompiledMeasure {
+    /// The scene compiled up to the authoring cursor and seeked to `time`,
+    /// or to that cursor. The cursor is taken on the compiled clock: it sums
+    /// the durations in another order than [`Self::current_time`], so the two
+    /// can differ by a few ULPs, and what starts at the cursor, such as a cut
+    /// made by a setter, starts exactly at the compiled one.
+    fn compile_measure(&self, time: Option<f64>) -> CompiledMeasure {
         let segments = self
             .state
             .lock()
@@ -161,15 +165,16 @@ impl SceneModel {
                 Vec::new(),
             )
         };
+        let cursor = checkpoint.map(|checkpoint| checkpoint.cursor);
+        let time = time
+            .or_else(|| cursor.as_ref().and_then(CompileCursor::time))
+            .unwrap_or_else(|| self.current_time());
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         timeline.seek(&mut world, time);
         // Boxes and their backgrounds take their layout box every frame.
         gaanim_animation::updaters::resolve_layout_boxes(&mut world, time);
-        CompiledMeasure {
-            cursor: checkpoint.map(|checkpoint| checkpoint.cursor),
-            world,
-        }
+        CompiledMeasure { cursor, world }
     }
 }
 
@@ -558,9 +563,7 @@ mod tests {
             "the fast path applies"
         );
         let fast = scene.bounds_of(handle).unwrap();
-        let full = scene
-            .compiled_bounds(handle.id, scene.current_time())
-            .unwrap();
+        let full = scene.compiled_bounds(handle.id).unwrap();
         for (a, b) in [
             (fast.min.x, full.min.x),
             (fast.min.y, full.min.y),
@@ -900,7 +903,6 @@ mod tests {
 
         // A cut on an animated drawable moves it from the cursor on.
         let label = label.move_to(-2.0, 1.0);
-        scene.wait(0.1);
         let moved = scene.bounds_of(&label).unwrap();
         assert!((moved.center().x + 2.0).abs() < 1e-6, "{moved:?}");
         let world = measured_world(&scene).unwrap();
@@ -926,6 +928,26 @@ mod tests {
         assert_eq!(measured_world(&scene), Some(world));
         scene.render();
         assert_eq!(measured_world(&scene), None);
+    }
+
+    #[test]
+    fn a_cut_at_the_cursor_counts() {
+        // The second segment's two plays end where the compiled clock
+        // (0.5 + 0.3 + 0.4) is a few ULPs past the authored cursor
+        // (0.5 + (0.3 + 0.4)); the cut starts at the compiled one.
+        let mut scene = busy_scene();
+        let label = scene.text("medido").move_to(1.0, 1.0);
+        scene.play(vec![label.animate().shift_by(1.0, 0.0).duration(0.4)]);
+        let label = label.move_to(-2.0, 1.0);
+        let bounds = scene.bounds_of(&label).unwrap();
+        assert!((bounds.center().x + 2.0).abs() < 1e-9, "{bounds:?}");
+        assert_eq!(scene.compiled_bounds(label.id).unwrap(), bounds);
+
+        // Animations that end at the cursor are measured at their end.
+        let label = label.move_to(1.0, 1.0);
+        scene.play(vec![label.animate().shift_by(0.5, 0.0).duration(0.3)]);
+        let bounds = scene.bounds_of(&label).unwrap();
+        assert!((bounds.center().x - 1.5).abs() < 1e-12, "{bounds:?}");
     }
 
     #[test]
