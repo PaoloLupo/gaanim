@@ -69,8 +69,54 @@ pub fn register_inittab() {
     pyo3::append_to_inittab!(gaanim_core);
 }
 
+/// The line of the script that called into Gaanim, as `path:line`: the
+/// innermost Python frame outside the `gaanim` package, its path relative
+/// to the working directory when inside it.
+fn script_call_site() -> Option<String> {
+    use std::path::{Path, PathBuf};
+    Python::attach(|py| {
+        let package = py
+            .import("gaanim")
+            .and_then(|gaanim| gaanim.getattr("__file__"))
+            .and_then(|file| file.extract::<PathBuf>())
+            .ok()
+            .and_then(|file| file.parent().map(engine_core::console::plain_path));
+        let mut frame = py
+            .import("sys")
+            .and_then(|sys| sys.call_method1("_getframe", (0,)))
+            .ok()?;
+        loop {
+            let file: String = frame
+                .getattr("f_code")
+                .and_then(|code| code.getattr("co_filename"))
+                .and_then(|file| file.extract())
+                .ok()?;
+            let path = &engine_core::console::plain_path(Path::new(&file));
+            let inside_gaanim = file.starts_with('<')
+                || package
+                    .as_deref()
+                    .is_some_and(|package| path.starts_with(package));
+            if !inside_gaanim {
+                let line: u32 = frame
+                    .getattr("f_lineno")
+                    .and_then(|line| line.extract())
+                    .ok()?;
+                return Some(format!(
+                    "{}:{line}",
+                    engine_core::console::display_path(path)
+                ));
+            }
+            frame = frame
+                .getattr("f_back")
+                .ok()
+                .filter(|back| !back.is_none())?;
+        }
+    })
+}
+
 #[pymodule]
 pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    gaanim_api::canvas::set_call_site_provider(script_call_site);
     m.add(
         "LayoutOwnershipError",
         _py.get_type::<LayoutOwnershipError>(),

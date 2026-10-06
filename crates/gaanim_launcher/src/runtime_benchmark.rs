@@ -41,6 +41,7 @@ fn timed_reload(
     let python_started = Instant::now();
     let canvas = (python.load_script_canvas)(script)?;
     let python_ms = python_started.elapsed().as_secs_f64() * 1000.0;
+    canvas.report_authoring();
     let size = canvas.frame.preview_pixel_size();
     let replay_started = Instant::now();
     let kind = if full {

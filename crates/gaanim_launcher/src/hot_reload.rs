@@ -184,6 +184,7 @@ pub fn reload_listener_system(world: &mut World) {
 
     let (width, height) = payload.canvas.frame.preview_pixel_size();
     let compile_duration = payload.compile_duration.as_secs_f64();
+    payload.canvas.report_authoring();
     let replay_started_at = Instant::now();
     let replay_kind = if assets_changed {
         reload_with_full_replay(world, payload.canvas)

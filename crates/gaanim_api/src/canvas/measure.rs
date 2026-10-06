@@ -11,6 +11,7 @@ use gaanim_timeline::timeline::Timeline;
 use super::authored::Authored;
 use super::compile::CompileCursor;
 use super::ops::{CanvasState, Op, Segment};
+use super::profile::Measured;
 use super::types::{LayoutOp, ObjectSpec, SpawnKind};
 use super::{DrawableHandle, SceneModel};
 use gaanim_core::ObjectId;
@@ -81,12 +82,19 @@ impl SceneModel {
         scope: MeasureScope,
         compile: impl FnOnce() -> CompiledMeasure,
     ) -> Result<Bounds3D, BoundsError> {
+        let started = std::time::Instant::now();
+        let compiled_how = match scope {
+            MeasureScope::Cursor(_) => Measured::Scene,
+            MeasureScope::Isolated(_) => Measured::Isolated,
+        };
         // Busy when a callback measures from inside a measurement.
         let (Ok(mut cache), Some(scene_wide)) = (
             self.measured.0.try_lock(),
             self.scene_wide_fingerprint().finish(),
         ) else {
-            return compile().bounds(id);
+            let bounds = compile().bounds(id);
+            self.profile.measured(compiled_how, started.elapsed());
+            return bounds;
         };
         let slot = match scope {
             MeasureScope::Cursor(_) => &mut cache.cursor,
@@ -97,7 +105,7 @@ impl SceneModel {
             scene_wide,
             scope,
         };
-        if slot.as_ref().is_none_or(|(current, _)| *current != key) {
+        let how = if slot.as_ref().is_none_or(|(current, _)| *current != key) {
             // Free the previous world before compiling the next one.
             *slot = None;
             let compiled = compile();
@@ -108,9 +116,15 @@ impl SceneModel {
                 ..key
             };
             *slot = Some((key, compiled));
-        }
+            compiled_how
+        } else {
+            Measured::Reused
+        };
         let (_, compiled) = slot.as_mut().expect("measurement compiled above");
-        compiled.bounds(id)
+        let bounds = compiled.bounds(id);
+        drop(cache);
+        self.profile.measured(how, started.elapsed());
+        bounds
     }
 
     /// Box of the object `id` in this scene compiled up to the authoring

@@ -205,7 +205,8 @@ pub enum ReplayKind {
 /// [`gaanim_timeline::capture_reload_keyframe`] (or the deferred capture that
 /// `NeedsKeyframeCapture` schedules) once the new entities exist.
 ///
-/// `GAANIM_RELOAD_TIMINGS=1` prints how long each phase took.
+/// `GAANIM_RELOAD_PROFILE=1` prints how long each phase took and the
+/// segments that took longest to compile.
 pub fn replay_canvas_incremental(
     world: &mut World,
     canvas: SceneModel,
@@ -253,14 +254,17 @@ pub fn replay_canvas_incremental(
 }
 
 /// How long each phase of a replay took, printed with
-/// `GAANIM_RELOAD_TIMINGS=1`.
+/// `GAANIM_RELOAD_PROFILE=1`.
 struct ReloadTimings {
     phases: Option<(std::time::Instant, Vec<(&'static str, f64)>)>,
 }
 
 impl ReloadTimings {
     fn start() -> Self {
-        let enabled = std::env::var_os("GAANIM_RELOAD_TIMINGS").is_some_and(|value| value != "0");
+        let enabled = crate::canvas::reload_profile_enabled();
+        if enabled {
+            crate::canvas::time_segments();
+        }
         Self {
             phases: enabled.then(|| (std::time::Instant::now(), Vec::new())),
         }
@@ -284,7 +288,21 @@ impl ReloadTimings {
             .map(|(name, ms)| format!("{name} {ms:.1} ms"))
             .collect::<Vec<_>>()
             .join(", ");
-        eprintln!("GAANIM_RELOAD_TIMINGS {kind:?}: {phases}");
+        gaanim_core::console::info("profile", format!("replay {kind:?}: {phases}"));
+        let mut segments = crate::canvas::take_segment_times();
+        segments.sort_by_key(|(_, time)| std::cmp::Reverse(*time));
+        if !segments.is_empty() {
+            let slowest = segments
+                .iter()
+                .take(5)
+                .map(|(name, time)| format!("`{name}` {:.1} ms", time.as_secs_f64() * 1000.0))
+                .collect::<Vec<_>>()
+                .join(", ");
+            gaanim_core::console::info(
+                "profile",
+                format!("{} segments compiled; slowest: {slowest}", segments.len()),
+            );
+        }
     }
 }
 

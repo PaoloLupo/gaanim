@@ -83,9 +83,14 @@ están explicados en la sección de problemas de
   proyecto y no en una carpeta ignorada (`exports`, `snapshots`, `target`,
   carpetas ocultas o de entornos). Los paquetes instalados fuera del proyecto
   no se recargan hasta reiniciar Gaanim.
-- *La recarga tarda más de lo normal:* los segmentos con funciones de Python
-  (updaters, funciones reactivas, easings propios) se recompilan siempre.
-  Para comparar con una recarga completa, arranca con `GAANIM_INCREMENTAL=0`.
+- *La recarga tarda más de lo normal:* arranca con `GAANIM_RELOAD_PROFILE=1`
+  para ver en la terminal el tiempo de cada segmento del script, las
+  mediciones con `bounds()` que compilaron la escena y en qué línea, y qué
+  segmentos tardan más en compilarse. Cuando medir compiló la escena a un
+  coste notable, Gaanim lo avisa siempre en la terminal y en `gaanim check`.
+  Los segmentos con funciones de Python (updaters, funciones reactivas,
+  easings propios) se recompilan siempre. Para comparar con una recarga
+  completa, arranca con `GAANIM_INCREMENTAL=0`.
 - *Necesito los mensajes del motor:* Gaanim oculta los avisos de Bevy, wgpu,
   winit y el audio. Para verlos, arranca con `RUST_LOG=info` (o
   `RUST_LOG=wgpu=warn` para un solo módulo). `NO_COLOR=1` quita los colores;

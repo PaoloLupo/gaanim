@@ -2287,6 +2287,8 @@ pub struct SceneModel {
     pub(crate) state: SharedCanvasState,
     /// The compilation that [`Self::bounds_of`] measures in.
     pub(crate) measured: super::measure::MeasureCache,
+    /// What authoring this scene cost; see [`Self::measurement_warning`].
+    pub(crate) profile: super::profile::SharedProfile,
 }
 
 impl SceneModel {
@@ -2332,6 +2334,7 @@ impl SceneModel {
             lighting_3d: gaanim_scene::Lighting3D::default(),
             state: Arc::new(Authored::new(CanvasState::new())),
             measured: Default::default(),
+            profile: Default::default(),
         }
     }
 
@@ -3068,7 +3071,7 @@ impl SceneModel {
         }
 
         let id = guard.next_segment_id();
-        let mut segment = Segment::new(id, name, notes, template.clone(), background);
+        let mut segment = Segment::new(id, name.clone(), notes, template.clone(), background);
         if replace_implicit {
             // Markers authored at t=0 before the first segment belong to it.
             segment.markers = std::mem::take(&mut guard.segments[0].markers);
@@ -3088,6 +3091,7 @@ impl SceneModel {
             .filter(|segment| segment.explicit)
             .count();
         drop(guard);
+        self.profile.segment_started(&name);
 
         if !replace_implicit {
             self.set_transition_sound(id, transition_sound);

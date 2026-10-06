@@ -136,11 +136,14 @@ pub use theme::{
 };
 mod compile;
 pub(crate) use compile::{
-    CompileCheckpoint, SegmentMarker, split_text_math, text_inline_typst_source,
+    CompileCheckpoint, SegmentMarker, split_text_math, take_segment_times,
+    text_inline_typst_source, time_segments,
 };
 mod incremental;
 mod measure;
 pub use measure::{BoundsError, ScatterLayoutError, avoid_boxes, scatter};
+mod profile;
+pub use profile::{reload_profile_enabled, set_call_site_provider};
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
 pub mod text_animator;

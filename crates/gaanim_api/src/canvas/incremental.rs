@@ -142,6 +142,8 @@ impl SceneModel {
             state: _,
             // Derived from the rest.
             measured: _,
+            // What authoring cost.
+            profile: _,
         } = self;
         let mut global = DebugFingerprint::new();
         global.add(frame);

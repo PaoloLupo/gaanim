@@ -3,6 +3,25 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+thread_local! {
+    /// How long each segment took to compile, while a replay profiles them.
+    static SEGMENT_TIMES: RefCell<Option<Vec<(String, Duration)>>> = const { RefCell::new(None) };
+}
+
+/// Record how long each segment that this thread compiles takes, until
+/// [`take_segment_times`].
+pub(crate) fn time_segments() {
+    SEGMENT_TIMES.with_borrow_mut(|times| *times = Some(Vec::new()));
+}
+
+/// The segments compiled since [`time_segments`], with how long each took.
+pub(crate) fn take_segment_times() -> Vec<(String, Duration)> {
+    SEGMENT_TIMES
+        .with_borrow_mut(Option::take)
+        .unwrap_or_default()
+}
 
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
@@ -2771,6 +2790,8 @@ impl SceneModel {
             scene_ids.push(scene_id);
             let start_time = builder.current_time;
             let first_stop = builder.stop_times.len();
+            let timed = SEGMENT_TIMES.with_borrow(Option::is_some);
+            let compile_started = timed.then(std::time::Instant::now);
             Self::replay_seg(
                 &mut builder,
                 seg,
@@ -2799,6 +2820,14 @@ impl SceneModel {
                 &mut revealed_deferred,
                 &self.state,
             );
+            if let Some(started) = compile_started {
+                let elapsed = started.elapsed();
+                SEGMENT_TIMES.with_borrow_mut(|times| {
+                    if let Some(times) = times {
+                        times.push((seg.name.clone(), elapsed));
+                    }
+                });
+            }
             // The manifest sums each segment's local cursor, while clips,
             // stops, and scene starts use the builder's running clock. The two
             // float sums can differ by a few ULPs, which made a terminal stop
