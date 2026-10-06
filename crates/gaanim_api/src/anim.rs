@@ -381,6 +381,11 @@ pub enum AnimationType {
     PathPointsTo {
         points: Vec<(f64, f64)>,
     },
+    /// Rotate, scale and skew about the scene point `pivot` from now on,
+    /// without moving the drawable.
+    PivotTo {
+        pivot: DVec3,
+    },
     /// Show `to` copies of a repeater group instead of `from`; the
     /// fractional part fades the next copy.
     CountTo {

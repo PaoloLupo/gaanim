@@ -1570,6 +1570,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::EffectsTo { .. } => "Effects",
             AnimationType::DashOffsetTo { .. } => "DashOffset",
             AnimationType::PathPointsTo { .. } => "Points",
+            AnimationType::PivotTo { .. } => "Pivot",
             AnimationType::CountTo { .. } => "Count",
             AnimationType::ParticleBurst { .. } => "Burst",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
@@ -3269,6 +3270,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_path_points_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::PivotTo { .. }) {
+            self.play_pivot_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::CountTo { .. }) {
             self.play_count_internal(anim, track);
             return;
@@ -3632,6 +3637,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::EffectsTo { .. }
             | AnimationType::DashOffsetTo { .. }
             | AnimationType::PathPointsTo { .. }
+            | AnimationType::PivotTo { .. }
             | AnimationType::CountTo { .. }
             | AnimationType::ParticleBurst { .. }
             | AnimationType::DrawBorderThenFill { .. }
@@ -5814,6 +5820,34 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     std::sync::Arc::new(crate::stroke_lens::PathPointsLens { from, to }),
                 )),
                 rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+    }
+
+    /// Move the pivot of `target`'s rotations, scales and skews to a scene
+    /// point; the translation compensates, so nothing moves.
+    fn play_pivot_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::PivotTo { pivot } = anim.anim_type else {
+            return;
+        };
+        let Some(state) = self.states.get_mut(anim.target) else {
+            return;
+        };
+        let from = state.transform;
+        let to = from.about_pivot(pivot);
+        state.transform = to;
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time + anim.delay,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                    std::sync::Arc::new(crate::pivot_lens::PivotLens::between(&from, &to)),
+                )),
+                rate_func: anim.rate_func,
                 delay: 0.0,
                 label: self.current_label.clone(),
             }),

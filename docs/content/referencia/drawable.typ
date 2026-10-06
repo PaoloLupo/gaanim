@@ -366,7 +366,7 @@ view = scene.camera.inset(ui.pixel(812, 240), zoom=3)
 #api-entry(
   name: "Drawable.with_pivot",
   kind: "method",
-  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. `pivot(x, y)` es un alias.],
+  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. Una vez mostrado el objeto, el pivote cambia en el cursor sin moverlo y vale para las animaciones siguientes. `pivot(x, y)` es un alias.],
 )[
 ```python
 # show-code: true

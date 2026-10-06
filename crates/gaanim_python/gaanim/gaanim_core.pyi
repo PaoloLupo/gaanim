@@ -4221,7 +4221,8 @@ class Drawable:
 
         Without a pivot, shapes turn about their own origin; shapes declared
         in scene coordinates (``line``, ``polygon``, arcs, arrows, curves)
-        turn about the center of their box instead.
+        turn about the center of their box instead. Once the drawable has
+        been shown, the pivot changes at the cursor without moving it.
 
         Example:
             result = drawable.with_pivot(1.0, 1.0)

@@ -1073,6 +1073,7 @@ impl DrawableHandle {
             LayoutOp::MoveToAnchorPoint { point } => {
                 Some(AnimationType::TranslateToAnchorPoint { point: *point })
             }
+            LayoutOp::SetPivot(pivot) => Some(AnimationType::PivotTo { pivot: *pivot }),
             _ => None,
         };
         let result = self.update_spec(|spec| {
@@ -2004,7 +2005,8 @@ impl DrawableHandle {
     ///
     /// Without one, shapes declared in scene coordinates (lines, polygons,
     /// arcs, arrows, curves) turn about their box center, and other shapes
-    /// about their origin.
+    /// about their origin. Once the drawable has been shown, the pivot
+    /// changes at the cursor, without moving it.
     ///
     /// This is the natural way to rotate a mechanism around a known hinge or
     /// disk center. The engine converts the point to the group's local anchor

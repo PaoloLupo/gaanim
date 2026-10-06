@@ -16313,6 +16313,47 @@ mod tests {
     }
 
     #[test]
+    fn a_pivot_set_after_showing_cuts_at_the_cursor_without_moving() {
+        let mut canvas = SceneModel::new(640, 360);
+        let square = canvas.rect(0.4, 0.4).move_to(2.0, 2.0).hidden().unwrap();
+        canvas.play(vec![square.animate().fade_in().duration(1.0)]);
+        let square = square.with_pivot(0.0, 2.0);
+        canvas.play(vec![square.animate().scale_to(2.0).duration(1.0)]);
+        // Already scaled about its center: the new pivot moves nothing.
+        let grown = canvas.rect(1.0, 1.0).move_to(1.0, 0.0);
+        canvas.play(vec![grown.animate().scale_to(2.0).duration(1.0)]);
+        let grown = grown.with_pivot(0.0, 0.0);
+        canvas.wait(1.0);
+        canvas.play(vec![grown.animate().scale_to(1.0).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        let mut drawn = |time: f64, handle: &DrawableHandle| {
+            timeline.seek(&mut world, time);
+            let affine = transform_of(&mut world, handle).to_affine_2d();
+            (affine * Point::ORIGIN, affine * Point::new(0.5, 0.0))
+        };
+        for (time, center) in [
+            (1.0, Point::new(2.0, 2.0)),
+            (2.0, Point::new(4.0, 2.0)),
+            (0.5, Point::new(2.0, 2.0)),
+            (2.0, Point::new(4.0, 2.0)),
+        ] {
+            let (drawn, _) = drawn(time, &square);
+            assert!(drawn.distance(center) < 1e-9, "{drawn:?} at {time}");
+        }
+        for (time, center, edge) in [
+            (3.5, Point::new(1.0, 0.0), Point::new(2.0, 0.0)),
+            (5.0, Point::new(0.5, 0.0), Point::new(1.0, 0.0)),
+            (2.5, Point::new(1.0, 0.0), Point::new(1.75, 0.0)),
+            (3.5, Point::new(1.0, 0.0), Point::new(2.0, 0.0)),
+        ] {
+            let (drawn, side) = drawn(time, &grown);
+            assert!(drawn.distance(center) < 1e-9, "{drawn:?} at {time}");
+            assert!(side.distance(edge) < 1e-9, "{side:?} at {time}");
+        }
+    }
+
+    #[test]
     fn move_along_an_arrow_travels_its_axis_from_tail_to_tip() {
         let mut canvas = SceneModel::new(640, 360);
         let straight = canvas.arrow(-2.0, 1.0, 2.0, 1.0);
