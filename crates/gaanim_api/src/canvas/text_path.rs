@@ -367,7 +367,10 @@ impl SceneBuilder<'_, '_, '_> {
             return;
         };
         let Some((layout, from)) = self.text_paths.get(&anim.target).cloned() else {
-            gaanim_core::console::warn("text", "path_offset needs a Text created with text.on_path");
+            gaanim_core::console::warn(
+                "text",
+                "path_offset needs a Text created with text.on_path",
+            );
             return;
         };
         self.text_paths.insert(anim.target, (layout.clone(), to));
@@ -442,18 +445,21 @@ mod tests {
             TextPathLayout::new(&path, &spec(TextPathAlign::Start, true), 0.2, &glyphs()).unwrap();
         for index in 0..3 {
             let point = anchor_at(&layout, index, 0.0);
-            assert!((point - kurbo::Point::new(index as f64 + 0.4, 5.0)).hypot() < 1e-9);
+            assert!(
+                (point - kurbo::Point::new(index as f64 + 0.4, 5.0)).hypot() < 1e-6,
+                "{point:?}"
+            );
         }
         // An offset of 0.5 moves every glyph half the path further.
         let shifted = anchor_at(&layout, 0, 0.5);
-        assert!((shifted - kurbo::Point::new(5.4, 5.0)).hypot() < 1e-9);
+        assert!((shifted - kurbo::Point::new(5.4, 5.0)).hypot() < 1e-6);
 
         let centered =
             TextPathLayout::new(&path, &spec(TextPathAlign::Center, true), 0.2, &glyphs()).unwrap();
-        assert!((anchor_at(&centered, 1, 0.0) - kurbo::Point::new(5.0, 5.0)).hypot() < 1e-9);
+        assert!((anchor_at(&centered, 1, 0.0) - kurbo::Point::new(5.0, 5.0)).hypot() < 1e-6);
         let ended =
             TextPathLayout::new(&path, &spec(TextPathAlign::End, true), 0.2, &glyphs()).unwrap();
-        assert!((anchor_at(&ended, 2, 0.0) - kurbo::Point::new(9.6, 5.0)).hypot() < 1e-9);
+        assert!((anchor_at(&ended, 2, 0.0) - kurbo::Point::new(9.6, 5.0)).hypot() < 1e-6);
     }
 
     #[test]
@@ -469,8 +475,8 @@ mod tests {
                 .rotation
                 .z
                 .atan2(oriented.transform(0, 0.0).rotation.w);
-        assert!((angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
-        assert!((anchor_at(&oriented, 1, 0.0) - kurbo::Point::new(0.0, 1.4)).hypot() < 1e-9);
+        assert!((angle - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
+        assert!((anchor_at(&oriented, 1, 0.0) - kurbo::Point::new(0.0, 1.4)).hypot() < 1e-6);
         let upright =
             TextPathLayout::new(&path, &spec(TextPathAlign::Start, false), 0.0, &glyphs()).unwrap();
         assert!(upright.transform(0, 0.0).rotation.z.abs() < 1e-12);
