@@ -56,7 +56,8 @@ pub struct LottieAsset {
 
 /// Hot reload fingerprints scenes through `Debug`: the parsed composition is
 /// large and prints hash maps in no fixed order, so the source digest stands
-/// for it, and image layers print their size instead of their pixels.
+/// for it, and image layers print their size and the identity of their
+/// pixels, which an image read again changes.
 impl std::fmt::Debug for LottieAsset {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -74,6 +75,7 @@ impl std::fmt::Debug for LottieAsset {
                             layer.layer_index,
                             layer.width,
                             layer.height,
+                            layer.image.image.data.id(),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -107,6 +109,8 @@ struct LottieImageLayer {
     image: vello::peniko::ImageBrush,
     width: f64,
     height: f64,
+    /// The image file it was read from, outside a dotLottie package.
+    file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -835,6 +839,57 @@ pub fn sample_lottie_system(
     }
 }
 
+/// Files that changed on disk, compared as the caches key them: by their
+/// canonical path, without Windows' verbatim prefix or letter case there.
+pub struct ChangedFiles(HashSet<PathBuf>);
+
+impl ChangedFiles {
+    pub fn new(paths: &[PathBuf]) -> Self {
+        Self(paths.iter().map(|path| Self::key(path)).collect())
+    }
+
+    fn key(path: &Path) -> PathBuf {
+        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if cfg!(windows) {
+            let text = path.to_string_lossy();
+            let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+            PathBuf::from(text.to_lowercase())
+        } else {
+            path
+        }
+    }
+
+    /// Whether the file at `path` is one of them.
+    pub fn contains(&self, path: &Path) -> bool {
+        !self.0.is_empty() && self.0.contains(&Self::key(path))
+    }
+}
+
+/// Forget the compositions read from the files `changed`, or from an image
+/// one of them references, and the dotLottie packages among them.
+pub fn forget_lottie_files(changed: &ChangedFiles) {
+    package::forget(changed);
+    if let Some(cache) = LOTTIE_CACHE.get() {
+        cache
+            .lock()
+            .expect("Lottie cache poisoned")
+            .retain(|path, asset| {
+                !changed.contains(path)
+                    && !asset
+                        .image_layers
+                        .iter()
+                        .filter_map(|layer| layer.file.as_deref())
+                        .any(|file| changed.contains(file))
+            });
+    }
+    if let Some(warned) = WARNED_ASSETS.get() {
+        warned
+            .lock()
+            .expect("Lottie warning cache poisoned")
+            .retain(|path| !changed.contains(path));
+    }
+}
+
 pub fn clear_lottie_cache() {
     package::clear_cache();
     if let Some(cache) = LOTTIE_CACHE.get() {
@@ -1046,6 +1101,7 @@ fn load_image_layers(
             image: vello::peniko::ImageBrush::new(image),
             width,
             height,
+            file: package.is_none().then_some(asset_path),
         });
     }
     if embedded_count > 0 {

@@ -87,7 +87,7 @@ scene.assets.preload(["logo.svg", "cover.png", "pulse.json", "button.lottie"])
   name: "AssetManager.reload_assets",
   kind: "method",
   returns: (type: "None", desc: [Vacía las cachés de archivos.]),
-  desc: [Vacía las cachés de imágenes ráster, Lottie JSON y paquetes dotLottie. Los objetos ya creados conservan sus recursos; las cargas siguientes leen los archivos del disco. En el editor no hace falta: guardar cualquier archivo del proyecto vacía las cachés y recarga la escena. Los SVG se vuelven a leer cada vez que `scene.media.svg(...)` crea un objeto.],
+  desc: [Vacía las cachés de imágenes ráster, Lottie JSON y paquetes dotLottie. Los objetos ya creados conservan sus recursos; las cargas siguientes leen los archivos del disco. En el editor no hace falta: al guardar un archivo del proyecto, el editor olvida lo que las cachés guardan de ese archivo y recarga la escena, recompilando desde el primer segmento que lo usa. Los SVG se vuelven a leer cada vez que `scene.media.svg(...)` crea un objeto.],
 )[
 ```python
 >>>from gaanim import *

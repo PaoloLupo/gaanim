@@ -47,17 +47,19 @@ pub fn run() {
     let launch = parse_args();
     // The window's GPU backends are found while Python loads.
     gaanim_renderer::adapter::start_window_backends_probe();
-    // Load Python before the app starts its threads (see `python::runtime`).
-    let python = launch
+    // Load Python before the app starts its threads (see `python::runtime`),
+    // and run the script while the app and its GPU start.
+    let script = launch
         .script_path
         .as_deref()
         .filter(|path| !gaanim_editor::bundle_player::is_bundle_path(path))
         .map(|script| {
-            load_python(script, launch.project.as_ref()).unwrap_or_else(|error| {
+            let python = load_python(script, launch.project.as_ref()).unwrap_or_else(|error| {
                 console::error("python", error);
                 console::hint(crate::python::install_hint());
                 std::process::exit(2);
-            })
+            });
+            ScriptLaunch::start(python, script.to_path_buf())
         });
     #[cfg(target_os = "linux")]
     gaanim_editor::alsa_errors::route_alsa_errors();
@@ -104,10 +106,8 @@ pub fn run() {
         app.world_mut()
             .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
             .active = false;
-    } else if let (Some(script_path), Some(python)) = (launch.script_path, python) {
-        if let Err(error) =
-            start_script_session(app.world_mut(), python, script_path, launch.project)
-        {
+    } else if let Some(script) = script {
+        if let Err(error) = attach_script_session(app.world_mut(), script, launch.project) {
             console::error("project", error);
             std::process::exit(2);
         }
@@ -428,20 +428,56 @@ fn load_python(
     crate::python::runtime(hint)
 }
 
-/// Install the persistent primary camera before the Bevy event loop begins.
-///
-/// Canvas replay reuses this Vello camera; creating it during replay is too
-/// late for `bevy_egui` to attach its primary context on script launches.
+/// A script running on the plugin's thread. Its scenes and tracebacks wait
+/// in their channels until [`attach_script_session`] hands them to an app.
+struct ScriptLaunch {
+    runner: Box<dyn gaanim_editor::python_plugin::ScriptSession>,
+    script_path: PathBuf,
+    payload_rx: crossbeam_channel::Receiver<ReloadPayload>,
+    error_rx: crossbeam_channel::Receiver<String>,
+}
+
+impl ScriptLaunch {
+    fn start(python: &gaanim_editor::python_plugin::PythonPlugin, script_path: PathBuf) -> Self {
+        let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
+        let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
+        let runner = (python.spawn_script)(script_path.clone(), payload_tx, error_tx);
+        crate::startup::mark("script started");
+        Self {
+            runner,
+            script_path,
+            payload_rx,
+            error_rx,
+        }
+    }
+}
+
+/// Start `script_path` and attach it to the app in `world` at once, as
+/// opening a project from Home does.
 fn start_script_session(
     world: &mut World,
     python: &gaanim_editor::python_plugin::PythonPlugin,
     script_path: PathBuf,
     project: Option<gaanim_project::ResolvedProject>,
 ) -> Result<(), String> {
-    let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
-    let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
-    let runner = (python.spawn_script)(script_path.clone(), payload_tx, error_tx);
-    crate::startup::mark("script started");
+    attach_script_session(world, ScriptLaunch::start(python, script_path), project)
+}
+
+/// Install the persistent primary camera before the Bevy event loop begins.
+///
+/// Canvas replay reuses this Vello camera; creating it during replay is too
+/// late for `bevy_egui` to attach its primary context on script launches.
+fn attach_script_session(
+    world: &mut World,
+    script: ScriptLaunch,
+    project: Option<gaanim_project::ResolvedProject>,
+) -> Result<(), String> {
+    let ScriptLaunch {
+        runner,
+        script_path,
+        payload_rx,
+        error_rx,
+    } = script;
     world.insert_resource(gaanim_editor::narration::ScriptReload(
         runner.asset_reload_handle().into(),
     ));
@@ -453,7 +489,9 @@ fn start_script_session(
             while !stop.load(Ordering::SeqCst) {
                 match changed_rx.recv_timeout(std::time::Duration::from_millis(250)) {
                     Ok(crate::file_watcher::ProjectChange::Source) => runner.request_rerun(),
-                    Ok(crate::file_watcher::ProjectChange::Assets) => runner.request_asset_reload(),
+                    Ok(crate::file_watcher::ProjectChange::Assets(changed)) => {
+                        runner.request_asset_reload(changed)
+                    }
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     Err(_) => break,
                 }

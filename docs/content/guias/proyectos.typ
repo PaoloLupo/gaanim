@@ -121,14 +121,20 @@ El resultado siempre es idéntico al de una recarga completa. Para forzar esta
 
 == Recursos
 
-Guardar cualquier archivo que no sea Python dentro del proyecto (imágenes,
-SVG, Lottie, WGSL, fuentes, documentos Typst, datos) vacía las cachés de
-recursos, vuelve a ejecutar el script y recompila todos los segmentos.
+Guardar un archivo que no sea Python dentro del proyecto (imágenes, SVG,
+Lottie, WGSL, fuentes, documentos Typst, datos) vuelve a ejecutar el script
+leyendo de nuevo ese archivo, no el resto: las cachés olvidan solo lo que
+guardaban de él. La recarga sigue siendo incremental y recompila desde el
+primer segmento que lo usa; si la escena no lo lee, queda igual
+(`unchanged`).
 
 Se ignoran los archivos y carpetas ocultos (`.git`, `.venv`, archivos de
 intercambio del editor), `venv`, `env`, `__pycache__`, `exports`,
 `snapshots`, `target`, los temporales (`~`, `.swp`, `.tmp`, `.bak`) y los
-`.lock`.
+`.lock`. Un guardado cuenta por el archivo que guarda: las herramientas que
+escriben un temporal y lo renombran sobre el archivo (como `main.py.tmp.*`
+o el `sedXXXXXX` de `sed -i`) y la carpeta, que Windows también da por
+cambiada, no cuentan como cambios.
 
 == Módulos de Python del proyecto
 

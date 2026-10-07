@@ -96,7 +96,6 @@ pub use visualization::{
 mod canvas_impl;
 mod narration;
 pub use crate::export::{AudioTrack, AudioTrackError};
-pub use canvas_impl::clear_asset_caches;
 pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
@@ -107,6 +106,7 @@ pub use canvas_impl::{
     TypstAssetError, VideoClip, VideoLoadError, VideoSegment, stagger_weights,
 };
 pub use canvas_impl::{InsertPosition, ScheduleLabel};
+pub use canvas_impl::{clear_asset_caches, forget_assets};
 pub use gaanim_media::narration::{MarkerSource, ScriptSection, TakeFiles};
 pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,
@@ -139,7 +139,7 @@ mod compile;
 mod coverage;
 pub use axonometric::{Axonometric, AxonometricView};
 pub(crate) use compile::{
-    CompileCheckpoint, SegmentMarker, split_text_math, take_segment_times,
+    CompileCheckpoint, Compiled, SegmentMarker, split_text_math, take_segment_times,
     text_inline_typst_source, time_segments,
 };
 mod incremental;

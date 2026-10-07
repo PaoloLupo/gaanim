@@ -549,6 +549,15 @@ impl EnvironmentProbe {
         detect_environment_with(project_hint, &SystemRunner)
     }
 
+    /// The Python runtime [`Self::detect`] would select, without probing
+    /// uv: all that loading Python needs.
+    pub fn detect_python(project_hint: Option<&Path>) -> Self {
+        Self {
+            python: detect_python_with(project_hint, &SystemRunner),
+            uv: None,
+        }
+    }
+
     pub fn has_supported_python(&self) -> bool {
         self.python
             .as_ref()
@@ -634,15 +643,22 @@ fn detect_environment_with(
     project_hint: Option<&Path>,
     runner: &impl CommandRunner,
 ) -> EnvironmentProbe {
-    let python = active_venv()
+    let python = detect_python_with(project_hint, runner);
+    let uv = probe_uv(runner);
+    EnvironmentProbe { python, uv }
+}
+
+fn detect_python_with(
+    project_hint: Option<&Path>,
+    runner: &impl CommandRunner,
+) -> Option<DetectedPython> {
+    active_venv()
         .and_then(|root| probe_venv(&root, PythonSource::ActiveVenv, runner))
         .or_else(|| {
             find_project_venv(project_hint)
                 .and_then(|root| probe_venv(&root, PythonSource::ProjectVenv, runner))
         })
-        .or_else(|| probe_system_python(runner));
-    let uv = probe_uv(runner);
-    EnvironmentProbe { python, uv }
+        .or_else(|| probe_system_python(runner))
 }
 
 fn probe_uv(runner: &impl CommandRunner) -> Option<UvInfo> {
@@ -710,6 +726,15 @@ fn probe_venv(
     runner: &impl CommandRunner,
 ) -> Option<DetectedPython> {
     let executable = venv_python(root)?;
+    if let Some((home, version)) = venv_base_runtime(root) {
+        return Some(DetectedPython {
+            executable,
+            home,
+            version,
+            source,
+            venv_root: Some(root.to_path_buf()),
+        });
+    }
     probe_python_command(
         executable.as_os_str(),
         &[],
@@ -717,6 +742,36 @@ fn probe_venv(
         Some(root.to_path_buf()),
         runner,
     )
+}
+
+/// The runtime a virtual environment was made from, read from its
+/// `pyvenv.cfg` instead of starting its interpreter, which takes up to
+/// seconds the first time Windows sees a new environment: the runtime's
+/// folder (`sys.base_prefix`) and version. Windows only, where that folder
+/// holds the `python3.dll` loading Python needs; elsewhere, or when the
+/// file lacks either value, the interpreter answers.
+fn venv_base_runtime(root: &Path) -> Option<(PathBuf, PythonVersion)> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let config = std::fs::read_to_string(root.join("pyvenv.cfg")).ok()?;
+    let (mut home, mut version, mut version_info) = (None, None, None);
+    for line in config.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim();
+        match key.trim() {
+            "home" => home = Some(PathBuf::from(value)),
+            // uv and virtualenv write `version_info`, the standard library
+            // `version`.
+            "version_info" => version_info = parse_python_version(value),
+            "version" => version = parse_python_version(value),
+            _ => {}
+        }
+    }
+    let home = home.filter(|home| home.join("python3.dll").is_file())?;
+    Some((home, version_info.or(version)?))
 }
 
 fn probe_system_python(runner: &impl CommandRunner) -> Option<DetectedPython> {
@@ -912,15 +967,19 @@ pub fn provision_authoring_package(project_root: &Path) -> Result<PathBuf, Strin
             venv.display()
         )
     })?;
-    let installed = python_command(&python)
-        .args([
-            "-c",
-            "import importlib.metadata as m; print(m.version('gaanim'))",
-        ])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
+    let installed = if authoring_package_installed(&venv) {
+        Some(env!("CARGO_PKG_VERSION").to_string())
+    } else {
+        python_command(&python)
+            .args([
+                "-c",
+                "import importlib.metadata as m; print(m.version('gaanim'))",
+            ])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+    };
     if installed.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
         let status = python_command("uv")
             .args([
@@ -942,6 +1001,26 @@ pub fn provision_authoring_package(project_root: &Path) -> Result<PathBuf, Strin
         }
     }
     Ok(venv)
+}
+
+/// Whether the environment at `venv` holds this version's authoring
+/// package, read from its installed metadata without starting Python.
+fn authoring_package_installed(venv: &Path) -> bool {
+    let metadata =
+        Path::new(&format!("gaanim-{}.dist-info", env!("CARGO_PKG_VERSION"))).join("METADATA");
+    let site_packages: Vec<PathBuf> = if cfg!(windows) {
+        vec![venv.join("Lib").join("site-packages")]
+    } else {
+        std::fs::read_dir(venv.join("lib"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path().join("site-packages"))
+            .collect()
+    };
+    site_packages
+        .iter()
+        .any(|folder| folder.join(&metadata).is_file())
 }
 
 fn bundled_authoring_wheel() -> Option<PathBuf> {
@@ -1240,6 +1319,87 @@ mod tests {
     fn success_status() -> std::process::ExitStatus {
         use std::os::unix::process::ExitStatusExt;
         std::process::ExitStatus::from_raw(0)
+    }
+
+    #[test]
+    fn a_virtual_environment_is_read_without_starting_python_on_windows() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("pythoncore-3.14-64");
+        let venv = temp.path().join(".venv");
+        let scripts = venv.join(if cfg!(windows) { "Scripts" } else { "bin" });
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::write(home.join("python3.dll"), "").unwrap();
+        for name in ["python.exe", "python3", "python"] {
+            std::fs::write(scripts.join(name), "").unwrap();
+        }
+        let write_config = |version_line: &str| {
+            std::fs::write(
+                venv.join("pyvenv.cfg"),
+                format!(
+                    "home = {}\ninclude-system-site-packages = false\n{version_line}\n",
+                    home.display()
+                ),
+            )
+            .unwrap();
+        };
+        let silent = FakeRunner {
+            python: false,
+            uv: false,
+        };
+        // uv writes `version_info`, the standard library `version`.
+        for line in ["version_info = 3.14.2", "version = 3.14.2"] {
+            write_config(line);
+            let detected = probe_venv(&venv, PythonSource::ProjectVenv, &silent);
+            if cfg!(windows) {
+                let detected = detected.expect("read from pyvenv.cfg");
+                assert_eq!(detected.home, home);
+                assert_eq!(detected.venv_root.as_deref(), Some(venv.as_path()));
+                assert_eq!(
+                    detected.version,
+                    PythonVersion {
+                        major: 3,
+                        minor: 14,
+                        patch: 2
+                    }
+                );
+            } else {
+                assert!(detected.is_none());
+            }
+        }
+        // Without the runtime library in `home`, the interpreter answers.
+        std::fs::remove_file(home.join("python3.dll")).unwrap();
+        assert!(probe_venv(&venv, PythonSource::ProjectVenv, &silent).is_none());
+        let answering = FakeRunner {
+            python: true,
+            uv: false,
+        };
+        assert_eq!(
+            probe_venv(&venv, PythonSource::ProjectVenv, &answering)
+                .unwrap()
+                .home,
+            PathBuf::from("C:\\Python314")
+        );
+    }
+
+    #[test]
+    fn the_authoring_package_is_found_by_its_installed_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let venv = temp.path().join(".venv");
+        assert!(!authoring_package_installed(&venv));
+        let site_packages = if cfg!(windows) {
+            venv.join("Lib").join("site-packages")
+        } else {
+            venv.join("lib").join("python3.14").join("site-packages")
+        };
+        let other = site_packages.join("gaanim-0.0.1.dist-info");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("METADATA"), "").unwrap();
+        assert!(!authoring_package_installed(&venv));
+        let this = site_packages.join(format!("gaanim-{}.dist-info", env!("CARGO_PKG_VERSION")));
+        std::fs::create_dir_all(&this).unwrap();
+        std::fs::write(this.join("METADATA"), "").unwrap();
+        assert!(authoring_package_installed(&venv));
     }
 
     #[test]

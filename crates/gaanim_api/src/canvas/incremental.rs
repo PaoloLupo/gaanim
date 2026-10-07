@@ -71,21 +71,11 @@ impl SceneModel {
         ));
 
         let state = self.state.lock().expect("canvas state poisoned");
-        let segments = state
-            .segments
-            .iter()
-            .map(|segment| {
-                let mut fingerprint = DebugFingerprint::new();
-                fingerprint.add(segment);
-                for op in &segment.ops {
-                    if let Op::Spawn(spec) = op {
-                        let id = spec.lock().expect("object spec poisoned").id;
-                        fingerprint.add(&state.frozen_spawn_specs.get(&id));
-                    }
-                }
-                fingerprint.finish()
-            })
-            .collect();
+        let segments = fingerprint_each(&state.segments, |segment| {
+            let mut fingerprint = DebugFingerprint::new();
+            add_segment(&mut fingerprint, segment, &state.frozen_spawn_specs);
+            fingerprint.finish()
+        });
         let mut after_segments = DebugFingerprint::new();
         after_segments.add(&state.polls);
         after_segments.add(&state.poll_session);
@@ -170,6 +160,122 @@ impl SceneModel {
         global.add(lighting_3d);
         global
     }
+}
+
+/// Feed what compiling `segment` reads from it. A declaration compiles from
+/// its frozen spec plus the few live fields that apply to the whole scene
+/// (see `SceneModel::compile_resumable`), so a setter that later changes
+/// the live spec through a timeline cut changes the segment holding the cut,
+/// not the one that declared the drawable.
+fn add_segment(
+    fingerprint: &mut DebugFingerprint,
+    segment: &crate::canvas::ops::Segment,
+    frozen: &HashMap<gaanim_core::ObjectId, crate::canvas::types::ObjectSpec>,
+) {
+    // Exhaustive on purpose: a new segment field must be fingerprinted.
+    let crate::canvas::ops::Segment {
+        id,
+        name,
+        notes,
+        template,
+        background,
+        post_process,
+        stops,
+        markers,
+        explicit,
+        cursor,
+        ops,
+        transition,
+        prev_segment,
+        mobject_ids,
+    } = segment;
+    fingerprint.add(id);
+    fingerprint.add(name);
+    fingerprint.add(notes);
+    fingerprint.add(template);
+    fingerprint.add(background);
+    fingerprint.add(post_process);
+    fingerprint.add(stops);
+    fingerprint.add(markers);
+    fingerprint.add(explicit);
+    fingerprint.add(cursor);
+    fingerprint.add(transition);
+    fingerprint.add(prev_segment);
+    fingerprint.add(mobject_ids);
+    fingerprint.add(&ops.len());
+    for op in ops {
+        let Op::Spawn(spec) = op else {
+            fingerprint.add(op);
+            continue;
+        };
+        let live = spec.lock().expect("object spec poisoned");
+        let Some(declared) = frozen.get(&live.id) else {
+            fingerprint.add(&*live);
+            continue;
+        };
+        fingerprint.add(&"Spawn");
+        fingerprint.add(declared);
+        fingerprint.add(&live.z_index);
+        fingerprint.add(&live.layout_background);
+        fingerprint.add(&live.layout_owner);
+        // Media schedules come from the live spec, and readouts in a box
+        // keep room for what their live source shows.
+        match &live.kind {
+            crate::canvas::types::SpawnKind::Video { .. }
+            | crate::canvas::types::SpawnKind::Lottie { .. }
+            | crate::canvas::types::SpawnKind::ReactiveReadout { .. } => {
+                fingerprint.add(&live.kind);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `fingerprint` of each of `segments`, on as many threads as the machine
+/// runs, since segments are independent; the largest go first. A value that
+/// prints a `Mutex` another thread holds comes out opaque, so the segments
+/// that did are fingerprinted again alone: the result is the serial one.
+fn fingerprint_each(
+    segments: &[crate::canvas::ops::Segment],
+    fingerprint: impl Fn(&crate::canvas::ops::Segment) -> Option<u64> + Sync,
+) -> Vec<Option<u64>> {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |threads| threads.get())
+        .min(segments.len());
+    if threads <= 1 {
+        return segments.iter().map(&fingerprint).collect();
+    }
+    let mut order: Vec<usize> = (0..segments.len()).collect();
+    order.sort_by_key(|&index| std::cmp::Reverse(segments[index].ops.len()));
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut fingerprints = vec![None; segments.len()];
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let taken = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(&index) = order.get(taken) else {
+                            return done;
+                        };
+                        done.push((index, fingerprint(&segments[index])));
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            for (index, value) in worker.join().expect("fingerprint worker panicked") {
+                fingerprints[index] = value;
+            }
+        }
+    });
+    for (segment, value) in segments.iter().zip(&mut fingerprints) {
+        if value.is_none() {
+            *value = fingerprint(segment);
+        }
+    }
+    fingerprints
 }
 
 /// Feed map entries in a stable order; `HashMap` iteration order differs

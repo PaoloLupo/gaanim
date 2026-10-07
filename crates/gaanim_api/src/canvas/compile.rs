@@ -1033,18 +1033,14 @@ pub(crate) struct CompileCheckpoint {
     pub(crate) timeline: Timeline,
 }
 
-impl CompileCursor {
-    /// The compiled clock where the next segment starts.
-    pub(crate) fn time(&self) -> Option<f64> {
-        self.builder
-            .as_ref()
-            .map(crate::builder::SceneBuilderState::current_time)
-    }
-
-    /// The compiled object that stands for authored object `id`.
-    pub(crate) fn runtime_id(&self, id: ObjectId) -> Option<ObjectId> {
-        self.id_map.get(&id).copied()
-    }
+/// What a compilation leaves for later.
+pub(crate) struct Compiled {
+    /// The checkpoint asked for, if the compilation reached it.
+    pub(crate) checkpoint: Option<CompileCheckpoint>,
+    /// The compiled object that stands for each authored object.
+    pub(crate) ids: HashMap<ObjectId, ObjectId>,
+    /// The compiled clock after the last segment.
+    pub(crate) end_time: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2573,15 +2569,6 @@ impl SceneModel {
         );
     }
 
-    /// Compile the segments from `resume` (or from the start), optionally
-    /// capturing a checkpoint before segment `checkpoint_at` and queueing
-    /// world markers before chosen segments. An index equal to the segment
-    /// count denotes the point after the last segment.
-    ///
-    /// Resuming is valid only when every segment before the cursor, and every
-    /// scene-wide input, is identical to the compilation that produced it,
-    /// and `timeline` is that checkpoint's timeline.
-    #[allow(clippy::too_many_arguments)]
     /// Values whose text each reactive number inside a layout keeps room
     /// for, by number: its explicit reserve and its source at the corners of
     /// the ranges its parameters take. A number outside a layout keeps none,
@@ -2639,6 +2626,14 @@ impl SceneModel {
             .collect()
     }
 
+    /// Compile the segments from `resume` (or from the start), optionally
+    /// capturing a checkpoint before segment `checkpoint_at` and queueing
+    /// world markers before chosen segments. An index equal to the segment
+    /// count denotes the point after the last segment.
+    ///
+    /// Resuming is valid only when every segment before the cursor, and every
+    /// scene-wide input, is identical to the compilation that produced it,
+    /// and `timeline` is that checkpoint's timeline.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn compile_resumable<'w, 's>(
         &self,
@@ -2649,7 +2644,7 @@ impl SceneModel {
         resume: Option<CompileCursor>,
         checkpoint_at: Option<usize>,
         mut markers: Vec<(usize, SegmentMarker)>,
-    ) -> Option<CompileCheckpoint> {
+    ) -> Compiled {
         let CompileCursor {
             next_segment: start,
             builder: builder_state,
@@ -3144,32 +3139,46 @@ impl SceneModel {
         }
 
         // Parameter-driven procedural layers integrate their signal from the
-        // layer's start, so they need its whole schedule.
-        for (target, signal, start, base) in std::mem::take(&mut builder.procedural_signal_tracks) {
-            let tweens: Vec<gaanim_animation::SignalTween> = builder
-                .timeline
-                .clips
-                .values()
-                .filter_map(|clip| match &clip.payload {
-                    gaanim_timeline::clip::ClipPayload::Animation(animation)
-                        if animation.target == signal
-                            && (clip.start >= start || clip.end() > start) =>
-                    {
-                        match animation.lens {
-                            gaanim_timeline::clip::PropertyLensSpec::SignalFloat { from, to } => {
-                                Some(gaanim_animation::SignalTween {
-                                    start: clip.start,
-                                    duration: clip.duration,
-                                    from,
-                                    to,
-                                    rate: animation.rate_func.clone(),
-                                })
-                            }
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                })
+        // layer's start, so they need its whole schedule: each signal's tweens
+        // in timeline order, gathered in one pass over the clips.
+        let procedural_tracks = std::mem::take(&mut builder.procedural_signal_tracks);
+        let mut signal_tweens: HashMap<ObjectId, Vec<(f64, f64, gaanim_animation::SignalTween)>> =
+            procedural_tracks
+                .iter()
+                .map(|(_, signal, _, _)| (*signal, Vec::new()))
+                .collect();
+        if !signal_tweens.is_empty() {
+            for clip in builder.timeline.clips.values() {
+                let gaanim_timeline::clip::ClipPayload::Animation(animation) = &clip.payload else {
+                    continue;
+                };
+                let gaanim_timeline::clip::PropertyLensSpec::SignalFloat { from, to } =
+                    animation.lens
+                else {
+                    continue;
+                };
+                if let Some(tweens) = signal_tweens.get_mut(&animation.target) {
+                    tweens.push((
+                        clip.start,
+                        clip.end(),
+                        gaanim_animation::SignalTween {
+                            start: clip.start,
+                            duration: clip.duration,
+                            from,
+                            to,
+                            rate: animation.rate_func.clone(),
+                        },
+                    ));
+                }
+            }
+        }
+        for (target, signal, start, base) in procedural_tracks {
+            let tweens: Vec<gaanim_animation::SignalTween> = signal_tweens
+                .get(&signal)
+                .into_iter()
+                .flatten()
+                .filter(|(clip_start, clip_end, _)| *clip_start >= start || *clip_end > start)
+                .map(|(_, _, tween)| tween.clone())
                 .collect();
             let track = std::sync::Arc::new(gaanim_animation::SignalTrack::new(base, tweens));
             builder.commands.entity(target).queue(
@@ -3196,6 +3205,7 @@ impl SceneModel {
             );
         }
 
+        let mut connections = Vec::new();
         for (i, seg) in segments.iter().enumerate() {
             if let Some(prev) = seg.prev_segment
                 && prev < i
@@ -3219,11 +3229,10 @@ impl SceneModel {
                     &shown_at_end,
                 );
                 let runtime = Self::runtime_transition(&tr, &id_map, &builder);
-                builder
-                    .timeline
-                    .connect(scene_ids[prev], scene_ids[i], runtime);
+                connections.push((scene_ids[prev], scene_ids[i], runtime));
             }
         }
+        builder.timeline.connect_all(connections);
 
         // Shader effects read parameters any segment may declare, so they
         // resolve once every object exists; echo copies then carry them.
@@ -3362,7 +3371,11 @@ impl SceneModel {
             .commands
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
-        checkpoint
+        Compiled {
+            checkpoint,
+            ids: id_map,
+            end_time: builder.current_time,
+        }
     }
 
     /// Compile the scene into a scratch world and return every layout

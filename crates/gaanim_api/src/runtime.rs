@@ -6,7 +6,8 @@ use gaanim_renderer::pipeline::GaanimFullWindowClearCamera;
 use gaanim_renderer::prelude::VelloView;
 use gaanim_timeline::timeline::Timeline;
 
-use crate::canvas::{CompileCheckpoint, SceneFingerprints, SceneModel, SegmentMarker};
+use crate::canvas::{CompileCheckpoint, Compiled, SceneFingerprints, SceneModel, SegmentMarker};
+use gaanim_core::ObjectId;
 use gaanim_scene::prelude::{ArchetypeId, ComponentId, Tick};
 use std::sync::{Arc, Mutex};
 
@@ -152,6 +153,33 @@ pub struct RetainedReplay {
     _canvas: SceneModel,
     fingerprints: SceneFingerprints,
     checkpoint: Option<RetainedCheckpoint>,
+    /// The compiled object that stands for each authored object.
+    ids: std::collections::HashMap<ObjectId, ObjectId>,
+    /// The compiled clock after the last segment.
+    end_time: f64,
+}
+
+impl RetainedReplay {
+    /// The compiled object that stands for authored object `id`.
+    pub(crate) fn runtime_id(&self, id: ObjectId) -> Option<ObjectId> {
+        self.ids.get(&id).copied()
+    }
+
+    /// The compiled clock after the last segment.
+    pub(crate) fn end_time(&self) -> f64 {
+        self.end_time
+    }
+}
+
+/// What a replay keeps its checkpoint for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplayGoal {
+    /// An editor reload: profiled, with its checkpoint where this revision
+    /// first differs from the previous one, where editing happens.
+    Reload,
+    /// A measurement while authoring: quiet, with its checkpoint at the
+    /// start of the last segment, where authoring continues.
+    Measure,
 }
 
 struct RetainedCheckpoint {
@@ -213,7 +241,31 @@ pub fn replay_canvas_incremental(
     allow_reuse: bool,
     clear_scene: impl FnOnce(&mut World),
 ) -> ReplayKind {
-    let mut timings = ReloadTimings::start();
+    replay_incremental_for(world, canvas, allow_reuse, clear_scene, ReplayGoal::Reload)
+}
+
+/// Replay `canvas` into `world` to measure its drawables while authoring:
+/// what an earlier replay of the scene into `world` compiled is reused as a
+/// reload would, and the checkpoint waits at the start of the last segment,
+/// where authoring continues. `world` holds a `Timeline`, a `FontRegistry`
+/// and a `TextConfig`; `reset` empties it when nothing can be reused. The
+/// t=0 keyframe is left to the caller, as for a reload.
+pub(crate) fn replay_for_measuring(
+    world: &mut World,
+    canvas: SceneModel,
+    reset: impl FnOnce(&mut World),
+) -> ReplayKind {
+    replay_incremental_for(world, canvas, true, reset, ReplayGoal::Measure)
+}
+
+fn replay_incremental_for(
+    world: &mut World,
+    canvas: SceneModel,
+    allow_reuse: bool,
+    clear_scene: impl FnOnce(&mut World),
+    goal: ReplayGoal,
+) -> ReplayKind {
+    let mut timings = ReloadTimings::start(goal == ReplayGoal::Reload);
     let previous = world.remove_resource::<RetainedReplay>();
     let Some(fingerprints) = scene_fingerprints(world, &canvas) else {
         clear_scene(world);
@@ -235,7 +287,7 @@ pub fn replay_canvas_incremental(
             return kind;
         }
         Some(previous) if allow_reuse => {
-            match try_incremental(world, &canvas, &fingerprints, previous, &mut timings) {
+            match try_incremental(world, &canvas, &fingerprints, previous, &mut timings, goal) {
                 Ok(kind) => {
                     timings.report(kind);
                     return kind;
@@ -247,7 +299,7 @@ pub fn replay_canvas_incremental(
     };
     clear_scene(world);
     timings.phase("clear");
-    replay_full_retained(world, canvas, fingerprints, previous.as_ref());
+    replay_full_retained(world, canvas, fingerprints, previous.as_ref(), goal);
     timings.phase("full compile");
     timings.report(ReplayKind::Full);
     ReplayKind::Full
@@ -260,8 +312,9 @@ struct ReloadTimings {
 }
 
 impl ReloadTimings {
-    fn start() -> Self {
-        let enabled = crate::canvas::reload_profile_enabled();
+    /// Timings printed with the profile when `report` holds.
+    fn start(report: bool) -> Self {
+        let enabled = report && crate::canvas::reload_profile_enabled();
         if enabled {
             crate::canvas::time_segments();
         }
@@ -304,6 +357,14 @@ impl ReloadTimings {
             );
         }
     }
+}
+
+/// Drop `value` on another thread: freeing a large scene takes a while
+/// that whoever replaced it need not wait.
+pub(crate) fn drop_elsewhere<T: Send + 'static>(value: T) {
+    let _ = std::thread::Builder::new()
+        .name("gaanim-drop".into())
+        .spawn(move || drop(value));
 }
 
 fn scene_fingerprints(world: &mut World, canvas: &SceneModel) -> Option<SceneFingerprints> {
@@ -424,10 +485,13 @@ fn replay_full_retained(
     canvas: SceneModel,
     fingerprints: SceneFingerprints,
     previous: Option<&SceneFingerprints>,
+    goal: ReplayGoal,
 ) {
-    let checkpoint_at = previous
-        .map(|previous| previous.shared_prefix(&fingerprints))
-        .filter(|&index| index > 0);
+    let checkpoint_at = match goal {
+        ReplayGoal::Reload => previous.map(|previous| previous.shared_prefix(&fingerprints)),
+        ReplayGoal::Measure => Some(fingerprints.segment_count().saturating_sub(1)),
+    }
+    .filter(|&index| index > 0);
     let record = Arc::new(Mutex::new(MarkerRecord::default()));
     let markers = checkpoint_at
         .map(|index| {
@@ -440,7 +504,7 @@ fn replay_full_retained(
             ]
         })
         .unwrap_or_default();
-    let checkpoint = replay_prepared(world, &canvas, |commands, timeline, fonts, text_config| {
+    let compiled = replay_prepared(world, &canvas, |commands, timeline, fonts, text_config| {
         canvas.compile_resumable(
             commands,
             timeline,
@@ -450,9 +514,17 @@ fn replay_full_retained(
             checkpoint_at,
             markers,
         )
-    })
-    .flatten();
+    });
     world.flush();
+    let Compiled {
+        checkpoint,
+        ids,
+        end_time,
+    } = compiled.unwrap_or_else(|| Compiled {
+        checkpoint: None,
+        ids: Default::default(),
+        end_time: 0.0,
+    });
     let checkpoint = checkpoint
         .filter(|_| !marker_entities_touched(&record))
         .and_then(|compile| {
@@ -465,6 +537,8 @@ fn replay_full_retained(
         _canvas: canvas,
         fingerprints,
         checkpoint,
+        ids,
+        end_time,
     });
 }
 
@@ -477,6 +551,7 @@ fn try_incremental(
     fingerprints: &SceneFingerprints,
     previous: RetainedReplay,
     timings: &mut ReloadTimings,
+    goal: ReplayGoal,
 ) -> Result<ReplayKind, Option<SceneFingerprints>> {
     let RetainedReplay {
         fingerprints: previous_fingerprints,
@@ -538,26 +613,41 @@ fn try_incremental(
     // The segments compiled next apply their own changes again, so the t=0
     // keyframe is then captured from the world as after a full replay.
     let this_run = world.read_change_tick();
-    checkpoint.base.restore_selected(world, |world, _, entity| {
-        let entity = world.entity(entity);
-        checkpoint.archetypes.get(&entity.id()) != Some(&entity.archetype().id())
-            || entity.archetype().components().iter().any(|&component| {
-                entity
-                    .get_change_ticks_by_id(component)
-                    .is_some_and(|ticks| ticks.is_changed(checkpoint.spawned_after, this_run))
-            })
+    // The compile works on copies of the checkpoint's timeline and cursor,
+    // made while the kept entities are restored.
+    let (mut restored, cursor) = std::thread::scope(|scope| {
+        let copies = scope.spawn(|| {
+            (
+                checkpoint.compile.timeline.clone(),
+                checkpoint.compile.cursor.clone(),
+            )
+        });
+        checkpoint.base.restore_selected(world, |world, _, entity| {
+            let entity = world.entity(entity);
+            checkpoint.archetypes.get(&entity.id()) != Some(&entity.archetype().id())
+                || entity.archetype().components().iter().any(|&component| {
+                    entity
+                        .get_change_ticks_by_id(component)
+                        .is_some_and(|ticks| ticks.is_changed(checkpoint.spawned_after, this_run))
+                })
+        });
+        copies.join().expect("copying the checkpoint panicked")
     });
-    let mut restored = checkpoint.compile.timeline.clone();
     let mut timeline = world.resource_mut::<Timeline>();
     restored.playback_rate = timeline.playback_rate;
     restored.loop_range = timeline.loop_range;
     restored.is_playing = false;
-    *timeline = restored;
+    drop_elsewhere(std::mem::replace(&mut *timeline, restored));
     timings.phase("restore");
 
     // Move the checkpoint to this revision's first change so the next edit
-    // at the same place recompiles as little as possible.
-    let advance_to = (shared > resume_at).then_some(shared);
+    // at the same place recompiles as little as possible; a measurement
+    // moves it to where authoring continues.
+    let target = match goal {
+        ReplayGoal::Reload => shared,
+        ReplayGoal::Measure => fingerprints.segment_count().saturating_sub(1),
+    };
+    let advance_to = (target > resume_at).then_some(target);
     let kept_record = Arc::new(Mutex::new(MarkerRecord::default()));
     let advanced_record = Arc::new(Mutex::new(MarkerRecord::default()));
     let mut markers = vec![(resume_at, segment_marker(kept_record.clone(), false))];
@@ -574,7 +664,7 @@ fn try_incremental(
             timeline,
             fonts,
             text_config,
-            Some(checkpoint.compile.cursor.clone()),
+            Some(cursor),
             advance_to,
             markers,
         )
@@ -590,6 +680,11 @@ fn try_incremental(
         return Err(Some(previous_fingerprints));
     }
 
+    let Compiled {
+        checkpoint: advanced,
+        ids,
+        end_time,
+    } = advanced;
     let checkpoint = match advanced {
         Some(compile) if !marker_entities_touched(&advanced_record) => RetainedCheckpoint::marked(
             compile,
@@ -602,6 +697,8 @@ fn try_incremental(
         _canvas: canvas.clone(),
         fingerprints: fingerprints.clone(),
         checkpoint: Some(checkpoint),
+        ids,
+        end_time,
     });
     Ok(ReplayKind::Incremental {
         reused: resume_at,
