@@ -372,6 +372,24 @@ pub enum PropertyLensSpec {
         from_far: f64,
         to_far: f64,
     },
+    /// Move the 2D camera along a world-space path at height `z`, turned to
+    /// the path's tangent plus `orient` radians when set.
+    CameraPathFollow {
+        path: BezPath,
+        z: f64,
+        orient: Option<f64>,
+    },
+    /// A dolly zoom: the camera moves along its line of sight to `factor`
+    /// times its distance from `target` while the field of view keeps the
+    /// target's plane the same size (`gaanim_math::dolly_zoom`).
+    CameraDollyZoom {
+        from_position: gaanim_core::glam::DVec3,
+        target: gaanim_core::glam::DVec3,
+        from_fov: f64,
+        near: f64,
+        far: f64,
+        factor: f64,
+    },
     /// Move the entity's translation along a Bézier path. Sampled at
     /// the rate-function-eased `t` and applied as the entity's
     /// world-space translation.
@@ -519,6 +537,26 @@ impl PropertyLensSpec {
             Self::CameraPosition { from, to } => PropertyLens::CameraPosition {
                 from: *from,
                 to: *to,
+            },
+            Self::CameraPathFollow { path, z, .. } => {
+                let (start, end) = (
+                    gaanim_math::get_point_at_alpha(path, 0.0),
+                    gaanim_math::get_point_at_alpha(path, 1.0),
+                );
+                PropertyLens::CameraPosition {
+                    from: gaanim_core::glam::DVec3::new(start.x, start.y, *z),
+                    to: gaanim_core::glam::DVec3::new(end.x, end.y, *z),
+                }
+            }
+            Self::CameraDollyZoom {
+                from_position,
+                target,
+                from_fov,
+                factor,
+                ..
+            } => PropertyLens::CameraPosition {
+                from: *from_position,
+                to: gaanim_math::dolly_zoom(*from_position, *target, *from_fov, *factor, 1.0).0,
             },
             Self::CameraPositionSource { from, to } => PropertyLens::CameraPositionSource {
                 from: *from,

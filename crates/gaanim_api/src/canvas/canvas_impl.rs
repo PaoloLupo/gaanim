@@ -1568,6 +1568,14 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         SpinInFromNothing => &["scale", "rotation"],
         Create3D => &["scale", "opacity"],
         Indicate { .. } => &["scale", "fill"],
+        CameraFollowPath {
+            follow:
+                crate::anim::PathFollowOptions {
+                    orient: Some(_), ..
+                },
+            ..
+        } => &["camera_pose", "camera_rotation"],
+        CameraDollyZoom { .. } => &["camera_pose", "camera_projection"],
         Transform { .. } | ReplacementTransform { .. } | MagicMove { .. } => &[
             "translation",
             "rotation",
@@ -1619,6 +1627,8 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | CameraLookAtSource { .. }
         | CameraOrbit { .. }
         | CameraDolly { .. }
+        | CameraFollowPath { .. }
+        | CameraWhipPan { .. }
         | CameraState { .. }
         | CameraReset => "camera_pose",
         CameraZoom { .. }
@@ -5209,6 +5219,54 @@ impl SceneModel {
     /// Dolly camera toward/away from target (factor <1 closer).
     pub fn camera_dolly(&mut self, factor: f64, duration: f64) -> Anim {
         self.camera_anim(AnimationType::CameraDolly { factor }, duration)
+    }
+
+    /// Move the 2D camera along the path of `route`, read in scene
+    /// coordinates when the animation is scheduled. With `follow.orient`
+    /// the view turns so the direction of travel points right on screen,
+    /// plus that offset (`-π/2` puts it up).
+    pub fn camera_follow_path(
+        &mut self,
+        route: &DrawableHandle,
+        follow: crate::anim::PathFollowOptions,
+        duration: f64,
+    ) -> Result<Anim, String> {
+        if !Arc::ptr_eq(&route.state, &self.state) {
+            return Err("the camera's route must belong to this scene".to_string());
+        }
+        if !(follow.start.is_finite() && follow.end.is_finite())
+            || !(0.0..=1.0).contains(&follow.start)
+            || !(0.0..=1.0).contains(&follow.end)
+            || follow.start == follow.end
+        {
+            return Err("start and end must be different fractions in [0, 1]".to_string());
+        }
+        if follow.orient.is_some_and(|offset| !offset.is_finite()) {
+            return Err("rotate_offset must be finite".to_string());
+        }
+        Ok(self.camera_anim(
+            AnimationType::CameraFollowPath {
+                route: route.id,
+                follow,
+            },
+            duration,
+        ))
+    }
+
+    /// A whip pan to `target`: a fast move eased hard at both ends. With
+    /// `blur`, exported frames and snapshots of the move get a 360° motion
+    /// blur window, whatever the scene's own motion blur.
+    pub fn camera_whip_pan(&mut self, target: CanvasEndpoint, blur: bool, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraWhipPan { target, blur }, duration)
+    }
+
+    /// A dolly zoom (vertigo shot) to `factor` times the distance from the
+    /// look-at target; needs a perspective camera aimed with `look_at`.
+    pub fn camera_dolly_zoom(&mut self, factor: f64, duration: f64) -> Result<Anim, String> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Err("factor must be finite and positive".to_string());
+        }
+        Ok(self.camera_anim(AnimationType::CameraDollyZoom { factor }, duration))
     }
 
     fn camera_binding(

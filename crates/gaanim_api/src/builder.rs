@@ -340,6 +340,25 @@ fn arrow_spine(shape: &gaanim_math::ArrowShape) -> gaanim_core::kurbo::BezPath {
     spine
 }
 
+/// The part of `path` between the arc-length fractions `follow.start` and
+/// `follow.end`; `start > end` travels the same portion backwards.
+pub(crate) fn route_portion(
+    path: gaanim_core::kurbo::BezPath,
+    follow: crate::anim::PathFollowOptions,
+) -> gaanim_core::kurbo::BezPath {
+    let (from, to) = (follow.start.min(follow.end), follow.start.max(follow.end));
+    let path = if from <= 0.0 && to >= 1.0 {
+        path
+    } else {
+        gaanim_math::get_subpath_range(&path, from, to)
+    };
+    if follow.start > follow.end {
+        reverse_path(&path)
+    } else {
+        path
+    }
+}
+
 /// Reverses travel along `path`: subpaths run last to first, each backwards.
 fn reverse_path(path: &gaanim_core::kurbo::BezPath) -> gaanim_core::kurbo::BezPath {
     use gaanim_core::kurbo::{BezPath, PathEl};
@@ -836,6 +855,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) clipped: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
+    /// Time ranges whose frames get a motion blur of their own, such as
+    /// whip pans with `blur`.
+    pub(crate) motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
     /// Glyph layout and current offset of Texts laid on a path.
     pub(crate) text_paths: HashMap<
         ObjectId,
@@ -923,6 +945,7 @@ pub(crate) struct SceneBuilderState {
     connectors: HashSet<ObjectId>,
     clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
+    motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
     text_paths: HashMap<
         ObjectId,
         (
@@ -969,6 +992,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
             text_paths: self.text_paths.clone(),
+            motion_blur_windows: self.motion_blur_windows.clone(),
             camera_view_rests: self.camera_view_rests.clone(),
             text_motion: self.text_motion.clone(),
             persistent_objects: self.persistent_objects.clone(),
@@ -1015,6 +1039,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             clipped,
             text_tracking,
             text_paths,
+            motion_blur_windows,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -1057,6 +1082,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             clipped,
             text_tracking,
             text_paths,
+            motion_blur_windows,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -1367,6 +1393,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             clipped: HashSet::new(),
             text_tracking: HashMap::new(),
             text_paths: HashMap::new(),
+            motion_blur_windows: Vec::new(),
             camera_view_rests: HashMap::new(),
             text_motion: Default::default(),
             property_bindings: HashMap::new(),
@@ -1565,7 +1592,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraPerspective { .. }
             | AnimationType::CameraOrthographic { .. }
             | AnimationType::CameraReset
-            | AnimationType::CameraDolly { .. } => "Camera",
+            | AnimationType::CameraDolly { .. }
+            | AnimationType::CameraFollowPath { .. }
+            | AnimationType::CameraWhipPan { .. }
+            | AnimationType::CameraDollyZoom { .. } => "Camera",
             AnimationType::TextMotion(_) => "TextMotion",
             AnimationType::Properties { .. } => "Properties",
             AnimationType::Write { .. } => "Write",
@@ -3655,6 +3685,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraOrthographic { .. }
             | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. }
+            | AnimationType::CameraFollowPath { .. }
+            | AnimationType::CameraWhipPan { .. }
+            | AnimationType::CameraDollyZoom { .. }
             | AnimationType::TextMotion(_)
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }
@@ -6668,6 +6701,21 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// translation is sampled from the Bézier path at the eased `t`
     /// (parametric, not arc-length uniform). Updates the tracked state
     /// so the final translation equals `path(1.0)`.
+    /// The path `target_id` travels along in scene coordinates as it is
+    /// now; a solid arrow is travelled along its axis, not around its
+    /// silhouette, unless its geometry changed after spawning.
+    pub(crate) fn world_route(&self, target_id: ObjectId) -> Option<gaanim_core::kurbo::BezPath> {
+        let state = self.states.get(target_id)?;
+        let mut path = self
+            .arrow_shapes
+            .get(&target_id)
+            .filter(|shape| *state.path == shape.path())
+            .map(arrow_spine)
+            .unwrap_or_else(|| (*state.path).clone());
+        path.apply_affine(self.get_world_transform(target_id).to_affine_2d());
+        Some(path)
+    }
+
     fn play_move_along_path_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let (path_arg, path_target, follow) = match &anim.anim_type {
             AnimationType::MoveAlongPath {
@@ -6678,37 +6726,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             _ => unreachable!(),
         };
 
-        let path = if let Some(target_id) = path_target {
-            if let Some(state) = self.states.get(target_id) {
-                // A solid arrow is travelled along its axis, not around its
-                // silhouette, unless its geometry changed after spawning.
-                let mut p = self
-                    .arrow_shapes
-                    .get(&target_id)
-                    .filter(|shape| *state.path == shape.path())
-                    .map(arrow_spine)
-                    .unwrap_or_else(|| (*state.path).clone());
-                let world_affine = self.get_world_transform(target_id).to_affine_2d();
-                p.apply_affine(world_affine);
-                p
-            } else {
-                path_arg
-            }
-        } else {
-            path_arg
-        };
-        // `start > end` travels the same portion backwards.
-        let (from, to) = (follow.start.min(follow.end), follow.start.max(follow.end));
-        let path = if from <= 0.0 && to >= 1.0 {
-            path
-        } else {
-            gaanim_math::get_subpath_range(&path, from, to)
-        };
-        let path = if follow.start > follow.end {
-            reverse_path(&path)
-        } else {
-            path
-        };
+        let path = path_target
+            .and_then(|target_id| self.world_route(target_id))
+            .unwrap_or(path_arg);
+        let path = route_portion(path, follow);
 
         // Resolve and persist the final translation so subsequent
         // animations build on top of the new position. The entity keeps its

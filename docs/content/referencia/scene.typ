@@ -1413,6 +1413,45 @@ scene.play([scene.camera.animate.shake(trauma=0.4, seed=3)])  # un golpe más le
 ]
 
 #api-entry(
+  name: "CameraAnimation.follow_path",
+  kind: "method",
+  params: (
+    (name: "route", type: "Drawable", desc: [Drawable cuya trayectoria recorre la cámara.]),
+    (name: "orient", type: "bool", default: "False", desc: [Gira la vista para que el sentido de avance apunte a la derecha de la pantalla.]),
+    (name: "rotate_offset", type: "float", default: "0.0", desc: [Giro extra en radianes; `-math.pi / 2` apunta el avance hacia arriba.]),
+    (name: "start / end", type: "float", default: "0.0 / 1.0", desc: [Tramo recorrido, como fracciones de longitud de arco; `start > end` lo recorre al revés.]),
+  ),
+  returns: (type: "Anim", desc: [Recorrido de la cámara.]),
+  desc: [Lee la trayectoria en coordenadas de escena cuando se reproduce la animación, como `Anim.move_along`. El giro de `orient` se calcula en cada fotograma, así que nunca salta. Easing predeterminado: suave. Una ruta de otra escena, `start` o `end` fuera de `[0, 1]` o iguales, o un `rotate_offset` no finito lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+route = scene.geometry.path([(-6, -2), (-2, 2), (2, -2), (6, 2)])
+scene.play([scene.camera.animate.follow_path(route, orient=True).duration(4)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.whip_pan",
+  kind: "method",
+  params: (
+    (name: "to / y", type: "Endpoint | float", desc: [Destino, como en `pan_to`.]),
+    (name: "blur", type: "bool", default: "True", desc: [Desenfoque de movimiento en los fotogramas del barrido.]),
+  ),
+  returns: (type: "Anim", desc: [Barrido rápido.]),
+  desc: [Paneo rápido de 0.4 s salvo `.duration`, con easing exponencial de entrada y salida: casi todo el recorrido ocurre en un instante a mitad de camino. Con `blur`, los fotogramas exportados y los snapshots del barrido reciben un desenfoque de movimiento de 360° y 24 subfotogramas aunque la escena no tenga uno propio; la vista previa sigue nítida, como con `canvas.motion_blur`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+section_b = scene.text("B", role="title").move_to(16, 0)
+scene.play([scene.camera.animate.whip_pan(section_b)])
+scene.play([scene.camera.animate.whip_pan(0, 0, blur=False).duration(0.3)])
+```
+]
+
+#api-entry(
   name: "CameraAnimation.orthographic",
   kind: "method",
   params: ((name: "zoom", type: "float", default: "1.0", desc: [Zoom positivo.]),),
@@ -1830,6 +1869,22 @@ scene.play([scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(
 >>>scene = Scene(frame=(16, 9))
 >>>scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
 scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.6)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.dolly_zoom",
+  kind: "method",
+  params: ((name: "factor", type: "float", default: none, desc: [Multiplicador positivo de la distancia al objetivo.]),),
+  returns: (type: "Anim", desc: [Efecto vértigo.]),
+  desc: [La cámara avanza o retrocede por su línea de visión hasta `factor` veces su distancia al objetivo de `look_at` mientras el campo de visión cambia para que el plano del objetivo conserve su tamaño en pantalla: el fondo se estira (`factor` mayor que 1) o se precipita. La distancia cambia exponencialmente. Solo el contenido 3D lo muestra, porque la capa 2D no se mueve con una cámara en perspectiva. Sin `perspective` o con la cámara sobre su objetivo avisa y no hace nada. Un `factor` no finito o no positivo lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.perspective(fov_y=0.6)
+scene.camera.look_at(eye=(0, 1, 8), target=(0, 0, 0))
+scene.play([scene.camera.animate.dolly_zoom(1.8).duration(2.0)])
 ```
 ]
 

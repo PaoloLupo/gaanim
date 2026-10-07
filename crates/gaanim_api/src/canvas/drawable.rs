@@ -1146,6 +1146,9 @@ impl DrawableHandle {
             };
             mesh.material = Some(material);
             spec.material_animation_cursor = Some(material);
+            if let Some(extrusion) = &mut spec.extrusion {
+                extrusion.material = Some(material);
+            }
         }
         Ok(self)
     }
