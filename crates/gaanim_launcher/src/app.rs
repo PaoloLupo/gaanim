@@ -489,7 +489,9 @@ fn attach_script_session(
             while !stop.load(Ordering::SeqCst) {
                 match changed_rx.recv_timeout(std::time::Duration::from_millis(250)) {
                     Ok(crate::file_watcher::ProjectChange::Source) => runner.request_rerun(),
-                    Ok(crate::file_watcher::ProjectChange::Assets) => runner.request_asset_reload(),
+                    Ok(crate::file_watcher::ProjectChange::Assets(changed)) => {
+                        runner.request_asset_reload(changed)
+                    }
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     Err(_) => break,
                 }

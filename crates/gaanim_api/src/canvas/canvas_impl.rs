@@ -2119,6 +2119,18 @@ impl ImageCache {
         self.entries.clear();
         self.bytes = 0;
     }
+
+    /// Forget the images decoded from the files `changed`.
+    fn forget(&mut self, changed: &gaanim_renderer::lottie::ChangedFiles) {
+        let bytes = &mut self.bytes;
+        self.entries.retain(|path, (image, _)| {
+            let keep = !changed.contains(path);
+            if !keep {
+                *bytes -= image.data.len();
+            }
+            keep
+        });
+    }
 }
 
 /// Drop every process-local cache of files read by scenes (raster images,
@@ -2130,6 +2142,20 @@ pub fn clear_asset_caches() {
     }
     gaanim_renderer::lottie::clear_lottie_cache();
     gaanim_text::typst_compiler::clear_typst_layout_cache();
+}
+
+/// Forget what the process-local caches hold from the files `changed` (raster
+/// images, Lottie JSON and the images it references, dotLottie packages), so
+/// the next compile reads them from disk again. Typst layouts read no
+/// project file and stay. Anything else the scene holds from a file was
+/// read while authoring, and reaches the replay's fingerprints: a new image
+/// is a new allocation, the rest is content.
+pub fn forget_assets(changed: &[PathBuf]) {
+    let changed = gaanim_renderer::lottie::ChangedFiles::new(changed);
+    if let Some(cache) = IMAGE_CACHE.get() {
+        cache.lock().expect("image cache poisoned").forget(&changed);
+    }
+    gaanim_renderer::lottie::forget_lottie_files(&changed);
 }
 
 fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, ImageLoadError> {
@@ -7950,6 +7976,29 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forgetting_an_image_reads_it_again_and_keeps_the_others() {
+        let temp = tempfile::tempdir().unwrap();
+        let write = |name: &str, shade: u8| {
+            let path = temp.path().join(name);
+            image::RgbaImage::from_pixel(2, 2, image::Rgba([shade, 0, 0, 255]))
+                .save(&path)
+                .unwrap();
+            path
+        };
+        let cover = write("cover.png", 10);
+        let logo = write("logo.png", 20);
+        let id = |path: &Path| load_image(path).unwrap().data.id();
+        let (cover_id, logo_id) = (id(&cover), id(&logo));
+        assert_eq!(id(&cover), cover_id, "cached");
+
+        write("cover.png", 30);
+        forget_assets(std::slice::from_ref(&cover));
+        assert_ne!(id(&cover), cover_id, "read again");
+        assert_eq!(load_image(&cover).unwrap().data.data()[0], 30);
+        assert_eq!(id(&logo), logo_id, "another file stays cached");
+    }
 
     #[test]
     fn image_cache_forgets_the_least_recently_used_images_past_its_budget() {

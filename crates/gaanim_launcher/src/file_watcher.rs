@@ -12,13 +12,21 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// What changed in the project since the last notification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectChange {
     /// Only Python sources changed.
     Source,
-    /// A non-Python project file changed (images, SVG, Lottie, WGSL, Typst,
-    /// data, ...); cached assets must be read again.
-    Assets,
+    /// These non-Python project files changed (images, SVG, Lottie, WGSL,
+    /// data, ...), with or without sources; cached copies of them must be
+    /// read again.
+    Assets(Vec<PathBuf>),
+}
+
+/// How a change to one file affects the scene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileKind {
+    Source,
+    Asset,
 }
 
 /// Handle to the watcher thread. Exposes a [`Receiver`](mpsc::Receiver) that
@@ -63,9 +71,9 @@ impl WatchScope {
     }
 
     /// How a change to `path` affects the scene, if at all.
-    fn classify(&self, path: &Path) -> Option<ProjectChange> {
+    fn classify(&self, path: &Path) -> Option<FileKind> {
         if path == self.script_path {
-            return Some(ProjectChange::Source);
+            return Some(FileKind::Source);
         }
         let relative = path.strip_prefix(&self.root).ok()?;
         let ignored = relative
@@ -88,9 +96,9 @@ impl WatchScope {
             return None;
         }
         Some(if extension == "py" {
-            ProjectChange::Source
+            FileKind::Source
         } else {
-            ProjectChange::Assets
+            FileKind::Asset
         })
     }
 
@@ -287,16 +295,16 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
                 if reload_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     reload_deadline = None;
                     if let Some(change) = std::mem::take(&mut pending).settle(&scope) {
-                        console::info(
-                            "reload",
-                            format!(
-                                "{} changed",
-                                match change {
-                                    ProjectChange::Source => "Python source",
-                                    ProjectChange::Assets => "project asset",
-                                }
-                            ),
-                        );
+                        let what = match &change {
+                            ProjectChange::Source => "Python source".to_string(),
+                            ProjectChange::Assets(paths) if paths.len() == 1 => {
+                                console::display_path(&paths[0])
+                            }
+                            ProjectChange::Assets(paths) => {
+                                format!("{} project files", paths.len())
+                            }
+                        };
+                        console::info("reload", format!("{what} changed"));
                         let _ = changed_tx.send(change);
                     }
                 }
@@ -306,9 +314,23 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
     }
 }
 
-/// The strongest change among `paths`: any asset outranks sources.
+/// What a change to `paths` means for the scene: the assets among them,
+/// which outrank sources, or a source change.
 fn event_change(paths: &[PathBuf], scope: &WatchScope) -> Option<ProjectChange> {
-    paths.iter().filter_map(|path| scope.classify(path)).max()
+    let mut source = false;
+    let mut assets = Vec::new();
+    for path in paths {
+        match scope.classify(path) {
+            Some(FileKind::Asset) => assets.push(path.clone()),
+            Some(FileKind::Source) => source = true,
+            None => {}
+        }
+    }
+    if !assets.is_empty() {
+        Some(ProjectChange::Assets(assets))
+    } else {
+        source.then_some(ProjectChange::Source)
+    }
 }
 
 #[cfg(test)]
@@ -391,7 +413,7 @@ mod tests {
         ] {
             assert_eq!(
                 event_change(&[temp.path().join(asset)], &scope),
-                Some(ProjectChange::Assets),
+                Some(ProjectChange::Assets(vec![temp.path().join(asset)])),
                 "{asset}"
             );
         }
@@ -404,7 +426,9 @@ mod tests {
                 ],
                 &scope
             ),
-            Some(ProjectChange::Assets)
+            Some(ProjectChange::Assets(vec![
+                temp.path().join("assets/a.png")
+            ]))
         );
         for ignored in [
             "assets/.cover.png.swp",
@@ -531,7 +555,10 @@ mod tests {
             event(EventKind::Create(CreateKind::Any), &[&cover]),
             event(EventKind::Modify(ModifyKind::Any), &[&assets]),
         ];
-        assert_eq!(settle(&scope, &added), Some(ProjectChange::Assets));
+        assert_eq!(
+            settle(&scope, &added),
+            Some(ProjectChange::Assets(vec![cover.clone()]))
+        );
 
         // An asset deleted, or renamed away, is a change too.
         let removed = assets.join("logo.svg");
@@ -540,7 +567,7 @@ mod tests {
                 &scope,
                 &[event(EventKind::Remove(RemoveKind::Any), &[&removed])]
             ),
-            Some(ProjectChange::Assets)
+            Some(ProjectChange::Assets(vec![removed.clone()]))
         );
         assert_eq!(
             settle(
@@ -550,7 +577,7 @@ mod tests {
                     &[&removed]
                 )]
             ),
-            Some(ProjectChange::Assets)
+            Some(ProjectChange::Assets(vec![removed.clone()]))
         );
         // A folder alone reports only that its entries changed.
         assert_eq!(

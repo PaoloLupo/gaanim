@@ -52,9 +52,11 @@ pub struct PythonPlugin {
 pub trait ScriptSession: Send + Sync {
     /// Run the script again after its source changed.
     fn request_rerun(&self);
-    /// Run the script again after project assets changed, reading them anew.
-    fn request_asset_reload(&self);
-    /// A [`ScriptSession::request_asset_reload`] that other threads can keep.
+    /// Run the script again after the project files `changed` changed,
+    /// reading cached copies of them anew.
+    fn request_asset_reload(&self, changed: Vec<PathBuf>);
+    /// A request, that other threads can keep, to run the script again
+    /// reading every asset anew and replaying the whole scene.
     fn asset_reload_handle(&self) -> Box<dyn Fn() + Send + Sync>;
 }
 

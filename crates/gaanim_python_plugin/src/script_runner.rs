@@ -68,27 +68,51 @@ impl ScriptRunner {
         let _ = self.rerun_tx.send(Rerun::Source);
     }
 
-    /// Re-run the script after project assets changed: cached images,
-    /// Lottie, glTF, and Typst layouts are read again and the scene is
-    /// replayed in full.
-    pub fn request_asset_reload(&self) {
-        let _ = self.rerun_tx.send(Rerun::Assets);
+    /// Re-run the script after the project files `changed` changed: the
+    /// cached images and Lottie compositions read from them are read again,
+    /// and the replay recompiles from the first segment whose content
+    /// changed with them.
+    pub fn request_asset_reload(&self, changed: Vec<PathBuf>) {
+        let _ = self.rerun_tx.send(Rerun::Assets(changed));
     }
 
-    /// An asset reload request that other threads and systems can keep.
+    /// A request that other threads and systems can keep to re-run the
+    /// script reading every cached asset (images, Lottie, Typst layouts)
+    /// anew and replaying the whole scene, e.g. after narration takes.
     pub fn asset_reload_handle(&self) -> impl Fn() + Send + Sync + 'static {
         let rerun_tx = self.rerun_tx.clone();
         move || {
-            let _ = rerun_tx.send(Rerun::Assets);
+            let _ = rerun_tx.send(Rerun::AllAssets);
         }
     }
 }
 
 /// Why the script runs again.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Rerun {
     Source,
-    Assets,
+    /// These project files changed.
+    Assets(Vec<PathBuf>),
+    /// Any asset may have changed.
+    AllAssets,
+}
+
+impl Rerun {
+    /// One request standing for `self` and `next`, queued while the script
+    /// ran.
+    fn merge(self, next: Self) -> Self {
+        match (self, next) {
+            (Rerun::AllAssets, _) | (_, Rerun::AllAssets) => Rerun::AllAssets,
+            (Rerun::Assets(mut paths), Rerun::Assets(more)) => {
+                paths.extend(more);
+                Rerun::Assets(paths)
+            }
+            (Rerun::Assets(paths), Rerun::Source) | (Rerun::Source, Rerun::Assets(paths)) => {
+                Rerun::Assets(paths)
+            }
+            (Rerun::Source, Rerun::Source) => Rerun::Source,
+        }
+    }
 }
 
 fn format_py_traceback(py: Python<'_>, err: &PyErr) -> String {
@@ -189,12 +213,15 @@ fn run_script_thread(
         match rerun_rx.recv() {
             Ok(first) => {
                 // Coalesce requests queued while the script ran.
-                let reason = rerun_rx.try_iter().fold(first, |reason, next| {
-                    if next == Rerun::Assets { next } else { reason }
-                });
-                if reason == Rerun::Assets {
-                    gaanim_api::canvas::clear_asset_caches();
-                    gaanim_api::host::mark_assets_changed();
+                match rerun_rx.try_iter().fold(first, Rerun::merge) {
+                    Rerun::Source => {}
+                    // What the forgotten files fed the scene reaches the
+                    // replay's fingerprints, so it can still reuse segments.
+                    Rerun::Assets(changed) => gaanim_api::canvas::forget_assets(&changed),
+                    Rerun::AllAssets => {
+                        gaanim_api::canvas::clear_asset_caches();
+                        gaanim_api::host::mark_assets_changed();
+                    }
                 }
             }
             Err(_) => break,
