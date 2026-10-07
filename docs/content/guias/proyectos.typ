@@ -128,7 +128,10 @@ recursos, vuelve a ejecutar el script y recompila todos los segmentos.
 Se ignoran los archivos y carpetas ocultos (`.git`, `.venv`, archivos de
 intercambio del editor), `venv`, `env`, `__pycache__`, `exports`,
 `snapshots`, `target`, los temporales (`~`, `.swp`, `.tmp`, `.bak`) y los
-`.lock`.
+`.lock`. Un guardado cuenta por el archivo que guarda: las herramientas que
+escriben un temporal y lo renombran sobre el archivo (como `main.py.tmp.*`
+o el `sedXXXXXX` de `sed -i`) y la carpeta, que Windows también da por
+cambiada, no cuentan como cambios.
 
 == Módulos de Python del proyecto
 
