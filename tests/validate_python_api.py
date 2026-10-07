@@ -196,6 +196,11 @@ def validate_runtime_type_aliases(module: object) -> list[str]:
             failures.append(f"gaanim.{name} is not exported at runtime")
     if typing.get_args(getattr(package, "NavigationState", None)) != ("done", "current", "upcoming"):
         failures.append("gaanim.NavigationState does not list done, current and upcoming")
+    axonometric = getattr(package, "Axonometric", None)
+    if axonometric is not module.Axonometric or "Axonometric" not in package.__all__:
+        failures.append("gaanim.Axonometric is not exported at runtime")
+    elif not isinstance(scene.geometry.axonometric("isometric"), axonometric):
+        failures.append("scene.geometry.axonometric() did not return gaanim.Axonometric")
     return failures
 
 
