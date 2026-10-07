@@ -1327,6 +1327,30 @@ impl Timeline {
             .scene_bounds(from)
             .map(|(_, e)| e)
             .unwrap_or(self.current_time);
+        self.connect_ending_at(from, to, transition, from_end);
+    }
+
+    /// [`Self::connect`] for each `(from, to, transition)`, bounding the
+    /// scenes in one pass over the clips: transitions leave scene bounds as
+    /// they are, and each `connect` scans every clip.
+    pub fn connect_all(
+        &mut self,
+        connections: impl IntoIterator<Item = (SceneId, SceneId, TransitionType)>,
+    ) {
+        let bounds = self.scene_bounds_all();
+        for (from, to, transition) in connections {
+            let from_end = bounds.get(&from).map_or(self.current_time, |(_, end)| *end);
+            self.connect_ending_at(from, to, transition, from_end);
+        }
+    }
+
+    fn connect_ending_at(
+        &mut self,
+        from: SceneId,
+        to: SceneId,
+        transition: TransitionType,
+        from_end: f64,
+    ) {
         let duration = transition.duration();
         self.scene_connections.push(SceneConnection {
             from,
@@ -1348,9 +1372,11 @@ impl Timeline {
 
     /// Connects a sequence of scenes with the same transition type.
     pub fn sequence(&mut self, scenes: &[SceneId], default_transition: TransitionType) {
-        for window in scenes.windows(2) {
-            self.connect(window[0], window[1], default_transition.clone());
-        }
+        self.connect_all(
+            scenes
+                .windows(2)
+                .map(|window| (window[0], window[1], default_transition.clone())),
+        );
     }
 
     /// Changes whenever clips, keyframes or cached bounds change.

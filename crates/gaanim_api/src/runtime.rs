@@ -306,6 +306,14 @@ impl ReloadTimings {
     }
 }
 
+/// Drop `value` on another thread: freeing a large scene takes a while
+/// that whoever replaced it need not wait.
+pub(crate) fn drop_elsewhere<T: Send + 'static>(value: T) {
+    let _ = std::thread::Builder::new()
+        .name("gaanim-drop".into())
+        .spawn(move || drop(value));
+}
+
 fn scene_fingerprints(world: &mut World, canvas: &SceneModel) -> Option<SceneFingerprints> {
     let text_config =
         canvas.scene_text_config(world.get_resource::<gaanim_text::prelude::TextConfig>()?);
@@ -538,26 +546,41 @@ fn try_incremental(
     // The segments compiled next apply their own changes again, so the t=0
     // keyframe is then captured from the world as after a full replay.
     let this_run = world.read_change_tick();
-    checkpoint.base.restore_selected(world, |world, _, entity| {
-        let entity = world.entity(entity);
-        checkpoint.archetypes.get(&entity.id()) != Some(&entity.archetype().id())
-            || entity.archetype().components().iter().any(|&component| {
-                entity
-                    .get_change_ticks_by_id(component)
-                    .is_some_and(|ticks| ticks.is_changed(checkpoint.spawned_after, this_run))
-            })
+    // The compile works on copies of the checkpoint's timeline and cursor,
+    // made while the kept entities are restored.
+    let (mut restored, cursor) = std::thread::scope(|scope| {
+        let copies = scope.spawn(|| {
+            (
+                checkpoint.compile.timeline.clone(),
+                checkpoint.compile.cursor.clone(),
+            )
+        });
+        checkpoint.base.restore_selected(world, |world, _, entity| {
+            let entity = world.entity(entity);
+            checkpoint.archetypes.get(&entity.id()) != Some(&entity.archetype().id())
+                || entity.archetype().components().iter().any(|&component| {
+                    entity
+                        .get_change_ticks_by_id(component)
+                        .is_some_and(|ticks| ticks.is_changed(checkpoint.spawned_after, this_run))
+                })
+        });
+        copies.join().expect("copying the checkpoint panicked")
     });
-    let mut restored = checkpoint.compile.timeline.clone();
     let mut timeline = world.resource_mut::<Timeline>();
     restored.playback_rate = timeline.playback_rate;
     restored.loop_range = timeline.loop_range;
     restored.is_playing = false;
-    *timeline = restored;
+    drop_elsewhere(std::mem::replace(&mut *timeline, restored));
     timings.phase("restore");
 
     // Move the checkpoint to this revision's first change so the next edit
-    // at the same place recompiles as little as possible.
-    let advance_to = (shared > resume_at).then_some(shared);
+    // at the same place recompiles as little as possible; a measurement
+    // moves it to where authoring continues.
+    let target = match goal {
+        ReplayGoal::Reload => shared,
+        ReplayGoal::Measure => fingerprints.segment_count().saturating_sub(1),
+    };
+    let advance_to = (target > resume_at).then_some(target);
     let kept_record = Arc::new(Mutex::new(MarkerRecord::default()));
     let advanced_record = Arc::new(Mutex::new(MarkerRecord::default()));
     let mut markers = vec![(resume_at, segment_marker(kept_record.clone(), false))];
@@ -574,7 +597,7 @@ fn try_incremental(
             timeline,
             fonts,
             text_config,
-            Some(checkpoint.compile.cursor.clone()),
+            Some(cursor),
             advance_to,
             markers,
         )
