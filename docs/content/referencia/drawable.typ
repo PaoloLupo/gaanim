@@ -846,6 +846,71 @@ scene.render()
   none,
 )
 
+=== Anotaciones a mano alzada <anotaciones>
+
+#api-entry(
+  name: "Drawable.annotate",
+  kind: "property",
+  returns: (type: "Annotations", desc: [Constructor de anotaciones alrededor de este drawable.]),
+  desc: [Subrayados, cajas, círculos, tachados y corchetes con trazo de mano alzada, al estilo de rough-notation. Cada método devuelve un `Drawable` nuevo con trazo: las líneas tiemblan y se arquean como dibujadas a mano, y la forma se dibuja `passes` veces sobre sí misma con otro azar. La marca sigue los límites del objetivo en cada fotograma, conserva su garabato cuando el objetivo se mueve y permanece oculta hasta que un `play` la incluye, así que `marca.animate.create()` la dibuja pasada a pasada. Se puede desvanecer o reestilizar como cualquier drawable, pero se mueve moviendo su objetivo. La misma `seed` dibuja siempre el mismo garabato. También existe en las selecciones de texto (`TextSelection.annotate`); para resaltar con rotulador usa `TextSelection.marker`.],
+)[
+```python
+# output: rough_notation.webp
+# show-code: true
+from gaanim import *
+
+scene = Scene(frame=(16, 9))
+title = scene.text("Anotaciones", role="title").move_to(0, 2.6)
+card = scene.geometry.rounded_rect(3.2, 1.6, 0.2).fill(BLUE).move_to(-3.2, -0.6)
+word = scene.text("importante").move_to(3.2, -0.6)
+ul = title.annotate.underline(color=RED, seed=1)
+box = card.annotate.box(color=GOLD, seed=2)
+circle = word.annotate.circle(color=RED, seed=3)
+scene.play([ul.animate.create(), box.animate.create()], duration=1.2)
+scene.play([circle.animate.create()], duration=0.9)
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Annotations.underline / box / circle / strike_through / crossed_off",
+  kind: "method",
+  params: (
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Color del trazo; sin color se usa el trazo del tema.]),
+    (name: "width", type: "float | None", default: "None", desc: [Grosor del trazo; requiere `color`.]),
+    (name: "roughness", type: "float", default: "1.0", desc: [Escala del temblor: `0` dibuja geometría limpia y `1` el aspecto de rough-notation.]),
+    (name: "passes", type: "int", default: "2", desc: [Veces que se dibuja la forma, de 1 a 8.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla del garabato.]),
+    (name: "padding", type: "Padding | None", default: "None", desc: [Crecimiento de los límites del objetivo: escalar, `(vertical, horizontal)` o `(arriba, derecha, abajo, izquierda)`.]),
+  ),
+  returns: (type: "Drawable", desc: [La marca, oculta hasta que un `play` la incluye.]),
+  desc: [`underline` traza una línea bajo el objetivo (por defecto 0.08 por debajo y 0.04 a cada lado), `box` una caja (0.1 por lado), `circle` una elipse que pasa por el centro de cada lado acolchado (0.25 arriba y abajo, 0.35 a los lados), `strike_through` una línea por el centro (0.06 a cada lado) y `crossed_off` las dos diagonales (0.05 por lado). Un `roughness` o `padding` negativo o no finito, `passes` fuera de 1 a 8 o un `width` no positivo lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+price = scene.text("99 €")
+scene.play([price.annotate.crossed_off(color=RED, roughness=1.5, passes=1).animate.create()])
+```
+]
+
+#api-entry(
+  name: "Annotations.bracket",
+  kind: "method",
+  params: (
+    (name: "sides", type: "str | Sequence[str]", default: "(\"left\", \"right\")", desc: [Lados con corchete: `"left"`, `"right"`, `"top"` o `"bottom"`.]),
+  ),
+  returns: (type: "Drawable", desc: [Los corchetes, ocultos hasta que un `play` los incluye.]),
+  desc: [Corchetes a mano alzada en los lados elegidos; acepta los demás argumentos de `underline`, con `padding` de 0.05 arriba y abajo y 0.1 a los lados. Un lado desconocido lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+block = scene.text("primer paso\nsegundo paso")
+scene.play([block.annotate.bracket("left", color=BLUE).animate.create()])
+```
+]
+
 #api-entry(
   name: "Drawable.modifiers",
   kind: "property",

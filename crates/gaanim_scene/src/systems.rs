@@ -333,6 +333,130 @@ pub fn world_hud_pin(world: &bevy::prelude::World) -> Option<gaanim_core::kurbo:
     hud_pin(&camera)
 }
 
+/// World transform that moves a parallax layer at `depth` as if the camera
+/// sat `depth` times farther from it than from the scene plane.
+///
+/// The layer sees a camera centered at `position / depth`, zoomed by
+/// `zoom^(1/depth)` and with the same roll: depth 1 is the scene plane (no
+/// correction), larger depths drift and zoom less, smaller depths more, and
+/// an infinite depth only follows the roll. `None` when no correction applies,
+/// as with a perspective camera or an invalid depth.
+pub fn parallax_pin(
+    camera: &gaanim_math::Camera,
+    depth: f64,
+) -> Option<gaanim_core::kurbo::Affine> {
+    use gaanim_core::kurbo::Affine;
+    if !(depth > 0.0) {
+        return None;
+    }
+    let gaanim_math::Projection::Orthographic { zoom } = camera.projection else {
+        return None;
+    };
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return None;
+    }
+    let factor = depth.recip();
+    let view = |x: f64, y: f64, zoom: f64| {
+        Affine::translate((x, y)) * Affine::rotate(camera.z_angle()) * Affine::scale(zoom.recip())
+    };
+    // A point authored at `p` must sit at `pin * p` so that the real camera
+    // shows it where the layer's own camera would.
+    let pin = view(camera.position.x, camera.position.y, zoom)
+        * view(
+            camera.position.x * factor,
+            camera.position.y * factor,
+            zoom.powf(factor),
+        )
+        .inverse();
+    (pin != Affine::IDENTITY).then_some(pin)
+}
+
+/// [`parallax_pin`] of the camera a frame shows, read like [`world_hud_pin`].
+pub fn world_parallax_pin(
+    world: &bevy::prelude::World,
+    depth: f64,
+) -> Option<gaanim_core::kurbo::Affine> {
+    let camera = world
+        .get_resource::<gaanim_math::CameraViewOverride>()
+        .and_then(|view| view.0)
+        .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())?;
+    parallax_pin(&camera, depth)
+}
+
+/// System: move parallax layers by their share of the camera motion.
+///
+/// Runs after [`transform_propagation_system`] and before
+/// [`pin_hud_overlays_system`], recomposing every layer subtree under its
+/// [`parallax_pin`] like the HUD pin does. A layer nested in another layer
+/// follows the outer one only.
+#[allow(clippy::too_many_arguments)]
+pub fn pin_parallax_layers_system(
+    camera: Option<Res<gaanim_math::ResolvedCamera>>,
+    layers: Query<(Entity, &crate::components::ParallaxLayer)>,
+    children_query: Query<&'static Children>,
+    mut transforms: Query<(
+        &SpatialTransform,
+        &mut GlobalSpatialTransform,
+        Option<&crate::ShapeDeform>,
+    )>,
+    view_roles: Query<&'static CoordinateViewRole>,
+    label_offsets: Query<&'static CoordinateLabelOffset>,
+    parents: Query<&'static ChildOf>,
+    mut pinned: Local<EntityHashSet>,
+) {
+    let inside_layer = |entity: Entity| {
+        let mut current = entity;
+        for _ in 0..256 {
+            let Ok(parent) = parents.get(current).map(ChildOf::parent) else {
+                return false;
+            };
+            if layers.contains(parent) {
+                return true;
+            }
+            current = parent;
+        }
+        false
+    };
+    let mut now_pinned = EntityHashSet::default();
+    for (root, layer) in &layers {
+        let pin = camera
+            .as_deref()
+            .and_then(|camera| parallax_pin(camera, layer.depth));
+        // Unpinned layers are exactly what propagation produced; recompose
+        // once more after a pin ends so none keeps the last pinned placement.
+        if pin.is_none() && !pinned.contains(&root) || inside_layer(root) {
+            continue;
+        }
+        if pin.is_some() {
+            now_pinned.insert(root);
+        }
+        let pin = pin.unwrap_or(gaanim_core::kurbo::Affine::IDENTITY);
+        let pin = GlobalSpatialTransform::from_local(&SpatialTransform::from_affine_2d(&pin));
+        let parent_global = parents
+            .get(root)
+            .ok()
+            .and_then(|parent| transforms.get(parent.parent()).ok().map(|(_, g, _)| *g));
+        let pinned_parent = parent_global.map_or(pin, |parent| GlobalSpatialTransform {
+            affine_2d: pin.affine_2d * parent.affine_2d,
+            mat4: pin.mat4 * parent.mat4,
+        });
+        propagate_transforms_recursive(
+            root,
+            Some(pinned_parent),
+            true,
+            &mut transforms,
+            &Propagation {
+                children_query: &children_query,
+                view_roles: &view_roles,
+                label_offsets: &label_offsets,
+                parents: &parents,
+                stale: None,
+            },
+        );
+    }
+    *pinned = now_pinned;
+}
+
 /// System: pin HUD overlays to the output frame.
 ///
 /// Runs after [`transform_propagation_system`] and recomposes every HUD
@@ -352,9 +476,30 @@ pub fn pin_hud_overlays_system(
     view_roles: Query<&'static CoordinateViewRole>,
     label_offsets: Query<&'static CoordinateLabelOffset>,
     parents: Query<&'static ChildOf>,
+    layers: Query<&'static crate::components::ParallaxLayer>,
     mut pinned: Local<bool>,
 ) {
     let pin = camera.as_deref().and_then(|camera| hud_pin(camera));
+    // A HUD inside a parallax layer stays on screen: the layer's pin, which
+    // `pin_parallax_layers_system` put first in its parent's transform, is
+    // taken back out.
+    let parallax_unpin = |root: Entity| {
+        let mut depth = None;
+        let mut current = root;
+        for _ in 0..256 {
+            let Ok(parent) = parents.get(current).map(ChildOf::parent) else {
+                break;
+            };
+            if let Ok(layer) = layers.get(parent) {
+                depth = Some(layer.depth);
+            }
+            current = parent;
+        }
+        let camera = camera.as_deref()?;
+        parallax_pin(camera, depth?).map(|pin| {
+            GlobalSpatialTransform::from_local(&SpatialTransform::from_affine_2d(&pin.inverse()))
+        })
+    };
     // Unpinned HUD transforms are exactly what propagation produced; recompose
     // once more after a pin ends so none keeps the last pinned placement.
     if pin.is_none() && !*pinned {
@@ -368,8 +513,15 @@ pub fn pin_hud_overlays_system(
         if parent.is_some_and(|parent| hud.contains(parent)) {
             continue;
         }
-        let parent_global =
-            parent.and_then(|parent| transforms.get(parent).ok().map(|(_, g, _)| *g));
+        let parent_global = parent
+            .and_then(|parent| transforms.get(parent).ok().map(|(_, g, _)| *g))
+            .map(|parent| match parallax_unpin(root) {
+                Some(unpin) => GlobalSpatialTransform {
+                    affine_2d: unpin.affine_2d * parent.affine_2d,
+                    mat4: unpin.mat4 * parent.mat4,
+                },
+                None => parent,
+            });
         let pinned_parent = parent_global.map_or(pin, |parent| GlobalSpatialTransform {
             affine_2d: pin.affine_2d * parent.affine_2d,
             mat4: pin.mat4 * parent.mat4,
@@ -1050,6 +1202,109 @@ mod tests {
             global.affine_2d * gaanim_core::kurbo::Point::ORIGIN,
             (5.0, 3.0).into()
         );
+    }
+
+    #[test]
+    fn parallax_layers_move_by_their_share_of_the_camera_motion() {
+        use bevy::prelude::IntoScheduleConfigs;
+        use gaanim_core::glam::DVec3;
+        use gaanim_core::kurbo::Point;
+        let authored = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+        let mut moved = authored;
+        moved.position = DVec3::new(4.0, -2.0, 0.0);
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            moved,
+            gaanim_math::CameraViewport::default(),
+        ));
+        let spawn_layer = |world: &mut World, depth: f64| {
+            let layer = world
+                .spawn((
+                    SpatialTransform::default(),
+                    GlobalSpatialTransform::default(),
+                    crate::components::ParallaxLayer { depth },
+                ))
+                .id();
+            let child = world
+                .spawn((
+                    SpatialTransform::new_2d(1.0, 1.0),
+                    GlobalSpatialTransform::default(),
+                    ChildOf(layer),
+                ))
+                .id();
+            (layer, child)
+        };
+        let (far_layer, far) = spawn_layer(&mut world, 2.0);
+        // A HUD inside a layer stays on screen.
+        let hud = world
+            .spawn((
+                SpatialTransform::new_2d(1.0, 1.0),
+                GlobalSpatialTransform::default(),
+                crate::components::HudOverlay,
+                ChildOf(far_layer),
+            ))
+            .id();
+        let (_, near) = spawn_layer(&mut world, 0.5);
+        let (plane_layer, plane) = spawn_layer(&mut world, 1.0);
+        let (sky_layer, sky) = spawn_layer(&mut world, f64::INFINITY);
+        // A layer inside another follows the outer one only.
+        world.entity_mut(sky_layer).insert(ChildOf(plane_layer));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            (
+                transform_propagation_system.run_if(has_transform_changes),
+                pin_parallax_layers_system,
+                pin_hud_overlays_system,
+            )
+                .chain(),
+        );
+        let pixel = |world: &World, camera: &gaanim_math::Camera, entity: Entity| {
+            let origin = world
+                .get::<GlobalSpatialTransform>(entity)
+                .unwrap()
+                .affine_2d
+                * Point::ORIGIN;
+            camera.to_vello_transform() * origin
+        };
+        let at_rest = authored.to_vello_transform() * Point::new(1.0, 1.0);
+        let full_shift = moved.to_vello_transform() * Point::new(1.0, 1.0) - at_rest;
+        for _ in 0..2 {
+            schedule.run(&mut world);
+            for (entity, share) in [(far, 0.5), (near, 2.0), (plane, 1.0)] {
+                let shift = pixel(&world, &moved, entity) - at_rest;
+                assert!(
+                    (shift - full_shift * share).hypot() < 1e-6,
+                    "{shift:?} != {:?}",
+                    full_shift * share
+                );
+            }
+            // Nested in the depth-1 layer, which never moves it.
+            assert!((pixel(&world, &moved, sky) - at_rest - full_shift).hypot() < 1e-6);
+            assert!((pixel(&world, &moved, hud) - at_rest).hypot() < 1e-6);
+        }
+
+        // Zoom scales a layer by `zoom^(1/depth)` about the camera center.
+        let mut zoomed = authored;
+        zoomed.projection = gaanim_math::Projection::Orthographic { zoom: 4.0 };
+        let pin = parallax_pin(&zoomed, 2.0).unwrap();
+        let shown = zoomed.to_vello_transform() * pin * Point::new(1.0, 0.0);
+        let center = zoomed.to_vello_transform() * Point::ORIGIN;
+        let unit = authored.to_vello_transform() * Point::new(1.0, 0.0) - center;
+        assert!(((shown - center) - unit * 2.0).hypot() < 1e-6);
+        assert_eq!(parallax_pin(&zoomed, 1.0), None);
+        assert_eq!(parallax_pin(&zoomed, 0.0), None);
+
+        // Resetting the camera returns every layer to its authored place.
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            authored,
+            gaanim_math::CameraViewport::default(),
+        ));
+        schedule.run(&mut world);
+        for entity in [far, near, plane] {
+            assert!((pixel(&world, &authored, entity) - at_rest).hypot() < 1e-6);
+        }
     }
 
     #[test]

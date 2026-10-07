@@ -21,6 +21,7 @@ pyo3::create_exception!(
     pyo3::exceptions::PyException
 );
 
+mod annotations;
 mod bar_race;
 mod brush;
 mod callback_recipe;
@@ -186,6 +187,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pycanvas::PyDimension>()?;
     m.add_class::<pycanvas::PyAngleDimension>()?;
     m.add_class::<pycanvas::PySurroundingRect>()?;
+    m.add_class::<pycanvas::PyParallaxLayer>()?;
     m.add_class::<pycanvas::PyForceVector>()?;
     m.add_class::<pycanvas::PySupport>()?;
     m.add_class::<py3d::PyMaterial3D>()?;
@@ -205,6 +207,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pytext_animator::PyTextAnimator>()?;
     m.add_class::<pytext_animator::PyTextAnimatorAnimation>()?;
     m.add_class::<path_modifiers::PyPathModifiers>()?;
+    m.add_class::<annotations::PyAnnotations>()?;
     m.add_class::<path_modifiers::PyPathModifier>()?;
     m.add_class::<path_modifiers::PyPathModifierAnimation>()?;
     m.add_function(wrap_pyfunction!(pytext::text_part, m)?)?;

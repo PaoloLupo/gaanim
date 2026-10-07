@@ -238,6 +238,16 @@ impl PyText {
         slf.handle.clone().tracking(value).map_err(text_error)?;
         Ok(slf)
     }
+
+    /// Immediately shift a Text made by `text.on_path` along its path.
+    fn path_offset<'py>(slf: PyRef<'py, Self>, value: f64) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.handle
+            .clone()
+            .path_offset(value)
+            .map_err(PyValueError::new_err)?;
+        Ok(slf)
+    }
 }
 
 #[pymethods]
@@ -268,6 +278,16 @@ impl PyCanvasAnim {
             .blur_in(sigma, unit, stagger)
             .map(|inner| Self { inner })
             .map_err(text_error)
+    }
+
+    /// Move a Text made by `text.on_path` along its path to `value`.
+    fn path_offset(&self, value: f64) -> PyResult<Self> {
+        require_text_effect_slot(self, "path_offset")?;
+        self.inner
+            .clone()
+            .path_offset(value)
+            .map(|inner| Self { inner })
+            .map_err(PyValueError::new_err)
     }
 
     /// Animate the extra spacing between glyphs to `value` scene units.

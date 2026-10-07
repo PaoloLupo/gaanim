@@ -2167,6 +2167,23 @@ class Anim:
             scene.play(title.animate.tracking(0.0).duration(1.2))
         """
         ...
+    def path_offset(self, value: float) -> Anim:
+        """Move a Text made by ``scene.text.on_path`` along its path to ``value``.
+
+        ``value`` is a fraction of the path's length measured from the
+        placement ``align`` gives: on a closed path ``1.0`` is one full turn
+        and the text wraps around, on an open one glyphs past an end continue
+        straight along its last direction. Every frame is computed from the
+        offset, so a seek shows what playback does. Default easing is smooth;
+        use ``Easing.LINEAR`` for a steady spin. A Text not made by
+        ``on_path`` or a non-finite value raise ``ValueError``; a text
+        selection raises ``TypeError``.
+
+        Example:
+            ring = scene.text.on_path("GAANIM · MOTION · ", scene.geometry.circle(2.0))
+            scene.play([ring.animate.path_offset(1.0).duration(4).easing(Easing.LINEAR)])
+        """
+        ...
     def path_arc(self, angle: float) -> Anim:
         """Travel this animation's ``move_to``/``shift_by`` along a circular arc.
 
@@ -3165,6 +3182,133 @@ class Updater:
         """
         ...
 
+class Annotations:
+    """Hand-drawn notations around a drawable or text selection; see ``Drawable.annotate``.
+
+    Every method returns a new stroked Drawable drawn in the style of
+    rough-notation: lines wobble and bow as if drawn by hand, and the shape
+    is drawn ``passes`` times over itself with fresh randomness. The mark
+    follows the target's bounds every frame, keeps its scribble while the
+    target moves, and stays hidden until a ``play`` includes it, so
+    ``mark.animate.create()`` draws it on, one pass after another; fade or
+    restyle it like any other drawable, but move it by moving its target.
+    The same ``seed`` always draws the same scribble.
+
+    Common arguments: ``color`` and ``width`` style the stroke (without a
+    color the theme's stroke applies, and a ``width`` needs a ``color``);
+    ``roughness`` scales the wobble (``0`` draws clean geometry, ``1`` the
+    rough-notation look); ``passes`` is 1 to 8. A negative or non-finite
+    ``roughness`` or ``padding``, a ``passes`` outside 1 to 8 or a
+    non-positive ``width`` raise ``ValueError``.
+    """
+    def underline(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Underline the target with a hand-drawn line.
+
+        ``padding`` grows the target's bounds first (default 0.08 below and 0.04 to each side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def box(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Draw a hand-drawn box around the target.
+
+        ``padding`` grows the target's bounds first (default 0.1 on every side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def circle(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Circle the target with a hand-drawn ellipse through the middle of each padded side.
+
+        ``padding`` grows the target's bounds first (default 0.25 above and below, 0.35 to each side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def strike_through(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Strike the target through its middle with a hand-drawn line.
+
+        ``padding`` grows the target's bounds first (default 0.06 to each side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def crossed_off(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Cross the target off with two hand-drawn diagonals.
+
+        ``padding`` grows the target's bounds first (default 0.05 on every side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def bracket(
+        self,
+        sides: str | Sequence[str] = ("left", "right"),
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Draw hand-drawn square brackets on ``sides`` of the target.
+
+        ``sides`` names one or more of ``"left"``, ``"right"``, ``"top"`` and
+        ``"bottom"``; an unknown name raises ``ValueError``. ``padding``
+        defaults to 0.05 above and below and 0.1 to each side. See
+        ``Annotations`` for the other arguments.
+
+        Example:
+            scene.play([eq["rhs"].annotate.bracket("right").animate.create()])
+        """
+        ...
+
 class PathModifiers:
     """Adds path modifiers to a drawable; see ``Drawable.modifiers``."""
     def zigzag(self, size: float = 0.1, ridges: int = 4, *, smooth: bool = False) -> PathModifier:
@@ -3292,6 +3436,16 @@ class Drawable:
             zz = star.modifiers.zigzag(size=0.0, ridges=3)
             star.modifiers.round_corners(0.15)
             scene.play(zz.animate.size(0.12).duration(1.0))
+        """
+        ...
+    @property
+    def annotate(self) -> Annotations:
+        """Hand-drawn notations around this drawable: underline, box, circle, strikes and brackets.
+
+        Example:
+            ul = card.annotate.underline(color=RED, roughness=1.0, passes=2, seed=1)
+            box = card.annotate.box(padding=0.1)
+            scene.play([ul.animate.create(), box.animate.create()])
         """
         ...
     @property
@@ -4562,6 +4716,30 @@ class SurroundingRect(Drawable):
         """
         ...
 
+class ParallaxLayer(Drawable):
+    """A 2.5D parallax layer created by ``Scene.layer``.
+
+    Its members move by ``1 / depth`` of the orthographic camera's pan, so a
+    far layer drifts slowly behind the scene and a near one sweeps past in
+    front. The layer itself is a Drawable: move, fade or animate it to act on
+    all its members at once.
+    """
+    def add(self, drawable: Drawable, *others: Drawable) -> Self:
+        """Move drawables into the layer, keeping their current place; returns the layer.
+
+        Adding a drawable to a second layer moves it there. A drawable from
+        another scene, the layer itself or another layer raise ``ValueError``.
+
+        Example:
+            far = scene.layer(depth=3.0)
+            far.add(scene.geometry.circle(1.0).move_to(4, 2))
+        """
+        ...
+    @property
+    def depth(self) -> float:
+        """The depth the layer was created with."""
+        ...
+
 class ForceVector(Drawable):
     """Reactive force/vector with independently styleable shaft, solid head, and readout parts."""
     @property
@@ -4874,6 +5052,14 @@ class TextSelection:
     for example, ``g sin(theta)`` targets the rendered ``g sin(θ)``.
     """
     def __getitem__(self, name: str) -> TextSelection: ...
+    @property
+    def annotate(self) -> Annotations:
+        """Hand-drawn notations around the selected glyphs; see ``Annotations``.
+
+        Example:
+            scene.play([eq["rhs"].annotate.underline(color=RED).animate.create()])
+        """
+        ...
     def fill(self, color: ColorLike) -> TextSelection:
         """Persistently color selected glyphs and invalidate metric state if needed.
 
@@ -5133,6 +5319,18 @@ class Text(Drawable):
         Example:
             title.tracking(0.4)
             scene.play(title.animate.tracking(0.0))
+        """
+        ...
+    def path_offset(self, value: float) -> Self:
+        """Shift a Text made by ``scene.text.on_path`` along its path now.
+
+        ``value`` is a fraction of the path's length, as in
+        ``animate.path_offset``. Declared before the first ``play`` it is the
+        initial offset; later it cuts at the cursor. Returns this Text; a
+        Text not made by ``on_path`` or a non-finite value raise ``ValueError``.
+
+        Example:
+            label = scene.text.on_path("ola", wave, align="center").path_offset(-0.2)
         """
         ...
     @overload
@@ -8298,6 +8496,56 @@ class Typography:
             result = scene.typst(Path("assets/title.typ"))
         """
         ...
+    def on_path(
+        self,
+        content: TextContent,
+        path: Drawable,
+        *,
+        align: Literal["start", "center", "end"] = "start",
+        orient: bool = True,
+        reverse: bool = False,
+        offset: float = 0.0,
+        role: Optional[TextRole] = None,
+        style: Optional[TextStyle] = None,
+        font: Optional[str] = None,
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        italic: Optional[bool] = None,
+        color: Optional[ColorLike] = None,
+        opacity: Optional[float] = None,
+        letter_spacing: Optional[float] = None,
+        word_spacing: Optional[float] = None,
+        markup: Optional[bool] = None,
+    ) -> Text:
+        """Create one line of text whose glyphs follow the path of ``path``.
+
+        Each glyph keeps its shape and spacing: its center on the text's
+        baseline is placed on the path at the same arc length it had along
+        the line, and with ``orient`` it turns to the path's direction (else
+        it stays upright). Glyphs sit on the left of the direction of travel,
+        so on a circle, which runs counterclockwise, the text reads around the
+        inside; ``reverse=True`` follows the path backward and puts it around
+        the outside. ``align`` places the text at the start, middle or end
+        of the path, and ``offset`` shifts it by a fraction of the path's
+        length (animate it with ``animate.path_offset``). On a closed path
+        the text wraps around; on an open one, glyphs past an end continue
+        along its last direction.
+
+        The path is read in scene coordinates where ``path`` stands now and
+        then belongs to the Text: moving the Text moves it along, and later
+        changes to ``path`` do not move the glyphs. ``path`` itself stays an
+        ordinary drawable; hide it or give it a stroke. Style arguments are
+        those of ``scene.text``; the text never wraps. An unknown ``align``,
+        a non-finite ``offset``, a ``path`` from another scene or a group
+        (which has no path of its own), or content without visible characters
+        raise ``ValueError``.
+
+        Example:
+            circle = scene.geometry.circle(2.0).no_fill().stroke(GRAY, 0.02)
+            ring = scene.text.on_path("GAANIM · MOTION · ", circle, reverse=True)
+            scene.play([ring.animate.path_offset(1.0).duration(4).easing(Easing.LINEAR)])
+        """
+        ...
     def code(
         self,
         source: str,
@@ -9837,6 +10085,30 @@ class Scene:
 
         Raises:
             ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def layer(self, depth: float) -> ParallaxLayer:
+        """Create an empty 2.5D parallax layer at ``depth``.
+
+        Depth is measured in units of the scene plane's distance from the
+        camera: members added with ``ParallaxLayer.add`` move by
+        ``1 / depth`` of the 2D camera's pan and zoom by ``zoom ** (1 / depth)``,
+        while rotation applies to every layer alike. ``depth=1`` behaves
+        like the rest of the scene, ``depth=3`` drifts at a third of the
+        camera speed, ``depth=0.6`` sweeps past faster, and ``math.inf``
+        never pans or zooms, like ``Drawable.hud`` except for rotation.
+        Shake, follow and bindings move layers too; a member made a HUD with
+        ``Drawable.hud`` still stays on screen. Farther layers draw
+        behind nearer ones: the layer's ``z_index`` defaults to
+        ``round(-100 * ln(depth))`` within ±900, and its members add their
+        own. Under a perspective camera layers stay put, since real depth
+        already gives parallax. A depth that is not positive raises
+        ``ValueError``.
+
+        Example:
+            far = scene.layer(depth=3.0).add(mountains)
+            near = scene.layer(depth=0.6).add(trees)
+            scene.play([scene.camera.animate.pan_to(6, 0).duration(3)])
         """
         ...
     def z_layers(self, *names: str, default: Optional[str] = None) -> None:

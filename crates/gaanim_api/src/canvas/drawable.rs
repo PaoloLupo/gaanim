@@ -790,7 +790,7 @@ impl DrawableHandle {
         self.clone()
     }
 
-    fn push_immediate(&self, target: ObjectId, anim_type: AnimationType) {
+    pub(super) fn push_immediate(&self, target: ObjectId, anim_type: AnimationType) {
         let mut state = self.state.lock().expect("canvas state poisoned");
         if !state.frozen_spawn_specs.contains_key(&target) {
             return;

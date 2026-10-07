@@ -1050,6 +1050,21 @@ scene.play(title.animate.tracking(0.0).duration(1.2))
 ```
 ]
 
+#api-entry(
+  name: "Anim.path_offset",
+  kind: "method",
+  params: ((name: "value", type: "float", default: none, desc: [Desplazamiento a lo largo de la trayectoria, como fracción de su longitud.]),),
+  returns: (type: "Anim", desc: [Recorrido animado del texto por su trayectoria.]),
+  desc: [Mueve un texto creado con #link("/referencia/text/#texto-trayectoria")[`scene.text.on_path`] por su trayectoria. En una trayectoria cerrada `1.0` es una vuelta completa. Cada fotograma se calcula a partir del desplazamiento, así que un seek muestra lo mismo que la reproducción. Easing predeterminado: suave; usa `Easing.LINEAR` para un giro constante. Un texto que no sea de `on_path` o un valor no finito lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+ring = scene.text.on_path("GAANIM · MOTION · ", scene.geometry.circle(2.0), reverse=True)
+scene.play([ring.animate.path_offset(1.0).duration(4).easing(Easing.LINEAR)])
+```
+]
+
 == Transformaciones
 
 #api-entry(

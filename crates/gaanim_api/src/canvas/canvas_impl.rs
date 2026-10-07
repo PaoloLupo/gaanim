@@ -1627,6 +1627,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | CameraPerspective { .. } => "camera_projection",
         CameraRotation { .. } | CameraRotationSource { .. } => "camera_rotation",
         CameraShake { .. } => "camera_shake",
+        TextPathOffset { .. } => "text_path",
         _ => "effect",
     };
     vec![channel.to_owned()]
@@ -6283,6 +6284,73 @@ impl SceneModel {
                 Ok(())
             }
         }
+    }
+
+    /// Create an empty 2.5D parallax layer at `depth` and return its root.
+    ///
+    /// Drawables added with [`Self::add_to_parallax_layer`] move by
+    /// `1 / depth` of the orthographic camera's pan and zoom by
+    /// `zoom^(1/depth)`: depth 1 is the scene plane, a larger depth is farther
+    /// and moves less, a smaller one is nearer and moves more, and an infinite
+    /// depth only follows the camera's roll. Farther layers draw behind nearer
+    /// ones: the root's `z_index` defaults to `-100 ln(depth)`, within ±900,
+    /// and its members add their own. A perspective camera leaves layers in
+    /// place, since its own depth already gives parallax.
+    pub fn parallax_layer(&mut self, depth: f64) -> Result<DrawableHandle, String> {
+        if depth.is_nan() || depth <= 0.0 {
+            return Err(format!(
+                "layer depth must be positive (math.inf for a backdrop that never pans), got {depth}"
+            ));
+        }
+        let layer = self.spawn(SpawnKind::GroupNoCenter(Vec::new()));
+        {
+            let mut spec = layer.spec.lock().expect("object spec poisoned");
+            spec.parallax_depth = Some(depth);
+            spec.z_index = (-100.0 * depth.ln()).round().clamp(-900.0, 900.0) as i32;
+        }
+        Ok(layer)
+    }
+
+    /// Move `member` into the parallax `layer`, keeping its current place.
+    pub fn add_to_parallax_layer(
+        &mut self,
+        layer: &DrawableHandle,
+        member: &DrawableHandle,
+    ) -> Result<(), String> {
+        if !Arc::ptr_eq(&layer.state, &self.state) || !layer.same_canvas(member) {
+            return Err("layer members must belong to the layer's scene".to_string());
+        }
+        if layer
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .parallax_depth
+            .is_none()
+        {
+            return Err("only layers created with scene.layer() take members".to_string());
+        }
+        if member.id == layer.id {
+            return Err("a layer cannot contain itself".to_string());
+        }
+        if member
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .parallax_depth
+            .is_some()
+        {
+            return Err("a layer cannot contain another layer".to_string());
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachToGroup {
+                group: layer.id,
+                child: member.id,
+            });
+        Ok(())
     }
 
     /// Keep several existing drawables visible and animatable across future segments.

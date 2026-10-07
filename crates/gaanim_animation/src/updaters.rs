@@ -1528,6 +1528,9 @@ pub struct SurroundingRect {
     /// What is drawn inside the padded bounds.
     #[cfg_attr(feature = "serde", serde(default))]
     pub shape: SurroundingShape,
+    /// A hand-drawn notation drawn instead of `shape`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub notation: Option<gaanim_math::RoughNotation>,
 }
 
 /// What a [`SurroundingRect`] draws inside its padded bounds.
@@ -1551,6 +1554,19 @@ impl SurroundingRect {
             corner_radius,
             last_bounds: None,
             shape: SurroundingShape::Frame,
+            notation: None,
+        }
+    }
+
+    /// A hand-drawn `notation` around the targets' bounds grown by `padding`.
+    pub fn rough(
+        targets: Vec<gaanim_core::ObjectId>,
+        padding: [f64; 4],
+        notation: gaanim_math::RoughNotation,
+    ) -> Self {
+        Self {
+            notation: Some(notation),
+            ..Self::new(targets, padding, 0.0)
         }
     }
 
@@ -1630,6 +1646,19 @@ pub fn surrounding_rect_system(world: &mut World) {
             continue;
         };
 
+        if let Some(notation) = frame.notation {
+            let path = notation.path(gaanim_core::kurbo::Rect::new(
+                bounds.min.x,
+                bounds.min.y,
+                bounds.max.x,
+                bounds.max.y,
+            ));
+            write_path(world, entity, path);
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+                live.last_bounds = Some(bounds);
+            }
+            continue;
+        }
         if frame.shape == SurroundingShape::Underline {
             let mut line = BezPath::new();
             line.move_to((bounds.min.x, bounds.min.y));
@@ -1980,11 +2009,17 @@ fn write_path(world: &mut World, entity: Entity, path: BezPath) {
         .map(|progress| progress.0)
         .unwrap_or(1.0)
         .clamp(0.0, 1.0);
-    let visible = crate::writing::visible_path(
-        &path,
-        reveal,
-        world.get::<crate::writing::PathTrimWindow>(entity),
-    );
+    let trim = world.get::<crate::writing::PathTrimWindow>(entity);
+    // Pieces of one stroke, such as the passes of a hand-drawn notation,
+    // are drawn one after another as the timeline's own reveal does.
+    let visible = match world.get::<gaanim_scene::PathRevealOrder>(entity) {
+        Some(order @ gaanim_scene::PathRevealOrder::Sequential)
+            if trim.is_none() && reveal < 1.0 - 1e-9 =>
+        {
+            Arc::new(order.trim(&path, reveal))
+        }
+        _ => crate::writing::visible_path(&path, reveal, trim),
+    };
     // These systems rewrite every tracked path each frame; writing only what
     // differs keeps unchanged paths out of the renderer's re-encoding and the
     // timeline's restore set.
@@ -2020,21 +2055,36 @@ pub fn tracking_world_to_local(entity: Entity, point: DVec3, world: &World) -> D
 pub fn entity_world_matrix(entity: Entity, world: &World) -> Option<DMat4> {
     let mut chain = Vec::new();
     let mut hud = false;
+    let mut parallax = None;
     let mut current = entity;
     for _ in 0..256 {
         chain.push(world.get::<SpatialTransform>(current)?.to_mat4());
         hud |= world.get::<gaanim_scene::HudOverlay>(current).is_some();
+        // The outermost layer wins, as in `pin_parallax_layers_system`.
+        if let Some(layer) = world.get::<gaanim_scene::ParallaxLayer>(current) {
+            parallax = Some(layer.depth);
+        }
         let Some(parent) = world
             .get::<ChildOf>(current)
             .map(|relation| relation.parent())
         else {
+            let pin_matrix = |pin: gaanim_core::kurbo::Affine| {
+                gaanim_math::GlobalSpatialTransform::from_local(&SpatialTransform::from_affine_2d(
+                    &pin,
+                ))
+                .mat4
+            };
             let mut matrix = DMat4::IDENTITY;
             // HUD overlays sit where the camera pins them on the output frame.
             if hud && let Some(pin) = gaanim_scene::world_hud_pin(world) {
-                matrix = gaanim_math::GlobalSpatialTransform::from_local(
-                    &SpatialTransform::from_affine_2d(&pin),
-                )
-                .mat4;
+                matrix = pin_matrix(pin);
+            }
+            // A HUD stays on screen even inside a parallax layer.
+            if !hud
+                && let Some(pin) =
+                    parallax.and_then(|depth| gaanim_scene::world_parallax_pin(world, depth))
+            {
+                matrix *= pin_matrix(pin);
             }
             for local in chain.iter().rev() {
                 matrix *= *local;
@@ -2746,6 +2796,7 @@ mod tests {
                     corner_radius: 8.0,
                     last_bounds: None,
                     shape: SurroundingShape::Frame,
+                    notation: None,
                 },
             ))
             .id();

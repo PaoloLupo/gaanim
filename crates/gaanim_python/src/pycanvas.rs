@@ -185,6 +185,42 @@ impl PySurroundingRect {
     }
 }
 
+#[pyclass(name = "ParallaxLayer", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PyParallaxLayer {
+    layer: gaanim_api::canvas::DrawableHandle,
+    depth: f64,
+    scene: Arc<Mutex<ApiCanvas>>,
+}
+
+#[pymethods]
+impl PyParallaxLayer {
+    /// Move drawables into the layer, keeping their current place.
+    #[pyo3(signature = (drawable, *others))]
+    fn add<'py>(
+        slf: PyRef<'py, Self>,
+        drawable: &PyDrawable,
+        others: &Bound<'_, PyTuple>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let members = drawable_args(drawable, others)?;
+        {
+            let mut scene = slf.scene.lock().expect("scene canvas poisoned");
+            for member in &members {
+                scene
+                    .add_to_parallax_layer(&slf.layer, member)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
+        }
+        Ok(slf)
+    }
+
+    #[getter]
+    fn depth(&self) -> f64 {
+        self.depth
+    }
+}
+
 pub(crate) fn bounds_targets(
     value: &Bound<'_, PyAny>,
 ) -> PyResult<
@@ -4685,6 +4721,75 @@ impl PyTypography {
         )
     }
 
+    /// Create a Text whose glyphs follow the path of a drawable.
+    #[pyo3(signature = (content, path, *, align="start", orient=true, reverse=false, offset=0.0, role=None, style=None, font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, markup=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn on_path<'py>(
+        &self,
+        py: Python<'py>,
+        content: &Bound<'py, PyAny>,
+        path: &PyDrawable,
+        align: &str,
+        orient: bool,
+        reverse: bool,
+        offset: f64,
+        role: Option<&str>,
+        style: Option<PyTextStyle>,
+        font: Option<String>,
+        size: Option<f64>,
+        weight: Option<u16>,
+        italic: Option<bool>,
+        color: Option<PyColor>,
+        opacity: Option<f32>,
+        letter_spacing: Option<f64>,
+        word_spacing: Option<f64>,
+        markup: Option<bool>,
+    ) -> PyResult<Py<PyText>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let align = gaanim_api::canvas::TextPathAlign::parse(align).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "align must be {}",
+                gaanim_api::canvas::TextPathAlign::NAMES
+            ))
+        })?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
+        let mut spec = build_text_spec(
+            &PyTuple::new(py, [content])?,
+            false,
+            role,
+            style,
+            None,
+            font,
+            None,
+            size,
+            weight,
+            italic,
+            color,
+            opacity,
+            letter_spacing,
+            word_spacing,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            markup,
+        )?;
+        // One line laid along the path: wrapping would stack glyphs on it.
+        spec.flow.wrap = gaanim_text::prelude::TextWrap::NoWrap;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .text_on_path(spec.clone(), &path.0, align, orient, reverse, offset)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Py::new(py, PyText::initializer(handle, spec))
+    }
+
     #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None))]
     #[allow(clippy::too_many_arguments)]
     fn equation<'py>(
@@ -6461,6 +6566,25 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .reuse_many(&drawables)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// Create an empty 2.5D parallax layer at `depth`.
+    fn layer(&self, py: Python<'_>, depth: f64) -> PyResult<Py<PyParallaxLayer>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let layer = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .parallax_layer(depth)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Py::new(
+            py,
+            PyClassInitializer::from(PyDrawable(layer.clone())).add_subclass(PyParallaxLayer {
+                layer,
+                depth,
+                scene: self.inner.clone(),
+            }),
+        )
     }
 
     /// Name the draw layers, from the back to the front.

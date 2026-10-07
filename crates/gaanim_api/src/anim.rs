@@ -609,6 +609,11 @@ pub enum AnimationType {
     /// Per-unit text range animation (sweep, reveal presets, tracking); see
     /// [`crate::canvas::text_animator`].
     TextAnimator(Box<crate::canvas::text_animator::TextAnimatorSpec>),
+    /// Shift a Text laid on a path to `to` along it, as a fraction of the
+    /// path's length; see [`crate::canvas::text_path`].
+    TextPathOffset {
+        to: f64,
+    },
 }
 
 #[derive(Debug, Clone)]
