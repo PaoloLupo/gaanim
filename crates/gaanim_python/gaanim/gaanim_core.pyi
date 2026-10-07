@@ -3352,9 +3352,10 @@ class Drawable:
         width follow that scale instead, as ``scale_stroke_with_object`` does.
 
         ``align`` places the stroke on closed contours, including every text
-        glyph. By default it stays inside the shape, so ``write`` draws a
-        constant width; ``"center"`` straddles the contour and ``"outside"``
-        draws the whole width beyond it (a text halo). Open paths always
+        glyph. By default the whole width stays inside the shape, so
+        ``write`` draws a constant width; ``"center"`` straddles the contour
+        and ``"outside"`` draws the whole width beyond it (a text halo). The
+        visible stroke is ``width`` wide in all three. Open paths always
         center their stroke. The alignment is declaration state and is not
         animated. Other values raise ``ValueError``.
 
