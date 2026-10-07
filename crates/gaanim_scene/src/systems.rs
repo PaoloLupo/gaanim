@@ -476,9 +476,30 @@ pub fn pin_hud_overlays_system(
     view_roles: Query<&'static CoordinateViewRole>,
     label_offsets: Query<&'static CoordinateLabelOffset>,
     parents: Query<&'static ChildOf>,
+    layers: Query<&'static crate::components::ParallaxLayer>,
     mut pinned: Local<bool>,
 ) {
     let pin = camera.as_deref().and_then(|camera| hud_pin(camera));
+    // A HUD inside a parallax layer stays on screen: the layer's pin, which
+    // `pin_parallax_layers_system` put first in its parent's transform, is
+    // taken back out.
+    let parallax_unpin = |root: Entity| {
+        let mut depth = None;
+        let mut current = root;
+        for _ in 0..256 {
+            let Ok(parent) = parents.get(current).map(ChildOf::parent) else {
+                break;
+            };
+            if let Ok(layer) = layers.get(parent) {
+                depth = Some(layer.depth);
+            }
+            current = parent;
+        }
+        let camera = camera.as_deref()?;
+        parallax_pin(camera, depth?).map(|pin| {
+            GlobalSpatialTransform::from_local(&SpatialTransform::from_affine_2d(&pin.inverse()))
+        })
+    };
     // Unpinned HUD transforms are exactly what propagation produced; recompose
     // once more after a pin ends so none keeps the last pinned placement.
     if pin.is_none() && !*pinned {
@@ -492,8 +513,15 @@ pub fn pin_hud_overlays_system(
         if parent.is_some_and(|parent| hud.contains(parent)) {
             continue;
         }
-        let parent_global =
-            parent.and_then(|parent| transforms.get(parent).ok().map(|(_, g, _)| *g));
+        let parent_global = parent
+            .and_then(|parent| transforms.get(parent).ok().map(|(_, g, _)| *g))
+            .map(|parent| match parallax_unpin(root) {
+                Some(unpin) => GlobalSpatialTransform {
+                    affine_2d: unpin.affine_2d * parent.affine_2d,
+                    mat4: unpin.mat4 * parent.mat4,
+                },
+                None => parent,
+            });
         let pinned_parent = parent_global.map_or(pin, |parent| GlobalSpatialTransform {
             affine_2d: pin.affine_2d * parent.affine_2d,
             mat4: pin.mat4 * parent.mat4,
@@ -1207,7 +1235,16 @@ mod tests {
                 .id();
             (layer, child)
         };
-        let (_, far) = spawn_layer(&mut world, 2.0);
+        let (far_layer, far) = spawn_layer(&mut world, 2.0);
+        // A HUD inside a layer stays on screen.
+        let hud = world
+            .spawn((
+                SpatialTransform::new_2d(1.0, 1.0),
+                GlobalSpatialTransform::default(),
+                crate::components::HudOverlay,
+                ChildOf(far_layer),
+            ))
+            .id();
         let (_, near) = spawn_layer(&mut world, 0.5);
         let (plane_layer, plane) = spawn_layer(&mut world, 1.0);
         let (sky_layer, sky) = spawn_layer(&mut world, f64::INFINITY);
@@ -1219,6 +1256,7 @@ mod tests {
             (
                 transform_propagation_system.run_if(has_transform_changes),
                 pin_parallax_layers_system,
+                pin_hud_overlays_system,
             )
                 .chain(),
         );
@@ -1244,6 +1282,7 @@ mod tests {
             }
             // Nested in the depth-1 layer, which never moves it.
             assert!((pixel(&world, &moved, sky) - at_rest - full_shift).hypot() < 1e-6);
+            assert!((pixel(&world, &moved, hud) - at_rest).hypot() < 1e-6);
         }
 
         // Zoom scales a layer by `zoom^(1/depth)` about the camera center.

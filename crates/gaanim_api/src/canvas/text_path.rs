@@ -205,6 +205,21 @@ impl super::SceneModel {
             return Err("the path of text.on_path must belong to the same scene".to_string());
         }
         check_offset(offset)?;
+        if matches!(
+            path.spec.lock().expect("object spec poisoned").kind,
+            super::SpawnKind::Group(_) | super::SpawnKind::GroupNoCenter(_)
+        ) {
+            return Err(
+                "the path of text.on_path must be a shape with a path, not a group".to_string(),
+            );
+        }
+        if spec
+            .rendered_text()
+            .chars()
+            .all(|character| character.is_whitespace())
+        {
+            return Err("text.on_path needs visible characters".to_string());
+        }
         let handle = self.text_spec(spec);
         handle.spec.lock().expect("object spec poisoned").text_path = Some(TextPathSpec {
             path: path.id,
@@ -271,7 +286,10 @@ impl SceneBuilder<'_, '_, '_> {
     /// so moving the Text later moves it with its path.
     pub(crate) fn attach_text_path(&mut self, root: ObjectId, path: ObjectId, spec: &TextPathSpec) {
         let Some(source) = self.states.get(path) else {
-            bevy::prelude::warn!("text on a path: the path drawable was not created");
+            gaanim_core::console::warn(
+                "text",
+                "on_path: the path drawable is not in the scene; the text stays straight",
+            );
             return;
         };
         let mut route = (*source.path).clone();
@@ -309,7 +327,10 @@ impl SceneBuilder<'_, '_, '_> {
                     .fold(f64::INFINITY, f64::min)
             });
         let Some(layout) = TextPathLayout::new(&route, spec, baseline, &glyphs) else {
-            bevy::prelude::warn!("text on a path needs a Text with glyphs and a path with length");
+            gaanim_core::console::warn(
+                "text",
+                "on_path: the path has no length; the text stays straight",
+            );
             return;
         };
         let mut bounds: Option<Bounds3D> = None;
@@ -327,9 +348,14 @@ impl SceneBuilder<'_, '_, '_> {
             && let Some(state) = self.states.get_mut(root)
         {
             state.bounds = bounds;
+            // Scale and rotation turn the text around the middle of its path
+            // (a ring around its circle's center), not around the scene
+            // origin its glyphs were laid out from.
+            let center = route.bounding_box().center();
+            state.transform.anchor = gaanim_core::glam::DVec3::new(center.x, center.y, 0.0);
             self.commands
                 .entity(state.entity)
-                .insert(gaanim_scene::LocalBounds(bounds));
+                .insert((gaanim_scene::LocalBounds(bounds), state.transform));
         }
         self.text_paths
             .insert(root, (Arc::new(layout), spec.offset));
@@ -341,7 +367,7 @@ impl SceneBuilder<'_, '_, '_> {
             return;
         };
         let Some((layout, from)) = self.text_paths.get(&anim.target).cloned() else {
-            bevy::prelude::warn!("path_offset needs a Text created with scene.text.on_path");
+            gaanim_core::console::warn("text", "path_offset needs a Text created with text.on_path");
             return;
         };
         self.text_paths.insert(anim.target, (layout.clone(), to));

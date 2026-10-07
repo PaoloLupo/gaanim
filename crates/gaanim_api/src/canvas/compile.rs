@@ -11306,7 +11306,9 @@ impl SceneModel {
         id_map: &HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
     ) {
-        let uses_default_text_anchor = matches!(spec.kind, SpawnKind::Text(_));
+        // A Text on a path already sits where its path is.
+        let uses_default_text_anchor =
+            matches!(spec.kind, SpawnKind::Text(_)) && spec.text_path.is_none();
         let pivots_on_box_center = Self::declared_in_scene_coordinates(&spec.kind)
             && !spec
                 .layout_ops

@@ -2075,13 +2075,14 @@ pub fn entity_world_matrix(entity: Entity, world: &World) -> Option<DMat4> {
                 .mat4
             };
             let mut matrix = DMat4::IDENTITY;
-            // HUD overlays sit where the camera pins them on the output frame,
-            // over the place their parallax layer moved them to.
+            // HUD overlays sit where the camera pins them on the output frame.
             if hud && let Some(pin) = gaanim_scene::world_hud_pin(world) {
                 matrix = pin_matrix(pin);
             }
-            if let Some(pin) =
-                parallax.and_then(|depth| gaanim_scene::world_parallax_pin(world, depth))
+            // A HUD stays on screen even inside a parallax layer.
+            if !hud
+                && let Some(pin) =
+                    parallax.and_then(|depth| gaanim_scene::world_parallax_pin(world, depth))
             {
                 matrix *= pin_matrix(pin);
             }

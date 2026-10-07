@@ -1310,6 +1310,8 @@ def validate_text_on_path_contract(module: object) -> list[str]:
         lambda: scene.text.on_path("x", circle, align="middle"),
         lambda: scene.text.on_path("x", circle, offset=float("nan")),
         lambda: scene.text.on_path("x", other.geometry.circle(1.0)),
+        lambda: scene.text.on_path("x", scene.geometry.group([scene.geometry.dot(0.1)])),
+        lambda: scene.text.on_path("   ", circle),
         lambda: plain.path_offset(0.5),
         lambda: plain.animate.path_offset(0.5),
         lambda: ring.animate.path_offset(float("inf")),
@@ -1953,7 +1955,7 @@ def validate_scene_capability_surface(module) -> list[str]:
     """Keep Scene limited to orchestration and scene-owned capabilities."""
     expected = {
         "assets", "camera", "canvas", "fx", "geometry", "layout", "mechanics",
-        "media", "slides", "text", "viz", "fade_out_all", "link", "persist", "z_layers",
+        "media", "slides", "text", "viz", "fade_out_all", "link", "persist", "z_layers", "layer",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
         "voiceover", "live_take", "narration_script", "marker", "markers",

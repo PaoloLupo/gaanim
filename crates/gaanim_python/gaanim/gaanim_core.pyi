@@ -5328,6 +5328,9 @@ class Text(Drawable):
         ``animate.path_offset``. Declared before the first ``play`` it is the
         initial offset; later it cuts at the cursor. Returns this Text; a
         Text not made by ``on_path`` or a non-finite value raise ``ValueError``.
+
+        Example:
+            label = scene.text.on_path("ola", wave, align="center").path_offset(-0.2)
         """
         ...
     @overload
@@ -8533,8 +8536,9 @@ class Typography:
         changes to ``path`` do not move the glyphs. ``path`` itself stays an
         ordinary drawable; hide it or give it a stroke. Style arguments are
         those of ``scene.text``; the text never wraps. An unknown ``align``,
-        a non-finite ``offset`` or a ``path`` from another scene raise
-        ``ValueError``.
+        a non-finite ``offset``, a ``path`` from another scene or a group
+        (which has no path of its own), or content without visible characters
+        raise ``ValueError``.
 
         Example:
             circle = scene.geometry.circle(2.0).no_fill().stroke(GRAY, 0.02)
@@ -10093,7 +10097,8 @@ class Scene:
         like the rest of the scene, ``depth=3`` drifts at a third of the
         camera speed, ``depth=0.6`` sweeps past faster, and ``math.inf``
         never pans or zooms, like ``Drawable.hud`` except for rotation.
-        Shake, follow and bindings move layers too. Farther layers draw
+        Shake, follow and bindings move layers too; a member made a HUD with
+        ``Drawable.hud`` still stays on screen. Farther layers draw
         behind nearer ones: the layer's ``z_index`` defaults to
         ``round(-100 * ln(depth))`` within ±900, and its members add their
         own. Under a perspective camera layers stay put, since real depth
