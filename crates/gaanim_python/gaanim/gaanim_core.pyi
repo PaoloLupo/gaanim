@@ -4051,7 +4051,10 @@ class Drawable:
         compiles the scene authored so far. Calls with nothing authored in
         between share one compilation, and so do the members of one fresh
         layout, so measure before animating and measure the boxes you need
-        together.
+        together. A later call resumes that compilation from the segment
+        where the scene changed, as an editor reload does, and the next run
+        of the script resumes the last one; a segment holding Python
+        functions (reactive values, updaters) is not reused across runs.
 
         Example:
             label = scene.text("PGA = 0.35 g", role="label").move_to(0, 1)

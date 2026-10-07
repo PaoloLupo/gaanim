@@ -139,7 +139,7 @@ mod compile;
 mod coverage;
 pub use axonometric::{Axonometric, AxonometricView};
 pub(crate) use compile::{
-    CompileCheckpoint, SegmentMarker, split_text_math, take_segment_times,
+    CompileCheckpoint, Compiled, SegmentMarker, split_text_math, take_segment_times,
     text_inline_typst_source, time_segments,
 };
 mod incremental;

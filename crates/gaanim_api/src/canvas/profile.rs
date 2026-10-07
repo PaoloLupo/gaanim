@@ -53,6 +53,8 @@ pub(crate) struct AuthoringProfile {
     isolated: Compiles,
     /// Measurements that compiled the scene up to the cursor.
     scene: Compiles,
+    /// Measurements that resumed an earlier compilation of the scene.
+    resumed: Compiles,
     /// Measurements that reused an earlier compilation.
     reused: usize,
     /// Where the scene was compiled to measure, in first-call order.
@@ -69,6 +71,7 @@ impl Default for AuthoringProfile {
             segments: Vec::new(),
             isolated: Compiles::default(),
             scene: Compiles::default(),
+            resumed: Compiles::default(),
             reused: 0,
             sites: Vec::new(),
             slowest: None,
@@ -91,7 +94,10 @@ impl std::fmt::Debug for SharedProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Measured {
     Isolated,
+    /// The whole scene up to the cursor compiled.
     Scene,
+    /// An earlier compilation resumed where the scene changed.
+    Resumed,
     Reused,
 }
 
@@ -124,6 +130,7 @@ impl SharedProfile {
             match how {
                 Measured::Isolated => profile.isolated.add(time),
                 Measured::Reused => profile.reused += 1,
+                Measured::Resumed => profile.resumed.add(time),
                 Measured::Scene => {
                     profile.scene.add(time);
                     let label = site.clone().unwrap_or_else(|| "?".to_string());
@@ -195,12 +202,14 @@ impl SharedProfile {
             let now = profile.rendered.unwrap_or(now);
             let mut lines = vec![format!(
                 "authoring {} · measurements: {} isolated ({}), {} compiled the scene ({}), \
-                 {} reused",
+                 {} resumed it ({}), {} reused",
                 seconds(now - profile.created),
                 profile.isolated.count,
                 seconds(profile.isolated.time),
                 profile.scene.count,
                 seconds(profile.scene.time),
+                profile.resumed.count,
+                seconds(profile.resumed.time),
                 profile.reused,
             )];
             let starts = profile.segments.iter().map(|(_, start)| *start);

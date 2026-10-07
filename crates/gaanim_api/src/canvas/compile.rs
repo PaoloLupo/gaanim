@@ -1033,18 +1033,14 @@ pub(crate) struct CompileCheckpoint {
     pub(crate) timeline: Timeline,
 }
 
-impl CompileCursor {
-    /// The compiled clock where the next segment starts.
-    pub(crate) fn time(&self) -> Option<f64> {
-        self.builder
-            .as_ref()
-            .map(crate::builder::SceneBuilderState::current_time)
-    }
-
-    /// The compiled object that stands for authored object `id`.
-    pub(crate) fn runtime_id(&self, id: ObjectId) -> Option<ObjectId> {
-        self.id_map.get(&id).copied()
-    }
+/// What a compilation leaves for later.
+pub(crate) struct Compiled {
+    /// The checkpoint asked for, if the compilation reached it.
+    pub(crate) checkpoint: Option<CompileCheckpoint>,
+    /// The compiled object that stands for each authored object.
+    pub(crate) ids: HashMap<ObjectId, ObjectId>,
+    /// The compiled clock after the last segment.
+    pub(crate) end_time: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2573,15 +2569,6 @@ impl SceneModel {
         );
     }
 
-    /// Compile the segments from `resume` (or from the start), optionally
-    /// capturing a checkpoint before segment `checkpoint_at` and queueing
-    /// world markers before chosen segments. An index equal to the segment
-    /// count denotes the point after the last segment.
-    ///
-    /// Resuming is valid only when every segment before the cursor, and every
-    /// scene-wide input, is identical to the compilation that produced it,
-    /// and `timeline` is that checkpoint's timeline.
-    #[allow(clippy::too_many_arguments)]
     /// Values whose text each reactive number inside a layout keeps room
     /// for, by number: its explicit reserve and its source at the corners of
     /// the ranges its parameters take. A number outside a layout keeps none,
@@ -2639,6 +2626,14 @@ impl SceneModel {
             .collect()
     }
 
+    /// Compile the segments from `resume` (or from the start), optionally
+    /// capturing a checkpoint before segment `checkpoint_at` and queueing
+    /// world markers before chosen segments. An index equal to the segment
+    /// count denotes the point after the last segment.
+    ///
+    /// Resuming is valid only when every segment before the cursor, and every
+    /// scene-wide input, is identical to the compilation that produced it,
+    /// and `timeline` is that checkpoint's timeline.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn compile_resumable<'w, 's>(
         &self,
@@ -2649,7 +2644,7 @@ impl SceneModel {
         resume: Option<CompileCursor>,
         checkpoint_at: Option<usize>,
         mut markers: Vec<(usize, SegmentMarker)>,
-    ) -> Option<CompileCheckpoint> {
+    ) -> Compiled {
         let CompileCursor {
             next_segment: start,
             builder: builder_state,
@@ -3376,7 +3371,11 @@ impl SceneModel {
             .commands
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
-        checkpoint
+        Compiled {
+            checkpoint,
+            ids: id_map,
+            end_time: builder.current_time,
+        }
     }
 
     /// Compile the scene into a scratch world and return every layout
