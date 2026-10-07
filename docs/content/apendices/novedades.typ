@@ -17,9 +17,11 @@ Publicada el 6 de octubre de 2026. Recargar y abrir presentaciones largas es má
 `bounds()` reutiliza lo ya compilado, un `traced_path` ya no encarece los
 saltos, guardar sin cambios conserva la escena y `GAANIM_RELOAD_PROFILE=1`
 dice en qué se va el tiempo. Trae capas de dibujo con nombre, un aviso de
-textos tapados en `gaanim check` y dibujos axonométricos, y corrige un fallo
-de Typst en sesiones largas y tres detalles de la API. Lee «Al actualizar» si
-alguna escena entra con `fade_in` a un objeto con opacidad declarada.
+textos tapados en `gaanim check` y dibujos axonométricos. Corrige un fallo de
+Typst en sesiones largas, el ancho de los trazos de contornos cerrados, las
+recargas tras guardar con herramientas que escriben un temporal y tres
+detalles de la API. Lee «Al actualizar» si alguna escena traza contornos
+cerrados o entra con `fade_in` a un objeto con opacidad declarada.
 
 == Cambios
 
@@ -54,7 +56,9 @@ alguna escena entra con `fade_in` a un objeto con opacidad declarada.
   dentro de cada capa. Sin capas, todo se dibuja como antes.
 - `gaanim check` avisa cuando una figura opaca dibujada encima tapa por
   completo un texto en una pausa o al final de un segmento, y dice cuál,
-  detrás de qué y dónde.
+  detrás de qué y dónde. `covers_on_purpose()` marca una figura, o un grupo,
+  que tapa textos a propósito, como un diálogo sobre el modelo, para que no
+  avise ni haga fallar `--strict`.
 - Dibujos axonométricos: `scene.geometry.axonometric("isometric", ...)`
   dibuja puntos de un modelo 3D (con `z` hacia arriba) como polígonos y
   polilíneas planos, con el mismo estilo que el resto de la escena.
@@ -79,9 +83,24 @@ alguna escena entra con `fade_in` a un objeto con opacidad declarada.
 - `fade_in()` termina en la opacidad declarada o fijada del objeto, o en la
   que tenía antes de un `fade_out`, en lugar de 1. También las entradas por
   trazo (`create`, `write`) tras un `fade_out`.
+- `stroke(color, ancho)` en un contorno cerrado, con el trazo hacia dentro
+  (el valor por defecto), dibuja el ancho entero dentro de la figura, como
+  `"outside"` lo dibuja entero fuera. Antes se veía la mitad: el trazo
+  centrado, recortado por el contorno.
+- Guardar un `.py` escribiendo un temporal y renombrándolo sobre el archivo
+  (la herramienta Edit de Claude Code, `sed -i`) o restaurarlo con `git
+  checkout` recarga como un cambio de código, con el replay incremental. Antes
+  contaba como un cambio de asset: vaciaba las cachés y recompilaba la escena
+  entera. Ni los temporales de guardado ni la carpeta del archivo, que Windows
+  también da por cambiada, cuentan ya como cambios.
 
 == Al actualizar
 
+- Los trazos de contornos cerrados hacia dentro (sin `align` o con
+  `align="inside"`), incluidos los de los glifos, se ven con el ancho
+  declarado: el doble que en 0.10.1. Para conservar el aspecto anterior,
+  divide entre dos su ancho. Los trazos centrados, hacia fuera o de caminos
+  abiertos no cambian.
 - Un objeto declarado con una opacidad menor que 1 que entra con `fade_in`
   (o con `create` o `write` tras un `fade_out`) termina en esa opacidad, no
   en 1. Si contabas con llegar a 1, quita la opacidad de la declaración.
