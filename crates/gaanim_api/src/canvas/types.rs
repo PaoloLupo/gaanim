@@ -1021,6 +1021,8 @@ pub struct ObjectSpec {
     pub z_index: i32,
     /// Named draw layer (`SceneModel::z_layers`) and its rank.
     pub z_layer: Option<(String, i32)>,
+    /// Hides texts on purpose; see `Drawable::covers_on_purpose`.
+    pub covers_on_purpose: bool,
     /// If true, this object is a HUD overlay (screen-space, fixed).
     pub hud: bool,
     /// If true, this object was attached to a coordinate space as data.
@@ -1199,6 +1201,7 @@ impl ObjectSpec {
             defer_visibility_until_play: false,
             z_index: 0,
             z_layer: None,
+            covers_on_purpose: false,
             billboard: false,
             coordinate_view_role: None,
             coordinate_label_offset: None,

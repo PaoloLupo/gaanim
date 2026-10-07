@@ -38,7 +38,8 @@ pub struct ElementBlend(pub gaanim_core::peniko::BlendMode);
 ///
 /// Without it a closed contour keeps its stroke inside the shape, so a
 /// `write` draws a constant width, and an open path centers its stroke.
-/// `Outside` draws the whole width beyond the contour, e.g. for a text halo.
+/// `Inside` draws the whole authored width within the contour, `Center`
+/// half on each side and `Outside` all of it beyond, e.g. for a text halo.
 /// Open paths always center their stroke.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

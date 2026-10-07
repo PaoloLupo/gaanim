@@ -9,8 +9,8 @@ use gaanim_core::peniko::Brush;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::components::TextSpan;
 use gaanim_scene::{
-    FillBrush, GlobalOpacity, HudOverlay, LayoutBackdrop, LocalBounds, ObjectTag, Path2D,
-    RasterImage, RenderLayer, RenderOrder, SegmentContent, Visible, ZLayer,
+    CoversOnPurpose, FillBrush, GlobalOpacity, HudOverlay, LayoutBackdrop, LocalBounds, ObjectTag,
+    Path2D, RasterImage, RenderLayer, RenderOrder, SegmentContent, Visible, ZLayer,
 };
 use gaanim_timeline::timeline::Timeline;
 
@@ -41,7 +41,8 @@ impl SceneModel {
     /// Texts that an opaque shape drawn above them hides completely at a
     /// stop or at the end of a segment, as warnings that name the text, the
     /// shape and where it is first hidden. A text faded out, or behind a
-    /// translucent shape or an image, is not reported.
+    /// translucent shape, an image or a shape that covers it on purpose, is
+    /// not reported.
     pub fn covered_text_warnings(&self) -> Vec<String> {
         let rests = self.rests();
         if rests.is_empty() {
@@ -65,9 +66,10 @@ impl SceneModel {
             .into_iter()
             .map(|(text, shape, place)| {
                 format!(
-                    "text \"{}\" is hidden behind a {} {place}; draw it above with z_layer or z_index",
+                    "text \"{}\" is hidden behind a {} {place}; draw it above with z_layer or z_index, or mark the {} with covers_on_purpose()",
                     text_content(world, text),
                     shape_name(world, shape),
+                    cover_name(world, shape),
                 )
             })
             .collect()
@@ -192,6 +194,7 @@ fn covered_texts(world: &mut World) -> Vec<(Entity, Entity)> {
                     .get(entity)
                     .is_some_and(|(_, opacity)| *opacity >= 0.999)
                 && opaque_cover(world, *entity)
+                && !covers_on_purpose(world, *entity)
         })
         .filter_map(|(entity, path, _)| {
             let transform = world.get::<GlobalSpatialTransform>(entity)?;
@@ -259,6 +262,40 @@ fn drawn(
     }
     key.layer = layer.unwrap_or(0);
     Some((key, opacity))
+}
+
+/// The drawable to mark when `shape` covers a text on purpose: the
+/// outermost group it belongs to, which is what a script names, or the shape.
+fn cover_name(world: &World, shape: Entity) -> String {
+    let mut top = shape;
+    while let Some(parent) = world.get::<ChildOf>(top).map(ChildOf::parent) {
+        if world.get::<RenderOrder>(parent).is_none() {
+            break;
+        }
+        top = parent;
+    }
+    if top == shape {
+        "shape".to_string()
+    } else {
+        let name = world
+            .get::<ObjectTag>(top)
+            .map(|tag| tag.0.as_str())
+            .filter(|tag| !tag.is_empty())
+            .unwrap_or("group");
+        format!("{name} it belongs to")
+    }
+}
+
+/// Whether `entity` or a group it belongs to hides texts on purpose.
+fn covers_on_purpose(world: &World, entity: Entity) -> bool {
+    let mut current = Some(entity);
+    while let Some(node) = current {
+        if world.get::<CoversOnPurpose>(node).is_some() {
+            return true;
+        }
+        current = world.get::<ChildOf>(node).map(ChildOf::parent);
+    }
+    false
 }
 
 /// Whether `entity` draws its whole fill as is: not a glyph, an image, a
@@ -363,7 +400,7 @@ mod tests {
         assert_eq!(
             hidden,
             [
-                "text \"Pier 2\" is hidden behind a Rectangle at the end of the scene; draw it above with z_layer or z_index"
+                "text \"Pier 2\" is hidden behind a Rectangle at the end of the scene; draw it above with z_layer or z_index, or mark the shape with covers_on_purpose()"
             ]
         );
         for cover in [
@@ -375,6 +412,9 @@ mod tests {
             },
             |canvas: &mut SceneModel| {
                 canvas.rect(0.2, 0.2).fill(RED);
+            },
+            |canvas: &mut SceneModel| {
+                canvas.rect(4.0, 2.0).fill(RED).covers_on_purpose();
             },
         ] {
             assert!(warnings(cover).is_empty());
@@ -389,6 +429,27 @@ mod tests {
         canvas.rect(4.0, 2.0).fill(RED).z_index(400);
         canvas.wait(1.0);
         assert!(canvas.covered_text_warnings().is_empty());
+    }
+
+    #[test]
+    fn a_group_that_covers_on_purpose_takes_its_members_with_it() {
+        let dialog = |canvas: &mut SceneModel| {
+            let panel = canvas.rect(4.0, 2.0).fill(RED);
+            let title = canvas.text("Define");
+            canvas.group(&[&panel, &title])
+        };
+        let hidden = warnings(|canvas| {
+            dialog(canvas);
+        });
+        assert_eq!(hidden.len(), 1, "{hidden:?}");
+        assert!(
+            hidden[0].ends_with("or mark the group it belongs to with covers_on_purpose()"),
+            "{hidden:?}"
+        );
+        let hidden = warnings(|canvas| {
+            dialog(canvas).covers_on_purpose();
+        });
+        assert!(hidden.is_empty(), "{hidden:?}");
     }
 
     #[test]

@@ -69,8 +69,8 @@ badge = scene.geometry.square(1).fill("#f97316").move_to(3, 0)
 #api-entry(
   name: "Drawable.stroke",
   kind: "method",
-  params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro.]), (name: "scale_with_object", type: "bool | None", default: "None", desc: [`True` hace que el ancho siga la escala de la figura, como `scale_stroke_with_object`.])),
-  desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`.],
+  params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro. En los tres casos el trazo visible mide `width`.]), (name: "scale_with_object", type: "bool | None", default: "None", desc: [`True` hace que el ancho siga la escala de la figura, como `scale_stroke_with_object`.])),
+  desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda entero dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -204,6 +204,18 @@ back = scene.geometry.rect(3, 1).fill(BLUE)
 scene.z_layers("modelo", "overlay")
 muro = scene.geometry.rect(4, 3).fill(BLUE).z_index(400)
 lupa = scene.geometry.circle(0.8).fill(GOLD).z_layer("overlay")
+```
+]
+
+#api-entry(
+  name: "Drawable.covers_on_purpose",
+  kind: "method",
+  desc: [Marca que el objeto, y sus miembros si es un grupo, tapa textos a propósito, como un diálogo dibujado sobre un modelo mientras se explica: el aviso de textos tapados de `gaanim check` deja de contar los textos que tapa. No cambia nada del dibujo y vale para toda la escena.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+dialogo = scene.geometry.rect(4, 2).fill(WHITE).covers_on_purpose()
 ```
 ]
 

@@ -1595,16 +1595,23 @@ fn stroke_clip_path<'a>(
         .then_some(clip_path)
 }
 
-/// Pen drawn for `align`: an outside stroke doubles the width and keeps
-/// only its outer half, so the authored width lies wholly beyond the contour.
+/// Pen whose stroke covers everything an aligned stroke draws, for extents:
+/// an outside stroke reaches its whole authored width beyond the contour,
+/// an inside one stays within it, and open contours center their stroke.
 fn aligned_pen(style: &kurbo::Stroke, align: StrokeAlign) -> std::borrow::Cow<'_, kurbo::Stroke> {
     if align == StrokeAlign::Outside {
-        let mut pen = style.clone();
-        pen.width *= 2.0;
-        std::borrow::Cow::Owned(pen)
+        std::borrow::Cow::Owned(clipped_pen(style))
     } else {
         std::borrow::Cow::Borrowed(style)
     }
+}
+
+/// Pen an inside or outside stroke draws before the contour clips it: twice
+/// the authored width, so the half it keeps is the whole authored width.
+fn clipped_pen(style: &kurbo::Stroke) -> kurbo::Stroke {
+    let mut pen = style.clone();
+    pen.width *= 2.0;
+    pen
 }
 
 /// Stroke `path` aligned to its closed contour (see [`StrokeAlign`]).
@@ -1633,7 +1640,7 @@ pub(crate) fn draw_aligned_stroke(
         draw_stroke(scene, style, kurbo::Affine::IDENTITY, brush, view, path);
         return;
     };
-    let pen = aligned_pen(style, align);
+    let pen = clipped_pen(style);
     if align == StrokeAlign::Outside {
         // Keep the even-odd region between an enclosing rectangle and the
         // contour: outside the shape and inside its counters.
@@ -6691,8 +6698,10 @@ mod tests {
     }
 
     #[test]
-    fn outside_strokes_double_the_pen_that_keeps_only_its_outer_half() {
+    fn aligned_strokes_double_the_pen_that_keeps_only_one_half() {
         let stroke = kurbo::Stroke::new(0.3);
+        assert_eq!(clipped_pen(&stroke).width, 0.6);
+        // Only an outside stroke reaches beyond the contour.
         assert_eq!(aligned_pen(&stroke, StrokeAlign::Inside).width, 0.3);
         assert_eq!(aligned_pen(&stroke, StrokeAlign::Center).width, 0.3);
         assert_eq!(aligned_pen(&stroke, StrokeAlign::Outside).width, 0.6);

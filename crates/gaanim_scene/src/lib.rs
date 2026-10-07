@@ -8,8 +8,8 @@ pub mod systems;
 pub mod transition_frame;
 
 pub use components::{
-    Billboard, CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole, FillBrush,
-    FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, LayoutBackdrop,
+    Billboard, CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose,
+    FillBrush, FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, LayoutBackdrop,
     LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame, LayoutInspectionKind,
     LayoutZoneRecord, LayoutZones, Lighting3D, LineListData, LineListSource, LocalBounds,
     Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity, Path2D,

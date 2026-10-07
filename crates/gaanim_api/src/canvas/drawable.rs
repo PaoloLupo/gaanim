@@ -1833,6 +1833,17 @@ impl DrawableHandle {
         Ok(self)
     }
 
+    /// Let this drawable, and its members, hide texts on purpose: the
+    /// covered-text warning of `gaanim check` skips the texts it covers.
+    /// Nothing changes in the drawing; it holds for the whole scene.
+    pub fn covers_on_purpose(self) -> Self {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_covers_on_purpose(&self.spec);
+        self
+    }
+
     pub fn move_to(self, x: impl Into<ScalarSource>, y: impl Into<ScalarSource>) -> Self {
         let x = x.into();
         let y = y.into();

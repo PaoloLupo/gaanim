@@ -3352,9 +3352,10 @@ class Drawable:
         width follow that scale instead, as ``scale_stroke_with_object`` does.
 
         ``align`` places the stroke on closed contours, including every text
-        glyph. By default it stays inside the shape, so ``write`` draws a
-        constant width; ``"center"`` straddles the contour and ``"outside"``
-        draws the whole width beyond it (a text halo). Open paths always
+        glyph. By default the whole width stays inside the shape, so
+        ``write`` draws a constant width; ``"center"`` straddles the contour
+        and ``"outside"`` draws the whole width beyond it (a text halo). The
+        visible stroke is ``width`` wide in all three. Open paths always
         center their stroke. The alignment is declaration state and is not
         animated. Other values raise ``ValueError``.
 
@@ -3988,6 +3989,18 @@ class Drawable:
         Example:
             scene.z_layers("model", "overlay")
             lens = scene.geometry.circle(0.8).z_layer("overlay")
+        """
+        ...
+    def covers_on_purpose(self) -> Self:
+        """Let this drawable, and its members, hide texts on purpose.
+
+        ``gaanim check`` warns about a text that an opaque shape drawn above
+        it hides completely; it skips the texts this drawable covers, such
+        as a dialog drawn over a model while it is explained. Nothing
+        changes in the drawing, and it holds for the whole scene.
+
+        Example:
+            dialog = scene.geometry.rect(4, 2).fill(WHITE).covers_on_purpose()
         """
         ...
     @overload
