@@ -1025,6 +1025,10 @@ pub struct ObjectSpec {
     pub covers_on_purpose: bool,
     /// If true, this object is a HUD overlay (screen-space, fixed).
     pub hud: bool,
+    /// Depth of a parallax layer (`SceneModel::parallax_layer`).
+    pub parallax_depth: Option<f64>,
+    /// The path a Text follows (`SceneModel::text_on_path`).
+    pub text_path: Option<super::text_path::TextPathSpec>,
     /// If true, this object was attached to a coordinate space as data.
     /// Its parent's Create/Write animations should not include it as a leaf
     /// (otherwise a plane.create() would also draw every plot).
@@ -1207,6 +1211,8 @@ impl ObjectSpec {
             coordinate_label_offset: None,
             coordinate_tick_level: None,
             hud: false,
+            parallax_depth: None,
+            text_path: None,
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),

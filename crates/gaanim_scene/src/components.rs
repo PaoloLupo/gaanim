@@ -408,6 +408,15 @@ pub struct LayoutZones(pub Vec<LayoutZoneRecord>);
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HudOverlay;
 
+/// Parallax layer root (`SceneModel::layer`): its subtree moves by
+/// `1 / depth` of the 2D camera motion; see [`crate::systems::parallax_pin`].
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ParallaxLayer {
+    /// Distance from the camera in units of the scene plane's distance.
+    pub depth: f64,
+}
+
 /// Marks 3D content (triangle meshes and line lists) that the renderer
 /// projects through the camera instead of drawing as a 2D path.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]

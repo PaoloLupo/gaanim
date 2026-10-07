@@ -469,6 +469,20 @@ quote.words[0:2].marker(opacity=0.35)
 ]
 
 #api-entry(
+  name: "TextSelection.annotate",
+  kind: "property",
+  returns: (type: "Annotations", desc: [Constructor de anotaciones alrededor de los glifos seleccionados.]),
+  desc: [Las anotaciones a mano alzada de #link("/referencia/drawable/#anotaciones")[`Drawable.annotate`] alrededor de una parte del texto. Siguen los glifos aunque el texto se mueva.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+eq = scene.text.equation("E = ", part("rhs", "m c^2"))
+scene.play([eq["rhs"].annotate.underline(color=RED, seed=1).animate.create()])
+```
+]
+
+#api-entry(
   name: "TextSelection.animate / TextSelectionAnimation.fill / opacity",
   kind: "property",
   desc: [Proxy `TextSelectionAnimation` limitado a los glifos seleccionados. Acepta `fill` y `opacity`, combinables (`animate.fill(RED).opacity(0.6)`); los destinos de transformación, escala, rotación, material o trazo lanzan `TypeError`. Cada método devuelve un `Anim` para `scene.play`.],
@@ -651,6 +665,49 @@ scene.render()
 >>>scene = Scene(frame=(16, 9))
 title = scene.text("Tipografía", role="title").tracking(0.4)
 scene.play([title.animate.tracking(0.0).duration(1.2)])
+```
+]
+
+=== Texto sobre una trayectoria <texto-trayectoria>
+
+#api-entry(
+  name: "Typography.on_path",
+  kind: "factory",
+  params: (
+    (name: "content", type: "TextContent", desc: [Una línea de texto; nunca se parte.]),
+    (name: "path", type: "Drawable", desc: [Drawable cuya trayectoria siguen los glifos.]),
+    (name: "align", type: "str", default: "\"start\"", desc: [`"start"`, `"center"` o `"end"`: el texto empieza, se centra o termina en la trayectoria.]),
+    (name: "orient", type: "bool", default: "True", desc: [Gira cada glifo con la dirección de la trayectoria; con `False` quedan derechos.]),
+    (name: "reverse", type: "bool", default: "False", desc: [Recorre la trayectoria del final al principio.]),
+    (name: "offset", type: "float", default: "0.0", desc: [Desplazamiento inicial, como fracción de la longitud de la trayectoria.]),
+  ),
+  returns: (type: "Text", desc: [Texto cuyos glifos siguen la trayectoria.]),
+  desc: [Cada glifo conserva su forma y su espaciado: su centro sobre la línea base se coloca en la trayectoria a la misma longitud de arco que tenía en la línea. Los glifos quedan a la izquierda del sentido de avance; un círculo avanza en sentido antihorario, así que el texto se lee por dentro, y `reverse=True` lo pone por fuera. En una trayectoria cerrada el texto da la vuelta; en una abierta, los glifos que pasan un extremo siguen en línea recta. La trayectoria se lee en coordenadas de escena donde está `path` en ese momento y pasa a ser del texto: moverlo la arrastra, y cambiar `path` después no mueve los glifos. `path` sigue siendo un drawable normal. Acepta los argumentos de estilo de `scene.text`. Un `align` desconocido, un `offset` no finito o un `path` de otra escena lanzan `ValueError`.],
+)[
+```python
+# output: text_on_path.webp
+# show-code: true
+from gaanim import *
+
+scene = Scene(frame=(16, 9))
+circle = scene.geometry.circle(2.4).no_fill().stroke(GRAY, 0.03)
+ring = scene.text.on_path("GAANIM · MOTION · DESIGN · ", circle, reverse=True, size=0.5)
+scene.play([ring.animate.path_offset(1.0).duration(4).easing(Easing.LINEAR)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Text.path_offset",
+  kind: "method",
+  desc: [Desplaza al instante un texto creado con `on_path` por su trayectoria, como fracción de su longitud. Declarado antes del primer `play` es el desplazamiento inicial; después corta en el cursor. Anímalo con `animate.path_offset(value)`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+wave = scene.geometry.path([("move", [(-6, 0)]), ("cubic", [(-2, 3), (2, -3), (6, 0)])])
+label = scene.text.on_path("una ola de texto", wave, align="center").path_offset(-0.2)
+scene.play([label.animate.path_offset(0.2).duration(2)])
 ```
 ]
 

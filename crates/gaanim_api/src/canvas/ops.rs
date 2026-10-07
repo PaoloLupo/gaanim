@@ -315,6 +315,7 @@ impl CanvasState {
                 AnimationType::PathPointsTo { .. } => "points",
                 AnimationType::PivotTo { .. } => "pivot",
                 AnimationType::TextAnimator(_) => "text_animator",
+                AnimationType::TextPathOffset { .. } => "text_path",
                 _ => "other",
             }
         }
@@ -766,6 +767,14 @@ pub(crate) enum Op {
         sources: Vec<crate::anim::BoundsTarget>,
         gap: f64,
         overhang: f64,
+    },
+    /// Draw a hand-drawn notation around live bounds, grown by `padding`
+    /// (top, right, bottom, left).
+    AttachRoughNotation {
+        target: ObjectId,
+        sources: Vec<crate::anim::BoundsTarget>,
+        padding: [f64; 4],
+        notation: gaanim_math::RoughNotation,
     },
     /// Cycle the stroke color of a drawable through `colors`, `rate` turns
     /// per second from the cursor on.

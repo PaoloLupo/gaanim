@@ -150,9 +150,11 @@ pub use profile::{reload_profile_enabled, set_call_site_provider};
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
 pub mod text_animator;
+pub mod text_path;
 pub use text_animator::{
     SelectorShape, TextAnimator, TextAnimatorError, TextAnimatorOut, TextRevealStyle,
 };
+pub use text_path::{TextPathAlign, TextPathSpec};
 
 /// dotLottie selectors and typed inputs.
 pub use gaanim_renderer::lottie::{LottieInput, LottiePackageOptions};

@@ -836,6 +836,14 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) clipped: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
+    /// Glyph layout and current offset of Texts laid on a path.
+    pub(crate) text_paths: HashMap<
+        ObjectId,
+        (
+            std::sync::Arc<crate::canvas::text_path::TextPathLayout>,
+            f64,
+        ),
+    >,
     /// Resting transforms and opacities of camera view screens hidden by
     /// `pop_in`, which the next `pop_out` returns to.
     pub(crate) camera_view_rests: HashMap<ObjectId, CameraViewRest>,
@@ -915,6 +923,13 @@ pub(crate) struct SceneBuilderState {
     connectors: HashSet<ObjectId>,
     clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
+    text_paths: HashMap<
+        ObjectId,
+        (
+            std::sync::Arc<crate::canvas::text_path::TextPathLayout>,
+            f64,
+        ),
+    >,
     camera_view_rests: HashMap<ObjectId, CameraViewRest>,
     text_motion: crate::text_motion::TextMotionState,
     persistent_objects: HashSet<ObjectId>,
@@ -953,6 +968,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors: self.connectors.clone(),
             clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
+            text_paths: self.text_paths.clone(),
             camera_view_rests: self.camera_view_rests.clone(),
             text_motion: self.text_motion.clone(),
             persistent_objects: self.persistent_objects.clone(),
@@ -998,6 +1014,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors,
             clipped,
             text_tracking,
+            text_paths,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -1039,6 +1056,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors,
             clipped,
             text_tracking,
+            text_paths,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -1348,6 +1366,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors: HashSet::new(),
             clipped: HashSet::new(),
             text_tracking: HashMap::new(),
+            text_paths: HashMap::new(),
             camera_view_rests: HashMap::new(),
             text_motion: Default::default(),
             property_bindings: HashMap::new(),
@@ -1622,6 +1641,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::Broadcast { .. } => "Broadcast",
             AnimationType::Spotlight { .. } => "Spotlight",
             AnimationType::TextAnimator(_) => "TextAnimator",
+            AnimationType::TextPathOffset { .. } => "TextPathOffset",
         }
     }
 
@@ -3138,6 +3158,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_text_animator_internal(anim, *spec);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::TextPathOffset { .. }) {
+            self.play_text_path_offset_internal(anim);
+            return;
+        }
         if let AnimationType::TextSelectionProperties {
             fragment,
             occurrence,
@@ -3668,7 +3692,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Blink { .. }
             | AnimationType::Broadcast { .. }
             | AnimationType::Spotlight { .. }
-            | AnimationType::TextAnimator(_) => {
+            | AnimationType::TextAnimator(_)
+            | AnimationType::TextPathOffset { .. } => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
             AnimationType::SignalFloat { to } => {

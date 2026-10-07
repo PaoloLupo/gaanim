@@ -3552,6 +3552,14 @@ impl SceneModel {
                     if spec.hud {
                         Self::apply_hud(builder, actual.id);
                     }
+                    if let Some(depth) = spec.parallax_depth
+                        && let Some(state) = builder.states.get(actual.id)
+                    {
+                        builder
+                            .commands
+                            .entity(state.entity)
+                            .insert(gaanim_scene::ParallaxLayer { depth });
+                    }
                     if spec.exclude_from_parent_draw
                         && let Some(state) = builder.states.get_mut(actual.id)
                     {
@@ -6566,6 +6574,22 @@ impl SceneModel {
                         builder.commands.entity(state.entity).insert(
                             gaanim_animation::SurroundingRect::underline(compiled, *gap, *overhang),
                         );
+                    }
+                }
+                Op::AttachRoughNotation {
+                    target,
+                    sources,
+                    padding,
+                    notation,
+                } => {
+                    let compiled = Self::bounds_source_ids(builder, id_map, sources);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(state.entity).insert((
+                            gaanim_animation::SurroundingRect::rough(compiled, *padding, *notation),
+                            gaanim_scene::PathRevealOrder::Sequential,
+                        ));
                     }
                 }
                 Op::AttachStrokeCycle {
@@ -11079,6 +11103,12 @@ impl SceneModel {
                 .commands
                 .entity(state.entity)
                 .insert(bevy::prelude::Transform::default());
+        }
+        // Glyphs go on their path before a layout measures the Text.
+        if let Some(text_path) = &spec.text_path
+            && let Some(path) = id_map.get(&text_path.path).copied()
+        {
+            builder.attach_text_path(id, path, text_path);
         }
         // A part of an imported SVG is laid out after its root.
         if spec.svg_owner.is_none() {

@@ -1433,6 +1433,64 @@ scene.play([scene.camera.animate.reset().duration(0.5)])
 ```
 ]
 
+=== Capas de parallax <parallax>
+
+Una capa de parallax agrupa drawables que están más lejos o más cerca de la
+cámara que el plano de la escena. Con la cámara ortográfica, sus miembros se
+desplazan `1 / depth` del paneo de cámara: el fondo lejano se mueve despacio y
+el primer plano pasa rápido, sin 3D real. No confundir con `Scene.z_layers`
+(orden de dibujo con nombre), `Drawable.view_layer` (filtro de vistas de
+cámara) ni con `.layer(nombre)` de gráficos y ejes (una parte del objeto).
+
+#api-entry(
+  name: "Scene.layer",
+  kind: "method",
+  params: (
+    (name: "depth", type: "float", desc: [Distancia a la cámara en unidades de la distancia del plano de la escena; positiva, `math.inf` permitido.]),
+  ),
+  returns: (type: "ParallaxLayer", desc: [Capa vacía; es un `Drawable` cuyos miembros se añaden con `add`.]),
+  desc: [La capa ve una cámara centrada en `posición / depth` y con zoom `zoom ** (1 / depth)`; la rotación afecta a todas por igual. `depth=1` se comporta como el resto de la escena, `depth=3` se mueve a un tercio de la velocidad de la cámara, `depth=0.6` pasa más rápido y `math.inf` no se desplaza ni hace zoom, como `Drawable.hud` salvo por la rotación. Sacudida, seguimiento y bindings también mueven las capas. Las capas lejanas se dibujan detrás de las cercanas: su `z_index` por defecto es `round(-100 * ln(depth))`, limitado a ±900, y cada miembro suma el suyo. Con cámara en perspectiva las capas no se mueven, porque la profundidad real ya produce parallax. Una profundidad no positiva lanza `ValueError`.],
+)[
+```python
+# output: parallax.webp
+# show-code: true
+import math
+from gaanim import *
+
+scene = Scene(frame=(16, 9), background="#1d2b53")
+sky = scene.layer(depth=math.inf).add(scene.geometry.circle(0.9).fill(GOLD).move_to(4.5, 2.6))
+far = scene.layer(depth=3.0)
+for i in range(6):
+    far.add(scene.geometry.polygon([(-2.4, 0), (0, 2.6), (2.4, 0)]).fill("#3b4a7a").move_to(-8 + i * 4.2, -1.4))
+for i in range(8):
+    scene.geometry.rect(0.5, 1.2).fill("#8a5a3b").move_to(-6 + i * 3, -2.0)
+near = scene.layer(depth=0.6)
+for i in range(5):
+    near.add(scene.geometry.circle(0.9).fill("#1f4d33").move_to(-7 + i * 5, -3.3))
+scene.play([scene.camera.animate.pan_to(6, 0).duration(3)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "ParallaxLayer.add",
+  kind: "method",
+  params: (
+    (name: "drawable", type: "Drawable", desc: [Primer drawable que entra en la capa.]),
+    (name: "*others", type: "Drawable", desc: [Más drawables.]),
+  ),
+  returns: (type: "Self", desc: [La misma capa, para encadenar.]),
+  desc: [Mueve los drawables a la capa conservando su posición actual; añadirlo a otra capa lo mueve allí. Mover, desvanecer o animar la capa actúa sobre todos sus miembros. Un drawable de otra escena, la propia capa u otra capa lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+far = scene.layer(depth=3.0)
+far.add(scene.geometry.circle(1.0).move_to(4, 2), scene.geometry.square(1.0).move_to(-4, 2))
+print(far.depth)  # 3.0
+```
+]
+
 === Bindings persistentes
 
 Un binding es una restricción de cámara que no se dibuja: desde que se crea
