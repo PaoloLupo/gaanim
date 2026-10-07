@@ -266,6 +266,19 @@ impl CanvasState {
         Ok(())
     }
 
+    /// Let `spec` hide texts on purpose for the whole scene, like
+    /// [`Self::set_z_layer`].
+    pub(crate) fn set_covers_on_purpose(&mut self, spec: &SharedObjectSpec) {
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.covers_on_purpose = true;
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.covers_on_purpose = true;
+        }
+    }
+
     pub(crate) fn set_chalk(
         &mut self,
         spec: &SharedObjectSpec,

@@ -3991,6 +3991,18 @@ class Drawable:
             lens = scene.geometry.circle(0.8).z_layer("overlay")
         """
         ...
+    def covers_on_purpose(self) -> Self:
+        """Let this drawable, and its members, hide texts on purpose.
+
+        ``gaanim check`` warns about a text that an opaque shape drawn above
+        it hides completely; it skips the texts this drawable covers, such
+        as a dialog drawn over a model while it is explained. Nothing
+        changes in the drawing, and it holds for the whole scene.
+
+        Example:
+            dialog = scene.geometry.rect(4, 2).fill(WHITE).covers_on_purpose()
+        """
+        ...
     @overload
     def move_to(self, reference: Drawable, /) -> Self: ...
     @overload

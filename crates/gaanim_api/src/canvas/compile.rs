@@ -10508,6 +10508,14 @@ impl SceneModel {
                 .entity(state.entity)
                 .insert(gaanim_scene::ZLayer(*rank));
         }
+        if spec.covers_on_purpose
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(gaanim_scene::CoversOnPurpose);
+        }
         // Applies to primitives as well as groups/text, which skip `post_apply`
         // when they finish through `finish_spawn_builder`.
         if let Some(align) = spec.stroke_align

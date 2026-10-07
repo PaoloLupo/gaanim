@@ -145,7 +145,8 @@ termina con `pass` o `fail`:
   encima en una pausa o al final de un segmento. El aviso dice el texto, la
   figura y dónde se tapa por primera vez; súbelo con `z_layer` o `z_index`.
   Un texto oculto a propósito (con opacidad 0) o detrás de una figura
-  translúcida o de una imagen no cuenta.
+  translúcida, de una imagen o de una figura marcada con
+  `covers_on_purpose()` no cuenta.
 - Si la escena usa segmentos (una presentación): que exista al menos un
   segmento, que ninguno dure cero segundos, que cada uno tenga notas y que
   las pausas tengan nombre; avisa si el marco no es 16:9 o si la escena dura

@@ -208,6 +208,18 @@ lupa = scene.geometry.circle(0.8).fill(GOLD).z_layer("overlay")
 ]
 
 #api-entry(
+  name: "Drawable.covers_on_purpose",
+  kind: "method",
+  desc: [Marca que el objeto, y sus miembros si es un grupo, tapa textos a propósito, como un diálogo dibujado sobre un modelo mientras se explica: el aviso de textos tapados de `gaanim check` deja de contar los textos que tapa. No cambia nada del dibujo y vale para toda la escena.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+dialogo = scene.geometry.rect(4, 2).fill(WHITE).covers_on_purpose()
+```
+]
+
+#api-entry(
   name: "Drawable.named",
   kind: "method",
   params: ((name: "name", type: "str", default: none, desc: [Nombre no vacío; no hace falta que sea único.]),),

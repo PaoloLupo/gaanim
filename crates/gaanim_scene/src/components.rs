@@ -223,6 +223,12 @@ pub struct RenderOrder {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ZLayer(pub i32);
 
+/// Marks an entity, and its descendants, that hides texts on purpose, like a
+/// dialog drawn over a model: `gaanim check` does not warn about texts it
+/// covers. It changes nothing in the drawing.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct CoversOnPurpose;
+
 /// Marks an entity that belongs to one segment of the timeline. In a scene
 /// with segments, a drawable whose chain of parents carries no marker is
 /// persistent (`scene.persist`) and draws above segment content with the

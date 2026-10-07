@@ -2466,6 +2466,11 @@ impl PyDrawable {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
+    pub(crate) fn covers_on_purpose_impl(&self) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().covers_on_purpose()))
+    }
+
     pub(crate) fn move_to_impl(
         &self,
         x: &Bound<'_, PyAny>,
@@ -3645,6 +3650,11 @@ impl PyDrawable {
 
     fn z_layer<'py>(slf: &Bound<'py, Self>, name: &str) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().z_layer_impl(name);
+        same_drawable(slf, result)
+    }
+
+    fn covers_on_purpose<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().covers_on_purpose_impl();
         same_drawable(slf, result)
     }
 
