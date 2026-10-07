@@ -15,8 +15,9 @@ instalar una versión nueva, sigue
 
 Publicada el 6 de octubre de 2026. Recargar y abrir presentaciones largas es más rápido: medir con
 `bounds()` reutiliza lo ya compilado, un `traced_path` ya no encarece los
-saltos, guardar sin cambios conserva la escena y `GAANIM_RELOAD_PROFILE=1`
-dice en qué se va el tiempo. Trae capas de dibujo con nombre, un aviso de
+saltos, guardar sin cambios conserva la escena, cambiar un asset recompila
+solo lo que lo usa, el script arranca mientras se prepara la ventana y
+`GAANIM_RELOAD_PROFILE=1` dice en qué se va el tiempo. Trae capas de dibujo con nombre, un aviso de
 textos tapados en `gaanim check` y dibujos axonométricos. Corrige un fallo de
 Typst en sesiones largas, el ancho de los trazos de contornos cerrados, las
 recargas tras guardar con herramientas que escriben un temporal y tres
@@ -50,6 +51,29 @@ cerrados o entra con `fade_in` a un objeto con opacidad declarada.
 - La vista previa arranca en Vulkan (Metal en macOS) cuando la GPU lo admite,
   sin iniciar también DX12: en Windows llega al primer fotograma unos 0,3 s
   antes y sin las esperas de varios segundos que a veces causaba DX12.
+- Al abrir un script, este empieza a ejecutarse mientras se preparan la
+  ventana y la GPU, y encontrar su entorno de Python ya no arranca procesos:
+  se leen el `pyvenv.cfg` y los metadatos del paquete instalado. En la
+  presentación de prueba, la primera escena llega unos 1,3 s antes.
+- Guardar un asset (una imagen, un Lottie, un archivo de datos) ya no vacía
+  todas las cachés ni recompila la escena entera: se olvida solo lo que las
+  cachés guardaban de ese archivo, y la recarga sigue siendo incremental
+  desde el primer segmento que lo usa. Si la escena no lo lee, la recarga
+  queda en `unchanged`. El aviso de recarga dice qué archivo cambió.
+- Editar una diapositiva recompila con menos coste fijo: las huellas que
+  deciden qué segmentos se reutilizan se calculan en paralelo, las
+  transiciones entre segmentos y las capas procedurales ya no recorren todos
+  los clips una vez cada una, y el punto de control se copia mientras se
+  restaura la escena. Al editar la última diapositiva de la presentación de
+  prueba, el replay pasó de 0,45 a 0,25 s (las huellas, de 100 a 17 ms). Un
+  cambio inmediato sobre un objeto de un segmento anterior ya no impide
+  reutilizar el segmento que lo declaró.
+- Una medición con `bounds()` que compila la escena reanuda la compilación
+  de la anterior desde el segmento donde cambió la escena, y la siguiente
+  ejecución del script reanuda la última, salvo desde un segmento con
+  funciones de Python (reactivas, updaters), que son nuevas en cada
+  ejecución. En la presentación de prueba, la segunda medición de cada
+  recarga pasó de unos 0,3 a 0,16 s.
 - Capas de dibujo con nombre: `scene.z_layers("modelo", "overlay")` y
   `drawable.z_layer("overlay")` dejan lo que va encima (ventanas, lupas,
   etiquetas) sobre cualquier `z_index` del resto, que pasa a ordenar solo
