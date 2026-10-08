@@ -37,6 +37,117 @@ pub struct ShaderEffect {
     pub margin: f64,
 }
 
+/// Separable Gaussian blur of a depth-of-field layer, in premultiplied
+/// alpha so edges fade instead of darkening. `sigma` arrives in scene units
+/// and [`crate::pipeline`] turns it into the texture's pixels.
+const DEPTH_BLUR: &str = r#"
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let p = uv * resolution;
+    let sigma = gaanim_uniforms.sigma;
+    if (sigma < 0.5) {
+        return gaanim_scene(uv);
+    }
+    let radius = ceil(3.0 * sigma);
+    let step = max(1.0, radius / 32.0);
+    var sum = vec4<f32>(0.0);
+    var total = 0.0;
+    for (var i = -32; i <= 32; i++) {
+        let x = f32(i) * step;
+        if (abs(x) > radius) {
+            continue;
+        }
+        let weight = exp(-0.5 * x * x / (sigma * sigma));
+        let offset = select(vec2<f32>(0.0, x), vec2<f32>(x, 0.0), gaanim_uniforms.horizontal > 0.5);
+        let q = clamp(p + offset, vec2<f32>(0.5), resolution - vec2<f32>(0.5));
+        let color = gaanim_scene(q / resolution);
+        sum += vec4<f32>(color.rgb * color.a, color.a) * weight;
+        total += weight;
+    }
+    let average = sum / total;
+    if (average.a <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(average.rgb / average.a, average.a);
+}
+"#;
+
+/// The depth-of-field blur pass; its first uniform is a sigma in scene
+/// units until a layer's texture density turns it into pixels.
+pub fn depth_blur_shader() -> Option<&'static PostProcessShader> {
+    static SHADER: OnceLock<Option<PostProcessShader>> = OnceLock::new();
+    SHADER
+        .get_or_init(|| PostProcessShader::with_uniforms(DEPTH_BLUR, ["sigma", "horizontal"]).ok())
+        .as_ref()
+}
+
+/// Largest blur, in texture pixels, a depth-of-field layer is drawn with:
+/// blurrier layers are drawn at a lower density, which costs less and
+/// looks the same once blurred.
+pub const MAX_DEPTH_BLUR_PIXELS: f64 = 8.0;
+
+/// The shader effect that blurs a parallax layer by `sigma` scene units:
+/// two separable passes and room for the blur to spread.
+pub fn depth_of_field_effect(sigma: f64) -> Option<ShaderEffect> {
+    let shader = depth_blur_shader()?;
+    let passes = [1.0, 0.0]
+        .into_iter()
+        .map(|horizontal| {
+            crate::post_process::PostProcessPass::constant(shader.clone(), &[sigma, horizontal])
+                .ok()
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(ShaderEffect {
+        post: CanvasPostProcess {
+            passes,
+            segments: Vec::new(),
+            parameters: Vec::new(),
+        },
+        margin: 3.0 * sigma,
+    })
+}
+
+/// Marks a [`ShaderEffect`] put on a parallax layer by its depth of field,
+/// with the blur it was built for.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct DepthOfFieldBlur(pub f64);
+
+/// Smallest blur, in scene units, worth drawing a layer offscreen for.
+const MIN_DEPTH_BLUR: f64 = 1.0e-3;
+
+/// System: blur every parallax layer by its depth of field, through a
+/// shader effect on the layer's root. A layer in focus is drawn plainly.
+pub fn depth_of_field_system(
+    mut commands: bevy::prelude::Commands,
+    depth_of_field: Option<bevy::prelude::Res<gaanim_scene::DepthOfField>>,
+    layers: bevy::prelude::Query<(
+        Entity,
+        &gaanim_scene::ParallaxLayer,
+        Option<&DepthOfFieldBlur>,
+    )>,
+) {
+    for (entity, layer, current) in &layers {
+        let sigma = depth_of_field
+            .as_deref()
+            .map_or(0.0, |depth_of_field| depth_of_field.blur_at(layer.depth));
+        if sigma < MIN_DEPTH_BLUR {
+            if current.is_some() {
+                commands
+                    .entity(entity)
+                    .remove::<(ShaderEffect, DepthOfFieldBlur)>();
+            }
+            continue;
+        }
+        if current.is_some_and(|current| (current.0 - sigma).abs() <= 1.0e-9) {
+            continue;
+        }
+        if let Some(effect) = depth_of_field_effect(sigma) {
+            commands
+                .entity(entity)
+                .insert((effect, DepthOfFieldBlur(sigma)));
+        }
+    }
+}
+
 /// How a track matte shows the drawable it is set on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MatteMode {

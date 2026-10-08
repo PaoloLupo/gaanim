@@ -365,6 +365,21 @@ impl MotionBlur {
     }
 }
 
+/// Time ranges with their own [`MotionBlur`], such as a whip pan's: a frame
+/// inside one is blurred even when the scene has no motion blur of its own.
+#[derive(bevy::prelude::Resource, Debug, Clone, PartialEq, Default)]
+pub struct MotionBlurWindows(pub Vec<(f64, f64, MotionBlur)>);
+
+impl MotionBlurWindows {
+    /// The blur of the first window that holds `time`.
+    pub fn at(&self, time: f64) -> Option<MotionBlur> {
+        self.0
+            .iter()
+            .find(|(start, end, _)| *start - 1e-9 <= time && time <= *end + 1e-9)
+            .map(|(_, _, blur)| *blur)
+    }
+}
+
 /// Keeps a drawable sharp under [`MotionBlur`]: every sub-frame draws it as
 /// it is at the frame's own time.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]

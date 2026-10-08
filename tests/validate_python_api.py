@@ -1228,7 +1228,7 @@ def validate_camera_rig_contract(module: object) -> list[str]:
 
 
 def validate_camera_motion_contract(module: object) -> list[str]:
-    """Exercise trauma shake and exponential zoom (CA-01, CA-02)."""
+    """Exercise trauma shake, exponential zoom, paths, whip pans and dolly zooms (CA-01 to CA-03)."""
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
     marker = scene.geometry.dot(0.2)
@@ -1240,6 +1240,11 @@ def validate_camera_motion_contract(module: object) -> list[str]:
         camera.zoom_to(8.0, interpolation="exponential"),
         camera.zoom_to(2.0, interpolation="linear"),
         camera.frame_to(marker, 0.5, interpolation="linear"),
+        camera.follow_path(scene.geometry.circle(2.0), orient=True, rotate_offset=0.5, start=0.2, end=0.9),
+        camera.whip_pan((6.0, 0.0)),
+        camera.whip_pan(6.0, 0.0, blur=False),
+        camera.whip_pan(marker),
+        camera.dolly_zoom(1.5),
     )
     if not all(isinstance(animation, module.Anim) for animation in animations):
         failures.append("camera shake/zoom interpolation did not return Anim")
@@ -1249,6 +1254,12 @@ def validate_camera_motion_contract(module: object) -> list[str]:
         lambda: camera.shake(-0.1, 4.0),
         lambda: camera.zoom_to(2.0, interpolation="cubic"),
         lambda: camera.frame_to(marker, interpolation="log"),
+        lambda: camera.follow_path(module.Scene(frame=(16, 9)).geometry.circle(1.0)),
+        lambda: camera.follow_path(marker, start=0.5, end=0.5),
+        lambda: camera.follow_path(marker, start=-0.1),
+        lambda: camera.follow_path(marker, orient=True, rotate_offset=float("inf")),
+        lambda: camera.dolly_zoom(0.0),
+        lambda: camera.dolly_zoom(float("nan")),
     )
     for call in invalid_calls:
         try:
@@ -1261,7 +1272,7 @@ def validate_camera_motion_contract(module: object) -> list[str]:
 
 
 def validate_parallax_layer_contract(module: object) -> list[str]:
-    """Exercise parallax layers (CA-04)."""
+    """Exercise parallax layers and their depth of field (CA-04, CA-05)."""
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
     far = scene.layer(depth=3.0)
@@ -1273,6 +1284,31 @@ def validate_parallax_layer_contract(module: object) -> list[str]:
     if far.add(member, scene.geometry.dot(0.1)) is not far:
         failures.append("ParallaxLayer.add did not chain")
     scene.layer(depth=float("inf"))
+    if scene.camera.depth_of_field(focus=1.0, aperture=0.1, max_blur=0.4) is None:
+        failures.append("Camera.depth_of_field did not return the camera")
+    focus = scene.camera.animate.focus_to(3.0)
+    if not isinstance(focus, module.Anim) or not isinstance(
+        scene.camera.animate.depth_of_field(aperture=0.0), module.Anim
+    ):
+        failures.append("depth of field animations did not return Anim")
+    # A rack focus runs alongside a camera move: it has a channel of its own.
+    try:
+        scene.play([scene.camera.animate.pan_to(1.0, 0.0), scene.camera.animate.focus_to(2.0)])
+    except ValueError as error:
+        failures.append(f"a rack focus cannot run with a pan: {error}")
+    for call in (
+        lambda: scene.camera.depth_of_field(focus=0.0),
+        lambda: scene.camera.depth_of_field(focus=float("inf")),
+        lambda: scene.camera.depth_of_field(aperture=-0.1),
+        lambda: scene.camera.animate.focus_to(float("nan")),
+        lambda: scene.camera.animate.depth_of_field(max_blur=-1.0),
+    ):
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("depth of field accepted an invalid value")
     other = module.Scene(frame=(16, 9))
     invalid_calls = (
         lambda: scene.layer(depth=0.0),
@@ -1367,6 +1403,45 @@ def validate_rough_notation_contract(module: object) -> list[str]:
             pass
         else:
             failures.append("annotations accepted an invalid argument")
+    return failures
+
+
+def validate_extrude_contract(module: object) -> list[str]:
+    """Exercise 3D extrusion (CA-06)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    sources = (
+        scene.geometry.circle(1.0),
+        scene.text("HOLA"),
+        scene.geometry.group([scene.geometry.square(1.0), scene.geometry.star(5, 1.0, 0.4)]),
+    )
+    for source in sources:
+        mesh = scene.geometry.extrude(source, 0.3, bevel=0.05, material=module.Material3D.metal(module.GOLD))
+        if not isinstance(mesh, module.Primitive3D):
+            failures.append("Geometry.extrude did not return a Primitive3D")
+        if mesh.material(module.Material3D.matte(module.BLUE)) is not mesh:
+            failures.append("an extruded mesh does not take a material")
+    kept = scene.geometry.extrude(scene.geometry.square(1.0), keep_source=True, tolerance=0.02)
+    if not isinstance(kept.animate.material(module.Material3D()), module.Anim):
+        failures.append("an extruded mesh cannot animate its material")
+    other = module.Scene(frame=(16, 9))
+    square = scene.geometry.square(1.0)
+    invalid_calls = (
+        lambda: scene.geometry.extrude(square, 0.0),
+        lambda: scene.geometry.extrude(square, -1.0),
+        lambda: scene.geometry.extrude(square, 0.2, bevel=-0.01),
+        lambda: scene.geometry.extrude(square, 0.2, bevel=0.1),
+        lambda: scene.geometry.extrude(square, 0.2, tolerance=0.0),
+        lambda: scene.geometry.extrude(scene.geometry.cube(), 0.2),
+        lambda: scene.geometry.extrude(other.geometry.square(1.0), 0.2),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("Geometry.extrude accepted an invalid argument")
     return failures
 
 
@@ -3233,6 +3308,7 @@ def main() -> int:
     missing.extend(validate_parallax_layer_contract(module))
     missing.extend(validate_text_on_path_contract(module))
     missing.extend(validate_rough_notation_contract(module))
+    missing.extend(validate_extrude_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())

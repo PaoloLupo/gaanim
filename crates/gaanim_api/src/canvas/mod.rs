@@ -149,8 +149,10 @@ mod profile;
 pub use profile::{reload_profile_enabled, set_call_site_provider};
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
+mod extrude;
 pub mod text_animator;
 pub mod text_path;
+pub use extrude::ExtrusionSpec;
 pub use text_animator::{
     SelectorShape, TextAnimator, TextAnimatorError, TextAnimatorOut, TextRevealStyle,
 };

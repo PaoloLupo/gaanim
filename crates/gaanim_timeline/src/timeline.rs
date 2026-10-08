@@ -3280,6 +3280,8 @@ impl Timeline {
                         if matches!(
                             anim.lens,
                             PropertyLensSpec::CameraPosition { .. }
+                                | PropertyLensSpec::CameraPathFollow { .. }
+                                | PropertyLensSpec::CameraDollyZoom { .. }
                                 | PropertyLensSpec::CameraPanZoom { .. }
                                 | PropertyLensSpec::CameraState { .. }
                                 | PropertyLensSpec::CameraFollow { .. }
@@ -4687,6 +4689,54 @@ fn apply_lens_spec(
         PropertyLensSpec::CameraPosition { from, to } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.position = from.lerp(*to, t);
+            }
+        }
+        PropertyLensSpec::CameraPathFollow { path, z, orient } => {
+            let point = gaanim_math::get_point_at_alpha(path, t);
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.position = gaanim_core::glam::DVec3::new(point.x, point.y, *z);
+                if let Some(offset) = orient {
+                    // Per-frame angle, not a slerp: no jump where the
+                    // tangent crosses ±π.
+                    camera.rotation = gaanim_core::glam::DQuat::from_rotation_z(
+                        gaanim_math::path_tangent_angle(path, t) + offset,
+                    );
+                }
+            }
+        }
+        PropertyLensSpec::CameraDepthOfField { from, to } => {
+            let lerp = |a: f64, b: f64| a + (b - a) * t;
+            let value = gaanim_scene::DepthOfField {
+                focus: 1.0 / lerp(1.0 / from[0], 1.0 / to[0]),
+                aperture: lerp(from[1], to[1]),
+                max_blur: lerp(from[2], to[2]),
+            };
+            match world.get_resource_mut::<gaanim_scene::DepthOfField>() {
+                Some(mut current) => {
+                    if *current != value {
+                        *current = value;
+                    }
+                }
+                None => world.insert_resource(value),
+            }
+        }
+        PropertyLensSpec::CameraDollyZoom {
+            from_position,
+            target,
+            from_fov,
+            near,
+            far,
+            factor,
+        } => {
+            let (position, fov_y) =
+                gaanim_math::dolly_zoom(*from_position, *target, *from_fov, *factor, t);
+            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+                camera.position = position;
+                camera.projection = gaanim_math::Projection::Perspective {
+                    fov_y,
+                    near: *near,
+                    far: *far,
+                };
             }
         }
         PropertyLensSpec::CameraPositionSource { from, to } => {

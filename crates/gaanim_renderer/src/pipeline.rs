@@ -2968,11 +2968,18 @@ fn extract_world(
         while let Ok(child_of) = child_query.get(world, opacity_group) {
             opacity_group = child_of.parent();
         }
+        // A HUD stays sharp inside a layer the depth of field blurs.
+        let mut under_hud = false;
         let effect_root = outermost_effect(entity, |node| {
+            under_hud |= world.get::<gaanim_scene::HudOverlay>(node).is_some();
+            let depth_blur = world
+                .get::<crate::object_effects::DepthOfFieldBlur>(node)
+                .is_some();
             (
                 world
                     .get::<crate::object_effects::ShaderEffect>(node)
-                    .is_some(),
+                    .is_some()
+                    && !(depth_blur && under_hud),
                 child_query.get(world, node).ok().map(ChildOf::parent),
             )
         });
@@ -4114,12 +4121,41 @@ fn divert_effects(
         let Some(bounds) = bounds.map(|bounds| bounds.inflate(margin, margin)) else {
             continue;
         };
-        let Some((width, height, _)) = effect_texture_size(bounds, pixels_per_unit) else {
+        // A depth-of-field blur is in scene units: it sets how coarse the
+        // texture may be and becomes pixels at the density it gets.
+        let depth_blur = crate::object_effects::depth_blur_shader();
+        let is_depth_blur =
+            |shader: &crate::post_process::PostProcessShader| depth_blur == Some(shader);
+        let scene_sigma = effect
+            .passes
+            .iter()
+            .filter(|(shader, _)| is_depth_blur(shader))
+            .filter_map(|(_, values)| values.first().copied())
+            .fold(0.0_f64, |largest, sigma| largest.max(f64::from(sigma)));
+        let pixels_per_unit = if scene_sigma > 0.0 {
+            pixels_per_unit.min(crate::object_effects::MAX_DEPTH_BLUR_PIXELS / scene_sigma)
+        } else {
+            pixels_per_unit
+        };
+        let Some((width, height, density)) = effect_texture_size(bounds, pixels_per_unit) else {
             continue;
         };
         let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+        let passes = effect
+            .passes
+            .iter()
+            .map(|(shader, values)| {
+                let mut values = values.clone();
+                if is_depth_blur(shader)
+                    && let Some(sigma) = values.first_mut()
+                {
+                    *sigma *= density as f32;
+                }
+                (shader.clone(), values)
+            })
+            .collect();
         let request = crate::post_process::PostProcessRequest {
-            passes: effect.passes.clone(),
+            passes,
             frame,
             time,
             transition: None,
@@ -6901,6 +6937,26 @@ mod tests {
         assert_eq!(
             layer.to_pixels * kurbo::Point::new(-0.5, 1.5),
             kurbo::Point::ZERO
+        );
+        // A depth-of-field blur turns its scene-unit sigma into pixels at
+        // a density low enough to keep it within a few texels.
+        let blur = crate::object_effects::depth_of_field_effect(0.5).unwrap();
+        let mut blurred = vec![member(0.0, Some(root))];
+        let effects = evaluate_effects(
+            &blurred,
+            1.0,
+            |entity| (entity == root).then(|| blur.clone()),
+            |_| None,
+        );
+        assert_eq!(effects[0].margin, 1.5);
+        assert_eq!(effects[0].passes[0].1, vec![0.5, 1.0]);
+        let layers = divert_effects(&mut blurred, &effects, 1.0, 100.0);
+        let density = crate::object_effects::MAX_DEPTH_BLUR_PIXELS / 0.5;
+        assert_eq!(layers[0].request.passes[0].1, vec![8.0, 1.0]);
+        assert_eq!(layers[0].request.passes[1].1, vec![8.0, 0.0]);
+        assert_eq!(
+            u32::from(layers[0].image.width),
+            ((1.0 + 2.0 * 1.5) * density).ceil() as u32
         );
         // A drawable without the component is drawn plainly.
         let mut plain = vec![member(0.0, Some(other))];

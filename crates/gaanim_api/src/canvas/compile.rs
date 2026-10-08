@@ -2535,6 +2535,43 @@ impl SceneModel {
         leaves
     }
 
+    /// The mesh extruded from the outline `source` fills in the scene, and
+    /// the center it belongs at; `None`, with a console warning, when the
+    /// outline encloses no area.
+    fn extruded_mesh(
+        builder: &SceneBuilder<'_, '_, '_>,
+        source: ObjectId,
+        extrusion: &super::ExtrusionSpec,
+    ) -> Option<(gaanim_scene::TriangleMeshData, gaanim_core::kurbo::Point)> {
+        let outline = Self::mask_path_in_world(builder, source);
+        let material = extrusion.material.unwrap_or_else(|| {
+            // The source's own color, as its first filled leaf shows it.
+            let color = Self::visual_leaf_ids(builder, source)
+                .into_iter()
+                .find_map(|id| match builder.states.get(id)?.fill.as_ref()? {
+                    gaanim_core::peniko::Brush::Solid(color) => Some(*color),
+                    _ => None,
+                });
+            color.map_or_else(
+                gaanim_scene::Material3D::default,
+                gaanim_scene::Material3D::matte,
+            )
+        });
+        match gaanim_objects::extrude::extrude(
+            &outline,
+            extrusion.depth,
+            extrusion.bevel,
+            extrusion.tolerance,
+            material,
+        ) {
+            Ok(extruded) => Some((extruded.mesh, extruded.center)),
+            Err(error) => {
+                gaanim_core::console::warn("3d", format!("extrude: {error}"));
+                None
+            }
+        }
+    }
+
     fn mask_path_in_world(
         builder: &SceneBuilder<'_, '_, '_>,
         root: ObjectId,
@@ -3357,6 +3394,20 @@ impl SceneModel {
             None => builder
                 .commands
                 .remove_resource::<gaanim_renderer::effects::MotionBlur>(),
+        }
+        // Clips change it from here; seeks restore it from snapshots.
+        builder
+            .commands
+            .insert_resource(gaanim_scene::DepthOfField::default());
+        if builder.motion_blur_windows.is_empty() {
+            builder
+                .commands
+                .remove_resource::<gaanim_renderer::effects::MotionBlurWindows>();
+        } else {
+            let windows = builder.motion_blur_windows.clone();
+            builder
+                .commands
+                .insert_resource(gaanim_renderer::effects::MotionBlurWindows(windows));
         }
 
         // Clear with the canvas color as well. The drawable background is
@@ -7991,6 +8042,13 @@ impl SceneModel {
         }
     }
 
+    /// The motion blur of a whip pan's frames: a full-frame shutter with
+    /// enough samples that a fast move smears instead of stepping.
+    fn whip_pan_blur() -> gaanim_renderer::effects::MotionBlur {
+        gaanim_renderer::effects::MotionBlur::new(360.0, 24, None)
+            .expect("the whip pan shutter is valid")
+    }
+
     fn add_camera_lens(
         builder: &mut SceneBuilder,
         start: f64,
@@ -8497,6 +8555,124 @@ impl SceneModel {
                 *camera_zoom = 1.0;
                 *camera_fov = None;
             }
+            AnimationType::CameraFollowPath { route, follow } => {
+                let Some(path) = builder.world_route(*route) else {
+                    return;
+                };
+                let path = crate::builder::route_portion(path, *follow);
+                if gaanim_math::get_path_length(&path) <= 0.0 {
+                    gaanim_core::console::warn("camera", "follow_path: the route has no length");
+                    return;
+                }
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPathFollow {
+                        path: path.clone(),
+                        z: camera_position.z,
+                        orient: follow.orient,
+                    },
+                );
+                let end = gaanim_math::get_point_at_alpha(&path, 1.0);
+                *camera_position = DVec3::new(end.x, end.y, camera_position.z);
+                if let Some(offset) = follow.orient {
+                    *camera_rotation = gaanim_core::glam::DQuat::from_rotation_z(
+                        gaanim_math::path_tangent_angle(&path, 1.0) + offset,
+                    );
+                }
+            }
+            AnimationType::CameraWhipPan { target, blur } => {
+                let to = compile_tracking_endpoint(target, id_map, &builder.states);
+                match &to {
+                    gaanim_animation::TrackingEndpoint::Static(point) => {
+                        let to = DVec3::new(point.x, point.y, camera_position.z);
+                        Self::add_camera_lens(
+                            builder,
+                            start,
+                            anim,
+                            PropertyLensSpec::CameraPosition {
+                                from: *camera_position,
+                                to,
+                            },
+                        );
+                        *camera_position = to;
+                    }
+                    _ => Self::add_camera_lens(
+                        builder,
+                        start,
+                        anim,
+                        PropertyLensSpec::CameraPositionSource {
+                            from: *camera_position,
+                            to,
+                        },
+                    ),
+                }
+                if *blur {
+                    let begin = builder.timeline.map_time(start + anim.delay.max(0.0));
+                    let end = builder
+                        .timeline
+                        .map_time(start + anim.delay.max(0.0) + anim.duration.max(0.0));
+                    builder
+                        .motion_blur_windows
+                        .push((begin, end, Self::whip_pan_blur()));
+                }
+            }
+            AnimationType::CameraDepthOfField {
+                focus,
+                aperture,
+                max_blur,
+            } => {
+                let from = builder.depth_of_field;
+                let to = gaanim_scene::DepthOfField {
+                    focus: focus.unwrap_or(from.focus),
+                    aperture: aperture.unwrap_or(from.aperture),
+                    max_blur: max_blur.unwrap_or(from.max_blur),
+                };
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraDepthOfField {
+                        from: [from.focus, from.aperture, from.max_blur],
+                        to: [to.focus, to.aperture, to.max_blur],
+                    },
+                );
+                builder.depth_of_field = to;
+            }
+            AnimationType::CameraDollyZoom { factor } => {
+                let Some((fov, near, far)) = *camera_fov else {
+                    gaanim_core::console::warn(
+                        "camera",
+                        "dolly_zoom needs a perspective camera; call camera.perspective(...) first",
+                    );
+                    return;
+                };
+                if (*camera_position - *camera_target).length() <= f64::EPSILON {
+                    gaanim_core::console::warn(
+                        "camera",
+                        "dolly_zoom needs the camera away from its look_at target",
+                    );
+                    return;
+                }
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraDollyZoom {
+                        from_position: *camera_position,
+                        target: *camera_target,
+                        from_fov: fov,
+                        near,
+                        far,
+                        factor: *factor,
+                    },
+                );
+                let (position, fov) =
+                    gaanim_math::dolly_zoom(*camera_position, *camera_target, fov, *factor, 1.0);
+                *camera_position = position;
+                *camera_fov = Some((fov, near, far));
+            }
             AnimationType::CameraDolly { factor } => {
                 let direction = *camera_position - *camera_target;
                 let destination = *camera_target + direction * factor;
@@ -8637,6 +8813,10 @@ impl SceneModel {
             },
             AnimationType::CameraFollow { target } => AnimationType::CameraFollow {
                 target: *id_map.get(target)?,
+            },
+            AnimationType::CameraFollowPath { route, follow } => AnimationType::CameraFollowPath {
+                route: *id_map.get(route)?,
+                follow: *follow,
             },
             AnimationType::CameraViewZoomTo { screen, zoom, fit } => {
                 AnimationType::CameraViewZoomTo {
@@ -10190,7 +10370,28 @@ impl SceneModel {
                 mref
             }
             SpawnKind::Primitive3D(mesh) => {
-                let mref = builder.spawn_triangle_mesh_data(mesh.clone());
+                let extruded = spec.extrusion.as_ref().and_then(|extrusion| {
+                    let source = id_map.get(&extrusion.source).copied()?;
+                    Self::extruded_mesh(builder, source, extrusion)
+                });
+                let (mesh, center) = match extruded {
+                    Some((mesh, center)) => (mesh, Some(center)),
+                    None => (mesh.clone(), None),
+                };
+                let mref = builder.spawn_triangle_mesh_data(mesh);
+                // The mesh is centered on its own origin, so moves, pivots
+                // and `create()` behave as for other primitives.
+                if let Some(center) = center
+                    && let Some(state) = builder.states.get_mut(mref.id)
+                {
+                    state.transform = state
+                        .transform
+                        .shift_3d(gaanim_core::glam::DVec3::new(center.x, center.y, 0.0));
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(state.transform);
+                }
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
@@ -12820,6 +13021,35 @@ mod tests {
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
+    }
+
+    #[test]
+    fn depth_of_field_clips_set_the_resource_and_seeks_restore_it() {
+        let mut canvas = SceneModel::new(960, 540);
+        let layer = canvas.parallax_layer(3.0).unwrap();
+        let hill = canvas.circle(1.0);
+        canvas.add_to_parallax_layer(&layer, &hill).unwrap();
+        let set = canvas
+            .camera_depth_of_field(Some(0.5), Some(0.12), None, 1.0)
+            .unwrap()
+            .duration(0.0);
+        canvas.play(vec![set]);
+        canvas.wait(0.5);
+        let rack = canvas
+            .camera_depth_of_field(Some(3.0), None, None, 1.0)
+            .unwrap();
+        canvas.play(vec![rack]);
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        let dof = |world: &World| *world.resource::<gaanim_scene::DepthOfField>();
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(dof(&world).focus, 0.5);
+        assert_eq!(dof(&world).aperture, 0.12);
+        assert!((dof(&world).blur_at(3.0) - 0.1).abs() < 1e-9);
+        timeline.seek(&mut world, 2.0);
+        assert!((dof(&world).focus - 3.0).abs() < 1e-9);
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(dof(&world).focus, 0.5);
     }
 
     #[test]

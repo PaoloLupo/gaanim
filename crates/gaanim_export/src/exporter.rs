@@ -698,7 +698,7 @@ where
         crate::encoder::ExportFormat::Mp4 => true,
         crate::encoder::ExportFormat::Webm => !config.transparent,
         _ => false,
-    } && frame_motion_blur(app.world()).is_none()
+    } && !scene_has_motion_blur(app.world())
         && gpu.read_nv12();
     let mut encoder = ParallelEncoder::new(EncoderConfig {
         output_path: config.output_path.clone(),
@@ -1546,11 +1546,28 @@ where
     Ok(())
 }
 
-/// The scene's motion blur, if it has one.
+/// The motion blur of the frame the world was just updated to: the scene's
+/// own, or else that of a window holding the frame, such as a whip pan's.
 pub(crate) fn frame_motion_blur(world: &World) -> Option<gaanim_renderer::effects::MotionBlur> {
     world
         .get_resource::<gaanim_renderer::effects::MotionBlur>()
         .copied()
+        .or_else(|| {
+            let time = world.get_resource::<Timeline>()?.current_time;
+            world
+                .get_resource::<gaanim_renderer::effects::MotionBlurWindows>()?
+                .at(time)
+        })
+}
+
+/// Whether any frame of the scene can be motion blurred.
+fn scene_has_motion_blur(world: &World) -> bool {
+    world
+        .get_resource::<gaanim_renderer::effects::MotionBlur>()
+        .is_some()
+        || world
+            .get_resource::<gaanim_renderer::effects::MotionBlurWindows>()
+            .is_some_and(|windows| !windows.0.is_empty())
 }
 
 /// Compile the frame the world was just updated to.

@@ -1413,6 +1413,45 @@ scene.play([scene.camera.animate.shake(trauma=0.4, seed=3)])  # un golpe más le
 ]
 
 #api-entry(
+  name: "CameraAnimation.follow_path",
+  kind: "method",
+  params: (
+    (name: "route", type: "Drawable", desc: [Drawable cuya trayectoria recorre la cámara.]),
+    (name: "orient", type: "bool", default: "False", desc: [Gira la vista para que el sentido de avance apunte a la derecha de la pantalla.]),
+    (name: "rotate_offset", type: "float", default: "0.0", desc: [Giro extra en radianes; `-math.pi / 2` apunta el avance hacia arriba.]),
+    (name: "start / end", type: "float", default: "0.0 / 1.0", desc: [Tramo recorrido, como fracciones de longitud de arco; `start > end` lo recorre al revés.]),
+  ),
+  returns: (type: "Anim", desc: [Recorrido de la cámara.]),
+  desc: [Lee la trayectoria en coordenadas de escena cuando se reproduce la animación, como `Anim.move_along`. El giro de `orient` se calcula en cada fotograma, así que nunca salta. Easing predeterminado: suave. Una ruta de otra escena, `start` o `end` fuera de `[0, 1]` o iguales, o un `rotate_offset` no finito lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+route = scene.geometry.path([(-6, -2), (-2, 2), (2, -2), (6, 2)])
+scene.play([scene.camera.animate.follow_path(route, orient=True).duration(4)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.whip_pan",
+  kind: "method",
+  params: (
+    (name: "to / y", type: "Endpoint | float", desc: [Destino, como en `pan_to`.]),
+    (name: "blur", type: "bool", default: "True", desc: [Desenfoque de movimiento en los fotogramas del barrido.]),
+  ),
+  returns: (type: "Anim", desc: [Barrido rápido.]),
+  desc: [Paneo rápido de 0.4 s salvo `.duration`, con easing exponencial de entrada y salida: casi todo el recorrido ocurre en un instante a mitad de camino. Con `blur`, los fotogramas exportados y los snapshots del barrido reciben un desenfoque de movimiento de 360° y 24 subfotogramas aunque la escena no tenga uno propio; la vista previa sigue nítida, como con `canvas.motion_blur`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+section_b = scene.text("B", role="title").move_to(16, 0)
+scene.play([scene.camera.animate.whip_pan(section_b)])
+scene.play([scene.camera.animate.whip_pan(0, 0, blur=False).duration(0.3)])
+```
+]
+
+#api-entry(
   name: "CameraAnimation.orthographic",
   kind: "method",
   params: ((name: "zoom", type: "float", default: "1.0", desc: [Zoom positivo.]),),
@@ -1488,6 +1527,69 @@ scene.render()
 far = scene.layer(depth=3.0)
 far.add(scene.geometry.circle(1.0).move_to(4, 2), scene.geometry.square(1.0).move_to(-4, 2))
 print(far.depth)  # 3.0
+```
+]
+
+=== Profundidad de campo <profundidad-campo>
+
+Las capas de parallax pueden desenfocarse según su distancia al foco, como
+con una lente real: cada capa se desenfoca `aperture * |1 - focus / depth|`
+unidades de escena, como máximo `max_blur`. Las capas a la profundidad
+`focus` quedan nítidas y el desenfoque crece al alejarse de ella hacia
+delante o hacia atrás; una capa en `math.inf` se desenfoca `aperture`. Los
+drawables fuera de capas, y los HUD dentro de ellas, nunca se desenfocan. Cada capa se desenfoca como una
+sola imagen, con un efecto de shader en su raíz que reemplaza cualquier
+`shader_effect` puesto en la propia capa; una capa desenfocada se dibuja fuera
+de pantalla y cuesta más.
+
+#api-entry(
+  name: "Camera.depth_of_field",
+  kind: "method",
+  params: (
+    (name: "focus", type: "float | None", default: "None", desc: [Profundidad nítida, finita y positiva; `1` es el plano de la escena.]),
+    (name: "aperture", type: "float | None", default: "None", desc: [Escala del desenfoque, en unidades de escena; `0` lo apaga.]),
+    (name: "max_blur", type: "float | None", default: "None", desc: [Desenfoque máximo, en unidades de escena.]),
+  ),
+  returns: (type: "Camera", desc: [La cámara.]),
+  desc: [Fija la profundidad de campo en el cursor. Los valores omitidos se conservan; al principio el foco es 1, la apertura 0 (sin desenfoque) y `max_blur` 0.5. Un foco no finito o no positivo, o una `aperture` o `max_blur` negativos o no finitos lanzan `ValueError`.],
+)[
+```python
+# output: depth_of_field.webp
+# show-code: true
+import math
+from gaanim import *
+
+scene = Scene(frame=(16, 9), background="#1d2b53")
+far = scene.layer(depth=3.0)
+for i in range(5):
+    far.add(scene.geometry.polygon([(-2.4, 0), (0, 2.6), (2.4, 0)]).fill("#3b4a7a").move_to(-8 + i * 4.2, -1.2))
+for i in range(6):
+    scene.geometry.rect(0.5, 1.2).fill("#8a5a3b").move_to(-6.5 + i * 2.6, -2.0)
+near = scene.layer(depth=0.5)
+for i in range(4):
+    near.add(scene.geometry.circle(0.9).fill("#1f4d33").move_to(-6 + i * 4.4, -3.4))
+scene.camera.depth_of_field(focus=1.0, aperture=0.12)
+scene.wait(0.5)
+scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.depth_of_field / focus_to",
+  kind: "method",
+  params: (
+    (name: "focus", type: "float", desc: [Nueva profundidad nítida.]),
+  ),
+  returns: (type: "Anim", desc: [Cambio animado de la profundidad de campo.]),
+  desc: [`depth_of_field` anima los mismos valores que `Camera.depth_of_field`; `focus_to(focus)` es el cambio de foco (rack focus). El foco se mueve en profundidad inversa, así que pasa de forma pareja por capas cercanas y lejanas; la apertura y `max_blur` cambian linealmente. Easing predeterminado: suave.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.depth_of_field(focus=0.6, aperture=0.12)
+scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+scene.play([scene.camera.animate.depth_of_field(aperture=0.0).duration(0.5)])
 ```
 ]
 
@@ -1830,6 +1932,22 @@ scene.play([scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(
 >>>scene = Scene(frame=(16, 9))
 >>>scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
 scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.6)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.dolly_zoom",
+  kind: "method",
+  params: ((name: "factor", type: "float", default: none, desc: [Multiplicador positivo de la distancia al objetivo.]),),
+  returns: (type: "Anim", desc: [Efecto vértigo.]),
+  desc: [La cámara avanza o retrocede por su línea de visión hasta `factor` veces su distancia al objetivo de `look_at` mientras el campo de visión cambia para que el plano del objetivo conserve su tamaño en pantalla: el fondo se estira (`factor` mayor que 1) o se precipita. La distancia cambia exponencialmente. Solo el contenido 3D lo muestra, porque la capa 2D no se mueve con una cámara en perspectiva. Sin `perspective` o con la cámara sobre su objetivo avisa y no hace nada. Un `factor` no finito o no positivo lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.perspective(fov_y=0.6)
+scene.camera.look_at(eye=(0, 1, 8), target=(0, 0, 0))
+scene.play([scene.camera.animate.dolly_zoom(1.8).duration(2.0)])
 ```
 ]
 

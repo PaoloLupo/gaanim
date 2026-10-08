@@ -19,7 +19,7 @@ pub use camera::{
     Camera, CameraPose, CameraRigCamera, CameraValidationError, CameraViewOverride, CameraViewport,
     Projection, ResolvedCamera,
 };
-pub use camera_motion::{TraumaShake, ZoomInterpolation};
+pub use camera_motion::{TraumaShake, ZoomInterpolation, dolly_zoom};
 pub use easing::{EaseMode, EasingCurve, RateFunc, RepeatMode, StepJump};
 pub use particles::{EmitterShape, Particle, ParticleShape, ParticleSystem};
 pub use path::{

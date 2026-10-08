@@ -480,6 +480,7 @@ fn self_contained(spec: &ObjectSpec) -> bool {
     !spec.hud
         && spec.parallax_depth.is_none()
         && spec.text_path.is_none()
+        && spec.extrusion.is_none()
         && !spec.defer_visibility_until_play
         && spec.coordinate_view_role.is_none()
         && spec.coordinate_label_offset.is_none()

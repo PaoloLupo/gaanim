@@ -1296,6 +1296,37 @@ lamp = Material3D.emissive(GOLD, strength=2.0)
 ]
 
 #api-entry(
+  name: "Geometry.extrude",
+  kind: "factory",
+  params: (
+    (name: "source", type: "Drawable", desc: [Drawable 2D cuyo relleno se extruye: forma, texto, ecuación, grupo o SVG.]),
+    (name: "depth", type: "float", default: "0.2", desc: [Profundidad de la malla, centrada en z = 0.]),
+    (name: "bevel", type: "float", default: "0.0", desc: [Ancho del chaflán a 45° en ambas tapas; menor que la mitad de `depth`.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate del color de relleno del origen.]),
+    (name: "tolerance", type: "float", default: "0.01", desc: [Tolerancia al aplanar las curvas, en unidades de escena; menor es más suave y pesado.]),
+    (name: "keep_source", type: "bool", default: "False", desc: [Mantiene visible el drawable de origen.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Malla cerrada con tapas, paredes y chaflán.]),
+  desc: [El contorno se lee al compilar la escena, así que funcionan textos, ecuaciones, grupos y SVG importados, y se rellena como se dibuja (regla nonzero): las letras conservan sus huecos. La malla queda centrada donde está el origen en el plano z = 0, con la tapa frontal hacia la cámara predeterminada. Los trazos de menos del doble del chaflán conservan aristas rectas. El origen sigue siendo un drawable propio, oculto desde el cursor (el 2D se dibuja encima del 3D) salvo con `keep_source`; cambiarlo después no altera la malla. Gira la cámara para ver la profundidad. Un origen de otra escena, 3D, imagen, video o Lottie, una `depth` o `tolerance` no positiva o un `bevel` negativo o de al menos la mitad de `depth` lanzan `ValueError`; un contorno sin área avisa y deja la malla vacía.],
+)[
+```python
+# output: extrude.webp
+# show-code: true
+from gaanim import *
+
+scene = Scene(frame=(16, 9))
+word = scene.geometry.extrude(scene.text("HOLA", size=1.6), depth=0.4, bevel=0.04,
+                              material=Material3D.metal(GOLD))
+star = scene.geometry.extrude(scene.geometry.star(5, 1.2, 0.5).fill(BLUE).move_to(4.5, 0), depth=0.3)
+scene.camera.perspective(fov_y=0.785)
+scene.camera.look_at(eye=(2, 3, 12), target=(1, 0, 0))
+scene.play([word.animate.create(), star.animate.create()])
+scene.play([scene.camera.animate.orbit(delta_yaw=0.6, delta_pitch=0.0).duration(2)])
+scene.render()
+```
+]
+
+#api-entry(
   name: "Primitive3D.material",
   kind: "method",
   desc: [Cambia el material al instante; `.animate.material(...)` lo interpola.],

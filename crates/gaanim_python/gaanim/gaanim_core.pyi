@@ -5642,6 +5642,34 @@ class Camera:
     def rotate_to(self, angle: ScalarSource) -> Camera: ...
     def look_at(self, eye: Endpoint, target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
     def perspective(self, fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera: ...
+    def depth_of_field(
+        self,
+        focus: Optional[float] = None,
+        *,
+        aperture: Optional[float] = None,
+        max_blur: Optional[float] = None,
+    ) -> Camera:
+        """Set the depth of field of parallax layers at the cursor; returns the camera.
+
+        Each layer created with ``Scene.layer`` blurs by its circle of
+        confusion, ``aperture * |1 - focus / depth|`` scene units, at most
+        ``max_blur``: layers at the ``focus`` depth stay sharp and the blur
+        grows with the distance from it in either direction (a layer at
+        ``math.inf`` blurs by ``aperture``). Depths are those of the layers,
+        so ``focus=1`` keeps the scene plane sharp. Omitted values keep
+        their current value; at first focus is 1, aperture 0 (no blur) and
+        max_blur 0.5. Drawables outside layers, and HUD drawables inside
+        them, never blur. A layer is blurred
+        as one image, through a shader effect on its root that replaces any
+        ``shader_effect`` set on the layer itself; drawn offscreen, a blurred
+        layer costs more. A focus that is not a finite positive depth, or a
+        negative or non-finite ``aperture`` or ``max_blur``, raise
+        ``ValueError``.
+
+        Example:
+            scene.camera.depth_of_field(focus=1.0, aperture=0.12)
+        """
+        ...
     def orthographic(self, zoom: float = 1.0) -> Camera: ...
     def reset(self) -> Camera: ...
     def bind_2d(self, *, center: Optional[Endpoint] = None, zoom: Optional[ScalarSource] = None, rotation: Optional[ScalarSource] = None, influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
@@ -6015,6 +6043,53 @@ class CameraAnimation:
             scene.camera.animate.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0)
         """
         ...
+    def follow_path(
+        self,
+        route: Drawable,
+        *,
+        orient: bool = False,
+        rotate_offset: float = 0.0,
+        start: float = 0.0,
+        end: float = 1.0,
+    ) -> Anim:
+        """Move the 2D camera along the path of ``route``.
+
+        The path is read in scene coordinates when the animation plays, as
+        ``Anim.move_along`` reads it; ``start`` and ``end`` choose the
+        portion as arc-length fractions (``start > end`` travels it
+        backwards). With ``orient`` the view also turns so the direction of
+        travel points right on screen, plus ``rotate_offset`` radians
+        (``-math.pi / 2`` points it up, like a driving view); the turn is
+        computed per frame, so it never jumps. Default easing is smooth.
+        A route from another scene, ``start`` or ``end`` outside ``[0, 1]``
+        or equal, or a non-finite ``rotate_offset`` raise ``ValueError``.
+
+        Example:
+            route = scene.geometry.path([(-6, -2), (-2, 2), (2, -2), (6, 2)])
+            scene.play([scene.camera.animate.follow_path(route, orient=True).duration(4)])
+        """
+        ...
+    def whip_pan(
+        self,
+        to: Endpoint | float,
+        y: Optional[float] = None,
+        *,
+        blur: bool = True,
+    ) -> Anim:
+        """Whip pan to a point or drawable: a fast move eased hard at both ends.
+
+        Takes ``pan_to``'s targets and lasts 0.4 s unless ``.duration`` says
+        otherwise; the default easing is an exponential ease in and out,
+        which keeps most of the travel in a blink around the middle. With
+        ``blur``, exported frames and snapshots of the move get a 360°
+        motion blur of 24 sub-frames even when the scene has none; the live
+        preview stays sharp, as for ``canvas.motion_blur``.
+
+        Example:
+            scene.play([scene.camera.animate.whip_pan(section_b)])
+            scene.play([scene.camera.animate.whip_pan(0, 0, blur=False).duration(0.3)])
+        """
+        ...
     def look_at(
         self,
         eye: Endpoint,
@@ -6069,6 +6144,51 @@ class CameraAnimation:
 
         Example:
             scene.camera.animate.dolly(factor=0.85).duration(0.6)
+        """
+        ...
+
+    def depth_of_field(
+        self,
+        focus: Optional[float] = None,
+        *,
+        aperture: Optional[float] = None,
+        max_blur: Optional[float] = None,
+    ) -> Anim:
+        """Animate the depth of field of parallax layers; see ``Camera.depth_of_field``.
+
+        The focus moves in inverse depth, so a rack focus passes evenly
+        through near and far layers; aperture and max_blur change linearly.
+        Default easing is smooth.
+
+        Example:
+            scene.play([scene.camera.animate.depth_of_field(aperture=0.15).duration(0.5)])
+        """
+        ...
+    def focus_to(self, focus: float) -> Anim:
+        """Rack focus: move the depth of field's focus to the depth ``focus``.
+
+        Example:
+            scene.camera.depth_of_field(focus=0.6, aperture=0.12)
+            scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+        """
+        ...
+    def dolly_zoom(self, factor: float) -> Anim:
+        """Dolly zoom (the vertigo shot) of a perspective camera.
+
+        The camera moves along its line of sight to ``factor`` times its
+        distance from the ``look_at`` target while the field of view changes
+        so the plane through the target keeps its size on screen: the
+        background stretches away (``factor`` above ``1``) or rushes in.
+        The distance changes exponentially. Only 3D content shows it, since
+        the 2D layer does not move under a perspective camera. Without
+        ``perspective`` or with the camera on its target, it warns and does
+        nothing. A ``factor`` that is not finite and positive raises
+        ``ValueError``.
+
+        Example:
+            scene.camera.perspective(fov_y=0.6)
+            scene.camera.look_at(eye=(0, 1, 8), target=(0, 0, 0))
+            scene.play([scene.camera.animate.dolly_zoom(1.8).duration(2.0)])
         """
         ...
 
@@ -7644,6 +7764,40 @@ class Geometry:
 
         Example:
             planet = scene.geometry.circle(0.5).fill(BLUE).move_to(2, 0)
+        """
+        ...
+    def extrude(
+        self,
+        source: Drawable,
+        depth: float = 0.2,
+        *,
+        bevel: float = 0.0,
+        material: Optional[Material3D] = None,
+        tolerance: float = 0.01,
+        keep_source: bool = False,
+    ) -> Primitive3D:
+        """Extrude the area a 2D drawable fills into a closed 3D mesh.
+
+        The outline is read when the scene compiles, so text, equations,
+        groups and imported SVGs work, and filled as it is drawn (nonzero
+        rule): letters keep their holes. The mesh is ``depth`` deep, centered
+        on the source's place in the z = 0 plane with its front facing the
+        default camera, and has a front and back cap, side walls and, with
+        ``bevel`` > 0, a 45° chamfer of that width on both caps (outlines
+        thinner than twice the bevel keep square edges). Curves flatten to
+        ``tolerance`` scene units: smaller is smoother and heavier. Without a
+        ``material`` the mesh is matte in the source's fill color. The source
+        stays a drawable of its own, hidden from the cursor on (2D draws over
+        3D) unless ``keep_source``; later changes to it do not reshape the
+        mesh. Turn the camera to see the depth. A source from another scene,
+        a 3D, image, video or Lottie source, a non-positive ``depth`` or
+        ``tolerance``, or a ``bevel`` that is negative or not less than half
+        the depth raise ``ValueError``; an outline that encloses no area
+        warns and leaves an empty mesh.
+
+        Example:
+            logo3d = scene.geometry.extrude(logo, depth=0.3, bevel=0.03, material=Material3D.metal(GOLD))
+            word = scene.geometry.extrude(scene.text("HOLA"), depth=0.2)
         """
         ...
     def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:

@@ -309,6 +309,8 @@ pub(crate) fn camera_clip_ids(timeline: &Timeline, world: &mut World) -> Vec<cli
                             | clip::PropertyLensSpec::CameraFrameDynamic { .. }
                             | clip::PropertyLensSpec::CameraShake { .. }
                             | clip::PropertyLensSpec::CameraPosition { .. }
+                            | clip::PropertyLensSpec::CameraPathFollow { .. }
+                            | clip::PropertyLensSpec::CameraDollyZoom { .. }
                             | clip::PropertyLensSpec::CameraPanZoom { .. }
                             | clip::PropertyLensSpec::CameraState { .. }
                     )

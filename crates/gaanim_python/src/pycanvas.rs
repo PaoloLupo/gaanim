@@ -2746,6 +2746,92 @@ impl PyCameraAnimation {
             .camera_dolly(factor, 1.0);
         Ok(PyCanvasAnim { inner })
     }
+
+    /// Move the camera along a drawable's path.
+    #[pyo3(signature = (route, *, orient=false, rotate_offset=0.0, start=0.0, end=1.0))]
+    fn follow_path(
+        &self,
+        route: &PyDrawable,
+        orient: bool,
+        rotate_offset: f64,
+        start: f64,
+        end: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let follow = gaanim_api::anim::PathFollowOptions {
+            orient: orient.then_some(rotate_offset),
+            start,
+            end,
+        };
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_follow_path(&route.0, follow, 1.0)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// A fast pan to a point or drawable, eased hard at both ends.
+    #[pyo3(signature = (to, y=None, *, blur=true))]
+    fn whip_pan(&self, to: Bound<'_, PyAny>, y: Option<f64>, blur: bool) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let endpoint = if let Some(y) = y {
+            let x = to.extract::<f64>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "the two-coordinate overload requires numeric x and y",
+                )
+            })?;
+            gaanim_api::canvas::CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
+                require_finite(x, "x")?,
+                require_finite(y, "y")?,
+                0.0,
+            ))
+        } else {
+            resolve_endpoint(&to)?
+        };
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_whip_pan(endpoint, blur, 0.4);
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Animate the depth of field of parallax layers.
+    #[pyo3(signature = (focus=None, *, aperture=None, max_blur=None))]
+    fn depth_of_field(
+        &self,
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+    ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_depth_of_field(focus, aperture, max_blur, 1.0)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Rack focus: move the depth of field's focus to `focus`.
+    fn focus_to(&self, focus: f64) -> PyResult<PyCanvasAnim> {
+        self.depth_of_field(Some(focus), None, None)
+    }
+
+    /// A dolly zoom (vertigo shot) of a perspective camera.
+    fn dolly_zoom(&self, factor: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_dolly_zoom(factor, 1.0)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyCanvasAnim { inner })
+    }
 }
 
 #[pymethods]
@@ -2788,6 +2874,23 @@ impl PyCamera {
             inner: self.inner.clone(),
         }
         .pan_to(target, y)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    /// Set the depth of field of parallax layers at the cursor.
+    #[pyo3(signature = (focus=None, *, aperture=None, max_blur=None))]
+    fn depth_of_field(
+        &self,
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .depth_of_field(focus, aperture, max_blur)?;
         self.commit_immediate(animation)?;
         Ok(self.clone())
     }
@@ -4891,6 +4994,36 @@ impl PyVisualization {
 
 #[pymethods]
 impl PyGeometry {
+    /// Extrude the outline a 2D drawable fills into a 3D mesh.
+    #[pyo3(signature = (source, depth=0.2, *, bevel=0.0, material=None, tolerance=0.01, keep_source=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn extrude<'py>(
+        &self,
+        py: Python<'py>,
+        source: &PyDrawable,
+        depth: f64,
+        bevel: f64,
+        material: Option<PyMaterial3D>,
+        tolerance: f64,
+        keep_source: bool,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .extrude(
+                &source.0,
+                depth,
+                bevel,
+                tolerance,
+                material.map(|value| value.0),
+                keep_source,
+            )
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
     #[pyo3(signature = (size=2.0, *, material=None))]
     fn cube<'py>(
         &self,

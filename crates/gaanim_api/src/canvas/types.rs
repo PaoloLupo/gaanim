@@ -1029,6 +1029,8 @@ pub struct ObjectSpec {
     pub parallax_depth: Option<f64>,
     /// The path a Text follows (`SceneModel::text_on_path`).
     pub text_path: Option<super::text_path::TextPathSpec>,
+    /// The drawable a `Primitive3D` is extruded from (`SceneModel::extrude`).
+    pub extrusion: Option<super::extrude::ExtrusionSpec>,
     /// If true, this object was attached to a coordinate space as data.
     /// Its parent's Create/Write animations should not include it as a leaf
     /// (otherwise a plane.create() would also draw every plot).
@@ -1213,6 +1215,7 @@ impl ObjectSpec {
             hud: false,
             parallax_depth: None,
             text_path: None,
+            extrusion: None,
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),

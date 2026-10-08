@@ -126,6 +126,9 @@ pub struct WorldSnapshot {
     /// Timeline camera captures required by later state transitions.
     #[cfg_attr(feature = "serde", serde(default))]
     pub camera_states: HashMap<u64, gaanim_math::CameraPose>,
+    /// Depth of field of parallax layers, which camera clips animate.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub depth_of_field: Option<gaanim_scene::DepthOfField>,
 }
 
 /// Insert a component only when the snapshot differs from the live world.
@@ -509,6 +512,7 @@ impl WorldSnapshot {
     /// Captures a new `WorldSnapshot` of all Mobjects currently registered in the Bevy `World`.
     pub fn capture(world: &mut World) -> Self {
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
+        let depth_of_field = world.get_resource::<gaanim_scene::DepthOfField>().copied();
         let camera_states = world
             .get_resource::<CapturedCameraStates>()
             .map(|states| states.0.clone())
@@ -608,6 +612,7 @@ impl WorldSnapshot {
             entities,
             camera,
             camera_states,
+            depth_of_field,
         }
     }
 
@@ -652,6 +657,11 @@ impl WorldSnapshot {
             world.insert_resource(camera);
         }
         world.insert_resource(CapturedCameraStates(self.camera_states.clone()));
+        if let Some(depth_of_field) = self.depth_of_field
+            && world.get_resource::<gaanim_scene::DepthOfField>() != Some(&depth_of_field)
+        {
+            world.insert_resource(depth_of_field);
+        }
         // 1. Map every existing Mobject in one pass: hide the ones missing from
         //    the snapshot and select the ones to restore.
         let mut entity_map = ObjectEntityMap::with_capacity(self.entities.len());
@@ -844,6 +854,7 @@ mod tests {
     fn capture_by_lookup(world: &mut World) -> WorldSnapshot {
         let mut entities = bevy::platform::collections::HashMap::new();
         let camera = world.get_resource::<gaanim_math::Camera>().copied();
+        let depth_of_field = world.get_resource::<gaanim_scene::DepthOfField>().copied();
         let camera_states = world
             .get_resource::<CapturedCameraStates>()
             .map(|states| states.0.clone())
@@ -970,6 +981,7 @@ mod tests {
             entities,
             camera,
             camera_states,
+            depth_of_field,
         }
     }
 
