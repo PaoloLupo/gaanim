@@ -1291,6 +1291,11 @@ def validate_parallax_layer_contract(module: object) -> list[str]:
         scene.camera.animate.depth_of_field(aperture=0.0), module.Anim
     ):
         failures.append("depth of field animations did not return Anim")
+    # A rack focus runs alongside a camera move: it has a channel of its own.
+    try:
+        scene.play([scene.camera.animate.pan_to(1.0, 0.0), scene.camera.animate.focus_to(2.0)])
+    except ValueError as error:
+        failures.append(f"a rack focus cannot run with a pan: {error}")
     for call in (
         lambda: scene.camera.depth_of_field(focus=0.0),
         lambda: scene.camera.depth_of_field(focus=float("inf")),

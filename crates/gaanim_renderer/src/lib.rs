@@ -59,10 +59,15 @@ impl Plugin for GaanimDerivedGeometryPlugin {
                 .after(gaanim_animation::surrounding_rect_system)
                 .in_set(gaanim_scene::SceneSet::DerivedGeometry),
         );
-        // Exports install only this plugin, so tips get their layers here.
+        // Exports install only this plugin, so tips get their layers here,
+        // and parallax layers their depth of field.
         app.add_systems(
             Update,
             effects::sync_stroke_tip_layers_system.in_set(gaanim_scene::SceneSet::DerivedGeometry),
+        );
+        app.add_systems(
+            Update,
+            object_effects::depth_of_field_system.in_set(gaanim_scene::SceneSet::Bounds),
         );
     }
 }
@@ -92,7 +97,6 @@ impl Plugin for GaanimRendererPlugin {
             (
                 pipeline::sync_canvas_background_clear_system,
                 pipeline::sync_gaanim_camera_to_bevy_system,
-                object_effects::depth_of_field_system,
             )
                 .in_set(gaanim_scene::SceneSet::Bounds),
         );

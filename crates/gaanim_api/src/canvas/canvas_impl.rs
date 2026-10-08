@@ -1629,7 +1629,6 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | CameraDolly { .. }
         | CameraFollowPath { .. }
         | CameraWhipPan { .. }
-        | CameraDepthOfField { .. }
         | CameraState { .. }
         | CameraReset => "camera_pose",
         CameraZoom { .. }
@@ -1638,6 +1637,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | CameraPerspective { .. } => "camera_projection",
         CameraRotation { .. } | CameraRotationSource { .. } => "camera_rotation",
         CameraShake { .. } => "camera_shake",
+        CameraDepthOfField { .. } => "camera_depth_of_field",
         TextPathOffset { .. } => "text_path",
         _ => "effect",
     };

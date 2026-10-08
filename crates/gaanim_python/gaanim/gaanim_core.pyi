@@ -5658,7 +5658,8 @@ class Camera:
         ``math.inf`` blurs by ``aperture``). Depths are those of the layers,
         so ``focus=1`` keeps the scene plane sharp. Omitted values keep
         their current value; at first focus is 1, aperture 0 (no blur) and
-        max_blur 0.5. Drawables outside layers never blur. A layer is blurred
+        max_blur 0.5. Drawables outside layers, and HUD drawables inside
+        them, never blur. A layer is blurred
         as one image, through a shader effect on its root that replaces any
         ``shader_effect`` set on the layer itself; drawn offscreen, a blurred
         layer costs more. A focus that is not a finite positive depth, or a

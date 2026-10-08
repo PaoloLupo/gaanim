@@ -2968,11 +2968,18 @@ fn extract_world(
         while let Ok(child_of) = child_query.get(world, opacity_group) {
             opacity_group = child_of.parent();
         }
+        // A HUD stays sharp inside a layer the depth of field blurs.
+        let mut under_hud = false;
         let effect_root = outermost_effect(entity, |node| {
+            under_hud |= world.get::<gaanim_scene::HudOverlay>(node).is_some();
+            let depth_blur = world
+                .get::<crate::object_effects::DepthOfFieldBlur>(node)
+                .is_some();
             (
                 world
                     .get::<crate::object_effects::ShaderEffect>(node)
-                    .is_some(),
+                    .is_some()
+                    && !(depth_blur && under_hud),
                 child_query.get(world, node).ok().map(ChildOf::parent),
             )
         });

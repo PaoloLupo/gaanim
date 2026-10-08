@@ -13024,6 +13024,35 @@ mod tests {
     }
 
     #[test]
+    fn depth_of_field_clips_set_the_resource_and_seeks_restore_it() {
+        let mut canvas = SceneModel::new(960, 540);
+        let layer = canvas.parallax_layer(3.0).unwrap();
+        let hill = canvas.circle(1.0);
+        canvas.add_to_parallax_layer(&layer, &hill).unwrap();
+        let set = canvas
+            .camera_depth_of_field(Some(0.5), Some(0.12), None, 1.0)
+            .unwrap()
+            .duration(0.0);
+        canvas.play(vec![set]);
+        canvas.wait(0.5);
+        let rack = canvas
+            .camera_depth_of_field(Some(3.0), None, None, 1.0)
+            .unwrap();
+        canvas.play(vec![rack]);
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        let dof = |world: &World| *world.resource::<gaanim_scene::DepthOfField>();
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(dof(&world).focus, 0.5);
+        assert_eq!(dof(&world).aperture, 0.12);
+        assert!((dof(&world).blur_at(3.0) - 0.1).abs() < 1e-9);
+        timeline.seek(&mut world, 2.0);
+        assert!((dof(&world).focus - 3.0).abs() < 1e-9);
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(dof(&world).focus, 0.5);
+    }
+
+    #[test]
     fn named_camera_state_restores_complete_authored_pose() {
         let mut canvas = SceneModel::new(960, 540);
         let _marker = canvas.circle(1.0);

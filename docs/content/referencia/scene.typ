@@ -1537,7 +1537,7 @@ con una lente real: cada capa se desenfoca `aperture * |1 - focus / depth|`
 unidades de escena, como máximo `max_blur`. Las capas a la profundidad
 `focus` quedan nítidas y el desenfoque crece al alejarse de ella hacia
 delante o hacia atrás; una capa en `math.inf` se desenfoca `aperture`. Los
-drawables fuera de capas nunca se desenfocan. Cada capa se desenfoca como una
+drawables fuera de capas, y los HUD dentro de ellas, nunca se desenfocan. Cada capa se desenfoca como una
 sola imagen, con un efecto de shader en su raíz que reemplaza cualquier
 `shader_effect` puesto en la propia capa; una capa desenfocada se dibuja fuera
 de pantalla y cuesta más.
