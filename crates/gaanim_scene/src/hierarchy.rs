@@ -62,6 +62,7 @@ impl Plugin for GaanimScenePlugin {
         app.init_resource::<gaanim_math::ResolvedCamera>()
             .init_resource::<gaanim_math::CameraViewOverride>()
             .init_resource::<gaanim_math::CameraViewport>()
+            .init_resource::<crate::components::DepthOfField>()
             .add_systems(
                 Update,
                 crate::systems::resolve_camera_system.in_set(SceneSet::Camera),

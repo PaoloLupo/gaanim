@@ -379,6 +379,13 @@ pub enum PropertyLensSpec {
         z: f64,
         orient: Option<f64>,
     },
+    /// Tween the depth of field of parallax layers: `[focus, aperture,
+    /// max_blur]`, the focus in inverse depth so a rack focus moves evenly
+    /// through near and far layers.
+    CameraDepthOfField {
+        from: [f64; 3],
+        to: [f64; 3],
+    },
     /// A dolly zoom: the camera moves along its line of sight to `factor`
     /// times its distance from `target` while the field of view keeps the
     /// target's plane the same size (`gaanim_math::dolly_zoom`).
@@ -548,6 +555,10 @@ impl PropertyLensSpec {
                     to: gaanim_core::glam::DVec3::new(end.x, end.y, *z),
                 }
             }
+            Self::CameraDepthOfField { from, to } => PropertyLens::CameraZoom {
+                from: from[1],
+                to: to[1],
+            },
             Self::CameraDollyZoom {
                 from_position,
                 target,

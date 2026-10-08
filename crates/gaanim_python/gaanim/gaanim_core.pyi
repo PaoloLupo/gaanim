@@ -5642,6 +5642,33 @@ class Camera:
     def rotate_to(self, angle: ScalarSource) -> Camera: ...
     def look_at(self, eye: Endpoint, target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
     def perspective(self, fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera: ...
+    def depth_of_field(
+        self,
+        focus: Optional[float] = None,
+        *,
+        aperture: Optional[float] = None,
+        max_blur: Optional[float] = None,
+    ) -> Camera:
+        """Set the depth of field of parallax layers at the cursor; returns the camera.
+
+        Each layer created with ``Scene.layer`` blurs by its circle of
+        confusion, ``aperture * |1 - focus / depth|`` scene units, at most
+        ``max_blur``: layers at the ``focus`` depth stay sharp and the blur
+        grows with the distance from it in either direction (a layer at
+        ``math.inf`` blurs by ``aperture``). Depths are those of the layers,
+        so ``focus=1`` keeps the scene plane sharp. Omitted values keep
+        their current value; at first focus is 1, aperture 0 (no blur) and
+        max_blur 0.5. Drawables outside layers never blur. A layer is blurred
+        as one image, through a shader effect on its root that replaces any
+        ``shader_effect`` set on the layer itself; drawn offscreen, a blurred
+        layer costs more. A focus that is not a finite positive depth, or a
+        negative or non-finite ``aperture`` or ``max_blur``, raise
+        ``ValueError``.
+
+        Example:
+            scene.camera.depth_of_field(focus=1.0, aperture=0.12)
+        """
+        ...
     def orthographic(self, zoom: float = 1.0) -> Camera: ...
     def reset(self) -> Camera: ...
     def bind_2d(self, *, center: Optional[Endpoint] = None, zoom: Optional[ScalarSource] = None, rotation: Optional[ScalarSource] = None, influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
@@ -6119,6 +6146,31 @@ class CameraAnimation:
         """
         ...
 
+    def depth_of_field(
+        self,
+        focus: Optional[float] = None,
+        *,
+        aperture: Optional[float] = None,
+        max_blur: Optional[float] = None,
+    ) -> Anim:
+        """Animate the depth of field of parallax layers; see ``Camera.depth_of_field``.
+
+        The focus moves in inverse depth, so a rack focus passes evenly
+        through near and far layers; aperture and max_blur change linearly.
+        Default easing is smooth.
+
+        Example:
+            scene.play([scene.camera.animate.depth_of_field(aperture=0.15).duration(0.5)])
+        """
+        ...
+    def focus_to(self, focus: float) -> Anim:
+        """Rack focus: move the depth of field's focus to the depth ``focus``.
+
+        Example:
+            scene.camera.depth_of_field(focus=0.6, aperture=0.12)
+            scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+        """
+        ...
     def dolly_zoom(self, factor: float) -> Anim:
         """Dolly zoom (the vertigo shot) of a perspective camera.
 

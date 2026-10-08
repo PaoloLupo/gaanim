@@ -417,6 +417,43 @@ pub struct ParallaxLayer {
     pub depth: f64,
 }
 
+/// Depth of field of parallax layers: a layer at `depth` blurs by its
+/// circle of confusion, `aperture * |1 - focus / depth|` scene units, at
+/// most `max_blur`. Depths are those of [`ParallaxLayer`], so `focus = 1`
+/// keeps the scene plane sharp; an aperture of 0 turns it off.
+#[derive(bevy::prelude::Resource, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DepthOfField {
+    pub focus: f64,
+    pub aperture: f64,
+    pub max_blur: f64,
+}
+
+impl Default for DepthOfField {
+    fn default() -> Self {
+        Self {
+            focus: 1.0,
+            aperture: 0.0,
+            max_blur: 0.5,
+        }
+    }
+}
+
+impl DepthOfField {
+    /// Gaussian blur, in scene units, of a layer at `depth`.
+    pub fn blur_at(&self, depth: f64) -> f64 {
+        if !(self.aperture > 0.0 && self.focus > 0.0 && depth > 0.0) {
+            return 0.0;
+        }
+        let confusion = if depth.is_infinite() {
+            self.aperture
+        } else {
+            self.aperture * (1.0 - self.focus / depth).abs()
+        };
+        confusion.min(self.max_blur).max(0.0)
+    }
+}
+
 /// Marks 3D content (triangle meshes and line lists) that the renderer
 /// projects through the camera instead of drawing as a 2D path.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -578,6 +615,24 @@ pub struct LineListSource(pub LineListData);
 #[cfg(test)]
 mod material_3d_tests {
     use super::*;
+
+    #[test]
+    fn depth_of_field_blurs_by_the_distance_from_the_focus() {
+        let off = DepthOfField::default();
+        assert_eq!(off.blur_at(3.0), 0.0);
+        let dof = DepthOfField {
+            focus: 1.0,
+            aperture: 0.2,
+            max_blur: 0.5,
+        };
+        assert_eq!(dof.blur_at(1.0), 0.0);
+        assert!((dof.blur_at(2.0) - 0.1).abs() < 1e-12);
+        assert!((dof.blur_at(0.5) - 0.2).abs() < 1e-12);
+        // An infinite backdrop blurs by the aperture; near layers clamp.
+        assert!((dof.blur_at(f64::INFINITY) - 0.2).abs() < 1e-12);
+        assert_eq!(dof.blur_at(0.01), 0.5);
+        assert_eq!(dof.blur_at(0.0), 0.0);
+    }
 
     #[test]
     fn material_validates_pbr_ranges() {

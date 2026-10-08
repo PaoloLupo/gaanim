@@ -4704,6 +4704,22 @@ fn apply_lens_spec(
                 }
             }
         }
+        PropertyLensSpec::CameraDepthOfField { from, to } => {
+            let lerp = |a: f64, b: f64| a + (b - a) * t;
+            let value = gaanim_scene::DepthOfField {
+                focus: 1.0 / lerp(1.0 / from[0], 1.0 / to[0]),
+                aperture: lerp(from[1], to[1]),
+                max_blur: lerp(from[2], to[2]),
+            };
+            match world.get_resource_mut::<gaanim_scene::DepthOfField>() {
+                Some(mut current) => {
+                    if *current != value {
+                        *current = value;
+                    }
+                }
+                None => world.insert_resource(value),
+            }
+        }
         PropertyLensSpec::CameraDollyZoom {
             from_position,
             target,

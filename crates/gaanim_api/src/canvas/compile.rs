@@ -3395,6 +3395,10 @@ impl SceneModel {
                 .commands
                 .remove_resource::<gaanim_renderer::effects::MotionBlur>(),
         }
+        // Clips change it from here; seeks restore it from snapshots.
+        builder
+            .commands
+            .insert_resource(gaanim_scene::DepthOfField::default());
         if builder.motion_blur_windows.is_empty() {
             builder
                 .commands
@@ -8613,6 +8617,28 @@ impl SceneModel {
                         .motion_blur_windows
                         .push((begin, end, Self::whip_pan_blur()));
                 }
+            }
+            AnimationType::CameraDepthOfField {
+                focus,
+                aperture,
+                max_blur,
+            } => {
+                let from = builder.depth_of_field;
+                let to = gaanim_scene::DepthOfField {
+                    focus: focus.unwrap_or(from.focus),
+                    aperture: aperture.unwrap_or(from.aperture),
+                    max_blur: max_blur.unwrap_or(from.max_blur),
+                };
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraDepthOfField {
+                        from: [from.focus, from.aperture, from.max_blur],
+                        to: [to.focus, to.aperture, to.max_blur],
+                    },
+                );
+                builder.depth_of_field = to;
             }
             AnimationType::CameraDollyZoom { factor } => {
                 let Some((fov, near, far)) = *camera_fov else {

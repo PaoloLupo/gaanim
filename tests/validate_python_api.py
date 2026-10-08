@@ -1272,7 +1272,7 @@ def validate_camera_motion_contract(module: object) -> list[str]:
 
 
 def validate_parallax_layer_contract(module: object) -> list[str]:
-    """Exercise parallax layers (CA-04)."""
+    """Exercise parallax layers and their depth of field (CA-04, CA-05)."""
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
     far = scene.layer(depth=3.0)
@@ -1284,6 +1284,26 @@ def validate_parallax_layer_contract(module: object) -> list[str]:
     if far.add(member, scene.geometry.dot(0.1)) is not far:
         failures.append("ParallaxLayer.add did not chain")
     scene.layer(depth=float("inf"))
+    if scene.camera.depth_of_field(focus=1.0, aperture=0.1, max_blur=0.4) is None:
+        failures.append("Camera.depth_of_field did not return the camera")
+    focus = scene.camera.animate.focus_to(3.0)
+    if not isinstance(focus, module.Anim) or not isinstance(
+        scene.camera.animate.depth_of_field(aperture=0.0), module.Anim
+    ):
+        failures.append("depth of field animations did not return Anim")
+    for call in (
+        lambda: scene.camera.depth_of_field(focus=0.0),
+        lambda: scene.camera.depth_of_field(focus=float("inf")),
+        lambda: scene.camera.depth_of_field(aperture=-0.1),
+        lambda: scene.camera.animate.focus_to(float("nan")),
+        lambda: scene.camera.animate.depth_of_field(max_blur=-1.0),
+    ):
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("depth of field accepted an invalid value")
     other = module.Scene(frame=(16, 9))
     invalid_calls = (
         lambda: scene.layer(depth=0.0),

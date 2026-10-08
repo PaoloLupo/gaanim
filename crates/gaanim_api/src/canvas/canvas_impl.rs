@@ -1629,6 +1629,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | CameraDolly { .. }
         | CameraFollowPath { .. }
         | CameraWhipPan { .. }
+        | CameraDepthOfField { .. }
         | CameraState { .. }
         | CameraReset => "camera_pose",
         CameraZoom { .. }
@@ -5258,6 +5259,35 @@ impl SceneModel {
     /// blur window, whatever the scene's own motion blur.
     pub fn camera_whip_pan(&mut self, target: CanvasEndpoint, blur: bool, duration: f64) -> Anim {
         self.camera_anim(AnimationType::CameraWhipPan { target, blur }, duration)
+    }
+
+    /// Change the depth of field of parallax layers over `duration`: each
+    /// layer blurs by `aperture * |1 - focus / depth|` scene units, at most
+    /// `max_blur`; `None` keeps the current value (focus 1, aperture 0 and
+    /// max_blur 0.5 at first, so nothing blurs).
+    pub fn camera_depth_of_field(
+        &mut self,
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+        duration: f64,
+    ) -> Result<Anim, String> {
+        if focus.is_some_and(|focus| !focus.is_finite() || focus <= 0.0) {
+            return Err("focus must be a finite positive depth".to_string());
+        }
+        for (name, value) in [("aperture", aperture), ("max_blur", max_blur)] {
+            if value.is_some_and(|value| !value.is_finite() || value < 0.0) {
+                return Err(format!("{name} must be finite and non-negative"));
+            }
+        }
+        Ok(self.camera_anim(
+            AnimationType::CameraDepthOfField {
+                focus,
+                aperture,
+                max_blur,
+            },
+            duration,
+        ))
     }
 
     /// A dolly zoom (vertigo shot) to `factor` times the distance from the

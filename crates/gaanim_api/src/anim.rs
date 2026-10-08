@@ -306,6 +306,12 @@ pub enum AnimationType {
         target: CanvasEndpoint,
         blur: bool,
     },
+    /// Change the depth of field of parallax layers; `None` keeps a value.
+    CameraDepthOfField {
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+    },
     /// Dolly to `factor` times the distance from the look-at target while
     /// the field of view keeps the target's plane the same size.
     CameraDollyZoom {
@@ -816,6 +822,7 @@ impl AnimationType {
                 | Self::CameraFollowPath { .. }
                 | Self::CameraWhipPan { .. }
                 | Self::CameraDollyZoom { .. }
+                | Self::CameraDepthOfField { .. }
         )
     }
 

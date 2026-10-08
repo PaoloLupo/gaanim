@@ -92,6 +92,7 @@ impl Plugin for GaanimRendererPlugin {
             (
                 pipeline::sync_canvas_background_clear_system,
                 pipeline::sync_gaanim_camera_to_bevy_system,
+                object_effects::depth_of_field_system,
             )
                 .in_set(gaanim_scene::SceneSet::Bounds),
         );

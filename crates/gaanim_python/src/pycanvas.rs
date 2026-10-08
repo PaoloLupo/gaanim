@@ -2798,6 +2798,29 @@ impl PyCameraAnimation {
         Ok(PyCanvasAnim { inner })
     }
 
+    /// Animate the depth of field of parallax layers.
+    #[pyo3(signature = (focus=None, *, aperture=None, max_blur=None))]
+    fn depth_of_field(
+        &self,
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+    ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_depth_of_field(focus, aperture, max_blur, 1.0)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Rack focus: move the depth of field's focus to `focus`.
+    fn focus_to(&self, focus: f64) -> PyResult<PyCanvasAnim> {
+        self.depth_of_field(Some(focus), None, None)
+    }
+
     /// A dolly zoom (vertigo shot) of a perspective camera.
     fn dolly_zoom(&self, factor: f64) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
@@ -2851,6 +2874,23 @@ impl PyCamera {
             inner: self.inner.clone(),
         }
         .pan_to(target, y)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    /// Set the depth of field of parallax layers at the cursor.
+    #[pyo3(signature = (focus=None, *, aperture=None, max_blur=None))]
+    fn depth_of_field(
+        &self,
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .depth_of_field(focus, aperture, max_blur)?;
         self.commit_immediate(animation)?;
         Ok(self.clone())
     }

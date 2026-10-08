@@ -1530,6 +1530,69 @@ print(far.depth)  # 3.0
 ```
 ]
 
+=== Profundidad de campo <profundidad-campo>
+
+Las capas de parallax pueden desenfocarse según su distancia al foco, como
+con una lente real: cada capa se desenfoca `aperture * |1 - focus / depth|`
+unidades de escena, como máximo `max_blur`. Las capas a la profundidad
+`focus` quedan nítidas y el desenfoque crece al alejarse de ella hacia
+delante o hacia atrás; una capa en `math.inf` se desenfoca `aperture`. Los
+drawables fuera de capas nunca se desenfocan. Cada capa se desenfoca como una
+sola imagen, con un efecto de shader en su raíz que reemplaza cualquier
+`shader_effect` puesto en la propia capa; una capa desenfocada se dibuja fuera
+de pantalla y cuesta más.
+
+#api-entry(
+  name: "Camera.depth_of_field",
+  kind: "method",
+  params: (
+    (name: "focus", type: "float | None", default: "None", desc: [Profundidad nítida, finita y positiva; `1` es el plano de la escena.]),
+    (name: "aperture", type: "float | None", default: "None", desc: [Escala del desenfoque, en unidades de escena; `0` lo apaga.]),
+    (name: "max_blur", type: "float | None", default: "None", desc: [Desenfoque máximo, en unidades de escena.]),
+  ),
+  returns: (type: "Camera", desc: [La cámara.]),
+  desc: [Fija la profundidad de campo en el cursor. Los valores omitidos se conservan; al principio el foco es 1, la apertura 0 (sin desenfoque) y `max_blur` 0.5. Un foco no finito o no positivo, o una `aperture` o `max_blur` negativos o no finitos lanzan `ValueError`.],
+)[
+```python
+# output: depth_of_field.webp
+# show-code: true
+import math
+from gaanim import *
+
+scene = Scene(frame=(16, 9), background="#1d2b53")
+far = scene.layer(depth=3.0)
+for i in range(5):
+    far.add(scene.geometry.polygon([(-2.4, 0), (0, 2.6), (2.4, 0)]).fill("#3b4a7a").move_to(-8 + i * 4.2, -1.2))
+for i in range(6):
+    scene.geometry.rect(0.5, 1.2).fill("#8a5a3b").move_to(-6.5 + i * 2.6, -2.0)
+near = scene.layer(depth=0.5)
+for i in range(4):
+    near.add(scene.geometry.circle(0.9).fill("#1f4d33").move_to(-6 + i * 4.4, -3.4))
+scene.camera.depth_of_field(focus=1.0, aperture=0.12)
+scene.wait(0.5)
+scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.depth_of_field / focus_to",
+  kind: "method",
+  params: (
+    (name: "focus", type: "float", desc: [Nueva profundidad nítida.]),
+  ),
+  returns: (type: "Anim", desc: [Cambio animado de la profundidad de campo.]),
+  desc: [`depth_of_field` anima los mismos valores que `Camera.depth_of_field`; `focus_to(focus)` es el cambio de foco (rack focus). El foco se mueve en profundidad inversa, así que pasa de forma pareja por capas cercanas y lejanas; la apertura y `max_blur` cambian linealmente. Easing predeterminado: suave.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.depth_of_field(focus=0.6, aperture=0.12)
+scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+scene.play([scene.camera.animate.depth_of_field(aperture=0.0).duration(0.5)])
+```
+]
+
 === Bindings persistentes
 
 Un binding es una restricción de cámara que no se dibuja: desde que se crea
