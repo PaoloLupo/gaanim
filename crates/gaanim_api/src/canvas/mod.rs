@@ -147,10 +147,12 @@ mod incremental;
 mod measure;
 pub use measure::{BoundsError, ScatterLayoutError, avoid_boxes, scatter};
 mod profile;
-pub use profile::{reload_profile_enabled, set_call_site_provider};
+pub use profile::{
+    reload_profile_enabled, set_call_site_provider, track_script_lines, tracks_script_lines,
+};
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
-pub(crate) use inspection::compiled_index;
+pub(crate) use inspection::deferred_index;
 mod extrude;
 pub mod text_animator;
 pub mod text_path;

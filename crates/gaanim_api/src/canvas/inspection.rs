@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use gaanim_core::ObjectId;
-use gaanim_scene::{AuthoredObject, AuthoredObjects};
+use gaanim_scene::{AuthoredIndex, AuthoredObject, AuthoredObjects};
 
 use super::SceneModel;
 use super::types::SpawnKind;
@@ -42,17 +42,21 @@ impl SceneModel {
 /// maps authored ids to compiled ones, and an id it lacks compiled as itself.
 pub(crate) fn compiled_index(
     authored: HashMap<ObjectId, AuthoredObject>,
-    ids: Option<&HashMap<ObjectId, ObjectId>>,
+    ids: &HashMap<ObjectId, ObjectId>,
+) -> AuthoredIndex {
+    authored
+        .into_iter()
+        .map(|(id, object)| (ids.get(&id).copied().unwrap_or(id), object))
+        .collect()
+}
+
+/// The index of `canvas`, built when the editor first reads it. `ids` holds
+/// the authored ids that compiled under another id.
+pub(crate) fn deferred_index(
+    canvas: SceneModel,
+    ids: HashMap<ObjectId, ObjectId>,
 ) -> AuthoredObjects {
-    AuthoredObjects(
-        authored
-            .into_iter()
-            .map(|(id, object)| {
-                let compiled = ids.and_then(|ids| ids.get(&id)).copied().unwrap_or(id);
-                (compiled, object)
-            })
-            .collect(),
-    )
+    AuthoredObjects::deferred(move || compiled_index(canvas.authored_objects(), &ids))
 }
 
 /// The variant name of `kind` in snake case, as the scripting API spells
@@ -116,10 +120,10 @@ mod tests {
             (ObjectId::from_raw(2), object.clone()),
         ]);
         let ids = HashMap::from([(ObjectId::from_raw(1), ObjectId::from_raw(7))]);
-        let index = compiled_index(authored, Some(&ids));
-        assert!(index.0.contains_key(&ObjectId::from_raw(7)));
-        assert!(index.0.contains_key(&ObjectId::from_raw(2)));
-        assert!(!index.0.contains_key(&ObjectId::from_raw(1)));
+        let index = compiled_index(authored, &ids);
+        assert!(index.contains_key(&ObjectId::from_raw(7)));
+        assert!(index.contains_key(&ObjectId::from_raw(2)));
+        assert!(!index.contains_key(&ObjectId::from_raw(1)));
     }
 
     #[test]

@@ -39,10 +39,7 @@ pub(crate) fn authored_entity(
     let mut current = entity;
     // A hierarchy deeper than this is a cycle, which Bevy rules out.
     for _ in 0..256 {
-        if ids
-            .get(current)
-            .is_ok_and(|id| authored.0.contains_key(&id.0))
-        {
+        if ids.get(current).is_ok_and(|id| authored.contains(&id.0)) {
             return Some(current);
         }
         current = parents.get(current).ok()?.parent();
@@ -99,13 +96,13 @@ pub fn inspector_panel_system(
     let authored = authored.as_deref();
     let object = authored.and_then(|authored| {
         data.0
-            .and_then(|id| authored.0.get(&id.0))
+            .and_then(|id| authored.get(&id.0))
             .map(|object| (authored, object))
     });
     let parent = authored.and_then(|authored| {
         let parent = parents.get(selected).ok()?.parent();
         let entity = authored_entity(parent, authored, &ids, &parents)?;
-        let object = authored.0.get(&ids.get(entity).ok()?.0)?;
+        let object = authored.get(&ids.get(entity).ok()?.0)?;
         Some((entity, object))
     });
     let child_count = children.get(selected).map_or(0, |children| children.len());
@@ -552,7 +549,7 @@ mod tests {
             ))
             .id();
         let stray = world.spawn_empty().id();
-        let authored = AuthoredObjects(std::collections::HashMap::from([(
+        let authored = AuthoredObjects::new(std::collections::HashMap::from([(
             id,
             AuthoredObject {
                 kind: "text".to_owned(),

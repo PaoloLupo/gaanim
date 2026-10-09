@@ -27,6 +27,21 @@ pub fn set_call_site_provider(provider: fn() -> Vec<ScriptLocation>) {
     let _ = CALL_SITE.set(provider);
 }
 
+static TRACK_SCRIPT_LINES: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Record the script lines that create each drawable, for the editor's
+/// inspector. Off by default: only the editor shows them, so exports and
+/// checks pay nothing for it.
+pub fn track_script_lines(track: bool) {
+    TRACK_SCRIPT_LINES.store(track, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether drawables record their script lines (see [`track_script_lines`]).
+pub fn tracks_script_lines() -> bool {
+    TRACK_SCRIPT_LINES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The script lines making the current authoring call, innermost first;
 /// empty without a binding that provides them.
 pub(crate) fn call_stack() -> Vec<ScriptLocation> {

@@ -187,7 +187,9 @@ fn run_script_thread(
         gaanim_core::console::error("python", "could not load the in-memory `gaanim` package");
     }
 
-    if let Err(error) = Python::attach(install_console_capture) {
+    if gaanim_core::console::keeps_log()
+        && let Err(error) = Python::attach(crate::console_capture::install)
+    {
         gaanim_core::console::warn(
             "python",
             format!("script output will not reach the editor console · {error}"),
@@ -253,101 +255,6 @@ fn run_script_thread(
 
     host::set_host_sender(None);
     exited.store(true, Ordering::SeqCst);
-}
-
-/// Python side of [`install_console_capture`]: `_record(level, label,
-/// message, file, line)` keeps a line in the console log.
-const CONSOLE_CAPTURE: &str = r#"
-import sys, warnings
-
-_show_warning = warnings.showwarning
-
-def _caller():
-    frame = sys._getframe(2)
-    return frame.f_code.co_filename, frame.f_lineno
-
-def showwarning(message, category, filename, lineno, file=None, line=None):
-    try:
-        _record("warn", category.__name__, str(message), filename, lineno)
-    except Exception:
-        pass
-    _show_warning(message, category, filename, lineno, file, line)
-
-class ConsoleTee:
-    """Writes to the wrapped stream and keeps each complete line in the log."""
-
-    def __init__(self, stream):
-        self._stream = stream
-        self._pending = ""
-        self._origin = None
-
-    def write(self, text):
-        written = self._stream.write(text) if self._stream is not None else len(text)
-        if self._origin is None:
-            try:
-                self._origin = _caller()
-            except Exception:
-                self._origin = (None, None)
-        self._pending += text
-        *lines, self._pending = self._pending.split("\n")
-        for line in lines:
-            _record("info", "print", line, *self._origin)
-            self._origin = None
-        return written
-
-    def flush(self):
-        # A line without its newline, such as print(..., end=""), is kept
-        # once the runner flushes at the end of the run.
-        if self._pending:
-            _record("info", "print", self._pending, *(self._origin or (None, None)))
-            self._pending = ""
-            self._origin = None
-        if self._stream is not None:
-            self._stream.flush()
-
-    def __getattr__(self, name):
-        return getattr(self._stream, name)
-
-warnings.showwarning = showwarning
-sys.stdout = ConsoleTee(sys.stdout)
-"#;
-
-/// Keep what the script prints and the warnings Python shows in the console
-/// log, so the editor's console lists them with their script lines. Output
-/// still reaches stdout and stderr as before.
-fn install_console_capture(py: Python<'_>) -> PyResult<()> {
-    use gaanim_core::console::{Level, LogEntry, ScriptLocation};
-    let record = pyo3::types::PyCFunction::new_closure(
-        py,
-        None,
-        None,
-        |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, PyDict>>| {
-            let (level, label, message, file, line): (
-                String,
-                String,
-                String,
-                Option<String>,
-                Option<u32>,
-            ) = args.extract()?;
-            let level = match level.as_str() {
-                "warn" => Level::Warn,
-                "error" => Level::Error,
-                _ => Level::Info,
-            };
-            let location = file
-                .zip(line)
-                .filter(|(file, _)| !file.starts_with('<'))
-                .map(|(file, line)| ScriptLocation::new(file, line));
-            gaanim_core::console::record(
-                LogEntry::new(level, &label, message.trim_end()).at(location),
-            );
-            PyResult::Ok(())
-        },
-    )?;
-    let globals = PyDict::new(py);
-    globals.set_item("_record", record)?;
-    let source = std::ffi::CString::new(CONSOLE_CAPTURE).expect("no NUL in the capture source");
-    py.run(&source, Some(&globals), None)
 }
 
 const GAANIM_PACKAGE_INIT: &str = include_str!("../../gaanim_python/gaanim/__init__.py");
@@ -971,13 +878,14 @@ mod tests {
              print('sin salto', end='')\n",
         )
         .unwrap();
+        gaanim_core::console::keep_log(true);
         let before = entries_since(0).last().map_or(0, |entry| entry.seq);
         let result = Python::attach(|py| {
             let sys = py.import("sys").unwrap();
             let warnings = py.import("warnings").unwrap();
             let stdout = sys.getattr("stdout").unwrap();
             let show = warnings.getattr("showwarning").unwrap();
-            install_console_capture(py).unwrap();
+            crate::console_capture::install(py).unwrap();
             let result = run_script_file(py, &entry);
             sys.setattr("stdout", stdout).unwrap();
             warnings.setattr("showwarning", show).unwrap();

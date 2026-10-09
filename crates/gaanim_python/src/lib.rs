@@ -72,24 +72,50 @@ pub fn register_inittab() {
 }
 
 /// The lines of the script that called into Gaanim, innermost first: the
-/// Python frames outside the `gaanim` package, at most
-/// [`MAX_SCRIPT_FRAMES`]. Called for every drawable a script creates, so
-/// each file is classified and its path built once.
+/// Python frames outside the `gaanim` package, at most four, up to the
+/// first top-level module code. Called for every drawable the editor's scripts create,
+/// so it reads frames through the C API and classifies each code object once.
 fn script_call_stack() -> Vec<engine_core::console::ScriptLocation> {
+    use pyo3::ffi;
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+
     /// Enough to name a helper and the lines that called it.
     const MAX_SCRIPT_FRAMES: usize = 4;
-    thread_local! {
-        /// Each file a frame ran: its path, or `None` inside `gaanim`.
-        static FILES: RefCell<HashMap<String, Option<Arc<Path>>>> = RefCell::default();
+    /// Code objects kept classified before the cache starts over.
+    const MAX_CACHED_CODES: usize = 4096;
+
+    /// Where a code object's file sits.
+    #[derive(Clone)]
+    enum Origin {
+        /// A script file; `module` for its top-level code, above which only
+        /// the runner or an import remains.
+        Script { file: Arc<Path>, module: bool },
+        /// The `gaanim` package, or Python's own frozen and generated code.
+        Library,
+        /// `runpy`, which runs the script: no script frame lies above it.
+        Runner,
     }
-    /// Whether `file` belongs to the `gaanim` package. The editor runs the
-    /// package from memory, under relative names such as `gaanim/live.py`.
-    fn inside_gaanim(py: Python<'_>, file: &str) -> bool {
+
+    thread_local! {
+        /// Each code object a frame ran, kept alive so its address is not
+        /// reused by another one while it stays a key.
+        static CODES: RefCell<HashMap<usize, (Py<PyAny>, Origin)>> = RefCell::default();
+    }
+
+    fn classify(py: Python<'_>, code: &Bound<'_, PyAny>) -> Origin {
         static PACKAGE: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+        let Ok(file) = code
+            .getattr(pyo3::intern!(py, "co_filename"))
+            .and_then(|file| file.extract::<String>())
+        else {
+            return Origin::Library;
+        };
+        if file == "<frozen runpy>" {
+            return Origin::Runner;
+        }
         let package = PACKAGE.get_or_init(|| {
             py.import("gaanim")
                 .and_then(|gaanim| gaanim.getattr("__file__"))
@@ -97,54 +123,70 @@ fn script_call_stack() -> Vec<engine_core::console::ScriptLocation> {
                 .ok()
                 .and_then(|file| file.parent().map(engine_core::console::plain_path))
         });
-        file.starts_with('<')
+        let path = engine_core::console::plain_path(Path::new(&file));
+        // The editor runs the package from memory, under relative names
+        // such as `gaanim/live.py`.
+        let library = file.starts_with('<')
             || file.starts_with("gaanim/")
             || file.starts_with("gaanim\\")
-            || package.as_deref().is_some_and(|package| {
-                engine_core::console::plain_path(Path::new(file)).starts_with(package)
-            })
+            || package
+                .as_deref()
+                .is_some_and(|package| path.starts_with(package));
+        if library {
+            return Origin::Library;
+        }
+        let module = code
+            .getattr(pyo3::intern!(py, "co_name"))
+            .and_then(|name| name.extract::<String>())
+            .is_ok_and(|name| name == "<module>");
+        Origin::Script {
+            file: Arc::from(path),
+            module,
+        }
     }
 
     Python::attach(|py| {
         let mut stack = Vec::new();
-        let Ok(mut frame) = py
-            .import(pyo3::intern!(py, "sys"))
-            .and_then(|sys| sys.call_method1(pyo3::intern!(py, "_getframe"), (0,)))
-        else {
+        // SAFETY: the thread holds the GIL; the frame is borrowed and
+        // `from_borrowed_ptr` takes its own reference.
+        let current = unsafe { ffi::PyEval_GetFrame() };
+        if current.is_null() {
             return stack;
-        };
-        FILES.with_borrow_mut(|files| {
+        }
+        let mut frame: Bound<'_, PyAny> = unsafe { Bound::from_borrowed_ptr(py, current.cast()) };
+        CODES.with_borrow_mut(|codes| {
+            if codes.len() > MAX_CACHED_CODES {
+                codes.clear();
+            }
             while stack.len() < MAX_SCRIPT_FRAMES {
-                let Ok(code) = frame.getattr(pyo3::intern!(py, "f_code")) else {
-                    break;
+                // SAFETY: `frame` is a live frame object; PyFrame_GetCode
+                // returns a new reference that `from_owned_ptr` adopts.
+                let code: Bound<'_, PyAny> = unsafe {
+                    Bound::from_owned_ptr(py, ffi::PyFrame_GetCode(frame.as_ptr().cast()).cast())
                 };
-                let Ok(name) = code.getattr(pyo3::intern!(py, "co_filename")) else {
-                    break;
+                let key = code.as_ptr() as usize;
+                let origin = match codes.get(&key) {
+                    Some((_, origin)) => origin.clone(),
+                    None => {
+                        let origin = classify(py, &code);
+                        codes.insert(key, (code.clone().unbind(), origin.clone()));
+                        origin
+                    }
                 };
-                let Ok(name) = name.cast::<pyo3::types::PyString>() else {
-                    break;
-                };
-                let Ok(file) = name.to_str() else {
-                    break;
-                };
-                // Above the script's module only the runner's frames remain.
-                if file == "<frozen runpy>" {
-                    break;
-                }
-                if !files.contains_key(file) {
-                    let entry = (!inside_gaanim(py, file))
-                        .then(|| Arc::from(engine_core::console::plain_path(Path::new(file))));
-                    files.insert(file.to_owned(), entry);
-                }
-                if let Some(Some(path)) = files.get(file)
-                    && let Ok(line) = frame
-                        .getattr(pyo3::intern!(py, "f_lineno"))
-                        .and_then(|line| line.extract::<u32>())
-                {
-                    stack.push(engine_core::console::ScriptLocation {
-                        file: path.clone(),
-                        line,
-                    });
+                match origin {
+                    Origin::Runner => break,
+                    Origin::Library => {}
+                    Origin::Script { file, module } => {
+                        // SAFETY: as above, a live frame object.
+                        let line = unsafe { ffi::PyFrame_GetLineNumber(frame.as_ptr().cast()) };
+                        stack.push(engine_core::console::ScriptLocation {
+                            file,
+                            line: line.max(0) as u32,
+                        });
+                        if module {
+                            break;
+                        }
+                    }
                 }
                 match frame.getattr(pyo3::intern!(py, "f_back")) {
                     Ok(back) if !back.is_none() => frame = back,

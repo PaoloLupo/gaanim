@@ -182,7 +182,9 @@ pub fn status_label(line: &str) -> Option<&str> {
 /// Prints a status line on stderr and keeps it in the [log](entries_since).
 pub fn status(level: Level, label: &str, message: impl Display) {
     let message = message.to_string();
-    record(LogEntry::new(level, label, &message));
+    if keeps_log() {
+        record(LogEntry::new(level, label, &message));
+    }
     print_status(level, label, &message);
 }
 
@@ -302,9 +304,25 @@ fn log() -> std::sync::MutexGuard<'static, Log> {
     LOG.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+static KEEP_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Start or stop keeping lines in the log. Only the editor, whose console
+/// shows them, keeps them; command-line runs pay nothing for the log.
+pub fn keep_log(keep: bool) {
+    KEEP_LOG.store(keep, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether lines are kept in the log (see [`keep_log`]).
+pub fn keeps_log() -> bool {
+    KEEP_LOG.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Keep `entry` in the log without printing it, numbered after the last one
-/// and in the current run.
+/// and in the current run. Does nothing unless [`keep_log`] asked for it.
 pub fn record(mut entry: LogEntry) {
+    if !keeps_log() {
+        return;
+    }
     let mut log = log();
     entry.seq = log.next_seq;
     entry.run = log.run;
@@ -717,6 +735,7 @@ mod tests {
 
     #[test]
     fn the_log_keeps_recorded_lines_in_order_with_their_run() {
+        keep_log(true);
         let before = entries_since(0).last().map_or(0, |entry| entry.seq);
         let run = begin_run();
         record(LogEntry::new(Level::Warn, "log-test", "first"));

@@ -2221,7 +2221,11 @@ pub(crate) fn spawn_in(
     drop(guard);
 
     let handle = DrawableHandle::new(id, kind, state.clone(), active_idx);
-    let stack = super::profile::call_stack();
+    let stack = if super::profile::tracks_script_lines() {
+        super::profile::call_stack()
+    } else {
+        Vec::new()
+    };
     {
         let mut state = state.lock().expect("canvas state poisoned");
         if !stack.is_empty() {
