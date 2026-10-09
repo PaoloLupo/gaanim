@@ -364,6 +364,17 @@ pub struct Timeline {
     pub tracks: SlotMap<TrackId, Track>,
     /// Arena collection of clips.
     pub clips: SlotMap<ClipId, Clip>,
+    /// The authoring operation each clip came from, as an opaque key the
+    /// host resolves to script lines (the editor's animation timeline). Set
+    /// while [`Self::origin`] is.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub clip_origins: HashMap<ClipId, u64>,
+    /// The authoring operation the clips added now come from.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub origin: Option<u64>,
+    /// Changes only when a clip is added or removed; see [`Self::clip_revision`].
+    #[cfg_attr(feature = "serde", serde(skip))]
+    clips_revision: u64,
     /// O(log n) index mapping clip start times to clip IDs.
     pub clip_index: BTreeMap<OrderedFloat<f64>, Vec<ClipId>>,
     /// Snapshots captured at strategic keyframe timestamps for fast delta replay seeks.
@@ -785,6 +796,9 @@ impl Default for Timeline {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             tracks: SlotMap::with_key(),
             clips: SlotMap::with_key(),
+            clip_origins: HashMap::new(),
+            origin: None,
+            clips_revision: 0,
             clip_index: BTreeMap::new(),
             keyframes: BTreeMap::new(),
             current_time: 0.0,
@@ -1379,6 +1393,13 @@ impl Timeline {
         );
     }
 
+    /// Changes whenever a clip is added or removed, and never repeats across
+    /// timelines, so a view of the clips can tell it needs rebuilding.
+    /// Keyframes and seeks leave it alone.
+    pub fn clip_revision(&self) -> u64 {
+        self.clips_revision
+    }
+
     /// Changes whenever clips, keyframes or cached bounds change.
     pub(crate) fn property_revision(&self) -> u64 {
         self.property_revision
@@ -1427,6 +1448,8 @@ impl Timeline {
         };
         self.property_revision =
             NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.clips_revision =
+            NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let clip_id = self.clips.insert_with_key(|id| Clip {
             id,
             track,
@@ -1434,6 +1457,10 @@ impl Timeline {
             duration,
             payload,
         });
+
+        if let Some(origin) = self.origin {
+            self.clip_origins.insert(clip_id, origin);
+        }
 
         // Insert into the B-Tree index for O(log n) lookup
         let start_key = OrderedFloat(start);
@@ -1457,6 +1484,9 @@ impl Timeline {
         self.property_revision =
             NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let clip = self.clips.remove(id)?;
+        self.clips_revision =
+            NEXT_PROPERTY_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.clip_origins.remove(&id);
 
         // Remove from index
         let start_key = OrderedFloat(clip.start);

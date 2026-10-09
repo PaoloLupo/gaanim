@@ -178,6 +178,7 @@ pub fn console_panel_system(
     mut contexts: EguiContexts,
     presentation: Res<PresentationMode>,
     mut panel: ResMut<ConsolePanel>,
+    animations: Res<crate::animation_timeline::AnimationTimeline>,
 ) {
     if presentation.active {
         return;
@@ -199,7 +200,19 @@ pub fn console_panel_system(
     egui::Window::new("Consola")
         .id(egui::Id::new("editor_console"))
         .title_bar(false)
-        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(12.0, -96.0))
+        // Above the animation timeline when it is open.
+        .anchor(
+            egui::Align2::LEFT_BOTTOM,
+            egui::vec2(
+                12.0,
+                -96.0
+                    - if animations.height > 0.0 {
+                        animations.height + 8.0
+                    } else {
+                        0.0
+                    },
+            ),
+        )
         .order(egui::Order::Foreground)
         .resizable(false)
         .collapsible(false)

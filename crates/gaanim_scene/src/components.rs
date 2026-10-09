@@ -300,8 +300,24 @@ pub struct AuthoredObjects {
     build: Option<Arc<dyn Fn() -> AuthoredIndex + Send + Sync>>,
 }
 
-/// The authored drawables by the id of their compiled entity.
-pub type AuthoredIndex = std::collections::HashMap<gaanim_core::ObjectId, AuthoredObject>;
+/// What a scene script authored, for the editor.
+#[derive(Debug, Clone, Default)]
+pub struct AuthoredIndex {
+    /// The authored drawables by the id of their compiled entity.
+    pub objects: std::collections::HashMap<gaanim_core::ObjectId, AuthoredObject>,
+    /// The script lines of each `play`, by the origin key its clips carry
+    /// in `Timeline::clip_origins`.
+    pub plays: std::collections::HashMap<u64, AuthoredCall>,
+}
+
+/// A script call that authored something, such as a `play`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredCall {
+    /// The line that made the call.
+    pub location: gaanim_core::console::ScriptLocation,
+    /// The lines that called the function holding `location`, innermost first.
+    pub callers: Vec<gaanim_core::console::ScriptLocation>,
+}
 
 impl AuthoredObjects {
     /// An index already built.
@@ -327,18 +343,23 @@ impl AuthoredObjects {
 
     /// The drawable compiled as entity id `id`, if the script authored it.
     pub fn get(&self, id: &gaanim_core::ObjectId) -> Option<&AuthoredObject> {
-        self.index().get(id)
+        self.index().objects.get(id)
     }
 
     pub fn contains(&self, id: &gaanim_core::ObjectId) -> bool {
-        self.index().contains_key(id)
+        self.index().objects.contains_key(id)
+    }
+
+    /// The `play` whose clips carry `origin`.
+    pub fn play(&self, origin: u64) -> Option<&AuthoredCall> {
+        self.index().plays.get(&origin)
     }
 }
 
 impl std::fmt::Debug for AuthoredObjects {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthoredObjects")
-            .field("built", &self.index.get().map(|index| index.len()))
+            .field("built", &self.index.get().map(|index| index.objects.len()))
             .finish_non_exhaustive()
     }
 }

@@ -13,6 +13,7 @@ pub use colormap::{ColorMap, ColorMapError};
 
 pub mod fingerprint;
 pub mod id;
+pub mod names;
 pub use id::ObjectId;
 
 pub mod theme;
