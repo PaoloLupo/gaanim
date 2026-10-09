@@ -205,11 +205,18 @@ una X para cancelar. La terminal desde la que abriste `gaanim` muestra la misma
 barra de progreso que `gaanim export` y el resultado. Al terminar aparece un
 aviso en la esquina con el archivo y un botón para abrirlo.
 
+En *Archivo* escribes solo el nombre: la extensión la pone el formato. Al
+principio es el del proyecto (su carpeta, si el script es `main.py`, o el
+nombre del script), en la carpeta `output_dir` de `gaanim.toml`. *Cambiar…*
+elige otra carpeta con el selector del sistema; pasa el cursor por ella para
+ver la ruta completa. Si ya existe un archivo con ese nombre, el diálogo avisa
+de que lo reemplazará y ofrece el siguiente nombre libre (`intro-2`,
+`intro-3`…). Sin nombre no se puede exportar.
+
 El formato *PNG* exporta un PNG por fotograma (`frame_00000.png`,
-`frame_00001.png`…) para editar o componer en otro programa. Al elegirlo, el
-archivo `exports/output.mp4` pasa a `exports/output/frame.png`: los
-fotogramas van a una carpeta con el nombre del video, y el aviso final abre
-esa carpeta.
+`frame_00001.png`…) para editar o componer en otro programa. Los fotogramas
+van a una carpeta con el nombre que escribas, y el aviso final abre esa
+carpeta.
 
 Para guardar solo el fotograma que estás viendo, pulsa `Ctrl+Mayús+S`
 (`Cmd+Mayús+S` en macOS) o el botón de captura de la barra de overlays. Se

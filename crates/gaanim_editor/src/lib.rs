@@ -4154,10 +4154,8 @@ mod tests {
 
     #[test]
     fn active_export_preserves_the_editor_viewport_fit() {
-        let export_state = export::ExportState {
-            active: true,
-            ..export::ExportState::default()
-        };
+        let mut export_state = export::ExportState::default();
+        export_state.active = true;
         let mut app = App::new();
         app.insert_resource(ViewportInset { bottom: 120.0 })
             .insert_resource(PreviewInteractive::default())
