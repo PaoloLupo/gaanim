@@ -18,6 +18,7 @@ pub mod diff_cli;
 pub mod export;
 pub mod feedback;
 mod fps_overlay;
+pub mod frame_capture;
 pub mod frame_profile;
 pub mod host;
 #[cfg(not(target_arch = "wasm32"))]
@@ -248,6 +249,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<overlays::EditorOverlays>()
             .init_resource::<inspector::InspectorPanel>()
             .init_resource::<console_panel::ConsolePanel>()
+            .init_resource::<frame_capture::FrameCapture>()
             .init_resource::<narration::NarrationPanel>()
             .init_resource::<narration::NarrationSession>()
             .init_resource::<gaanim_media::PreviewAudioEnabled>()
@@ -271,6 +273,11 @@ impl Plugin for GaanimEditorPlugin {
                     overlays::overlays_toggle_keys_system,
                     console_panel::console_keys_system,
                     console_panel::console_sync_system,
+                    (
+                        frame_capture::frame_capture_keys_system,
+                        frame_capture::frame_capture_system,
+                    )
+                        .chain(),
                     global_playback_keys_system,
                     editor_fullscreen_keys_system,
                     presenter::presentation_input_system
@@ -357,6 +364,7 @@ impl Plugin for GaanimEditorPlugin {
                     overlays::scene_overlays_system,
                     inspector::inspector_panel_system,
                     console_panel::console_panel_system,
+                    frame_capture::frame_capture_notice_system,
                 )
                     .after(editor_ui_system),
             )

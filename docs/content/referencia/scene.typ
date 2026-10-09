@@ -2004,7 +2004,9 @@ capturas ni en la exportación. `O` o `Esc` la ocultan.
   el *Inspector* muestra sus propiedades (ver más abajo).
 - Con la inspección activa, la barra muestra el zoom de la vista (o *3D libre*)
   en azul cuando ya no coincide con la cámara de la escena, y un botón para
-  restablecerla (`R`). El icono de teclado lista todos los atajos.
+  restablecerla (`R`). El botón de captura guarda el fotograma actual como
+  PNG, sin overlays (`Ctrl+Mayús+S`). El icono de teclado lista todos los
+  atajos.
 
 El editor recuerda qué overlays dejaste activados entre sesiones; el modo en
 sí siempre empieza oculto.
@@ -2026,7 +2028,10 @@ Con los overlays visibles, un clic en la vista previa selecciona un objeto y el
 - su `z_index`, su capa, su profundidad de parallax o si es HUD, si es visible,
   el texto que dibuja y cuántos hijos tiene.
 
-Los valores son los del instante de la línea de tiempo, así que cambian al
+Sin nada seleccionado, el inspector muestra la cámara de la escena: su
+posición, rotación, zoom (o campo de visión, recorte y objetivo en
+perspectiva), el encuadre y, si está activa, la profundidad de campo. Los
+valores son los del instante de la línea de tiempo, así que cambian al
 reproducir o recorrer la escena. Un clic sobre una letra selecciona el texto
 entero y, a igual `z_index`, gana la caja más pequeña bajo el cursor: la
 etiqueta sobre su tarjeta, el miembro dentro de su grupo. *Dentro de…* sube al

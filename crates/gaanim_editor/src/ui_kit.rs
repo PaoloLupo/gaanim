@@ -85,6 +85,8 @@ pub(crate) enum Icon {
     Inspect,
     /// A prompt and a cursor: the console.
     Console,
+    /// Viewfinder corners around a dot: save the frame on screen.
+    Capture,
 }
 
 /// How an icon button presents its state.
@@ -669,6 +671,19 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         Icon::Inspect => {
             painter.circle_stroke(p(-0.08, -0.08), s * 0.26, stroke);
             painter.line_segment([p(0.12, 0.12), p(0.40, 0.40)], stroke);
+        }
+        Icon::Capture => {
+            for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                painter.line(
+                    vec![
+                        p(x * 0.42, y * 0.14),
+                        p(x * 0.42, y * 0.34),
+                        p(x * 0.22, y * 0.34),
+                    ],
+                    stroke,
+                );
+            }
+            painter.circle_filled(c, s * 0.11, color);
         }
         Icon::Console => {
             painter.rect_stroke(

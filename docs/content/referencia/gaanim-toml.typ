@@ -78,8 +78,9 @@ la CLI y el editor. Consulta
 === `output_dir`
 
 Carpeta relativa al proyecto, o absoluta. El diálogo de exportación del editor
-propone `<output_dir>/output.mp4`. `gaanim export` no la usa: escribe en la
-ruta de `--output`, relativa al directorio actual.
+propone `<output_dir>/output.mp4`, y las capturas del fotograma actual van a
+`<output_dir>/captures/`. `gaanim export` no la usa: escribe en la ruta de
+`--output`, relativa al directorio actual.
 
 === `[polls]`
 

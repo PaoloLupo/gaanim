@@ -308,8 +308,13 @@ pub fn export_dialog_system(
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
-        let displayed_path = state
+        // A PNG sequence is a folder of frames: show and open the folder.
+        let sequence = state.format == ExportFormat::PngSequence && !state.bundle;
+        let opened_path = state
             .completed_output_path
+            .as_deref()
+            .map(|path| exported_location(path, sequence));
+        let displayed_path = opened_path
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| state.output_path.clone());
@@ -379,7 +384,12 @@ pub fn export_dialog_system(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         if can_open {
-                            if primary_button(ui, "Abrir archivo", None, true).clicked() {
+                            let open_label = if sequence {
+                                "Abrir carpeta"
+                            } else {
+                                "Abrir archivo"
+                            };
+                            if primary_button(ui, open_label, None, true).clicked() {
                                 trigger_open = true;
                             }
                             if secondary_button(ui, "Cerrar", true).clicked() {
@@ -394,7 +404,8 @@ pub fn export_dialog_system(
     }
 
     if trigger_open && let Some(path) = state.completed_output_path.clone() {
-        match open_exported_file(&path) {
+        let sequence = state.format == ExportFormat::PngSequence && !state.bundle;
+        match open_exported_file(&exported_location(&path, sequence)) {
             Ok(()) => trigger_ok = true,
             Err(error) => {
                 state.message =
@@ -560,16 +571,30 @@ pub fn export_dialog_system(
             let videos = [
                 (FormatChoice::Video(ExportFormat::Mp4), "MP4", "Video H.264"),
                 (FormatChoice::Video(ExportFormat::Webm), "WebM", "Video VP9"),
-                (FormatChoice::Video(ExportFormat::Webp), "WebP", "Imagen animada"),
-                (FormatChoice::Video(ExportFormat::Gif), "GIF", "Imagen animada"),
-                (FormatChoice::Bundle, "Gaanim", "Escena completa"),
+                // Six formats share the row: short details keep them apart.
+                (FormatChoice::Video(ExportFormat::Webp), "WebP", "Animada"),
+                (FormatChoice::Video(ExportFormat::Gif), "GIF", "Animada"),
+                (FormatChoice::Video(ExportFormat::PngSequence), "PNG", "Fotogramas"),
+                (FormatChoice::Bundle, "Gaanim", "Escena"),
             ];
             let choices = if offers_bundle {
                 &videos[..]
             } else {
-                &videos[..4]
+                &videos[..5]
             };
             segmented(ui, "export_format", &mut current_choice, choices);
+            if current_choice == FormatChoice::Video(ExportFormat::PngSequence) {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "Un PNG por fotograma (frame_00000.png, frame_00001.png…) en la carpeta de salida, para editar o componer en otro programa.",
+                        )
+                        .size(12.0)
+                        .color(palette::TEXT_MUTED),
+                    )
+                    .wrap(),
+                );
+            }
             if current_choice == FormatChoice::Bundle {
                 ui.add(
                     egui::Label::new(
@@ -1209,15 +1234,41 @@ fn with_format_extension(path: &str, format: ExportFormat) -> String {
 }
 
 /// `path` with the extension `extension` when it has a known export one.
+/// A PNG sequence writes a folder of frames, so a video path becomes a
+/// folder of that name holding `frame.png`, and back again.
 fn with_output_extension(path: &str, extension: &str) -> String {
-    const KNOWN: [&str; 5] = ["mp4", "webm", "webp", "gif", "gaanim"];
+    const KNOWN: [&str; 6] = ["mp4", "webm", "webp", "gif", "gaanim", "png"];
     let as_path = Path::new(path);
-    match as_path.extension().and_then(|ext| ext.to_str()) {
-        Some(ext) if KNOWN.contains(&ext.to_ascii_lowercase().as_str()) => as_path
-            .with_extension(extension)
-            .to_string_lossy()
-            .into_owned(),
-        _ => path.to_string(),
+    let current = as_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase);
+    let Some(current) = current.filter(|ext| KNOWN.contains(&ext.as_str())) else {
+        return path.to_string();
+    };
+    let sequence_frame = current == "png"
+        && as_path.file_stem().and_then(|stem| stem.to_str()) == Some(PNG_SEQUENCE_STEM);
+    let base = match as_path.parent() {
+        Some(parent) if sequence_frame && !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => as_path.with_extension(""),
+    };
+    let result = if extension == "png" {
+        base.join(format!("{PNG_SEQUENCE_STEM}.png"))
+    } else {
+        base.with_extension(extension)
+    };
+    result.to_string_lossy().into_owned()
+}
+
+/// File name of the frames of a PNG sequence, before their numbers.
+const PNG_SEQUENCE_STEM: &str = "frame";
+
+/// What a finished export opens: the file, or for a PNG sequence the folder
+/// its frames are in.
+fn exported_location(path: &Path, sequence: bool) -> PathBuf {
+    match path.parent() {
+        Some(parent) if sequence && !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => path.to_path_buf(),
     }
 }
 
@@ -1254,8 +1305,6 @@ fn export_format_arg(format: ExportFormat) -> &'static str {
         ExportFormat::PngSequence => "png",
     }
 }
-
-pub fn export_per_frame_system() {}
 
 #[cfg(test)]
 mod tests {
@@ -1374,6 +1423,26 @@ mod tests {
             "clip.mov"
         );
         assert_eq!(with_format_extension("clip", ExportFormat::Webm), "clip");
+        assert_eq!(
+            with_format_extension("exports/output.mp4", ExportFormat::PngSequence),
+            "exports/output/frame.png"
+        );
+        assert_eq!(
+            with_format_extension("exports/output/frame.png", ExportFormat::Webm),
+            "exports/output.webm"
+        );
+        assert_eq!(
+            with_format_extension("still.png", ExportFormat::Mp4),
+            "still.mp4"
+        );
+        assert_eq!(
+            super::exported_location(Path::new("exports/output/frame.png"), true),
+            Path::new("exports/output")
+        );
+        assert_eq!(
+            super::exported_location(Path::new("exports/output.mp4"), false),
+            Path::new("exports/output.mp4")
+        );
     }
 
     #[test]
