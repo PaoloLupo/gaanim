@@ -40,6 +40,7 @@ pub type ImageHandle = DrawableHandle;
 
 mod audio_signals;
 mod authored;
+mod inspection;
 pub use audio_signals::{AUDIO_SHADER_FUNCTIONS, AUDIO_TIME_UNIFORM, SpectrumScale};
 pub use gaanim_media::analysis::AnalysisError as AudioAnalysisError;
 pub use gaanim_media::analysis::{AudioAnalysis, TempoEstimate};
@@ -149,6 +150,7 @@ mod profile;
 pub use profile::{reload_profile_enabled, set_call_site_provider};
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
+pub(crate) use inspection::compiled_index;
 mod extrude;
 pub mod text_animator;
 pub mod text_path;

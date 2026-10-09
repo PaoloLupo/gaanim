@@ -350,6 +350,8 @@ pub fn overlays_settings_ui_system(
     mut interactive: ResMut<PreviewInteractive>,
     authored_camera: Option<Res<Camera>>,
     presentation: Res<PresentationMode>,
+    mut inspector: ResMut<crate::inspector::InspectorPanel>,
+    mut console: ResMut<crate::console_panel::ConsolePanel>,
 ) {
     if presentation.active || !overlays.enabled {
         return;
@@ -499,6 +501,36 @@ pub fn overlays_settings_ui_system(
                             {
                                 interactive.reset();
                             }
+                        }
+                        divider(ui);
+                        if pill_toggle(
+                            ui,
+                            Icon::Inspect,
+                            Some("Inspector"),
+                            inspector.enabled,
+                            palette::ACCENT,
+                            HEIGHT,
+                        )
+                        .on_hover_text(
+                            "Propiedades del objeto seleccionado y su línea en el script
+                             Un clic en la vista selecciona un objeto.",
+                        )
+                        .clicked()
+                        {
+                            inspector.enabled = !inspector.enabled;
+                        }
+                        if pill_toggle(
+                            ui,
+                            Icon::Console,
+                            Some("Consola"),
+                            console.open,
+                            palette::ACCENT,
+                            HEIGHT,
+                        )
+                        .on_hover_text("Avisos, errores y salida del script · J")
+                        .clicked()
+                        {
+                            console.open = !console.open;
                         }
                         divider(ui);
                         let keyboard =
@@ -888,7 +920,11 @@ const SHORTCUTS: &[(&str, &str)] = &[
         "Arrastrar",
         "Desplazar la vista (en 3D, orbitar con el derecho)",
     ),
-    ("Clic", "Seleccionar el objeto bajo el cursor"),
+    (
+        "Clic",
+        "Seleccionar e inspeccionar el objeto bajo el cursor",
+    ),
+    ("J", "Mostrar u ocultar la consola"),
     ("Rueda", "Acercar o alejar hacia el cursor"),
     ("W A S D", "Mover la cámara"),
     ("R · F", "Restablecer la vista · encuadrar en 3D"),
@@ -1021,6 +1057,7 @@ pub fn scene_overlays_system(
     state: Res<EditorState>,
     interactive: Res<PreviewInteractive>,
     pickable: Query<crate::PickBoundsQueryData>,
+    children: Query<&Children>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     layouts: Query<LayoutQueryData>,
@@ -1095,8 +1132,7 @@ pub fn scene_overlays_system(
     };
     let selected = state
         .selected
-        .and_then(|entity| pickable.get(entity).ok())
-        .and_then(crate::pick_bounds);
+        .and_then(|entity| crate::selection_bounds(entity, &pickable, &children));
 
     // Área de dibujo full-screen no interactiva
     egui::Area::new("scene_overlays".into())

@@ -2221,8 +2221,12 @@ pub(crate) fn spawn_in(
     drop(guard);
 
     let handle = DrawableHandle::new(id, kind, state.clone(), active_idx);
+    let stack = super::profile::call_stack();
     {
         let mut state = state.lock().expect("canvas state poisoned");
+        if !stack.is_empty() {
+            state.object_locations.insert(id, stack);
+        }
         state.object_specs.insert(id, handle.spec.clone());
         state.segments[active_idx]
             .ops

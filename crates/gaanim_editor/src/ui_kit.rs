@@ -81,6 +81,10 @@ pub(crate) enum Icon {
     Volume,
     /// A speaker with a cross: muted.
     VolumeMuted,
+    /// A magnifying glass: inspect the selected drawable.
+    Inspect,
+    /// A prompt and a cursor: the console.
+    Console,
 }
 
 /// How an icon button presents its state.
@@ -661,6 +665,21 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                 painter.line_segment([p(from.0, from.1), p(to.0, to.1)], stroke);
             }
             painter.circle_filled(c, s * 0.06, color);
+        }
+        Icon::Inspect => {
+            painter.circle_stroke(p(-0.08, -0.08), s * 0.26, stroke);
+            painter.line_segment([p(0.12, 0.12), p(0.40, 0.40)], stroke);
+        }
+        Icon::Console => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-0.44, -0.34), p(0.44, 0.34)),
+                0.0,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            let thin = Stroke::new(stroke.width * 0.85, color);
+            painter.line(vec![p(-0.26, -0.12), p(-0.10, 0.0), p(-0.26, 0.12)], thin);
+            painter.line_segment([p(0.0, 0.14), p(0.24, 0.14)], thin);
         }
     }
 }

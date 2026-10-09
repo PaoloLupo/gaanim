@@ -274,6 +274,26 @@ pub enum RenderLayer {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MobjectId(pub gaanim_core::ObjectId);
 
+/// What a scene script authored a drawable as, for the editor's inspector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredObject {
+    /// The kind of drawable in the scripting vocabulary, such as `circle`.
+    pub kind: String,
+    /// The name the script gave it (`Drawable.named`).
+    pub name: Option<String>,
+    /// The script line that created it.
+    pub location: Option<gaanim_core::console::ScriptLocation>,
+    /// The script lines that called the function holding `location`,
+    /// innermost first, when a script's own function created it.
+    pub callers: Vec<gaanim_core::console::ScriptLocation>,
+}
+
+/// The authored drawables of the scene a reload compiled, by the
+/// [`MobjectId`] of the entity compiled for each. Every reload rebuilds it,
+/// so its script lines stay current when a reload keeps earlier entities.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct AuthoredObjects(pub std::collections::HashMap<gaanim_core::ObjectId, AuthoredObject>);
+
 /// Internal transform roles for a Cartesian domain view and its text roots.
 /// Labels follow the view's positions while retaining their authored glyph size.
 #[doc(hidden)]

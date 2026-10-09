@@ -2000,13 +2000,55 @@ capturas ni en la exportación. `O` o `Esc` la ocultan.
   márgenes (naranja) y los gaps entre ellos (morado), con una etiqueta de su
   tipo, tamaño, padding y gap en px de diseño. Sigue la caja en cada momento
   de la línea de tiempo, también mientras se reorganiza.
-- El objeto seleccionado se enmarca con su centro y su tamaño en unidades.
+- El objeto seleccionado se enmarca con su centro y su tamaño en unidades, y
+  el *Inspector* muestra sus propiedades (ver más abajo).
 - Con la inspección activa, la barra muestra el zoom de la vista (o *3D libre*)
   en azul cuando ya no coincide con la cámara de la escena, y un botón para
   restablecerla (`R`). El icono de teclado lista todos los atajos.
 
 El editor recuerda qué overlays dejaste activados entre sesiones; el modo en
 sí siempre empieza oculto.
+
+=== Inspector y consola
+
+Con los overlays visibles, un clic en la vista previa selecciona un objeto y el
+*Inspector* (botón de la barra) muestra:
+
+- su tipo con el vocabulario del script (`circle`, `rounded_rect`, `text`…) y
+  el nombre que le diste con `named`;
+- la línea del script que lo creó, con *Abrir* para ir a ella en tu editor de
+  código y *Copiar* para llevarte `archivo:línea`. Si lo creó una función tuya,
+  debajo aparecen las líneas que la llamaron (*llamado desde main.py · línea
+  11*), cada una también se abre con un clic;
+- su posición, rotación (en radianes, como `rotate_to`, y en grados), escala,
+  tamaño y centro en unidades de la escena; su relleno y su trazo con el color
+  en hexadecimal, y su opacidad;
+- su `z_index`, su capa, su profundidad de parallax o si es HUD, si es visible,
+  el texto que dibuja y cuántos hijos tiene.
+
+Los valores son los del instante de la línea de tiempo, así que cambian al
+reproducir o recorrer la escena. Un clic sobre una letra selecciona el texto
+entero y, a igual `z_index`, gana la caja más pequeña bajo el cursor: la
+etiqueta sobre su tarjeta, el miembro dentro de su grupo. *Dentro de…* sube al
+grupo que lo contiene. Las líneas siguen siendo correctas tras cada recarga,
+aunque la recarga reutilice segmentos ya compilados.
+
+La *Consola* (`J`, o el botón de la barra) reúne lo que antes solo llegaba a la
+terminal: los avisos de Gaanim y de Python (`warnings.warn`), lo que escribe
+`print`, los errores del script con su traceback y las líneas de estado de
+cada recarga. Cada mensaje ocupa una fila y enlaza con la línea del script que
+lo produjo; un clic en la fila muestra debajo el mensaje completo y, si lo
+tiene, su traceback. Filtra por errores, avisos y mensajes, busca por texto o archivo,
+copia lo listado como en la terminal y limpia la lista. Por defecto muestra
+solo la última ejecución del script; *Historial* conserva las anteriores.
+Mientras está oculta, una insignia arriba a la izquierda cuenta los errores y
+avisos de la última ejecución y la abre con un clic.
+
+*Abrir* usa el comando de `GAANIM_EDITOR` (por ejemplo
+`code --goto {file}:{line}`); sin ella, el primero que encuentre en el `PATH`
+entre VS Code (`code`), Cursor, VSCodium, Zed y Sublime Text, y si no hay
+ninguno abre el archivo con la aplicación predeterminada, que no salta a la
+línea. El panel de error del script también ofrece *Abrir en el editor*.
 
 == Recorte y máscaras
 

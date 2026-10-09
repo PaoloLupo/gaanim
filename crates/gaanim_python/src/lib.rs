@@ -71,54 +71,94 @@ pub fn register_inittab() {
     pyo3::append_to_inittab!(gaanim_core);
 }
 
-/// The line of the script that called into Gaanim, as `path:line`: the
-/// innermost Python frame outside the `gaanim` package, its path relative
-/// to the working directory when inside it.
-fn script_call_site() -> Option<String> {
+/// The lines of the script that called into Gaanim, innermost first: the
+/// Python frames outside the `gaanim` package, at most
+/// [`MAX_SCRIPT_FRAMES`]. Called for every drawable a script creates, so
+/// each file is classified and its path built once.
+fn script_call_stack() -> Vec<engine_core::console::ScriptLocation> {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::path::{Path, PathBuf};
-    Python::attach(|py| {
-        let package = py
-            .import("gaanim")
-            .and_then(|gaanim| gaanim.getattr("__file__"))
-            .and_then(|file| file.extract::<PathBuf>())
-            .ok()
-            .and_then(|file| file.parent().map(engine_core::console::plain_path));
-        let mut frame = py
-            .import("sys")
-            .and_then(|sys| sys.call_method1("_getframe", (0,)))
-            .ok()?;
-        loop {
-            let file: String = frame
-                .getattr("f_code")
-                .and_then(|code| code.getattr("co_filename"))
-                .and_then(|file| file.extract())
-                .ok()?;
-            let path = &engine_core::console::plain_path(Path::new(&file));
-            let inside_gaanim = file.starts_with('<')
-                || package
-                    .as_deref()
-                    .is_some_and(|package| path.starts_with(package));
-            if !inside_gaanim {
-                let line: u32 = frame
-                    .getattr("f_lineno")
-                    .and_then(|line| line.extract())
-                    .ok()?;
-                return Some(format!(
-                    "{}:{line}",
-                    engine_core::console::display_path(path)
-                ));
-            }
-            frame = frame
-                .getattr("f_back")
+    use std::sync::Arc;
+    /// Enough to name a helper and the lines that called it.
+    const MAX_SCRIPT_FRAMES: usize = 4;
+    thread_local! {
+        /// Each file a frame ran: its path, or `None` inside `gaanim`.
+        static FILES: RefCell<HashMap<String, Option<Arc<Path>>>> = RefCell::default();
+    }
+    /// Whether `file` belongs to the `gaanim` package. The editor runs the
+    /// package from memory, under relative names such as `gaanim/live.py`.
+    fn inside_gaanim(py: Python<'_>, file: &str) -> bool {
+        static PACKAGE: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+        let package = PACKAGE.get_or_init(|| {
+            py.import("gaanim")
+                .and_then(|gaanim| gaanim.getattr("__file__"))
+                .and_then(|file| file.extract::<PathBuf>())
                 .ok()
-                .filter(|back| !back.is_none())?;
-        }
+                .and_then(|file| file.parent().map(engine_core::console::plain_path))
+        });
+        file.starts_with('<')
+            || file.starts_with("gaanim/")
+            || file.starts_with("gaanim\\")
+            || package.as_deref().is_some_and(|package| {
+                engine_core::console::plain_path(Path::new(file)).starts_with(package)
+            })
+    }
+
+    Python::attach(|py| {
+        let mut stack = Vec::new();
+        let Ok(mut frame) = py
+            .import(pyo3::intern!(py, "sys"))
+            .and_then(|sys| sys.call_method1(pyo3::intern!(py, "_getframe"), (0,)))
+        else {
+            return stack;
+        };
+        FILES.with_borrow_mut(|files| {
+            while stack.len() < MAX_SCRIPT_FRAMES {
+                let Ok(code) = frame.getattr(pyo3::intern!(py, "f_code")) else {
+                    break;
+                };
+                let Ok(name) = code.getattr(pyo3::intern!(py, "co_filename")) else {
+                    break;
+                };
+                let Ok(name) = name.cast::<pyo3::types::PyString>() else {
+                    break;
+                };
+                let Ok(file) = name.to_str() else {
+                    break;
+                };
+                // Above the script's module only the runner's frames remain.
+                if file == "<frozen runpy>" {
+                    break;
+                }
+                if !files.contains_key(file) {
+                    let entry = (!inside_gaanim(py, file))
+                        .then(|| Arc::from(engine_core::console::plain_path(Path::new(file))));
+                    files.insert(file.to_owned(), entry);
+                }
+                if let Some(Some(path)) = files.get(file)
+                    && let Ok(line) = frame
+                        .getattr(pyo3::intern!(py, "f_lineno"))
+                        .and_then(|line| line.extract::<u32>())
+                {
+                    stack.push(engine_core::console::ScriptLocation {
+                        file: path.clone(),
+                        line,
+                    });
+                }
+                match frame.getattr(pyo3::intern!(py, "f_back")) {
+                    Ok(back) if !back.is_none() => frame = back,
+                    _ => break,
+                }
+            }
+        });
+        stack
     })
 }
 
 #[pymodule]
 pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    gaanim_api::canvas::set_call_site_provider(script_call_site);
+    gaanim_api::canvas::set_call_site_provider(script_call_stack);
     m.add(
         "LayoutOwnershipError",
         _py.get_type::<LayoutOwnershipError>(),
