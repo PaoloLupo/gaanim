@@ -13,6 +13,7 @@ pub mod alsa_errors;
 mod app_icon;
 pub mod bundle_player;
 pub mod cli;
+pub mod console_panel;
 pub mod diff_cli;
 pub mod export;
 pub mod feedback;
@@ -21,6 +22,7 @@ pub mod frame_profile;
 pub mod host;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod idle;
+pub mod inspector;
 pub mod narration;
 pub mod overlays;
 pub mod platform;
@@ -42,6 +44,7 @@ pub mod project_hub;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod python_plugin;
 pub mod share_link;
+pub mod source_link;
 mod touch;
 mod ui_kit;
 pub mod volume;
@@ -243,6 +246,8 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<PreviewInteractive>()
             .init_resource::<PreviewDrag>()
             .init_resource::<overlays::EditorOverlays>()
+            .init_resource::<inspector::InspectorPanel>()
+            .init_resource::<console_panel::ConsolePanel>()
             .init_resource::<narration::NarrationPanel>()
             .init_resource::<narration::NarrationSession>()
             .init_resource::<gaanim_media::PreviewAudioEnabled>()
@@ -264,6 +269,8 @@ impl Plugin for GaanimEditorPlugin {
                         .after(preview_mode_keys_system),
                     editor_picking_system.after(preview_interactive_input_system),
                     overlays::overlays_toggle_keys_system,
+                    console_panel::console_keys_system,
+                    console_panel::console_sync_system,
                     global_playback_keys_system,
                     editor_fullscreen_keys_system,
                     presenter::presentation_input_system
@@ -348,6 +355,8 @@ impl Plugin for GaanimEditorPlugin {
                 (
                     overlays::overlays_settings_ui_system,
                     overlays::scene_overlays_system,
+                    inspector::inspector_panel_system,
+                    console_panel::console_panel_system,
                 )
                     .after(editor_ui_system),
             )
@@ -3230,6 +3239,37 @@ pub(crate) fn pick_bounds(
     finite.then(|| gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1))
 }
 
+/// World box of a selected entity: its pick box grown by those of its
+/// descendants, so a text, whose root has no extent of its own, is boxed by
+/// its glyphs and a group by its members.
+pub(crate) fn selection_bounds(
+    entity: Entity,
+    pickable: &Query<PickBoundsQueryData>,
+    children: &Query<&Children>,
+) -> Option<gaanim_math::Bounds3D> {
+    /// Entities read at most, so a huge group costs little per frame.
+    const MAX_ENTITIES: usize = 10_000;
+    let mut pending = vec![entity];
+    let mut visited = 0;
+    let mut result: Option<gaanim_math::Bounds3D> = None;
+    while let Some(current) = pending.pop() {
+        visited += 1;
+        if visited > MAX_ENTITIES {
+            break;
+        }
+        if let Some(bounds) = pickable.get(current).ok().and_then(pick_bounds) {
+            let size = bounds.max - bounds.min;
+            if size.max_element() > 1e-9 {
+                result = Some(result.map_or(bounds, |result| result.union(&bounds)));
+            }
+        }
+        if let Ok(list) = children.get(current) {
+            pending.extend(list.iter());
+        }
+    }
+    result
+}
+
 #[allow(clippy::too_many_arguments)]
 fn editor_picking_system(
     egui_wants: Res<EguiWantsInput>,
@@ -3241,6 +3281,11 @@ fn editor_picking_system(
     mut state: ResMut<EditorState>,
     interactive: Res<PreviewInteractive>,
     drag: Res<PreviewDrag>,
+    authored: Option<Res<gaanim_scene::AuthoredObjects>>,
+    ids: Query<&gaanim_scene::MobjectId>,
+    parents: Query<&ChildOf>,
+    pickable: Query<PickBoundsQueryData>,
+    children: Query<&Children>,
 ) {
     let Some(camera) = camera else { return };
     if egui_wants.wants_any_pointer_input() {
@@ -3319,21 +3364,48 @@ fn editor_picking_system(
             }
             picking_camera.screen_to_world(viewport_pos)
         };
+        // Among boxes at the same z_index, the smallest is the most specific
+        // hit: a label over its card, a member inside its group.
+        let mut best_area = f64::INFINITY;
         for (entity, data, render_order) in &entities {
-            let Some(bounds) = pick_bounds(data) else {
+            let Some(mut bounds) = pick_bounds(data) else {
                 continue;
             };
+            // A text root has no extent of its own; its glyphs give it one,
+            // so a click between two letters still selects the text.
+            if (bounds.max - bounds.min).max_element() <= 1e-9 {
+                match selection_bounds(entity, &pickable, &children) {
+                    Some(grown) => bounds = grown,
+                    None => continue,
+                }
+            }
             if bounds.contains(glam::DVec3::new(world_pos.x, world_pos.y, 0.0)) {
                 let z = render_order.map(|ro| ro.z_index).unwrap_or(0);
-                if z >= best_z {
+                let size = bounds.max - bounds.min;
+                let area = size.x * size.y;
+                if beats_hit((z, area), (best_z, best_area)) {
                     best_z = z;
+                    best_area = area;
                     best_entity = Some(entity);
                 }
             }
         }
     }
 
-    state.selected = best_entity;
+    // A click on a glyph or another compiled part selects the drawable the
+    // script authored, which the inspector can trace to its line.
+    state.selected = best_entity.map(|entity| {
+        authored
+            .as_deref()
+            .and_then(|authored| inspector::authored_entity(entity, authored, &ids, &parents))
+            .unwrap_or(entity)
+    });
+}
+
+/// Whether a 2D hit `(z_index, area)` is picked over the best one so far:
+/// it draws above it, or at the same z_index its box is not larger.
+fn beats_hit((z, area): (i32, f64), (best_z, best_area): (i32, f64)) -> bool {
+    z > best_z || (z == best_z && area <= best_area)
 }
 
 fn ray_aabb_intersect(
@@ -3521,6 +3593,17 @@ fn viewport_adjust_system(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn picking_prefers_higher_layers_then_the_smaller_box() {
+        // A label over its card at the same z_index.
+        assert!(beats_hit((0, 0.5), (0, 3.6)));
+        assert!(!beats_hit((0, 3.6), (0, 0.5)));
+        // A higher z_index wins whatever its size.
+        assert!(beats_hit((2, 10.0), (0, 0.5)));
+        assert!(!beats_hit((-1, 0.1), (0, 3.6)));
+        assert!(beats_hit((i32::MIN + 1, 1.0), (i32::MIN, f64::INFINITY)));
+    }
+
     use super::*;
     use gaanim_timeline::timeline::SegmentMetadata;
 

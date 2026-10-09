@@ -274,6 +274,75 @@ pub enum RenderLayer {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MobjectId(pub gaanim_core::ObjectId);
 
+/// What a scene script authored a drawable as, for the editor's inspector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredObject {
+    /// The kind of drawable in the scripting vocabulary, such as `circle`.
+    pub kind: String,
+    /// The name the script gave it (`Drawable.named`).
+    pub name: Option<String>,
+    /// The script line that created it.
+    pub location: Option<gaanim_core::console::ScriptLocation>,
+    /// The script lines that called the function holding `location`,
+    /// innermost first, when a script's own function created it.
+    pub callers: Vec<gaanim_core::console::ScriptLocation>,
+}
+
+/// The authored drawables of the scene a reload compiled, by the
+/// [`MobjectId`] of the entity compiled for each. Every reload replaces it,
+/// so its script lines stay current when a reload keeps earlier entities.
+///
+/// A reload only hands it a way to build the index; it is built the first
+/// time the editor asks, so a reload nobody inspects pays nothing for it.
+#[derive(Resource, Clone, Default)]
+pub struct AuthoredObjects {
+    index: Arc<std::sync::OnceLock<AuthoredIndex>>,
+    build: Option<Arc<dyn Fn() -> AuthoredIndex + Send + Sync>>,
+}
+
+/// The authored drawables by the id of their compiled entity.
+pub type AuthoredIndex = std::collections::HashMap<gaanim_core::ObjectId, AuthoredObject>;
+
+impl AuthoredObjects {
+    /// An index already built.
+    pub fn new(index: AuthoredIndex) -> Self {
+        Self {
+            index: Arc::new(std::sync::OnceLock::from(index)),
+            build: None,
+        }
+    }
+
+    /// An index that `build` makes when it is first read.
+    pub fn deferred(build: impl Fn() -> AuthoredIndex + Send + Sync + 'static) -> Self {
+        Self {
+            index: Arc::default(),
+            build: Some(Arc::new(build)),
+        }
+    }
+
+    fn index(&self) -> &AuthoredIndex {
+        self.index
+            .get_or_init(|| self.build.as_ref().map(|build| build()).unwrap_or_default())
+    }
+
+    /// The drawable compiled as entity id `id`, if the script authored it.
+    pub fn get(&self, id: &gaanim_core::ObjectId) -> Option<&AuthoredObject> {
+        self.index().get(id)
+    }
+
+    pub fn contains(&self, id: &gaanim_core::ObjectId) -> bool {
+        self.index().contains_key(id)
+    }
+}
+
+impl std::fmt::Debug for AuthoredObjects {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthoredObjects")
+            .field("built", &self.index.get().map(|index| index.len()))
+            .finish_non_exhaustive()
+    }
+}
+
 /// Internal transform roles for a Cartesian domain view and its text roots.
 /// Labels follow the view's positions while retaining their authored glyph size.
 #[doc(hidden)]

@@ -187,17 +187,27 @@ fn run_script_thread(
         gaanim_core::console::error("python", "could not load the in-memory `gaanim` package");
     }
 
+    if gaanim_core::console::keeps_log()
+        && let Err(error) = Python::attach(crate::console_capture::install)
+    {
+        gaanim_core::console::warn(
+            "python",
+            format!("script output will not reach the editor console · {error}"),
+        );
+    }
+
     // Run immediately on first iteration, then block for re-run signals.
     loop {
         if exited.load(Ordering::SeqCst) {
             break;
         }
 
+        gaanim_core::console::begin_run();
         host::set_compile_started_at(Some(Instant::now()));
         let result = Python::attach(|py| run_script_file(py, &script_path));
         host::set_compile_started_at(None);
         if let Err(e) = result {
-            Python::attach(|py| {
+            let tb = Python::attach(|py| {
                 let tb = without_runner_frames(&format_py_traceback(py, &e));
                 let header = format!("{} — traceback:", script_path.display());
                 let full = format!("{}\n{}", header, tb);
@@ -205,8 +215,23 @@ fn run_script_thread(
                 let color =
                     gaanim_core::console::color_enabled(gaanim_core::console::Stream::Stderr);
                 eprint!("{}", gaanim_core::console::format_traceback(&tb, color));
+                tb
             });
-            gaanim_core::console::error("python", "Script failed · fix it and save to reload");
+            let (headline, location) = gaanim_core::console::traceback_summary(&tb);
+            gaanim_core::console::record(
+                gaanim_core::console::LogEntry::new(
+                    gaanim_core::console::Level::Error,
+                    "python",
+                    headline,
+                )
+                .with_detail(tb.trim_end())
+                .at(location),
+            );
+            gaanim_core::console::print_status(
+                gaanim_core::console::Level::Error,
+                "python",
+                "Script failed · fix it and save to reload",
+            );
         }
 
         // Block until the next re-run request (or channel closed).
@@ -837,5 +862,57 @@ mod tests {
                 format!("{name}-output")
             );
         }
+    }
+
+    #[test]
+    fn script_output_and_warnings_reach_the_console_log() {
+        use gaanim_core::console::{Level, entries_since};
+        let _python = python_lock();
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        write_project_manifest(temp.path());
+        let entry = temp.path().join("scene.py");
+        std::fs::write(
+            &entry,
+            "import warnings\nprint('hola', 'mundo')\nwarnings.warn('cuidado')\n\
+             print('sin salto', end='')\n",
+        )
+        .unwrap();
+        gaanim_core::console::keep_log(true);
+        let before = entries_since(0).last().map_or(0, |entry| entry.seq);
+        let result = Python::attach(|py| {
+            let sys = py.import("sys").unwrap();
+            let warnings = py.import("warnings").unwrap();
+            let stdout = sys.getattr("stdout").unwrap();
+            let show = warnings.getattr("showwarning").unwrap();
+            crate::console_capture::install(py).unwrap();
+            let result = run_script_file(py, &entry);
+            sys.setattr("stdout", stdout).unwrap();
+            warnings.setattr("showwarning", show).unwrap();
+            result
+        });
+        assert!(result.is_ok());
+        let logged = entries_since(before);
+        let printed = logged
+            .iter()
+            .find(|logged| logged.label == "print")
+            .expect("the printed line");
+        assert_eq!(printed.message, "hola mundo");
+        assert_eq!(printed.level, Level::Info);
+        assert_eq!(printed.location.as_ref().map(|at| at.line), Some(2));
+        let unfinished = logged
+            .iter()
+            .find(|logged| logged.message == "sin salto")
+            .expect("the line the run ended without a newline");
+        assert_eq!(unfinished.location.as_ref().map(|at| at.line), Some(4));
+        let warned = logged
+            .iter()
+            .find(|logged| logged.label == "UserWarning")
+            .expect("the warning");
+        assert_eq!(warned.message, "cuidado");
+        assert_eq!(warned.level, Level::Warn);
+        let location = warned.location.as_ref().expect("the warning's line");
+        assert_eq!(location.line, 3);
+        assert_eq!(location.file_name(), "scene.py");
     }
 }

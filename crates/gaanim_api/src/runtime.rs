@@ -265,6 +265,40 @@ fn replay_incremental_for(
     clear_scene: impl FnOnce(&mut World),
     goal: ReplayGoal,
 ) -> ReplayKind {
+    // Read from this revision even when the world keeps an earlier one's
+    // entities: moving a line changes no fingerprint. Only the editor reads
+    // it, and only once something is inspected.
+    let inspected = (goal == ReplayGoal::Reload && crate::canvas::tracks_script_lines())
+        .then(|| canvas.clone());
+    let kind = replay_revision(world, canvas, allow_reuse, clear_scene, goal);
+    if let Some(canvas) = inspected {
+        let ids = world
+            .get_resource::<RetainedReplay>()
+            .map(|retained| {
+                retained
+                    .ids
+                    .iter()
+                    .filter(|(authored, compiled)| authored != compiled)
+                    .map(|(&authored, &compiled)| (authored, compiled))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The previous index may hold the last copy of a large scene.
+        if let Some(previous) = world.remove_resource::<gaanim_scene::AuthoredObjects>() {
+            drop_elsewhere(previous);
+        }
+        world.insert_resource(crate::canvas::deferred_index(canvas, ids));
+    }
+    kind
+}
+
+fn replay_revision(
+    world: &mut World,
+    canvas: SceneModel,
+    allow_reuse: bool,
+    clear_scene: impl FnOnce(&mut World),
+    goal: ReplayGoal,
+) -> ReplayKind {
     let mut timings = ReloadTimings::start(goal == ReplayGoal::Reload);
     let previous = world.remove_resource::<RetainedReplay>();
     let Some(fingerprints) = scene_fingerprints(world, &canvas) else {

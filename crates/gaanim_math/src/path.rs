@@ -228,35 +228,18 @@ fn get_subpath_proportional(path: &BezPath, alpha: f64) -> BezPath {
     result
 }
 
-/// Point at parameter `alpha` in `[0.0, 1.0]` along a `BezPath`.
-///
-/// Used by the tip-glow effect to position a small "pen tip" entity
-/// at the current end of the draw progression.
+/// Point at `alpha` in `[0.0, 1.0]` of the arc length of `path`, its
+/// sub-paths walked one after another as one route: 0 is its start and 1
+/// its end. Continuous and monotonic in `alpha`, so a drawable or camera
+/// following it never jumps or steps back.
 pub fn get_point_at_alpha(path: &BezPath, alpha: f64) -> Point {
-    if path.elements().is_empty() {
-        return Point::default();
-    }
+    point_and_angle_at_alpha(path, alpha).0
+}
 
-    if alpha <= 0.0 {
-        if let Some(PathEl::MoveTo(p)) = path.elements().first() {
-            return *p;
-        }
-        return Point::default();
-    }
-
-    let subpath = get_subpath(path, alpha);
-
-    let mut last_point = Point::default();
-    for el in subpath.elements() {
-        match *el {
-            PathEl::MoveTo(p) => last_point = p,
-            PathEl::LineTo(p) => last_point = p,
-            PathEl::QuadTo(_, p) => last_point = p,
-            PathEl::CurveTo(_, _, p) => last_point = p,
-            PathEl::ClosePath => {}
-        }
-    }
-    last_point
+/// [`get_point_at_alpha`] and [`path_tangent_angle`] at once, measuring the
+/// path a single time.
+pub fn point_and_angle_at_alpha(path: &BezPath, alpha: f64) -> (Point, f64) {
+    PathArcLength::new(path).point_and_angle_at(alpha)
 }
 
 /// Visible part of `path` for an After Effects–style trim: the window
@@ -336,19 +319,7 @@ fn sequential_range(path: &BezPath, from_alpha: f64, to_alpha: f64) -> BezPath {
 /// Direction of travel (radians from +x) along `path` at `alpha`, estimated
 /// from nearby arc-length samples; 0 when the path has no extent.
 pub fn path_tangent_angle(path: &BezPath, alpha: f64) -> f64 {
-    const STEP: f64 = 1e-3;
-    let alpha = alpha.clamp(0.0, 1.0);
-    let (before, after) = if alpha + STEP <= 1.0 {
-        (alpha, alpha + STEP)
-    } else {
-        ((alpha - STEP).max(0.0), alpha)
-    };
-    let delta = get_point_at_alpha(path, after) - get_point_at_alpha(path, before);
-    if delta.hypot2() <= 1e-18 {
-        0.0
-    } else {
-        delta.y.atan2(delta.x)
-    }
+    point_and_angle_at_alpha(path, alpha).1
 }
 
 /// A circular arc from `from` to `to` that turns by `angle` radians
@@ -699,8 +670,9 @@ impl SampledContour {
         } else {
             sample_count.saturating_sub(1).max(1)
         } as f64;
+        let route = PathArcLength::new(&path);
         let points: Vec<_> = (0..sample_count)
-            .map(|idx| get_point_at_alpha(&path, idx as f64 / denominator))
+            .map(|idx| route.point_and_angle_at(idx as f64 / denominator).0)
             .collect();
         let center = average_point(&points);
         let area = signed_area(&points);
@@ -921,16 +893,25 @@ pub struct PathArcLength {
     segments: Vec<(CubicBez, f64, f64)>,
     total: f64,
     closed: bool,
+    /// Arc length error allowed in measuring and inverting, in path units.
+    accuracy: f64,
+    /// Where the path starts, which a path with no length stays at.
+    start: Option<Point>,
 }
 
 const ARCLEN_ACCURACY: f64 = 1.0e-6;
 
 impl PathArcLength {
     pub fn new(path: &BezPath) -> Self {
+        Self::with_accuracy(path, ARCLEN_ACCURACY)
+    }
+
+    /// Measured to `accuracy` path units of arc length.
+    pub fn with_accuracy(path: &BezPath, accuracy: f64) -> Self {
         let mut segments = Vec::new();
         let mut total = 0.0;
         for segment in path.segments() {
-            let length = segment.arclen(ARCLEN_ACCURACY);
+            let length = segment.arclen(accuracy);
             if length > 1.0e-12 {
                 segments.push((segment.to_cubic(), total, length));
                 total += length;
@@ -948,10 +929,16 @@ impl PathArcLength {
                 }
                 _ => false,
             };
+        let start = path.elements().iter().find_map(|element| match element {
+            PathEl::MoveTo(point) => Some(*point),
+            _ => None,
+        });
         Self {
             segments,
             total,
             closed: starts <= 1 && closes,
+            accuracy,
+            start,
         }
     }
 
@@ -964,6 +951,43 @@ impl PathArcLength {
         self.closed
     }
 
+    /// The point at `alpha` in `[0, 1]` of the arc length and the direction
+    /// of travel there, as an angle from +x: 0 is the start and 1 the end,
+    /// closed or not, without wrapping or extrapolating. `None` for a path
+    /// with no length.
+    pub fn at_fraction(&self, alpha: f64) -> Option<(Point, f64)> {
+        let last = self.segments.last()?;
+        let alpha = if alpha.is_nan() {
+            0.0
+        } else {
+            alpha.clamp(0.0, 1.0)
+        };
+        if alpha >= 1.0 {
+            return Some((last.0.p3, travel_angle(&last.0, 1.0)));
+        }
+        Some(self.within(alpha * self.total))
+    }
+
+    /// [`Self::at_fraction`], or the path's start heading +x when it has
+    /// no length. Measure a path once with [`PathArcLength::new`] and call
+    /// this every frame to follow it.
+    pub fn point_and_angle_at(&self, alpha: f64) -> (Point, f64) {
+        self.at_fraction(alpha)
+            .unwrap_or((self.start.unwrap_or_default(), 0.0))
+    }
+
+    /// The point and direction at arc length `s` in `[0, total]`.
+    fn within(&self, s: f64) -> (Point, f64) {
+        let index = self
+            .segments
+            .partition_point(|(_, start, _)| *start <= s)
+            .saturating_sub(1);
+        let (segment, start, length) = &self.segments[index];
+        let local = (s - start).clamp(0.0, *length);
+        let t = segment.inv_arclen(local, self.accuracy);
+        (segment.eval(t), travel_angle(segment, t))
+    }
+
     /// The point at arc length `s` from the start and the direction of travel
     /// there, as an angle from +x; `None` for a path with no length.
     pub fn sample(&self, s: f64) -> Option<(Point, f64)> {
@@ -973,22 +997,7 @@ impl PathArcLength {
         } else {
             s
         };
-        let direction = |segment: &CubicBez, t: f64| {
-            let tangent = segment.deriv().eval(t).to_vec2();
-            let tangent = if tangent.hypot2() > 1.0e-18 {
-                tangent
-            } else {
-                // A control point on its end point: step inside the segment.
-                let inner = if t < 0.5 { 1.0e-4 } else { 1.0 - 1.0e-4 };
-                let (a, b) = if t < 0.5 {
-                    (segment.eval(t), segment.eval(inner))
-                } else {
-                    (segment.eval(inner), segment.eval(t))
-                };
-                b - a
-            };
-            tangent.y.atan2(tangent.x)
-        };
+        let direction = travel_angle;
         if s <= 0.0 && !self.closed {
             let angle = direction(&first.0, 0.0);
             return Some((first.0.p0 + kurbo::Vec2::from_angle(angle) * s, angle));
@@ -1001,15 +1010,59 @@ impl PathArcLength {
                 angle,
             ));
         }
-        let index = self
-            .segments
-            .partition_point(|(_, start, _)| *start <= s)
-            .saturating_sub(1);
-        let (segment, start, length) = &self.segments[index];
-        let local = (s - start).clamp(0.0, *length);
-        let t = segment.inv_arclen(local, ARCLEN_ACCURACY);
-        Some((segment.eval(t), direction(segment, t)))
+        Some(self.within(s))
     }
+}
+
+/// The arc-length measure of a path that something follows, made the first
+/// time it is read and shared by copies, so following the path each frame
+/// only inverts the arc length. It never shows in `Debug` or comparisons,
+/// which depend on the path alone.
+#[derive(Clone, Default)]
+pub struct MeasuredRoute(std::sync::OnceLock<std::sync::Arc<PathArcLength>>);
+
+impl MeasuredRoute {
+    /// The measure of `path`, which must be the path this route stands for.
+    pub fn get(&self, path: &BezPath) -> &PathArcLength {
+        self.0
+            .get_or_init(|| std::sync::Arc::new(PathArcLength::new(path)))
+    }
+
+    /// [`Self::get`] as a shared handle.
+    pub fn shared(&self, path: &BezPath) -> std::sync::Arc<PathArcLength> {
+        self.get(path);
+        self.0.get().cloned().expect("measured above")
+    }
+}
+
+impl std::fmt::Debug for MeasuredRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MeasuredRoute")
+    }
+}
+
+impl PartialEq for MeasuredRoute {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The direction of travel along `segment` at `t`, as an angle from +x.
+fn travel_angle(segment: &CubicBez, t: f64) -> f64 {
+    let tangent = segment.deriv().eval(t).to_vec2();
+    let tangent = if tangent.hypot2() > 1.0e-18 {
+        tangent
+    } else {
+        // A control point on its end point: step inside the segment.
+        let inner = if t < 0.5 { 1.0e-4 } else { 1.0 - 1.0e-4 };
+        let (a, b) = if t < 0.5 {
+            (segment.eval(t), segment.eval(inner))
+        } else {
+            (segment.eval(inner), segment.eval(t))
+        };
+        b - a
+    };
+    tangent.y.atan2(tangent.x)
 }
 
 #[cfg(test)]
@@ -1340,6 +1393,51 @@ mod motion_tests {
         assert!(get_point_at_alpha(&arc_between(from, to, -1.0), 0.5).y > 0.2);
         let straight = arc_between(from, to, 0.0);
         assert!(get_point_at_alpha(&straight, 0.5).y.abs() < 1e-12);
+    }
+
+    /// The road of `examples/camera_path_demo.py` (#404).
+    fn winding_road() -> BezPath {
+        let mut path = BezPath::new();
+        path.move_to((-8.0, -2.0));
+        path.curve_to((-4.0, 4.0), (0.0, -6.0), (4.0, 0.0));
+        path.curve_to((6.0, 3.0), (9.0, 2.0), (12.0, -1.0));
+        path
+    }
+
+    #[test]
+    fn following_a_path_moves_forward_evenly_and_turns_smoothly() {
+        let road = winding_road();
+        let length = get_path_length(&road);
+        let steps = 2000;
+        let step = length / steps as f64;
+        let mut previous = point_and_angle_at_alpha(&road, 0.0);
+        let mut travelled = 0.0;
+        for index in 1..=steps {
+            let current = point_and_angle_at_alpha(&road, index as f64 / steps as f64);
+            let advance = current.0.distance(previous.0);
+            // Never back, never ahead: a chord is at most its arc.
+            assert!(
+                advance <= step * 1.001 && advance >= step * 0.5,
+                "step {index}: moved {advance}, expected about {step}"
+            );
+            let turn = (current.1 - previous.1 + std::f64::consts::PI)
+                .rem_euclid(std::f64::consts::TAU)
+                - std::f64::consts::PI;
+            assert!(turn.abs() < 0.05, "step {index}: turned {turn} rad");
+            travelled += advance;
+            previous = current;
+        }
+        assert!((travelled - length).abs() < length * 1e-3);
+        let (start, start_angle) = point_and_angle_at_alpha(&road, 0.0);
+        assert!(start.distance(Point::new(-8.0, -2.0)) < 1e-9);
+        // Toward the first control point, (4, 6) away.
+        assert!((start_angle - 6.0_f64.atan2(4.0)).abs() < 1e-9);
+        assert!(
+            point_and_angle_at_alpha(&road, 1.0)
+                .0
+                .distance(Point::new(12.0, -1.0))
+                < 1e-9
+        );
     }
 
     #[test]

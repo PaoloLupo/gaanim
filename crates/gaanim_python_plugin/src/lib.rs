@@ -8,6 +8,7 @@
 // Take the engine crates from the shared engine library.
 use gaanim_engine as _;
 
+mod console_capture;
 mod python_home;
 mod script_runner;
 

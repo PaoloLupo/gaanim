@@ -378,6 +378,9 @@ pub enum PropertyLensSpec {
         path: BezPath,
         z: f64,
         orient: Option<f64>,
+        /// `path` measured once for every frame that follows it.
+        #[cfg_attr(feature = "serde", serde(skip, default))]
+        route: gaanim_math::MeasuredRoute,
     },
     /// Tween the depth of field of parallax layers: `[focus, aperture,
     /// max_blur]`, the focus in inverse depth so a rack focus moves evenly
@@ -408,6 +411,9 @@ pub enum PropertyLensSpec {
         /// while the clip applies, as `move_along` authors it.
         #[cfg_attr(feature = "serde", serde(default))]
         reset_anchor: bool,
+        /// `path` measured once for every frame that follows it.
+        #[cfg_attr(feature = "serde", serde(skip, default))]
+        route: gaanim_math::MeasuredRoute,
     },
     /// Move along a 3D polyline; the pivot anchor is cleared like a 2D
     /// `move_along`.
@@ -718,8 +724,9 @@ impl PropertyLensSpec {
                 path,
                 orient,
                 reset_anchor,
+                route,
             } => PropertyLens::PathFollow {
-                path: std::sync::Arc::new(path.clone()),
+                route: route.shared(path),
                 orient: *orient,
                 reset_anchor: *reset_anchor,
             },

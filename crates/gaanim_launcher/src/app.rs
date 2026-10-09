@@ -439,6 +439,10 @@ struct ScriptLaunch {
 
 impl ScriptLaunch {
     fn start(python: &gaanim_editor::python_plugin::PythonPlugin, script_path: PathBuf) -> Self {
+        // The editor's console and inspector show the log and the script
+        // lines; nothing else records them.
+        gaanim_core::console::keep_log(true);
+        gaanim_api::canvas::track_script_lines(true);
         let (payload_tx, payload_rx) = crossbeam_channel::unbounded::<ReloadPayload>();
         let (error_tx, error_rx) = crossbeam_channel::unbounded::<String>();
         let runner = (python.spawn_script)(script_path.clone(), payload_tx, error_tx);

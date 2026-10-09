@@ -8,6 +8,8 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use gaanim_core::console::ScriptLocation;
+
 use super::SceneModel;
 
 /// Whether `GAANIM_RELOAD_PROFILE` asks for the full profile.
@@ -15,16 +17,43 @@ pub fn reload_profile_enabled() -> bool {
     std::env::var_os("GAANIM_RELOAD_PROFILE").is_some_and(|value| value != "0")
 }
 
-static CALL_SITE: OnceLock<fn() -> Option<String>> = OnceLock::new();
+static CALL_SITE: OnceLock<fn() -> Vec<ScriptLocation>> = OnceLock::new();
 
-/// Let a binding name the line of its script that made an authoring call,
-/// such as `sections/intro.py:42`. Only the first provider counts.
-pub fn set_call_site_provider(provider: fn() -> Option<String>) {
+/// Let a binding name the lines of its script that made an authoring call,
+/// innermost first: the line that called Gaanim, then the lines that called
+/// the script's own functions on the way, such as `sections/intro.py:42`
+/// called from `main.py:7`. Only the first provider counts.
+pub fn set_call_site_provider(provider: fn() -> Vec<ScriptLocation>) {
     let _ = CALL_SITE.set(provider);
 }
 
-fn call_site() -> Option<String> {
-    CALL_SITE.get().and_then(|provider| provider())
+static TRACK_SCRIPT_LINES: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Record the script lines that create each drawable, for the editor's
+/// inspector. Off by default: only the editor shows them, so exports and
+/// checks pay nothing for it.
+pub fn track_script_lines(track: bool) {
+    TRACK_SCRIPT_LINES.store(track, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether drawables record their script lines (see [`track_script_lines`]).
+pub fn tracks_script_lines() -> bool {
+    TRACK_SCRIPT_LINES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The script lines making the current authoring call, innermost first;
+/// empty without a binding that provides them.
+pub(crate) fn call_stack() -> Vec<ScriptLocation> {
+    CALL_SITE
+        .get()
+        .map(|provider| provider())
+        .unwrap_or_default()
+}
+
+/// The script line making the current authoring call.
+pub(crate) fn call_site() -> Option<ScriptLocation> {
+    call_stack().into_iter().next()
 }
 
 /// Measurements that compiled, and how long they took.
@@ -125,7 +154,8 @@ impl SharedProfile {
     pub(crate) fn measured(&self, how: Measured, time: Duration) {
         let site = (how == Measured::Scene || time >= SLOW_MEASUREMENT)
             .then(call_site)
-            .flatten();
+            .flatten()
+            .map(|site| site.to_string());
         self.with(|profile| {
             match how {
                 Measured::Isolated => profile.isolated.add(time),

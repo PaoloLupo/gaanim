@@ -55,6 +55,11 @@ pub(crate) struct CanvasState {
     pub object_specs: HashMap<ObjectId, SharedObjectSpec>,
     /// Frozen birth state. Once present, later setters must become timeline cuts.
     pub frozen_spawn_specs: HashMap<ObjectId, ObjectSpec>,
+    /// The script lines that created each drawable, innermost first, for
+    /// the editor's inspector. Kept out of the specs: they are not compiled,
+    /// and moving a line must not change the fingerprints that let a reload
+    /// reuse work.
+    pub(crate) object_locations: HashMap<ObjectId, Vec<gaanim_core::console::ScriptLocation>>,
     /// The shared scene that owns this state, which drawables compile to
     /// measure themselves.
     pub(crate) owner: Option<std::sync::Weak<Mutex<crate::canvas::SceneModel>>>,
@@ -118,6 +123,7 @@ impl CanvasState {
             parameter_ranges: HashMap::new(),
             object_specs: HashMap::new(),
             frozen_spawn_specs: HashMap::new(),
+            object_locations: HashMap::new(),
             owner: None,
             polls: Vec::new(),
             poll_session: None,
