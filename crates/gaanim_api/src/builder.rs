@@ -3760,6 +3760,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     ),
                     orient: None,
                     reset_anchor: false,
+                    route: Default::default(),
                 }
             }
             (_, lens) => lens,
@@ -6768,6 +6769,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     path,
                     orient: follow.orient,
                     reset_anchor: true,
+                    route: Default::default(),
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -6889,6 +6891,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         path,
                         orient: None,
                         reset_anchor: true,
+                        route: Default::default(),
                     },
                     rate_func: anim.rate_func.clone(),
                     delay: 0.0,

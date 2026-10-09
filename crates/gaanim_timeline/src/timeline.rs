@@ -4691,16 +4691,19 @@ fn apply_lens_spec(
                 camera.position = from.lerp(*to, t);
             }
         }
-        PropertyLensSpec::CameraPathFollow { path, z, orient } => {
-            let point = gaanim_math::get_point_at_alpha(path, t);
+        PropertyLensSpec::CameraPathFollow {
+            path,
+            z,
+            orient,
+            route,
+        } => {
+            let (point, angle) = route.get(path).point_and_angle_at(t);
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.position = gaanim_core::glam::DVec3::new(point.x, point.y, *z);
                 if let Some(offset) = orient {
                     // Per-frame angle, not a slerp: no jump where the
                     // tangent crosses ±π.
-                    camera.rotation = gaanim_core::glam::DQuat::from_rotation_z(
-                        gaanim_math::path_tangent_angle(path, t) + offset,
-                    );
+                    camera.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle + offset);
                 }
             }
         }
@@ -4949,10 +4952,11 @@ fn apply_lens_spec(
             path,
             orient,
             reset_anchor,
+            route,
         } => {
             // Sample the Bézier path at the eased `t` and set the
             // entity's translation to the sampled world point.
-            let p = gaanim_math::get_point_at_alpha(path, t);
+            let (p, angle) = route.get(path).point_and_angle_at(t);
             if let Some(mut transform) = world.get_mut::<SpatialTransform>(target) {
                 let mut value = *transform;
                 value.translation = gaanim_core::glam::DVec3::new(p.x, p.y, 0.0);
@@ -4960,9 +4964,7 @@ fn apply_lens_spec(
                     value.anchor = gaanim_core::glam::DVec3::ZERO;
                 }
                 if let Some(offset) = orient {
-                    value.rotation = gaanim_core::glam::DQuat::from_rotation_z(
-                        gaanim_math::path_tangent_angle(path, t) + offset,
-                    );
+                    value.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle + offset);
                 }
                 if *transform != value {
                     *transform = value;

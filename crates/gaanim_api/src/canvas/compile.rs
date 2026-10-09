@@ -8572,6 +8572,7 @@ impl SceneModel {
                         path: path.clone(),
                         z: camera_position.z,
                         orient: follow.orient,
+                        route: Default::default(),
                     },
                 );
                 let end = gaanim_math::get_point_at_alpha(&path, 1.0);
@@ -15348,6 +15349,7 @@ mod tests {
                                 path,
                                 orient,
                                 reset_anchor,
+                                ..
                             },
                         ..
                     },
