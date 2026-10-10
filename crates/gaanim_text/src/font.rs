@@ -233,7 +233,8 @@ impl FontRegistry {
             }
         }
 
-        if self.db.faces().count() == 0 {
+        // WebAssembly has no system fonts to find; the embedded faces serve.
+        if self.db.faces().count() == 0 && cfg!(not(target_arch = "wasm32")) {
             eprintln!(
                 "FontRegistry: no system fonts were found. Text rendering via rustybuzz may fail. \
                  Ensure standard font directories exist or register fonts manually."

@@ -213,7 +213,7 @@ Para publicarlo en GitHub Pages:
 + El enlace es
   `https://paololupo.github.io/gaanim/reproductor/?src=https://<usuario>.github.io/<repositorio>/charlas/mi-charla.gaanim`.
 
-=== Enlazar un momento
+=== Enlazar un momento <enlazar-un-momento>
 
 Como en los sitios de vídeo, lo que va después de `#` elige dónde empieza:
 
@@ -238,18 +238,67 @@ equipo hay que publicarlo antes.
 El botón *Presentar* existe porque el navegador solo deja abrir otra ventana
 tras un clic: el enlace no puede abrir el Presenter View por sí solo.
 
-=== Insertar en otra página
+== Insertar en un blog o sitio web <insertar>
 
-El reproductor funciona dentro de un `<iframe>`. Permite la pantalla completa
-y el portapapeles para que funcionen sus botones:
+Una animación corta puede ir en una entrada de blog como una figura más: se
+ve nítida a cualquier tamaño y suele pesar menos que el mismo vídeo. Publica
+el `.gaanim` como para #link(<compartir-un-enlace>)[compartir un enlace] y
+pega en la entrada:
 
 ```html
-<iframe
-  src="https://paololupo.github.io/gaanim/reproductor/?src=https://tu-sitio.com/mi-charla.gaanim#segmento=2"
-  width="960" height="540" style="border: 0"
-  allow="fullscreen; clipboard-write">
-</iframe>
+<iframe src="https://paololupo.github.io/gaanim/reproductor/insertar/?src=https://tu-blog.com/animaciones/circulo.gaanim&amp;loop&amp;controls=0"
+  title="Animación: círculo" loading="lazy" allow="fullscreen; clipboard-write"
+  style="width: 100%; aspect-ratio: 16 / 9; border: 0"></iframe>
 ```
+
+`reproductor/insertar/` es un reproductor ligero hecho para esto: solo dibuja
+el archivo, sin la barra del editor ni el Presenter View, y su primera visita
+descarga unos 3 MB en lugar de los 24 del reproductor completo. La animación
+empieza cuando al menos una cuarta parte del marco está a la vista y se pausa
+cuando sale de ella: quien lee la entrada la ve desde el principio al llegar a
+ella, no mientras lee lo anterior. Si la pausa a mano, sigue pausada. Una
+pausa de la escena (`scene.stop()`) la detiene hasta un clic, como en una
+presentación; si la pausa tiene un bucle (`loop=`), lo repite mientras espera,
+y el clic sigue desde su final. Estas opciones cambian cómo se reproduce (en HTML, el `&` que
+las separa se escribe `&amp;`):
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Opción*], [*Efecto*],
+  [`loop`], [Repite la animación entera, como un GIF.],
+  [`controls=0`], [Oculta la barra. Un clic o un toque en la animación la pausa o la reanuda, y al terminar la repite desde el principio.],
+  [`autoplay=0`], [No empieza sola: un botón en el centro espera un clic.],
+  [`#t=2`], [Empieza a los dos segundos (también `#t=1:05`).],
+)
+
+Sin `controls=0`, una barra fina aparece al pasar el cursor por la animación y
+mientras está pausada: reproducir o pausar, la posición, el tiempo, el bucle,
+el sonido si la escena lo tiene y la pantalla completa. Sin `loop`, la
+animación se detiene en su último fotograma con un botón para repetirla.
+
+El reproductor ligero deja fuera el posprocesado, los fondos de shader, las
+transiciones de shader y los efectos de shader sobre objetos, que se dibujan
+en pasadas propias de la GPU. Cuando la escena usa alguno, abre el
+reproductor completo con las mismas opciones, así que la animación siempre se
+ve como la grabaste; solo descarga más.
+
+`aspect-ratio` da al marco la proporción de la escena: `16 / 9` para el
+`frame=(16, 9)` por defecto, `1 / 1` para una cuadrada. Así el marco ocupa el
+ancho de la columna sin franjas. `loading="lazy"` hace que el navegador no lo
+cargue hasta que la entrada se acerca a él, y `allow` deja funcionar la
+pantalla completa.
+
+El #link("https://paololupo.github.io/gaanim/playground/")[playground] lo
+prepara por ti: tras ejecutar la escena, *Insertar* descarga el `.gaanim` con
+el nombre que elijas, compone el código con la dirección donde lo publicarás y
+la proporción de la escena, y muestra cómo se verá con las opciones que
+marques.
+
+Quien lee la entrada necesita un navegador con WebGPU, igual que para el
+reproductor completo; sin él, el marco explica qué falta. Las demás
+animaciones de la página, y las de visitas siguientes, toman el reproductor
+de la caché del navegador.
 
 == Controles táctiles
 

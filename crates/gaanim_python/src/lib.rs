@@ -36,6 +36,8 @@ mod magic_move;
 mod motion;
 mod particles;
 mod path_modifiers;
+#[cfg(target_os = "emscripten")]
+mod playground;
 mod poll;
 mod procedural;
 mod progress_ring;
@@ -409,5 +411,7 @@ pub fn gaanim_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "TEAL",
         color::PyColor(engine_core::peniko::Color::from_rgb8(0x2E, 0x86, 0xAB)),
     )?;
+    #[cfg(target_os = "emscripten")]
+    playground::register(m)?;
     Ok(())
 }

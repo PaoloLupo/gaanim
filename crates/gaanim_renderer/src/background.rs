@@ -360,7 +360,7 @@ impl ShaderBackground {
         let rendered = rasterize_shader(self, width, height, time, frame, values)
             .map(|image| Brush::Image(ImageBrush::new(image)));
         if let Err(error) = &rendered {
-            bevy::log::error!("background shader failed; using its fallback color: {error}");
+            tracing::error!("background shader failed; using its fallback color: {error}");
         }
         *cache = Some((key, rendered.clone()));
         rendered
@@ -986,7 +986,7 @@ impl GpuShaderTarget {
     /// Drop the pipeline that failed to build and fill the texture with the
     /// shader's fallback color.
     fn fail(&mut self, queue: &wgpu::Queue, shader: &ShaderBackground, error: &wgpu::Error) {
-        bevy::log::error!("background shader failed; using its fallback color: {error}");
+        tracing::error!("background shader failed; using its fallback color: {error}");
         self.pipeline = None;
         let rgba = shader.fallback.to_rgba8().to_u8_array();
         let pixels = rgba.repeat(self.image.width as usize * self.image.height as usize);

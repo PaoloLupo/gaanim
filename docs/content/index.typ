@@ -7,6 +7,7 @@
 
 #book-part("I", "Empezar", description: "Instala Gaanim, crea tu primera animación y aprende cómo piensa una escena")
 #include "empezar/instalacion.typ"
+#include "empezar/playground.typ"
 #include "empezar/primera-animacion.typ"
 #include "empezar/como-piensa-gaanim.typ"
 

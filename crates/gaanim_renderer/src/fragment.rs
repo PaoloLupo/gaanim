@@ -520,6 +520,60 @@ impl FragmentStore {
     }
 }
 
+/// Whether two scenes draw exactly the same pixels: equal command streams and
+/// equal late-bound resources. Images compare by their shared data, which
+/// cannot change in place. Glyph runs are not compared (Gaanim draws text as
+/// paths), so scenes that use them always differ.
+pub fn draws_same(a: &vello::Scene, b: &vello::Scene) -> bool {
+    use vello_encoding::Patch;
+    let (a, b) = (a.encoding(), b.encoding());
+    let (resources_a, resources_b) = (&a.resources, &b.resources);
+    let same_patches = resources_a.patches.len() == resources_b.patches.len()
+        && resources_a
+            .patches
+            .iter()
+            .zip(&resources_b.patches)
+            .all(|patches| match patches {
+                (
+                    Patch::Ramp {
+                        draw_data_offset: offset_a,
+                        stops: stops_a,
+                        extend: extend_a,
+                    },
+                    Patch::Ramp {
+                        draw_data_offset: offset_b,
+                        stops: stops_b,
+                        extend: extend_b,
+                    },
+                ) => offset_a == offset_b && stops_a == stops_b && extend_a == extend_b,
+                (
+                    Patch::Image {
+                        draw_data_offset: offset_a,
+                        image: image_a,
+                    },
+                    Patch::Image {
+                        draw_data_offset: offset_b,
+                        image: image_b,
+                    },
+                ) => offset_a == offset_b && image_a == image_b,
+                _ => false,
+            });
+    a.n_paths == b.n_paths
+        && a.n_path_segments == b.n_path_segments
+        && a.n_clips == b.n_clips
+        && a.n_open_clips == b.n_open_clips
+        && resources_a.glyph_runs.is_empty()
+        && resources_b.glyph_runs.is_empty()
+        && a.path_tags == b.path_tags
+        && a.path_data == b.path_data
+        && a.draw_tags == b.draw_tags
+        && a.draw_data == b.draw_data
+        && a.transforms == b.transforms
+        && a.styles == b.styles
+        && resources_a.color_stops == resources_b.color_stops
+        && same_patches
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

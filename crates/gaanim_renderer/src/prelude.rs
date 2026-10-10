@@ -1,7 +1,12 @@
+pub use crate::GaanimDerivedGeometryPlugin;
+#[cfg(not(target_os = "emscripten"))]
+pub use crate::GaanimRendererPlugin;
 pub use crate::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundError};
+#[cfg(not(target_os = "emscripten"))]
 pub use crate::canvas::{
     CanvasMirror, PREVIEW_RESOLUTION_ENV, PreviewResolution, VelloCanvas, VelloScene2d, VelloView,
 };
+#[cfg(not(target_os = "emscripten"))]
 pub use crate::diagnostics::{
     RenderFailure, RenderFailureKind, RenderHealth, VelloDiagnostics,
     collect_vello_diagnostics_system,
@@ -17,7 +22,9 @@ pub use crate::lottie::{
 };
 pub use crate::pipeline::{
     CanvasBackground, GaanimRenderCache, MainVelloScene, SegmentBackgroundPaint,
-    gaanim_render_cache_sweep_system, gaanim_render_system, sync_canvas_background_clear_system,
-    sync_gaanim_camera_to_bevy_system,
+    gaanim_render_cache_sweep_system,
 };
-pub use crate::{GaanimDerivedGeometryPlugin, GaanimRendererPlugin};
+#[cfg(not(target_os = "emscripten"))]
+pub use crate::pipeline::{
+    gaanim_render_system, sync_canvas_background_clear_system, sync_gaanim_camera_to_bevy_system,
+};

@@ -723,6 +723,26 @@ table th, .code-header, .code-cell-anim .anim-preview::before, .api-badge, .kind
     max-height: 480px;
     cursor: zoom-in;
 }
+/* A `# player` cell: the embed player covers the preview once it opened the
+   recording; until then, and without WebGPU, the preview shows. */
+.code-cell-anim .anim-stage {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    line-height: 0;
+}
+.code-cell-anim .anim-stage img { display: block; max-width: 100%; height: auto; }
+.code-cell-anim .anim-stage iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+.code-cell-anim .anim-stage.ready iframe { opacity: 1; pointer-events: auto; }
 
 .copy-code-btn {
     position: absolute;

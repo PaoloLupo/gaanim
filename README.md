@@ -23,6 +23,11 @@ La documentación (guía, recetas y referencia de la API) se publica en
 cada push a `main`, renderizando las vistas previas de los ejemplos con el
 runtime real.
 
+Para probar Gaanim sin instalar nada, el
+[playground](https://paololupo.github.io/gaanim/playground/) ejecuta escenas
+de Python en el navegador (Pyodide) y las muestra en el reproductor web; su
+botón *Insertar* prepara una animación para un blog o sitio web.
+
 ## Inicio rápido
 
 Requisitos: Rust (toolchain estable), Python y [`just`](https://just.systems).
@@ -330,6 +335,7 @@ detecta las marcas por palabra. Consulte `docs/content/referencia/audio.typ`.
 | Medir presupuestos del runtime | `just benchmark smoke` |
 | Generar la documentación | `just docs` |
 | Compilar el reproductor web de `.gaanim` (experimental) | `just web` (servirlo: `just web-serve`) |
+| Compilar el playground web (Pyodide y reproductor) | `just playground` (servirlo: `just playground-serve`) |
 
 Durante la iteración, comprueba el crate afectado y conserva `target/`, el
 toolchain y las opciones de compilación para aprovechar la caché. El perfil
@@ -414,7 +420,7 @@ Consulte también las escenas de referencia en [`examples/`](examples/).
 
 ## Estado
 
-Gaanim está en fase alfa (`0.10.2`). La base de render, timeline, texto y
+Gaanim está en fase alfa (`0.11.0`). La base de render, timeline, texto y
 ecuaciones es funcional; la cobertura de API, pruebas de exportación y
 capacidades multimedia continúan en desarrollo. El plan de evolución se
 sigue en las [issues](https://github.com/PaoloLupo/gaanim/issues).

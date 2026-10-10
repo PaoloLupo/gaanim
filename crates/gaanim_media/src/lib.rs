@@ -1,3 +1,7 @@
+// The playground's Pyodide extension (wasm32-unknown-emscripten) leaves out
+// the preview and windowed code; helpers only it uses are unused there.
+#![cfg_attr(target_os = "emscripten", allow(dead_code, unused_imports))]
+
 use std::collections::{HashMap, VecDeque};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -821,7 +825,7 @@ impl Default for VideoDecoder {
                 }
             });
         if let Err(error) = spawned {
-            bevy::log::warn!("video frames are unavailable: {error}");
+            tracing::warn!("video frames are unavailable: {error}");
         }
         Self {
             request_tx,
@@ -998,6 +1002,9 @@ fn sample_video_system(world: &mut World) {
     world.insert_resource(decoder);
 }
 
+// The playground's Pyodide extension (wasm32-unknown-emscripten) has no audio
+// output; the web player plays the recorded tracks itself.
+#[cfg(not(target_os = "emscripten"))]
 fn sync_preview_audio_system(world: &mut World) {
     use bevy::audio::{
         AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, Decodable, PlaybackSettings,
@@ -1219,12 +1226,14 @@ impl Plugin for GaanimMediaPlugin {
             .init_resource::<PreviewAudioTracks>()
             .init_resource::<VideoDecoder>()
             .init_resource::<PreviewAudioRegistry>()
-            .add_systems(
-                Update,
-                (sample_video_system, sync_preview_audio_system)
-                    .chain()
-                    .in_set(SceneSet::Updaters),
-            );
+            .add_systems(Update, sample_video_system.in_set(SceneSet::Updaters));
+        #[cfg(not(target_os = "emscripten"))]
+        app.add_systems(
+            Update,
+            sync_preview_audio_system
+                .after(sample_video_system)
+                .in_set(SceneSet::Updaters),
+        );
     }
 }
 

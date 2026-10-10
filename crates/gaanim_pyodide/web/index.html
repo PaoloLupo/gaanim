@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Playground Gaanim</title>
+  <meta name="description" content="Escribe escenas de Gaanim en Python y míralas en el navegador, sin instalar nada.">
+  <link rel="icon" href="favicon.ico">
+  <script>
+    // The theme the documentation site's toggle chose, before the first paint.
+    try {
+      const theme = localStorage.getItem("theme");
+      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    } catch {}
+  </script>
+  <link rel="stylesheet" href="playground.css">
+  <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min/vs/editor/editor.main.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="brand" href="../" title="Documentación de Gaanim">
+      <img class="symbol" src="gaanim-icon.svg" alt="Gaanim" width="32" height="32">
+      <span class="product">Playground</span>
+    </a>
+    <div class="controls">
+      <button type="button" id="stop" class="ghost danger square" hidden title="Detener (Esc)" aria-label="Detener"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" fill="currentColor"/></svg></button>
+      <button type="button" id="run" class="primary" disabled title="Ejecutar (Ctrl+S o Ctrl+Enter)">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+        <span>Ejecutar</span>
+      </button>
+      <button type="button" id="live" class="ghost square toggle" aria-pressed="false" aria-label="En vivo" title="Ejecutar la escena al dejar de escribir"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="stroke" d="M9.25 1.75L3.75 9h4.5l-1.5 5.25L12.25 7h-4.5z"/></svg></button>
+      <label class="select compact" title="Fotogramas por segundo de la grabación">
+        <span class="sr-only">FPS</span>
+        <select id="fps" aria-label="Fotogramas por segundo">
+          <option value="24">24 fps</option>
+          <option value="30" selected>30 fps</option>
+          <option value="60">60 fps</option>
+        </select>
+      </label>
+    </div>
+    <div class="spacer"></div>
+    <button type="button" id="share" class="ghost square" aria-label="Compartir" title="Compartir: copiar un enlace con los archivos de texto del proyecto"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="stroke" d="M6.5 4.75H2.75v6.5H6.5M9.5 4.75h3.75v6.5H9.5M5.5 8h5"/></svg></button>
+    <div class="menu">
+      <button type="button" id="download-toggle" class="ghost square" aria-haspopup="true" aria-expanded="false" aria-label="Descargar" title="Descargar: vídeo, grabación o proyecto"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="stroke" d="M8 2v8M4.75 6.75L8 10l3.25-3.25M2.75 11.5v2h10.5v-2"/></svg></button>
+      <div class="menu-list" id="download-menu" hidden>
+        <button type="button" id="download-video" disabled>Vídeo o GIF…</button>
+        <button type="button" id="download-bundle" disabled>animacion.gaanim</button>
+        <button type="button" id="download-project">proyecto.zip</button>
+      </div>
+    </div>
+    <button type="button" id="theme" class="ghost square" aria-label="Cambiar tema" title="Cambiar tema"><svg class="when-dark" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="5" y="5" width="6" height="6" fill="currentColor"/><path class="stroke" d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M13 3l-1.5 1.5M4.5 11.5L3 13"/></svg><svg class="when-light" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="stroke" d="M10.5 2.25A6 6 0 1 0 13.75 10 5 5 0 0 1 10.5 2.25z"/></svg></button>
+    <button type="button" id="embed" class="ghost square" disabled aria-label="Insertar" title="Ejecuta la escena para insertarla en un blog o sitio web"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="stroke" d="M5 4.5L1.75 8 5 11.5M11 4.5L14.25 8 11 11.5"/><path class="stroke accent" d="M9.25 3l-2.5 10"/></svg></button>
+  </header>
+
+  <main id="layout">
+    <section class="pane explorer" id="explorer" aria-label="Proyecto">
+      <div class="explorer-head">
+        <button type="button" class="project-switch" id="project-switch" aria-haspopup="menu" title="Proyectos">
+          <span class="explorer-title" id="project-name">Proyecto</span>
+          <span class="caret" aria-hidden="true">▾</span>
+        </button>
+        <span class="spacer"></span>
+        <button type="button" class="icon" id="new-file" title="Nuevo archivo" aria-label="Nuevo archivo">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M3.5 1.5h6l3 3v10h-9z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 7v5M5.5 9.5h5" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button type="button" class="icon" id="new-folder" title="Nueva carpeta" aria-label="Nueva carpeta">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 7.5v4.5M5.75 9.75h4.5" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button type="button" class="icon" id="upload-files" title="Subir archivos" aria-label="Subir archivos">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 10.5V2.5M4.5 6 8 2.5 11.5 6M2.5 10.5v3h11v-3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button type="button" class="icon" id="upload-folder" title="Subir una carpeta" aria-label="Subir una carpeta">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 12V7.5M6 9.5 8 7.5l2 2" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+      </div>
+      <ul class="tree" id="tree" role="tree" aria-label="Archivos del proyecto"></ul>
+      <p class="explorer-note">Arrastra aquí archivos o carpetas: módulos de Python, imágenes, música, fuentes o datos. Las rutas son relativas a <code>main.py</code>.</p>
+      <input type="file" id="file-input" multiple hidden>
+      <input type="file" id="folder-input" webkitdirectory multiple hidden>
+      <input type="file" id="zip-input" accept=".zip,application/zip" hidden>
+    </section>
+
+    <section class="pane editor-pane" aria-label="Editor">
+      <div class="editor-bar">
+        <button type="button" class="icon" id="explorer-toggle" title="Mostrar u ocultar el proyecto" aria-label="Proyecto">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 2.5h12v11H2zM6 2.5v11" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <div class="editor-tabs" id="editor-tabs" role="tablist" aria-label="Archivos abiertos"></div>
+        <span class="hint" id="cursor"></span>
+      </div>
+      <div class="editor-stack">
+        <div id="editor" class="editor"><div class="placeholder">Cargando editor…</div></div>
+        <div id="asset-view" class="asset-view" hidden></div>
+      </div>
+    </section>
+
+    <div class="splitter vertical" id="split-x" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Redimensionar"></div>
+
+    <section class="pane side" id="side">
+      <div class="player-wrap" id="player-wrap">
+        <iframe id="player" title="Reproductor Gaanim" allow="fullscreen; clipboard-write"></iframe>
+        <div class="player-overlay" id="player-overlay" hidden>
+          <span class="loader" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span id="player-overlay-text">Grabando escena…</span>
+          <span class="overlay-hint" id="player-overlay-hint" hidden></span>
+        </div>
+      </div>
+
+      <div class="splitter horizontal" id="split-y" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Redimensionar"></div>
+
+      <div class="panel">
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="console" id="tab-console">Consola</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" aria-controls="packages" id="tab-packages">Paquetes <span class="count" id="packages-count" hidden></span></button>
+          <span class="spacer"></span>
+          <button type="button" class="icon" id="clear-console" title="Limpiar consola" aria-label="Limpiar consola">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+          </button>
+        </div>
+        <div class="tab-body" id="console" role="tabpanel" aria-labelledby="tab-console" aria-live="polite"></div>
+        <div class="tab-body packages" id="packages" role="tabpanel" aria-labelledby="tab-packages" hidden>
+          <form class="package-search" id="package-form" autocomplete="off">
+            <div class="package-field">
+              <input type="text" id="package-query" spellcheck="false" placeholder="Busca un paquete: numpy, rich, pyyaml…" aria-label="Paquete" aria-autocomplete="list" aria-controls="package-suggestions">
+              <ul class="package-suggestions" id="package-suggestions" role="listbox" hidden></ul>
+            </div>
+            <button type="submit" class="primary" id="package-add">Añadir</button>
+          </form>
+          <p class="note" id="package-where"></p>
+          <ul class="package-list" id="package-list"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="status">
+    <span class="dot" id="status-dot"></span>
+    <span id="status">Cargando…</span>
+    <progress id="progress" max="1" value="0" hidden></progress>
+    <span class="spacer"></span>
+    <span id="versions"></span>
+  </footer>
+
+  <dialog id="embed-dialog" aria-labelledby="embed-title">
+    <header class="dialog-head">
+      <h2 id="embed-title">Insertar en un blog o sitio web</h2>
+      <button type="button" class="icon" id="embed-close" aria-label="Cerrar">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+    </header>
+    <div class="embed-body">
+      <figure class="embed-preview">
+        <div class="embed-frame" id="embed-frame">
+          <iframe id="embed-preview" title="Vista previa de la animación insertada" allow="fullscreen"></iframe>
+        </div>
+        <figcaption>
+          <span id="embed-meta"></span>
+          <span>Así se verá en tu página: el reproductor la dibuja nítida a cualquier tamaño.</span>
+        </figcaption>
+      </figure>
+      <ol class="embed-steps">
+        <li>
+          <h3>Descarga la animación</h3>
+          <div class="row">
+            <label class="field">
+              <span class="sr-only">Nombre del archivo</span>
+              <input id="embed-name" spellcheck="false" autocomplete="off" maxlength="80">
+              <span class="suffix">.gaanim</span>
+            </label>
+            <button type="button" id="embed-download" class="ghost">Descargar</button>
+          </div>
+        </li>
+        <li>
+          <h3>Publícala en tu sitio</h3>
+          <p>Súbela junto a las imágenes de tu blog y escribe la dirección donde quedará, o la de su carpeta:</p>
+          <input id="embed-url" type="url" placeholder="https://tu-blog.com/animaciones/" spellcheck="false" autocomplete="url">
+          <p class="note" id="embed-url-note">El sitio debe dejar que otra página lea el archivo (CORS): GitHub Pages lo hace. <a href="../guias/compartir/#insertar" target="_blank" rel="noopener">Dónde publicarla</a><span id="embed-test-wrap" hidden> · <a id="embed-test" target="_blank" rel="noopener">Probar la dirección</a></span></p>
+        </li>
+        <li>
+          <h3>Pega este código en tu entrada</h3>
+          <div class="options" role="group" aria-label="Cómo se reproduce">
+            <label><input type="checkbox" id="embed-loop" checked> En bucle</label>
+            <label><input type="checkbox" id="embed-autoplay" checked> Empieza al verse</label>
+            <label><input type="checkbox" id="embed-controls"> Barra de controles</label>
+          </div>
+          <textarea id="embed-code" readonly rows="5" spellcheck="false" aria-label="Código para insertar"></textarea>
+          <p class="note warn" id="embed-local" hidden>Este playground se sirve desde tu equipo, así que el código apunta a tu reproductor local. El del playground publicado funciona en cualquier sitio.</p>
+          <div class="row end">
+            <button type="button" id="embed-copy" class="primary">Copiar código</button>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </dialog>
+
+  <dialog id="video-dialog" aria-labelledby="video-title">
+    <header class="dialog-head">
+      <h2 id="video-title">Exportar vídeo</h2>
+      <button type="button" class="icon" id="video-close" aria-label="Cerrar">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+    </header>
+    <div class="video-body">
+      <p class="note">La última grabación, convertida en tu navegador: no sale de él.</p>
+      <div class="video-fields">
+        <label>Formato
+          <span class="select"><select id="video-format">
+            <option value="mp4">MP4 (H.264)</option>
+            <option value="webm">WebM (VP9)</option>
+            <option value="gif">GIF</option>
+          </select></span>
+        </label>
+        <label>Tamaño
+          <span class="select"><select id="video-height">
+            <option value="480">480p</option>
+            <option value="720">720p</option>
+            <option value="1080" selected>1080p</option>
+            <option value="2160">4K</option>
+          </select></span>
+        </label>
+      </div>
+      <p class="video-meta" id="video-meta"></p>
+      <p class="note warn" id="video-warning" hidden></p>
+      <progress id="video-progress" max="1" value="0" hidden></progress>
+      <p class="note" id="video-status" role="status"></p>
+      <div class="row end">
+        <button type="button" id="video-cancel" class="ghost" hidden>Cancelar</button>
+        <button type="button" id="video-start" class="primary">Exportar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="context-menu" class="menu-list context-menu" role="menu" hidden></div>
+  <div id="toast" role="status" hidden></div>
+  <div id="dropping" hidden><div>Suelta para añadir al proyecto</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min/vs/loader.js"></script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

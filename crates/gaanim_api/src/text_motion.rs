@@ -597,7 +597,7 @@ impl SceneBuilder<'_, '_, '_> {
             return;
         };
         let Some(context) = motion.context.clone() else {
-            bevy::prelude::warn!("text motion skipped: the target is not a Text");
+            tracing::warn!("text motion skipped: the target is not a Text");
             return;
         };
         let root = anim.target;
@@ -692,7 +692,7 @@ impl SceneBuilder<'_, '_, '_> {
                     let Some((new_glyphs, new_layout)) =
                         self.spawn_typing_glyphs(root, &object, &context, &after.document)
                     else {
-                        bevy::prelude::warn!("text motion skipped: new text failed to typeset");
+                        tracing::warn!("text motion skipped: new text failed to typeset");
                         self.text_motion.objects.insert(root, object);
                         return;
                     };
@@ -777,7 +777,7 @@ impl SceneBuilder<'_, '_, '_> {
                     let Some((new_glyphs, new_layout)) =
                         self.spawn_typing_glyphs(root, &object, &context, &after.document)
                     else {
-                        bevy::prelude::warn!("text motion skipped: new text failed to typeset");
+                        tracing::warn!("text motion skipped: new text failed to typeset");
                         self.text_motion.objects.insert(root, object);
                         return;
                     };

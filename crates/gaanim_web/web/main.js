@@ -26,6 +26,12 @@
 // page: the player asks for requests and the results socket, and the page
 // answers. `#clave=<key>` hands it the presenter key of a session that
 // another computer claimed (`gaanim relay key`).
+//
+// `?embed` embeds the player in another page: in the playground, which sends
+// the bundles it records, or in a blog post, with the file in `?src=`. It
+// plays while it is on screen and pauses when it scrolls away; `loop`
+// repeats it, `controls=0` hides the playback bar (a click plays or pauses)
+// and `autoplay=0` waits for a click.
 import init, {
   run,
   openBundle,
@@ -33,6 +39,8 @@ import init, {
   addBytes,
   setLink,
   setVolume,
+  setEmbedOptions,
+  setPlaying,
   present,
   frameCount,
   linkReceive,
@@ -55,7 +63,25 @@ const fillBar = document.getElementById("fill");
 const buffering = document.getElementById("buffering");
 const presentCard = document.getElementById("present-card");
 
-const presenterSession = new URLSearchParams(location.search).get("presenter");
+const pageParams = new URLSearchParams(location.search);
+const presenterSession = pageParams.get("presenter");
+// Embedded (`?embed`): there is nothing to drop here. A parent page on this
+// site (the playground) sends the bundles it records and hears what the
+// player reports.
+const embedded = pageParams.has("embed");
+function tellParent(message) {
+  if (embedded && window.parent !== window) window.parent.postMessage(message, location.origin);
+}
+// `?loop`, `?loop=1`: on; `?loop=0`: off; absent: `fallback`.
+function pageFlag(name, fallback) {
+  if (!pageParams.has(name)) return fallback;
+  return !["0", "false", "no"].includes(pageParams.get(name).toLowerCase());
+}
+const embedOptions = {
+  loop: pageFlag("loop", false),
+  controls: pageFlag("controls", true),
+  autoplay: pageFlag("autoplay", true),
+};
 const linkParams = new URLSearchParams(location.hash.slice(1));
 // A presenter key from the link, kept out of the address bar from now on.
 const linkKey = linkParams.get("clave");
@@ -210,6 +236,7 @@ function say(message, error = false) {
 // Called by the player: "ready", "opened", "damaged" (not a .gaanim, or
 // damaged) or "error".
 window.gaanimStatus = (kind, message) => {
+  tellParent({ type: "gaanim:status", kind, message: message ?? null });
   if (kind === "ready") {
     ready = true;
     const tasks = waiting;
@@ -217,7 +244,9 @@ window.gaanimStatus = (kind, message) => {
     for (const task of tasks) task();
   } else if (kind === "opened") {
     welcome.hidden = true;
-    canvas.focus();
+    // An embedded player leaves the keyboard to its page until a click.
+    if (embedded) embeddedOpened();
+    else canvas.focus();
     showSoundHint();
     if (remote) {
       remote.opened = true;
@@ -779,6 +808,10 @@ function followVolume(level, muted) {
 
 // Called by the player every frame with the playhead and the volume.
 window.gaanimAudioState = (time, playing, rate, level, muted) => {
+  if (playing !== view.playing) {
+    view.playing = playing;
+    if (playing) playHint.hidden = true;
+  }
   followVolume(level, muted);
   const ctx = audio.ctx;
   if (!ctx || !audio.tracks.length) return;
@@ -801,6 +834,65 @@ window.gaanimAudioState = (time, playing, rate, level, muted) => {
 // A hidden page stops drawing, and so stops moving the playhead.
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) stopAudio();
+});
+
+// ---------------------------------------------------------------------------
+// Embedded
+// ---------------------------------------------------------------------------
+
+// An embedded file plays while at least a quarter of the player is on
+// screen, and pauses when it scrolls away: a post's animations play as they
+// are read, not before. One paused by hand stays paused.
+const view = { visible: true, opened: false, started: false, pausedAway: false, playing: false };
+const playHint = document.getElementById("play-hint");
+
+function applyEmbedOptions() {
+  whenReady(() => setEmbedOptions(embedOptions.loop, embedOptions.controls, true));
+}
+
+function embeddedOpened() {
+  view.opened = true;
+  view.started = false;
+  view.pausedAway = false;
+  followVisibility();
+  // Without autoplay, or while off screen, a button says it plays.
+  playHint.hidden = view.started;
+}
+
+function startPlaying() {
+  view.started = true;
+  view.pausedAway = false;
+  playHint.hidden = true;
+  whenReady(() => setPlaying(true));
+}
+
+function followVisibility() {
+  if (!view.opened) return;
+  if (view.visible && embedOptions.autoplay && (!view.started || view.pausedAway)) {
+    startPlaying();
+  } else if (!view.visible && view.playing) {
+    view.pausedAway = true;
+    whenReady(() => setPlaying(false));
+  }
+}
+
+function watchVisibility() {
+  if (!("IntersectionObserver" in window)) return;
+  view.visible = false;
+  // A frame's document intersects the viewport of the page around it.
+  new IntersectionObserver(
+    (entries) => {
+      const entry = entries[entries.length - 1];
+      view.visible = entry.isIntersecting && entry.intersectionRatio >= 0.25;
+      followVisibility();
+    },
+    { threshold: [0, 0.25, 0.5] },
+  ).observe(document.documentElement);
+}
+
+playHint.addEventListener("click", (event) => {
+  event.stopPropagation();
+  startPlaying();
 });
 
 // ---------------------------------------------------------------------------
@@ -901,7 +993,7 @@ window.gaanimDownload = (name, bytes) => {
 fileInput.addEventListener("change", () => {
   if (fileInput.files[0]) playFile(fileInput.files[0]);
 });
-for (const target of [drop, document.body]) {
+for (const target of embedded ? [] : [drop, document.body]) {
   target.addEventListener("dragover", (event) => {
     event.preventDefault();
     drop.classList.add("over");
@@ -942,6 +1034,34 @@ if (!navigator.gpu) {
   } else {
     say("Presenter View se abre desde el reproductor: abre allí tu archivo, presenta y pulsa P.", true);
   }
+} else if (embedded) {
+  document.body.classList.add("embedded");
+  drop.hidden = true;
+  const src = pageParams.get("src");
+  if (!src) say("Ejecuta el código para ver la escena aquí.");
+  applyEmbedOptions();
+  watchVisibility();
+  startPlayer();
+  const volume = rememberedVolume();
+  if (volume) whenReady(() => setVolume(volume.level, volume.muted));
+  if (location.hash) whenReady(() => setLink(location.hash));
+  if (src) playUrl(src);
+  // A parent page on this site sends what it records, and may change how it
+  // plays (the playground's preview of an embedded scene).
+  window.addEventListener("message", (event) => {
+    if (event.origin !== location.origin || event.source !== window.parent) return;
+    const message = event.data;
+    if (message?.type === "gaanim:open" && message.bytes) {
+      play(message.name ?? "escena.gaanim", new Uint8Array(message.bytes));
+    } else if (message?.type === "gaanim:options") {
+      for (const key of ["loop", "controls", "autoplay"]) {
+        if (typeof message[key] === "boolean") embedOptions[key] = message[key];
+      }
+      applyEmbedOptions();
+      followVisibility();
+    }
+  });
+  tellParent({ type: "gaanim:status", kind: "loaded", message: null });
 } else {
   startPlayer();
   const volume = rememberedVolume();

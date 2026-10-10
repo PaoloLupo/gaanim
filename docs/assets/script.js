@@ -869,3 +869,15 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener("hashchange", flashTarget);
     flashTarget();
 });
+
+// A `# player` cell's embed player shows over its preview once it opened the
+// recording. Without WebGPU it never does, and the preview stays.
+window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (event.origin !== location.origin || data?.type !== "gaanim:status") return;
+    for (const frame of document.querySelectorAll(".anim-stage iframe")) {
+        if (frame.contentWindow !== event.source) continue;
+        if (data.kind === "opened") frame.parentElement.classList.add("ready");
+        else if (data.kind === "error") frame.parentElement.classList.remove("ready");
+    }
+});

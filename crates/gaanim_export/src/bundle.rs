@@ -13,11 +13,24 @@ use gaanim_bundle::{AudioData, BundleWriter, Frame, PostPass, SceneData, SceneSp
 use gaanim_core::console;
 use gaanim_renderer::pipeline::{CanvasBackground, capture_frame, capture_frame_pinned};
 use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessShader};
+use gaanim_scene::ClearColor;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::config::ExportTelemetry;
 use crate::encoder::{ExportError, Result};
 use crate::exporter::{check_custom_animation_errors, frame_camera};
+
+/// Called during a recording with the instants recorded so far and their
+/// total, every few instants and at the end. The playground, which records on
+/// its only thread, tells its page how far the recording went through it.
+#[derive(Clone)]
+pub struct RecordingCallback(pub std::sync::Arc<dyn Fn(u64, u64) + Send + Sync>);
+
+impl std::fmt::Debug for RecordingCallback {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RecordingCallback")
+    }
+}
 
 /// Settings of a bundle recording.
 #[derive(Clone, Debug)]
@@ -42,6 +55,8 @@ pub struct BundleConfig {
     /// Render and store the cover image. Without a GPU the bundle is still
     /// recorded, without one.
     pub thumbnail: bool,
+    /// Hears how far the recording went.
+    pub on_progress: Option<RecordingCallback>,
 }
 
 impl BundleConfig {
@@ -62,6 +77,7 @@ impl BundleConfig {
             force_second_world: false,
             thumbnail_time: None,
             thumbnail: true,
+            on_progress: None,
         }
     }
 }
@@ -139,22 +155,29 @@ pub fn recording_times(timeline: &Timeline, fps: u32) -> Vec<f64> {
     RecordingPlan::new(timeline, fps).times()
 }
 
-/// Terminal bar, editor telemetry and export-worker marker for a recording.
+/// Terminal bar, editor telemetry, export-worker marker and the caller's
+/// callback for a recording.
 struct RecordingProgress {
     bar: indicatif::ProgressBar,
     telemetry: Option<ExportTelemetry>,
+    callback: Option<RecordingCallback>,
     total: u64,
     done: std::cell::Cell<u64>,
     window: std::cell::Cell<Instant>,
 }
 
 impl RecordingProgress {
-    fn new(total: u64, telemetry: Option<ExportTelemetry>) -> Self {
+    fn new(
+        total: u64,
+        telemetry: Option<ExportTelemetry>,
+        callback: Option<RecordingCallback>,
+    ) -> Self {
         let bar = crate::exporter::create_progress_bar(total);
         bar.set_prefix("record");
         Self {
             bar,
             telemetry,
+            callback,
             total,
             done: std::cell::Cell::new(0),
             window: std::cell::Cell::new(Instant::now()),
@@ -170,6 +193,11 @@ impl RecordingProgress {
             self.bar
                 .set_message(format!("{:.1} fps", 30.0 / elapsed.as_secs_f64().max(1e-9)));
             crate::exporter::export_progress(&self.telemetry, done, self.total);
+        }
+        if let Some(callback) = &self.callback
+            && (done.is_multiple_of(10) || done == self.total)
+        {
+            (callback.0)(done, self.total);
         }
     }
 
@@ -437,13 +465,30 @@ struct SinkState {
     cover: Option<ThumbnailPicker>,
 }
 
+impl SinkState {
+    /// Digest, encode and compress `frame` into the bundle.
+    fn write(&mut self, frame: Frame, background: Option<&CanvasBackground>) -> Result<()> {
+        let digest = gaanim_bundle::frame_digest(&frame, background, &mut self.fragments);
+        if let Some(cover) = &mut self.cover {
+            cover.offer(&frame);
+        }
+        self.writer
+            .push_frame(&frame, digest)
+            .map_err(bundle_error)?;
+        self.fragments.end_frame();
+        Ok(())
+    }
+}
+
 /// Frames a recording captured in flight to a thread that digests, encodes
 /// and compresses them, in order, while the world steps the next frames.
+#[cfg(not(target_os = "emscripten"))]
 struct FrameSink {
     sender: std::sync::mpsc::SyncSender<Frame>,
     worker: std::thread::JoinHandle<Result<SinkState>>,
 }
 
+#[cfg(not(target_os = "emscripten"))]
 impl FrameSink {
     /// Captured frames waiting for the worker; enough to absorb a chunk
     /// being compressed without holding many frames in memory.
@@ -455,19 +500,7 @@ impl FrameSink {
             .name("gaanim-bundle-writer".into())
             .spawn(move || {
                 for frame in frames {
-                    let digest = gaanim_bundle::frame_digest(
-                        &frame,
-                        background.as_ref(),
-                        &mut state.fragments,
-                    );
-                    if let Some(cover) = &mut state.cover {
-                        cover.offer(&frame);
-                    }
-                    state
-                        .writer
-                        .push_frame(&frame, digest)
-                        .map_err(bundle_error)?;
-                    state.fragments.end_frame();
+                    state.write(frame, background.as_ref())?;
                 }
                 Ok(state)
             })
@@ -487,6 +520,41 @@ impl FrameSink {
         self.worker
             .join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    }
+}
+
+/// The playground's Pyodide extension (wasm32-unknown-emscripten) has no
+/// threads: each frame is written as soon as it is captured.
+#[cfg(target_os = "emscripten")]
+struct FrameSink {
+    state: Result<SinkState>,
+    background: Option<CanvasBackground>,
+}
+
+#[cfg(target_os = "emscripten")]
+impl FrameSink {
+    fn spawn(state: SinkState, background: Option<CanvasBackground>) -> Self {
+        Self {
+            state: Ok(state),
+            background,
+        }
+    }
+
+    /// Write `frame`; `false` once writing failed, which [`Self::finish`]
+    /// returns.
+    fn push(&mut self, frame: Frame) -> bool {
+        let Ok(state) = &mut self.state else {
+            return false;
+        };
+        if let Err(error) = state.write(frame, self.background.as_ref()) {
+            self.state = Err(error);
+            return false;
+        }
+        true
+    }
+
+    fn finish(self) -> Result<SinkState> {
+        self.state
     }
 }
 
@@ -567,7 +635,7 @@ where
     if let Some(telemetry) = &telemetry {
         telemetry.set_total_frames(work);
     }
-    let progress = RecordingProgress::new(work, telemetry);
+    let progress = RecordingProgress::new(work, telemetry, config.on_progress.clone());
     let cover = config.thumbnail.then(|| {
         ThumbnailPicker::new(ThumbnailPick::new(
             config.thumbnail_time,

@@ -888,7 +888,7 @@ impl SceneBuilder<'_, '_, '_> {
             return;
         }
         let Some(layout) = self.text_glyph_layout(anim.target, &spec) else {
-            bevy::prelude::warn!("text animations require a Text target with visible glyphs");
+            tracing::warn!("text animations require a Text target with visible glyphs");
             return;
         };
         let world = self.get_world_transform(anim.target).to_affine_2d();

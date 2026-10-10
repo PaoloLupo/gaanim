@@ -297,7 +297,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .collect();
         let bands = marker_bands(&glyphs, style.padding, style.skew);
         if bands.is_empty() {
-            bevy::prelude::warn!("text marker found no visible glyphs to highlight");
+            tracing::warn!("text marker found no visible glyphs to highlight");
             return;
         }
 

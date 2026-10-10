@@ -628,7 +628,7 @@ impl PostProcessRequest {
         let shader = match PostProcessShader::for_transition(&transition.shader) {
             Ok(shader) => shader,
             Err(error) => {
-                bevy::log::error!("transition shader failed; cutting instead: {error}");
+                tracing::error!("transition shader failed; cutting instead: {error}");
                 return request;
             }
         };
@@ -1145,7 +1145,7 @@ fn validated(pipeline: Arc<PostPipeline>, outcome: ScopeCheck) -> Option<Arc<Pos
     match outcome {
         ScopeCheck::Valid => Some(pipeline),
         ScopeCheck::Invalid(error) => {
-            bevy::log::error!("post-process shader failed; drawing without it: {error}");
+            tracing::error!("post-process shader failed; drawing without it: {error}");
             None
         }
         ScopeCheck::Pending(_) => None,

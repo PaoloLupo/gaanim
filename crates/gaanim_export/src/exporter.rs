@@ -1,7 +1,15 @@
+//! Video, image and frame exports.
+//!
+//! The playground's Pyodide extension (wasm32-unknown-emscripten) builds
+//! without Bevy's windows and renderer, so the windowed export path is left out
+//! there; it only records playback bundles.
+
 use bevy::app::AppExit;
+#[cfg(not(target_os = "emscripten"))]
 use bevy::camera::Viewport;
 use bevy::ecs::observer::On;
 use bevy::prelude::*;
+#[cfg(not(target_os = "emscripten"))]
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use gaanim_core::console;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -9,7 +17,9 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 use std::time::{Duration, Instant};
 
+#[cfg(not(target_os = "emscripten"))]
 use gaanim_renderer::prelude::VelloView;
+use gaanim_scene::ClearColor;
 use gaanim_timeline::timeline::Timeline;
 
 use crate::config::{ExportConfig, ExportTelemetry};
@@ -162,6 +172,7 @@ fn publish_benchmark_timings(encoder: VideoEncoder, timings: &ExportTimings) {
     );
 }
 
+#[cfg(not(target_os = "emscripten"))]
 #[derive(Resource)]
 struct ExportPipeline {
     pub encoder: ParallelEncoder,
@@ -266,12 +277,14 @@ impl SetupCallback {
     }
 }
 
+#[cfg(not(target_os = "emscripten"))]
 #[derive(Resource, Clone, Copy)]
 struct WindowRenderSize {
     width: u32,
     height: u32,
 }
 
+#[cfg(not(target_os = "emscripten"))]
 fn export_pipeline_system(
     mut commands: Commands,
     custom_errors: Option<Res<gaanim_animation::CustomAnimationDiagnostics>>,
@@ -316,7 +329,7 @@ fn export_pipeline_system(
                         "error",
                         e.to_string(),
                     );
-                    bevy::prelude::error!("Encoder error: {}", e);
+                    tracing::error!("Encoder error: {}", e);
                     publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(e));
                     exit.write(AppExit::Success);
                     return;
@@ -360,7 +373,7 @@ fn export_pipeline_system(
                             "error",
                             e.to_string(),
                         );
-                        bevy::prelude::error!("Encoder finalization error: {}", e);
+                        tracing::error!("Encoder finalization error: {}", e);
                         publish_export_result(
                             &pipeline.result_tx,
                             &mut pipeline.result_sent,
@@ -401,7 +414,7 @@ fn export_pipeline_system(
                     "error",
                     error.to_string(),
                 );
-                bevy::prelude::error!("{error}");
+                tracing::error!("{error}");
                 publish_export_result(&pipeline.result_tx, &mut pipeline.result_sent, Err(error));
                 exit.write(AppExit::Success);
                 return;
@@ -471,6 +484,7 @@ pub(crate) fn setup_scene_system(world: &mut World) {
 /// Replay a window-backed scene before Vello creates its render target, then
 /// give the Vello camera an explicit physical viewport. This removes the
 /// startup race between WindowPlugin and the Vello canvas texture setup.
+#[cfg(not(target_os = "emscripten"))]
 fn setup_window_scene_system(world: &mut World) {
     setup_scene_system(world);
     world.flush();
@@ -496,6 +510,7 @@ fn filter_for_quality(speed: crate::encoder::EncodingSpeed) -> image::imageops::
     }
 }
 
+#[cfg(not(target_os = "emscripten"))]
 pub fn export_scene<F>(config: ExportConfig, setup_world_fn: F) -> Result<()>
 where
     F: FnOnce(&mut World) + Send + Sync + 'static,
@@ -881,7 +896,7 @@ where
     let finalize_started_at = Instant::now();
     timings.encode_active = encoder.finalize_with_timings().inspect_err(|e| {
         export_log(&telemetry, console::Level::Error, "error", e.to_string());
-        bevy::prelude::error!("Encoder finalization error: {}", e);
+        tracing::error!("Encoder finalization error: {}", e);
     })?;
     timings.finalize = finalize_started_at.elapsed();
     timings.readback_wait = gpu.readback_wait();
@@ -1924,55 +1939,12 @@ fn capture_camera_to_vello_transform(
     output_height: u32,
     fit: crate::config::OutputFit,
 ) -> kurbo::Affine {
-    let (zoom, pixels_per_unit, viewport_width, viewport_height, cam_x, cam_y, angle, viewport) =
-        resolved
-            .map(|resolved| {
-                let camera = &resolved.camera;
-                // Under perspective the canvas stays at the origin, unrotated,
-                // as in the preview: 3D content is projected onto it.
-                let (zoom, cam_x, cam_y, angle) = match camera.projection {
-                    gaanim_math::Projection::Orthographic { zoom } => {
-                        (zoom, camera.position.x, camera.position.y, camera.z_angle())
-                    }
-                    _ => (1.0, 0.0, 0.0, 0.0),
-                };
-                (
-                    zoom,
-                    camera.pixels_per_unit(),
-                    camera.viewport_width.max(1),
-                    camera.viewport_height.max(1),
-                    cam_x,
-                    cam_y,
-                    angle,
-                    resolved.viewport,
-                )
-            })
-            .unwrap_or((
-                1.0,
-                1.0,
-                output_width.max(1),
-                output_height.max(1),
-                0.0,
-                0.0,
-                0.0,
-                gaanim_math::CameraViewport::default(),
-            ));
-    let fit_scale = output_fit_scale(
-        viewport_width,
-        viewport_height,
+    gaanim_renderer::pipeline::camera_to_output(
+        resolved,
         output_width,
         output_height,
-        fit,
-    );
-    let scale = pixels_per_unit * zoom * fit_scale * viewport.scale;
-    let offset_y = viewport.offset_y * fit_scale;
-
-    kurbo::Affine::translate((
-        output_width as f64 / 2.0,
-        output_height as f64 / 2.0 + offset_y,
-    )) * kurbo::Affine::scale_non_uniform(scale, -scale)
-        * kurbo::Affine::rotate(-angle)
-        * kurbo::Affine::translate((-cam_x, -cam_y))
+        fit == crate::config::OutputFit::Cover,
+    )
 }
 
 #[cfg(test)]

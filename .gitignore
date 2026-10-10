@@ -45,6 +45,9 @@ tests/visual/**/report/
 !docs/assets/brand/*.svg
 !docs/assets/brand/*.png
 
+# Screenshots of the playground's page, taken by tools/capture_playground.mjs.
+!docs/assets/playground/*.webp
+
 # These must come after the parent-directory exceptions above.
 tests/visual/**/current/
 tests/visual/**/report/

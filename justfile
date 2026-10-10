@@ -135,6 +135,15 @@ web:
 web-serve: web
     {{ system_python }} -m http.server 8000 -d dist/web
 
+# Build the web playground (Pyodide, editor and web player) into dist/playground.
+# Needs Emscripten 5.0.3 (EMSDK) and the web player's toolchain.
+playground:
+    {{ system_python }} scripts/build_playground.py --with-player
+
+# Build the web playground and serve it on http://localhost:8001.
+playground-serve: playground
+    {{ system_python }} -m http.server 8001 -d dist/playground
+
 # Build documentation site and PDF (one-shot).
 docs:
     {{ system_python }} scripts/dev.py build -p gaanim_launcher

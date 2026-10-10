@@ -24,6 +24,11 @@
 //! `gaanim_editor::web_relay` (`window.gaanimRelay*`), and hands back what it
 //! hears ([`relay_response`], [`relay_socket_message`],
 //! [`relay_socket_state`]).
+//!
+//! A page that embeds the player (`?embed`, in the playground or in a blog
+//! post) sets how it plays with [`set_embed_options`]: in a loop, without the
+//! playback bar, and paused until the page sees it on screen and starts it
+//! with [`set_playing`].
 
 #[cfg(target_arch = "wasm32")]
 mod web {
@@ -37,6 +42,7 @@ mod web {
     use gaanim_editor::host::{HostOptions, WebPage, host_app};
     use gaanim_editor::presenter_link::{LinkRole, PresenterLink};
     use gaanim_editor::share_link::LinkTarget;
+    use gaanim_timeline::timeline::Timeline;
     use wasm_bindgen::prelude::*;
 
     /// Files picked or dropped whole, opened by [`open_requested_bundles`].
@@ -61,6 +67,22 @@ mod web {
     static LINK_INBOX: Mutex<Vec<String>> = Mutex::new(Vec::new());
     /// Frames the app has updated, for the page to measure the frame rate.
     static FRAMES: AtomicU32 = AtomicU32::new(0);
+    /// How the embedding page wants files played, once it said so.
+    static EMBED: Mutex<Option<EmbedOptions>> = Mutex::new(None);
+    /// Set when [`EMBED`] changed, to apply it to the open file.
+    static EMBED_CHANGED: AtomicBool = AtomicBool::new(false);
+    /// Play (`true`) or pause, as the page last asked.
+    static PLAY_REQUEST: Mutex<Option<bool>> = Mutex::new(None);
+
+    #[derive(Clone, Copy)]
+    struct EmbedOptions {
+        /// Repeat the whole file.
+        looping: bool,
+        /// Show the playback bar and the touch controls.
+        controls: bool,
+        /// Open files paused, for the page to start them.
+        open_paused: bool,
+    }
 
     fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         mutex
@@ -237,6 +259,88 @@ mod web {
         PRESENT.store(true, Ordering::Release);
     }
 
+    /// How a page that embeds the player plays files: `looping` repeats the
+    /// whole file, `controls` shows the playback bar (without it, a click
+    /// plays or pauses), and `open_paused` opens files paused, for the page
+    /// to start them with [`set_playing`]. It applies to the open file too.
+    #[wasm_bindgen(js_name = setEmbedOptions)]
+    pub fn set_embed_options(looping: bool, controls: bool, open_paused: bool) {
+        *lock(&EMBED) = Some(EmbedOptions {
+            looping,
+            controls,
+            open_paused,
+        });
+        EMBED_CHANGED.store(true, Ordering::Release);
+    }
+
+    /// Play or pause the open file; playing a file that has finished starts
+    /// it over.
+    #[wasm_bindgen(js_name = setPlaying)]
+    pub fn set_playing(playing: bool) {
+        *lock(&PLAY_REQUEST) = Some(playing);
+    }
+
+    /// The whole file as a loop range, when the page asked for a loop.
+    fn embed_loop(timeline: &Timeline) -> Option<(f64, f64)> {
+        (timeline.cached_duration > 0.0).then_some((0.0, timeline.cached_duration))
+    }
+
+    /// Set a file that just opened up as the embedding page asked.
+    fn embed_opened(world: &mut World) {
+        let Some(options) = *lock(&EMBED) else {
+            return;
+        };
+        if let Some(mut timeline) = world.get_resource_mut::<Timeline>() {
+            if options.looping {
+                timeline.loop_range = embed_loop(&timeline);
+            }
+            if options.open_paused {
+                timeline.is_playing = false;
+            }
+        }
+    }
+
+    /// Apply new options of the embedding page, and its play requests.
+    fn apply_embed_requests(
+        mut controls: ResMut<gaanim_editor::PlaybackControls>,
+        playback: Option<Res<BundlePlayback>>,
+        timeline: Option<ResMut<Timeline>>,
+    ) {
+        let options = EMBED_CHANGED
+            .swap(false, Ordering::AcqRel)
+            .then(|| *lock(&EMBED))
+            .flatten();
+        if let Some(options) = options
+            && controls.shown != options.controls
+        {
+            controls.shown = options.controls;
+        }
+        let (Some(_), Some(mut timeline)) = (playback, timeline) else {
+            return;
+        };
+        if let Some(options) = options {
+            let whole = embed_loop(&timeline);
+            if options.looping {
+                timeline.loop_range = whole;
+            } else if timeline.loop_range == whole {
+                timeline.loop_range = None;
+            }
+        }
+        match lock(&PLAY_REQUEST).take() {
+            Some(true) if !timeline.is_playing => {
+                gaanim_editor::toggle_playback_from_end(&mut timeline);
+                // The page resumes a player that was off screen, where the
+                // browser drew about once a second: the first frame back
+                // would advance by that whole step. It stays where it is.
+                if timeline.seek_request.is_none() {
+                    timeline.seek_request = Some(timeline.current_time);
+                }
+            }
+            Some(false) => timeline.is_playing = false,
+            _ => {}
+        }
+    }
+
     fn send_ranges(ranges: &[std::ops::Range<u64>], urgent: bool) {
         if ranges.is_empty() {
             return;
@@ -294,7 +398,10 @@ mod web {
             let source = BundleSource::whole(bytes);
             *lock(&SOURCE) = None;
             match bundle_player::open_bundle_source(world, Path::new(&name), source) {
-                Ok(()) => status("opened", &name),
+                Ok(()) => {
+                    embed_opened(world);
+                    status("opened", &name);
+                }
                 Err(error) => failed(&error),
             }
         }
@@ -314,6 +421,7 @@ mod web {
                     *remote = None;
                 }
                 drop(remote);
+                embed_opened(world);
                 status("opened", &name);
             }
             Err(BundleError::Incomplete { missing }) => send_ranges(&missing, true),
@@ -440,7 +548,12 @@ mod web {
         .add_systems(
             PreUpdate,
             (
-                (open_requested_bundles, apply_page_link).chain(),
+                (
+                    open_requested_bundles,
+                    apply_page_link,
+                    apply_embed_requests,
+                )
+                    .chain(),
                 receive_link_messages,
                 start_presenting_on_request,
                 apply_remembered_volume,

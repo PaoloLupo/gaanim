@@ -242,6 +242,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<fps_overlay::FpsOverlay>()
             .init_resource::<EditorFullscreenState>()
             .init_resource::<PresentationMode>()
+            .init_resource::<PlaybackControls>()
             .init_resource::<AudienceBlank>()
             .init_resource::<ViewportInset>()
             .init_resource::<ViewportFrame>()
@@ -341,10 +342,23 @@ impl Plugin for GaanimEditorPlugin {
                     .before(gaanim_scene::systems::resolve_camera_system),
             )
             .add_systems(EguiPrimaryContextPass, editor_ui_system)
-            .add_systems(EguiPrimaryContextPass, touch::touch_overlay_system)
+            .add_systems(
+                EguiPrimaryContextPass,
+                touch::touch_overlay_system.run_if(playback_controls_shown),
+            )
             .add_systems(
                 Update,
-                touch::touch_gesture_system.run_if(resource_exists::<bevy::input::touch::Touches>),
+                touch::touch_gesture_system.run_if(
+                    resource_exists::<bevy::input::touch::Touches>
+                        .and_then(playback_controls_shown),
+                ),
+            )
+            .add_systems(
+                Update,
+                hidden_controls_click_system
+                    .run_if(not(playback_controls_shown))
+                    .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                    .before(gaanim_timeline::timeline_playback_system),
             )
             .add_systems(
                 EguiPrimaryContextPass,
@@ -404,6 +418,59 @@ fn ambient_clock_system(
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct PresentationMode {
     pub active: bool,
+}
+
+/// Whether the player shows its playback controls. A page that embeds the
+/// web player as a figure (`?embed&controls=0`) hides them: the playback bar
+/// and the touch controls stay off, and a click or tap on the scene plays or
+/// pauses it.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaybackControls {
+    pub shown: bool,
+}
+
+impl Default for PlaybackControls {
+    fn default() -> Self {
+        Self { shown: true }
+    }
+}
+
+fn playback_controls_shown(controls: Res<PlaybackControls>) -> bool {
+    controls.shown
+}
+
+/// With the controls hidden, a click or tap on the scene plays or pauses it,
+/// from the start once it has finished. Stops keep their own click, which
+/// continues the presentation (`interactive_stop_input_system`).
+fn hidden_controls_click_system(
+    mouse: Option<Res<ButtonInput<MouseButton>>>,
+    touches: Option<Res<bevy::input::touch::Touches>>,
+    mut timeline: ResMut<Timeline>,
+) {
+    let clicked = mouse.is_some_and(|mouse| mouse.just_released(MouseButton::Left))
+        || touches.is_some_and(|touches| touches.iter_just_released().next().is_some());
+    if !clicked
+        || timeline
+            .segments
+            .iter()
+            .any(|segment| !segment.stops.is_empty())
+    {
+        return;
+    }
+    toggle_playback_from_end(&mut timeline);
+}
+
+/// Play or pause; playing a timeline that has finished starts it over.
+pub fn toggle_playback_from_end(timeline: &mut Timeline) {
+    if timeline.is_playing {
+        timeline.is_playing = false;
+        return;
+    }
+    let total = timeline.cached_duration.max(0.0);
+    if timeline.loop_range.is_none() && timeline.current_time >= total - 1e-6 {
+        timeline.seek_request = Some(0.0);
+    }
+    timeline.is_playing = true;
 }
 
 /// Emergency audience-screen blanking used during a live presentation.
@@ -604,6 +671,7 @@ fn editor_ui_system(
         bundle_playback,
         mut volume,
         audio_tracks,
+        controls,
     ): (
         ResMut<export::ExportState>,
         ResMut<narration::NarrationPanel>,
@@ -611,6 +679,7 @@ fn editor_ui_system(
         Option<Res<bundle_player::BundlePlayback>>,
         ResMut<gaanim_media::PreviewVolume>,
         Option<Res<gaanim_media::PreviewAudioTracks>>,
+        Res<PlaybackControls>,
     ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
@@ -647,6 +716,11 @@ fn editor_ui_system(
             .is_ok_and(|window| !matches!(window.mode, bevy::window::WindowMode::Windowed));
     paint_viewport_letterbox(ctx, &viewport_frame, opaque);
     if presentation_mode.active {
+        return;
+    }
+    if !controls.shown {
+        inset.bottom = 0.0;
+        state.bar_rect = None;
         return;
     }
     // The teleprompter replaces the playback bar while recording narration.
@@ -3721,6 +3795,34 @@ mod tests {
         assert_eq!(timeline.seek_request, None);
         assert_eq!(timeline.playback_rate, 1.75);
         assert!(!state.is_active());
+    }
+
+    #[test]
+    fn toggling_a_finished_timeline_plays_it_from_the_start() {
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 3.0;
+        timeline.current_time = 1.2;
+        timeline.is_playing = true;
+
+        toggle_playback_from_end(&mut timeline);
+        assert!(!timeline.is_playing);
+        toggle_playback_from_end(&mut timeline);
+        assert!(timeline.is_playing);
+        assert_eq!(timeline.seek_request, None);
+
+        timeline.is_playing = false;
+        timeline.current_time = 3.0;
+        toggle_playback_from_end(&mut timeline);
+        assert!(timeline.is_playing);
+        assert_eq!(timeline.seek_request, Some(0.0));
+
+        // A loop never finishes: it resumes where it is.
+        timeline.seek_request = None;
+        timeline.is_playing = false;
+        timeline.loop_range = Some((0.0, 3.0));
+        toggle_playback_from_end(&mut timeline);
+        assert!(timeline.is_playing);
+        assert_eq!(timeline.seek_request, None);
     }
 
     #[test]

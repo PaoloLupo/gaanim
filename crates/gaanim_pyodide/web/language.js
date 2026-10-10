@@ -1,0 +1,124 @@
+// Editor services worker: Jedi in its own Pyodide, over the gaanim stubs.
+//
+// It never loads the engine, so completions work while the runner downloads
+// or records a scene. Requests that a newer one of the same kind superseded
+// while Python was busy are answered with null instead of computed.
+
+let services = null;
+let pyodide = null;
+const pending = new Map();
+let draining = false;
+
+function reply(id, result, error = null) {
+  postMessage({ id, result, error });
+}
+
+async function init(config) {
+  const { loadPyodide } = await import(`${config.pyodide}pyodide.mjs`);
+  pyodide = await loadPyodide({ indexURL: config.pyodide });
+  await pyodide.loadPackage("jedi");
+  const stubs = await fetch(new URL(config.stubs, config.base));
+  if (!stubs.ok) throw new Error(`stubs.zip: HTTP ${stubs.status}`);
+  pyodide.unpackArchive(await stubs.arrayBuffer(), "zip", { extractDir: "/home/pyodide/stubs" });
+  // Revalidated: a cached language.py may be older than this worker.
+  const source = await (await fetch(new URL("language.py", config.base), { cache: "no-cache" })).text();
+  const namespace = pyodide.toPy({});
+  pyodide.runPython(source, { globals: namespace, filename: "language.py" });
+  services = namespace;
+  // Parse the stubs once, so the first real completion is quick.
+  call("complete", ["main.py", "from gaanim import Scene\nscene = Scene()\nscene.", 3, 6]);
+}
+
+function toJs(value) {
+  if (value && typeof value.toJs === "function") {
+    const converted = value.toJs({ dict_converter: Object.fromEntries });
+    value.destroy();
+    return converted;
+  }
+  return value;
+}
+
+function call(method, args) {
+  const fn = services.get(method);
+  try {
+    return toJs(fn(...args.map((arg) => (arg !== null && typeof arg === "object" ? pyodide.toPy(arg) : arg))));
+  } finally {
+    fn.destroy();
+  }
+}
+
+async function drain() {
+  if (draining) return;
+  draining = true;
+  // Let queued messages arrive before choosing what to compute.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  while (pending.size) {
+    const [method, { id, args }] = pending.entries().next().value;
+    pending.delete(method);
+    try {
+      reply(id, call(method, args));
+    } catch (error) {
+      reply(id, null, String(error));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  draining = false;
+}
+
+// The packages the project uses, so that Jedi completes them too: Pyodide's
+// that its code imports, and the requirements it declares, which micropip
+// installs here as in the runner. Each requirement is tried once.
+const tried = new Set();
+async function usePackages({ requirements, imports }) {
+  try {
+    await pyodide.loadPackagesFromImports(imports, { messageCallback: () => {}, errorCallback: () => {} });
+  } catch {
+    // An import Pyodide does not know: Jedi just will not complete it.
+  }
+  const missing = requirements.filter((requirement) => !tried.has(requirement));
+  if (!missing.length) return;
+  await pyodide.loadPackage("micropip", { messageCallback: () => {} });
+  const micropip = pyodide.pyimport("micropip");
+  try {
+    for (const requirement of missing) {
+      tried.add(requirement);
+      try {
+        await micropip.install(requirement);
+      } catch {
+        // The runner reports why; completions go on without it.
+      }
+    }
+  } finally {
+    micropip.destroy();
+  }
+}
+
+let ready = null;
+self.onmessage = async ({ data }) => {
+  if (data.type === "init") {
+    ready = init(data.config).then(
+      () => postMessage({ type: "ready" }),
+      (error) => postMessage({ type: "failed", error: String(error) }),
+    );
+    return;
+  }
+  await ready;
+  if (!services) return reply(data.id, null, "not ready");
+  if (data.type === "packages") {
+    usePackages(data);
+    return;
+  }
+  // `set_project` and `resolve` are cheap and must not be skipped.
+  if (data.method === "set_project" || data.method === "resolve") {
+    try {
+      reply(data.id, call(data.method, data.args));
+    } catch (error) {
+      reply(data.id, null, String(error));
+    }
+    return;
+  }
+  const superseded = pending.get(data.method);
+  if (superseded) reply(superseded.id, null);
+  pending.set(data.method, { id: data.id, args: data.args });
+  drain();
+};

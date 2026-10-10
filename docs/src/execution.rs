@@ -283,6 +283,7 @@ pub fn compile_code_cell(
     let mut target_cell: Option<String> = None;
     let mut cell_id_override: Option<String> = None;
     let mut expected_webp: Option<String> = None;
+    let mut player = false;
 
     for (line, _) in code_lines {
         let trimmed = line.trim();
@@ -319,6 +320,11 @@ pub fn compile_code_cell(
         }
         if let Some(rest) = trimmed.strip_prefix("# output:") {
             expected_webp = Some(rest.trim().to_string());
+            continue;
+        }
+        // The page plays the scene in the embed player, over its preview.
+        if trimmed == "# player" {
+            player = true;
             continue;
         }
 
@@ -476,9 +482,14 @@ pub fn compile_code_cell(
     // Hash and cell ID. An export's preview settings are part of its identity,
     // so changing them re-renders the previews instead of reusing old files.
     let cell_hash = if expected_webp.is_some() {
+        let player = if player {
+            BUNDLE_ARGS.join(" ")
+        } else {
+            String::new()
+        };
         typst_utils::hash128(
             format!(
-                "{code_to_execute}{}{PREVIEW_REVISION}",
+                "{code_to_execute}{}{PREVIEW_REVISION}{player}",
                 PREVIEW_ARGS.join(" ")
             )
             .as_bytes(),
@@ -496,6 +507,7 @@ pub fn compile_code_cell(
         format!("cell_{:x}", cell_hash)
     };
 
+    let player = player && expected_webp.is_some();
     let mode = if let Some(output) = expected_webp {
         CellMode::Export(output)
     } else if code_to_execute.contains(".render(") {
@@ -509,8 +521,10 @@ pub fn compile_code_cell(
         prelude_lines: PYTHON_PRELUDE.lines().count() + chain_lines,
         cell_id,
         mode,
+        player,
         timeout_secs,
         cached_webp: None,
+        cached_bundle: None,
     };
 
     let outcome = match lookup_cache(&job) {
@@ -520,8 +534,9 @@ pub fn compile_code_cell(
         }
         lookup => {
             let job = match lookup {
-                Lookup::Revalidate(webp) => CellJob {
+                Lookup::Revalidate(webp, bundle) => CellJob {
                     cached_webp: Some(webp),
+                    cached_bundle: bundle,
                     ..job
                 },
                 _ => job,
@@ -559,6 +574,7 @@ pub fn compile_code_cell(
     );
     result.insert("caption".into(), Value::Str(caption.as_str().into()));
     result.insert("webp".into(), Value::Str(outcome.webp.as_str().into()));
+    result.insert("bundle".into(), Value::Str(outcome.bundle.as_str().into()));
     result.insert("vars".into(), Value::Dict(Dict::new()));
     result.insert("own".into(), Value::Str(own.as_str().into()));
 
@@ -586,6 +602,10 @@ const PREVIEW_ARGS: [&str; 7] = [
 ];
 const PREVIEW_FIT: &str = "contain";
 
+/// Recording of a `# player` cell's bundle, which the page plays in the embed
+/// player over the preview: the preview's frame rate keeps it small.
+const BUNDLE_ARGS: [&str; 2] = ["--fps", "30"];
+
 /// Bump when the engine's default look changes (theme, palette, units), so
 /// cached previews re-render instead of being merely re-checked.
 const PREVIEW_REVISION: u32 = 2;
@@ -612,10 +632,14 @@ struct CellJob {
     script: String,
     prelude_lines: usize,
     mode: CellMode,
+    /// Also record a bundle for the embed player (`# player`).
+    player: bool,
     timeout_secs: u64,
     /// Preview from an earlier runtime. When set, the cell only needs a
     /// `check` to prove it still runs; the animation is kept.
     cached_webp: Option<String>,
+    /// The bundle recorded with that preview, for a `# player` cell.
+    cached_bundle: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -623,12 +647,15 @@ struct CellOutcome {
     stdout: String,
     stderr: String,
     webp: String,
+    /// Site path of the cell's bundle, for a `# player` cell.
+    bundle: String,
 }
 
 enum Lookup {
     Hit(CellOutcome),
-    /// Succeeded with the same code under another runtime fingerprint.
-    Revalidate(String),
+    /// Succeeded with the same code under another runtime fingerprint: its
+    /// preview and, for a `# player` cell, its bundle.
+    Revalidate(String, Option<String>),
     Miss,
 }
 
@@ -735,6 +762,7 @@ pub fn prune_unused() -> usize {
     let dirs = [
         (root.join("target/code_cache"), ".json"),
         (root.join("assets/generated"), "_anim.webp"),
+        (root.join("assets/generated"), "_anim.gaanim"),
     ];
     for (dir, suffix) in dirs {
         let Ok(entries) = fs::read_dir(&dir) else {
@@ -782,6 +810,7 @@ fn lookup_cache(job: &CellJob) -> Lookup {
         stdout: strip_ansi_escape_codes(&text("stdout")),
         stderr: strip_ansi_escape_codes(&text("stderr")),
         webp: text("webp"),
+        bundle: text("bundle"),
     };
     // A failure is final for this build (both passes and the PDF see it) but
     // is retried by the next build.
@@ -798,10 +827,14 @@ fn lookup_cache(job: &CellJob) -> Lookup {
     if exports && !webp_is_valid || !exports && !outcome.webp.is_empty() && !webp_is_valid {
         return Lookup::Miss;
     }
+    if job.player && !is_bundle(&root.join(&outcome.bundle)) {
+        return Lookup::Miss;
+    }
     if text("fingerprint") == *FINGERPRINT {
         Lookup::Hit(outcome)
     } else if exports {
-        Lookup::Revalidate(outcome.webp)
+        let bundle = job.player.then_some(outcome.bundle);
+        Lookup::Revalidate(outcome.webp, bundle)
     } else {
         Lookup::Miss
     }
@@ -838,6 +871,7 @@ fn run_cell(job: &CellJob) -> CellOutcome {
     if outcome.stderr.is_empty() {
         if let Some(webp) = &job.cached_webp {
             outcome.webp = webp.clone();
+            outcome.bundle = job.cached_bundle.clone().unwrap_or_default();
         } else if let CellMode::Export(name) = &job.mode {
             match collect_webp(&root, &work_dir.join(name), &job.cell_id) {
                 Some(path) => outcome.webp = path,
@@ -845,6 +879,9 @@ fn run_cell(job: &CellJob) -> CellOutcome {
                     outcome.stderr =
                         format!("The export finished without writing a valid `{name}` preview.")
                 }
+            }
+            if job.player && outcome.stderr.is_empty() {
+                record_bundle(job, &root, &work_dir, &temp_file, &mut outcome);
             }
         }
     }
@@ -854,6 +891,7 @@ fn run_cell(job: &CellJob) -> CellOutcome {
         "fingerprint": *FINGERPRINT,
         "run": *RUN_ID,
         "webp": outcome.webp,
+        "bundle": outcome.bundle,
         "stdout": outcome.stdout,
         "stderr": outcome.stderr,
     });
@@ -935,6 +973,7 @@ fn execute(job: &CellJob, work_dir: &Path, temp_file: &Path) -> CellOutcome {
                 stdout: strip_ansi_escape_codes(&String::from_utf8_lossy(&output.stdout)),
                 stderr: stderr.trim().to_string(),
                 webp: String::new(),
+                bundle: String::new(),
             }
         }
         Ok(Err(error)) => CellOutcome {
@@ -986,6 +1025,56 @@ fn copy_recursively(source: &Path, target: &Path) -> std::io::Result<()> {
     } else {
         fs::copy(source, target).map(|_| ())
     }
+}
+
+/// Record a `# player` cell's bundle and move it into `assets/generated`;
+/// a failure becomes the cell's error.
+fn record_bundle(
+    job: &CellJob,
+    root: &Path,
+    work_dir: &Path,
+    temp_file: &Path,
+    outcome: &mut CellOutcome,
+) {
+    let output = work_dir.join("preview.gaanim");
+    let recorded = Command::new(gaanim_binary())
+        .arg("export")
+        .arg(temp_file)
+        .arg("--output")
+        .arg(&output)
+        .args(BUNDLE_ARGS)
+        .current_dir(work_dir)
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .output();
+    let dest = root
+        .join("assets/generated")
+        .join(format!("{}_anim.gaanim", job.cell_id));
+    match recorded {
+        Ok(result) if result.status.success() && is_bundle(&output) => {
+            if fs::rename(&output, &dest).is_err() && fs::copy(&output, &dest).is_err() {
+                outcome.stderr = "Could not keep the recorded bundle.".to_string();
+                return;
+            }
+            outcome.bundle = format!("assets/generated/{}_anim.gaanim", job.cell_id);
+        }
+        Ok(result) => {
+            outcome.stderr = format!(
+                "Recording the bundle failed: {}",
+                strip_ansi_escape_codes(&String::from_utf8_lossy(&result.stderr)).trim()
+            );
+        }
+        Err(error) => outcome.stderr = format!("Could not record the bundle: {error}"),
+    }
+}
+
+/// Whether `path` holds a bundle: a ZIP archive.
+fn is_bundle(path: &Path) -> bool {
+    let mut header = [0u8; 4];
+    fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .is_ok()
+        && header == *b"PK\x03\x04"
 }
 
 /// Move a finished export into `assets/generated` and return its site path.
