@@ -31,7 +31,7 @@ output_dir = "exports"
   [`entry`], [ruta], [obligatorio], [Script que ejecutan `gaanim <carpeta>`, `check` y `export`.],
   [`name`], [cadena], [nombre de la carpeta], [Nombre que muestran el Inicio y el título de la ventana.],
   [`assets_dir`], [ruta], [`"assets"`], [Carpeta de recursos, relativa al manifiesto. La lee `scene.assets.load_project()`.],
-  [`output_dir`], [ruta], [`"exports"`], [Carpeta donde el diálogo de exportación del editor propone guardar.],
+  [`output_dir`], [ruta], [`"exports"`], [Carpeta donde el diálogo de exportación del editor propone guardar, y donde van las capturas del fotograma.],
   [`polls.relay`], [URL], [ninguno], [Relay de las encuestas de este proyecto, en una tabla `[polls]`.],
 )
 
@@ -78,7 +78,8 @@ la CLI y el editor. Consulta
 === `output_dir`
 
 Carpeta relativa al proyecto, o absoluta. El diálogo de exportación del editor
-propone `<output_dir>/output.mp4`, y las capturas del fotograma actual van a
+propone guardar ahí, con el nombre del proyecto (`<output_dir>/mi-video.mp4`),
+y las capturas del fotograma actual van a
 `<output_dir>/captures/`. `gaanim export` no la usa: escribe en la ruta de
 `--output`, relativa al directorio actual.
 

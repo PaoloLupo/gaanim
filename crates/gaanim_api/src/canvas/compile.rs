@@ -2859,6 +2859,7 @@ impl SceneModel {
                 &mut revealed_deferred,
                 &self.state,
             );
+            builder.timeline.origin = None;
             if let Some(started) = compile_started {
                 let elapsed = started.elapsed();
                 SEGMENT_TIMES.with_borrow_mut(|times| {
@@ -3539,7 +3540,11 @@ impl SceneModel {
             })
             .collect();
         fade_in_targets.extend(Self::camera_view_entries(&seg.ops));
+        let track_origins = crate::canvas::tracks_script_lines();
         for (op_index, op) in seg.ops.iter().enumerate() {
+            // The editor's animation timeline traces each clip to its `play`.
+            builder.timeline.origin = (track_origins && matches!(op, Op::Play(_) | Op::Launch(_)))
+                .then(|| crate::canvas::ops::op_origin(seg.id, op_index));
             match op {
                 Op::Spawn(spec) => {
                     let live = spec.lock().expect("object spec poisoned").clone();
@@ -15249,6 +15254,44 @@ mod tests {
             Some(vec![ids[..5].to_vec(), vec![ids[5]]])
         );
         assert_eq!(reveal_groups(&glyphs, &[('x', None)]), None);
+    }
+
+    #[test]
+    fn clips_carry_the_play_they_came_from_while_lines_are_tracked() {
+        crate::canvas::track_script_lines(true);
+        let mut canvas = SceneModel::new(640, 360);
+        let circle = canvas.circle(1.0);
+        let square = canvas.square(1.0);
+        canvas.play(vec![circle.fade_in(1.0)]);
+        canvas.play(vec![square.fade_in(0.5), circle.fade_out(0.5)]);
+        let timeline = compiled_timeline(&canvas);
+        let mut origins: Vec<_> = timeline
+            .clips
+            .iter()
+            .filter(|(_, clip)| {
+                matches!(
+                    clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(_)
+                )
+            })
+            .map(|(id, clip)| (clip.start, timeline.clip_origins.get(&id).copied()))
+            .collect();
+        origins.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert!(origins.iter().all(|(_, origin)| origin.is_some()));
+        let first = origins.first().unwrap().1;
+        let last = origins.last().unwrap().1;
+        assert_ne!(first, last, "each play has its own origin");
+        // The key names the play's segment and its place there.
+        let state = canvas.state.lock().unwrap();
+        let segment = state.active();
+        let plays: Vec<_> = segment
+            .ops
+            .iter()
+            .enumerate()
+            .filter(|(_, op)| matches!(op, Op::Play(_)))
+            .map(|(index, _)| crate::canvas::ops::op_origin(segment.id, index))
+            .collect();
+        assert_eq!(plays, vec![first.unwrap(), last.unwrap()]);
     }
 
     fn compiled_timeline(canvas: &SceneModel) -> Timeline {

@@ -13,9 +13,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+mod output_file;
+use output_file::{OutputKind, OutputParts};
+
 use crate::ui_kit::{
     ButtonTone, Icon, card_frame, chip, field_frame, icon_button, paint_icon, palette,
-    primary_button, secondary_button, section_label, segmented, status_badge,
+    primary_button, secondary_button, section_label, segmented, small_button, status_badge,
 };
 
 const EXPORT_WORKER_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -57,6 +60,9 @@ pub struct ExportState {
     pub quality: ExportQuality,
     pub video_encoder: VideoEncoder,
     pub output_path: String,
+    /// The folder and name the dialog edits; `output_path` follows them and
+    /// the format. `None` until the dialog names the first export.
+    output_parts: Option<OutputParts>,
     pub width: u32,
     pub height: u32,
     pub fit: OutputFit,
@@ -245,6 +251,7 @@ impl Default for ExportState {
             quality: ExportQuality::Standard,
             video_encoder: VideoEncoder::Auto,
             output_path: "output.mp4".to_string(),
+            output_parts: None,
             width: 1920,
             height: 1080,
             fit: OutputFit::Error,
@@ -272,17 +279,22 @@ pub fn export_dialog_system(
 ) {
     let Ok(ctx) = ctx.ctx_mut() else { return };
 
-    // Initialize default output path from gaanim.toml if still default
-    if let Some(ref proj) = project_paths
-        && state.output_path == "output.mp4"
-    {
-        // Show relative to project for nicer UX: e.g. "exports/output.mp4"
-        let rel = proj
-            .output_dir
-            .strip_prefix(&proj.project_dir)
-            .unwrap_or(&proj.output_dir)
-            .join("output.mp4");
-        state.output_path = rel.to_string_lossy().to_string();
+    // Name the first export after the project, script or bundle, in the
+    // project's output folder.
+    if state.output_parts.is_none() {
+        let project = project_paths
+            .as_ref()
+            .map(|paths| (paths.project_dir.as_path(), paths.script_path.as_path()));
+        let folder = project_paths
+            .as_ref()
+            .map(|paths| output_file::relative_folder(&paths.output_dir, Some(&paths.project_dir)))
+            .unwrap_or_default();
+        let parts = OutputParts {
+            folder,
+            name: output_file::default_name(project, bundle.as_ref().map(|bundle| bundle.path())),
+        };
+        state.output_path = output_file::join(&parts, OutputKind::of(state.format, state.bundle));
+        state.output_parts = Some(parts);
     }
 
     // --- Collect intent from egui into local variables first ---
@@ -492,7 +504,10 @@ pub fn export_dialog_system(
     };
     let mut current_quality = state.quality;
     let mut current_encoder = state.video_encoder;
-    let mut current_output = state.output_path.clone();
+    let mut current_parts = state
+        .output_parts
+        .clone()
+        .unwrap_or_else(|| output_file::split(&state.output_path));
     let mut current_width = state.width;
     let mut current_height = state.height;
     let mut current_fit = state.fit;
@@ -525,7 +540,6 @@ pub fn export_dialog_system(
         current_choice = FormatChoice::Video(current_format);
     }
 
-    let previous_choice = current_choice;
     // Enter submits unless a field is using it (text or number entry).
     let enter_submits = ctx.input(|input| input.key_pressed(egui::Key::Enter))
         && ctx.memory(|memory| memory.focused().is_none());
@@ -735,15 +749,11 @@ pub fn export_dialog_system(
             ui.add_space(6.0);
             }
 
-            section_label(ui, "Archivo");
-            ui.add(
-                egui::TextEdit::singleline(&mut current_output)
-                    .desired_width(f32::INFINITY)
-                    .font(egui::FontId::monospace(12.0))
-                    .text_color(palette::TEXT)
-                    .frame(field_frame())
-                    .margin(egui::Margin::ZERO),
-            );
+            let kind = output_kind(current_choice, current_format);
+            let project_dir = project_paths
+                .as_ref()
+                .map(|paths| paths.project_dir.as_path());
+            output_file_section(ui, &mut current_parts, kind, project_dir);
             ui.add_space(14.0);
 
             ui.horizontal(|ui| {
@@ -759,8 +769,13 @@ pub fn export_dialog_system(
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if primary_button(ui, "Exportar", Some(Icon::Export), true)
-                        .on_hover_text("Enter")
+                    let named = !current_parts.name.trim().is_empty();
+                    if primary_button(ui, "Exportar", Some(Icon::Export), named)
+                        .on_hover_text(if named {
+                            "Enter"
+                        } else {
+                            "Escribe un nombre para el archivo"
+                        })
                         .clicked()
                     {
                         trigger_export = true;
@@ -780,14 +795,11 @@ pub fn export_dialog_system(
     if let FormatChoice::Video(format) = current_choice {
         current_format = format;
     }
-    if current_choice != previous_choice {
-        current_output = with_output_extension(
-            &current_output,
-            match current_choice {
-                FormatChoice::Video(format) => export_format_arg(format),
-                FormatChoice::Bundle => gaanim_bundle::EXTENSION,
-            },
-        );
+    let current_output =
+        output_file::join(&current_parts, output_kind(current_choice, current_format));
+    // An export needs a name to write.
+    if current_parts.name.trim().is_empty() {
+        trigger_export = false;
     }
 
     // Apply state changes AFTER the egui closures (no borrow conflicts)
@@ -796,6 +808,7 @@ pub fn export_dialog_system(
     state.quality = current_quality;
     state.video_encoder = current_encoder;
     state.output_path = current_output;
+    state.output_parts = Some(current_parts);
     state.width = current_width;
     state.height = current_height;
     state.fit = current_fit;
@@ -1226,42 +1239,159 @@ fn aspect_label(width: f64, height: f64) -> String {
     }
 }
 
-/// Keep the output extension in step with the chosen format, leaving custom
-/// extensions alone.
-#[cfg(test)]
-fn with_format_extension(path: &str, format: ExportFormat) -> String {
-    with_output_extension(path, export_format_arg(format))
+fn output_kind(choice: FormatChoice, format: ExportFormat) -> OutputKind {
+    match choice {
+        FormatChoice::Bundle => OutputKind::of(format, true),
+        FormatChoice::Video(format) => OutputKind::of(format, false),
+    }
 }
 
-/// `path` with the extension `extension` when it has a known export one.
-/// A PNG sequence writes a folder of frames, so a video path becomes a
-/// folder of that name holding `frame.png`, and back again.
-fn with_output_extension(path: &str, extension: &str) -> String {
-    const KNOWN: [&str; 6] = ["mp4", "webm", "webp", "gif", "gaanim", "png"];
-    let as_path = Path::new(path);
-    let current = as_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::to_ascii_lowercase);
-    let Some(current) = current.filter(|ext| KNOWN.contains(&ext.as_str())) else {
-        return path.to_string();
-    };
-    let sequence_frame = current == "png"
-        && as_path.file_stem().and_then(|stem| stem.to_str()) == Some(PNG_SEQUENCE_STEM);
-    let base = match as_path.parent() {
-        Some(parent) if sequence_frame && !parent.as_os_str().is_empty() => parent.to_path_buf(),
-        _ => as_path.with_extension(""),
-    };
-    let result = if extension == "png" {
-        base.join(format!("{PNG_SEQUENCE_STEM}.png"))
-    } else {
-        base.with_extension(extension)
-    };
-    result.to_string_lossy().into_owned()
-}
+/// The dialog's *Archivo* section: the name with the format's extension,
+/// the folder with a picker, the full path, and a notice when the export
+/// would replace an earlier one.
+fn output_file_section(
+    ui: &mut egui::Ui,
+    parts: &mut OutputParts,
+    kind: OutputKind,
+    project_dir: Option<&Path>,
+) {
+    section_label(ui, "Archivo");
+    let suffix = kind.suffix();
+    let mono = egui::FontId::monospace(12.0);
+    field_frame().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let suffix_width = ui
+                .painter()
+                .layout_no_wrap(suffix.clone(), mono.clone(), palette::TEXT_FAINT)
+                .size()
+                .x;
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut parts.name)
+                    .hint_text("nombre")
+                    .desired_width((ui.available_width() - suffix_width).max(80.0))
+                    .font(mono.clone())
+                    .text_color(palette::TEXT)
+                    .frame(egui::Frame::NONE)
+                    .margin(egui::Margin::ZERO),
+            );
+            if response.changed() {
+                parts.name = output_file::sanitize_name(&parts.name);
+            }
+            ui.label(
+                egui::RichText::new(&suffix)
+                    .font(mono.clone())
+                    .color(palette::TEXT_FAINT),
+            );
+        });
+    });
 
-/// File name of the frames of a PNG sequence, before their numbers.
-const PNG_SEQUENCE_STEM: &str = "frame";
+    let folder = resolve_output_path(
+        if parts.folder.is_empty() {
+            "."
+        } else {
+            &parts.folder
+        },
+        project_dir,
+    )
+    .ok();
+    // Rows as tall as their buttons, everything centred on one line.
+    let row = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 26.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| add(ui),
+        );
+    };
+    row(ui, &mut |ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 16.0), egui::Sense::hover());
+        paint_icon(
+            ui.painter(),
+            egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(13.0)),
+            Icon::Folder,
+            palette::TEXT_MUTED,
+        );
+        let shown = if parts.folder.is_empty() {
+            "carpeta del proyecto".to_owned()
+        } else {
+            parts.folder.clone()
+        };
+        let label_width = (ui.available_width() - 90.0).max(60.0);
+        let full_path = resolve_output_path(&output_file::join(parts, kind), project_dir)
+            .map(|path| match kind {
+                OutputKind::File(_) => path,
+                OutputKind::Frames => exported_location(&path, true),
+            })
+            .map(|path| path.display().to_string())
+            .unwrap_or_default();
+        ui.allocate_ui_with_layout(
+            egui::vec2(label_width, 18.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(label_width);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(shown)
+                            .size(12.5)
+                            .color(palette::TEXT_MUTED),
+                    )
+                    .truncate(),
+                )
+                .on_hover_text(format!("Se guarda en {full_path}"));
+            },
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if !crate::WEB
+                && small_button(ui, "Cambiar…", true)
+                    .on_hover_text("Elegir la carpeta donde se guarda")
+                    .clicked()
+                && let Some(chosen) =
+                    crate::platform::pick_folder("Carpeta de exportación", folder.as_deref())
+            {
+                parts.folder = output_file::relative_folder(&chosen, project_dir);
+            }
+        });
+    });
+
+    if parts.name.trim().is_empty() {
+        notice(ui, palette::STOP, "Escribe un nombre para el archivo.");
+        return;
+    }
+    let Ok(resolved) = resolve_output_path(&output_file::join(parts, kind), project_dir) else {
+        return;
+    };
+    if output_file::exists(&resolved, kind)
+        && let Some(folder) = &folder
+    {
+        let free = output_file::free_name(folder, &parts.name, kind);
+        row(ui, &mut |ui| {
+            notice(
+                ui,
+                palette::STOP,
+                &match kind {
+                    OutputKind::File(_) => {
+                        format!("{}{} ya existe: se reemplazará.", parts.name, kind.suffix())
+                    }
+                    OutputKind::Frames => {
+                        format!(
+                            "La carpeta {} ya tiene fotogramas: se reemplazarán.",
+                            parts.name
+                        )
+                    }
+                },
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if small_button(ui, &format!("Usar «{free}»"), true)
+                    .on_hover_text("Guardar con el siguiente nombre libre")
+                    .clicked()
+                {
+                    parts.name = free.clone();
+                }
+            });
+        });
+    }
+}
 
 /// What a finished export opens: the file, or for a PNG sequence the folder
 /// its frames are in.
@@ -1309,9 +1439,8 @@ fn export_format_arg(format: ExportFormat) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportFormat, ExportTelemetry, WorkerStopReason, aspect_differs, aspect_label,
-        forward_worker_line, open_exported_file_with, resolve_output_path, short_duration,
-        with_format_extension, worker_stop_reason,
+        ExportTelemetry, WorkerStopReason, aspect_differs, aspect_label, forward_worker_line,
+        open_exported_file_with, resolve_output_path, short_duration, worker_stop_reason,
     };
     use bevy::platform::time::Instant;
     use std::path::Path;
@@ -1408,33 +1537,7 @@ mod tests {
     }
 
     #[test]
-    fn output_extension_follows_the_selected_format() {
-        assert_eq!(
-            with_format_extension("exports/output.mp4", ExportFormat::Gif),
-            "exports/output.gif"
-        );
-        assert_eq!(
-            with_format_extension("clip.WEBM", ExportFormat::Mp4),
-            "clip.mp4"
-        );
-        // Custom or missing extensions are the user's choice.
-        assert_eq!(
-            with_format_extension("clip.mov", ExportFormat::Webm),
-            "clip.mov"
-        );
-        assert_eq!(with_format_extension("clip", ExportFormat::Webm), "clip");
-        assert_eq!(
-            with_format_extension("exports/output.mp4", ExportFormat::PngSequence),
-            "exports/output/frame.png"
-        );
-        assert_eq!(
-            with_format_extension("exports/output/frame.png", ExportFormat::Webm),
-            "exports/output.webm"
-        );
-        assert_eq!(
-            with_format_extension("still.png", ExportFormat::Mp4),
-            "still.mp4"
-        );
+    fn png_sequences_open_their_folder() {
         assert_eq!(
             super::exported_location(Path::new("exports/output/frame.png"), true),
             Path::new("exports/output")

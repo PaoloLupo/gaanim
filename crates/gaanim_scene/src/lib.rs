@@ -8,7 +8,7 @@ pub mod systems;
 pub mod transition_frame;
 
 pub use components::{
-    AuthoredIndex, AuthoredObject, AuthoredObjects, Billboard, CoordinateLabelOffset,
+    AuthoredCall, AuthoredIndex, AuthoredObject, AuthoredObjects, Billboard, CoordinateLabelOffset,
     CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose, DepthOfField, FillBrush,
     FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, LayoutBackdrop,
     LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame, LayoutInspectionKind,

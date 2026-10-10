@@ -2,10 +2,9 @@
 //! their kind, name and the script line that created them.
 
 use std::collections::HashMap;
-use std::fmt::Write as _;
 
 use gaanim_core::ObjectId;
-use gaanim_scene::{AuthoredIndex, AuthoredObject, AuthoredObjects};
+use gaanim_scene::{AuthoredCall, AuthoredIndex, AuthoredObject, AuthoredObjects};
 
 use super::SceneModel;
 use super::types::SpawnKind;
@@ -40,14 +39,35 @@ impl SceneModel {
 
 /// The authored drawables keyed by the objects compiled for them; `ids`
 /// maps authored ids to compiled ones, and an id it lacks compiled as itself.
-pub(crate) fn compiled_index(
+pub(crate) fn compiled_objects(
     authored: HashMap<ObjectId, AuthoredObject>,
     ids: &HashMap<ObjectId, ObjectId>,
-) -> AuthoredIndex {
+) -> HashMap<ObjectId, AuthoredObject> {
     authored
         .into_iter()
         .map(|(id, object)| (ids.get(&id).copied().unwrap_or(id), object))
         .collect()
+}
+
+impl SceneModel {
+    /// The script lines of each `play`, by the origin key its clips carry.
+    pub(crate) fn authored_plays(&self) -> HashMap<u64, AuthoredCall> {
+        let state = self.state.lock().expect("canvas state poisoned");
+        state
+            .op_locations
+            .iter()
+            .filter_map(|(&origin, stack)| {
+                let mut stack = stack.iter().cloned();
+                Some((
+                    origin,
+                    AuthoredCall {
+                        location: stack.next()?,
+                        callers: stack.collect(),
+                    },
+                ))
+            })
+            .collect()
+    }
 }
 
 /// The index of `canvas`, built when the editor first reads it. `ids` holds
@@ -56,40 +76,16 @@ pub(crate) fn deferred_index(
     canvas: SceneModel,
     ids: HashMap<ObjectId, ObjectId>,
 ) -> AuthoredObjects {
-    AuthoredObjects::deferred(move || compiled_index(canvas.authored_objects(), &ids))
+    AuthoredObjects::deferred(move || AuthoredIndex {
+        objects: compiled_objects(canvas.authored_objects(), &ids),
+        plays: canvas.authored_plays(),
+    })
 }
 
 /// The variant name of `kind` in snake case, as the scripting API spells
 /// drawables (`RoundedRect` is `rounded_rect`).
 pub(crate) fn kind_name(kind: &SpawnKind) -> String {
-    /// Keeps what `Debug` writes up to the first character that cannot be
-    /// part of a name, then stops it: a variant's data can be large.
-    struct Head(String);
-    impl std::fmt::Write for Head {
-        fn write_str(&mut self, text: &str) -> std::fmt::Result {
-            for ch in text.chars() {
-                if !(ch.is_alphanumeric() || ch == '_') {
-                    return Err(std::fmt::Error);
-                }
-                self.0.push(ch);
-            }
-            Ok(())
-        }
-    }
-    let mut head = Head(String::new());
-    let _ = write!(head, "{kind:?}");
-    let mut name = String::with_capacity(head.0.len() + 4);
-    for (index, ch) in head.0.chars().enumerate() {
-        if ch.is_uppercase() {
-            if index > 0 {
-                name.push('_');
-            }
-            name.extend(ch.to_lowercase());
-        } else {
-            name.push(ch);
-        }
-    }
-    name
+    gaanim_core::names::variant_name(kind)
 }
 
 #[cfg(test)]
@@ -120,7 +116,7 @@ mod tests {
             (ObjectId::from_raw(2), object.clone()),
         ]);
         let ids = HashMap::from([(ObjectId::from_raw(1), ObjectId::from_raw(7))]);
-        let index = compiled_index(authored, &ids);
+        let index = compiled_objects(authored, &ids);
         assert!(index.contains_key(&ObjectId::from_raw(7)));
         assert!(index.contains_key(&ObjectId::from_raw(2)));
         assert!(!index.contains_key(&ObjectId::from_raw(1)));

@@ -10,6 +10,7 @@ use ui_kit::{
 
 #[cfg(target_os = "linux")]
 pub mod alsa_errors;
+pub mod animation_timeline;
 mod app_icon;
 pub mod bundle_player;
 pub mod cli;
@@ -250,6 +251,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<inspector::InspectorPanel>()
             .init_resource::<console_panel::ConsolePanel>()
             .init_resource::<frame_capture::FrameCapture>()
+            .init_resource::<animation_timeline::AnimationTimeline>()
             .init_resource::<narration::NarrationPanel>()
             .init_resource::<narration::NarrationSession>()
             .init_resource::<gaanim_media::PreviewAudioEnabled>()
@@ -276,6 +278,11 @@ impl Plugin for GaanimEditorPlugin {
                     (
                         frame_capture::frame_capture_keys_system,
                         frame_capture::frame_capture_system,
+                    )
+                        .chain(),
+                    (
+                        animation_timeline::animation_timeline_keys_system,
+                        animation_timeline::animation_timeline_model_system,
                     )
                         .chain(),
                     global_playback_keys_system,
@@ -365,6 +372,7 @@ impl Plugin for GaanimEditorPlugin {
                     inspector::inspector_panel_system,
                     console_panel::console_panel_system,
                     frame_capture::frame_capture_notice_system,
+                    animation_timeline::animation_timeline_panel_system,
                 )
                     .after(editor_ui_system),
             )
@@ -4154,10 +4162,8 @@ mod tests {
 
     #[test]
     fn active_export_preserves_the_editor_viewport_fit() {
-        let export_state = export::ExportState {
-            active: true,
-            ..export::ExportState::default()
-        };
+        let mut export_state = export::ExportState::default();
+        export_state.active = true;
         let mut app = App::new();
         app.insert_resource(ViewportInset { bottom: 120.0 })
             .insert_resource(PreviewInteractive::default())
