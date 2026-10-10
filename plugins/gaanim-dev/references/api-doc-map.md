@@ -49,6 +49,7 @@ relative path. Directives are the block's own comment lines:
 | Directive | Effect |
 |---|---|
 | `# output: preview.webp` | Export the scene and show the animation next to the code. |
+| `# player` | With `# output:`, also record a `.gaanim` bundle (30 fps) that the web page plays in the embed player (`reproductor/insertar/`) over the preview; the WebP stays for the PDF and for browsers without WebGPU. Keep it for 2D scenes: 3D and very busy scenes record heavier bundles than their WebP (issue #413). |
 | `# show-code: true` | Keep the code visible next to its preview. |
 | `# continue` | Replay the page's previous executed block first (hidden, output muted, its `render()` dropped). Use it for fragments that build on earlier code. |
 | `>>> line` | Execute a setup line without displaying it. |

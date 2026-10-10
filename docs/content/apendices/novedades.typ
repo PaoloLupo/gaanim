@@ -28,10 +28,14 @@ alguna escena mueve objetos por una trayectoria.
   ejecuta escenas en el navegador. Escribes Python en un editor con
   autocompletado, firmas y la documentación de la API al pasar el cursor, y
   la escena se graba en un `.gaanim` que el reproductor web muestra al lado;
-  un error marca su línea. `Ctrl+S` guarda y ejecuta, los ejemplos de la
-  galería se cargan desde el menú, las imágenes y la música que subes se
-  quedan en tu navegador, *Compartir* copia un enlace con el código y
-  *Descargar* guarda `main.py` o el `.gaanim`. Usa Pyodide (Python 3.14 en
+  un error marca su línea, también dentro de un módulo. Es un proyecto, como
+  en un editor de código: el explorador crea, sube (archivos o carpetas
+  enteras), renombra, mueve y elimina archivos, `main.py` importa los módulos
+  de sus carpetas, y las imágenes, la música y las fuentes que subes
+  (`Theme(font_dir="assets/fonts", …)`) se quedan en tu navegador.
+  `Ctrl+S` guarda y ejecuta, los ejemplos de la galería se cargan en
+  `main.py`, *Compartir* copia un enlace con los archivos de texto y
+  *Descargar* guarda el proyecto en un `.zip` o el `.gaanim`. Usa Pyodide (Python 3.14 en
   WebAssembly); lo que necesita FFmpeg, como los vídeos, solo funciona en la
   aplicación.
 - *Insertar*, en el playground, prepara la escena para un blog o un sitio
@@ -84,6 +88,58 @@ alguna escena mueve objetos por una trayectoria.
   sólido 3D. Ver #link("/referencia/geometria/")[Geometría].
 - `Axonometric` se importa desde `gaanim`; en 0.10.2 solo estaba en
   `gaanim.gaanim_core`.
+
+En la web, estas animaciones se reproducen en el reproductor ligero, el mismo
+que se inserta en un blog: pasa el cursor por encima para ver su barra.
+
+```python
+# output: preview.webp
+# player
+from gaanim import *
+
+scene = Scene(frame=(16, 9))
+title = scene.text("Anotaciones", role="title").move_to(0, 2.6)
+card = scene.geometry.rounded_rect(3.2, 1.6, 0.2).fill(BLUE).move_to(-3.2, -0.6)
+word = scene.text("importante").move_to(3.2, -0.6)
+ul = title.annotate.underline(color=RED, seed=1)
+box = card.annotate.box(color=GOLD, seed=2)
+circle = word.annotate.circle(color=RED, seed=3)
+scene.play([ul.animate.create(), box.animate.create()], duration=1.2)
+scene.play([circle.animate.create()], duration=0.9)
+scene.render()
+```
+
+```python
+# output: preview.webp
+# player
+import math
+from gaanim import *
+
+scene = Scene(frame=(16, 9), background="#1d2b53")
+sky = scene.layer(depth=math.inf).add(scene.geometry.circle(0.9).fill(GOLD).move_to(4.5, 2.6))
+far = scene.layer(depth=3.0)
+for i in range(6):
+    far.add(scene.geometry.polygon([(-2.4, 0), (0, 2.6), (2.4, 0)]).fill("#3b4a7a").move_to(-8 + i * 4.2, -1.4))
+for i in range(8):
+    scene.geometry.rect(0.5, 1.2).fill("#8a5a3b").move_to(-6 + i * 3, -2.0)
+near = scene.layer(depth=0.6)
+for i in range(5):
+    near.add(scene.geometry.circle(0.9).fill("#1f4d33").move_to(-7 + i * 5, -3.3))
+scene.play([scene.camera.animate.pan_to(6, 0).duration(3)])
+scene.render()
+```
+
+```python
+# output: preview.webp
+# player
+from gaanim import *
+
+scene = Scene(frame=(16, 9))
+circle = scene.geometry.circle(2.4).no_fill().stroke(GRAY, 0.03)
+ring = scene.text.on_path("GAANIM · MOTION · DESIGN · ", circle, reverse=True, size=0.5)
+scene.play([ring.animate.path_offset(1.0).duration(4).easing(Easing.LINEAR)])
+scene.render()
+```
 
 == Editor
 

@@ -196,6 +196,7 @@
             html.a(href: prefix + "tutorial/antes-de-empezar/", "Tutorial")
             html.a(href: prefix + "guias/layout/", "Guías")
             html.a(href: prefix + "referencia/", "Referencia")
+            html.a(href: prefix + "playground/", "Playground")
             html.a(href: prefix + "reproductor/", "Reproductor")
             html.a(href: "https://github.com/PaoloLupo/gaanim", class: "header-github", "GitHub")
           })
@@ -425,7 +426,25 @@
           source-code
         })
         html.div(class: "anim-preview", {
-          image("../" + result.webp, alt: "animation preview")
+          if result.bundle.len() > 0 {
+            // A `# player` cell plays its recording in the embed player over
+            // the preview, which stays without WebGPU (assets/script.js).
+            let name = result.bundle.split("/").last()
+            let base = stdx.config.asset-base
+            let root = base.slice(0, base.len() - "assets/".len())
+            html.div(class: "anim-stage", {
+              image("../" + result.webp, alt: "animation preview")
+              html.elem("iframe", attrs: (
+                src: root + "reproductor/insertar/?src=../../assets/bundles/" + name + "&loop",
+                title: "Animación",
+                loading: "lazy",
+                allow: "fullscreen",
+              ))
+            })
+            [#metadata((base + "bundles/" + name, read("../" + result.bundle, encoding: none))) <metadata-asset>]
+          } else {
+            image("../" + result.webp, alt: "animation preview")
+          }
         })
       })
     } else {
