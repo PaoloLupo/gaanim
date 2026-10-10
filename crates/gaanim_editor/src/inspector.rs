@@ -1,6 +1,7 @@
 //! The inspector: what the drawable selected in the preview is, the script
 //! line that created it, and its properties at the current time. It shows
-//! while the overlays are on (`O`) and something is selected.
+//! while the overlays are on (`O`). It docks top right; its header drags it
+//! anywhere, and a double click on the header docks it again.
 
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
@@ -15,16 +16,33 @@ use crate::overlays::EditorOverlays;
 use crate::ui_kit::{self, ButtonTone, Icon, caption, icon_button_sized, palette};
 use crate::{EditorState, PresentationMode};
 
-/// Whether the inspector shows the selection.
+/// Whether the inspector shows the selection, and where.
 #[derive(Resource, Debug, Clone)]
 pub struct InspectorPanel {
     pub enabled: bool,
+    /// The top left corner it was dragged to; `None` while docked.
+    position: Option<egui::Pos2>,
 }
 
 impl Default for InspectorPanel {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            position: None,
+        }
     }
+}
+
+/// Space from the top right corner of the preview while docked.
+const DOCK_OFFSET: egui::Vec2 = egui::vec2(-12.0, 62.0);
+/// Height of the header that drags the window.
+const HEADER_HEIGHT: f32 = 24.0;
+
+/// What happened in the inspector's header this frame.
+#[derive(Default)]
+struct Header {
+    close: bool,
+    drag: ui_kit::HeaderDrag,
 }
 
 /// The entity of the nearest authored drawable at or above `entity`: the
@@ -88,7 +106,7 @@ pub fn inspector_panel_system(
         // Nothing selected: the scene camera at the current time.
         if let Some(camera) = camera
             && let Ok(ctx) = contexts.ctx_mut()
-            && camera_panel(ctx, &camera, depth_of_field.as_deref())
+            && camera_panel(ctx, &mut panel.position, &camera, depth_of_field.as_deref())
         {
             panel.enabled = false;
         }
@@ -118,22 +136,12 @@ pub fn inspector_panel_system(
     let text = text_of(selected, &children, &spans);
     let bounds = crate::selection_bounds(selected, &pickable, &children);
 
-    let mut close = false;
+    let mut top = Header::default();
     let mut select = None;
-    inspector_window().show(ctx, |ui| {
+    let window = inspector_window(panel.position).show(ctx, |ui| {
         ui.set_width(280.0);
         ui.spacing_mut().item_spacing.y = 6.0;
-        ui.horizontal(|ui| {
-            ui.label(caption("INSPECTOR"));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
-                    .on_hover_text("Quitar la selección")
-                    .clicked()
-                {
-                    close = true;
-                }
-            });
-        });
+        top = window_header(ui, "Quitar la selección");
         header(ui, object.map(|(_, object)| object), data.0);
         if let Some((_, object)) = object {
             location_row(ui, object);
@@ -222,48 +230,65 @@ pub fn inspector_panel_system(
             }
         }
     });
-    if close {
+    let rect = window.map(|window| window.response.rect);
+    panel.position = ui_kit::moved(panel.position, rect, &top.drag, ctx.viewport_rect());
+    if top.close {
         state.selected = None;
     } else if let Some(entity) = select {
         state.selected = Some(entity);
     }
 }
 
-/// The inspector's window, docked to the right of the preview.
-fn inspector_window() -> egui::Window<'static> {
-    egui::Window::new("Inspector")
+/// The inspector's window: docked to the right of the preview, or where its
+/// header dragged it.
+fn inspector_window(position: Option<egui::Pos2>) -> egui::Window<'static> {
+    let window = egui::Window::new("Inspector")
         .id(egui::Id::new("editor_inspector"))
         .title_bar(false)
-        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 62.0))
         .order(egui::Order::Foreground)
         .resizable(false)
         .collapsible(false)
         .default_width(280.0)
-        .frame(ui_kit::card_frame().inner_margin(egui::Margin::same(14)))
+        .frame(ui_kit::card_frame().inner_margin(egui::Margin::same(14)));
+    ui_kit::placed(window, position, egui::Align2::RIGHT_TOP, DOCK_OFFSET)
+}
+
+/// The inspector's header: a grip, its caption and the close button. The
+/// whole row drags the window.
+fn window_header(ui: &mut egui::Ui, close_hint: &str) -> Header {
+    let mut header = Header {
+        drag: ui_kit::drag_handle(ui, HEADER_HEIGHT),
+        close: false,
+    };
+    ui.horizontal(|ui| {
+        ui.set_min_height(HEADER_HEIGHT);
+        ui_kit::grip(ui, &header.drag);
+        ui.label(caption("INSPECTOR"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
+                .on_hover_text(close_hint)
+                .clicked()
+            {
+                header.close = true;
+            }
+        });
+    });
+    header
 }
 
 /// The scene camera, shown while nothing is selected. Returns whether the
 /// inspector was closed.
 fn camera_panel(
     ctx: &egui::Context,
+    position: &mut Option<egui::Pos2>,
     camera: &gaanim_math::Camera,
     depth_of_field: Option<&DepthOfField>,
 ) -> bool {
-    let mut close = false;
-    inspector_window().show(ctx, |ui| {
+    let mut top = Header::default();
+    let window = inspector_window(*position).show(ctx, |ui| {
         ui.set_width(280.0);
         ui.spacing_mut().item_spacing.y = 6.0;
-        ui.horizontal(|ui| {
-            ui.label(caption("INSPECTOR"));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
-                    .on_hover_text("Ocultar el inspector")
-                    .clicked()
-                {
-                    close = true;
-                }
-            });
-        });
+        top = window_header(ui, "Ocultar el inspector");
         ui.add(
             egui::Label::new(
                 egui::RichText::new("Cámara de la escena")
@@ -284,7 +309,9 @@ fn camera_panel(
             field(ui, "Desenfoque máx.", &number(depth_of_field.max_blur));
         }
     });
-    close
+    let rect = window.map(|window| window.response.rect);
+    *position = ui_kit::moved(*position, rect, &top.drag, ctx.viewport_rect());
+    top.close
 }
 
 /// The camera's pose and lens, as a script would set them.

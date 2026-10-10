@@ -2,6 +2,7 @@
 //! block per `play` that animates it, along a ruler with the playhead. A
 //! click on a block goes to its start and selects the drawable; a double
 //! click opens the `play`'s line in the code editor. `T` shows or hides it.
+//! Its header drags it anywhere; a double click on the header docks it again.
 
 use std::collections::HashMap;
 
@@ -23,6 +24,8 @@ const ROW_HEIGHT: f32 = 22.0;
 const VISIBLE_ROWS: usize = 7;
 /// Width of the column of drawable names.
 const LABEL_WIDTH: f32 = 168.0;
+/// Height of the header, which drags the window.
+const HEADER_HEIGHT: f32 = 24.0;
 /// Height of the ruler.
 const RULER_HEIGHT: f32 = 20.0;
 
@@ -37,8 +40,12 @@ pub struct AnimationTimeline {
     model: Model,
     /// The timeline's clip revision the model was built from.
     built_from: Option<u64>,
-    /// Height drawn last frame, so the console can sit above the panel.
+    /// Height drawn last frame while docked, so the console can sit above
+    /// the panel; 0 when hidden or dragged elsewhere.
     pub(crate) height: f32,
+    /// The top left corner its header dragged it to; `None` while docked
+    /// above the playback bar.
+    position: Option<egui::Pos2>,
 }
 
 /// What a row stands for.
@@ -382,98 +389,112 @@ pub fn animation_timeline_panel_system(
         .collect();
     let in_view = rows.len();
 
-    let response = egui::Window::new("Animaciones")
+    let window = egui::Window::new("Animaciones")
         .id(egui::Id::new("editor_animation_timeline"))
         .title_bar(false)
-        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -96.0))
         .order(egui::Order::Foreground)
         .resizable(false)
         .collapsible(false)
-        .frame(ui_kit::card_frame().inner_margin(egui::Margin::same(12)))
-        .show(ctx, |ui| {
-            ui.set_width(width - 24.0);
-            ui.spacing_mut().item_spacing.y = 4.0;
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                ui.label(caption("ANIMACIONES"));
-                ui.add_space(6.0);
-                if ui_kit::chip(ui, "Segmento", !panel.whole_scene)
-                    .on_hover_text("Solo el segmento bajo el cabezal")
+        .frame(ui_kit::card_frame().inner_margin(egui::Margin::same(12)));
+    let mut drag = ui_kit::HeaderDrag::default();
+    let response = ui_kit::placed(
+        window,
+        panel.position,
+        egui::Align2::CENTER_BOTTOM,
+        egui::vec2(0.0, -96.0),
+    )
+    .show(ctx, |ui| {
+        ui.set_width(width - 24.0);
+        ui.spacing_mut().item_spacing.y = 4.0;
+        drag = ui_kit::drag_handle(ui, HEADER_HEIGHT);
+        ui.horizontal(|ui| {
+            ui.set_min_height(HEADER_HEIGHT);
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui_kit::grip(ui, &drag);
+            ui.label(caption("ANIMACIONES"));
+            ui.add_space(6.0);
+            if ui_kit::chip(ui, "Segmento", !panel.whole_scene)
+                .on_hover_text("Solo el segmento bajo el cabezal")
+                .clicked()
+            {
+                panel.whole_scene = false;
+            }
+            if ui_kit::chip(ui, "Escena completa", panel.whole_scene).clicked() {
+                panel.whole_scene = true;
+            }
+            ui.add(
+                egui::TextEdit::singleline(&mut panel.query)
+                    .hint_text("Buscar objeto o animación")
+                    .desired_width(200.0),
+            );
+            ui.label(
+                egui::RichText::new(format!(
+                    "{in_view} {} · {} – {} s",
+                    if in_view == 1 { "objeto" } else { "objetos" },
+                    seconds(from),
+                    seconds(to)
+                ))
+                .size(12.0)
+                .color(palette::TEXT_FAINT),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
+                    .on_hover_text("Ocultar las animaciones · T")
                     .clicked()
                 {
-                    panel.whole_scene = false;
+                    actions.close = true;
                 }
-                if ui_kit::chip(ui, "Escena completa", panel.whole_scene).clicked() {
-                    panel.whole_scene = true;
-                }
-                ui.add(
-                    egui::TextEdit::singleline(&mut panel.query)
-                        .hint_text("Buscar objeto o animación")
-                        .desired_width(200.0),
-                );
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{in_view} {} · {} – {} s",
-                        if in_view == 1 { "objeto" } else { "objetos" },
-                        seconds(from),
-                        seconds(to)
-                    ))
-                    .size(12.0)
-                    .color(palette::TEXT_FAINT),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
-                        .on_hover_text("Ocultar las animaciones · T")
-                        .clicked()
-                    {
-                        actions.close = true;
-                    }
-                });
             });
-
-            ruler(ui, from, to, now, &mut actions);
-
-            ui_kit::field_frame()
-                .fill(palette::INK)
-                .inner_margin(egui::Margin::ZERO)
-                .show(ui, |ui| {
-                    if rows.is_empty() {
-                        ui.set_min_height(ROW_HEIGHT * 2.0);
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new(if panel.model.rows.is_empty() {
-                                "La escena no tiene animaciones con duración."
-                            } else if query.is_empty() {
-                                "Nada se anima en este tramo."
-                            } else {
-                                "Ninguna animación coincide con la búsqueda."
-                            })
-                            .size(12.0)
-                            .color(palette::TEXT_FAINT),
-                        );
-                        return;
-                    }
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    egui::ScrollArea::vertical()
-                        .max_height(ROW_HEIGHT * VISIBLE_ROWS as f32)
-                        .auto_shrink([false, true])
-                        .show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
-                            for (index, row) in rows[range.clone()].iter().enumerate() {
-                                row_view(
-                                    ui,
-                                    row,
-                                    range.start + index,
-                                    (from, to),
-                                    now,
-                                    state.selected,
-                                    authored.as_deref(),
-                                    &mut actions,
-                                );
-                            }
-                        });
-                });
         });
-    panel.height = response.map_or(0.0, |response| response.response.rect.height());
+
+        ruler(ui, from, to, now, &mut actions);
+
+        ui_kit::field_frame()
+            .fill(palette::INK)
+            .inner_margin(egui::Margin::ZERO)
+            .show(ui, |ui| {
+                if rows.is_empty() {
+                    ui.set_min_height(ROW_HEIGHT * 2.0);
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(if panel.model.rows.is_empty() {
+                            "La escena no tiene animaciones con duración."
+                        } else if query.is_empty() {
+                            "Nada se anima en este tramo."
+                        } else {
+                            "Ninguna animación coincide con la búsqueda."
+                        })
+                        .size(12.0)
+                        .color(palette::TEXT_FAINT),
+                    );
+                    return;
+                }
+                ui.spacing_mut().item_spacing.y = 0.0;
+                egui::ScrollArea::vertical()
+                    .max_height(ROW_HEIGHT * VISIBLE_ROWS as f32)
+                    .auto_shrink([false, true])
+                    .show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
+                        for (index, row) in rows[range.clone()].iter().enumerate() {
+                            row_view(
+                                ui,
+                                row,
+                                range.start + index,
+                                (from, to),
+                                now,
+                                state.selected,
+                                authored.as_deref(),
+                                &mut actions,
+                            );
+                        }
+                    });
+            });
+    });
+    let rect = response.map(|response| response.response.rect);
+    panel.position = ui_kit::moved(panel.position, rect, &drag, ctx.viewport_rect());
+    panel.height = match (panel.position, rect) {
+        (None, Some(rect)) => rect.height(),
+        _ => 0.0,
+    };
 
     if let Some(time) = actions.seek {
         timeline.seek_request = Some(time);
