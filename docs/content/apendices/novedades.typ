@@ -28,16 +28,24 @@ alguna escena mueve objetos por una trayectoria.
   ejecuta escenas en el navegador. Escribes Python en un editor con
   autocompletado, firmas y la documentación de la API al pasar el cursor, y
   la escena se graba en un `.gaanim` que el reproductor web muestra al lado;
-  un error marca su línea, también dentro de un módulo. Es un proyecto, como
-  en un editor de código: el explorador crea, sube (archivos o carpetas
-  enteras), renombra, mueve y elimina archivos, `main.py` importa los módulos
-  de sus carpetas, y las imágenes, la música y las fuentes que subes
-  (`Theme(font_dir="assets/fonts", …)`) se quedan en tu navegador.
-  `Ctrl+S` guarda y ejecuta, los ejemplos de la galería se cargan en
-  `main.py`, *Compartir* copia un enlace con los archivos de texto y
-  *Descargar* guarda el proyecto en un `.zip` o el `.gaanim`. Usa Pyodide (Python 3.14 en
-  WebAssembly); lo que necesita FFmpeg, como los vídeos, solo funciona en la
-  aplicación.
+  un error marca su línea, también dentro de un módulo. Cada trabajo es un
+  proyecto, como en un editor de código: el explorador crea, sube (archivos o
+  carpetas enteras), renombra, mueve y elimina archivos, `main.py` importa los
+  módulos de sus carpetas, y las imágenes, la música y las fuentes que subes
+  (`Theme(font_dir="assets/fonts", …)`) se quedan en tu navegador. Hay varios
+  proyectos: se crean vacíos o desde un ejemplo de la galería, se duplican y
+  se abren desde un `.zip`, también la carpeta de un proyecto de la
+  aplicación. Los paquetes de PyPI se declaran en `pyproject.toml` (la lista
+  de `uv add`) o en `requirements.txt` y se instalan con micropip.
+  `Ctrl+S` guarda y ejecuta, *En vivo* ejecuta al dejar de escribir, la
+  grabación muestra su avance y su tiempo, y *Detener* cambia a un Python que
+  ya se estaba cargando. *Compartir* copia un enlace con los archivos de
+  texto, y *Descargar* convierte la grabación en vídeo MP4 o WebM, con su
+  audio, o en GIF, en el navegador, o guarda el `.gaanim` o el proyecto en un
+  `.zip`. Tiene tema claro y oscuro, el mismo que esta documentación. Usa
+  Pyodide (Python 3.14 en WebAssembly); lo que necesita FFmpeg, como los
+  vídeos como recurso, solo funciona en la aplicación. Ver
+  #link("/empezar/playground/")[El playground].
 - *Insertar*, en el playground, prepara la escena para un blog o un sitio
   web: descarga el `.gaanim` con el nombre que elijas, compone el `<iframe>`
   con la dirección donde lo publicarás y la proporción de la escena, y muestra
