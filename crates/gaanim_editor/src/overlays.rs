@@ -156,7 +156,7 @@ fn logical_grid_step(pixels_per_unit: f64) -> f64 {
 }
 
 /// The 1, 2 or 5 times a power of ten at or above `raw_step`.
-fn nice_step(raw_step: f64) -> f64 {
+pub(crate) fn nice_step(raw_step: f64) -> f64 {
     if !raw_step.is_finite() || raw_step <= 0.0 {
         return 1.0;
     }
@@ -174,7 +174,7 @@ fn nice_step(raw_step: f64) -> f64 {
     nice * magnitude
 }
 
-fn format_logical_value(value: f64, step: f64) -> String {
+pub(crate) fn format_logical_value(value: f64, step: f64) -> String {
     let decimals = if step >= 1.0 {
         0
     } else {
@@ -354,6 +354,7 @@ pub fn overlays_settings_ui_system(
     mut inspector: ResMut<crate::inspector::InspectorPanel>,
     mut console: ResMut<crate::console_panel::ConsolePanel>,
     mut capture: ResMut<crate::frame_capture::FrameCapture>,
+    mut animations: ResMut<crate::animation_timeline::AnimationTimeline>,
 ) {
     if presentation.active || !overlays.enabled {
         return;
@@ -533,6 +534,22 @@ pub fn overlays_settings_ui_system(
                         .clicked()
                         {
                             console.open = !console.open;
+                        }
+                        if pill_toggle(
+                            ui,
+                            Icon::Timeline,
+                            Some("Animaciones"),
+                            animations.open,
+                            palette::ACCENT,
+                            HEIGHT,
+                        )
+                        .on_hover_text(
+                            "Qué anima cada objeto y cuándo · T\n\
+                             Clic en un bloque: ir a su inicio · doble clic: abrir su play.",
+                        )
+                        .clicked()
+                        {
+                            animations.open = !animations.open;
                         }
                         if crate::frame_capture::AVAILABLE
                             && icon_button_sized(
@@ -943,6 +960,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
         "Seleccionar e inspeccionar el objeto bajo el cursor",
     ),
     ("J", "Mostrar u ocultar la consola"),
+    ("T", "Mostrar u ocultar las animaciones"),
     ("Ctrl+Mayús+S", "Guardar el fotograma actual como PNG"),
     ("Rueda", "Acercar o alejar hacia el cursor"),
     ("W A S D", "Mover la cámara"),

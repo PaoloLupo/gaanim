@@ -87,6 +87,8 @@ pub(crate) enum Icon {
     Console,
     /// Viewfinder corners around a dot: save the frame on screen.
     Capture,
+    /// Staggered bars on tracks: the animation timeline.
+    Timeline,
 }
 
 /// How an icon button presents its state.
@@ -671,6 +673,16 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
         Icon::Inspect => {
             painter.circle_stroke(p(-0.08, -0.08), s * 0.26, stroke);
             painter.line_segment([p(0.12, 0.12), p(0.40, 0.40)], stroke);
+        }
+        Icon::Timeline => {
+            let thin = Stroke::new(stroke.width * 0.8, color);
+            for (y, from, to) in [(-0.26, -0.42, 0.05), (0.0, -0.15, 0.3), (0.26, 0.1, 0.42)] {
+                painter.line_segment(
+                    [p(from, y), p(to, y)],
+                    Stroke::new(stroke.width * 1.6, color),
+                );
+            }
+            painter.line_segment([p(-0.05, -0.44), p(-0.05, 0.44)], thin);
         }
         Icon::Capture => {
             for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
