@@ -5958,6 +5958,11 @@ impl SceneModel {
             }
         }
 
+        let stack = if super::profile::tracks_script_lines() {
+            super::profile::call_stack()
+        } else {
+            Vec::new()
+        };
         let mut guard = self.state.lock().expect("canvas state poisoned");
         for id in camera_captures {
             guard.active_mut().ops.push(Op::CaptureCameraState { id });
@@ -5965,6 +5970,7 @@ impl SceneModel {
         if time_maps.iter().any(Option::is_some) {
             guard.active_mut().ops.push(Op::TimeMaps(time_maps));
         }
+        guard.record_op_location(stack);
         if !advance {
             guard.active_mut().ops.push(Op::Launch(builders));
             return Ok(());
