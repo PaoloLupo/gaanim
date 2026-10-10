@@ -2063,6 +2063,13 @@ línea del `play` y las líneas desde las que se llamó. Un clic en el nombre de
 selecciona el objeto y un doble clic abre la línea que lo creó. Mientras está
 oculto, el panel no cuesta nada por fotograma.
 
+El inspector aparece arriba a la derecha y el panel de animaciones sobre la
+barra de reproducción. Arrastra cualquiera de los dos por su cabecera (la fila
+con los puntos) para llevarlo a otro sitio de la ventana; se queda ahí al
+cambiar de selección y nunca sale de la pantalla. Un doble clic en la
+cabecera lo devuelve a su sitio. Mientras el panel de animaciones está en su
+sitio, la consola se coloca encima de él.
+
 *Abrir* usa el comando de `GAANIM_EDITOR` (por ejemplo
 `code --goto {file}:{line}`); sin ella, el primero que encuentre en el `PATH`
 entre VS Code (`code`), Cursor, VSCodium, Zed y Sublime Text, y si no hay

@@ -87,6 +87,8 @@ pub(crate) enum Icon {
     Console,
     /// Viewfinder corners around a dot: save the frame on screen.
     Capture,
+    /// Two columns of dots: drag to move a panel.
+    Grip,
     /// Staggered bars on tracks: the animation timeline.
     Timeline,
 }
@@ -674,6 +676,13 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
             painter.circle_stroke(p(-0.08, -0.08), s * 0.26, stroke);
             painter.line_segment([p(0.12, 0.12), p(0.40, 0.40)], stroke);
         }
+        Icon::Grip => {
+            for x in [-0.14, 0.14] {
+                for y in [-0.28, 0.0, 0.28] {
+                    painter.circle_filled(p(x, y), s * 0.075, color);
+                }
+            }
+        }
         Icon::Timeline => {
             let thin = Stroke::new(stroke.width * 0.8, color);
             for (y, from, to) in [(-0.26, -0.42, 0.05), (0.0, -0.15, 0.3), (0.26, 0.1, 0.42)] {
@@ -1048,4 +1057,130 @@ pub(crate) fn caption(text: &str) -> egui::RichText {
         .strong()
         .extra_letter_spacing(1.2)
         .color(palette::TEXT_FAINT)
+}
+
+/// What happened this frame on the header that drags a panel's window.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct HeaderDrag {
+    /// How far the header was dragged.
+    pub delta: Vec2,
+    /// A double click: dock the window again.
+    pub dock: bool,
+    /// Under the pointer or being dragged.
+    pub active: bool,
+}
+
+/// Make the next `height` points of `ui`, across its width, the handle that
+/// drags its window. Call it before drawing the header: the controls drawn
+/// after it stay clickable on top of it.
+pub(crate) fn drag_handle(ui: &mut Ui, height: f32) -> HeaderDrag {
+    let row = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), height));
+    let handle = ui
+        .interact(row, ui.id().with("drag_handle"), Sense::click_and_drag())
+        .on_hover_cursor(egui::CursorIcon::Grab)
+        .on_hover_text("Arrastra para mover · doble clic: volver a su sitio");
+    let dragged = handle.dragged();
+    if dragged {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
+    HeaderDrag {
+        delta: if dragged {
+            handle.drag_delta()
+        } else {
+            Vec2::ZERO
+        },
+        dock: handle.double_clicked(),
+        active: dragged || handle.hovered(),
+    }
+}
+
+/// The dots that show a header drags its window.
+pub(crate) fn grip(ui: &mut Ui, drag: &HeaderDrag) {
+    let (rect, _) = ui.allocate_exact_size(vec2(10.0, 14.0), Sense::hover());
+    let color = if drag.active {
+        palette::TEXT_MUTED
+    } else {
+        palette::TEXT_FAINT
+    };
+    paint_icon(ui.painter(), rect, Icon::Grip, color);
+}
+
+/// `window` at `position`, where its header dragged it, or docked at
+/// `align` and `offset` while `position` is `None`.
+pub(crate) fn placed<'a>(
+    window: egui::Window<'a>,
+    position: Option<Pos2>,
+    align: Align2,
+    offset: Vec2,
+) -> egui::Window<'a> {
+    match position {
+        // Only the header moves it, so text inside stays selectable.
+        Some(position) => window.movable(false).current_pos(position),
+        None => window.anchor(align, offset),
+    }
+}
+
+/// Where a draggable window goes after `drag`: docked again (`None`) on a
+/// double click, or moved from where it was drawn (`rect`), kept inside
+/// `screen`, which may have shrunk since.
+pub(crate) fn moved(
+    position: Option<Pos2>,
+    rect: Option<Rect>,
+    drag: &HeaderDrag,
+    screen: Rect,
+) -> Option<Pos2> {
+    if drag.dock {
+        return None;
+    }
+    let rect = rect?;
+    let position = match position {
+        None if drag.delta == Vec2::ZERO => return None,
+        None => rect.min,
+        Some(position) => position,
+    } + drag.delta;
+    let max = (screen.max - rect.size()).max(screen.min);
+    Some(position.clamp(screen.min, max))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_header_drags_its_window_and_a_double_click_docks_it() {
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0));
+        let docked = Rect::from_min_size(pos2(988.0, 62.0), vec2(280.0, 400.0));
+        let drag = |x: f32, y: f32| HeaderDrag {
+            delta: vec2(x, y),
+            ..HeaderDrag::default()
+        };
+        let still = HeaderDrag::default();
+        // Docked until dragged; the first drag starts where it was drawn.
+        assert_eq!(moved(None, Some(docked), &still, screen), None);
+        let position = moved(None, Some(docked), &drag(-300.0, 20.0), screen);
+        assert_eq!(position, Some(pos2(688.0, 82.0)));
+        // Later drags add up, and it stays where it was left.
+        let rect = Rect::from_min_size(position.unwrap(), docked.size());
+        assert_eq!(
+            moved(position, Some(rect), &drag(-10.0, 0.0), screen),
+            Some(pos2(678.0, 82.0))
+        );
+        assert_eq!(moved(position, Some(rect), &still, screen), position);
+        // It never leaves the screen, also when the screen shrinks.
+        assert_eq!(
+            moved(position, Some(rect), &drag(-5000.0, 5000.0), screen),
+            Some(pos2(0.0, 320.0))
+        );
+        let small = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 300.0));
+        assert_eq!(
+            moved(position, Some(rect), &still, small),
+            Some(pos2(520.0, 0.0))
+        );
+        // A double click docks it again.
+        let dock = HeaderDrag {
+            dock: true,
+            ..HeaderDrag::default()
+        };
+        assert_eq!(moved(position, Some(rect), &dock, screen), None);
+    }
 }
