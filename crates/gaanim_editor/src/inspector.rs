@@ -337,7 +337,7 @@ fn header(ui: &mut egui::Ui, object: Option<&AuthoredObject>, id: Option<&Mobjec
 }
 
 /// `circle`, or `circle "logo"` when the script named it.
-fn object_title(object: &AuthoredObject) -> String {
+pub(crate) fn object_title(object: &AuthoredObject) -> String {
     match &object.name {
         Some(name) => format!("{} \"{name}\"", object.kind),
         None => object.kind.clone(),
@@ -659,15 +659,18 @@ mod tests {
             ))
             .id();
         let stray = world.spawn_empty().id();
-        let authored = AuthoredObjects::new(std::collections::HashMap::from([(
-            id,
-            AuthoredObject {
-                kind: "text".to_owned(),
-                name: None,
-                location: None,
-                callers: Vec::new(),
-            },
-        )]));
+        let authored = AuthoredObjects::new(gaanim_scene::AuthoredIndex {
+            objects: std::collections::HashMap::from([(
+                id,
+                AuthoredObject {
+                    kind: "text".to_owned(),
+                    name: None,
+                    location: None,
+                    callers: Vec::new(),
+                },
+            )]),
+            plays: Default::default(),
+        });
         world.insert_resource(authored);
         let found = world
             .run_system_once(

@@ -2011,7 +2011,7 @@ capturas ni en la exportación. `O` o `Esc` la ocultan.
 El editor recuerda qué overlays dejaste activados entre sesiones; el modo en
 sí siempre empieza oculto.
 
-=== Inspector y consola
+=== Inspector, consola y animaciones
 
 Con los overlays visibles, un clic en la vista previa selecciona un objeto y el
 *Inspector* (botón de la barra) muestra:
@@ -2048,6 +2048,20 @@ copia lo listado como en la terminal y limpia la lista. Por defecto muestra
 solo la última ejecución del script; *Historial* conserva las anteriores.
 Mientras está oculta, una insignia arriba a la izquierda cuenta los errores y
 avisos de la última ejecución y la abre con un clic.
+
+*Animaciones* (`T`, o el botón de la barra) abre sobre la barra de
+reproducción una línea de tiempo de la escena: una fila por objeto animado,
+más la de la cámara, y un bloque por cada `play` que lo anima, coloreado por
+tipo (movimiento, transformación, aparición, estilo, trazo o cámara). Las
+animaciones de las letras de un texto aparecen en la fila del texto. Muestra
+el segmento bajo el cabezal; *Escena completa* muestra toda la escena, y la
+búsqueda filtra por objeto o por animación. Un clic o un arrastre en la regla
+mueve el cabezal. Un clic en un bloque pausa, lleva el cabezal a su inicio y
+selecciona el objeto para verlo en el inspector; un doble clic abre la línea
+del `play`. Al pasar el cursor, el bloque muestra su duración, su curva, la
+línea del `play` y las líneas desde las que se llamó. Un clic en el nombre de la fila
+selecciona el objeto y un doble clic abre la línea que lo creó. Mientras está
+oculto, el panel no cuesta nada por fotograma.
 
 *Abrir* usa el comando de `GAANIM_EDITOR` (por ejemplo
 `code --goto {file}:{line}`); sin ella, el primero que encuentre en el `PATH`

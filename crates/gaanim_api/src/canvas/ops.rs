@@ -25,6 +25,14 @@ use crate::canvas::types::{LayoutTreeSnapshot, ObjectSpec};
 // Shared state
 // -----------------------------------------------------------------------
 
+/// The key of operation `op_index` of `segment`, which its clips carry as
+/// their [`Timeline::clip_origins`](gaanim_timeline::timeline::Timeline):
+/// stable while the segment's earlier operations stay, as a reload that
+/// reuses the segment keeps them.
+pub(crate) fn op_origin(segment: super::segment::SegmentId, op_index: usize) -> u64 {
+    (u64::from(segment.raw()) << 32) | (op_index as u64 & 0xFFFF_FFFF)
+}
+
 /// Mutable state shared by a [`SceneModel`](super::SceneModel) and the handles it
 /// creates. This lets fluent object setters and auto-queued animations update
 /// the same deferred operation stream that will later be compiled.
@@ -60,6 +68,9 @@ pub(crate) struct CanvasState {
     /// and moving a line must not change the fingerprints that let a reload
     /// reuse work.
     pub(crate) object_locations: HashMap<ObjectId, Vec<gaanim_core::console::ScriptLocation>>,
+    /// The script lines of each `play`, by [`op_origin`], for the editor's
+    /// animation timeline; kept out of the ops for the same reason.
+    pub(crate) op_locations: HashMap<u64, Vec<gaanim_core::console::ScriptLocation>>,
     /// The shared scene that owns this state, which drawables compile to
     /// measure themselves.
     pub(crate) owner: Option<std::sync::Weak<Mutex<crate::canvas::SceneModel>>>,
@@ -124,6 +135,7 @@ impl CanvasState {
             object_specs: HashMap::new(),
             frozen_spawn_specs: HashMap::new(),
             object_locations: HashMap::new(),
+            op_locations: HashMap::new(),
             owner: None,
             polls: Vec::new(),
             poll_session: None,
@@ -157,6 +169,17 @@ impl CanvasState {
 
     pub fn active_mut(&mut self) -> &mut Segment {
         &mut self.segments[self.active_idx]
+    }
+
+    /// Keep `stack`, the script lines of the operation about to be pushed to
+    /// the active segment, under the key its clips will carry.
+    pub(crate) fn record_op_location(&mut self, stack: Vec<gaanim_core::console::ScriptLocation>) {
+        if stack.is_empty() {
+            return;
+        }
+        let segment = self.active();
+        let key = op_origin(segment.id, segment.ops.len());
+        self.op_locations.insert(key, stack);
     }
 
     pub fn next_object_id(&mut self) -> ObjectId {
