@@ -21,12 +21,18 @@ export const FORMATS = {
 };
 
 let module = null;
-// The embed player's module, loaded once from the player folder.
+// The embed player's module, loaded once from the player folder: its
+// bindings and module of one build (`pkg/version.txt`, written by
+// scripts/build_web.py), whatever the browser cached.
 async function playerModule(playerUrl) {
   if (!module) {
     module = (async () => {
-      const glue = await import(new URL("insertar/pkg/gaanim_embed.js", playerUrl).href);
-      const response = await fetch(new URL("insertar/pkg/gaanim_embed_bg.wasm.gz", playerUrl));
+      const build = await fetch(new URL("insertar/pkg/version.txt", playerUrl), { cache: "no-cache" })
+        .then((response) => (response.ok ? response.text() : ""))
+        .catch(() => "");
+      const query = build.trim() ? `?v=${build.trim()}` : "";
+      const glue = await import(new URL(`insertar/pkg/gaanim_embed.js${query}`, playerUrl).href);
+      const response = await fetch(new URL(`insertar/pkg/gaanim_embed_bg.wasm.gz${query}`, playerUrl));
       let bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
         const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));

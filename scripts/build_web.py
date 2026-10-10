@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import os
 import re
 import shutil
@@ -120,7 +121,32 @@ def package(wasm: Path, out: Path, page: Path) -> str:
     with module.open("rb") as source, gzip.open(compressed, "wb", compresslevel=9) as target:
         shutil.copyfileobj(source, target)
     module.unlink()
+    version(out, wasm.stem, hashlib.sha256(compressed.read_bytes()).hexdigest()[:12])
     return f"wasm {size / 1e6:.1f} MB, {compressed.stat().st_size / 1e6:.1f} MB compressed"
+
+
+def version(out: Path, stem: str, digest: str) -> None:
+    """Ask for the page's script, the bindings and the module by their build
+    (`?v=digest`): cached apart, a browser could otherwise run new bindings
+    with an old module ("__wbindgen_… is not a function") after a deploy.
+    `pkg/version.txt` names the build for other pages that load the module
+    (the playground's video export)."""
+    rewrites = {
+        "main.js": [
+            (f"pkg/{stem}.js\"", f"pkg/{stem}.js?v={digest}\""),
+            (f"pkg/{stem}_bg.wasm.gz\"", f"pkg/{stem}_bg.wasm.gz?v={digest}\""),
+        ],
+        "index.html": [('src="main.js"', f'src="main.js?v={digest}"')],
+    }
+    for name, pairs in rewrites.items():
+        path = out / name
+        text = path.read_text(encoding="utf-8")
+        for old, new in pairs:
+            if old not in text:
+                raise SystemExit(f"{path}: {old} not found; update scripts/build_web.py")
+            text = text.replace(old, new)
+        path.write_text(text, encoding="utf-8", newline="\n")
+    (out / "pkg" / "version.txt").write_text(digest, encoding="utf-8")
 
 
 if __name__ == "__main__":

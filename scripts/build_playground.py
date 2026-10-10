@@ -131,6 +131,28 @@ def content_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
 
 
+def version_page(out: Path) -> None:
+    """Ask for the page's script, styles and video module by their content
+    (`?v=`): cached apart, a browser could otherwise run a new page with an
+    old script after a deploy. The workers carry the release's version."""
+    digest = hashlib.sha256(b"".join((out / name).read_bytes() for name in PAGE_FILES)).hexdigest()[:12]
+    rewrites = {
+        "index.html": [
+            ('href="playground.css"', f'href="playground.css?v={digest}"'),
+            ('src="main.js"', f'src="main.js?v={digest}"'),
+        ],
+        "main.js": [('from "./video.js"', f'from "./video.js?v={digest}"')],
+    }
+    for name, pairs in rewrites.items():
+        path = out / name
+        text = path.read_text(encoding="utf-8")
+        for old, new in pairs:
+            if old not in text:
+                raise SystemExit(f"{path}: {old} not found; update scripts/build_playground.py")
+            text = text.replace(old, new)
+        path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def write_wheel(out: Path, module: Path, version: str) -> str:
     """A Pyodide wheel of the `gaanim` package with its native module.
 
@@ -238,6 +260,7 @@ def main() -> int:
     )
     for name in PAGE_FILES:
         shutil.copy(WEB / name, out / name)
+    version_page(out)
     for name in ICONS:
         shutil.copy(ROOT / "docs" / "assets" / "brand" / name, out / name)
     (out / "fonts").mkdir()
