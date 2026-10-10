@@ -143,6 +143,16 @@ mod web {
             Ok(true)
         }
 
+        /// Draw the frame shown at `time` even when it is the one on the
+        /// canvas already: a video export captures every frame it asks for.
+        #[wasm_bindgen(js_name = drawFrame)]
+        pub fn draw_frame(&mut self, time: f64) -> Result<bool, JsValue> {
+            if let Some(file) = self.file.as_mut() {
+                file.shown = None;
+            }
+            self.draw(time)
+        }
+
         /// The byte ranges to download, as start and end pairs, and forget
         /// them.
         #[wasm_bindgen(js_name = takeWanted)]

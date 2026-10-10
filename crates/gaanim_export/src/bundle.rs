@@ -20,6 +20,18 @@ use crate::config::ExportTelemetry;
 use crate::encoder::{ExportError, Result};
 use crate::exporter::{check_custom_animation_errors, frame_camera};
 
+/// Called during a recording with the instants recorded so far and their
+/// total, every few instants and at the end. The playground, which records on
+/// its only thread, tells its page how far the recording went through it.
+#[derive(Clone)]
+pub struct RecordingCallback(pub std::sync::Arc<dyn Fn(u64, u64) + Send + Sync>);
+
+impl std::fmt::Debug for RecordingCallback {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RecordingCallback")
+    }
+}
+
 /// Settings of a bundle recording.
 #[derive(Clone, Debug)]
 pub struct BundleConfig {
@@ -43,6 +55,8 @@ pub struct BundleConfig {
     /// Render and store the cover image. Without a GPU the bundle is still
     /// recorded, without one.
     pub thumbnail: bool,
+    /// Hears how far the recording went.
+    pub on_progress: Option<RecordingCallback>,
 }
 
 impl BundleConfig {
@@ -63,6 +77,7 @@ impl BundleConfig {
             force_second_world: false,
             thumbnail_time: None,
             thumbnail: true,
+            on_progress: None,
         }
     }
 }
@@ -140,22 +155,29 @@ pub fn recording_times(timeline: &Timeline, fps: u32) -> Vec<f64> {
     RecordingPlan::new(timeline, fps).times()
 }
 
-/// Terminal bar, editor telemetry and export-worker marker for a recording.
+/// Terminal bar, editor telemetry, export-worker marker and the caller's
+/// callback for a recording.
 struct RecordingProgress {
     bar: indicatif::ProgressBar,
     telemetry: Option<ExportTelemetry>,
+    callback: Option<RecordingCallback>,
     total: u64,
     done: std::cell::Cell<u64>,
     window: std::cell::Cell<Instant>,
 }
 
 impl RecordingProgress {
-    fn new(total: u64, telemetry: Option<ExportTelemetry>) -> Self {
+    fn new(
+        total: u64,
+        telemetry: Option<ExportTelemetry>,
+        callback: Option<RecordingCallback>,
+    ) -> Self {
         let bar = crate::exporter::create_progress_bar(total);
         bar.set_prefix("record");
         Self {
             bar,
             telemetry,
+            callback,
             total,
             done: std::cell::Cell::new(0),
             window: std::cell::Cell::new(Instant::now()),
@@ -171,6 +193,11 @@ impl RecordingProgress {
             self.bar
                 .set_message(format!("{:.1} fps", 30.0 / elapsed.as_secs_f64().max(1e-9)));
             crate::exporter::export_progress(&self.telemetry, done, self.total);
+        }
+        if let Some(callback) = &self.callback
+            && (done.is_multiple_of(10) || done == self.total)
+        {
+            (callback.0)(done, self.total);
         }
     }
 
@@ -608,7 +635,7 @@ where
     if let Some(telemetry) = &telemetry {
         telemetry.set_total_frames(work);
     }
-    let progress = RecordingProgress::new(work, telemetry);
+    let progress = RecordingProgress::new(work, telemetry, config.on_progress.clone());
     let cover = config.thumbnail.then(|| {
         ThumbnailPicker::new(ThumbnailPick::new(
             config.thumbnail_time,

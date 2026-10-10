@@ -12,7 +12,7 @@ use gaanim_export::prelude::{ExportError, export_scene_direct};
 use crate::canvas::SceneModel;
 use crate::runtime::replay_canvas_into;
 
-pub use gaanim_export::bundle::BundleConfig;
+pub use gaanim_export::bundle::{BundleConfig, RecordingCallback};
 pub use gaanim_export::encoder::{EncodingSpeed, VideoEncoder, detect_best_encoder};
 pub use gaanim_export::prelude::{
     AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportFormat, OutputFit,

@@ -52,7 +52,10 @@ function run(name, code, { files = {}, check = () => null, failsAt = null, fails
   }
   pyodide.FS.writeFile(`${PROJECT}/main.py`, code);
   const started = performance.now();
-  const value = runner.get("run")(30, true, () => {});
+  // The phases the page hears: the recording's, with how far it went.
+  const recorded = [];
+  const report = (phase, done = 0, total = 0) => phase === "record" && recorded.push([done, total]);
+  const value = runner.get("run")(30, true, report);
   const result = value.toJs({ dict_converter: Object.fromEntries });
   const seconds = ((performance.now() - started) / 1000).toFixed(2);
   if (failsAt !== null) {
@@ -76,6 +79,13 @@ function run(name, code, { files = {}, check = () => null, failsAt = null, fails
   if (!(result.width > 0 && result.height > 0 && result.duration >= 0)) {
     failures++;
     console.log(`FAIL ${name}: no size or duration in ${JSON.stringify(result)}`);
+    return;
+  }
+  // The page shows the recording's progress: it must reach its end.
+  const [done, total] = recorded.at(-1) ?? [0, 0];
+  if (!(total > 0 && done === total)) {
+    failures++;
+    console.log(`FAIL ${name}: the recording reported ${JSON.stringify(recorded)}`);
     return;
   }
   const bundle = pyodide.FS.readFile("/tmp/escena.gaanim");
@@ -189,6 +199,26 @@ scene.render()
 `,
   { files: { "assets/fonts/VictorMono.ttf": readFileSync(join(dist, "fonts", "VictorMono-VariableFont.ttf")) } },
 );
+
+// The packages a project asks for: its pyproject.toml (gaanim left out) and
+// its requirements.txt (comments and pip options left out). Reading only:
+// installing needs PyPI.
+{
+  const sync = runner.get("sync_files");
+  sync(pyodide.toPy(["pyproject.toml", "requirements.txt"]), pyodide.toPy([]));
+  pyodide.FS.writeFile(`${PROJECT}/pyproject.toml`, '[project]\nname = "x"\ndependencies = ["gaanim", "rich>=13"]\n');
+  pyodide.FS.writeFile(`${PROJECT}/requirements.txt`, "# para el gráfico\nmakefun\n-r otros.txt\n\nrich>=13\n");
+  const read = runner.get("requirements");
+  const wanted = read().toJs();
+  const expected = ["rich>=13", "makefun"];
+  if (JSON.stringify(wanted) === JSON.stringify(expected)) {
+    console.log("ok   requirements");
+  } else {
+    failures++;
+    console.log(`FAIL requirements: expected ${JSON.stringify(expected)}, got ${JSON.stringify(wanted)}`);
+  }
+  sync(pyodide.toPy([]), pyodide.toPy([]));
+}
 
 if (failures) {
   console.log(`${failures} failed`);

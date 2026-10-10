@@ -10,9 +10,9 @@
 //! interpreter.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use gaanim_api::export::{BundleConfig, record_canvas};
+use gaanim_api::export::{BundleConfig, RecordingCallback, record_canvas};
 use gaanim_api::host::{self, ReloadPayload};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -37,12 +37,13 @@ fn begin(assets_changed: bool) {
 }
 
 /// Record the scene the script submitted into a bundle at `path`, at `fps`
-/// frames per second. Returns the recording's size in pixels and its
-/// duration in seconds, `(width, height, duration)`, with which the
-/// playground sizes the frame that embeds it.
+/// frames per second; `progress(done, total)`, when given, hears how far the
+/// recording went. Returns the recording's size in pixels and its duration
+/// in seconds, `(width, height, duration)`, with which the playground sizes
+/// the frame that embeds it.
 #[pyfunction]
-#[pyo3(name = "_playground_record", signature = (path, fps = 30))]
-fn record(path: PathBuf, fps: u32) -> PyResult<(u32, u32, f64)> {
+#[pyo3(name = "_playground_record", signature = (path, fps = 30, progress = None))]
+fn record(path: PathBuf, fps: u32, progress: Option<Py<PyAny>>) -> PyResult<(u32, u32, f64)> {
     host::set_host_sender(None);
     let receiver = SUBMITTED
         .lock()
@@ -66,6 +67,14 @@ fn record(path: PathBuf, fps: u32) -> PyResult<(u32, u32, f64)> {
     config.height = height;
     // The cover image needs a GPU; the playground has none in Python.
     config.thumbnail = false;
+    config.on_progress = progress.map(|callback| {
+        RecordingCallback(Arc::new(move |done, total| {
+            // A failing callback must not stop the recording.
+            Python::attach(|py| {
+                let _ = callback.call1(py, (done, total));
+            });
+        }))
+    });
     record_canvas(canvas, config).map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
     Ok((width, height, duration))
 }

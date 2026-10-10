@@ -125,6 +125,10 @@ def resolve(index, label):
     completion = _completions[index]
     if completion.name_with_symbols != label:
         return None
+    if completion.type == "param":
+        # A keyword argument: its type and default. Jedi would give the whole
+        # function's documentation, which buried the list in a narrow editor.
+        return {"detail": _shown(completion.description), "signatures": [], "doc": ""}
     return {
         "detail": _shown(completion.description),
         "signatures": _signatures(completion),
@@ -157,30 +161,62 @@ def hover(path, code, line, column):
     }
 
 
+def _split_param(text):
+    """`name: type=default` as (name, type, default), split where `:` and `=`
+    are outside brackets and strings."""
+    depth, quote, colon, equals = 0, None, -1, -1
+    for at, char in enumerate(text):
+        if quote:
+            quote = None if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif depth == 0 and char == ":" and colon < 0 and equals < 0:
+            colon = at
+        elif depth == 0 and char == "=" and equals < 0:
+            equals = at
+    name_end = colon if colon >= 0 else (equals if equals >= 0 else len(text))
+    name = text[:name_end].strip()
+    kind = text[colon + 1 : equals if equals >= 0 else len(text)].strip() if colon >= 0 else ""
+    default = text[equals + 1 :].strip() if equals >= 0 else ""
+    return name, kind, default
+
+
 def signatures(path, code, line, column):
+    """The signatures of the call at the cursor, short: each parameter by its
+    name and default, its type apart (`types`), shown for the parameter being
+    written. Scene's full signature filled the editor and covered the
+    completions."""
     try:
         found = _script(path, code).get_signatures(line, column)
     except Exception:
         return None
     result = []
     for signature in found[:5]:
-        label = _shown(signature.to_string())
-        # Monaco highlights parameters by their offsets in the label.
-        params, start = [], label.find("(") + 1
-        for param in signature.params:
-            text = _shown(param.to_string())
-            at = label.find(text, start)
-            if at < 0:
-                params.append([0, 0])
-                continue
-            params.append([at, at + len(text)])
-            start = at + len(text)
+        label = f"{signature.name}("
+        params, types = [], []
+        for index, param in enumerate(signature.params):
+            name, kind, default = _split_param(_shown(param.to_string()))
+            if index:
+                label += ", "
+            text = f"{name}={default}" if default else name
+            # Monaco highlights parameters by their offsets in the label.
+            params.append([len(label), len(label) + len(text)])
+            label += text
+            types.append(f"{name}: {kind}" if kind else "")
+        label += ")"
+        doc = _doc(signature)
         result.append(
             {
                 "label": label,
                 "params": params,
+                "types": types,
                 "index": signature.index,
-                "doc": _doc(signature),
+                # The first paragraph; hovering shows the rest.
+                "doc": doc.split("\n\n")[0] if doc else "",
             }
         )
     return result

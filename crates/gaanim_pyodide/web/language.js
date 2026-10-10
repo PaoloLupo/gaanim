@@ -20,7 +20,8 @@ async function init(config) {
   const stubs = await fetch(new URL(config.stubs, config.base));
   if (!stubs.ok) throw new Error(`stubs.zip: HTTP ${stubs.status}`);
   pyodide.unpackArchive(await stubs.arrayBuffer(), "zip", { extractDir: "/home/pyodide/stubs" });
-  const source = await (await fetch(new URL("language.py", config.base))).text();
+  // Revalidated: a cached language.py may be older than this worker.
+  const source = await (await fetch(new URL("language.py", config.base), { cache: "no-cache" })).text();
   const namespace = pyodide.toPy({});
   pyodide.runPython(source, { globals: namespace, filename: "language.py" });
   services = namespace;

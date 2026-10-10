@@ -19,6 +19,8 @@
 //   preview of that player.
 // Nothing leaves the browser: the page is static files.
 
+import { FORMATS, evenSize, exportVideo, supportedCodec } from "./video.js";
+
 const MONACO = "https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min";
 const KEYS = {
   // main.py before projects had files of their own; read once, to migrate.
@@ -29,6 +31,10 @@ const KEYS = {
   tabs: "gaanim-playground-tabs",
   expanded: "gaanim-playground-expanded",
   explorer: "gaanim-playground-explorer",
+  projects: "gaanim-playground-projects",
+  current: "gaanim-playground-current",
+  live: "gaanim-playground-live",
+  video: "gaanim-playground-video",
 };
 // The file that runs.
 const ENTRY = "main.py";
@@ -43,6 +49,9 @@ const MAX_FILE = 80 * 1024 * 1024;
 let syntaxTimer = 0;
 let languageTimer = 0;
 let languageReady = false;
+// Live mode: the scene runs a moment after typing stops.
+let live = false;
+let liveTimer = 0;
 // The project: files by path ({ path, text } or { path, bytes, type, size,
 // modified }) and folders, empty ones included.
 const project = new Map();
@@ -54,10 +63,24 @@ const ui = {
   stop: $("stop"),
   share: $("share"),
   fps: $("fps"),
-  examples: $("examples"),
   downloadToggle: $("download-toggle"),
   downloadMenu: $("download-menu"),
   downloadProject: $("download-project"),
+  downloadVideo: $("download-video"),
+  live: $("live"),
+  projectSwitch: $("project-switch"),
+  projectName: $("project-name"),
+  zipInput: $("zip-input"),
+  videoDialog: $("video-dialog"),
+  videoClose: $("video-close"),
+  videoFormat: $("video-format"),
+  videoHeight: $("video-height"),
+  videoMeta: $("video-meta"),
+  videoWarning: $("video-warning"),
+  videoProgress: $("video-progress"),
+  videoStatus: $("video-status"),
+  videoCancel: $("video-cancel"),
+  videoStart: $("video-start"),
   downloadBundle: $("download-bundle"),
   explorer: $("explorer"),
   explorerToggle: $("explorer-toggle"),
@@ -76,6 +99,7 @@ const ui = {
   player: $("player"),
   overlay: $("player-overlay"),
   overlayText: $("player-overlay-text"),
+  overlayHint: $("player-overlay-hint"),
   console: $("console"),
   clearConsole: $("clear-console"),
   status: $("status"),
@@ -85,6 +109,7 @@ const ui = {
   toast: $("toast"),
   dropping: $("dropping"),
   embed: $("embed"),
+  theme: $("theme"),
   embedDialog: $("embed-dialog"),
   embedClose: $("embed-close"),
   embedFrame: $("embed-frame"),
@@ -211,6 +236,72 @@ function kindOf(path) {
   return isText(path) ? "text" : "file";
 }
 
+// Pictograms of the explorer, the tabs and the asset preview, on a 16-unit
+// grid as the brand draws: square corners and joins, lines in the type's
+// color, accents in violet and gold, and the symbol's three frames (haze,
+// violet, gold) for a recording or an animation.
+const ICONS = {
+  folder: '<path class="s" d="M1.75 3.75h4.5l1.5 1.5h6.5v7.5H1.75z"/>',
+  "folder-open": '<path class="s" d="M1.75 12.75v-9h4.5l1.5 1.5h5.5v1.5"/><path class="s" d="M1.75 12.75l1.75-5h11l-1.75 5z"/>',
+  python:
+    '<path class="v" d="M2 2h7v5H5v2.5H2z"/><path class="g" d="M14 14H7V9h4V6.5h3z"/>' +
+    '<rect class="eye" x="3.5" y="3.5" width="1.5" height="1.5"/><rect class="eye" x="11" y="11" width="1.5" height="1.5"/>',
+  markdown:
+    '<rect class="s" x="1.75" y="3.75" width="12.5" height="8.5"/><path class="s" d="M4.25 10V6.25L6 8.25l1.75-2V10"/>' +
+    '<path class="gs" d="M11 6v3.75M9.5 8.5L11 10l1.5-1.5"/>',
+  json: '<path class="s" d="M5.75 2.75h-1.5v4L3 8l1.25 1.25v4h1.5M10.25 2.75h1.5v4L13 8l-1.25 1.25v4h-1.5"/>',
+  table:
+    '<rect class="o" x="1.75" y="2.75" width="12.5" height="3.5"/><rect class="s" x="1.75" y="2.75" width="12.5" height="10.5"/>' +
+    '<path class="s" d="M1.75 6.25h12.5M1.75 9.75h12.5M6 2.75v10.5M10 2.75v10.5"/>',
+  config:
+    '<path class="s" d="M1.75 4.5h12.5M1.75 8h12.5M1.75 11.5h12.5"/><rect class="g" x="8.5" y="2.75" width="3.5" height="3.5"/>' +
+    '<rect class="g" x="3.5" y="6.25" width="3.5" height="3.5"/><rect class="g" x="6.5" y="9.75" width="3.5" height="3.5"/>',
+  lottie:
+    '<path class="s" d="M2.5 12.5C5 12.5 5.5 3.5 8 3.5s3 9 5.5 9"/><rect class="h" x="1" y="11" width="3" height="3"/>' +
+    '<rect class="v" x="6.5" y="2" width="3" height="3"/><rect class="g" x="12" y="11" width="3" height="3"/>',
+  image:
+    '<rect class="s" x="1.75" y="2.75" width="12.5" height="10.5"/><path class="v" d="M2.5 12.5l3.75-5 2.75 3.5 1.5-1.75 3 3.25z"/>' +
+    '<rect class="g" x="10" y="4.75" width="2.5" height="2.5"/>',
+  vector:
+    '<path class="s" d="M3 13C3.5 6.5 12.5 9.5 13 3"/><rect class="g" x="1.25" y="11.25" width="3.5" height="3.5"/>' +
+    '<rect class="g" x="11.25" y="1.25" width="3.5" height="3.5"/>',
+  audio: '<path class="s" d="M2.75 6.75v2.5M5.25 4.25v7.5M10.25 5v6M12.75 6.75v2.5"/><path class="gs" d="M7.75 2.5v11"/>',
+  video: '<rect class="s" x="1.75" y="3.25" width="12.5" height="9.5"/><path class="g" d="M6.25 5.5v5L10.5 8z"/>',
+  font: '<path class="s" d="M3 13.75L8 2.25l5 11.5M4.75 9.75h6.5"/>',
+  text: '<path class="s" d="M3.25 1.75h6.25l3.25 3.25v9.25h-9.5z"/><path class="s" d="M9.5 1.75V5h3.25M5.5 8h5M5.5 11h5"/>',
+  code: '<path class="s" d="M5 4.5L1.75 8 5 11.5M11 4.5L14.25 8 11 11.5"/><path class="gs" d="M9.25 3l-2.5 10"/>',
+  math: '<path class="s" d="M12.25 3.25h-8.5L8.5 8l-4.75 4.75h8.5"/>',
+  gaanim:
+    '<rect class="h" x="0.5" y="6" width="4" height="4"/><rect class="v" x="6" y="6" width="4" height="4"/>' +
+    '<rect class="g" x="11.5" y="6" width="4" height="4"/>',
+  file: '<path class="s" d="M3.25 1.75h6.25l3.25 3.25v9.25h-9.5z"/><path class="s" d="M9.5 1.75V5h3.25"/>',
+};
+
+// The pictogram of `path`, finer than its kind: Markdown, tables, settings,
+// code and math each have their own.
+function iconOf(path) {
+  const ext = extension(path);
+  if (ext === "gaanim") return "gaanim";
+  if (ext === "md") return "markdown";
+  if (ext === "json") return "json";
+  if (ext === "lottie") return "lottie";
+  if (ext === "csv" || ext === "tsv") return "table";
+  if (["toml", "yaml", "yml"].includes(ext)) return "config";
+  if (["typ", "tex"].includes(ext)) return "math";
+  if (["html", "css", "js", "xml", "wgsl", "glsl"].includes(ext)) return "code";
+  const kind = kindOf(path);
+  if (kind === "svg") return "vector";
+  return ICONS[kind] ? kind : "file";
+}
+
+function fileIcon(name, { big = false } = {}) {
+  const icon = document.createElement("span");
+  icon.className = `file-icon ${name}${big ? " big" : ""}`;
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = `<svg viewBox="0 0 16 16">${ICONS[name] ?? ICONS.file}</svg>`;
+  return icon;
+}
+
 // A path as the project keeps it: forward slashes, no empty, `.` or `..`
 // parts, and no characters that paths reject.
 function cleanPath(path) {
@@ -248,7 +339,24 @@ function consoleEmpty() {
   ui.console.innerHTML = '<p class="empty">La salida de <code>print</code> y los errores aparecen aquí.</p>';
 }
 
-function log(text, kind = "") {
+// The fonts the browser has without uploading any (typst-assets).
+const BUILTIN_FONTS = "New Computer Modern, Libertinus Serif y DejaVu Sans Mono";
+// Whether this run already said how to add a font.
+let fontHinted = false;
+
+function fontHint(text) {
+  const match = /unknown font family: ([^\n"]+)|Font family not found/i.exec(text);
+  if (!match || fontHinted) return;
+  fontHinted = true;
+  const family = match[1]?.trim() || "Familia";
+  log(
+    `Esa fuente no está en el navegador, que solo trae ${BUILTIN_FONTS}. Sube su archivo (.ttf u .otf) a assets/fonts y nómbrala en el tema: Theme(font_dir="assets/fonts", fonts={"text": "${family}"}).`,
+    "hint",
+  );
+}
+
+// `action` ({ label, run }) adds a link after the text.
+function log(text, kind = "", action = null) {
   ui.console.querySelector(".empty")?.remove();
   const line = document.createElement("div");
   line.className = `line ${kind}`;
@@ -266,9 +374,17 @@ function log(text, kind = "") {
     last = match.index + match[0].length;
   }
   line.append(text.slice(last));
+  if (action) {
+    const link = document.createElement("a");
+    link.textContent = action.label;
+    link.className = "action";
+    link.addEventListener("click", () => action.run(), { once: true });
+    line.append(" ", link);
+  }
   const atBottom = ui.console.scrollHeight - ui.console.scrollTop - ui.console.clientHeight < 40;
   ui.console.append(line);
   if (atBottom) ui.console.scrollTop = ui.console.scrollHeight;
+  if (kind !== "hint") fontHint(text);
 }
 
 ui.clearConsole.addEventListener("click", consoleEmpty);
@@ -338,12 +454,10 @@ async function sharedFiles() {
 // Examples
 // ---------------------------------------------------------------------------
 
+// The gallery's scenes, which the projects menu opens as new projects.
 const examples = await fetch(config.examples)
   .then((response) => response.json())
   .catch(() => []);
-for (const example of examples) {
-  ui.examples.append(new Option(example.title, example.name));
-}
 
 const FALLBACK_CODE = `from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
 
@@ -361,29 +475,39 @@ scene.render()
 `;
 
 // ---------------------------------------------------------------------------
-// Storage: the project in IndexedDB
+// Storage: the projects in IndexedDB
 // ---------------------------------------------------------------------------
 
-// Version 1 kept uploads by name in "files"; version 2 keeps the project by
-// path in "project" (folders as records with `folder: true`) and moves the
-// uploads to its root, where scripts found them.
+// Each project keeps its files by [project, path] in "entries" (folders as
+// records with `folder: true`); the projects' names and the open one are in
+// localStorage. Version 1 kept uploads by name in "files", version 2 one
+// project by path in "project": both become the first project.
+const DEFAULT_PROJECT = "default";
 const database = await new Promise((resolve) => {
   try {
-    const request = indexedDB.open("gaanim-playground", 2);
+    const request = indexedDB.open("gaanim-playground", 3);
     request.onupgradeneeded = (event) => {
       const db = request.result;
-      const fresh = db.objectStoreNames.contains("project")
-        ? request.transaction.objectStore("project")
-        : db.createObjectStore("project", { keyPath: "path" });
-      if (event.oldVersion >= 1 && db.objectStoreNames.contains("files")) {
-        request.transaction.objectStore("files").openCursor().onsuccess = ({ target }) => {
+      const tx = request.transaction;
+      const entries = db.objectStoreNames.contains("entries")
+        ? tx.objectStore("entries")
+        : db.createObjectStore("entries", { keyPath: ["project", "path"] });
+      const move = (name, convert) => {
+        if (!db.objectStoreNames.contains(name)) return;
+        tx.objectStore(name).openCursor().onsuccess = ({ target }) => {
           const cursor = target.result;
           if (!cursor) return;
-          const record = cursor.value;
-          const path = cleanPath(record.name ?? "");
-          if (path) fresh.put({ path, bytes: record.bytes, type: record.type, size: record.size, modified: record.modified });
+          const record = convert(cursor.value);
+          if (record) entries.put({ ...record, project: DEFAULT_PROJECT });
           cursor.continue();
         };
+      };
+      if (event.oldVersion === 2) move("project", (record) => record);
+      if (event.oldVersion === 1) {
+        move("files", (record) => {
+          const path = cleanPath(record.name ?? "");
+          return path ? { path, bytes: record.bytes, type: record.type, size: record.size, modified: record.modified } : null;
+        });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -397,8 +521,8 @@ function transaction(mode, work) {
   if (!database) return Promise.resolve(null);
   return new Promise((resolve) => {
     try {
-      const tx = database.transaction("project", mode);
-      const result = work(tx.objectStore("project"));
+      const tx = database.transaction("entries", mode);
+      const result = work(tx.objectStore("entries"));
       tx.oncomplete = () => resolve(result?.result ?? null);
       tx.onerror = () => resolve(null);
     } catch {
@@ -407,17 +531,46 @@ function transaction(mode, work) {
   });
 }
 
+// Every entry of project `id`.
+function projectRange(id) {
+  return IDBKeyRange.bound([id, ""], [id, "\uffff"]);
+}
+
+// The projects, { id, name }, in the order they were made, and the open one.
+let projects = loadJson(KEYS.projects, []).filter((entry) => entry?.id && entry?.name);
+if (!projects.length) projects = [{ id: DEFAULT_PROJECT, name: "Mi proyecto" }];
+let currentProject = projects.some((entry) => entry.id === load(KEYS.current)) ? load(KEYS.current) : projects[0].id;
+
+function saveProjects() {
+  store(KEYS.projects, JSON.stringify(projects));
+  store(KEYS.current, currentProject);
+}
+
+function currentName() {
+  return projects.find((entry) => entry.id === currentProject)?.name ?? "Proyecto";
+}
+
+function newProjectId() {
+  return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// What each project remembers apart (its tabs, its open folders).
+function projectKey(key) {
+  return currentProject === DEFAULT_PROJECT ? key : `${key}:${currentProject}`;
+}
+
 const saveTimers = new Map();
 // Keep `path` as it is now; text edits wait a moment, so typing does not
 // write on every key.
 function persist(path, { soon = false } = {}) {
   clearTimeout(saveTimers.get(path));
+  const id = currentProject;
   const write = () => {
     saveTimers.delete(path);
-    const file = project.get(path);
-    if (file) transaction("readwrite", (s) => s.put(file));
-    else if (folders.has(path)) transaction("readwrite", (s) => s.put({ path, folder: true }));
-    else transaction("readwrite", (s) => s.delete(path));
+    const file = id === currentProject ? project.get(path) : null;
+    if (file) transaction("readwrite", (s) => s.put({ ...file, project: id }));
+    else if (id === currentProject && folders.has(path)) transaction("readwrite", (s) => s.put({ project: id, path, folder: true }));
+    else if (id === currentProject) transaction("readwrite", (s) => s.delete([id, path]));
   };
   if (soon) saveTimers.set(path, setTimeout(write, 300));
   else write();
@@ -431,35 +584,57 @@ function flushSaves() {
   }
 }
 
-for (const record of (await transaction("readonly", (s) => s.getAll())) ?? []) {
-  const path = cleanPath(record.path ?? "");
-  if (!path) continue;
-  if (record.folder) {
-    folders.add(path);
-  } else if (typeof record.text === "string") {
-    project.set(path, { path, text: record.text });
-  } else if (record.bytes && isText(path)) {
-    // A text file uploaded before text files were edited here.
-    project.set(path, { path, text: new TextDecoder().decode(record.bytes) });
-    persist(path);
-  } else if (record.bytes) {
-    const file = { path, bytes: record.bytes, type: record.type ?? "", size: record.size ?? record.bytes.byteLength, modified: record.modified ?? 0 };
-    if (kindOf(path) === "font") file.family = fontFamily(record.bytes);
-    project.set(path, file);
+// Load project `id` into `project` and `folders`.
+async function loadProject(id) {
+  project.clear();
+  folders.clear();
+  for (const record of (await transaction("readonly", (s) => s.getAll(projectRange(id)))) ?? []) {
+    const path = cleanPath(record.path ?? "");
+    if (!path) continue;
+    if (record.folder) {
+      folders.add(path);
+    } else if (typeof record.text === "string") {
+      project.set(path, { path, text: record.text });
+    } else if (record.bytes && isText(path)) {
+      // A text file uploaded before text files were edited here.
+      project.set(path, { path, text: new TextDecoder().decode(record.bytes) });
+      persist(path);
+    } else if (record.bytes) {
+      const file = { path, bytes: record.bytes, type: record.type ?? "", size: record.size ?? record.bytes.byteLength, modified: record.modified ?? 0 };
+      if (kindOf(path) === "font") file.family = fontFamily(record.bytes);
+      project.set(path, file);
+    }
   }
 }
 
-// A shared link brings its files; a project without main.py starts from the
-// code of the playground before projects, or from the first example.
-const shared = await sharedFiles();
-for (const [path, text] of Object.entries(shared ?? {})) {
-  project.set(path, { path, text });
-  persist(path);
-}
-if (!project.has(ENTRY)) {
-  project.set(ENTRY, { path: ENTRY, text: load(KEYS.code) ?? examples[0]?.code ?? FALLBACK_CODE });
+// A project without main.py gets one: the first project from the code of
+// the playground before projects, any other from the first example.
+function ensureEntry() {
+  if (project.has(ENTRY)) return;
+  const legacy = currentProject === DEFAULT_PROJECT ? load(KEYS.code) : null;
+  project.set(ENTRY, { path: ENTRY, text: legacy ?? examples[0]?.code ?? FALLBACK_CODE });
   persist(ENTRY);
 }
+
+await loadProject(currentProject);
+// A shared link opens as a project of its own, so it never replaces one;
+// the link of the open project (reloading after sharing) opens it.
+const shared = await sharedFiles();
+const sameProject = (files) => Object.entries(files).every(([path, text]) => project.get(path)?.text === text);
+if (shared && !sameProject(shared)) {
+  currentProject = newProjectId();
+  projects.push({ id: currentProject, name: "Proyecto compartido" });
+  project.clear();
+  folders.clear();
+  for (const [path, text] of Object.entries(shared)) {
+    project.set(path, { path, text });
+    persist(path);
+  }
+  // Reloading the page must not make it again.
+  history.replaceState(null, "", location.pathname + location.search);
+}
+saveProjects();
+ensureEntry();
 
 // ---------------------------------------------------------------------------
 // Monaco
@@ -491,20 +666,174 @@ const monaco = await new Promise((resolve, reject) => {
   throw error;
 });
 
-// The brand's palette (docs/assets/brand/README.md): graphite, violet, and
-// gold for the current frame, here the cursor.
+// Python as the editor colors it: Monaco's own tokenizer leaves names,
+// calls and attributes in one color, so most of a scene was white. This one
+// tells apart calls, classes, constants (GOLD), keyword arguments, `self`,
+// attributes, decorators and f-string fields.
+monaco.languages.setMonarchTokensProvider("python", {
+  defaultToken: "",
+  tokenPostfix: ".python",
+  keywords: [
+    "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except",
+    "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass",
+    "raise", "return", "try", "while", "with", "yield",
+  ],
+  constants: ["True", "False", "None", "Ellipsis", "NotImplemented", "__name__", "__file__"],
+  selves: ["self", "cls"],
+  builtins: [
+    "abs", "all", "any", "bool", "dict", "dir", "divmod", "enumerate", "filter", "float", "format", "getattr",
+    "hasattr", "hash", "id", "input", "int", "isinstance", "issubclass", "iter", "len", "list", "map", "max", "min",
+    "next", "object", "open", "ord", "chr", "pow", "print", "property", "range", "repr", "reversed", "round", "set",
+    "setattr", "slice", "sorted", "staticmethod", "classmethod", "str", "sum", "super", "tuple", "type", "vars", "zip",
+  ],
+  ident: /[a-zA-Z_À-￿][\wÀ-￿]*/,
+  brackets: [
+    { open: "{", close: "}", token: "delimiter.curly" },
+    { open: "[", close: "]", token: "delimiter.square" },
+    { open: "(", close: ")", token: "delimiter.parenthesis" },
+  ],
+  tokenizer: {
+    root: [{ include: "@code" }, [/[)\]}]/, "@brackets"]],
+    // Inside brackets, where `name=` is a keyword argument.
+    nested: [
+      [/[)\]}]/, { token: "@brackets", next: "@pop" }],
+      [/@ident(?=\s*=(?!=))/, { cases: { "@keywords": "keyword", "@default": "variable.parameter" } }],
+      { include: "@code" },
+    ],
+    code: [
+      [/\s+/, "white"],
+      [/#.*$/, "comment"],
+      [/[([{]/, { token: "@brackets", next: "@nested" }],
+      [/(?:[rR][fF]|[fF][rR]?)"""/, { token: "string", next: "@fTripleDouble" }],
+      [/(?:[rR][fF]|[fF][rR]?)'''/, { token: "string", next: "@fTripleSingle" }],
+      [/(?:[rR][fF]|[fF][rR]?)"/, { token: "string", next: "@fDouble" }],
+      [/(?:[rR][fF]|[fF][rR]?)'/, { token: "string", next: "@fSingle" }],
+      [/(?:[rRbBuU]|[rR][bB]|[bB][rR])?"""/, { token: "string", next: "@tripleDouble" }],
+      [/(?:[rRbBuU]|[rR][bB]|[bB][rR])?'''/, { token: "string", next: "@tripleSingle" }],
+      [/(?:[rRbBuU]|[rR][bB]|[bB][rR])?"/, { token: "string", next: "@double" }],
+      [/(?:[rRbBuU]|[rR][bB]|[bB][rR])?'/, { token: "string", next: "@single" }],
+      [/0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+/, "number"],
+      [/(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?[jJ]?/, "number"],
+      [/@@ident(?:\.@ident)*/, "decorator"],
+      [/(def)(\s+)(@ident)/, ["keyword", "white", "function.definition"]],
+      [/(class)(\s+)(@ident)/, ["keyword", "white", "type.definition"]],
+      [/(\.)(@ident)(?=\s*\()/, ["delimiter", "function.method"]],
+      [/(\.)([A-Z][A-Z\d_]+)(?![\wÀ-￿])/, ["delimiter", "constant"]],
+      [/(\.)(@ident)/, ["delimiter", "property"]],
+      [
+        /@ident(?=\s*\()/,
+        {
+          cases: {
+            "@keywords": "keyword",
+            "@builtins": "function.builtin",
+            "~[A-Z][A-Z\\d_]+": "constant",
+            "~[A-Z]\\w*": "type",
+            "@default": "function.call",
+          },
+        },
+      ],
+      [
+        /@ident/,
+        {
+          cases: {
+            "@keywords": "keyword",
+            "@constants": "keyword.constant",
+            "@selves": "variable.self",
+            "@builtins": "function.builtin",
+            "~[A-Z][A-Z\\d_]+": "constant",
+            "~[A-Z]\\w*": "type",
+            "@default": "identifier",
+          },
+        },
+      ],
+      [/->|[-+*/%=<>!&|^~@]=?|\*\*=?|\/\/=?|<<=?|>>=?|:=/, "operator"],
+      [/[,:;.]/, "delimiter"],
+    ],
+    double: [[/\\./, "string.escape"], [/"/, { token: "string", next: "@pop" }], [/[^\\"]+/, "string"]],
+    single: [[/\\./, "string.escape"], [/'/, { token: "string", next: "@pop" }], [/[^\\']+/, "string"]],
+    tripleDouble: [[/\\./, "string.escape"], [/"""/, { token: "string", next: "@pop" }], [/[^\\"]+|"/, "string"]],
+    tripleSingle: [[/\\./, "string.escape"], [/'''/, { token: "string", next: "@pop" }], [/[^\\']+|'/, "string"]],
+    fDouble: [
+      [/\{\{|\}\}|\\./, "string.escape"],
+      [/\{[^{}]*\}/, "string.interpolation"],
+      [/"/, { token: "string", next: "@pop" }],
+      [/[^\\"{}]+|[{}]/, "string"],
+    ],
+    fSingle: [
+      [/\{\{|\}\}|\\./, "string.escape"],
+      [/\{[^{}]*\}/, "string.interpolation"],
+      [/'/, { token: "string", next: "@pop" }],
+      [/[^\\'{}]+|[{}]/, "string"],
+    ],
+    fTripleDouble: [
+      [/\{\{|\}\}|\\./, "string.escape"],
+      [/\{[^{}]*\}/, "string.interpolation"],
+      [/"""/, { token: "string", next: "@pop" }],
+      [/[^\\"{}]+|["{}]/, "string"],
+    ],
+    fTripleSingle: [
+      [/\{\{|\}\}|\\./, "string.escape"],
+      [/\{[^{}]*\}/, "string.interpolation"],
+      [/'''/, { token: "string", next: "@pop" }],
+      [/[^\\'{}]+|['{}]/, "string"],
+    ],
+  },
+});
+
+// The brand's palette (docs/assets/brand/README.md) for the code: violet
+// keywords, gold strings and the current frame (the cursor), and around
+// them sky calls, lilac classes and peach values, so a scene reads by role.
+const SYNTAX = {
+  dark: {
+    text: "e4e1f2", comment: "77738f", keyword: "a99fff", value: "ff9f7a", string: "ffd166", escape: "ffb347",
+    field: "c9c3ff", call: "7cc7ff", type: "e3a6ff", parameter: "bdb6e6", property: "cfcbe6", decorator: "ffc933",
+    operator: "b4aed6", delimiter: "8e89a8",
+  },
+  light: {
+    text: "1f1d2b", comment: "8a8799", keyword: "5b4af0", value: "c2410c", string: "a16207", escape: "b45309",
+    field: "4636d6", call: "0369a1", type: "a21caf", parameter: "6d5fb3", property: "3f3c56", decorator: "b45309",
+    operator: "6b6880", delimiter: "6b6880",
+  },
+};
+
+function syntaxRules(c) {
+  return [
+    { token: "", foreground: c.text },
+    { token: "identifier", foreground: c.text },
+    { token: "comment", foreground: c.comment, fontStyle: "italic" },
+    { token: "keyword", foreground: c.keyword },
+    { token: "keyword.constant", foreground: c.value },
+    { token: "number", foreground: c.value },
+    { token: "constant", foreground: c.value },
+    { token: "variable.self", foreground: c.value, fontStyle: "italic" },
+    { token: "string", foreground: c.string },
+    { token: "string.escape", foreground: c.escape },
+    { token: "string.interpolation", foreground: c.field },
+    { token: "function", foreground: c.call },
+    { token: "function.definition", foreground: c.call, fontStyle: "bold" },
+    { token: "function.builtin", foreground: c.call, fontStyle: "italic" },
+    { token: "type", foreground: c.type },
+    { token: "type.definition", foreground: c.type, fontStyle: "bold" },
+    { token: "variable.parameter", foreground: c.parameter, fontStyle: "italic" },
+    { token: "property", foreground: c.property },
+    { token: "decorator", foreground: c.decorator },
+    { token: "operator", foreground: c.operator },
+    { token: "delimiter", foreground: c.delimiter },
+    // Markdown, JSON and the other languages Monaco colors itself.
+    { token: "string.key.json", foreground: c.call },
+    { token: "string.value.json", foreground: c.string },
+    { token: "keyword.json", foreground: c.value },
+  ];
+}
+
+// Graphite, violet and gold; the light one is the documentation's.
 monaco.editor.defineTheme("gaanim", {
   base: "vs-dark",
   inherit: true,
-  rules: [
-    { token: "comment", foreground: "6b6b73", fontStyle: "italic" },
-    { token: "keyword", foreground: "a99fff" },
-    { token: "string", foreground: "cbc6ff" },
-    { token: "number", foreground: "ffc933" },
-    { token: "delimiter", foreground: "a0a0a0" },
-  ],
+  rules: syntaxRules(SYNTAX.dark),
   colors: {
     "editor.background": "#121212",
+    "editor.foreground": "#e4e1f2",
     "editor.lineHighlightBackground": "#1b1b1b",
     "editorLineNumber.foreground": "#4a4a4a",
     "editorLineNumber.activeForeground": "#a0a0a0",
@@ -523,15 +852,100 @@ monaco.editor.defineTheme("gaanim", {
     "editorBracketMatch.border": "#7c6cff",
     "editorBracketHighlight.foreground1": "#ffc933",
     "editorBracketHighlight.foreground2": "#a99fff",
-    "editorBracketHighlight.foreground3": "#cbc6ff",
+    "editorBracketHighlight.foreground3": "#7cc7ff",
+    "editorIndentGuide.background1": "#262626",
+    "editorIndentGuide.activeBackground1": "#3d3d3d",
+    "menu.background": "#1b1b1b",
+    "menu.foreground": "#ededed",
+    "menu.selectionBackground": "#2a2650",
+    "menu.selectionForeground": "#c9c3ff",
+    "menu.separatorBackground": "#3d3d3d",
+    "menu.border": "#3d3d3d",
+    // Lists (suggestions, the command palette): the selected row keeps
+    // legible text on the violet.
+    "editorSuggestWidget.foreground": "#e4e1f2",
+    "editorSuggestWidget.selectedForeground": "#ffffff",
+    "editorSuggestWidget.selectedIconForeground": "#ffc933",
+    "editorSuggestWidget.focusHighlightForeground": "#c9c3ff",
+    "list.activeSelectionBackground": "#2a2650",
+    "list.activeSelectionForeground": "#ffffff",
+    "list.inactiveSelectionBackground": "#242424",
+    "list.hoverBackground": "#222222",
+    "list.highlightForeground": "#a99fff",
+    "quickInput.background": "#1b1b1b",
+    "quickInputList.focusBackground": "#2a2650",
+    "quickInputList.focusForeground": "#ffffff",
     "focusBorder": "#a99fff",
   },
 });
+monaco.editor.defineTheme("gaanim-light", {
+  base: "vs",
+  inherit: true,
+  rules: syntaxRules(SYNTAX.light),
+  colors: {
+    "editor.background": "#ffffff",
+    "editor.foreground": "#1f1d2b",
+    "editor.lineHighlightBackground": "#f6f5ff",
+    "editorLineNumber.foreground": "#b4b2c2",
+    "editorLineNumber.activeForeground": "#5b4af0",
+    "editorGutter.background": "#ffffff",
+    "editorWidget.background": "#ffffff",
+    "editorWidget.border": "#e5e5e7",
+    "editorSuggestWidget.background": "#ffffff",
+    "editorSuggestWidget.border": "#e5e5e7",
+    "editorSuggestWidget.selectedBackground": "#e9e6ff",
+    "editorSuggestWidget.highlightForeground": "#5b4af0",
+    "editorHoverWidget.background": "#ffffff",
+    "editorHoverWidget.border": "#e5e5e7",
+    "editorCursor.foreground": "#5b4af0",
+    "editor.selectionBackground": "#cbc6ff99",
+    "editor.inactiveSelectionBackground": "#cbc6ff55",
+    "editorBracketMatch.border": "#7c6cff",
+    "editorBracketHighlight.foreground1": "#b45309",
+    "editorBracketHighlight.foreground2": "#5b4af0",
+    "editorBracketHighlight.foreground3": "#0369a1",
+    "editorIndentGuide.background1": "#eeeef0",
+    "editorIndentGuide.activeBackground1": "#d4d4d8",
+    "menu.background": "#ffffff",
+    "menu.foreground": "#18181b",
+    "menu.selectionBackground": "#f1efff",
+    "menu.selectionForeground": "#4636d6",
+    "menu.separatorBackground": "#e5e5e7",
+    "menu.border": "#d4d4d8",
+    "editorSuggestWidget.foreground": "#1f1d2b",
+    "editorSuggestWidget.selectedForeground": "#1f1d2b",
+    "editorSuggestWidget.selectedIconForeground": "#5b4af0",
+    "editorSuggestWidget.focusHighlightForeground": "#4636d6",
+    "list.activeSelectionBackground": "#e9e6ff",
+    "list.activeSelectionForeground": "#1f1d2b",
+    "list.inactiveSelectionBackground": "#f0f0f2",
+    "list.hoverBackground": "#f6f5ff",
+    "list.highlightForeground": "#5b4af0",
+    "quickInput.background": "#ffffff",
+    "quickInputList.focusBackground": "#e9e6ff",
+    "quickInputList.focusForeground": "#1f1d2b",
+    "focusBorder": "#5b4af0",
+  },
+});
+
+// The theme: the documentation site's choice (localStorage "theme", the
+// same origin) or the system's.
+const darkScheme = matchMedia("(prefers-color-scheme: dark)");
+function storedTheme() {
+  const theme = load("theme");
+  return theme === "light" || theme === "dark" ? theme : null;
+}
+function currentTheme() {
+  return storedTheme() ?? (darkScheme.matches ? "dark" : "light");
+}
+function editorTheme() {
+  return currentTheme() === "dark" ? "gaanim" : "gaanim-light";
+}
 
 ui.editor.textContent = "";
 const editor = monaco.editor.create(ui.editor, {
   model: null,
-  theme: "gaanim",
+  theme: editorTheme(),
   automaticLayout: true,
   fontSize: 14,
   fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
@@ -554,6 +968,26 @@ const editor = monaco.editor.create(ui.editor, {
 });
 // The code face loads after the editor measured its fallback.
 document.fonts?.ready.then(() => monaco.editor.remeasureFonts());
+
+function applyTheme() {
+  const theme = storedTheme();
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  monaco.editor.setTheme(editorTheme());
+  const next = currentTheme() === "dark" ? "claro" : "oscuro";
+  ui.theme.title = `Usar el tema ${next}`;
+  ui.theme.setAttribute("aria-label", ui.theme.title);
+}
+ui.theme.addEventListener("click", () => {
+  store("theme", currentTheme() === "dark" ? "light" : "dark");
+  applyTheme();
+});
+darkScheme.addEventListener("change", applyTheme);
+// The documentation, open in another tab, changed it.
+window.addEventListener("storage", (event) => {
+  if (event.key === "theme") applyTheme();
+});
+applyTheme();
 
 const LANGUAGES = { py: "python", pyi: "python", json: "json", md: "markdown", yaml: "yaml", yml: "yaml", css: "css", html: "html", xml: "xml", js: "javascript" };
 
@@ -598,6 +1032,7 @@ function edited(path, model) {
   clearRuntimeError(path);
   if (model === editor.getModel()) scheduleSyntaxCheck();
   scheduleLanguageSync();
+  scheduleLiveRun();
 }
 
 function clearRuntimeError(path) {
@@ -639,14 +1074,14 @@ function saveAndRun() {
 // Editor tabs and asset previews
 // ---------------------------------------------------------------------------
 
-const tabsState = loadJson(KEYS.tabs, {});
+const tabsState = loadJson(projectKey(KEYS.tabs), {});
 let openTabs = (Array.isArray(tabsState.open) ? tabsState.open : []).filter((path) => project.has(path));
 if (!openTabs.includes(ENTRY)) openTabs.unshift(ENTRY);
 let activePath = null;
 let assetUrl = null;
 
 function saveTabs() {
-  store(KEYS.tabs, JSON.stringify({ open: openTabs, active: activePath }));
+  store(projectKey(KEYS.tabs), JSON.stringify({ open: openTabs, active: activePath }));
 }
 
 // Open `path` in a tab: a text file in the editor, an asset in its preview.
@@ -696,8 +1131,7 @@ function renderTabs() {
     tab.title = path;
     tab.setAttribute("role", "tab");
     tab.setAttribute("aria-selected", String(path === activePath));
-    const icon = document.createElement("span");
-    icon.className = `file-icon ${kindOf(path)}`;
+    const icon = fileIcon(iconOf(path));
     const name = document.createElement("button");
     name.type = "button";
     name.className = "tab-name";
@@ -826,9 +1260,7 @@ function showAsset(file) {
     new FontFace(alias, file.bytes).load().then((face) => document.fonts.add(face), () => {});
     stage.append(sample);
   } else {
-    const icon = document.createElement("span");
-    icon.className = `file-icon big ${kind}`;
-    stage.append(icon);
+    stage.append(fileIcon(iconOf(file.path), { big: true }));
   }
   const meta = document.createElement("p");
   meta.className = "asset-meta";
@@ -857,13 +1289,13 @@ function showAsset(file) {
 // Explorer
 // ---------------------------------------------------------------------------
 
-const expanded = new Set(loadJson(KEYS.expanded, []));
+const expanded = new Set(loadJson(projectKey(KEYS.expanded), []));
 let selectedPath = null;
 // The row being renamed or created: { path, folder, kind } while it edits.
 let editing = null;
 
 function saveExpanded() {
-  store(KEYS.expanded, JSON.stringify([...expanded]));
+  store(projectKey(KEYS.expanded), JSON.stringify([...expanded]));
 }
 
 // The project as nested folders: { folders: Map(name → node), files: [path] }.
@@ -916,9 +1348,7 @@ function row({ path, folder, open = false, depth }) {
   const chevron = document.createElement("span");
   chevron.className = "chevron";
   chevron.textContent = folder ? (open ? "▾" : "▸") : "";
-  const icon = document.createElement("span");
-  icon.className = `file-icon ${folder ? "folder" : kindOf(path)}`;
-  item.append(chevron, icon);
+  item.append(chevron, fileIcon(folder ? (open ? "folder-open" : "folder") : iconOf(path)));
   if (editing && !editing.creating && editing.path === path) {
     item.append(renameInput(baseName(path)));
   } else {
@@ -944,9 +1374,7 @@ function editRow(depth) {
   item.style.setProperty("--depth", depth);
   const chevron = document.createElement("span");
   chevron.className = "chevron";
-  const icon = document.createElement("span");
-  icon.className = `file-icon ${editing.kind === "folder" ? "folder" : "text"}`;
-  item.append(chevron, icon, renameInput(""));
+  item.append(chevron, fileIcon(editing.kind === "folder" ? "folder" : "file"), renameInput(""));
   return item;
 }
 
@@ -1211,11 +1639,15 @@ ui.tree.addEventListener("keydown", (event) => {
 function showContextMenu(x, y, items) {
   const menu = ui.contextMenu;
   menu.replaceChildren(
-    ...items.map(({ label, run: action, danger }) => {
+    ...items.map(({ label, run: action, danger, current }) => {
       if (!label) return Object.assign(document.createElement("hr"), {});
       const button = Object.assign(document.createElement("button"), { type: "button", textContent: label });
       button.setAttribute("role", "menuitem");
       if (danger) button.className = "danger";
+      if (current) {
+        button.className = "current";
+        button.setAttribute("aria-current", "true");
+      }
       button.addEventListener("click", () => {
         hideContextMenu();
         action();
@@ -1528,27 +1960,297 @@ function zipArchive(entries) {
   return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
 }
 
+// A name for files and folders: lowercase, without accents, spaces or signs.
+function slug(text, fallback = "proyecto") {
+  const name = text
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return name || fallback;
+}
+
 function downloadProject() {
   flushSaves();
   const encoder = new TextEncoder();
+  const folder = slug(currentName());
   const entries = [...project.values()]
     .sort((a, b) => byName(a.path, b.path))
     .map((file) => ({
-      path: `proyecto/${file.path}`,
+      path: `${folder}/${file.path}`,
       bytes: file.text !== undefined ? encoder.encode(models.get(file.path)?.getValue() ?? file.text) : new Uint8Array(file.bytes),
     }));
-  downloadBlob("proyecto-gaanim.zip", zipArchive(entries), "application/zip");
+  downloadBlob(`${folder}.zip`, zipArchive(entries), "application/zip");
 }
+
+// The entries of a ZIP archive: { path, bytes } and { folder }. Stored and
+// deflated entries are read (DecompressionStream inflates the latter).
+async function readZip(buffer) {
+  const view = new DataView(buffer);
+  let end = buffer.byteLength - 22;
+  while (end >= Math.max(0, buffer.byteLength - 65557) && view.getUint32(end, true) !== 0x06054b50) end--;
+  if (end < 0 || view.getUint32(end, true) !== 0x06054b50) throw new Error("no es un archivo ZIP");
+  const count = view.getUint16(end + 10, true);
+  let at = view.getUint32(end + 16, true);
+  const entries = [];
+  for (let index = 0; index < count; index++) {
+    if (view.getUint32(at, true) !== 0x02014b50) throw new Error("el directorio del ZIP está dañado");
+    const flags = view.getUint16(at + 8, true);
+    const method = view.getUint16(at + 10, true);
+    const size = view.getUint32(at + 20, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const extraLength = view.getUint16(at + 30, true);
+    const commentLength = view.getUint16(at + 32, true);
+    const local = view.getUint32(at + 42, true);
+    const nameBytes = new Uint8Array(buffer, at + 46, nameLength);
+    const name = flags & 0x0800 ? new TextDecoder().decode(nameBytes) : String.fromCharCode(...nameBytes);
+    at += 46 + nameLength + extraLength + commentLength;
+    if (name.endsWith("/")) {
+      entries.push({ folder: name.slice(0, -1) });
+      continue;
+    }
+    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    const data = new Uint8Array(buffer, start, size);
+    if (method === 0) {
+      entries.push({ path: name, bytes: data.slice() });
+    } else if (method === 8) {
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      entries.push({ path: name, bytes: new Uint8Array(await new Response(stream).arrayBuffer()) });
+    }
+  }
+  return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+function showProjectName() {
+  ui.projectName.textContent = currentName();
+  ui.downloadProject.textContent = `${slug(currentName())}.zip`;
+  document.title = `${currentName()} · Playground Gaanim`;
+}
+
+// Open project `id`; `files` and `folders`, when given, fill a new one.
+async function switchProject(id, { files = null, newFolders = [] } = {}) {
+  flushSaves();
+  if (/[#&](c|p)=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
+  for (const path of [...models.keys()]) dropModel(path);
+  editor.setModel(null);
+  currentProject = id;
+  saveProjects();
+  await loadProject(id);
+  for (const file of files ?? []) {
+    project.set(file.path, file);
+    persist(file.path);
+  }
+  for (const folder of newFolders) {
+    folders.add(folder);
+    persist(folder);
+  }
+  ensureEntry();
+  expanded.clear();
+  for (const folder of loadJson(projectKey(KEYS.expanded), [])) expanded.add(folder);
+  const state = loadJson(projectKey(KEYS.tabs), {});
+  openTabs = (Array.isArray(state.open) ? state.open : []).filter((path) => project.has(path));
+  if (!openTabs.includes(ENTRY)) openTabs.unshift(ENTRY);
+  activePath = null;
+  selectedPath = null;
+  openFile(project.has(state.active) ? state.active : ENTRY, { focus: false });
+  showProjectName();
+  sentAssets = new Map();
+  assetsDirty = true;
+  scheduleLanguageSync();
+  run();
+}
+
+// "Proyecto 2", "Proyecto 3"…: the first name no project has.
+function freshName(base) {
+  const names = new Set(projects.map((entry) => entry.name));
+  if (!names.has(base)) return base;
+  for (let n = 2; ; n++) if (!names.has(`${base} ${n}`)) return `${base} ${n}`;
+}
+
+function newProject() {
+  const id = newProjectId();
+  projects.push({ id, name: freshName("Proyecto") });
+  switchProject(id, { files: [{ path: ENTRY, text: FALLBACK_CODE }] });
+}
+
+// An example of the gallery as a project of its own, named after it: the
+// projects there are stay as they are.
+function newFromExample(example) {
+  const id = newProjectId();
+  projects.push({ id, name: freshName(example.title) });
+  switchProject(id, { files: [{ path: ENTRY, text: example.code }] });
+}
+
+function showExamplesMenu(x, y) {
+  showContextMenu(x, y, [
+    { label: "← Proyectos", run: () => showProjectMenu() },
+    {},
+    ...examples.map((example) => ({ label: example.title, run: () => newFromExample(example) })),
+  ]);
+}
+
+function duplicateProject() {
+  flushSaves();
+  const files = [...project.values()].map((file) =>
+    file.text !== undefined ? { path: file.path, text: models.get(file.path)?.getValue() ?? file.text } : { ...file },
+  );
+  const id = newProjectId();
+  projects.push({ id, name: freshName(`${currentName()} (copia)`) });
+  switchProject(id, { files, newFolders: [...folders] });
+}
+
+function startProjectRename() {
+  const input = Object.assign(document.createElement("input"), { className: "rename project-rename", value: currentName(), spellcheck: false });
+  input.setAttribute("aria-label", "Nombre del proyecto");
+  ui.projectSwitch.hidden = true;
+  ui.projectSwitch.after(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (accept) => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    if (accept && name) {
+      projects.find((entry) => entry.id === currentProject).name = name;
+      saveProjects();
+      showProjectName();
+    }
+    input.remove();
+    ui.projectSwitch.hidden = false;
+  };
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") finish(true);
+    else if (event.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+async function deleteProject() {
+  flushSaves();
+  const gone = projects.find((entry) => entry.id === currentProject);
+  const records = (await transaction("readonly", (s) => s.getAll(projectRange(gone.id)))) ?? [];
+  await transaction("readwrite", (s) => s.delete(projectRange(gone.id)));
+  projects = projects.filter((entry) => entry !== gone);
+  if (!projects.length) projects.push({ id: newProjectId(), name: "Mi proyecto" });
+  await switchProject(projects[0].id);
+  toast(`Se eliminó el proyecto «${gone.name}».`, 8000, {
+    label: "Deshacer",
+    async run() {
+      projects.push(gone);
+      await transaction("readwrite", (s) => {
+        for (const record of records) s.put(record);
+      });
+      switchProject(gone.id);
+    },
+  });
+}
+
+// A ZIP archive (a project downloaded from here, or a folder of the
+// application's) opens as a new project.
+async function importZip(file) {
+  let entries;
+  try {
+    entries = await readZip(await file.arrayBuffer());
+  } catch (error) {
+    toast(`No se pudo abrir «${file.name}»: ${error.message}.`);
+    return;
+  }
+  // One folder holding everything, as a zipped folder: its content is the
+  // project.
+  const names = entries.map((entry) => entry.path ?? entry.folder);
+  const top = names[0]?.split("/")[0];
+  const nested = top && entries.some((entry) => entry.path?.startsWith(`${top}/`)) && names.every((name) => name === top || name.startsWith(`${top}/`));
+  const files = [];
+  const newFolders = [];
+  for (const entry of entries) {
+    const name = entry.path ?? entry.folder;
+    const path = cleanPath(nested ? name.slice(top.length + 1) : name);
+    if (!path || ignored(path)) continue;
+    if (entry.folder !== undefined) {
+      newFolders.push(path);
+    } else if (isText(path)) {
+      files.push({ path, text: new TextDecoder().decode(entry.bytes) });
+    } else {
+      const bytes = entry.bytes.buffer;
+      const asset = { path, bytes, type: "", size: bytes.byteLength, modified: Date.now() };
+      if (kindOf(path) === "font") asset.family = fontFamily(bytes);
+      files.push(asset);
+    }
+  }
+  if (!files.length) {
+    toast(`«${file.name}» no tiene archivos.`);
+    return;
+  }
+  const id = newProjectId();
+  const name = freshName(file.name.replace(/\.zip$/i, "") || "Proyecto");
+  projects.push({ id, name });
+  const hadEntry = files.some((entry) => entry.path === ENTRY);
+  await switchProject(id, { files, newFolders });
+  toast(hadEntry ? `Se abrió «${name}».` : `Se abrió «${name}». No traía main.py: se creó uno, que es el que se ejecuta.`, 5000);
+}
+
+function showProjectMenu() {
+  const rect = ui.projectSwitch.getBoundingClientRect();
+  const items = projects.map((entry) => ({
+    label: entry.name,
+    current: entry.id === currentProject,
+    run: () => entry.id !== currentProject && switchProject(entry.id),
+  }));
+  items.push(
+    {},
+    { label: "Nuevo proyecto", run: newProject },
+    { label: "Nuevo desde un ejemplo…", run: () => showExamplesMenu(rect.left, rect.bottom + 4) },
+    { label: "Abrir un .zip…", run: () => ui.zipInput.click() },
+    { label: "Duplicar", run: duplicateProject },
+    { label: "Renombrar…", run: startProjectRename },
+    { label: "Descargar .zip", run: downloadProject },
+    {},
+    { label: "Eliminar este proyecto", run: deleteProject, danger: true },
+  );
+  showContextMenu(rect.left, rect.bottom + 4, items);
+}
+
+ui.projectSwitch.addEventListener("click", (event) => {
+  event.stopPropagation();
+  showProjectMenu();
+});
+ui.zipInput.addEventListener("change", () => {
+  const file = ui.zipInput.files[0];
+  ui.zipInput.value = "";
+  if (file) importZip(file);
+});
+showProjectName();
 
 // ---------------------------------------------------------------------------
 // Language services (language.js)
 // ---------------------------------------------------------------------------
 
-const language = new Worker("language.js", { type: "module" });
+// Jedi loads a Python of its own: it starts once the runner's is ready, the
+// editor gets the focus, or a few seconds pass, so that the two do not
+// download and compile at once and the first run comes sooner.
+let language = null;
 let requestId = 0;
 const waiting = new Map();
 
-language.onmessage = ({ data }) => {
+function startLanguage() {
+  if (language) return;
+  // The version in the address: a release never runs the last one's cached worker.
+  language = new Worker(`language.js?v=${config.version}`, { type: "module" });
+  language.onmessage = onLanguageMessage;
+  language.postMessage({ type: "init", config });
+}
+editor.onDidFocusEditorText(startLanguage);
+setTimeout(startLanguage, 6000);
+
+function onLanguageMessage({ data }) {
   if (data.type === "ready") {
     languageReady = true;
     syncLanguageProject();
@@ -1562,8 +2264,7 @@ language.onmessage = ({ data }) => {
   const resolve = waiting.get(data.id);
   waiting.delete(data.id);
   resolve?.(data.result ?? null);
-};
-language.postMessage({ type: "init", config });
+}
 
 function ask(method, ...args) {
   if (!languageReady) return Promise.resolve(null);
@@ -1622,9 +2323,42 @@ function docToMarkdown(doc) {
   return out.join("\n");
 }
 
+// A long signature with one parameter per line, as a formatter writes it,
+// so that it reads in a narrow panel.
+function formatSignature(text) {
+  const open = text.indexOf("(");
+  if (text.length <= 72 || open < 0) return text;
+  let depth = 0;
+  let quote = null;
+  let start = open + 1;
+  let close = -1;
+  const params = [];
+  for (let at = start; at < text.length && close < 0; at++) {
+    const char = text[at];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if ("([{".includes(char)) {
+      depth++;
+    } else if (")]}".includes(char)) {
+      if (depth === 0) close = at;
+      else depth--;
+    } else if (char === "," && depth === 0) {
+      params.push(text.slice(start, at).trim());
+      start = at + 1;
+    }
+  }
+  if (close < 0) return text;
+  const last = text.slice(start, close).trim();
+  if (last) params.push(last);
+  if (!params.length) return text;
+  return `${text.slice(0, open)}(\n${params.map((param) => `    ${param},`).join("\n")}\n)${text.slice(close + 1)}`;
+}
+
 function details(signatures, doc) {
   const parts = [];
-  if (signatures?.length) parts.push("```python\n" + signatures.join("\n") + "\n```");
+  if (signatures?.length) parts.push("```python\n" + signatures.map(formatSignature).join("\n") + "\n```");
   if (doc) parts.push(docToMarkdown(doc));
   return parts.join("\n\n");
 }
@@ -1658,8 +2392,10 @@ monaco.languages.registerCompletionItemProvider("python", {
   async resolveCompletionItem(item) {
     const found = await ask("resolve", item.index, item.label);
     if (found) {
-      item.detail = found.signatures?.[0] ?? found.detail;
-      const documentation = details(found.signatures?.slice(1), found.doc);
+      // The first signature in full, formatted, heads the details; the row
+      // keeps Jedi's short description.
+      item.detail = found.detail;
+      const documentation = details(found.signatures, found.doc);
       if (documentation) item.documentation = { value: documentation };
     }
     return item;
@@ -1673,7 +2409,7 @@ monaco.languages.registerHoverProvider("python", {
     const found = await ask("hover", pathOf(model), model.getValue(), position.lineNumber, position.column - 1);
     if (!found) return null;
     const contents = [];
-    contents.push({ value: "```python\n" + (found.signatures?.length ? found.signatures.join("\n") : found.title) + "\n```" });
+    contents.push({ value: "```python\n" + (found.signatures?.length ? found.signatures.map(formatSignature).join("\n") : found.title) + "\n```" });
     if (found.doc) contents.push({ value: docToMarkdown(found.doc) });
     return {
       range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
@@ -1693,7 +2429,11 @@ monaco.languages.registerSignatureHelpProvider("python", {
         signatures: found.map((signature) => ({
           label: signature.label,
           documentation: signature.doc ? { value: docToMarkdown(signature.doc) } : undefined,
-          parameters: signature.params.map((range) => ({ label: range })),
+          // The type of the parameter being written, under the signature.
+          parameters: signature.params.map((range, index) => ({
+            label: range,
+            documentation: signature.types?.[index] ? { value: "```python\n" + signature.types[index] + "\n```" } : undefined,
+          })),
         })),
         activeSignature: 0,
         activeParameter: found[0].index ?? 0,
@@ -1740,6 +2480,9 @@ let pendingBundle = null;
 let lastBundle = null;
 // Size and duration of the last recording: { width, height, duration }.
 let lastScene = null;
+// The GPU passes of the last recording that the light player (and the video
+// export) leave out.
+let lastFull = [];
 // "embed", the light player, or "full", the web player, for a recording
 // that needs what the light one leaves out.
 let playerKind = null;
@@ -1767,6 +2510,7 @@ window.addEventListener("message", (event) => {
     if (pendingBundle) openInPlayer(pendingBundle);
     pendingBundle = null;
   } else if (message.kind === "opened" && playerKind === "embed" && message.full?.length) {
+    lastFull = message.full;
     // Post-processing or a shader background: the web player draws them.
     usePlayer("full");
     pendingBundle = lastBundle;
@@ -1786,9 +2530,11 @@ function openInPlayer(bytes) {
 function showBundle(bytes, scene) {
   lastBundle = bytes;
   lastScene = scene;
+  lastFull = [];
   ui.downloadBundle.disabled = false;
+  ui.downloadVideo.disabled = false;
   ui.embed.disabled = false;
-  ui.embed.title = "Insertar la animación en un blog o sitio web";
+  ui.embed.title = "Insertar: la animación en un blog o sitio web";
   if (ui.embedDialog.open) showEmbedScene();
   // Each recording tries the light player first.
   usePlayer("embed");
@@ -1804,8 +2550,23 @@ function showBundle(bytes, scene) {
 // Runner (runner.js)
 // ---------------------------------------------------------------------------
 
+// The runner's worker: { worker, ready, python }.
 let runner = null;
 let runnerReady = false;
+// A second Python, started when a run takes a while: stopping the run swaps
+// to it instead of waiting for Python to load again. Not on devices with
+// little memory, where two would not fit.
+let spare = null;
+let spareTimer = 0;
+const SPARE = (navigator.deviceMemory ?? 8) >= 4;
+// The run in progress, as the overlay tells it: when it started, its phase
+// and how far the recording went ({ done, total }).
+let runStarted = 0;
+let runPhase = "script";
+let recorded = null;
+let runTicker = 0;
+// The frame rate the run records at.
+let runFps = 30;
 let running = null;
 let runCounter = 0;
 let firstRun = true;
@@ -1816,35 +2577,79 @@ let rerun = false;
 let sentAssets = new Map();
 let assetsDirty = true;
 
-function startRunner() {
-  runnerReady = false;
+function makeRunner() {
+  const entry = { worker: new Worker(`runner.js?v=${config.version}`, { type: "module" }), ready: false, python: null };
+  entry.worker.onmessage = (event) => onRunnerMessage(entry, event);
+  entry.worker.onerror = (event) => {
+    if (entry === runner) setStatus(`El motor falló: ${event.message ?? "error desconocido"}`, "error");
+    else if (entry === spare) spare = null;
+  };
+  entry.worker.postMessage({ type: "init", config });
+  return entry;
+}
+
+// Use `entry` (a spare, or a new one) as the runner.
+function useRunner(entry = makeRunner()) {
+  runner = entry;
+  runnerReady = entry.ready;
+  // A new Python has none of the assets.
   sentAssets = new Map();
   assetsDirty = true;
-  ui.run.disabled = true;
-  runner = new Worker("runner.js", { type: "module" });
-  runner.onmessage = onRunnerMessage;
-  runner.onerror = (event) => {
-    setStatus(`El motor falló: ${event.message ?? "error desconocido"}`, "error");
-  };
-  runner.postMessage({ type: "init", config });
+  ui.run.disabled = !runnerReady;
 }
 
 function setRunning(active) {
   ui.run.disabled = active || !runnerReady;
   ui.stop.hidden = !active;
   ui.overlay.hidden = !active;
+  if (!active) {
+    clearInterval(runTicker);
+    clearTimeout(spareTimer);
+    ui.progress.hidden = true;
+    ui.overlayHint.hidden = true;
+  }
 }
 
-function onRunnerMessage({ data }) {
+// The overlay while a run goes: its phase, how far the recording went and
+// the time it has taken; after a while, how to stop it.
+function showRunState() {
+  if (running === null) return;
+  const seconds = Math.floor((performance.now() - runStarted) / 1000);
+  const share = runPhase === "record" && recorded?.total ? recorded.done / recorded.total : null;
+  let text = runPhase === "record" ? "Grabando la escena…" : "Ejecutando el script…";
+  if (share !== null) text = `Grabando la escena… ${Math.floor(share * 100)} %`;
+  if (seconds >= 1) text += ` · ${seconds} s`;
+  ui.overlayText.textContent = text;
+  ui.overlayHint.textContent = rerun ? "Se ejecutará de nuevo al terminar · Esc detiene" : "Esc o Detener la paran";
+  ui.overlayHint.hidden = !rerun && seconds < 8;
+  ui.progress.hidden = share === null;
+  if (share !== null) ui.progress.value = share;
+}
+
+function onRunnerMessage(entry, { data }) {
+  if (entry !== runner) {
+    // The spare only gets ready, or fails to.
+    if (data.type === "ready") {
+      entry.ready = true;
+      entry.python = data.python;
+    } else if (data.type === "fatal") {
+      entry.worker.terminate();
+      if (spare === entry) spare = null;
+    }
+    return;
+  }
   switch (data.type) {
     case "progress":
       setStatus(data.text, "busy");
       break;
     case "ready":
+      entry.ready = true;
+      entry.python = data.python;
       runnerReady = true;
       ui.run.disabled = false;
+      startLanguage();
       setStatus("Listo. Ctrl+S guarda y ejecuta la escena.", "ready");
-      ui.versions.textContent = `gaanim ${config.version} · Python ${data.python ?? "3.14"}`;
+      ui.versions.textContent = `gaanim ${config.version} · Python ${data.python ?? "3.14"} · Pyodide ${data.pyodide ?? ""}`;
       if (firstRun || rerun) {
         firstRun = false;
         rerun = false;
@@ -1862,8 +2667,10 @@ function onRunnerMessage({ data }) {
       break;
     case "phase":
       if (data.id === running && data.phase === "record") {
-        ui.overlayText.textContent = "Grabando la escena…";
-        setStatus("Grabando la escena…", "busy");
+        if (runPhase !== "record") setStatus("Grabando la escena…", "busy");
+        runPhase = "record";
+        recorded = { done: data.done ?? 0, total: data.total ?? 0 };
+        showRunState();
       }
       break;
     case "done":
@@ -1871,7 +2678,7 @@ function onRunnerMessage({ data }) {
       running = null;
       setRunning(false);
       ui.overlay.hidden = playerReady;
-      showBundle(data.bytes, data.scene);
+      showBundle(data.bytes, { ...data.scene, fps: runFps });
       log(
         `✓ Escena lista en ${data.timings.total.toFixed(1)} s (script ${data.timings.run.toFixed(1)} s, grabación ${data.timings.record.toFixed(1)} s, ${formatSize(data.bytes.byteLength)}).`,
         "ok",
@@ -1884,7 +2691,10 @@ function onRunnerMessage({ data }) {
       running = null;
       setRunning(false);
       showFailure(data.error);
-      setStatus(data.error.phase === "record" ? "La grabación falló." : "El script falló.", "error");
+      setStatus(
+        data.error.phase === "record" ? "La grabación falló." : data.error.phase === "install" ? "No se pudieron instalar los paquetes." : "El script falló.",
+        "error",
+      );
       runQueued();
       break;
     case "fatal":
@@ -1894,10 +2704,77 @@ function onRunnerMessage({ data }) {
   }
 }
 
+// Where the project lists its packages: the [project] dependencies of its
+// pyproject.toml, where `uv add` writes in an application project, or
+// requirements.txt.
+function requirementsFile() {
+  const pyproject = project.get("pyproject.toml");
+  if (pyproject?.text !== undefined && addDependency(models.get("pyproject.toml")?.getValue() ?? pyproject.text, "x") !== null) {
+    return "pyproject.toml";
+  }
+  return "requirements.txt";
+}
+
+// A module the project imports and does not have: maybe a package of PyPI,
+// which the project's list installs.
+function packageHint(error) {
+  const name = /^No module named '([^'.]+)/.exec(error.message ?? "")?.[1];
+  if (error.kind !== "ModuleNotFoundError" || !name || exists(`${name}.py`) || exists(name)) return;
+  const file = requirementsFile();
+  log(
+    `Si «${name}» es un paquete de PyPI, añádelo a ${file} (a veces se llama distinto de su import) y vuelve a ejecutar: se instala en el navegador si es de Python puro o Pyodide lo compila.`,
+    "hint",
+    { label: `Añadir «${name}» a ${file}`, run: () => addRequirement(name) },
+  );
+}
+
+// `toml` with `name` in its [project] dependencies, written as uv writes
+// them; null when it has no such array to add to.
+function addDependency(toml, name) {
+  const section = /^\[project\][ \t]*$/m.exec(toml);
+  if (!section) return null;
+  const after = toml.slice(section.index + section[0].length);
+  const next = /^\[/m.exec(after);
+  const end = section.index + section[0].length + (next ? next.index : after.length);
+  const body = toml.slice(section.index, end);
+  const array = /^(dependencies\s*=\s*\[)([^\]]*)\]/m.exec(body);
+  if (!array) return null;
+  const items = array[2];
+  const listed = items.match(/["']([A-Za-z0-9._-]+)/g)?.map((item) => item.slice(1).toLowerCase()) ?? [];
+  if (listed.includes(name.toLowerCase())) return toml;
+  let replaced;
+  if (items.includes("\n")) {
+    // One per line, with a trailing comma.
+    const kept = items.replace(/\s*$/, "");
+    const comma = !kept.trim() || kept.endsWith(",") ? "" : ",";
+    replaced = `${array[1]}${kept}${comma}\n    "${name}",\n]`;
+  } else {
+    const kept = items.trim().replace(/,$/, "");
+    replaced = `${array[1]}${kept ? `${kept}, ` : ""}"${name}"]`;
+  }
+  return toml.slice(0, section.index) + body.replace(array[0], replaced) + toml.slice(end);
+}
+
+function addRequirement(name) {
+  const path = requirementsFile();
+  const current = models.get(path)?.getValue() ?? project.get(path)?.text ?? "";
+  let text;
+  if (path === "pyproject.toml") {
+    text = addDependency(current, name);
+  } else {
+    const lines = current.split("\n").map((line) => line.trim());
+    text = lines.includes(name) ? current : `${current.replace(/\s*$/, "")}${current.trim() ? "\n" : ""}${name}\n`;
+  }
+  if (text !== current) setFile({ path, text });
+  openFile(path);
+  run();
+}
+
 // Show a failure in the console and mark its line in its file.
 function showFailure(error) {
   if (error.traceback) log(error.traceback.trimEnd(), "error");
   else log(`${error.kind}: ${error.message}`, "error");
+  packageHint(error);
   const path = error.file && project.get(error.file)?.text !== undefined ? error.file : null;
   if (!path || !error.line) return;
   openFile(path, { focus: false });
@@ -1928,7 +2805,7 @@ function showFailure(error) {
 function run() {
   if (running !== null) {
     rerun = true;
-    ui.overlayText.textContent = "Se ejecutará de nuevo al terminar…";
+    showRunState();
     return;
   }
   if (!runnerReady) {
@@ -1966,12 +2843,37 @@ function run() {
     fps: Number(ui.fps.value),
     assetsChanged,
   };
+  runFps = message.fps;
   for (const path of models.keys()) clearRuntimeError(path);
-  ui.overlayText.textContent = "Ejecutando el script…";
+  fontHinted = false;
+  runStarted = performance.now();
+  runPhase = "script";
+  recorded = null;
   setRunning(true);
+  showRunState();
+  clearInterval(runTicker);
+  runTicker = setInterval(showRunState, 250);
+  // A run that takes a while warms a spare Python for Stop.
+  clearTimeout(spareTimer);
+  if (SPARE && !spare) spareTimer = setTimeout(() => running !== null && !spare && (spare = makeRunner()), 2000);
   setStatus("Ejecutando…", "busy");
   log("▶ main.py", "info");
-  runner.postMessage(message);
+  runner.worker.postMessage(message);
+}
+
+// Live mode: run a moment after typing stops, when the Python files parse
+// (a half-typed line would only fail).
+function scheduleLiveRun() {
+  if (!live) return;
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(async () => {
+    for (const [path, model] of models) {
+      if (model.getLanguageId() !== "python") continue;
+      const errors = await ask("errors", path, model.getValue());
+      if (errors?.length) return;
+    }
+    run();
+  }, 900);
 }
 
 function runQueued() {
@@ -1982,41 +2884,46 @@ function runQueued() {
 
 function stop() {
   if (running === null) return;
-  runner.terminate();
+  runner.worker.terminate();
   running = null;
   rerun = false;
   setRunning(false);
-  log("■ Detenido. Python se reinicia.", "info");
-  startRunner();
+  const next = spare;
+  spare = null;
+  useRunner(next ?? undefined);
+  if (runnerReady) {
+    log("■ Detenido.", "info");
+    setStatus("Listo.", "ready");
+  } else {
+    log("■ Detenido. Python se reinicia.", "info");
+    setStatus("Python se reinicia…", "busy");
+  }
 }
 
 ui.run.addEventListener("click", run);
 ui.stop.addEventListener("click", stop);
-startRunner();
+useRunner();
 
 // ---------------------------------------------------------------------------
 // Toolbar
 // ---------------------------------------------------------------------------
 
+function showLive() {
+  ui.live.setAttribute("aria-pressed", String(live));
+  ui.live.title = live ? "En vivo: la escena se ejecuta al dejar de escribir. Pulsa para apagarlo." : "Ejecutar la escena al dejar de escribir";
+}
+live = load(KEYS.live) === "1";
+showLive();
+ui.live.addEventListener("click", () => {
+  live = !live;
+  store(KEYS.live, live ? "1" : "0");
+  showLive();
+  if (live) scheduleLiveRun();
+  else clearTimeout(liveTimer);
+});
+
 ui.fps.value = load(KEYS.fps) ?? "30";
 ui.fps.addEventListener("change", () => store(KEYS.fps, ui.fps.value));
-
-let loadedExample = project.get(ENTRY).text;
-ui.examples.addEventListener("change", () => {
-  const example = examples.find((entry) => entry.name === ui.examples.value);
-  ui.examples.value = "";
-  if (!example) return;
-  openFile(ENTRY);
-  const model = modelFor(ENTRY);
-  const replaced = model.getValue().trim() && model.getValue() !== loadedExample;
-  editor.pushUndoStop();
-  editor.executeEdits("example", [{ range: model.getFullModelRange(), text: example.code }]);
-  editor.pushUndoStop();
-  editor.setPosition({ lineNumber: 1, column: 1 });
-  loadedExample = example.code;
-  run();
-  if (replaced) toast("Ejemplo cargado en main.py. Ctrl+Z recupera tu código.");
-});
 
 ui.share.addEventListener("click", async () => {
   flushSaves();
@@ -2045,12 +2952,14 @@ function closeMenu() {
 ui.downloadToggle.addEventListener("click", (event) => {
   event.stopPropagation();
   const open = ui.downloadMenu.hidden;
+  ui.downloadBundle.textContent = `${embedName()}.gaanim`;
   ui.downloadMenu.hidden = !open;
   ui.downloadToggle.setAttribute("aria-expanded", String(open));
 });
 document.addEventListener("click", closeMenu);
 ui.downloadProject.addEventListener("click", downloadProject);
 ui.downloadBundle.addEventListener("click", downloadRecording);
+ui.downloadVideo.addEventListener("click", openVideo);
 
 function downloadRecording() {
   if (lastBundle) downloadBlob(`${embedName()}.gaanim`, lastBundle);
@@ -2066,7 +2975,8 @@ function downloadRecording() {
 const embed = (() => {
   const saved = loadJson(KEYS.embed, {});
   return {
-    name: typeof saved.name === "string" && saved.name ? saved.name : "animacion",
+    // Empty: the project's name.
+    name: typeof saved.name === "string" ? saved.name : "",
     url: typeof saved.url === "string" ? saved.url : "",
     loop: saved.loop ?? true,
     autoplay: saved.autoplay ?? true,
@@ -2096,7 +3006,7 @@ function embedName() {
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^[-.]+|[-.]+$/g, "");
-  return name || "animacion";
+  return name || slug(currentName(), "animacion");
 }
 
 // The address the file will have: the one typed, inside the folder typed,
@@ -2274,10 +3184,119 @@ document.addEventListener("keydown", (event) => {
   } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     saveAndRun();
-  } else if (event.key === "Escape" && running !== null && !ui.embedDialog.open && ui.contextMenu.hidden && !editing) {
+  } else if (event.key === "Escape" && running !== null && !ui.embedDialog.open && !ui.videoDialog.open && ui.contextMenu.hidden && !editing) {
     stop();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Video: the recording as MP4, WebM or GIF (video.js)
+// ---------------------------------------------------------------------------
+
+const video = { format: "mp4", height: 1080, ...loadJson(KEYS.video, {}) };
+// The export in progress, to cancel it.
+let videoAbort = null;
+// What the GPU passes are called on the page.
+const PASSES = { post: "el posprocesado", background: "el fondo de shader", transition: "las transiciones de shader", effect: "los efectos de shader" };
+
+function listOf(items) {
+  return items.length > 1 ? `${items.slice(0, -1).join(", ")} y ${items.at(-1)}` : (items[0] ?? "");
+}
+
+// The size, length and warnings of the export as chosen.
+async function showVideoOptions() {
+  const format = ui.videoFormat.value;
+  const size = evenSize(lastScene, Number(ui.videoHeight.value));
+  const recorded = lastScene?.fps ?? Number(ui.fps.value);
+  const fps = format === "gif" ? Math.min(recorded, 25) : recorded;
+  const seconds = lastScene?.duration ?? 0;
+  ui.videoMeta.textContent = `${size.width} × ${size.height} px · ${seconds.toFixed(1)} s · ${Math.max(1, Math.ceil(seconds * fps))} fotogramas`;
+  const warnings = [];
+  if (lastFull.length) {
+    warnings.push(`La escena usa ${listOf(lastFull.map((pass) => PASSES[pass] ?? pass))}, que el vídeo del navegador no dibuja. La aplicación de escritorio exporta la escena entera.`);
+  }
+  if (format === "gif") {
+    warnings.push(`GIF: hasta 25 fotogramas por segundo, 256 colores y sin sonido; pesa bastante más que un vídeo${size.height > 720 ? ", sobre todo a este tamaño" : ""}.`);
+  }
+  const codec = videoAbort ? true : await supportedCodec(format, size.width, size.height, fps);
+  if (!codec) warnings.push(`Este navegador no codifica ${FORMATS[format].label} a ${size.width} × ${size.height}. Prueba otro formato o un tamaño menor.`);
+  ui.videoStart.disabled = !codec || Boolean(videoAbort);
+  ui.videoWarning.hidden = !warnings.length;
+  ui.videoWarning.textContent = warnings.join(" ");
+}
+
+function setVideoBusy(busy) {
+  ui.videoProgress.hidden = !busy;
+  ui.videoCancel.hidden = !busy;
+  ui.videoStart.disabled = busy;
+  ui.videoFormat.disabled = busy;
+  ui.videoHeight.disabled = busy;
+}
+
+function openVideo() {
+  if (!lastBundle) return;
+  closeMenu();
+  ui.videoFormat.value = video.format;
+  ui.videoHeight.value = String(video.height);
+  if (!ui.videoHeight.value) ui.videoHeight.value = "1080";
+  if (!videoAbort) ui.videoStatus.textContent = "";
+  ui.videoDialog.showModal();
+  showVideoOptions();
+}
+
+async function startVideo() {
+  if (!lastBundle || videoAbort) return;
+  const format = ui.videoFormat.value;
+  const spec = FORMATS[format];
+  const name = `${embedName()}.${spec.extension}`;
+  videoAbort = new AbortController();
+  setVideoBusy(true);
+  ui.videoProgress.value = 0;
+  try {
+    const result = await exportVideo({
+      bundle: lastBundle,
+      scene: lastScene,
+      format,
+      height: Number(ui.videoHeight.value),
+      playerUrl,
+      signal: videoAbort.signal,
+      onProgress(fraction, text) {
+        ui.videoProgress.value = fraction;
+        ui.videoStatus.textContent = text;
+      },
+    });
+    downloadBlob(name, result.blob, spec.type);
+    let text = `${name} descargado (${formatSize(result.blob.size)}).`;
+    if (result.sound && format === "gif") text += " El GIF no lleva el sonido de la escena.";
+    else if (result.sound && !result.audio) text += " Va sin sonido: este navegador no codifica el audio de este formato.";
+    ui.videoStatus.textContent = text;
+  } catch (error) {
+    ui.videoStatus.textContent = error?.name === "AbortError" ? "Exportación cancelada." : `No se pudo exportar: ${error?.message ?? error}`;
+  } finally {
+    videoAbort = null;
+    setVideoBusy(false);
+    showVideoOptions();
+  }
+}
+
+for (const [select, key] of [
+  [ui.videoFormat, "format"],
+  [ui.videoHeight, "height"],
+]) {
+  select.addEventListener("change", () => {
+    video[key] = key === "height" ? Number(select.value) : select.value;
+    store(KEYS.video, JSON.stringify(video));
+    showVideoOptions();
+  });
+}
+ui.videoStart.addEventListener("click", startVideo);
+ui.videoCancel.addEventListener("click", () => videoAbort?.abort());
+ui.videoClose.addEventListener("click", () => ui.videoDialog.close());
+ui.videoDialog.addEventListener("click", (event) => {
+  if (event.target === ui.videoDialog) ui.videoDialog.close();
+});
+// Closing the dialog cancels the export.
+ui.videoDialog.addEventListener("close", () => videoAbort?.abort());
 
 // ---------------------------------------------------------------------------
 // Splitters

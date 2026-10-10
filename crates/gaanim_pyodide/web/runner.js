@@ -28,14 +28,44 @@ async function init(config) {
     errorCallback: (text) => post({ type: "stderr", text }),
   });
   progress("Iniciando Gaanim…");
-  const source = await (await fetch(new URL("runner.py", config.base))).text();
+  // Revalidated: a cached runner.py may be older than this runner.js.
+  const source = await (await fetch(new URL("runner.py", config.base), { cache: "no-cache" })).text();
   const namespace = pyodide.toPy({});
   pyodide.runPython(source, { globals: namespace, filename: "runner.py" });
   runner = namespace;
-  post({ type: "ready", python: pyodide.version });
+  post({ type: "ready", python: pyodide.runPython("import sys; '.'.join(map(str, sys.version_info[:3]))"), pyodide: pyodide.version });
 }
 
 const PROJECT = "/home/pyodide/proyecto";
+
+// Requirements this Python installed: a new one (after Stop) installs them
+// again, from the browser's cache.
+const installed = new Set();
+
+// Install the project's requirements from PyPI with micropip: pure Python
+// wheels, and the packages Pyodide builds for the browser.
+async function installRequirements() {
+  const read = runner.get("requirements");
+  const wanted = read().toJs();
+  read.destroy();
+  const missing = wanted.filter((requirement) => !installed.has(requirement));
+  if (!missing.length) return;
+  post({ type: "info", text: `Instalando ${missing.join(", ")}…` });
+  await pyodide.loadPackage("micropip", { messageCallback: () => {} });
+  const micropip = pyodide.pyimport("micropip");
+  try {
+    await micropip.install(pyodide.toPy(missing));
+  } catch (error) {
+    const reason = String(error.message ?? error).trim().split("\n").at(-1);
+    throw new Error(
+      `No se pudo instalar ${missing.join(", ")}: ${reason}\nEn el navegador se instalan los paquetes de Python puro de PyPI y los que Pyodide compila; los que traen código nativo propio solo funcionan en la aplicación.`,
+    );
+  } finally {
+    micropip.destroy();
+  }
+  for (const requirement of missing) installed.add(requirement);
+  post({ type: "info", text: `Instalado: ${missing.join(", ")}.` });
+}
 
 // Write `files` ({ path, text } or { path, bytes }) into the project folder.
 function writeFiles(files) {
@@ -56,13 +86,20 @@ async function run({ id, files, paths, folders, imports, fps, assetsChanged }) {
     sync(pyodide.toPy(paths), pyodide.toPy(folders));
     sync.destroy();
     writeFiles(files);
+    try {
+      await installRequirements();
+    } catch (error) {
+      post({ type: "failed", id, error: { phase: "install", kind: "Paquetes", message: error.message, traceback: "", line: null } });
+      return;
+    }
     // Packages the project imports (numpy, sympy…) load from Pyodide's index.
     await pyodide.loadPackagesFromImports(imports, {
       messageCallback: (text) => post({ type: "info", text }),
       errorCallback: (text) => post({ type: "stderr", text }),
     });
     const runScript = runner.get("run");
-    const report = (phase) => post({ type: "phase", id, phase });
+    // The recording says how far it went; the page shows it.
+    const report = (phase, done = 0, total = 0) => post({ type: "phase", id, phase, done, total });
     let result;
     try {
       const value = runScript(fps, assetsChanged, report);

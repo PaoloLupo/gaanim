@@ -14,9 +14,11 @@ import importlib
 import importlib.machinery
 import importlib.util
 import os
+import re
 import runpy
 import sys
 import time
+import tomllib
 import traceback
 from pathlib import Path
 
@@ -25,6 +27,32 @@ SCRIPT = PROJECT / "main.py"
 BUNDLE = Path("/tmp/escena.gaanim")
 
 PROJECT.mkdir(parents=True, exist_ok=True)
+
+
+def requirements():
+    """The packages the project asks for: ``[project] dependencies`` of its
+    ``pyproject.toml`` (the file of an application project) and the lines of
+    its ``requirements.txt``. ``gaanim`` itself, which the playground has, is
+    left out; so are comments and pip options."""
+    found = []
+    pyproject = PROJECT / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            found += tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {}).get("dependencies", [])
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+            print(f"pyproject.toml no se pudo leer: {error}", file=sys.stderr)
+    listed = PROJECT / "requirements.txt"
+    if listed.is_file():
+        for line in listed.read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line and not line.startswith("-"):
+                found.append(line)
+    wanted = []
+    for requirement in found:
+        name = re.match(r"[A-Za-z0-9._-]+", requirement.strip())
+        if name and name.group(0).lower() != "gaanim" and requirement not in wanted:
+            wanted.append(requirement.strip())
+    return wanted
 
 
 def _load_core():
@@ -118,9 +146,9 @@ def _failure(error, phase):
 def run(fps, assets_changed, report):
     """Run ``main.py`` and record its scene into ``BUNDLE``.
 
-    ``report(phase)`` tells the page when the recording starts. Returns the
-    timings and the recording's size and duration, or the failure of the
-    phase that failed.
+    ``report(phase, done, total)`` tells the page when the recording starts
+    and how far it went. Returns the timings and the recording's size and
+    duration, or the failure of the phase that failed.
     """
     os.chdir(PROJECT)
     sys.argv = [str(SCRIPT)]
@@ -140,9 +168,11 @@ def run(fps, assets_changed, report):
     except BaseException as error:
         return {"error": _failure(error, "run")}
     ran = time.perf_counter()
-    report("record")
+    report("record", 0, 0)
     try:
-        width, height, duration = core._playground_record(str(BUNDLE), fps)
+        width, height, duration = core._playground_record(
+            str(BUNDLE), fps, lambda done, total: report("record", done, total)
+        )
     except BaseException as error:
         return {"error": _failure(error, "record")}
     return {

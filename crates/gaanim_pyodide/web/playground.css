@@ -27,8 +27,22 @@
   --haze: #3f37a8;
   --gold: #ffc933;
   --brand-ink: #14112e;
+  /* Gold as text and thin lines; on white it darkens to stay legible. */
+  --gold-ink: #ffc933;
+  --on-primary: #14112e;
   --warn: #fbbf24;
   --danger: #f87171;
+  --hover: rgba(255, 255, 255, 0.04);
+  --stderr: #e2b4b4;
+  --checker-a: #242424;
+  --checker-b: #1b1b1b;
+  --backdrop: rgba(10, 10, 10, 0.72);
+  --scrim: rgba(18, 18, 18, 0.82);
+  --shadow: rgba(0, 0, 0, 0.45);
+  --drop: rgba(124, 108, 255, 0.24);
+  --error-line: rgba(248, 113, 113, 0.12);
+  --show-dark: block;
+  --show-light: none;
   --mono: "VictorMono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
   --frame-1: color-mix(in srgb, var(--primary) 45%, transparent);
   --frame-2: color-mix(in srgb, var(--primary) 20%, transparent);
@@ -38,9 +52,92 @@
   --player: 58%;
   --explorer-width: 232px;
   color-scheme: dark;
+  /* Monaco's context menu lives in a shadow root outside the editor, which
+     its theme's variables do not reach: they come from here. */
+  --vscode-menu-background: var(--raised);
+  --vscode-menu-foreground: var(--text);
+  --vscode-menu-border: var(--line-strong);
+  --vscode-menu-selectionBackground: var(--primary-soft);
+  --vscode-menu-selectionForeground: var(--primary-strong);
+  --vscode-menu-selectionBorder: transparent;
+  --vscode-menu-separatorBackground: var(--line-strong);
+  --vscode-widget-shadow: var(--shadow);
+}
+
+/* The light theme of the documentation site (docs/assets/base.css): it
+   follows the system unless the site's toggle chose one (localStorage
+   "theme", shared with the docs). */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+  --ink: #ffffff;
+  --surface: #fafafa;
+  --raised: #ffffff;
+  --muted-bg: #f0f0f2;
+  --line: #e5e5e7;
+  --line-strong: #d4d4d8;
+  --text: #18181b;
+  --muted: #52525b;
+  --faint: #8a8a93;
+  --primary: #5b4af0;
+  --primary-strong: #4636d6;
+  --primary-soft: rgba(91, 74, 240, 0.1);
+  --violet: #7c6cff;
+  --haze: #cbc6ff;
+  --gold-ink: #a16207;
+  --on-primary: #ffffff;
+  --warn: #b45309;
+  --danger: #dc2626;
+  --hover: rgba(0, 0, 0, 0.04);
+  --stderr: #9f1239;
+  --checker-a: #ececef;
+  --checker-b: #f8f8f9;
+  --backdrop: rgba(24, 24, 27, 0.4);
+  --scrim: rgba(255, 255, 255, 0.86);
+  --shadow: rgba(24, 24, 27, 0.16);
+  --drop: rgba(91, 74, 240, 0.14);
+  --error-line: rgba(220, 38, 38, 0.08);
+  --show-dark: none;
+  --show-light: block;
+  color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --ink: #ffffff;
+  --surface: #fafafa;
+  --raised: #ffffff;
+  --muted-bg: #f0f0f2;
+  --line: #e5e5e7;
+  --line-strong: #d4d4d8;
+  --text: #18181b;
+  --muted: #52525b;
+  --faint: #8a8a93;
+  --primary: #5b4af0;
+  --primary-strong: #4636d6;
+  --primary-soft: rgba(91, 74, 240, 0.1);
+  --violet: #7c6cff;
+  --haze: #cbc6ff;
+  --gold-ink: #a16207;
+  --on-primary: #ffffff;
+  --warn: #b45309;
+  --danger: #dc2626;
+  --hover: rgba(0, 0, 0, 0.04);
+  --stderr: #9f1239;
+  --checker-a: #ececef;
+  --checker-b: #f8f8f9;
+  --backdrop: rgba(24, 24, 27, 0.4);
+  --scrim: rgba(255, 255, 255, 0.86);
+  --shadow: rgba(24, 24, 27, 0.16);
+  --drop: rgba(91, 74, 240, 0.14);
+  --error-line: rgba(220, 38, 38, 0.08);
+  --show-dark: none;
+  --show-light: block;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
+/* Monaco sizes its widgets (the suggestions list, hovers) for the browser's
+   default box model: border-box cut the last suggestion short. */
+:where(.monaco-editor, .monaco-editor *) { box-sizing: content-box; }
 html, body { margin: 0; height: 100%; }
 body {
   display: grid;
@@ -54,6 +151,8 @@ button, select, input { font: inherit; color: inherit; }
 code { font-family: var(--mono); font-size: 0.92em; color: var(--text); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .spacer { flex: 1; }
+/* Running the scene, next to the brand. */
+.controls { display: flex; align-items: center; gap: 8px; }
 [hidden] { display: none !important; }
 
 /* ---- Top bar ------------------------------------------------------------ */
@@ -62,10 +161,9 @@ code { font-family: var(--mono); font-size: 0.92em; color: var(--text); }
   padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface);
   min-width: 0;
 }
-/* The lockup at 2 px per unit; below 142 px wide, the icon. */
+/* The brand's icon alone, without the wordmark. */
 .brand { display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; margin-right: 6px; white-space: nowrap; }
 .brand img { display: block; image-rendering: pixelated; }
-.brand .symbol { display: none; }
 .brand .product { font: 500 13px/1 var(--mono); color: var(--muted); letter-spacing: 0.02em; }
 button.primary, button.ghost, .select select {
   height: 32px; padding: 0 12px; border-radius: 0; cursor: pointer; white-space: nowrap;
@@ -73,13 +171,24 @@ button.primary, button.ghost, .select select {
 }
 button.primary {
   display: inline-flex; align-items: center; gap: 8px;
-  border: 1px solid var(--primary); background: var(--primary); color: var(--brand-ink);
+  border: 1px solid var(--primary); background: var(--primary); color: var(--on-primary);
 }
 button.primary:hover:not(:disabled) { background: var(--primary-strong); border-color: var(--primary-strong); }
 button.primary:disabled { background: var(--muted-bg); border-color: var(--line-strong); color: var(--faint); cursor: progress; }
 button.ghost { border: 1px solid var(--line-strong); background: transparent; }
 button.ghost:hover:not(:disabled) { border-color: var(--primary); color: var(--primary-strong); }
 button.ghost.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+/* Icon buttons of the bar: what each does is in its title. */
+button.ghost.square { display: inline-grid; place-items: center; width: 32px; padding: 0; }
+button.square svg { display: block; }
+/* The theme button shows the theme it switches to. */
+#theme .when-dark { display: var(--show-dark); }
+#theme .when-light { display: var(--show-light); }
+button.square .stroke { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter; }
+button.square .stroke.accent { stroke: var(--gold-ink); }
+/* A switch: on, it takes the violet and its icon turns gold. */
+button.ghost.toggle[aria-pressed="true"] { border-color: var(--violet); color: var(--gold-ink); background: var(--primary-soft); }
+button.ghost.toggle[aria-pressed="true"] .stroke { fill: currentColor; }
 button:disabled { opacity: 0.6; cursor: default; }
 /* Controls step forward one frame at a time and leave two ghost frames behind,
    like the symbol. */
@@ -109,7 +218,7 @@ button:focus-visible, select:focus-visible, .splitter:focus-visible, .drop:focus
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 170px;
   display: flex; flex-direction: column; padding: 4px;
   background: var(--raised); border: 1px solid var(--line-strong);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 24px 64px var(--shadow);
 }
 .menu-list button {
   text-align: left; padding: 6px 10px; border: 0; background: transparent; cursor: pointer;
@@ -125,6 +234,12 @@ button:focus-visible, select:focus-visible, .splitter:focus-visible, .drop:focus
 }
 body.explorer-hidden { --explorer-width: 0px; }
 body.explorer-hidden .explorer { display: none; }
+/* Each pane keeps its column, so a hidden explorer leaves its own empty
+   instead of shifting the others into it. */
+#layout > .explorer { grid-area: 1 / 1; }
+#layout > .editor-pane { grid-area: 1 / 2; }
+#layout > #split-x { grid-area: 1 / 3; }
+#layout > .side { grid-area: 1 / 4; }
 .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .side { display: grid; grid-template-rows: minmax(120px, var(--player)) 6px minmax(100px, 1fr); }
 .splitter { background: var(--line); transition: background 0.15s; }
@@ -158,11 +273,14 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
 .player-wrap { position: relative; background: var(--ink); min-height: 0; }
 #player { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
 .player-overlay {
-  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  /* Centered by its margins, so it may grow to the player's width. */
+  position: absolute; left: 0; right: 0; top: 12px; width: max-content; margin-inline: auto;
   display: flex; align-items: center; gap: 10px; padding: 6px 12px;
   background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line-strong);
   color: var(--muted); font: 12.5px/1.2 var(--mono); pointer-events: none;
+  flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px);
 }
+.player-overlay .overlay-hint { flex-basis: 100%; text-align: center; color: var(--faint); font-size: 11.5px; }
 /* Three frames light up in turn, from the faintest to the current one. */
 .loader { display: inline-flex; gap: 3px; flex: none; }
 .loader i { width: 6px; height: 6px; opacity: 0.25; animation: frame 0.9s steps(1, end) infinite; }
@@ -178,10 +296,13 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
   padding: 8px 12px; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word;
 }
 #console .line { margin: 0; }
-#console .stderr { color: #e2b4b4; }
+#console .stderr { color: var(--stderr); }
 #console .error { color: var(--danger); }
 #console .info { color: var(--muted); }
 #console .ok { color: var(--primary); }
+#console .hint { color: var(--gold-ink); }
+#console .hint::before { content: "→ "; }
+#console a.action { color: var(--primary-strong); text-decoration: underline; }
 #console a { color: var(--primary); cursor: pointer; text-decoration: underline dotted; }
 #console .empty { color: var(--faint); font-family: ui-sans-serif, system-ui, sans-serif; }
 
@@ -204,30 +325,35 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
   color: var(--text); white-space: nowrap; cursor: pointer; user-select: none; outline: none;
   border-left: 2px solid transparent;
 }
-.tree .row:hover { background: rgba(255, 255, 255, 0.04); }
+.tree .row:hover { background: var(--hover); }
 .tree .row.active { background: var(--primary-soft); border-left-color: var(--gold); }
 .tree .row.selected { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 60%, transparent); }
-.tree .row.drop-target { background: rgba(124, 108, 255, 0.24); }
+.tree .row.drop-target { background: var(--drop); }
 .tree .chevron { width: 10px; flex: none; color: var(--faint); font-size: 10px; text-align: center; }
 .tree .name { overflow: hidden; text-overflow: ellipsis; }
 .tree .row.folder .name { color: var(--text); }
-.entry-mark { margin-left: auto; padding-left: 6px; color: var(--gold); font-size: 9px; }
+.entry-mark { margin-left: auto; padding-left: 6px; color: var(--gold-ink); font-size: 9px; }
 .tree input.rename {
   flex: 1; min-width: 0; height: 20px; padding: 0 4px; border: 1px solid var(--primary); border-radius: 0;
   background: var(--ink); color: var(--text); font: inherit; outline: none;
 }
 .explorer-note { margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11.5px; line-height: 1.45; }
 
-/* What a file holds, as a square in the brand's colors: the symbol's frames. */
-.file-icon { width: 9px; height: 9px; flex: none; background: var(--faint); }
-.file-icon.folder { width: 11px; height: 8px; background: transparent; border: 1.5px solid var(--muted); border-top-width: 3px; }
-.file-icon.python { background: var(--primary); }
-.file-icon.image, .file-icon.svg { background: var(--gold); }
-.file-icon.audio, .file-icon.video { background: var(--violet); }
-.file-icon.font { background: transparent; border: 2px solid var(--gold); }
-.file-icon.data { background: transparent; border: 2px solid var(--primary); }
-.file-icon.text { background: var(--muted); }
-.file-icon.big { width: 48px; height: 48px; border-width: 4px; }
+/* What a file holds, as a pictogram in the brand's colors (main.js ICONS):
+   lines in the type's color, accents in violet and gold. */
+.file-icon { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.file-icon svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.file-icon .s, .file-icon .gs { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter; }
+.file-icon .gs { stroke: var(--gold-ink); }
+.file-icon .g { fill: var(--gold-ink); }
+.file-icon .v { fill: var(--violet); }
+.file-icon .h { fill: var(--haze); }
+.file-icon .o { fill: currentColor; opacity: 0.35; }
+.file-icon .eye { fill: var(--surface); }
+.file-icon:is(.folder-open, .markdown, .table, .image, .vector, .audio, .video, .code, .lottie) { color: var(--primary); }
+.file-icon:is(.json, .font, .math) { color: var(--gold-ink); }
+.file-icon.file { color: var(--faint); }
+.file-icon.big { width: 56px; height: 56px; }
 
 /* ---- Editor tabs and asset previews ------------------------------------- */
 .editor-bar {
@@ -257,7 +383,7 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
 .asset-stage { max-width: 100%; display: grid; place-items: center; }
 .asset-stage img {
   max-width: min(100%, 720px); max-height: 50vh; display: block;
-  background: repeating-conic-gradient(#242424 0% 25%, #1b1b1b 0% 50%) 0 / 16px 16px;
+  background: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%) 0 / 16px 16px;
 }
 .asset-stage audio, .asset-stage video { max-width: min(100%, 560px); }
 .font-sample { color: var(--text); }
@@ -268,9 +394,27 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
 .asset-snippet { padding: 6px 10px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--primary-strong); font-size: 12.5px; max-width: 100%; overflow-wrap: anywhere; }
 .asset-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
-.context-menu { position: fixed; top: 0; left: 0; z-index: 50; min-width: 200px; }
+/* Placed by its left edge (main.js), as wide as its longest item. */
+.context-menu {
+  position: fixed; top: 0; left: 0; right: auto; z-index: 50; min-width: 200px; width: max-content;
+  max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto;
+}
 .context-menu hr { margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
 .context-menu button.danger { color: var(--danger); }
+.context-menu button.current { color: var(--primary-strong); box-shadow: inset 2px 0 0 var(--gold); }
+
+/* The project's name opens the projects menu. */
+.project-switch {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 26px; padding: 0 6px 0 0;
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+}
+.project-switch .explorer-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-switch .caret { font-size: 10px; color: var(--faint); }
+.project-switch:hover .explorer-title, .project-switch:hover .caret { color: var(--primary-strong); }
+.explorer-head input.project-rename {
+  flex: 1; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid var(--primary); background: var(--ink);
+  font: 600 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); outline: none;
+}
 #toast .toast-action {
   margin-left: 6px; padding: 2px 8px; border: 1px solid var(--primary); background: transparent;
   color: var(--primary-strong); font: 12px/1.4 var(--mono); cursor: pointer;
@@ -296,11 +440,11 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
   position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 30;
   max-width: calc(100% - 32px); padding: 10px 16px;
   background: var(--raised); border: 1px solid var(--line-strong); border-left: 3px solid var(--gold);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 24px 64px var(--shadow);
 }
 #dropping {
   position: fixed; inset: 0; z-index: 40; display: grid; place-items: center;
-  background: rgba(18, 18, 18, 0.82); pointer-events: none;
+  background: var(--scrim); pointer-events: none;
 }
 #dropping div {
   padding: 28px 40px; border: 2px dashed var(--primary); font: 15px/1.3 var(--mono); background: var(--surface);
@@ -310,9 +454,9 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
 #embed-dialog {
   width: min(1040px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0;
   color: var(--text); background: var(--surface); border: 1px solid var(--line-strong);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5); overflow: auto;
+  box-shadow: 0 24px 64px var(--shadow); overflow: auto;
 }
-#embed-dialog::backdrop { background: rgba(10, 10, 10, 0.72); }
+#embed-dialog::backdrop { background: var(--backdrop); }
 .dialog-head {
   position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
   padding: 12px 12px 12px 20px; border-bottom: 1px solid var(--line); background: var(--surface);
@@ -362,8 +506,27 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
 }
 .note.warn { color: var(--warn); }
 
+/* ---- Video dialog ------------------------------------------------------- */
+#video-dialog {
+  width: min(480px, calc(100vw - 32px)); padding: 0;
+  color: var(--text); background: var(--surface); border: 1px solid var(--line-strong);
+  box-shadow: 0 24px 64px var(--shadow);
+}
+#video-dialog::backdrop { background: var(--backdrop); }
+.video-body { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+.video-fields { display: flex; flex-wrap: wrap; gap: 12px 16px; }
+.video-fields label { display: flex; flex-direction: column; gap: 6px; font: 600 12px/1.3 var(--mono); color: var(--muted); }
+.video-meta { margin: 0; color: var(--text); font: 13px/1.4 var(--mono); }
+#video-progress { width: 100%; height: 6px; appearance: none; border: 0; background: var(--muted-bg); }
+#video-progress::-webkit-progress-bar { background: var(--muted-bg); }
+#video-progress::-webkit-progress-value { background: var(--violet); }
+#video-progress::-moz-progress-bar { background: var(--violet); }
+.video-body .row { display: flex; gap: 8px; align-items: center; }
+.video-body .row.end { justify-content: flex-end; }
+.video-body .note { font-size: 13px; }
+
 /* Error lines in the editor. */
-.monaco-editor .gaanim-error-line { background: rgba(248, 113, 113, 0.12); }
+.monaco-editor .gaanim-error-line { background: var(--error-line); }
 .monaco-editor .gaanim-error-glyph { background: var(--danger); width: 4px !important; margin-left: 4px; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -376,23 +539,20 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
   .embed-body { grid-template-columns: 1fr; padding: 16px; }
   body { overflow: auto; }
   #layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
+  #layout > .editor-pane { grid-area: 1 / 1; }
+  #layout > .side { grid-area: 2 / 1; }
   .explorer {
     position: fixed; left: 0; top: 0; bottom: 0; z-index: 35; width: min(300px, 86vw);
-    box-shadow: 24px 0 64px rgba(0, 0, 0, 0.5); display: none;
+    box-shadow: 24px 0 64px var(--shadow); display: none;
   }
   body.explorer-open .explorer { display: flex; }
   .splitter.vertical { display: none; }
   .side { grid-template-rows: auto 6px 40vh; }
   .player-wrap { aspect-ratio: 16 / 9; }
-  .brand .logo, .brand .product { display: none; }
-  .brand .symbol { display: block; }
-  #share { display: none; }
-  /* The actions go to a second row, so Ejecutar stays on screen. */
+  .brand .product { display: none; }
+  /* What leaves the playground wraps to a second row when it must; the run
+     controls stay next to the brand. */
   .bar { flex-wrap: wrap; row-gap: 6px; }
-  .bar > .spacer { flex: 1 0 100%; height: 0; }
-  .bar > .select:first-of-type { flex: 1; }
-  .bar > .select:first-of-type select { width: 100%; max-width: none; }
-  #run, #stop { margin-left: auto; }
   /* While a run goes, Detener takes Ejecutar's place. */
   #stop:not([hidden]) ~ #run { display: none; }
 }
