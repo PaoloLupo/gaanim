@@ -11,6 +11,119 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.11.0
+
+Publicada el 10 de octubre de 2026. Gaanim llega al navegador: el playground
+ejecuta escenas de Python sin instalar nada, y el reproductor web se inserta
+en un blog o un sitio web como una figura más. Trae capas de parallax con
+profundidad de campo, texto que sigue una trayectoria, notaciones a mano
+alzada, movimientos de cámara (seguir una ruta, barridos y dolly zoom) y
+extrusión 3D, y el editor suma un inspector, una consola, un panel de
+animaciones, capturas de fotogramas y secuencias PNG. Lee «Al actualizar» si
+alguna escena mueve objetos por una trayectoria.
+
+== Playground y reproductor web
+
+- El #link("https://paololupo.github.io/gaanim/playground/")[playground]
+  ejecuta escenas en el navegador. Escribes Python en un editor con
+  autocompletado, firmas y la documentación de la API al pasar el cursor, y
+  la escena se graba en un `.gaanim` que el reproductor web muestra al lado;
+  un error marca su línea. `Ctrl+S` guarda y ejecuta, los ejemplos de la
+  galería se cargan desde el menú, las imágenes y la música que subes se
+  quedan en tu navegador, *Compartir* copia un enlace con el código y
+  *Descargar* guarda `main.py` o el `.gaanim`. Usa Pyodide (Python 3.14 en
+  WebAssembly); lo que necesita FFmpeg, como los vídeos, solo funciona en la
+  aplicación.
+- *Insertar*, en el playground, prepara la escena para un blog o un sitio
+  web: descarga el `.gaanim` con el nombre que elijas, compone el `<iframe>`
+  con la dirección donde lo publicarás y la proporción de la escena, y muestra
+  cómo se verá.
+- El reproductor web se inserta en otras páginas con `?embed&src=`: sin su
+  portada, empieza cuando está a la vista y se pausa al salir de ella, para
+  que quien lee la entrada vea la animación al llegar a ella. `loop` la
+  repite, `controls=0` oculta la barra (un clic pausa o reanuda) y
+  `autoplay=0` espera un clic. Ver
+  #link("/guias/compartir/#insertar")[Insertar en un blog o sitio web].
+
+== Motion design
+
+- *Capas de parallax.* `scene.layer(depth)` devuelve una `ParallaxLayer`, y
+  lo que le añades con `.add(...)` se mueve con `1/depth` del paneo de la
+  cámara y se acerca con `zoom ** (1/depth)`: el fondo lejano apenas se
+  mueve y el primer plano se mueve más. Cada capa se ordena por su
+  profundidad; `depth=math.inf` queda fija como un HUD. Ver
+  #link("/referencia/scene/#parallax")[Capas de parallax].
+- *Profundidad de campo.* `scene.camera.depth_of_field(focus, aperture=...,
+  max_blur=...)` desenfoca cada capa según lo lejos que esté de la distancia
+  de enfoque, también en exportaciones, capturas y paquetes; lo que no está
+  en una capa, y los HUD, nunca se desenfoca. `scene.camera.animate.focus_to`
+  cambia el foco de una capa a otra (rack focus) y puede ir a la vez que un
+  movimiento de cámara. Ver
+  #link("/referencia/scene/#profundidad-campo")[Profundidad de campo].
+- *Texto en una trayectoria.* `scene.text.on_path(texto, ruta, align=...,
+  orient=..., reverse=..., offset=...)` coloca las letras a lo largo de un
+  trazado, y `text.path_offset(...)` o `animate.path_offset(...)` las hacen
+  correr por él. Ver #link("/referencia/text/#texto-trayectoria")[Texto
+  sobre una trayectoria].
+- *Notaciones a mano alzada.* `objeto.annotate` (y `seleccion.annotate`
+  sobre parte de un texto) subraya, encierra en una caja o un círculo,
+  tacha, cruza o pone corchetes con un trazo irregular, como dibujado a
+  mano. Cada marca sigue a su objeto y se dibuja con `animate.create()`. Ver
+  #link("/referencia/drawable/#anotaciones")[Anotaciones a mano alzada].
+- *Movimientos de cámara.* `scene.camera.animate.follow_path(ruta,
+  orient=...)` lleva la cámara por un trazado, `whip_pan(destino)` es un
+  barrido rápido que en exportaciones y capturas lleva desenfoque de
+  movimiento, y `dolly_zoom(factor)` acerca la cámara en perspectiva
+  mientras el sujeto conserva su tamaño. Ver
+  #link("/referencia/scene/#camara")[Cámara].
+- *Extrusión 3D.* `scene.geometry.extrude(objeto, depth, bevel=...)`
+  convierte una figura, un texto, una ecuación, un grupo o un SVG en un
+  sólido 3D. Ver #link("/referencia/geometria/")[Geometría].
+- `Axonometric` se importa desde `gaanim`; en 0.10.2 solo estaba en
+  `gaanim.gaanim_core`.
+
+== Editor
+
+- *Inspector.* Un clic en la vista previa selecciona un objeto, y el
+  inspector muestra su tipo y su nombre, la línea del script que lo creó (con
+  *Abrir* y *Copiar*, y las líneas que la llamaron), su posición, rotación,
+  escala, tamaño, relleno, trazo y opacidad, su capa y su profundidad de
+  parallax. *Dentro de…* sube al grupo que lo contiene. Sin selección muestra
+  la cámara, profundidad de campo incluida.
+- *Consola* (`J`): avisos de Gaanim y de Python, lo que imprime `print`, los
+  errores con su traza y las recargas, cada fila con un enlace a su línea,
+  con filtros por gravedad y texto. Mientras está oculta, una marca arriba a
+  la izquierda cuenta los problemas.
+- *Animaciones* (`T`): una línea de tiempo sobre la barra de reproducción,
+  con una fila por objeto animado y la cámara y un bloque por cada `play`.
+  Un clic en un bloque va a su inicio y selecciona el objeto; un doble clic
+  abre la línea del `play`.
+- `Ctrl+Mayús+S` (o el botón de captura) guarda el fotograma actual como PNG,
+  sin overlays, en `<output_dir>/captures/`.
+- El diálogo de exportación graba secuencias PNG, nombra el archivo como el
+  proyecto (o el script, si no es `main.py`), elige la carpeta con el
+  selector del sistema y avisa antes de reemplazar un archivo.
+- *Abrir* usa el editor de `GAANIM_EDITOR` (con `{file}` y `{line}`) o,
+  sin esa variable, el primero de `code`, `cursor`, `codium`, `zed` o `subl`
+  que encuentre. Ver #link("/referencia/cli/")[CLI].
+
+== Correcciones
+
+- Seguir una trayectoria (`move_along`, `path_arc`, rotar alrededor de un
+  pivote externo) usa la longitud de arco exacta: el objeto ya no da saltos
+  de hasta 0,15 unidades ni retrocede, y con `orient=True` no gira 180° un
+  instante. Con orientación es de dos a cuatro veces más rápido.
+
+== Al actualizar
+
+- Los objetos que siguen una trayectoria pueden quedar unos píxeles más allá
+  o más acá que en 0.10.2 donde el muestreo anterior saltaba, y su
+  orientación final usa la tangente exacta. No hay forma de volver al
+  muestreo anterior, que era un error; si una composición dependía de esa
+  posición, ajusta la fracción de la trayectoria.
+- En el editor, un clic en un texto selecciona el texto entero, no un glifo,
+  y entre objetos con el mismo `z_index` gana el más pequeño.
+
 = 0.10.2
 
 Publicada el 6 de octubre de 2026. Recargar y abrir presentaciones largas es más rápido: medir con
