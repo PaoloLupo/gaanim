@@ -87,7 +87,8 @@ def run(fps, assets_changed, report):
     """Run ``main.py`` and record its scene into ``BUNDLE``.
 
     ``report(phase)`` tells the page when the recording starts. Returns the
-    timings, or the failure of the phase that failed.
+    timings and the recording's size and duration, or the failure of the
+    phase that failed.
     """
     os.chdir(PROJECT)
     sys.argv = [str(SCRIPT)]
@@ -105,7 +106,13 @@ def run(fps, assets_changed, report):
     ran = time.perf_counter()
     report("record")
     try:
-        core._playground_record(str(BUNDLE), fps)
+        width, height, duration = core._playground_record(str(BUNDLE), fps)
     except BaseException as error:
         return {"error": _failure(error, "record")}
-    return {"run": ran - started, "record": time.perf_counter() - ran}
+    return {
+        "run": ran - started,
+        "record": time.perf_counter() - ran,
+        "width": width,
+        "height": height,
+        "duration": duration,
+    }

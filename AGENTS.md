@@ -82,7 +82,10 @@ This file guides repository work; model selection belongs to the calling client.
     completions over the stubs, uploads kept in IndexedDB). Scripts run in
     Pyodide; `scene.render()` submits to the playground host
     (`gaanim_python/src/playground.rs`), which records a `.gaanim` bundle that
-    the embedded web player (`?embed`) plays. `just playground` builds
+    the embedded web player (`?embed`) plays. The same `?embed` mode, with
+    `src=`, `loop`, `controls=0` and `autoplay=0`, embeds a bundle in other
+    sites (`gaanim_web`'s `setEmbedOptions`/`setPlaying`; the page plays it
+    while it is on screen). `just playground` builds
     `dist/playground/`. On Emscripten, Bevy's `wasm32` web glue cannot load, so
     the engine builds without Bevy's render, asset, log, window and audio
     subsystems: those features and the code that needs them are gated on

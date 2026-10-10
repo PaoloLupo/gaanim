@@ -213,7 +213,7 @@ Para publicarlo en GitHub Pages:
 + El enlace es
   `https://paololupo.github.io/gaanim/reproductor/?src=https://<usuario>.github.io/<repositorio>/charlas/mi-charla.gaanim`.
 
-=== Enlazar un momento
+=== Enlazar un momento <enlazar-un-momento>
 
 Como en los sitios de vídeo, lo que va después de `#` elige dónde empieza:
 
@@ -238,18 +238,56 @@ equipo hay que publicarlo antes.
 El botón *Presentar* existe porque el navegador solo deja abrir otra ventana
 tras un clic: el enlace no puede abrir el Presenter View por sí solo.
 
-=== Insertar en otra página
+== Insertar en un blog o sitio web <insertar>
 
-El reproductor funciona dentro de un `<iframe>`. Permite la pantalla completa
-y el portapapeles para que funcionen sus botones:
+El reproductor funciona dentro de un `<iframe>`, así que una animación corta
+puede ir en una entrada de blog como una figura más: se ve nítida a cualquier
+tamaño y suele pesar menos que el mismo vídeo. Publica el `.gaanim` como para
+#link(<compartir-un-enlace>)[compartir un enlace] y pega en la entrada:
 
 ```html
-<iframe
-  src="https://paololupo.github.io/gaanim/reproductor/?src=https://tu-sitio.com/mi-charla.gaanim#segmento=2"
-  width="960" height="540" style="border: 0"
-  allow="fullscreen; clipboard-write">
-</iframe>
+<iframe src="https://paololupo.github.io/gaanim/reproductor/?embed&amp;loop&amp;controls=0&amp;src=https://tu-blog.com/animaciones/circulo.gaanim"
+  title="Animación: círculo" loading="lazy" allow="fullscreen; clipboard-write"
+  style="width: 100%; aspect-ratio: 16 / 9; border: 0"></iframe>
 ```
+
+Con `?embed` el reproductor deja fuera su portada y la zona para soltar
+archivos, y la animación empieza cuando al menos una cuarta parte del marco
+está a la vista y se pausa cuando sale de ella: quien lee la entrada la ve
+desde el principio al llegar a ella, no mientras lee lo anterior. Si la pausa
+a mano, sigue pausada. Estas opciones cambian cómo se reproduce (en HTML, el
+`&` que las separa se escribe `&amp;`):
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Opción*], [*Efecto*],
+  [`loop`], [Repite la animación entera, como un GIF.],
+  [`controls=0`], [Oculta la barra de reproducción. Un clic o un toque en la animación la pausa o la reanuda, y al terminar la repite desde el principio. Si la escena tiene pausas (`scene.stop()`), el clic continúa como en una presentación.],
+  [`autoplay=0`], [No empieza sola: un botón en el centro espera un clic.],
+)
+
+Sin opciones, la barra aparece al pasar el cursor por la parte de abajo y la
+animación se detiene en su último fotograma. El fragmento de
+#link(<enlazar-un-momento>)[Enlazar un momento] también vale: `#t=2` empieza
+a los dos segundos.
+
+`aspect-ratio` da al marco la proporción de la escena: `16 / 9` para el
+`frame=(16, 9)` por defecto, `1 / 1` para una cuadrada. Así el marco ocupa el
+ancho de la columna sin franjas. `loading="lazy"` hace que el navegador no lo
+cargue hasta que la entrada se acerca a él, y `allow` deja funcionar los
+botones de pantalla completa y de copiar enlace de la barra.
+
+El #link("https://paololupo.github.io/gaanim/playground/")[playground] lo
+prepara por ti: tras ejecutar la escena, *Insertar* descarga el `.gaanim` con
+el nombre que elijas, compone el código con la dirección donde lo publicarás y
+la proporción de la escena, y muestra cómo se verá con las opciones que
+marques.
+
+Quien lee la entrada necesita un navegador con WebGPU, igual que para el
+reproductor; sin él, el marco explica qué falta. La primera animación descarga
+también el reproductor; las demás de la página, y las de visitas siguientes,
+lo toman de la caché del navegador.
 
 == Controles táctiles
 

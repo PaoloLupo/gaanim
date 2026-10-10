@@ -203,18 +203,79 @@ button.icon:hover { background: var(--raised); color: var(--text); }
   padding: 28px 40px; border: 2px dashed var(--loop); border-radius: 12px; font-size: 16px; background: var(--surface);
 }
 
+/* ---- Embedding dialog -------------------------------------------------- */
+#embed-dialog {
+  width: min(1040px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0;
+  color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5); overflow: auto;
+}
+#embed-dialog::backdrop { background: rgba(8, 9, 12, 0.7); }
+.dialog-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
+  padding: 12px 12px 12px 20px; border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.dialog-head h2 { margin: 0; flex: 1; font-size: 16px; font-weight: 600; }
+.embed-body {
+  display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, 1fr); gap: 24px; padding: 20px;
+}
+.embed-preview { margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.embed-frame { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
+.embed-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+.embed-preview figcaption { display: flex; flex-direction: column; gap: 2px; color: var(--faint); font-size: 12.5px; }
+#embed-meta { color: var(--muted); font-family: var(--mono); }
+.embed-steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.embed-steps li { counter-increment: step; display: flex; flex-direction: column; gap: 8px; }
+.embed-steps h3 { margin: 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.embed-steps h3::before {
+  content: counter(step); display: grid; place-items: center; width: 20px; height: 20px; flex: none;
+  border-radius: 50%; background: var(--raised); color: var(--loop); font-size: 12px;
+}
+.embed-steps p { margin: 0; color: var(--muted); font-size: 13px; }
+.embed-steps .note a, .embed-steps p a { color: var(--accent); }
+.embed-steps .row { display: flex; gap: 8px; align-items: center; }
+.embed-steps .row.end { justify-content: flex-end; }
+.embed-steps input[type="url"], .embed-steps textarea, .field {
+  width: 100%; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--ink);
+}
+.embed-steps input[type="url"] { height: 32px; padding: 0 10px; font-family: var(--mono); font-size: 13px; }
+.embed-steps input[type="url"]:focus, .field:focus-within, .embed-steps textarea:focus {
+  outline: 2px solid var(--accent); outline-offset: -1px;
+}
+.embed-steps input[type="url"].invalid { border-color: var(--danger); }
+.field { display: flex; align-items: center; min-width: 0; height: 32px; padding: 0 10px; flex: 1; }
+.field input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; font-family: var(--mono); font-size: 13px; }
+.field .suffix { color: var(--faint); font-family: var(--mono); font-size: 13px; }
+.options { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+.options label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.options input { accent-color: var(--loop); margin: 0; }
+.embed-steps textarea {
+  resize: vertical; padding: 8px 10px; font: 12px/1.5 var(--mono); color: var(--text); white-space: pre-wrap; word-break: break-all;
+}
+.note.warn { color: var(--warn); }
+
 /* Error lines in the editor. */
 .monaco-editor .gaanim-error-line { background: rgba(255, 118, 118, 0.12); }
 .monaco-editor .gaanim-error-glyph { background: var(--danger); width: 4px !important; margin-left: 4px; }
 
 /* ---- Narrow screens: editor above, player and panel below. -------------- */
 @media (max-width: 860px) {
+  .embed-body { grid-template-columns: 1fr; padding: 16px; }
   body { overflow: auto; }
   #layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
   .splitter.vertical { display: none; }
   .side { grid-template-rows: auto 6px 40vh; }
   .player-wrap { aspect-ratio: 16 / 9; }
   .brand span { display: none; }
-  .select select { max-width: 150px; }
   #share { display: none; }
+  /* The actions go to a second row, so Ejecutar stays on screen. */
+  .bar { flex-wrap: wrap; row-gap: 6px; }
+  .bar > .spacer { flex: 1 0 100%; height: 0; }
+  .bar > .select:first-of-type { flex: 1; }
+  .bar > .select:first-of-type select { width: 100%; max-width: none; }
+  #run, #stop { margin-left: auto; }
+  /* While a run goes, Detener takes Ejecutar's place. */
+  #stop:not([hidden]) ~ #run { display: none; }
+}
+@media (max-width: 420px) {
+  #run span { display: none; }
 }

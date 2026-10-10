@@ -8,10 +8,18 @@
 // - The web player, embedded below (`?embed`), plays that bundle.
 // - Uploaded files (images, music…) are kept in this browser (IndexedDB) and
 //   written next to main.py before each run.
+// - Insertar prepares the recording for a blog or website: the file to
+//   publish there and the <iframe> of the web player that plays it, with a
+//   preview of that player.
 // Nothing leaves the browser: the page is static files.
 
 const MONACO = "https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min";
-const KEYS = { code: "gaanim-playground-code", fps: "gaanim-playground-fps", layout: "gaanim-playground-layout" };
+const KEYS = {
+  code: "gaanim-playground-code",
+  fps: "gaanim-playground-fps",
+  layout: "gaanim-playground-layout",
+  embed: "gaanim-playground-embed",
+};
 
 // State the handlers below share. Declared first: editor and worker events can
 // fire while the module still awaits its later steps.
@@ -54,6 +62,23 @@ const ui = {
   versions: $("versions"),
   toast: $("toast"),
   dropping: $("dropping"),
+  embed: $("embed"),
+  embedDialog: $("embed-dialog"),
+  embedClose: $("embed-close"),
+  embedFrame: $("embed-frame"),
+  embedPreview: $("embed-preview"),
+  embedMeta: $("embed-meta"),
+  embedName: $("embed-name"),
+  embedDownload: $("embed-download"),
+  embedUrl: $("embed-url"),
+  embedTest: $("embed-test"),
+  embedTestWrap: $("embed-test-wrap"),
+  embedLoop: $("embed-loop"),
+  embedAutoplay: $("embed-autoplay"),
+  embedControls: $("embed-controls"),
+  embedCode: $("embed-code"),
+  embedCopy: $("embed-copy"),
+  embedLocal: $("embed-local"),
 };
 
 // ---------------------------------------------------------------------------
@@ -709,13 +734,20 @@ window.addEventListener("drop", (event) => {
 let playerReady = false;
 let pendingBundle = null;
 let lastBundle = null;
+// Size and duration of the last recording: { width, height, duration }.
+let lastScene = null;
 
 ui.player.src = new URL(`${config.player}?embed`, location.href).href;
 
 window.addEventListener("message", (event) => {
-  if (event.source !== ui.player.contentWindow || event.origin !== location.origin) return;
+  if (event.origin !== location.origin) return;
   const message = event.data;
   if (message?.type !== "gaanim:status") return;
+  if (event.source === ui.embedPreview.contentWindow) {
+    previewStatus(message);
+    return;
+  }
+  if (event.source !== ui.player.contentWindow) return;
   if (message.kind === "ready") {
     playerReady = true;
     if (pendingBundle) openInPlayer(pendingBundle);
@@ -733,9 +765,13 @@ function openInPlayer(bytes) {
   ui.player.contentWindow.postMessage({ type: "gaanim:open", name: "escena.gaanim", bytes: copy }, location.origin, [copy]);
 }
 
-function showBundle(bytes) {
+function showBundle(bytes, scene) {
   lastBundle = bytes;
+  lastScene = scene;
   ui.downloadBundle.disabled = false;
+  ui.embed.disabled = false;
+  ui.embed.title = "Insertar la animación en un blog o sitio web";
+  if (ui.embedDialog.open) showEmbedScene();
   if (playerReady) {
     openInPlayer(bytes);
   } else {
@@ -810,7 +846,7 @@ function onRunnerMessage({ data }) {
       running = null;
       setRunning(false);
       ui.overlay.hidden = playerReady;
-      showBundle(data.bytes);
+      showBundle(data.bytes, data.scene);
       log(
         `✓ Escena lista en ${data.timings.total.toFixed(1)} s (script ${data.timings.run.toFixed(1)} s, grabación ${data.timings.record.toFixed(1)} s, ${formatSize(data.bytes.byteLength)}).`,
         "ok",
@@ -956,9 +992,227 @@ ui.downloadToggle.addEventListener("click", (event) => {
 });
 document.addEventListener("click", closeMenu);
 ui.downloadPy.addEventListener("click", () => downloadBlob("main.py", editor.getValue(), "text/x-python"));
-ui.downloadBundle.addEventListener("click", () => {
-  if (lastBundle) downloadBlob("escena.gaanim", lastBundle);
+ui.downloadBundle.addEventListener("click", downloadRecording);
+
+function downloadRecording() {
+  if (lastBundle) downloadBlob(`${embedName()}.gaanim`, lastBundle);
+}
+
+// ---------------------------------------------------------------------------
+// Insertar: the recording in a blog or website
+// ---------------------------------------------------------------------------
+
+// The page embeds the web player in an <iframe> that reads the .gaanim file
+// from the site that publishes it (`?embed&src=…`). How it plays, and the
+// file's name and address, are remembered for the next one.
+const embed = (() => {
+  const saved = (() => {
+    try {
+      return JSON.parse(load(KEYS.embed) ?? "{}") ?? {};
+    } catch {
+      return {};
+    }
+  })();
+  return {
+    name: typeof saved.name === "string" && saved.name ? saved.name : "animacion",
+    url: typeof saved.url === "string" ? saved.url : "",
+    loop: saved.loop ?? true,
+    autoplay: saved.autoplay ?? true,
+    controls: saved.controls ?? false,
+  };
+})();
+const playerUrl = new URL(config.player, location.href);
+const EXAMPLE_FOLDER = "https://tu-blog.com/animaciones/";
+let previewReady = false;
+// The recording the preview shows.
+let previewBundle = null;
+
+function saveEmbed() {
+  store(KEYS.embed, JSON.stringify(embed));
+}
+
+// The file's name as sites like it in addresses: lowercase, without accents,
+// spaces, signs or the extension.
+function embedName() {
+  const name = embed.name
+    .trim()
+    .replace(/\.gaanim$/i, "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return name || "animacion";
+}
+
+// The address the file will have: the one typed, inside the folder typed,
+// or an example of one.
+function fileUrl() {
+  const typed = embed.url.trim();
+  const name = `${embedName()}.gaanim`;
+  if (!typed) return EXAMPLE_FOLDER + name;
+  if (/\.gaanim$/i.test(typed)) return typed;
+  return typed.replace(/\/*$/, "/") + name;
+}
+
+// The player's address for `src`. The file's address stays readable: only
+// what would end it, or the attribute that holds it, is escaped.
+function embedSource(url) {
+  const params = ["embed"];
+  if (embed.loop) params.push("loop");
+  if (!embed.controls) params.push("controls=0");
+  if (!embed.autoplay) params.push("autoplay=0");
+  params.push(`src=${url.replace(/[%&#+ "<>]/g, encodeURIComponent)}`);
+  return `${playerUrl.origin}${playerUrl.pathname}?${params.join("&")}`;
+}
+
+function aspectRatio(scene) {
+  if (!scene?.width || !scene?.height) return "16 / 9";
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+  const divisor = gcd(scene.width, scene.height);
+  return `${scene.width / divisor} / ${scene.height / divisor}`;
+}
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
+}
+
+function embedCode() {
+  const title = `Animación: ${embedName().replace(/[-_]+/g, " ")}`;
+  return [
+    `<iframe src="${escapeHtml(embedSource(fileUrl()))}"`,
+    `  title="${escapeHtml(title)}" loading="lazy" allow="fullscreen; clipboard-write"`,
+    `  style="width: 100%; aspect-ratio: ${aspectRatio(lastScene)}; border: 0"></iframe>`,
+  ].join("\n");
+}
+
+function absoluteUrl(text) {
+  try {
+    return ["http:", "https:"].includes(new URL(text).protocol);
+  } catch {
+    return false;
+  }
+}
+
+function showEmbed() {
+  const name = `${embedName()}.gaanim`;
+  ui.downloadBundle.textContent = name;
+  const typed = embed.url.trim();
+  const valid = !typed || absoluteUrl(typed);
+  ui.embedUrl.classList.toggle("invalid", !valid);
+  ui.embedUrl.setCustomValidity(valid ? "" : "Escribe la dirección completa, con https://");
+  ui.embedUrl.placeholder = EXAMPLE_FOLDER;
+  // The full player opens the published file, or says why it cannot.
+  ui.embedTestWrap.hidden = !(typed && valid);
+  if (typed && valid) {
+    ui.embedTest.href = `${playerUrl.origin}${playerUrl.pathname}?src=${fileUrl().replace(/[%&#+ "<>]/g, encodeURIComponent)}`;
+  }
+  ui.embedCode.value = embedCode();
+}
+
+function showEmbedScene() {
+  ui.embedFrame.style.aspectRatio = aspectRatio(lastScene);
+  if (lastScene) {
+    const seconds = lastScene.duration.toLocaleString("es", { maximumFractionDigits: 1 });
+    ui.embedMeta.textContent = `${lastScene.width} × ${lastScene.height} · ${seconds} s · ${formatSize(lastBundle.byteLength)}`;
+  }
+  showEmbed();
+  sendToPreview();
+}
+
+function previewOptions() {
+  return { loop: embed.loop, controls: embed.controls, autoplay: embed.autoplay };
+}
+
+function sendToPreview() {
+  if (!previewReady || !lastBundle || previewBundle === lastBundle) return;
+  previewBundle = lastBundle;
+  const copy = lastBundle.slice(0);
+  ui.embedPreview.contentWindow.postMessage(
+    { type: "gaanim:open", name: `${embedName()}.gaanim`, bytes: copy },
+    location.origin,
+    [copy],
+  );
+}
+
+function previewStatus(message) {
+  if (message.kind === "ready") {
+    previewReady = true;
+    sendToPreview();
+  } else if (message.kind === "error" || message.kind === "damaged") {
+    log(`La vista previa no pudo abrir la escena: ${message.message ?? message.kind}`, "error");
+  }
+}
+
+function openEmbed() {
+  if (!lastBundle) return;
+  closeMenu();
+  ui.embedName.value = embedName();
+  ui.embedUrl.value = embed.url;
+  ui.embedLoop.checked = embed.loop;
+  ui.embedAutoplay.checked = embed.autoplay;
+  ui.embedControls.checked = embed.controls;
+  ui.embedLocal.hidden = !["localhost", "127.0.0.1", "[::1]"].includes(playerUrl.hostname);
+  // The preview is a second player, started the first time it is needed.
+  if (!ui.embedPreview.src) {
+    const params = new URLSearchParams({ embed: "" });
+    if (embed.loop) params.set("loop", "1");
+    if (!embed.controls) params.set("controls", "0");
+    if (!embed.autoplay) params.set("autoplay", "0");
+    ui.embedPreview.src = `${playerUrl.href}?${params}`;
+  } else if (previewReady) {
+    ui.embedPreview.contentWindow.postMessage({ type: "gaanim:options", ...previewOptions() }, location.origin);
+  }
+  ui.embedDialog.showModal();
+  showEmbedScene();
+}
+
+ui.embed.addEventListener("click", openEmbed);
+ui.embedClose.addEventListener("click", () => ui.embedDialog.close());
+// A click on the backdrop closes it too.
+ui.embedDialog.addEventListener("click", (event) => {
+  if (event.target === ui.embedDialog) ui.embedDialog.close();
 });
+ui.embedName.addEventListener("input", () => {
+  embed.name = ui.embedName.value;
+  saveEmbed();
+  showEmbed();
+});
+ui.embedName.addEventListener("change", () => {
+  ui.embedName.value = embedName();
+});
+ui.embedUrl.addEventListener("input", () => {
+  embed.url = ui.embedUrl.value;
+  saveEmbed();
+  showEmbed();
+});
+for (const [box, key] of [
+  [ui.embedLoop, "loop"],
+  [ui.embedAutoplay, "autoplay"],
+  [ui.embedControls, "controls"],
+]) {
+  box.addEventListener("change", () => {
+    embed[key] = box.checked;
+    saveEmbed();
+    showEmbed();
+    if (previewReady) {
+      ui.embedPreview.contentWindow.postMessage({ type: "gaanim:options", ...previewOptions() }, location.origin);
+    }
+  });
+}
+ui.embedDownload.addEventListener("click", downloadRecording);
+ui.embedCopy.addEventListener("click", async () => {
+  const code = embedCode();
+  try {
+    await navigator.clipboard.writeText(code);
+    toast(embed.url.trim() ? "Código copiado." : "Código copiado. Cambia la dirección de ejemplo por la de tu archivo.");
+  } catch {
+    ui.embedCode.focus();
+    ui.embedCode.select();
+    toast("Copia el código seleccionado.");
+  }
+});
+showEmbed();
 
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -967,7 +1221,7 @@ document.addEventListener("keydown", (event) => {
   } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     saveAndRun();
-  } else if (event.key === "Escape" && running !== null) {
+  } else if (event.key === "Escape" && running !== null && !ui.embedDialog.open) {
     stop();
   }
 });

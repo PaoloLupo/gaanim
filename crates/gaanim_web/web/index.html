@@ -77,8 +77,15 @@
       border: 1px solid rgba(255,255,255,.12); color: var(--muted); font-size: 13px; z-index: 6;
       pointer-events: none; }
     #sound[hidden] { display: none; }
-    /* Inside the playground the page around it names the player. */
+    /* Embedded, the page around it names the player. */
     .embedded .card img, .embedded .card h1, .embedded .card p:not(#status), .embedded .links { display: none; }
+    /* An embedded file waiting for a click, or to scroll into view. */
+    #play-hint { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 7;
+      width: 72px; height: 72px; margin: 0; padding: 0; border-radius: 50%; display: grid; place-items: center;
+      background: rgba(15,16,21,.72); border: 1px solid rgba(255,255,255,.24); color: var(--text); }
+    #play-hint:hover { background: rgba(15,16,21,.88); border-color: var(--loop); }
+    #play-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    #play-hint[hidden] { display: none; }
     /* Wording for mouse or touch screens. */
     .drop strong.touch, .drop span.touch { display: none; }
     @media (pointer: coarse) {
@@ -109,6 +116,9 @@
   </div>
   <div id="fill" hidden></div>
   <div id="buffering" role="status" hidden>Cargando…</div>
+  <button type="button" id="play-hint" aria-label="Reproducir" hidden>
+    <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>
+  </button>
   <div id="sound" role="status" hidden>Toca la escena o pulsa una tecla para activar el sonido</div>
   <div id="present-card" hidden>
     <div class="card">

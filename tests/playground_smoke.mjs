@@ -65,6 +65,12 @@ function run(name, code, { files = {}, check = () => null, failsAt = null } = {}
     if (output.length) console.log(output.join("\n"));
     return;
   }
+  // The page sizes the <iframe> that embeds the recording with these.
+  if (!(result.width > 0 && result.height > 0 && result.duration >= 0)) {
+    failures++;
+    console.log(`FAIL ${name}: no size or duration in ${JSON.stringify(result)}`);
+    return;
+  }
   const bundle = pyodide.FS.readFile("/tmp/escena.gaanim");
   const problem = check(bundle);
   if (problem) {

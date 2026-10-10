@@ -78,6 +78,7 @@ async function run({ id, code, files, names, fps, assetsChanged }) {
         id,
         bytes: bytes.buffer,
         timings: { run: result.run, record: result.record, total: (performance.now() - started) / 1000 },
+        scene: { width: result.width, height: result.height, duration: result.duration },
       },
       [bytes.buffer],
     );

@@ -37,10 +37,12 @@ fn begin(assets_changed: bool) {
 }
 
 /// Record the scene the script submitted into a bundle at `path`, at `fps`
-/// frames per second.
+/// frames per second. Returns the recording's size in pixels and its
+/// duration in seconds, `(width, height, duration)`, with which the
+/// playground sizes the frame that embeds it.
 #[pyfunction]
 #[pyo3(name = "_playground_record", signature = (path, fps = 30))]
-fn record(path: PathBuf, fps: u32) -> PyResult<()> {
+fn record(path: PathBuf, fps: u32) -> PyResult<(u32, u32, f64)> {
     host::set_host_sender(None);
     let receiver = SUBMITTED
         .lock()
@@ -57,13 +59,15 @@ fn record(path: PathBuf, fps: u32) -> PyResult<()> {
             )
         })?;
     let (width, height) = canvas.frame.preview_pixel_size();
+    let duration = canvas.segment_manifest().duration();
     let mut config = BundleConfig::new(path);
     config.fps = fps.max(1);
     config.width = width;
     config.height = height;
     // The cover image needs a GPU; the playground has none in Python.
     config.thumbnail = false;
-    record_canvas(canvas, config).map_err(|error| PyRuntimeError::new_err(error.to_string()))
+    record_canvas(canvas, config).map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+    Ok((width, height, duration))
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
