@@ -7,8 +7,8 @@ use bevy_egui::{EguiContexts, egui};
 use gaanim_core::peniko::Brush;
 use gaanim_math::{GlobalSpatialTransform, SpatialTransform};
 use gaanim_scene::{
-    AuthoredObject, AuthoredObjects, FillBrush, GlobalOpacity, HudOverlay, MobjectId, Opacity,
-    ParallaxLayer, RenderOrder, StrokeBrush, Visible, ZLayer, components::TextSpan,
+    AuthoredObject, AuthoredObjects, DepthOfField, FillBrush, GlobalOpacity, HudOverlay, MobjectId,
+    Opacity, ParallaxLayer, RenderOrder, StrokeBrush, Visible, ZLayer, components::TextSpan,
 };
 
 use crate::overlays::EditorOverlays;
@@ -68,7 +68,7 @@ type InspectedData = (
 pub fn inspector_panel_system(
     mut contexts: EguiContexts,
     overlays: Res<EditorOverlays>,
-    panel: Res<InspectorPanel>,
+    mut panel: ResMut<InspectorPanel>,
     presentation: Res<PresentationMode>,
     mut state: ResMut<EditorState>,
     authored: Option<Res<AuthoredObjects>>,
@@ -78,11 +78,20 @@ pub fn inspector_panel_system(
     parents: Query<&ChildOf>,
     children: Query<&Children>,
     spans: Query<&TextSpan>,
+    camera: Option<Res<gaanim_math::Camera>>,
+    depth_of_field: Option<Res<DepthOfField>>,
 ) {
     if presentation.active || !overlays.enabled || !panel.enabled {
         return;
     }
     let Some(selected) = state.selected else {
+        // Nothing selected: the scene camera at the current time.
+        if let Some(camera) = camera
+            && let Ok(ctx) = contexts.ctx_mut()
+            && camera_panel(ctx, &camera, depth_of_field.as_deref())
+        {
+            panel.enabled = false;
+        }
         return;
     };
     let Ok(data) = inspected.get(selected) else {
@@ -111,6 +120,117 @@ pub fn inspector_panel_system(
 
     let mut close = false;
     let mut select = None;
+    inspector_window().show(ctx, |ui| {
+        ui.set_width(280.0);
+        ui.spacing_mut().item_spacing.y = 6.0;
+        ui.horizontal(|ui| {
+            ui.label(caption("INSPECTOR"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
+                    .on_hover_text("Quitar la selección")
+                    .clicked()
+                {
+                    close = true;
+                }
+            });
+        });
+        header(ui, object.map(|(_, object)| object), data.0);
+        if let Some((_, object)) = object {
+            location_row(ui, object);
+        } else if authored.is_some() {
+            muted(ui, "Una parte interna, sin línea propia en el script.");
+        }
+        if let Some(text) = &text {
+            field(ui, "Texto", text);
+        }
+
+        section(ui, "TRANSFORMACIÓN");
+        if let Some(transform) = data.1 {
+            field(ui, "Posición", &format_vec(transform.translation));
+            field(ui, "Rotación", &format_rotation(transform.rotation));
+            field(ui, "Escala", &format_scale(transform.scale));
+        }
+        if let Some(bounds) = bounds {
+            let size = bounds.max - bounds.min;
+            field(
+                ui,
+                "Tamaño",
+                &format!("{} × {}", number(size.x), number(size.y)),
+            );
+            field(ui, "Centro", &format_vec((bounds.min + bounds.max) * 0.5));
+        } else if let Some(global) = data.2 {
+            field(
+                ui,
+                "En la escena",
+                &format_vec(global.mat4.w_axis.truncate()),
+            );
+        }
+
+        section(ui, "ESTILO");
+        match data.3 {
+            Some(fill) => brush_field(ui, "Relleno", fill.0.as_ref()),
+            None => field(ui, "Relleno", "—"),
+        }
+        match data.4 {
+            Some(stroke) if stroke.brush.is_some() && stroke.style.width > 0.0 => {
+                brush_field(ui, "Trazo", stroke.brush.as_ref());
+                field(ui, "Grosor", &number(stroke.style.width));
+            }
+            _ => field(ui, "Trazo", "—"),
+        }
+        let opacity = data.5.map_or(1.0, |opacity| opacity.0);
+        let global = data.6.map_or(opacity, |opacity| opacity.0);
+        field(
+            ui,
+            "Opacidad",
+            &if (global - opacity).abs() > 1e-3 {
+                format!("{} (en pantalla {})", percent(opacity), percent(global))
+            } else {
+                percent(opacity)
+            },
+        );
+
+        section(ui, "ORDEN");
+        if let Some(order) = data.7 {
+            field(ui, "z_index", &order.z_index.to_string());
+        }
+        if let Some(layer) = data.8 {
+            field(ui, "Capa", &format!("rango {}", layer.0));
+        }
+        if let Some(parallax) = data.9 {
+            field(
+                ui,
+                "Parallax",
+                &format!("profundidad {}", number(parallax.depth)),
+            );
+        }
+        if data.10 {
+            field(ui, "HUD", "fijo en pantalla");
+        }
+        field(ui, "Visible", if data.11 { "sí" } else { "no" });
+        if child_count > 0 {
+            field(ui, "Hijos", &child_count.to_string());
+        }
+        if let Some((entity, parent)) = parent {
+            ui.add_space(4.0);
+            let label = format!("Dentro de {}", object_title(parent));
+            if ui_kit::small_button(ui, &label, true)
+                .on_hover_text("Seleccionar el grupo que lo contiene")
+                .clicked()
+            {
+                select = Some(entity);
+            }
+        }
+    });
+    if close {
+        state.selected = None;
+    } else if let Some(entity) = select {
+        state.selected = Some(entity);
+    }
+}
+
+/// The inspector's window, docked to the right of the preview.
+fn inspector_window() -> egui::Window<'static> {
     egui::Window::new("Inspector")
         .id(egui::Id::new("editor_inspector"))
         .title_bar(false)
@@ -120,113 +240,83 @@ pub fn inspector_panel_system(
         .collapsible(false)
         .default_width(280.0)
         .frame(ui_kit::card_frame().inner_margin(egui::Margin::same(14)))
-        .show(ctx, |ui| {
-            ui.set_width(280.0);
-            ui.spacing_mut().item_spacing.y = 6.0;
-            ui.horizontal(|ui| {
-                ui.label(caption("INSPECTOR"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
-                        .on_hover_text("Quitar la selección")
-                        .clicked()
-                    {
-                        close = true;
-                    }
-                });
-            });
-            header(ui, object.map(|(_, object)| object), data.0);
-            if let Some((_, object)) = object {
-                location_row(ui, object);
-            } else if authored.is_some() {
-                muted(ui, "Una parte interna, sin línea propia en el script.");
-            }
-            if let Some(text) = &text {
-                field(ui, "Texto", text);
-            }
+}
 
-            section(ui, "TRANSFORMACIÓN");
-            if let Some(transform) = data.1 {
-                field(ui, "Posición", &format_vec(transform.translation));
-                field(ui, "Rotación", &format_rotation(transform.rotation));
-                field(ui, "Escala", &format_scale(transform.scale));
-            }
-            if let Some(bounds) = bounds {
-                let size = bounds.max - bounds.min;
-                field(
-                    ui,
-                    "Tamaño",
-                    &format!("{} × {}", number(size.x), number(size.y)),
-                );
-                field(ui, "Centro", &format_vec((bounds.min + bounds.max) * 0.5));
-            } else if let Some(global) = data.2 {
-                field(
-                    ui,
-                    "En la escena",
-                    &format_vec(global.mat4.w_axis.truncate()),
-                );
-            }
-
-            section(ui, "ESTILO");
-            match data.3 {
-                Some(fill) => brush_field(ui, "Relleno", fill.0.as_ref()),
-                None => field(ui, "Relleno", "—"),
-            }
-            match data.4 {
-                Some(stroke) if stroke.brush.is_some() && stroke.style.width > 0.0 => {
-                    brush_field(ui, "Trazo", stroke.brush.as_ref());
-                    field(ui, "Grosor", &number(stroke.style.width));
-                }
-                _ => field(ui, "Trazo", "—"),
-            }
-            let opacity = data.5.map_or(1.0, |opacity| opacity.0);
-            let global = data.6.map_or(opacity, |opacity| opacity.0);
-            field(
-                ui,
-                "Opacidad",
-                &if (global - opacity).abs() > 1e-3 {
-                    format!("{} (en pantalla {})", percent(opacity), percent(global))
-                } else {
-                    percent(opacity)
-                },
-            );
-
-            section(ui, "ORDEN");
-            if let Some(order) = data.7 {
-                field(ui, "z_index", &order.z_index.to_string());
-            }
-            if let Some(layer) = data.8 {
-                field(ui, "Capa", &format!("rango {}", layer.0));
-            }
-            if let Some(parallax) = data.9 {
-                field(
-                    ui,
-                    "Parallax",
-                    &format!("profundidad {}", number(parallax.depth)),
-                );
-            }
-            if data.10 {
-                field(ui, "HUD", "fijo en pantalla");
-            }
-            field(ui, "Visible", if data.11 { "sí" } else { "no" });
-            if child_count > 0 {
-                field(ui, "Hijos", &child_count.to_string());
-            }
-            if let Some((entity, parent)) = parent {
-                ui.add_space(4.0);
-                let label = format!("Dentro de {}", object_title(parent));
-                if ui_kit::small_button(ui, &label, true)
-                    .on_hover_text("Seleccionar el grupo que lo contiene")
+/// The scene camera, shown while nothing is selected. Returns whether the
+/// inspector was closed.
+fn camera_panel(
+    ctx: &egui::Context,
+    camera: &gaanim_math::Camera,
+    depth_of_field: Option<&DepthOfField>,
+) -> bool {
+    let mut close = false;
+    inspector_window().show(ctx, |ui| {
+        ui.set_width(280.0);
+        ui.spacing_mut().item_spacing.y = 6.0;
+        ui.horizontal(|ui| {
+            ui.label(caption("INSPECTOR"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
+                    .on_hover_text("Ocultar el inspector")
                     .clicked()
                 {
-                    select = Some(entity);
+                    close = true;
                 }
-            }
+            });
         });
-    if close {
-        state.selected = None;
-    } else if let Some(entity) = select {
-        state.selected = Some(entity);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new("Cámara de la escena")
+                    .size(16.0)
+                    .strong()
+                    .color(palette::TEXT),
+            )
+            .wrap(),
+        );
+        muted(ui, "Un clic en un objeto lo inspecciona.");
+        for (name, value) in camera_fields(camera) {
+            field(ui, name, &value);
+        }
+        if let Some(depth_of_field) = depth_of_field.filter(|dof| dof.aperture > 0.0) {
+            section(ui, "PROFUNDIDAD DE CAMPO");
+            field(ui, "Enfoque", &number(depth_of_field.focus));
+            field(ui, "Apertura", &number(depth_of_field.aperture));
+            field(ui, "Desenfoque máx.", &number(depth_of_field.max_blur));
+        }
+    });
+    close
+}
+
+/// The camera's pose and lens, as a script would set them.
+fn camera_fields(camera: &gaanim_math::Camera) -> Vec<(&'static str, String)> {
+    let mut fields = vec![
+        ("Posición", format_vec(camera.position)),
+        ("Rotación", format_rotation(camera.rotation)),
+    ];
+    match camera.projection {
+        gaanim_math::Projection::Orthographic { zoom } => fields.push(("Zoom", number(zoom))),
+        gaanim_math::Projection::Perspective { fov_y, near, far } => {
+            fields.push((
+                "FOV",
+                format!(
+                    "{} rad ({}°)",
+                    number(fov_y),
+                    number_with(fov_y.to_degrees(), 1)
+                ),
+            ));
+            fields.push(("Recorte", format!("{} – {}", number(near), number(far))));
+            fields.push(("Objetivo", format_vec(camera.target)));
+        }
     }
+    fields.push((
+        "Encuadre",
+        format!(
+            "{} × {}",
+            number(camera.frame_width),
+            number(camera.frame_height)
+        ),
+    ));
+    fields
 }
 
 fn header(ui: &mut egui::Ui, object: Option<&AuthoredObject>, id: Option<&MobjectId>) {
@@ -520,6 +610,26 @@ mod tests {
         assert_eq!(format_rotation(glam::DQuat::IDENTITY), "0 rad (0°)");
         let tilted = glam::DQuat::from_euler(glam::EulerRot::XYZ, 0.5, 0.0, 0.25);
         assert_eq!(format_rotation(tilted), "(0.5, 0, 0.25) rad");
+    }
+
+    #[test]
+    fn the_camera_lists_its_lens_like_a_script_sets_it() {
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+        camera.position = glam::DVec3::new(2.0, -1.5, 0.0);
+        camera.projection = gaanim_math::Projection::Orthographic { zoom: 1.6 };
+        let fields = camera_fields(&camera);
+        assert!(fields.contains(&("Posición", "(2, -1.5)".to_owned())));
+        assert!(fields.contains(&("Zoom", "1.6".to_owned())));
+        assert!(fields.contains(&("Encuadre", "16 × 9".to_owned())));
+        camera.projection = gaanim_math::Projection::Perspective {
+            fov_y: 0.5,
+            near: 0.1,
+            far: 100.0,
+        };
+        let fields = camera_fields(&camera);
+        assert!(fields.contains(&("FOV", "0.5 rad (28.6°)".to_owned())));
+        assert!(fields.contains(&("Recorte", "0.1 – 100".to_owned())));
+        assert!(!fields.iter().any(|(name, _)| *name == "Zoom"));
     }
 
     #[test]

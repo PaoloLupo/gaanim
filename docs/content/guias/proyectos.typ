@@ -205,6 +205,18 @@ una X para cancelar. La terminal desde la que abriste `gaanim` muestra la misma
 barra de progreso que `gaanim export` y el resultado. Al terminar aparece un
 aviso en la esquina con el archivo y un botón para abrirlo.
 
+El formato *PNG* exporta un PNG por fotograma (`frame_00000.png`,
+`frame_00001.png`…) para editar o componer en otro programa. Al elegirlo, el
+archivo `exports/output.mp4` pasa a `exports/output/frame.png`: los
+fotogramas van a una carpeta con el nombre del video, y el aviso final abre
+esa carpeta.
+
+Para guardar solo el fotograma que estás viendo, pulsa `Ctrl+Mayús+S`
+(`Cmd+Mayús+S` en macOS) o el botón de captura de la barra de overlays. Se
+renderiza aparte, sin overlays ni paneles, a 1920 píxeles en el lado largo, y
+se guarda en `<output_dir>/captures/` con el nombre del script y el instante
+(`main_2.35s.png`); nunca reemplaza una captura anterior.
+
 = Convertir un script suelto en proyecto
 
 Crea un proyecto con `gaanim init video mi-video`, reemplaza su `main.py` por

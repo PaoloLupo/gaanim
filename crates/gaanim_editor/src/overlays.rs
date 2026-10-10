@@ -344,6 +344,7 @@ pub(crate) const COPIED_FEEDBACK_SECS: f64 = 1.2;
 
 /// Barra flotante con los modos de vista y los overlays.
 /// Solo visible cuando `enabled=true` (activado con `O`, como el modo interactivo con `I`).
+#[allow(clippy::too_many_arguments)]
 pub fn overlays_settings_ui_system(
     mut contexts: EguiContexts,
     mut overlays: ResMut<EditorOverlays>,
@@ -352,6 +353,7 @@ pub fn overlays_settings_ui_system(
     presentation: Res<PresentationMode>,
     mut inspector: ResMut<crate::inspector::InspectorPanel>,
     mut console: ResMut<crate::console_panel::ConsolePanel>,
+    mut capture: ResMut<crate::frame_capture::FrameCapture>,
 ) {
     if presentation.active || !overlays.enabled {
         return;
@@ -531,6 +533,22 @@ pub fn overlays_settings_ui_system(
                         .clicked()
                         {
                             console.open = !console.open;
+                        }
+                        if crate::frame_capture::AVAILABLE
+                            && icon_button_sized(
+                                ui,
+                                Icon::Capture,
+                                ButtonTone::Ghost,
+                                !capture.busy(),
+                                HEIGHT,
+                            )
+                            .on_hover_text(
+                                "Guardar el fotograma actual como PNG · Ctrl+Mayús+S
+                                 Sin overlays, en la carpeta captures/ del proyecto.",
+                            )
+                            .clicked()
+                        {
+                            capture.requested = true;
                         }
                         divider(ui);
                         let keyboard =
@@ -925,6 +943,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
         "Seleccionar e inspeccionar el objeto bajo el cursor",
     ),
     ("J", "Mostrar u ocultar la consola"),
+    ("Ctrl+Mayús+S", "Guardar el fotograma actual como PNG"),
     ("Rueda", "Acercar o alejar hacia el cursor"),
     ("W A S D", "Mover la cámara"),
     ("R · F", "Restablecer la vista · encuadrar en 3D"),
