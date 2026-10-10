@@ -175,6 +175,11 @@ uv sync                      # instala las dependencias de un proyecto descargad
 
 = Ejecutar, detener y corregir
 
+El reproductor muestra la última grabación. Se detiene en cada `scene.stop()`
+hasta un clic o `Espacio`, y si la pausa tiene un bucle (`loop=`), lo repite
+mientras espera, como al presentar; *Continuar* sigue desde el final del
+bucle. El vídeo exportado no se detiene y reproduce cada bucle una vez.
+
 Mientras la escena corre, el reproductor dice si se está ejecutando el script
 o grabando la escena, cuánto lleva grabado y cuánto tiempo ha pasado:
 

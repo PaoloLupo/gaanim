@@ -8,7 +8,8 @@
 // when it scrolls away; one paused by hand stays paused. `loop` repeats it,
 // `controls=0` hides the bar (a click plays or pauses), `autoplay=0` waits for
 // a click and `#t=12.5` starts there. A stop (`scene.stop()`) pauses it until
-// a click.
+// a click; one with an ambient loop (`scene.stop(loop=…)`) repeats the loop
+// meanwhile, and the click plays on from its end, as a presentation does.
 //
 // The wasm module (`gaanim_embed`) only decodes the file and draws the frame
 // at a time; this page keeps the clock, downloads the file (in pieces when
@@ -83,6 +84,8 @@ const state = {
   ended: false,
   // Resting at this stop until a click.
   stop: null,
+  // The stop's ambient loop, `[start, end]`, repeating while it rests there.
+  ambient: null,
   // Paused because it scrolled away.
   pausedAway: false,
   // The frame on screen waits for its bytes.
@@ -116,7 +119,15 @@ function opened(json) {
     document.body.style.background = `rgb(${r} ${g} ${b})`;
   }
   document.title = info.title || document.title;
-  Object.assign(state, { time: Math.min(startTime(), info.duration), playing: false, started: false, ended: false, stop: null, pausedAway: false });
+  Object.assign(state, {
+    time: Math.min(startTime(), info.duration),
+    playing: false,
+    started: false,
+    ended: false,
+    stop: null,
+    ambient: null,
+    pausedAway: false,
+  });
   message.hidden = true;
   bar.hidden = !options.controls;
   seek.max = String(info.duration || 1);
@@ -131,6 +142,9 @@ function play() {
   if (!info) return;
   // The clock restarts from here, whatever time passed while paused.
   last = null;
+  // Out of a stop's loop, from its end.
+  if (state.ambient) state.time = state.ambient[1];
+  state.ambient = null;
   if (state.ended || state.time >= info.duration) state.time = 0;
   state.started = true;
   state.ended = false;
@@ -145,8 +159,21 @@ function pause() {
   showControls();
 }
 
+// Back to playing where it was: inside a stop's loop, it keeps looping.
+function resume() {
+  if (!state.ambient) {
+    play();
+    return;
+  }
+  last = null;
+  state.pausedAway = false;
+  state.playing = true;
+  showControls();
+}
+
+// A click, Space or the bar's button: a stop's loop waits for it to go on.
 function togglePlaying() {
-  if (state.playing) pause();
+  if (state.playing && !state.ambient) pause();
   else play();
 }
 
@@ -154,11 +181,23 @@ function togglePlaying() {
 function advance(dt) {
   const from = state.time;
   let next = from + dt;
+  if (state.ambient) {
+    // Round the loop, as long as the player rests here.
+    const [start, end] = state.ambient;
+    state.time = start + ((next - start) % (end - start));
+    return;
+  }
   const stop = info.stops.find((time) => time > from + 1e-6 && time <= next);
   if (stop !== undefined) {
     state.time = stop;
     state.stop = stop;
-    pause();
+    const loop = (info.loops ?? []).find(([start]) => Math.abs(start - stop) < 1e-5);
+    if (loop) {
+      state.ambient = loop;
+      showControls();
+    } else {
+      pause();
+    }
     return;
   }
   if (next >= info.duration) {
@@ -235,12 +274,13 @@ function showControls() {
   // Before the first start, a button in the middle; at a stop or at the end,
   // a small one in a corner, so the frame the reader looks at stays clear.
   big.hidden = !info || state.started || state.playing;
-  const waiting = !state.playing && state.started && (state.stop !== null || state.ended);
+  const waiting = state.started && ((!state.playing && (state.stop !== null || state.ended)) || state.ambient !== null);
   corner.hidden = !info || !waiting;
   cornerIcon.setAttribute("d", state.ended ? REPLAY : BAR_PLAY);
   cornerText.textContent = state.ended ? "Repetir" : "Continuar";
-  toggleIcon.setAttribute("d", state.playing ? BAR_PAUSE : state.ended ? REPLAY : BAR_PLAY);
-  toggle.setAttribute("aria-label", state.playing ? "Pausar" : state.ended ? "Repetir" : "Reproducir");
+  const running = state.playing && !state.ambient;
+  toggleIcon.setAttribute("d", running ? BAR_PAUSE : state.ended ? REPLAY : BAR_PLAY);
+  toggle.setAttribute("aria-label", running ? "Pausar" : state.ended ? "Repetir" : state.ambient ? "Continuar" : "Reproducir");
   loopButton.setAttribute("aria-pressed", String(options.loop));
   document.body.classList.toggle("reveal", hovering);
 }
@@ -289,6 +329,7 @@ seek.addEventListener("input", () => {
   state.time = Number(seek.value);
   state.ended = false;
   state.stop = null;
+  state.ambient = null;
 });
 seek.addEventListener("change", () => {
   seeking = false;
@@ -312,7 +353,7 @@ document.addEventListener("visibilitychange", () => {
 function followVisibility() {
   if (!info) return;
   if (state.visible && options.autoplay && (!state.started || state.pausedAway)) {
-    play();
+    resume();
   } else if (!state.visible && state.playing) {
     pause();
     state.pausedAway = true;

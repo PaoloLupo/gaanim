@@ -258,7 +258,8 @@ empieza cuando al menos una cuarta parte del marco está a la vista y se pausa
 cuando sale de ella: quien lee la entrada la ve desde el principio al llegar a
 ella, no mientras lee lo anterior. Si la pausa a mano, sigue pausada. Una
 pausa de la escena (`scene.stop()`) la detiene hasta un clic, como en una
-presentación. Estas opciones cambian cómo se reproduce (en HTML, el `&` que
+presentación; si la pausa tiene un bucle (`loop=`), lo repite mientras espera,
+y el clic sigue desde su final. Estas opciones cambian cómo se reproduce (en HTML, el `&` que
 las separa se escribe `&amp;`):
 
 #table(

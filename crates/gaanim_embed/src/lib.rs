@@ -270,14 +270,26 @@ mod web {
 
     /// What the page needs to know about a file, as JSON: its title,
     /// duration, frame rate and size, the color under it, the times of its
-    /// stops, its audio tracks (as the web player hands them to its page),
-    /// and `full`, which GPU passes it uses that this player leaves out.
+    /// stops and the ranges of their ambient loops, its audio tracks (as the
+    /// web player hands them to its page), and `full`, which GPU passes it
+    /// uses that this player leaves out.
     fn describe_file(bundle: &Bundle) -> String {
         let scene = &bundle.scene;
         let stops: Vec<f64> = scene
             .segments
             .iter()
             .flat_map(|segment| segment.stops.iter().map(|stop| stop.time))
+            .collect();
+        // `scene.stop(loop=…)`: the range after the stop that repeats while
+        // the player rests there, as `Timeline::ambient_loop_at` has it.
+        let loops: Vec<[f64; 2]> = scene
+            .segments
+            .iter()
+            .flat_map(|segment| segment.stops.iter())
+            .filter_map(|stop| {
+                let length = stop.ambient.filter(|length| *length > 1e-5)?;
+                Some([stop.time, stop.time + length])
+            })
             .collect();
         let audio: Vec<serde_json::Value> = scene
             .audio
@@ -325,6 +337,7 @@ mod web {
             "height": scene.output_size.1,
             "background": scene.clear_color,
             "stops": stops,
+            "loops": loops,
             "audio": audio,
             "full": full,
         })

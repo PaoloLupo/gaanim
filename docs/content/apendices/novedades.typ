@@ -55,7 +55,9 @@ alguna escena mueve objetos por una trayectoria.
   completo, empieza cuando está a la vista y se pausa al salir de ella, para
   que quien lee la entrada vea la animación al llegar a ella. `loop` la
   repite, `controls=0` oculta su barra fina (un clic pausa o reanuda) y
-  `autoplay=0` espera un clic. Una escena con posprocesado o con fondos,
+  `autoplay=0` espera un clic. Se detiene en cada `scene.stop()` hasta un
+  clic y repite el bucle de la pausa (`loop=`) mientras espera, como al
+  presentar. Una escena con posprocesado o con fondos,
   transiciones o efectos de shader se abre en el reproductor completo. El
   playground también lo usa. Ver
   #link("/guias/compartir/#insertar")[Insertar en un blog o sitio web].
