@@ -117,30 +117,42 @@ advierte y explica cómo añadirla. Los vídeos como recurso
 
 = Paquetes de Python <paquetes>
 
-Los paquetes que Pyodide compila para el navegador se cargan solos cuando el
-proyecto los importa: `numpy`, `sympy`, `scipy`, `pandas`, `networkx` y
-#link("https://pyodide.org/en/stable/usage/packages-in-pyodide.html")[muchos
-más].
+La pestaña *Paquetes*, junto a la consola, añade paquetes al proyecto. Escribe
+un nombre y elige entre las sugerencias: los paquetes que
+#link("https://pyodide.org/en/stable/usage/packages-in-pyodide.html")[Pyodide
+compila para el navegador] (NumPy, SymPy, SciPy, pandas, NetworkX…) y el
+paquete con ese nombre en PyPI. *Añadir* (o `Enter`) lo escribe en el proyecto
+y lo instala en el momento, sin ejecutar la escena; la lista muestra la versión
+instalada de cada uno, y la × lo quita del proyecto. Una versión escrita con el
+nombre, como `rich>=13`, se conserva.
 
-Otros paquetes de PyPI se declaran como en un proyecto de Python, en uno de
-estos dos archivos del proyecto:
+#figure(
+  image("../../assets/playground/paquetes.webp", alt: "La pestaña Paquetes: el buscador y la lista con numpy y webcolors instalados en el pyproject.toml del proyecto"),
+  caption: [`numpy`, de Pyodide, y `webcolors`, de PyPI, en el `pyproject.toml` del proyecto.],
+)
 
-- `pyproject.toml`, en la lista `dependencies` de la tabla `[project]`. Es el
-  archivo de los proyectos de la aplicación, donde escribe `uv add`.
-- `requirements.txt`, con un paquete por línea.
+Los paquetes se guardan como en cualquier proyecto de Python. Si el proyecto
+tiene un `pyproject.toml` con la lista `dependencies` de la tabla
+`[project]`, como los que crea `gaanim init`, van allí: es la lista donde
+escribe `uv add`. Si no, van a `requirements.txt`, un paquete por línea. Puedes
+editar esos archivos a mano; el panel los sigue. `gaanim` no hace falta
+declararlo, porque el playground ya lo tiene.
 
-Antes de ejecutar, el playground instala con
-#link("https://pyodide.org/en/stable/usage/loading-packages.html")[micropip] los que falten y lo anuncia
-en la consola. `gaanim` se omite, porque el playground ya lo tiene. Si un
-`import` falla con `ModuleNotFoundError`, la consola ofrece un enlace que
-añade el paquete al archivo y vuelve a ejecutar. A veces el paquete se llama
-distinto de su `import`: `import yaml` se instala como `pyyaml`.
+Al ejecutar, el playground instala con
+#link("https://pyodide.org/en/stable/usage/loading-packages.html")[micropip] lo
+que falte. Los paquetes de Pyodide se cargan también solos cuando el código
+los importa, aunque no estén en la lista. El editor completa los paquetes
+instalados igual que la API de Gaanim. Si un `import` falla con
+`ModuleNotFoundError`, la consola ofrece un enlace que añade el paquete. A
+veces se llama distinto de su `import`: `import yaml` viene de `pyyaml`.
 
 En el navegador solo se instalan los paquetes de Python puro (con una rueda
-`py3-none-any`) y los que Pyodide compila. Los que traen código nativo propio
-y no están en Pyodide solo funcionan en la aplicación. Instalar necesita
-conexión; una vez instalado, el paquete sigue disponible mientras no detengas
-Python.
+`py3-none-any`) y los que compila Pyodide, y lo mismo vale para sus
+dependencias. El panel avisa de los que no se pueden instalar y dice por qué:
+un paquete que no está en PyPI, o que necesita código nativo, falla sin
+detener la escena, y *Reintentar* lo intenta otra vez. Esos paquetes funcionan
+en la aplicación. Instalar necesita conexión; lo instalado sigue disponible
+mientras no detengas Python.
 
 = Del playground a la aplicación, y de vuelta <aplicacion>
 

@@ -302,6 +302,53 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
 #console .ok { color: var(--primary); }
 #console .hint { color: var(--gold-ink); }
 #console .hint::before { content: "→ "; }
+/* New output while the packages show: a gold frame on the console's tab. */
+.tab.unread::after { content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 6px; vertical-align: middle; background: var(--gold); }
+
+/* ---- Packages ----------------------------------------------------------- */
+.packages { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.packages[hidden] { display: none; }
+.package-search { display: flex; gap: 8px; }
+.package-field { position: relative; flex: 1; min-width: 0; }
+.package-field input {
+  width: 100%; height: 32px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 0;
+  background: var(--ink); color: var(--text); font: 13px/1 var(--mono); outline: none;
+}
+.package-field input:focus { border-color: var(--primary); }
+.package-suggestions {
+  position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 10; margin: 0; padding: 4px; list-style: none;
+  max-height: 280px; overflow: auto; background: var(--raised); border: 1px solid var(--line-strong);
+  box-shadow: 0 16px 40px var(--shadow);
+}
+.package-suggestions li {
+  display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: 2px 8px; padding: 6px 8px; cursor: pointer;
+}
+.package-suggestions li.active, .package-suggestions li:hover { background: var(--primary-soft); }
+.package-suggestions li.disabled { cursor: not-allowed; }
+.package-suggestions .name { font: 600 13px/1.3 var(--mono); color: var(--text); }
+.package-suggestions .version { font: 12px/1.3 var(--mono); color: var(--muted); }
+.package-suggestions .source {
+  justify-self: end; padding: 1px 6px; border: 1px solid var(--line-strong); color: var(--muted); font: 11px/1.3 var(--mono);
+}
+.package-suggestions .source.pyodide { border-color: var(--violet); color: var(--primary-strong); }
+.package-suggestions .summary {
+  grid-column: 1 / -1; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.package-suggestions .summary.warn { color: var(--warn); white-space: normal; }
+.package-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.package-list .empty { padding: 10px 0; color: var(--faint); font-size: 12.5px; }
+.package-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 2px 8px;
+  padding: 4px 0 4px 2px; border-bottom: 1px solid var(--line);
+}
+.package-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13px/1.3 var(--mono); }
+.package-name .spec { font-weight: 400; color: var(--muted); }
+.package-status { white-space: nowrap; font: 12px/1.3 var(--mono); color: var(--muted); }
+.package-status.ok { color: var(--primary); }
+.package-status.busy { color: var(--gold-ink); }
+.package-status.error { color: var(--danger); }
+.package-reason { grid-column: 1 / -1; margin: 0 0 4px; color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+.package-reason a { margin-left: 4px; color: var(--primary-strong); text-decoration: underline; cursor: pointer; }
 #console a.action { color: var(--primary-strong); text-decoration: underline; }
 #console a { color: var(--primary); cursor: pointer; text-decoration: underline dotted; }
 #console .empty { color: var(--faint); font-family: ui-sans-serif, system-ui, sans-serif; }
@@ -537,7 +584,9 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
 /* ---- Narrow screens: editor above, player and panel below. -------------- */
 @media (max-width: 860px) {
   .embed-body { grid-template-columns: 1fr; padding: 16px; }
-  body { overflow: auto; }
+  /* The page scrolls: the layout grows with the player and the panel
+     instead of squeezing them into what the editor leaves. */
+  body { overflow: visible; height: auto; min-height: 100%; grid-template-rows: auto auto auto; }
   #layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
   #layout > .editor-pane { grid-area: 1 / 1; }
   #layout > .side { grid-area: 2 / 1; }
@@ -548,7 +597,9 @@ button.icon:hover { background: var(--primary-soft); color: var(--primary-strong
   body.explorer-open .explorer { display: flex; }
   .splitter.vertical { display: none; }
   .side { grid-template-rows: auto 6px 40vh; }
-  .player-wrap { aspect-ratio: 16 / 9; }
+  /* Not stretched: a stretched grid item ignores its aspect ratio, and the
+     player's row collapsed under the console. */
+  .player-wrap { aspect-ratio: 16 / 9; align-self: start; }
   .brand .product { display: none; }
   /* What leaves the playground wraps to a second row when it must; the run
      controls stay next to the brand. */

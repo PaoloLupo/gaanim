@@ -110,13 +110,25 @@
 
       <div class="panel">
         <div class="tabs" role="tablist">
-          <span class="tab active" role="tab" aria-selected="true" id="tab-console">Consola</span>
+          <button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="console" id="tab-console">Consola</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" aria-controls="packages" id="tab-packages">Paquetes <span class="count" id="packages-count" hidden></span></button>
           <span class="spacer"></span>
           <button type="button" class="icon" id="clear-console" title="Limpiar consola" aria-label="Limpiar consola">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
           </button>
         </div>
         <div class="tab-body" id="console" role="tabpanel" aria-labelledby="tab-console" aria-live="polite"></div>
+        <div class="tab-body packages" id="packages" role="tabpanel" aria-labelledby="tab-packages" hidden>
+          <form class="package-search" id="package-form" autocomplete="off">
+            <div class="package-field">
+              <input type="text" id="package-query" spellcheck="false" placeholder="Busca un paquete: numpy, rich, pyyaml…" aria-label="Paquete" aria-autocomplete="list" aria-controls="package-suggestions">
+              <ul class="package-suggestions" id="package-suggestions" role="listbox" hidden></ul>
+            </div>
+            <button type="submit" class="primary" id="package-add">Añadir</button>
+          </form>
+          <p class="note" id="package-where"></p>
+          <ul class="package-list" id="package-list"></ul>
+        </div>
       </div>
     </section>
   </main>

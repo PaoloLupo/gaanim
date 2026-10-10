@@ -65,6 +65,34 @@ async function drain() {
   draining = false;
 }
 
+// The packages the project uses, so that Jedi completes them too: Pyodide's
+// that its code imports, and the requirements it declares, which micropip
+// installs here as in the runner. Each requirement is tried once.
+const tried = new Set();
+async function usePackages({ requirements, imports }) {
+  try {
+    await pyodide.loadPackagesFromImports(imports, { messageCallback: () => {}, errorCallback: () => {} });
+  } catch {
+    // An import Pyodide does not know: Jedi just will not complete it.
+  }
+  const missing = requirements.filter((requirement) => !tried.has(requirement));
+  if (!missing.length) return;
+  await pyodide.loadPackage("micropip", { messageCallback: () => {} });
+  const micropip = pyodide.pyimport("micropip");
+  try {
+    for (const requirement of missing) {
+      tried.add(requirement);
+      try {
+        await micropip.install(requirement);
+      } catch {
+        // The runner reports why; completions go on without it.
+      }
+    }
+  } finally {
+    micropip.destroy();
+  }
+}
+
 let ready = null;
 self.onmessage = async ({ data }) => {
   if (data.type === "init") {
@@ -76,6 +104,10 @@ self.onmessage = async ({ data }) => {
   }
   await ready;
   if (!services) return reply(data.id, null, "not ready");
+  if (data.type === "packages") {
+    usePackages(data);
+    return;
+  }
   // `set_project` and `resolve` are cheap and must not be skipped.
   if (data.method === "set_project" || data.method === "resolve") {
     try {

@@ -72,6 +72,7 @@ def fila_de_cuadros(scene, cantidad, lado=1.2, colores=()):
 `;
 const BROKEN = FORMAS.replace("scene.geometry.rect(lado, lado)", "scene.geometry.rectangulo(lado, lado)");
 const NOTES = "# Mi animación\n\nUna fila de cuadros y un título con una fuente propia.\n";
+const PYPROJECT = '[project]\nname = "mi-animacion"\nversion = "0.1.0"\nrequires-python = ">=3.14"\ndependencies = ["gaanim"]\n';
 const POINTS = "x,y\n0,0\n1,0.8\n2,1.1\n3,0.9\n";
 // A long scene: the recording takes long enough to show its progress.
 const LONG = `from gaanim import BLUE, GOLD, Scene
@@ -174,6 +175,8 @@ writeFileSync(
     "mi-animacion/main.py": MAIN,
     "mi-animacion/lib/formas.py": FORMAS,
     "mi-animacion/notas.md": NOTES,
+    // As `gaanim init` writes it: the packages panel adds to its list.
+    "mi-animacion/pyproject.toml": PYPROJECT,
     "mi-animacion/datos/puntos.csv": POINTS,
     "mi-animacion/assets/fonts/VictorMono.ttf": readFileSync(join(ROOT, "docs", "assets", "fonts", "VictorMono-VariableFont.ttf")),
     "mi-animacion/assets/imagenes/icono.png": readFileSync(join(ROOT, "docs", "assets", "brand", "gaanim-icon-512.png")),
@@ -340,6 +343,31 @@ try {
   await sleep(800);
   await shot("error");
   await setFile("lib/formas.py", FORMAS);
+
+  // The packages panel: one package of Pyodide and one of PyPI go into the
+  // project's pyproject.toml and install.
+  await click("#tab-packages");
+  const typePackage = (name) =>
+    evaluate(`(() => {
+      const query = document.getElementById("package-query");
+      query.focus();
+      query.value = ${JSON.stringify(name)};
+      query.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+  for (const [index, name] of ["numpy", "webcolors"].entries()) {
+    await typePackage(name);
+    await until(`!document.getElementById("package-suggestions").hidden`, { what: `the suggestions for ${name}` });
+    await evaluate(`document.getElementById("package-form").requestSubmit()`);
+    await until(`document.querySelectorAll(".package-status.ok").length > ${index}`, { what: `${name} installed`, timeout: 120000 });
+  }
+  await sleep(300);
+  await shot("paquetes", await rectOf(".panel"));
+  await evaluate(`(() => {
+    const query = document.getElementById("package-query");
+    query.value = "";
+    query.blur();
+  })()`);
+  await click("#tab-console");
 
   // A long recording: its progress and time, then Stop.
   await click(`.row[data-path="main.py"]`);

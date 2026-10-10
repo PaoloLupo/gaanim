@@ -49,6 +49,11 @@ const MAX_FILE = 80 * 1024 * 1024;
 let syntaxTimer = 0;
 let languageTimer = 0;
 let languageReady = false;
+// What the runner's Python has (packages panel): versions by normalized
+// name, requirements that failed with why, the one installing, and whether
+// an install was asked for; and Pyodide's own packages, once fetched.
+let packageState = { versions: {}, failed: {}, installing: null, busy: false };
+let pyodidePackages = null;
 // Live mode: the scene runs a moment after typing stops.
 let live = false;
 let liveTimer = 0;
@@ -102,6 +107,15 @@ const ui = {
   overlayHint: $("player-overlay-hint"),
   console: $("console"),
   clearConsole: $("clear-console"),
+  tabConsole: $("tab-console"),
+  tabPackages: $("tab-packages"),
+  packagesCount: $("packages-count"),
+  packages: $("packages"),
+  packageForm: $("package-form"),
+  packageQuery: $("package-query"),
+  packageSuggestions: $("package-suggestions"),
+  packageWhere: $("package-where"),
+  packageList: $("package-list"),
   status: $("status"),
   statusDot: $("status-dot"),
   progress: $("progress"),
@@ -384,6 +398,7 @@ function log(text, kind = "", action = null) {
   const atBottom = ui.console.scrollHeight - ui.console.scrollTop - ui.console.clientHeight < 40;
   ui.console.append(line);
   if (atBottom) ui.console.scrollTop = ui.console.scrollHeight;
+  if (ui.console.hidden && kind !== "info") ui.tabConsole.classList.add("unread");
   if (kind !== "hint") fontHint(text);
 }
 
@@ -1033,6 +1048,7 @@ function edited(path, model) {
   if (model === editor.getModel()) scheduleSyntaxCheck();
   scheduleLanguageSync();
   scheduleLiveRun();
+  if (path === "pyproject.toml" || path === "requirements.txt") renderPackages();
 }
 
 function clearRuntimeError(path) {
@@ -1333,6 +1349,7 @@ function renderTree() {
   add(treeOf(), 0);
   ui.tree.replaceChildren(...rows);
   ui.tree.querySelector("input")?.focus();
+  renderPackages();
 }
 
 function row({ path, folder, open = false, depth }) {
@@ -2275,11 +2292,26 @@ function ask(method, ...args) {
   });
 }
 
-// Jedi sees the project as it is: modules with their text, assets as names.
+// Jedi sees the project as it is: modules with their text, assets as names,
+// and the packages it imports or declares, which its worker loads too.
+let languagePackages = "";
 function syncLanguageProject() {
   const files = {};
-  for (const [path, file] of project) files[path] = file.text !== undefined ? (models.get(path)?.getValue() ?? file.text) : null;
+  const modules = new Set();
+  for (const [path, file] of project) {
+    const text = file.text !== undefined ? (models.get(path)?.getValue() ?? file.text) : null;
+    files[path] = text;
+    if (text === null || kindOf(path) !== "python") continue;
+    for (const match of text.matchAll(/^[ \t]*(?:from[ \t]+([A-Za-z_]\w*)|import[ \t]+([A-Za-z_]\w*))/gm)) modules.add(match[1] ?? match[2]);
+  }
   ask("set_project", files);
+  const requirements = projectRequirements().map((entry) => entry.requirement);
+  const imports = [...modules].sort().map((name) => `import ${name}`).join("\n");
+  const key = `${imports}\n${requirements.join("\n")}`;
+  if (languageReady && key !== languagePackages) {
+    languagePackages = key;
+    language.postMessage({ type: "packages", requirements, imports });
+  }
 }
 
 function scheduleLanguageSync() {
@@ -2592,6 +2624,9 @@ function makeRunner() {
 function useRunner(entry = makeRunner()) {
   runner = entry;
   runnerReady = entry.ready;
+  // A new Python has no packages yet either.
+  packageState = { versions: {}, failed: {}, installing: null, busy: false };
+  renderPackages();
   // A new Python has none of the assets.
   sentAssets = new Map();
   assetsDirty = true;
@@ -2654,7 +2689,12 @@ function onRunnerMessage(entry, { data }) {
         firstRun = false;
         rerun = false;
         run();
+      } else if (projectRequirements().length) {
+        installPackages();
       }
+      break;
+    case "packages":
+      onPackages(data);
       break;
     case "stdout":
       log(data.text);
@@ -2704,74 +2744,32 @@ function onRunnerMessage(entry, { data }) {
   }
 }
 
-// Where the project lists its packages: the [project] dependencies of its
-// pyproject.toml, where `uv add` writes in an application project, or
-// requirements.txt.
-function requirementsFile() {
-  const pyproject = project.get("pyproject.toml");
-  if (pyproject?.text !== undefined && addDependency(models.get("pyproject.toml")?.getValue() ?? pyproject.text, "x") !== null) {
-    return "pyproject.toml";
-  }
-  return "requirements.txt";
-}
-
-// A module the project imports and does not have: maybe a package of PyPI,
-// which the project's list installs.
-function packageHint(error) {
-  const name = /^No module named '([^'.]+)/.exec(error.message ?? "")?.[1];
-  if (error.kind !== "ModuleNotFoundError" || !name || exists(`${name}.py`) || exists(name)) return;
-  const file = requirementsFile();
+// A module the project imports and does not have: maybe a package, which
+// the packages panel adds.
+async function packageHint(error) {
+  const module = /^No module named '([^'.]+)/.exec(error.message ?? "")?.[1];
+  if (error.kind !== "ModuleNotFoundError" || !module || exists(`${module}.py`) || exists(module)) return;
+  // The distribution may have another name: `yaml` comes from `pyyaml`.
+  const known = (await loadPyodidePackages()).find((entry) => entry.imports.includes(module));
+  const name = known?.name ?? module;
   log(
-    `Si «${name}» es un paquete de PyPI, añádelo a ${file} (a veces se llama distinto de su import) y vuelve a ejecutar: se instala en el navegador si es de Python puro o Pyodide lo compila.`,
+    known
+      ? `«${module}» viene del paquete «${name}», que Pyodide incluye: añádelo al proyecto desde Paquetes.`
+      : `Si «${module}» es un paquete de PyPI, añádelo desde Paquetes (a veces se llama distinto de su import): se instala en el navegador si es de Python puro.`,
     "hint",
-    { label: `Añadir «${name}» a ${file}`, run: () => addRequirement(name) },
+    {
+      label: `Añadir «${name}»`,
+      run: () => {
+        showTab("packages");
+        addRequirement(name, { thenRun: true });
+      },
+    },
   );
-}
-
-// `toml` with `name` in its [project] dependencies, written as uv writes
-// them; null when it has no such array to add to.
-function addDependency(toml, name) {
-  const section = /^\[project\][ \t]*$/m.exec(toml);
-  if (!section) return null;
-  const after = toml.slice(section.index + section[0].length);
-  const next = /^\[/m.exec(after);
-  const end = section.index + section[0].length + (next ? next.index : after.length);
-  const body = toml.slice(section.index, end);
-  const array = /^(dependencies\s*=\s*\[)([^\]]*)\]/m.exec(body);
-  if (!array) return null;
-  const items = array[2];
-  const listed = items.match(/["']([A-Za-z0-9._-]+)/g)?.map((item) => item.slice(1).toLowerCase()) ?? [];
-  if (listed.includes(name.toLowerCase())) return toml;
-  let replaced;
-  if (items.includes("\n")) {
-    // One per line, with a trailing comma.
-    const kept = items.replace(/\s*$/, "");
-    const comma = !kept.trim() || kept.endsWith(",") ? "" : ",";
-    replaced = `${array[1]}${kept}${comma}\n    "${name}",\n]`;
-  } else {
-    const kept = items.trim().replace(/,$/, "");
-    replaced = `${array[1]}${kept ? `${kept}, ` : ""}"${name}"]`;
-  }
-  return toml.slice(0, section.index) + body.replace(array[0], replaced) + toml.slice(end);
-}
-
-function addRequirement(name) {
-  const path = requirementsFile();
-  const current = models.get(path)?.getValue() ?? project.get(path)?.text ?? "";
-  let text;
-  if (path === "pyproject.toml") {
-    text = addDependency(current, name);
-  } else {
-    const lines = current.split("\n").map((line) => line.trim());
-    text = lines.includes(name) ? current : `${current.replace(/\s*$/, "")}${current.trim() ? "\n" : ""}${name}\n`;
-  }
-  if (text !== current) setFile({ path, text });
-  openFile(path);
-  run();
 }
 
 // Show a failure in the console and mark its line in its file.
 function showFailure(error) {
+  showTab("console");
   if (error.traceback) log(error.traceback.trimEnd(), "error");
   else log(`${error.kind}: ${error.message}`, "error");
   packageHint(error);
@@ -2891,6 +2889,7 @@ function stop() {
   const next = spare;
   spare = null;
   useRunner(next ?? undefined);
+  if (runnerReady && projectRequirements().length) installPackages();
   if (runnerReady) {
     log("■ Detenido.", "info");
     setStatus("Listo.", "ready");
@@ -2903,6 +2902,404 @@ function stop() {
 ui.run.addEventListener("click", run);
 ui.stop.addEventListener("click", stop);
 useRunner();
+
+// ---------------------------------------------------------------------------
+// Packages: the project's dependencies, and the panel that adds them
+// ---------------------------------------------------------------------------
+
+// PEP 503: `Rich`, `rich_text` and `rich.text` name the same distribution.
+function normalizeName(name) {
+  return name.toLowerCase().replace(/[-_.]+/g, "-");
+}
+
+// The distribution a requirement names: `rich` in `rich[jupyter]>=13`.
+function requirementName(requirement) {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*/.exec(requirement.trim())?.[0] ?? "";
+}
+
+// The text of the project's file `path` as the editor has it; null without it.
+function fileText(path) {
+  const file = project.get(path);
+  if (file?.text === undefined) return null;
+  return models.get(path)?.getValue() ?? file.text;
+}
+
+// The [project] dependencies array of `toml`: where its items start and end
+// in the text, and the items; null without one.
+function dependencyArray(toml) {
+  const section = /^\[project\][ \t]*$/m.exec(toml);
+  if (!section) return null;
+  const bodyStart = section.index + section[0].length;
+  const after = toml.slice(bodyStart);
+  const next = /^\[/m.exec(after);
+  const body = after.slice(0, next ? next.index : after.length);
+  const array = /^dependencies\s*=\s*\[([^\]]*)\]/m.exec(body);
+  if (!array) return null;
+  const itemsStart = bodyStart + array.index + array[0].indexOf("[") + 1;
+  return { itemsStart, itemsEnd: itemsStart + array[1].length, items: array[1] };
+}
+
+function listedDependencies(toml) {
+  const array = dependencyArray(toml);
+  if (!array) return null;
+  return [...array.items.matchAll(/"([^"]*)"|'([^']*)'/g)].map((match) => (match[1] ?? match[2]).trim()).filter(Boolean);
+}
+
+// `toml` with `requirement` in its [project] dependencies, written as uv
+// writes them; null when it has no such array to add to.
+function addDependency(toml, requirement) {
+  const array = dependencyArray(toml);
+  if (!array) return null;
+  const name = normalizeName(requirementName(requirement));
+  if (listedDependencies(toml).some((item) => normalizeName(requirementName(item)) === name)) return toml;
+  let items;
+  if (array.items.includes("\n")) {
+    // One per line, with a trailing comma.
+    const kept = array.items.replace(/\s*$/, "");
+    const comma = !kept.trim() || kept.endsWith(",") ? "" : ",";
+    items = `${kept}${comma}\n    "${requirement}",\n`;
+  } else {
+    const kept = array.items.trim().replace(/,$/, "");
+    items = `${kept ? `${kept}, ` : ""}"${requirement}"`;
+  }
+  return toml.slice(0, array.itemsStart) + items + toml.slice(array.itemsEnd);
+}
+
+// `toml` without `requirement`'s distribution in its [project] dependencies.
+function removeDependency(toml, requirement) {
+  const array = dependencyArray(toml);
+  if (!array) return toml;
+  const name = normalizeName(requirementName(requirement));
+  const kept = [...array.items.matchAll(/"([^"]*)"|'([^']*)'/g)]
+    .filter((match) => normalizeName(requirementName(match[1] ?? match[2])) !== name)
+    .map((match) => match[0]);
+  const items = array.items.includes("\n") ? (kept.length ? `\n${kept.map((item) => `    ${item},`).join("\n")}\n` : "") : kept.join(", ");
+  return toml.slice(0, array.itemsStart) + items + toml.slice(array.itemsEnd);
+}
+
+// What the project asks for, as the runner reads it (runner.py
+// `requirements`): pyproject.toml's [project] dependencies and the lines of
+// requirements.txt, gaanim left out.
+function projectRequirements() {
+  const found = [];
+  const toml = fileText("pyproject.toml");
+  for (const requirement of (toml === null ? null : listedDependencies(toml)) ?? []) found.push({ requirement, file: "pyproject.toml" });
+  for (const line of fileText("requirements.txt")?.split("\n") ?? []) {
+    const requirement = line.split("#")[0].trim();
+    if (requirement && !requirement.startsWith("-")) found.push({ requirement, file: "requirements.txt" });
+  }
+  const seen = new Set();
+  return found.filter(({ requirement }) => {
+    const name = normalizeName(requirementName(requirement));
+    if (!name || name === "gaanim" || seen.has(requirement)) return false;
+    seen.add(requirement);
+    return true;
+  });
+}
+
+// Where new packages go: pyproject.toml when it has [project] dependencies
+// (an application project, where `uv add` writes), else requirements.txt.
+function requirementsFile() {
+  const toml = fileText("pyproject.toml");
+  return toml !== null && dependencyArray(toml) ? "pyproject.toml" : "requirements.txt";
+}
+
+function addRequirement(requirement, { thenRun = false } = {}) {
+  const path = requirementsFile();
+  const current = fileText(path) ?? "";
+  let text = current;
+  if (path === "pyproject.toml") {
+    text = addDependency(current, requirement);
+  } else {
+    const name = normalizeName(requirementName(requirement));
+    const listed = current.split("\n").some((line) => normalizeName(requirementName(line.split("#")[0])) === name && line.trim());
+    if (!listed) text = `${current.replace(/\s*$/, "")}${current.trim() ? "\n" : ""}${requirement}\n`;
+  }
+  if (text !== current) {
+    setFile({ path, text });
+    renderTree();
+  }
+  renderPackages();
+  if (thenRun) run();
+  else installPackages();
+}
+
+function removeRequirement({ requirement, file }) {
+  const current = fileText(file);
+  if (current === null) return;
+  const name = normalizeName(requirementName(requirement));
+  const text =
+    file === "pyproject.toml"
+      ? removeDependency(current, requirement)
+      : current
+          .split("\n")
+          .filter((line) => !line.trim() || normalizeName(requirementName(line.split("#")[0])) !== name)
+          .join("\n");
+  if (text !== current) setFile({ path: file, text });
+  renderPackages();
+  toast(`«${requirement}» ya no está en ${file}. Sigue instalado hasta que Python se reinicie.`);
+}
+
+// Install what the project asks for now, without running the scene: the
+// runner gets the two files as they are.
+function installPackages({ retry = false } = {}) {
+  if (!runner) return;
+  flushSaves();
+  const files = [];
+  const remove = [];
+  for (const path of ["pyproject.toml", "requirements.txt"]) {
+    const text = fileText(path);
+    if (text === null) remove.push(path);
+    else files.push({ path, text });
+  }
+  if (retry) packageState.failed = {};
+  packageState.busy = true;
+  renderPackages();
+  runner.worker.postMessage({ type: "install", files, remove, retry });
+}
+
+// The runner's report: what it is installing, or what it has.
+function onPackages(data) {
+  if (data.installing) {
+    packageState.installing = data.installing;
+  } else {
+    packageState = {
+      versions: Object.fromEntries(Object.entries(data.versions ?? {}).map(([name, version]) => [normalizeName(name), version])),
+      failed: data.failed ?? {},
+      installing: null,
+      busy: false,
+    };
+  }
+  renderPackages();
+}
+
+// Pyodide's own packages (pyodide-lock.json), for suggestions and to tell
+// which distribution an import comes from.
+function loadPyodidePackages() {
+  pyodidePackages ??= fetch(new URL("pyodide-lock.json", config.pyodide))
+    .then((response) => response.json())
+    .then((lock) =>
+      Object.values(lock.packages)
+        // Pyodide ships each package's tests apart: not something to add.
+        .filter((entry) => entry.package_type === "package" && entry.name !== "micropip" && !entry.name.endsWith("-tests"))
+        .map((entry) => ({ name: entry.name, version: entry.version, imports: entry.imports ?? [] })),
+    )
+    .catch(() => []);
+  return pyodidePackages;
+}
+
+function packageStatus({ requirement }) {
+  const version = packageState.versions[normalizeName(requirementName(requirement))];
+  const failure = packageState.failed[requirement];
+  if (failure) return { kind: "error", text: "No se instaló", reason: failure };
+  if (packageState.installing === requirement) return { kind: "busy", text: "Instalando…" };
+  if (version) return { kind: "ok", text: `✓ ${version}` };
+  if (packageState.busy) return { kind: "busy", text: "En cola…" };
+  return { kind: "pending", text: runnerReady ? "Se instala al ejecutar" : "Cuando Python esté listo" };
+}
+
+function renderPackages() {
+  const entries = projectRequirements();
+  ui.packagesCount.hidden = !entries.length;
+  ui.packagesCount.textContent = String(entries.length);
+  if (ui.packages.hidden) return;
+  ui.packageWhere.textContent =
+    requirementsFile() === "pyproject.toml"
+      ? "Se guardan en pyproject.toml, en [project] dependencies: la lista donde escribe uv add."
+      : "Se guardan en requirements.txt. Con un pyproject.toml que tenga [project] dependencies, como el de los proyectos de la aplicación, irían allí.";
+  if (!entries.length) {
+    const empty = document.createElement("li");
+    empty.className = "empty";
+    empty.textContent =
+      "El proyecto no declara paquetes. NumPy, SymPy, pandas y los demás de Pyodide se cargan también al importarlos; añádelos aquí para que el proyecto los declare, como en la aplicación.";
+    ui.packageList.replaceChildren(empty);
+    return;
+  }
+  const both = new Set(entries.map((entry) => entry.file)).size > 1;
+  ui.packageList.replaceChildren(
+    ...entries.map((entry) => {
+      const item = document.createElement("li");
+      item.className = "package-row";
+      const name = document.createElement("span");
+      name.className = "package-name";
+      const bare = requirementName(entry.requirement);
+      name.append(bare);
+      const spec = entry.requirement.slice(bare.length).trim();
+      if (spec) name.append(Object.assign(document.createElement("span"), { className: "spec", textContent: ` ${spec}` }));
+      if (both) name.append(Object.assign(document.createElement("span"), { className: "spec", textContent: ` · ${entry.file}` }));
+      const status = packageStatus(entry);
+      const state = Object.assign(document.createElement("span"), { className: `package-status ${status.kind}`, textContent: status.text });
+      const remove = Object.assign(document.createElement("button"), { type: "button", className: "icon", textContent: "×" });
+      remove.title = `Quitar «${bare}» del proyecto`;
+      remove.setAttribute("aria-label", remove.title);
+      remove.addEventListener("click", () => removeRequirement(entry));
+      item.append(name, state, remove);
+      if (status.reason) {
+        const reason = Object.assign(document.createElement("p"), { className: "package-reason", textContent: `${status.reason} ` });
+        const retry = Object.assign(document.createElement("a"), { textContent: "Reintentar" });
+        retry.addEventListener("click", () => installPackages({ retry: true }));
+        reason.append(retry);
+        item.append(reason);
+      }
+      return item;
+    }),
+  );
+}
+
+// Suggestions as the name is typed: Pyodide's packages that match it, and
+// the exact name on PyPI, whose files say whether it installs here.
+let suggestions = [];
+let activeSuggestion = -1;
+let suggestTimer = 0;
+let suggestLookup = null;
+
+async function findPackages(query) {
+  const name = requirementName(query);
+  if (!name) return [];
+  const key = normalizeName(name);
+  const rank = (entry) => (normalizeName(entry.name) === key || entry.imports.includes(name) ? 0 : normalizeName(entry.name).startsWith(key) ? 1 : 2);
+  const local = (await loadPyodidePackages())
+    .filter((entry) => normalizeName(entry.name).includes(key) || entry.imports.includes(name))
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+    .slice(0, 6)
+    .map((entry) => ({ name: entry.name, version: entry.version, source: "Pyodide", installable: true, summary: "Compilado para el navegador." }));
+  if (local.some((entry) => normalizeName(entry.name) === key)) return local;
+  suggestLookup?.abort();
+  suggestLookup = new AbortController();
+  try {
+    const response = await fetch(`https://pypi.org/pypi/${encodeURIComponent(key)}/json`, { signal: suggestLookup.signal });
+    if (!response.ok) {
+      return local.length ? local : [{ name, source: "", installable: false, summary: "No está en Pyodide ni en PyPI." }];
+    }
+    const data = await response.json();
+    // micropip installs wheels: a pure Python one (`none-any`) or Pyodide's.
+    const pure = (data.urls ?? []).some((file) => file.packagetype === "bdist_wheel" && /-none-any\.whl$/.test(file.filename));
+    return [
+      {
+        name: data.info.name,
+        version: data.info.version,
+        source: "PyPI",
+        installable: pure,
+        summary: pure ? (data.info.summary ?? "") : "No tiene una rueda de Python puro y Pyodide no lo compila: solo funciona en la aplicación.",
+      },
+      ...local,
+    ];
+  } catch (error) {
+    if (error.name === "AbortError") throw error;
+    return local.length ? local : [{ name, source: "", installable: false, summary: "PyPI no responde: comprueba la conexión." }];
+  }
+}
+
+function showSuggestions(list) {
+  suggestions = list;
+  activeSuggestion = list.findIndex((entry) => entry.installable);
+  ui.packageSuggestions.hidden = !list.length;
+  ui.packageSuggestions.replaceChildren(
+    ...list.map((entry, index) => {
+      const item = document.createElement("li");
+      item.setAttribute("role", "option");
+      item.className = `${entry.installable ? "" : "disabled"}${index === activeSuggestion ? " active" : ""}`;
+      item.append(Object.assign(document.createElement("span"), { className: "name", textContent: entry.name }));
+      item.append(Object.assign(document.createElement("span"), { className: "version", textContent: entry.version ?? "" }));
+      if (entry.source) {
+        item.append(Object.assign(document.createElement("span"), { className: `source ${entry.source.toLowerCase()}`, textContent: entry.source }));
+      }
+      if (entry.summary) {
+        item.append(Object.assign(document.createElement("span"), { className: `summary${entry.installable ? "" : " warn"}`, textContent: entry.summary }));
+      }
+      // Pressing chooses it before the input loses the focus.
+      item.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        choosePackage(entry);
+      });
+      return item;
+    }),
+  );
+}
+
+function hideSuggestions() {
+  ui.packageSuggestions.hidden = true;
+  suggestions = [];
+  activeSuggestion = -1;
+}
+
+function choosePackage(entry) {
+  if (!entry?.installable) return;
+  const typed = ui.packageQuery.value.trim();
+  // A version typed with the name (`rich>=13`) stays.
+  const requirement = normalizeName(requirementName(typed)) === normalizeName(entry.name) ? typed : entry.name;
+  ui.packageQuery.value = "";
+  hideSuggestions();
+  addRequirement(requirement);
+}
+
+ui.packageQuery.addEventListener("input", () => {
+  clearTimeout(suggestTimer);
+  const query = ui.packageQuery.value;
+  if (!requirementName(query)) {
+    hideSuggestions();
+    return;
+  }
+  suggestTimer = setTimeout(async () => {
+    try {
+      const found = await findPackages(query);
+      if (ui.packageQuery.value === query) showSuggestions(found);
+    } catch {
+      // A newer query took its place.
+    }
+  }, 250);
+});
+ui.packageQuery.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (!suggestions.length) return;
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    activeSuggestion = (activeSuggestion + step + suggestions.length) % suggestions.length;
+    [...ui.packageSuggestions.children].forEach((item, index) => item.classList.toggle("active", index === activeSuggestion));
+  } else if (event.key === "Escape") {
+    event.stopPropagation();
+    hideSuggestions();
+  }
+});
+ui.packageQuery.addEventListener("blur", hideSuggestions);
+ui.packageForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = ui.packageQuery.value;
+  if (!requirementName(query)) return;
+  let list = suggestions;
+  if (!list.length) {
+    try {
+      list = await findPackages(query);
+    } catch {
+      return;
+    }
+  }
+  const key = normalizeName(requirementName(query));
+  const chosen = list[activeSuggestion] ?? list.find((entry) => normalizeName(entry.name) === key) ?? list[0];
+  if (chosen?.installable) choosePackage(chosen);
+  else if (chosen) showSuggestions(list);
+});
+
+// The console and the packages share the panel under the player.
+function showTab(name) {
+  const packages = name === "packages";
+  ui.console.hidden = packages;
+  ui.packages.hidden = !packages;
+  ui.tabConsole.classList.toggle("active", !packages);
+  ui.tabPackages.classList.toggle("active", packages);
+  ui.tabConsole.setAttribute("aria-selected", String(!packages));
+  ui.tabPackages.setAttribute("aria-selected", String(packages));
+  ui.clearConsole.hidden = packages;
+  if (packages) {
+    loadPyodidePackages();
+    renderPackages();
+  } else {
+    ui.tabConsole.classList.remove("unread");
+  }
+}
+ui.tabConsole.addEventListener("click", () => showTab("console"));
+ui.tabPackages.addEventListener("click", () => showTab("packages"));
+renderPackages();
 
 // ---------------------------------------------------------------------------
 // Toolbar
