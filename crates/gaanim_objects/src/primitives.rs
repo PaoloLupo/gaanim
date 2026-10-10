@@ -922,12 +922,22 @@ pub fn number_plane(
 }
 
 pub fn open_path(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
+    polyline(id, points, false)
+}
+
+/// Straight segments through `points`; `closed` joins the last point to the
+/// first when there are at least three.
+pub fn polyline(id: ObjectId, points: &[kurbo::Point], closed: bool) -> MobjectBundle {
     let mut path = kurbo::BezPath::new();
     if !points.is_empty() {
         path.move_to(points[0]);
         for &p in &points[1..] {
             path.line_to(p);
         }
+    }
+    let closed = closed && points.len() > 2;
+    if closed {
+        path.close_path();
     }
     let mut min_x = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
@@ -952,7 +962,7 @@ pub fn open_path(id: ObjectId, points: &[kurbo::Point]) -> MobjectBundle {
         )),
         style: kurbo::Stroke::new(2.0),
     };
-    bundle.tag = ObjectTag("OpenPath".into());
+    bundle.tag = ObjectTag(if closed { "ClosedPath" } else { "OpenPath" }.into());
     bundle
 }
 

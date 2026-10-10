@@ -3,6 +3,25 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+thread_local! {
+    /// How long each segment took to compile, while a replay profiles them.
+    static SEGMENT_TIMES: RefCell<Option<Vec<(String, Duration)>>> = const { RefCell::new(None) };
+}
+
+/// Record how long each segment that this thread compiles takes, until
+/// [`take_segment_times`].
+pub(crate) fn time_segments() {
+    SEGMENT_TIMES.with_borrow_mut(|times| *times = Some(Vec::new()));
+}
+
+/// The segments compiled since [`time_segments`], with how long each took.
+pub(crate) fn take_segment_times() -> Vec<(String, Duration)> {
+    SEGMENT_TIMES
+        .with_borrow_mut(Option::take)
+        .unwrap_or_default()
+}
 
 use bevy::prelude::*;
 use gaanim_core::ObjectId;
@@ -1014,11 +1033,14 @@ pub(crate) struct CompileCheckpoint {
     pub(crate) timeline: Timeline,
 }
 
-impl CompileCursor {
-    /// The compiled object that stands for authored object `id`.
-    pub(crate) fn runtime_id(&self, id: ObjectId) -> Option<ObjectId> {
-        self.id_map.get(&id).copied()
-    }
+/// What a compilation leaves for later.
+pub(crate) struct Compiled {
+    /// The checkpoint asked for, if the compilation reached it.
+    pub(crate) checkpoint: Option<CompileCheckpoint>,
+    /// The compiled object that stands for each authored object.
+    pub(crate) ids: HashMap<ObjectId, ObjectId>,
+    /// The compiled clock after the last segment.
+    pub(crate) end_time: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2513,6 +2535,43 @@ impl SceneModel {
         leaves
     }
 
+    /// The mesh extruded from the outline `source` fills in the scene, and
+    /// the center it belongs at; `None`, with a console warning, when the
+    /// outline encloses no area.
+    fn extruded_mesh(
+        builder: &SceneBuilder<'_, '_, '_>,
+        source: ObjectId,
+        extrusion: &super::ExtrusionSpec,
+    ) -> Option<(gaanim_scene::TriangleMeshData, gaanim_core::kurbo::Point)> {
+        let outline = Self::mask_path_in_world(builder, source);
+        let material = extrusion.material.unwrap_or_else(|| {
+            // The source's own color, as its first filled leaf shows it.
+            let color = Self::visual_leaf_ids(builder, source)
+                .into_iter()
+                .find_map(|id| match builder.states.get(id)?.fill.as_ref()? {
+                    gaanim_core::peniko::Brush::Solid(color) => Some(*color),
+                    _ => None,
+                });
+            color.map_or_else(
+                gaanim_scene::Material3D::default,
+                gaanim_scene::Material3D::matte,
+            )
+        });
+        match gaanim_objects::extrude::extrude(
+            &outline,
+            extrusion.depth,
+            extrusion.bevel,
+            extrusion.tolerance,
+            material,
+        ) {
+            Ok(extruded) => Some((extruded.mesh, extruded.center)),
+            Err(error) => {
+                gaanim_core::console::warn("3d", format!("extrude: {error}"));
+                None
+            }
+        }
+    }
+
     fn mask_path_in_world(
         builder: &SceneBuilder<'_, '_, '_>,
         root: ObjectId,
@@ -2547,15 +2606,6 @@ impl SceneModel {
         );
     }
 
-    /// Compile the segments from `resume` (or from the start), optionally
-    /// capturing a checkpoint before segment `checkpoint_at` and queueing
-    /// world markers before chosen segments. An index equal to the segment
-    /// count denotes the point after the last segment.
-    ///
-    /// Resuming is valid only when every segment before the cursor, and every
-    /// scene-wide input, is identical to the compilation that produced it,
-    /// and `timeline` is that checkpoint's timeline.
-    #[allow(clippy::too_many_arguments)]
     /// Values whose text each reactive number inside a layout keeps room
     /// for, by number: its explicit reserve and its source at the corners of
     /// the ranges its parameters take. A number outside a layout keeps none,
@@ -2613,6 +2663,14 @@ impl SceneModel {
             .collect()
     }
 
+    /// Compile the segments from `resume` (or from the start), optionally
+    /// capturing a checkpoint before segment `checkpoint_at` and queueing
+    /// world markers before chosen segments. An index equal to the segment
+    /// count denotes the point after the last segment.
+    ///
+    /// Resuming is valid only when every segment before the cursor, and every
+    /// scene-wide input, is identical to the compilation that produced it,
+    /// and `timeline` is that checkpoint's timeline.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn compile_resumable<'w, 's>(
         &self,
@@ -2623,7 +2681,7 @@ impl SceneModel {
         resume: Option<CompileCursor>,
         checkpoint_at: Option<usize>,
         mut markers: Vec<(usize, SegmentMarker)>,
-    ) -> Option<CompileCheckpoint> {
+    ) -> Compiled {
         let CompileCursor {
             next_segment: start,
             builder: builder_state,
@@ -2771,6 +2829,8 @@ impl SceneModel {
             scene_ids.push(scene_id);
             let start_time = builder.current_time;
             let first_stop = builder.stop_times.len();
+            let timed = SEGMENT_TIMES.with_borrow(Option::is_some);
+            let compile_started = timed.then(std::time::Instant::now);
             Self::replay_seg(
                 &mut builder,
                 seg,
@@ -2799,6 +2859,15 @@ impl SceneModel {
                 &mut revealed_deferred,
                 &self.state,
             );
+            builder.timeline.origin = None;
+            if let Some(started) = compile_started {
+                let elapsed = started.elapsed();
+                SEGMENT_TIMES.with_borrow_mut(|times| {
+                    if let Some(times) = times {
+                        times.push((seg.name.clone(), elapsed));
+                    }
+                });
+            }
             // The manifest sums each segment's local cursor, while clips,
             // stops, and scene starts use the builder's running clock. The two
             // float sums can differ by a few ULPs, which made a terminal stop
@@ -3108,32 +3177,46 @@ impl SceneModel {
         }
 
         // Parameter-driven procedural layers integrate their signal from the
-        // layer's start, so they need its whole schedule.
-        for (target, signal, start, base) in std::mem::take(&mut builder.procedural_signal_tracks) {
-            let tweens: Vec<gaanim_animation::SignalTween> = builder
-                .timeline
-                .clips
-                .values()
-                .filter_map(|clip| match &clip.payload {
-                    gaanim_timeline::clip::ClipPayload::Animation(animation)
-                        if animation.target == signal
-                            && (clip.start >= start || clip.end() > start) =>
-                    {
-                        match animation.lens {
-                            gaanim_timeline::clip::PropertyLensSpec::SignalFloat { from, to } => {
-                                Some(gaanim_animation::SignalTween {
-                                    start: clip.start,
-                                    duration: clip.duration,
-                                    from,
-                                    to,
-                                    rate: animation.rate_func.clone(),
-                                })
-                            }
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                })
+        // layer's start, so they need its whole schedule: each signal's tweens
+        // in timeline order, gathered in one pass over the clips.
+        let procedural_tracks = std::mem::take(&mut builder.procedural_signal_tracks);
+        let mut signal_tweens: HashMap<ObjectId, Vec<(f64, f64, gaanim_animation::SignalTween)>> =
+            procedural_tracks
+                .iter()
+                .map(|(_, signal, _, _)| (*signal, Vec::new()))
+                .collect();
+        if !signal_tweens.is_empty() {
+            for clip in builder.timeline.clips.values() {
+                let gaanim_timeline::clip::ClipPayload::Animation(animation) = &clip.payload else {
+                    continue;
+                };
+                let gaanim_timeline::clip::PropertyLensSpec::SignalFloat { from, to } =
+                    animation.lens
+                else {
+                    continue;
+                };
+                if let Some(tweens) = signal_tweens.get_mut(&animation.target) {
+                    tweens.push((
+                        clip.start,
+                        clip.end(),
+                        gaanim_animation::SignalTween {
+                            start: clip.start,
+                            duration: clip.duration,
+                            from,
+                            to,
+                            rate: animation.rate_func.clone(),
+                        },
+                    ));
+                }
+            }
+        }
+        for (target, signal, start, base) in procedural_tracks {
+            let tweens: Vec<gaanim_animation::SignalTween> = signal_tweens
+                .get(&signal)
+                .into_iter()
+                .flatten()
+                .filter(|(clip_start, clip_end, _)| *clip_start >= start || *clip_end > start)
+                .map(|(_, _, tween)| tween.clone())
                 .collect();
             let track = std::sync::Arc::new(gaanim_animation::SignalTrack::new(base, tweens));
             builder.commands.entity(target).queue(
@@ -3160,6 +3243,7 @@ impl SceneModel {
             );
         }
 
+        let mut connections = Vec::new();
         for (i, seg) in segments.iter().enumerate() {
             if let Some(prev) = seg.prev_segment
                 && prev < i
@@ -3183,11 +3267,10 @@ impl SceneModel {
                     &shown_at_end,
                 );
                 let runtime = Self::runtime_transition(&tr, &id_map, &builder);
-                builder
-                    .timeline
-                    .connect(scene_ids[prev], scene_ids[i], runtime);
+                connections.push((scene_ids[prev], scene_ids[i], runtime));
             }
         }
+        builder.timeline.connect_all(connections);
 
         // Shader effects read parameters any segment may declare, so they
         // resolve once every object exists; echo copies then carry them.
@@ -3313,6 +3396,20 @@ impl SceneModel {
                 .commands
                 .remove_resource::<gaanim_renderer::effects::MotionBlur>(),
         }
+        // Clips change it from here; seeks restore it from snapshots.
+        builder
+            .commands
+            .insert_resource(gaanim_scene::DepthOfField::default());
+        if builder.motion_blur_windows.is_empty() {
+            builder
+                .commands
+                .remove_resource::<gaanim_renderer::effects::MotionBlurWindows>();
+        } else {
+            let windows = builder.motion_blur_windows.clone();
+            builder
+                .commands
+                .insert_resource(gaanim_renderer::effects::MotionBlurWindows(windows));
+        }
 
         // Clear with the canvas color as well. The drawable background is
         // world-space geometry and can be rotated by the camera; using the
@@ -3326,7 +3423,11 @@ impl SceneModel {
             .commands
             .insert_resource(gaanim_media::PreviewAudioTracks(self.audio_tracks.clone()));
         builder.commands.insert_resource(self.lighting_3d);
-        checkpoint
+        Compiled {
+            checkpoint,
+            ids: id_map,
+            end_time: builder.current_time,
+        }
     }
 
     /// Compile the scene into a scratch world and return every layout
@@ -3439,7 +3540,11 @@ impl SceneModel {
             })
             .collect();
         fade_in_targets.extend(Self::camera_view_entries(&seg.ops));
+        let track_origins = crate::canvas::tracks_script_lines();
         for (op_index, op) in seg.ops.iter().enumerate() {
+            // The editor's animation timeline traces each clip to its `play`.
+            builder.timeline.origin = (track_origins && matches!(op, Op::Play(_) | Op::Launch(_)))
+                .then(|| crate::canvas::ops::op_origin(seg.id, op_index));
             match op {
                 Op::Spawn(spec) => {
                     let live = spec.lock().expect("object spec poisoned").clone();
@@ -3502,6 +3607,14 @@ impl SceneModel {
                     );
                     if spec.hud {
                         Self::apply_hud(builder, actual.id);
+                    }
+                    if let Some(depth) = spec.parallax_depth
+                        && let Some(state) = builder.states.get(actual.id)
+                    {
+                        builder
+                            .commands
+                            .entity(state.entity)
+                            .insert(gaanim_scene::ParallaxLayer { depth });
                     }
                     if spec.exclude_from_parent_draw
                         && let Some(state) = builder.states.get_mut(actual.id)
@@ -6519,6 +6632,22 @@ impl SceneModel {
                         );
                     }
                 }
+                Op::AttachRoughNotation {
+                    target,
+                    sources,
+                    padding,
+                    notation,
+                } => {
+                    let compiled = Self::bounds_source_ids(builder, id_map, sources);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(state.entity).insert((
+                            gaanim_animation::SurroundingRect::rough(compiled, *padding, *notation),
+                            gaanim_scene::PathRevealOrder::Sequential,
+                        ));
+                    }
+                }
                 Op::AttachStrokeCycle {
                     target,
                     colors,
@@ -7918,6 +8047,13 @@ impl SceneModel {
         }
     }
 
+    /// The motion blur of a whip pan's frames: a full-frame shutter with
+    /// enough samples that a fast move smears instead of stepping.
+    fn whip_pan_blur() -> gaanim_renderer::effects::MotionBlur {
+        gaanim_renderer::effects::MotionBlur::new(360.0, 24, None)
+            .expect("the whip pan shutter is valid")
+    }
+
     fn add_camera_lens(
         builder: &mut SceneBuilder,
         start: f64,
@@ -8424,6 +8560,125 @@ impl SceneModel {
                 *camera_zoom = 1.0;
                 *camera_fov = None;
             }
+            AnimationType::CameraFollowPath { route, follow } => {
+                let Some(path) = builder.world_route(*route) else {
+                    return;
+                };
+                let path = crate::builder::route_portion(path, *follow);
+                if gaanim_math::get_path_length(&path) <= 0.0 {
+                    gaanim_core::console::warn("camera", "follow_path: the route has no length");
+                    return;
+                }
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraPathFollow {
+                        path: path.clone(),
+                        z: camera_position.z,
+                        orient: follow.orient,
+                        route: Default::default(),
+                    },
+                );
+                let end = gaanim_math::get_point_at_alpha(&path, 1.0);
+                *camera_position = DVec3::new(end.x, end.y, camera_position.z);
+                if let Some(offset) = follow.orient {
+                    *camera_rotation = gaanim_core::glam::DQuat::from_rotation_z(
+                        gaanim_math::path_tangent_angle(&path, 1.0) + offset,
+                    );
+                }
+            }
+            AnimationType::CameraWhipPan { target, blur } => {
+                let to = compile_tracking_endpoint(target, id_map, &builder.states);
+                match &to {
+                    gaanim_animation::TrackingEndpoint::Static(point) => {
+                        let to = DVec3::new(point.x, point.y, camera_position.z);
+                        Self::add_camera_lens(
+                            builder,
+                            start,
+                            anim,
+                            PropertyLensSpec::CameraPosition {
+                                from: *camera_position,
+                                to,
+                            },
+                        );
+                        *camera_position = to;
+                    }
+                    _ => Self::add_camera_lens(
+                        builder,
+                        start,
+                        anim,
+                        PropertyLensSpec::CameraPositionSource {
+                            from: *camera_position,
+                            to,
+                        },
+                    ),
+                }
+                if *blur {
+                    let begin = builder.timeline.map_time(start + anim.delay.max(0.0));
+                    let end = builder
+                        .timeline
+                        .map_time(start + anim.delay.max(0.0) + anim.duration.max(0.0));
+                    builder
+                        .motion_blur_windows
+                        .push((begin, end, Self::whip_pan_blur()));
+                }
+            }
+            AnimationType::CameraDepthOfField {
+                focus,
+                aperture,
+                max_blur,
+            } => {
+                let from = builder.depth_of_field;
+                let to = gaanim_scene::DepthOfField {
+                    focus: focus.unwrap_or(from.focus),
+                    aperture: aperture.unwrap_or(from.aperture),
+                    max_blur: max_blur.unwrap_or(from.max_blur),
+                };
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraDepthOfField {
+                        from: [from.focus, from.aperture, from.max_blur],
+                        to: [to.focus, to.aperture, to.max_blur],
+                    },
+                );
+                builder.depth_of_field = to;
+            }
+            AnimationType::CameraDollyZoom { factor } => {
+                let Some((fov, near, far)) = *camera_fov else {
+                    gaanim_core::console::warn(
+                        "camera",
+                        "dolly_zoom needs a perspective camera; call camera.perspective(...) first",
+                    );
+                    return;
+                };
+                if (*camera_position - *camera_target).length() <= f64::EPSILON {
+                    gaanim_core::console::warn(
+                        "camera",
+                        "dolly_zoom needs the camera away from its look_at target",
+                    );
+                    return;
+                }
+                Self::add_camera_lens(
+                    builder,
+                    start,
+                    anim,
+                    PropertyLensSpec::CameraDollyZoom {
+                        from_position: *camera_position,
+                        target: *camera_target,
+                        from_fov: fov,
+                        near,
+                        far,
+                        factor: *factor,
+                    },
+                );
+                let (position, fov) =
+                    gaanim_math::dolly_zoom(*camera_position, *camera_target, fov, *factor, 1.0);
+                *camera_position = position;
+                *camera_fov = Some((fov, near, far));
+            }
             AnimationType::CameraDolly { factor } => {
                 let direction = *camera_position - *camera_target;
                 let destination = *camera_target + direction * factor;
@@ -8564,6 +8819,10 @@ impl SceneModel {
             },
             AnimationType::CameraFollow { target } => AnimationType::CameraFollow {
                 target: *id_map.get(target)?,
+            },
+            AnimationType::CameraFollowPath { route, follow } => AnimationType::CameraFollowPath {
+                route: *id_map.get(route)?,
+                follow: *follow,
             },
             AnimationType::CameraViewZoomTo { screen, zoom, fit } => {
                 AnimationType::CameraViewZoomTo {
@@ -9323,9 +9582,9 @@ impl SceneModel {
                     group
                 }
             }
-            SpawnKind::Polyline(points) => {
+            SpawnKind::Polyline { points, closed } => {
                 let points: Vec<Point> = points.iter().map(|&(x, y)| Point::new(x, y)).collect();
-                let b = builder.open_path(&points);
+                let b = builder.polyline(&points, *closed);
                 let mr = Self::finish_spawn_builder(b, spec);
                 Self::apply_layout(builder, mr.id, spec, id_map, frame_bounds);
                 mr
@@ -10117,7 +10376,28 @@ impl SceneModel {
                 mref
             }
             SpawnKind::Primitive3D(mesh) => {
-                let mref = builder.spawn_triangle_mesh_data(mesh.clone());
+                let extruded = spec.extrusion.as_ref().and_then(|extrusion| {
+                    let source = id_map.get(&extrusion.source).copied()?;
+                    Self::extruded_mesh(builder, source, extrusion)
+                });
+                let (mesh, center) = match extruded {
+                    Some((mesh, center)) => (mesh, Some(center)),
+                    None => (mesh.clone(), None),
+                };
+                let mref = builder.spawn_triangle_mesh_data(mesh);
+                // The mesh is centered on its own origin, so moves, pivots
+                // and `create()` behave as for other primitives.
+                if let Some(center) = center
+                    && let Some(state) = builder.states.get_mut(mref.id)
+                {
+                    state.transform = state
+                        .transform
+                        .shift_3d(gaanim_core::glam::DVec3::new(center.x, center.y, 0.0));
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(state.transform);
+                }
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
@@ -10464,6 +10744,22 @@ impl SceneModel {
                 mref
             }
         };
+        if let Some((_, rank)) = &spec.z_layer
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(gaanim_scene::ZLayer(*rank));
+        }
+        if spec.covers_on_purpose
+            && let Some(state) = builder.states.get(mref.id)
+        {
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(gaanim_scene::CoversOnPurpose);
+        }
         // Applies to primitives as well as groups/text, which skip `post_apply`
         // when they finish through `finish_spawn_builder`.
         if let Some(align) = spec.stroke_align
@@ -11015,6 +11311,12 @@ impl SceneModel {
                 .entity(state.entity)
                 .insert(bevy::prelude::Transform::default());
         }
+        // Glyphs go on their path before a layout measures the Text.
+        if let Some(text_path) = &spec.text_path
+            && let Some(path) = id_map.get(&text_path.path).copied()
+        {
+            builder.attach_text_path(id, path, text_path);
+        }
         // A part of an imported SVG is laid out after its root.
         if spec.svg_owner.is_none() {
             Self::apply_layout(builder, id, spec, id_map, frame_bounds);
@@ -11063,7 +11365,7 @@ impl SceneModel {
                 | SpawnKind::CurvedArrow { .. }
                 | SpawnKind::CurvedArrowArc { .. }
                 | SpawnKind::Dimension { .. }
-                | SpawnKind::Polyline(_)
+                | SpawnKind::Polyline { .. }
                 | SpawnKind::ReactivePolyline { .. }
                 | SpawnKind::Bezier { .. }
                 | SpawnKind::Curve(_)
@@ -11211,7 +11513,9 @@ impl SceneModel {
         id_map: &HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
     ) {
-        let uses_default_text_anchor = matches!(spec.kind, SpawnKind::Text(_));
+        // A Text on a path already sits where its path is.
+        let uses_default_text_anchor =
+            matches!(spec.kind, SpawnKind::Text(_)) && spec.text_path.is_none();
         let pivots_on_box_center = Self::declared_in_scene_coordinates(&spec.kind)
             && !spec
                 .layout_ops
@@ -12723,6 +13027,35 @@ mod tests {
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
+    }
+
+    #[test]
+    fn depth_of_field_clips_set_the_resource_and_seeks_restore_it() {
+        let mut canvas = SceneModel::new(960, 540);
+        let layer = canvas.parallax_layer(3.0).unwrap();
+        let hill = canvas.circle(1.0);
+        canvas.add_to_parallax_layer(&layer, &hill).unwrap();
+        let set = canvas
+            .camera_depth_of_field(Some(0.5), Some(0.12), None, 1.0)
+            .unwrap()
+            .duration(0.0);
+        canvas.play(vec![set]);
+        canvas.wait(0.5);
+        let rack = canvas
+            .camera_depth_of_field(Some(3.0), None, None, 1.0)
+            .unwrap();
+        canvas.play(vec![rack]);
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        let dof = |world: &World| *world.resource::<gaanim_scene::DepthOfField>();
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(dof(&world).focus, 0.5);
+        assert_eq!(dof(&world).aperture, 0.12);
+        assert!((dof(&world).blur_at(3.0) - 0.1).abs() < 1e-9);
+        timeline.seek(&mut world, 2.0);
+        assert!((dof(&world).focus - 3.0).abs() < 1e-9);
+        timeline.seek(&mut world, 0.25);
+        assert_eq!(dof(&world).focus, 0.5);
     }
 
     #[test]
@@ -14923,6 +15256,44 @@ mod tests {
         assert_eq!(reveal_groups(&glyphs, &[('x', None)]), None);
     }
 
+    #[test]
+    fn clips_carry_the_play_they_came_from_while_lines_are_tracked() {
+        crate::canvas::track_script_lines(true);
+        let mut canvas = SceneModel::new(640, 360);
+        let circle = canvas.circle(1.0);
+        let square = canvas.square(1.0);
+        canvas.play(vec![circle.fade_in(1.0)]);
+        canvas.play(vec![square.fade_in(0.5), circle.fade_out(0.5)]);
+        let timeline = compiled_timeline(&canvas);
+        let mut origins: Vec<_> = timeline
+            .clips
+            .iter()
+            .filter(|(_, clip)| {
+                matches!(
+                    clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(_)
+                )
+            })
+            .map(|(id, clip)| (clip.start, timeline.clip_origins.get(&id).copied()))
+            .collect();
+        origins.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert!(origins.iter().all(|(_, origin)| origin.is_some()));
+        let first = origins.first().unwrap().1;
+        let last = origins.last().unwrap().1;
+        assert_ne!(first, last, "each play has its own origin");
+        // The key names the play's segment and its place there.
+        let state = canvas.state.lock().unwrap();
+        let segment = state.active();
+        let plays: Vec<_> = segment
+            .ops
+            .iter()
+            .enumerate()
+            .filter(|(_, op)| matches!(op, Op::Play(_)))
+            .map(|(index, _)| crate::canvas::ops::op_origin(segment.id, index))
+            .collect();
+        assert_eq!(plays, vec![first.unwrap(), last.unwrap()]);
+    }
+
     fn compiled_timeline(canvas: &SceneModel) -> Timeline {
         let world = World::new();
         let mut queue = CommandQueue::default();
@@ -15021,6 +15392,7 @@ mod tests {
                                 path,
                                 orient,
                                 reset_anchor,
+                                ..
                             },
                         ..
                     },
@@ -15877,6 +16249,57 @@ mod tests {
     }
 
     #[test]
+    fn a_closed_polyline_takes_new_points_and_stays_closed() {
+        let mut canvas = SceneModel::new(640, 360);
+        let outline = canvas.closed_polyline(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]);
+        let outline = outline
+            .points(vec![(0.0, 0.0), (2.0, 0.0), (2.0, 2.0)])
+            .unwrap();
+        canvas.play(vec![
+            outline
+                .animate()
+                .points(vec![(0.0, 0.0), (3.0, 0.0), (3.0, 3.0)])
+                .unwrap()
+                .duration(1.0),
+        ]);
+        let reactive = canvas.reactive_polyline(vec![(0.0.into(), 0.0.into()); 3], true);
+        assert!(reactive.points(vec![(0.0, 0.0); 3]).is_err());
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(outline.id.as_raw() - 1);
+        let mut outline_at = |time: f64| {
+            timeline.seek(&mut world, time);
+            world
+                .query::<(&MobjectId, &gaanim_scene::Path2D)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+                .elements()
+                .to_vec()
+        };
+        use gaanim_core::kurbo::PathEl::{ClosePath, LineTo, MoveTo};
+        assert_eq!(
+            outline_at(0.0),
+            [
+                MoveTo(Point::new(0.0, 0.0)),
+                LineTo(Point::new(2.0, 0.0)),
+                LineTo(Point::new(2.0, 2.0)),
+                ClosePath
+            ]
+        );
+        assert_eq!(
+            outline_at(1.0),
+            [
+                MoveTo(Point::new(0.0, 0.0)),
+                LineTo(Point::new(3.0, 0.0)),
+                LineTo(Point::new(3.0, 3.0)),
+                ClosePath
+            ]
+        );
+    }
+
+    #[test]
     fn launched_animations_run_under_later_plays() {
         let mut canvas = SceneModel::new(640, 360);
         let wheel = canvas.circle(1.0);
@@ -16226,6 +16649,47 @@ mod tests {
     }
 
     #[test]
+    fn a_pivot_set_after_showing_cuts_at_the_cursor_without_moving() {
+        let mut canvas = SceneModel::new(640, 360);
+        let square = canvas.rect(0.4, 0.4).move_to(2.0, 2.0).hidden().unwrap();
+        canvas.play(vec![square.animate().fade_in().duration(1.0)]);
+        let square = square.with_pivot(0.0, 2.0);
+        canvas.play(vec![square.animate().scale_to(2.0).duration(1.0)]);
+        // Already scaled about its center: the new pivot moves nothing.
+        let grown = canvas.rect(1.0, 1.0).move_to(1.0, 0.0);
+        canvas.play(vec![grown.animate().scale_to(2.0).duration(1.0)]);
+        let grown = grown.with_pivot(0.0, 0.0);
+        canvas.wait(1.0);
+        canvas.play(vec![grown.animate().scale_to(1.0).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        let mut drawn = |time: f64, handle: &DrawableHandle| {
+            timeline.seek(&mut world, time);
+            let affine = transform_of(&mut world, handle).to_affine_2d();
+            (affine * Point::ORIGIN, affine * Point::new(0.5, 0.0))
+        };
+        for (time, center) in [
+            (1.0, Point::new(2.0, 2.0)),
+            (2.0, Point::new(4.0, 2.0)),
+            (0.5, Point::new(2.0, 2.0)),
+            (2.0, Point::new(4.0, 2.0)),
+        ] {
+            let (drawn, _) = drawn(time, &square);
+            assert!(drawn.distance(center) < 1e-9, "{drawn:?} at {time}");
+        }
+        for (time, center, edge) in [
+            (3.5, Point::new(1.0, 0.0), Point::new(2.0, 0.0)),
+            (5.0, Point::new(0.5, 0.0), Point::new(1.0, 0.0)),
+            (2.5, Point::new(1.0, 0.0), Point::new(1.75, 0.0)),
+            (3.5, Point::new(1.0, 0.0), Point::new(2.0, 0.0)),
+        ] {
+            let (drawn, side) = drawn(time, &grown);
+            assert!(drawn.distance(center) < 1e-9, "{drawn:?} at {time}");
+            assert!(side.distance(edge) < 1e-9, "{side:?} at {time}");
+        }
+    }
+
+    #[test]
     fn move_along_an_arrow_travels_its_axis_from_tail_to_tip() {
         let mut canvas = SceneModel::new(640, 360);
         let straight = canvas.arrow(-2.0, 1.0, 2.0, 1.0);
@@ -16418,6 +16882,47 @@ mod tests {
         assert_eq!(order, Some(4));
     }
 
+    #[test]
+    fn z_layers_rank_drawables_for_the_whole_scene() {
+        let mut canvas = SceneModel::new(640, 360);
+        let wall = canvas.rect(1.0, 1.0).z_index(400);
+        assert!(wall.clone().z_layer("model").is_err());
+        assert!(canvas.z_layers(&[], None).is_err());
+        assert!(canvas.z_layers(&["model", "model"], None).is_err());
+        assert!(canvas.z_layers(&["model", " "], None).is_err());
+        assert!(canvas.z_layers(&["model"], Some("overlay")).is_err());
+        canvas
+            .z_layers(&["back", "model", "overlay"], Some("model"))
+            .unwrap();
+        canvas
+            .z_layers(&["back", "model", "overlay"], Some("model"))
+            .unwrap();
+        assert!(canvas.z_layers(&["model", "overlay"], None).is_err());
+        assert!(wall.clone().z_layer("front").is_err());
+        let lens = canvas.circle(0.5).z_layer("overlay").unwrap();
+        let floor = canvas.rect(2.0, 2.0).z_layer("back").unwrap();
+        canvas.play(vec![lens.animate().move_to(1.0, 0.0).duration(1.0)]);
+        // Draw order holds for the whole scene, so a later call applies too.
+        let wall = wall.z_layer("model").unwrap();
+        let unlayered = canvas.circle(0.2);
+        canvas.wait(1.0);
+        let (mut world, _) = compiled_world(&canvas);
+        let mut layer = |handle: &DrawableHandle| {
+            let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+            world
+                .query::<(&MobjectId, Option<&gaanim_scene::ZLayer>)>()
+                .iter(&world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .map(|layer| layer.0)
+        };
+        assert_eq!(
+            [&lens, &floor, &wall, &unlayered].map(&mut layer),
+            [Some(1), Some(-1), Some(0), None]
+        );
+    }
+
     fn opacity_of(world: &mut World, handle: &DrawableHandle) -> f32 {
         let id = ObjectId::from_raw(handle.id.as_raw() - 1);
         world
@@ -16427,6 +16932,31 @@ mod tests {
             .unwrap()
             .1
             .0
+    }
+
+    #[test]
+    fn entrances_show_the_opacity_an_object_was_declared_or_left_with() {
+        let mut canvas = SceneModel::new(640, 360);
+        let faint = canvas.rect(1.0, 1.0).opacity(0.3).hidden().unwrap();
+        let unset = canvas.rect(1.0, 1.0).opacity(0.0).hidden().unwrap();
+        canvas.play(vec![
+            faint.animate().fade_in().duration(1.0),
+            unset.animate().fade_in().duration(1.0),
+        ]);
+        canvas.play(vec![faint.animate().fade_out().duration(1.0)]);
+        canvas.play(vec![faint.animate().fade_in().duration(1.0)]);
+        canvas.play(vec![faint.animate().opacity(0.0).duration(1.0)]);
+        canvas.wait(1.0);
+        canvas.play(vec![faint.animate().create().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        for (time, expected) in [(1.0, 0.3), (2.0, 0.0), (3.0, 0.3), (4.5, 0.0), (6.0, 0.3)] {
+            timeline.seek(&mut world, time);
+            let opacity = opacity_of(&mut world, &faint);
+            assert!((opacity - expected).abs() < 1e-6, "{opacity} at {time}");
+        }
+        timeline.seek(&mut world, 1.0);
+        assert_eq!(opacity_of(&mut world, &unset), 1.0);
     }
 
     #[test]

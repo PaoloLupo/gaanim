@@ -17,6 +17,7 @@ use gaanim_text::prelude::TextAnchor;
 use crate::anim::{
     AnimationBuilder, AnimationType, DrawAnimationConfig, PropertyAnimation, TextSelectionEffect,
 };
+use crate::canvas::authored::Authored;
 use crate::canvas::ops::{
     AnchorPoint, FragmentRevealStyle, Op, SharedCanvasState, SharedObjectSpec, UpdaterPreset,
 };
@@ -133,6 +134,18 @@ fn math_source_terms(source: &str) -> Vec<String> {
         terms.push(current);
     }
     terms
+}
+
+/// Number of vertices `points()` sets on a drawable of `kind`.
+pub(crate) fn declared_vertices(kind: &SpawnKind) -> Result<usize, String> {
+    match kind {
+        SpawnKind::Polygon(points) | SpawnKind::Polyline { points, .. } => Ok(points.len()),
+        SpawnKind::ReactivePolyline { .. } => Err(
+            "points() requires fixed coordinates; this polyline follows reactive values"
+                .to_string(),
+        ),
+        _ => Err("points() requires a polygon or polyline".to_string()),
+    }
 }
 
 #[allow(dead_code)]
@@ -670,7 +683,7 @@ impl DrawableHandle {
     ) -> Self {
         Self {
             id,
-            spec: std::sync::Arc::new(std::sync::Mutex::new(ObjectSpec::new(id, kind))),
+            spec: Arc::new(Authored::sharing(ObjectSpec::new(id, kind), &state)),
             state,
             segment_idx,
             named_parts: None,
@@ -777,7 +790,7 @@ impl DrawableHandle {
         self.clone()
     }
 
-    fn push_immediate(&self, target: ObjectId, anim_type: AnimationType) {
+    pub(super) fn push_immediate(&self, target: ObjectId, anim_type: AnimationType) {
         let mut state = self.state.lock().expect("canvas state poisoned");
         if !state.frozen_spawn_specs.contains_key(&target) {
             return;
@@ -1060,6 +1073,7 @@ impl DrawableHandle {
             LayoutOp::MoveToAnchorPoint { point } => {
                 Some(AnimationType::TranslateToAnchorPoint { point: *point })
             }
+            LayoutOp::SetPivot(pivot) => Some(AnimationType::PivotTo { pivot: *pivot }),
             _ => None,
         };
         let result = self.update_spec(|spec| {
@@ -1132,6 +1146,9 @@ impl DrawableHandle {
             };
             mesh.material = Some(material);
             spec.material_animation_cursor = Some(material);
+            if let Some(extrusion) = &mut spec.extrusion {
+                extrusion.material = Some(material);
+            }
         }
         Ok(self)
     }
@@ -1779,10 +1796,7 @@ impl DrawableHandle {
     /// declared in. Before the first play this is the declared shape; after
     /// it, a cut at the cursor that `animate.points` can continue from.
     pub fn points(self, points: Vec<(f64, f64)>) -> Result<Self, String> {
-        let declared = match &self.spec.lock().expect("object spec poisoned").kind {
-            SpawnKind::Polygon(declared) | SpawnKind::Polyline(declared) => declared.len(),
-            _ => return Err("points() requires a polygon or polyline".to_string()),
-        };
+        let declared = declared_vertices(&self.spec.lock().expect("object spec poisoned").kind)?;
         if points.len() != declared {
             return Err(format!(
                 "points() needs {declared} points, one per vertex of the shape, got {}",
@@ -1793,7 +1807,11 @@ impl DrawableHandle {
             return Err("points must be finite".to_string());
         }
         let this = self.update_spec(|spec| {
-            if let SpawnKind::Polygon(vertices) | SpawnKind::Polyline(vertices) = &mut spec.kind {
+            if let SpawnKind::Polygon(vertices)
+            | SpawnKind::Polyline {
+                points: vertices, ..
+            } = &mut spec.kind
+            {
                 *vertices = points.clone();
             }
         });
@@ -1803,6 +1821,30 @@ impl DrawableHandle {
 
     pub fn z_index(self, z: i32) -> Self {
         self.update_spec(|spec| spec.z_index = z)
+    }
+
+    /// Draw this drawable, and its members, in the layer `name` named with
+    /// [`SceneModel::z_layers`](super::SceneModel::z_layers), above every
+    /// layer behind it whatever their `z_index`; `z_index` orders it within
+    /// its layer. Draw order holds for the whole scene, so a call after the
+    /// drawable is shown applies from its start.
+    pub fn z_layer(self, name: &str) -> Result<Self, String> {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_z_layer(&self.spec, name)?;
+        Ok(self)
+    }
+
+    /// Let this drawable, and its members, hide texts on purpose: the
+    /// covered-text warning of `gaanim check` skips the texts it covers.
+    /// Nothing changes in the drawing; it holds for the whole scene.
+    pub fn covers_on_purpose(self) -> Self {
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_covers_on_purpose(&self.spec);
+        self
     }
 
     pub fn move_to(self, x: impl Into<ScalarSource>, y: impl Into<ScalarSource>) -> Self {
@@ -1990,7 +2032,8 @@ impl DrawableHandle {
     ///
     /// Without one, shapes declared in scene coordinates (lines, polygons,
     /// arcs, arrows, curves) turn about their box center, and other shapes
-    /// about their origin.
+    /// about their origin. Once the drawable has been shown, the pivot
+    /// changes at the cursor, without moving it.
     ///
     /// This is the natural way to rotate a mechanism around a known hinge or
     /// disk center. The engine converts the point to the group's local anchor

@@ -215,6 +215,20 @@ pub struct RenderOrder {
     pub creation_order: u64,
 }
 
+/// Rank of the named draw layer (`scene.z_layers`) an entity and its
+/// descendants draw in: every element of a higher layer draws above every
+/// element of a lower one, whatever their `z_index`. An entity without one
+/// takes its nearest ancestor's, or draws in the default layer, rank 0.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ZLayer(pub i32);
+
+/// Marks an entity, and its descendants, that hides texts on purpose, like a
+/// dialog drawn over a model: `gaanim check` does not warn about texts it
+/// covers. It changes nothing in the drawing.
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct CoversOnPurpose;
+
 /// Marks an entity that belongs to one segment of the timeline. In a scene
 /// with segments, a drawable whose chain of parents carries no marker is
 /// persistent (`scene.persist`) and draws above segment content with the
@@ -259,6 +273,96 @@ pub enum RenderLayer {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MobjectId(pub gaanim_core::ObjectId);
+
+/// What a scene script authored a drawable as, for the editor's inspector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredObject {
+    /// The kind of drawable in the scripting vocabulary, such as `circle`.
+    pub kind: String,
+    /// The name the script gave it (`Drawable.named`).
+    pub name: Option<String>,
+    /// The script line that created it.
+    pub location: Option<gaanim_core::console::ScriptLocation>,
+    /// The script lines that called the function holding `location`,
+    /// innermost first, when a script's own function created it.
+    pub callers: Vec<gaanim_core::console::ScriptLocation>,
+}
+
+/// The authored drawables of the scene a reload compiled, by the
+/// [`MobjectId`] of the entity compiled for each. Every reload replaces it,
+/// so its script lines stay current when a reload keeps earlier entities.
+///
+/// A reload only hands it a way to build the index; it is built the first
+/// time the editor asks, so a reload nobody inspects pays nothing for it.
+#[derive(Resource, Clone, Default)]
+pub struct AuthoredObjects {
+    index: Arc<std::sync::OnceLock<AuthoredIndex>>,
+    build: Option<Arc<dyn Fn() -> AuthoredIndex + Send + Sync>>,
+}
+
+/// What a scene script authored, for the editor.
+#[derive(Debug, Clone, Default)]
+pub struct AuthoredIndex {
+    /// The authored drawables by the id of their compiled entity.
+    pub objects: std::collections::HashMap<gaanim_core::ObjectId, AuthoredObject>,
+    /// The script lines of each `play`, by the origin key its clips carry
+    /// in `Timeline::clip_origins`.
+    pub plays: std::collections::HashMap<u64, AuthoredCall>,
+}
+
+/// A script call that authored something, such as a `play`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredCall {
+    /// The line that made the call.
+    pub location: gaanim_core::console::ScriptLocation,
+    /// The lines that called the function holding `location`, innermost first.
+    pub callers: Vec<gaanim_core::console::ScriptLocation>,
+}
+
+impl AuthoredObjects {
+    /// An index already built.
+    pub fn new(index: AuthoredIndex) -> Self {
+        Self {
+            index: Arc::new(std::sync::OnceLock::from(index)),
+            build: None,
+        }
+    }
+
+    /// An index that `build` makes when it is first read.
+    pub fn deferred(build: impl Fn() -> AuthoredIndex + Send + Sync + 'static) -> Self {
+        Self {
+            index: Arc::default(),
+            build: Some(Arc::new(build)),
+        }
+    }
+
+    fn index(&self) -> &AuthoredIndex {
+        self.index
+            .get_or_init(|| self.build.as_ref().map(|build| build()).unwrap_or_default())
+    }
+
+    /// The drawable compiled as entity id `id`, if the script authored it.
+    pub fn get(&self, id: &gaanim_core::ObjectId) -> Option<&AuthoredObject> {
+        self.index().objects.get(id)
+    }
+
+    pub fn contains(&self, id: &gaanim_core::ObjectId) -> bool {
+        self.index().objects.contains_key(id)
+    }
+
+    /// The `play` whose clips carry `origin`.
+    pub fn play(&self, origin: u64) -> Option<&AuthoredCall> {
+        self.index().plays.get(&origin)
+    }
+}
+
+impl std::fmt::Debug for AuthoredObjects {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthoredObjects")
+            .field("built", &self.index.get().map(|index| index.objects.len()))
+            .finish_non_exhaustive()
+    }
+}
 
 /// Internal transform roles for a Cartesian domain view and its text roots.
 /// Labels follow the view's positions while retaining their authored glyph size.
@@ -393,6 +497,52 @@ pub struct LayoutZones(pub Vec<LayoutZoneRecord>);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HudOverlay;
+
+/// Parallax layer root (`SceneModel::layer`): its subtree moves by
+/// `1 / depth` of the 2D camera motion; see [`crate::systems::parallax_pin`].
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ParallaxLayer {
+    /// Distance from the camera in units of the scene plane's distance.
+    pub depth: f64,
+}
+
+/// Depth of field of parallax layers: a layer at `depth` blurs by its
+/// circle of confusion, `aperture * |1 - focus / depth|` scene units, at
+/// most `max_blur`. Depths are those of [`ParallaxLayer`], so `focus = 1`
+/// keeps the scene plane sharp; an aperture of 0 turns it off.
+#[derive(bevy::prelude::Resource, Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DepthOfField {
+    pub focus: f64,
+    pub aperture: f64,
+    pub max_blur: f64,
+}
+
+impl Default for DepthOfField {
+    fn default() -> Self {
+        Self {
+            focus: 1.0,
+            aperture: 0.0,
+            max_blur: 0.5,
+        }
+    }
+}
+
+impl DepthOfField {
+    /// Gaussian blur, in scene units, of a layer at `depth`.
+    pub fn blur_at(&self, depth: f64) -> f64 {
+        if !(self.aperture > 0.0 && self.focus > 0.0 && depth > 0.0) {
+            return 0.0;
+        }
+        let confusion = if depth.is_infinite() {
+            self.aperture
+        } else {
+            self.aperture * (1.0 - self.focus / depth).abs()
+        };
+        confusion.min(self.max_blur).max(0.0)
+    }
+}
 
 /// Marks 3D content (triangle meshes and line lists) that the renderer
 /// projects through the camera instead of drawing as a 2D path.
@@ -555,6 +705,24 @@ pub struct LineListSource(pub LineListData);
 #[cfg(test)]
 mod material_3d_tests {
     use super::*;
+
+    #[test]
+    fn depth_of_field_blurs_by_the_distance_from_the_focus() {
+        let off = DepthOfField::default();
+        assert_eq!(off.blur_at(3.0), 0.0);
+        let dof = DepthOfField {
+            focus: 1.0,
+            aperture: 0.2,
+            max_blur: 0.5,
+        };
+        assert_eq!(dof.blur_at(1.0), 0.0);
+        assert!((dof.blur_at(2.0) - 0.1).abs() < 1e-12);
+        assert!((dof.blur_at(0.5) - 0.2).abs() < 1e-12);
+        // An infinite backdrop blurs by the aperture; near layers clamp.
+        assert!((dof.blur_at(f64::INFINITY) - 0.2).abs() < 1e-12);
+        assert_eq!(dof.blur_at(0.01), 0.5);
+        assert_eq!(dof.blur_at(0.0), 0.0);
+    }
 
     #[test]
     fn material_validates_pbr_ranges() {

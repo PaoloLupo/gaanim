@@ -24,6 +24,9 @@ pub const MAX_RIPPLES: usize = 64;
 /// without one.
 const DEFAULT_STROKE_WIDTH: f64 = 0.05;
 
+/// Most passes a hand-drawn notation draws over itself.
+pub const MAX_NOTATION_PASSES: u32 = 8;
+
 fn check_padding(padding: [f64; 4]) -> Result<(), String> {
     if padding
         .iter()
@@ -272,6 +275,60 @@ impl SceneModel {
 }
 
 impl DrawableHandle {
+    /// A hand-drawn `notation` (rough-notation style) around `target`, this
+    /// drawable or one of its text selections, grown by `padding` (top,
+    /// right, bottom, left). The mark follows the target's bounds every
+    /// frame and stays hidden until a `play` includes it, so
+    /// `mark.create()` draws it on, one pass after another. Without a color
+    /// the theme's stroke applies; a width needs a color.
+    pub fn rough_notation(
+        &self,
+        target: BoundsTarget,
+        notation: gaanim_math::RoughNotation,
+        padding: [f64; 4],
+        color: Option<Color>,
+        width: Option<f64>,
+    ) -> Result<DrawableHandle, String> {
+        let owner = match &target {
+            BoundsTarget::Drawable(id) => *id,
+            BoundsTarget::TextSelection { target, .. } => *target,
+        };
+        if owner != self.id {
+            return Err(
+                "a notation's target must be this drawable or one of its selections".to_string(),
+            );
+        }
+        check_padding(padding)?;
+        check_stroke(color, width)?;
+        if !notation.roughness.is_finite() || notation.roughness < 0.0 {
+            return Err("roughness must be finite and non-negative".to_string());
+        }
+        if !(1..=MAX_NOTATION_PASSES).contains(&notation.passes) {
+            return Err(format!(
+                "passes must be between 1 and {MAX_NOTATION_PASSES}"
+            ));
+        }
+        if let gaanim_math::NotationShape::Bracket(sides) = notation.shape
+            && !(sides.left || sides.right || sides.top || sides.bottom)
+        {
+            return Err("a bracket needs at least one side".to_string());
+        }
+        let mark = spawn_in(&self.state, SpawnKind::SurroundingRect, true).no_fill();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachRoughNotation {
+                target: mark.id,
+                sources: vec![target],
+                padding,
+                notation,
+            });
+        mark.defer_visibility_until_play();
+        stroked(mark, color, width)
+    }
+
     /// A live frame around this drawable whose stroke cycles through `colors`,
     /// `cycle_rate` turns through the list per second from the timeline
     /// cursor on. The frame is a new drawable, visible right away: fade it in

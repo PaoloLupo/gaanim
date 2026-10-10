@@ -139,6 +139,26 @@ impl TraumaShake {
     }
 }
 
+/// Camera position and vertical field of view `t` of the way through a
+/// dolly zoom (the "vertigo" shot): the camera travels along its line of
+/// sight to `factor` times its distance from `target` while the field of
+/// view changes so the plane through `target` keeps its size on screen.
+///
+/// The distance changes exponentially, as a zoom does, so equal times give
+/// equal ratios; `factor < 1` dollies in and widens the view.
+pub fn dolly_zoom(
+    from_position: glam::DVec3,
+    target: glam::DVec3,
+    from_fov: f64,
+    factor: f64,
+    t: f64,
+) -> (glam::DVec3, f64) {
+    let ratio = factor.powf(t);
+    let position = target + (from_position - target) * ratio;
+    let fov = 2.0 * ((from_fov / 2.0).tan() / ratio).atan();
+    (position, fov)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,5 +271,22 @@ mod tests {
             );
             previous = current;
         }
+    }
+
+    #[test]
+    fn a_dolly_zoom_keeps_the_target_plane_the_same_size() {
+        let target = glam::DVec3::new(0.0, 0.0, 0.0);
+        let from = glam::DVec3::new(0.0, 0.0, 10.0);
+        let fov = std::f64::consts::FRAC_PI_4;
+        let visible =
+            |position: glam::DVec3, fov: f64| (position - target).length() * (fov / 2.0).tan();
+        for t in [0.0, 0.3, 0.7, 1.0] {
+            let (position, fov_t) = super::dolly_zoom(from, target, fov, 0.5, t);
+            assert!((visible(position, fov_t) - visible(from, fov)).abs() < 1e-9);
+            assert!(fov_t > 0.0 && fov_t < std::f64::consts::PI);
+        }
+        let (end, end_fov) = super::dolly_zoom(from, target, fov, 0.5, 1.0);
+        assert!((end - glam::DVec3::new(0.0, 0.0, 5.0)).length() < 1e-12);
+        assert!(end_fov > fov);
     }
 }

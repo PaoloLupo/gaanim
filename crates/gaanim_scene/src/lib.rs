@@ -11,13 +11,15 @@ pub mod systems;
 pub mod transition_frame;
 
 pub use components::{
-    Billboard, CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole, FillBrush,
+    AuthoredCall, AuthoredIndex, AuthoredObject, AuthoredObjects, Billboard, CoordinateLabelOffset,
+    CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose, DepthOfField, FillBrush,
     FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, LayoutBackdrop,
     LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame, LayoutInspectionKind,
     LayoutZoneRecord, LayoutZones, Lighting3D, LineListData, LineListSource, LocalBounds,
-    Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity, Path2D,
-    PathRevealOrder, PathSource, Presence, RasterImage, RenderLayer, RenderOrder, SegmentContent,
-    ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds,
+    Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity, ParallaxLayer,
+    Path2D, PathRevealOrder, PathSource, Presence, RasterImage, RenderLayer, RenderOrder,
+    SegmentContent, ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds,
+    ZLayer,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 
@@ -56,8 +58,9 @@ impl Default for ClearColor {
     }
 }
 pub use systems::{
-    hud_pin, opacity_propagation_system, pin_hud_overlays_system, sync_new_opacities,
-    transform_propagation_system, world_hud_pin,
+    hud_pin, opacity_propagation_system, parallax_pin, pin_hud_overlays_system,
+    pin_parallax_layers_system, sync_new_opacities, transform_propagation_system, world_hud_pin,
+    world_parallax_pin,
 };
 pub use transition_frame::{
     SceneTransitionFrame, TransitionMask, TransitionOverlayLayer, TransitionShader,

@@ -2,7 +2,9 @@
 //! assets change.
 
 use gaanim_core::console;
+use notify::event::{ModifyKind, RenameMode};
 use notify::{EventKind, RecursiveMode, Watcher};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,13 +12,21 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// What changed in the project since the last notification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectChange {
     /// Only Python sources changed.
     Source,
-    /// A non-Python project file changed (images, SVG, Lottie, WGSL, Typst,
-    /// data, ...); cached assets must be read again.
-    Assets,
+    /// These non-Python project files changed (images, SVG, Lottie, WGSL,
+    /// data, ...), with or without sources; cached copies of them must be
+    /// read again.
+    Assets(Vec<PathBuf>),
+}
+
+/// How a change to one file affects the scene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileKind {
+    Source,
+    Asset,
 }
 
 /// Handle to the watcher thread. Exposes a [`Receiver`](mpsc::Receiver) that
@@ -61,9 +71,9 @@ impl WatchScope {
     }
 
     /// How a change to `path` affects the scene, if at all.
-    fn classify(&self, path: &Path) -> Option<ProjectChange> {
+    fn classify(&self, path: &Path) -> Option<FileKind> {
         if path == self.script_path {
-            return Some(ProjectChange::Source);
+            return Some(FileKind::Source);
         }
         let relative = path.strip_prefix(&self.root).ok()?;
         let ignored = relative
@@ -78,20 +88,17 @@ impl WatchScope {
             .and_then(|extension| extension.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        // Editor backups and atomic-save temporaries are not assets.
-        if name.ends_with('~')
-            || matches!(
-                extension.as_str(),
-                "swp" | "swx" | "tmp" | "bak" | "pyc" | "lock"
-            )
-            || name.chars().all(|character| character.is_ascii_digit())
+        if matches!(
+            extension.as_str(),
+            "swp" | "swx" | "tmp" | "bak" | "pyc" | "lock"
+        ) || is_save_temporary(name)
         {
             return None;
         }
         Some(if extension == "py" {
-            ProjectChange::Source
+            FileKind::Source
         } else {
-            ProjectChange::Assets
+            FileKind::Asset
         })
     }
 
@@ -117,6 +124,81 @@ impl WatchScope {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| !is_ignored_name(name))
+    }
+}
+
+/// Editor backups and the temporaries of atomic saves, which write a new
+/// file and rename it over the saved one: `main.py.tmp.<pid>.<hash>` (Node
+/// tools such as Claude Code), `sedXXXXXX` (`sed -i`), JetBrains'
+/// `___jb_tmp___`/`___jb_old___`, Emacs' `#main.py#`, Vim's `main.py~` and
+/// numeric probe files.
+fn is_save_temporary(name: &str) -> bool {
+    let sed = name.len() == 9
+        && name.starts_with("sed")
+        && name[3..]
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric());
+    name.ends_with('~')
+        || name.contains(".tmp.")
+        || name.ends_with("___jb_tmp___")
+        || name.ends_with("___jb_old___")
+        || (name.len() > 1 && name.starts_with('#') && name.ends_with('#'))
+        || name.chars().all(|character| character.is_ascii_digit())
+        || sed
+}
+
+/// Paths reported during one debounce window, settled once it ends.
+#[derive(Debug, Default)]
+struct PendingChanges {
+    paths: BTreeSet<PathBuf>,
+    created: BTreeSet<PathBuf>,
+}
+
+impl PendingChanges {
+    /// Note the project paths `event` touches. Returns whether any can
+    /// affect the scene.
+    fn record(&mut self, event: &notify::Event, scope: &WatchScope) -> bool {
+        let relevant = matches!(
+            event.kind,
+            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+        );
+        if !relevant {
+            return false;
+        }
+        let mut recorded = false;
+        for (index, path) in event.paths.iter().enumerate() {
+            if scope.classify(path).is_none() {
+                continue;
+            }
+            let created = match event.kind {
+                EventKind::Create(_) => true,
+                EventKind::Modify(ModifyKind::Name(RenameMode::To)) => true,
+                // A rename reported as one event lists its source first.
+                EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => index > 0,
+                _ => false,
+            };
+            if created {
+                self.created.insert(path.clone());
+            }
+            self.paths.insert(path.clone());
+            recorded = true;
+        }
+        recorded
+    }
+
+    /// The strongest change the window left on disk. A saved file counts by
+    /// its own name: a temporary created and renamed or removed within the
+    /// window is gone, and a folder reports only that its entries changed,
+    /// which they report themselves.
+    fn settle(self, scope: &WatchScope) -> Option<ProjectChange> {
+        let paths: Vec<PathBuf> = self
+            .paths
+            .iter()
+            .filter(|path| !(self.created.contains(*path) && !path.exists()))
+            .filter(|path| !path.is_dir())
+            .cloned()
+            .collect();
+        event_change(&paths, scope)
     }
 }
 
@@ -185,7 +267,7 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
     let debounce = Duration::from_millis(200);
     let poll_interval = Duration::from_millis(250);
     let mut reload_deadline = None;
-    let mut pending = None;
+    let mut pending = PendingChanges::default();
 
     while !stop.load(Ordering::SeqCst) {
         let timeout = reload_deadline
@@ -194,13 +276,6 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
             .min(poll_interval);
         match rx.recv_timeout(timeout) {
             Ok(Ok(event)) => {
-                let relevant = matches!(
-                    event.kind,
-                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-                );
-                if !relevant {
-                    continue;
-                }
                 // A folder created at the top of the project is watched too.
                 if matches!(event.kind, EventKind::Create(_)) {
                     for path in &event.paths {
@@ -209,11 +284,9 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
                         }
                     }
                 }
-                let Some(change) = event_change(&event.paths, &scope) else {
-                    continue;
-                };
-                pending = pending.max(Some(change));
-                reload_deadline = Some(Instant::now() + debounce);
+                if pending.record(&event, &scope) {
+                    reload_deadline = Some(Instant::now() + debounce);
+                }
             }
             Ok(Err(e)) => {
                 console::warn("watch", e);
@@ -221,17 +294,17 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if reload_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     reload_deadline = None;
-                    if let Some(change) = pending.take() {
-                        console::info(
-                            "reload",
-                            format!(
-                                "{} changed",
-                                match change {
-                                    ProjectChange::Source => "Python source",
-                                    ProjectChange::Assets => "project asset",
-                                }
-                            ),
-                        );
+                    if let Some(change) = std::mem::take(&mut pending).settle(&scope) {
+                        let what = match &change {
+                            ProjectChange::Source => "Python source".to_string(),
+                            ProjectChange::Assets(paths) if paths.len() == 1 => {
+                                console::display_path(&paths[0])
+                            }
+                            ProjectChange::Assets(paths) => {
+                                format!("{} project files", paths.len())
+                            }
+                        };
+                        console::info("reload", format!("{what} changed"));
                         let _ = changed_tx.send(change);
                     }
                 }
@@ -241,9 +314,23 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
     }
 }
 
-/// The strongest change among `paths`: any asset outranks sources.
+/// What a change to `paths` means for the scene: the assets among them,
+/// which outrank sources, or a source change.
 fn event_change(paths: &[PathBuf], scope: &WatchScope) -> Option<ProjectChange> {
-    paths.iter().filter_map(|path| scope.classify(path)).max()
+    let mut source = false;
+    let mut assets = Vec::new();
+    for path in paths {
+        match scope.classify(path) {
+            Some(FileKind::Asset) => assets.push(path.clone()),
+            Some(FileKind::Source) => source = true,
+            None => {}
+        }
+    }
+    if !assets.is_empty() {
+        Some(ProjectChange::Assets(assets))
+    } else {
+        source.then_some(ProjectChange::Source)
+    }
 }
 
 #[cfg(test)]
@@ -254,7 +341,7 @@ mod tests {
     fn project_python_modules_trigger_hot_reload() {
         let temp = tempfile::tempdir().unwrap();
         let entry = temp.path().join("main.py");
-        let section = temp.path().join("src/tesis/sections/title.py");
+        let section = temp.path().join("src/talk/sections/title.py");
         std::fs::create_dir_all(section.parent().unwrap()).unwrap();
         std::fs::write(&entry, "").unwrap();
         std::fs::write(&section, "").unwrap();
@@ -320,13 +407,13 @@ mod tests {
             "assets/diagram.SVG",
             "assets/pulse.json",
             "assets/background.wgsl",
-            "src/tesis/notes.typ",
+            "src/talk/notes.typ",
             "data/results.csv",
             "gaanim.toml",
         ] {
             assert_eq!(
                 event_change(&[temp.path().join(asset)], &scope),
-                Some(ProjectChange::Assets),
+                Some(ProjectChange::Assets(vec![temp.path().join(asset)])),
                 "{asset}"
             );
         }
@@ -339,7 +426,9 @@ mod tests {
                 ],
                 &scope
             ),
-            Some(ProjectChange::Assets)
+            Some(ProjectChange::Assets(vec![
+                temp.path().join("assets/a.png")
+            ]))
         );
         for ignored in [
             "assets/.cover.png.swp",
@@ -350,6 +439,12 @@ mod tests {
             ".git/index",
             "__pycache__/main.cpython-314.pyc",
             "uv.lock",
+            "src/main.py.tmp.23124.4c0c6a4784a3",
+            "assets/cover.png.tmp.8.1f",
+            "sedWV991Q",
+            "src/main.py___jb_tmp___",
+            "src/main.py___jb_old___",
+            "src/#main.py#",
         ] {
             assert_eq!(
                 event_change(&[temp.path().join(ignored)], &scope),
@@ -357,5 +452,140 @@ mod tests {
                 "{ignored}"
             );
         }
+    }
+
+    fn event(kind: EventKind, paths: &[&Path]) -> notify::Event {
+        paths.iter().fold(notify::Event::new(kind), |event, path| {
+            event.add_path(path.to_path_buf())
+        })
+    }
+
+    fn settle(scope: &WatchScope, events: &[notify::Event]) -> Option<ProjectChange> {
+        let mut pending = PendingChanges::default();
+        for event in events {
+            pending.record(event, scope);
+        }
+        pending.settle(scope)
+    }
+
+    /// Event sequences recorded on Windows for each way of saving
+    /// `src/sections/title.py`; the files are left as each save leaves them.
+    #[test]
+    fn a_saved_source_reloads_as_source_however_it_was_written() {
+        use notify::event::{CreateKind, RemoveKind};
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let folder = root.join("src/sections");
+        let section = folder.join("title.py");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(root.join("main.py"), "").unwrap();
+        std::fs::write(&section, "").unwrap();
+        let scope = WatchScope {
+            script_path: root.join("main.py"),
+            root: root.to_path_buf(),
+        };
+        let create = || EventKind::Create(CreateKind::Any);
+        let modify = || EventKind::Modify(ModifyKind::Any);
+        let remove = || EventKind::Remove(RemoveKind::Any);
+        let renamed = |mode| EventKind::Modify(ModifyKind::Name(mode));
+
+        // A temporary renamed over the file, as Node tools and editors do.
+        let temporary = folder.join("title.py.tmp.24760.4c0c6a4784a3");
+        let atomic = [
+            event(create(), &[&temporary]),
+            event(modify(), &[&temporary]),
+            event(modify(), &[&folder]),
+            event(remove(), &[&section]),
+            event(renamed(RenameMode::From), &[&temporary]),
+            event(renamed(RenameMode::To), &[&section]),
+            event(modify(), &[&folder]),
+        ];
+        assert_eq!(settle(&scope, &atomic), Some(ProjectChange::Source));
+        // The same, reported as one rename event.
+        let atomic = [
+            event(create(), &[&temporary]),
+            event(renamed(RenameMode::Both), &[&temporary, &section]),
+        ];
+        assert_eq!(settle(&scope, &atomic), Some(ProjectChange::Source));
+
+        // `sed -i` writes its temporary in the working folder.
+        let sed = root.join("sedWV991Q");
+        let sed_save = [
+            event(create(), &[&sed]),
+            event(modify(), &[&sed]),
+            event(remove(), &[&section]),
+            event(remove(), &[&sed]),
+            event(create(), &[&section]),
+            event(modify(), &[&folder]),
+        ];
+        assert_eq!(settle(&scope, &sed_save), Some(ProjectChange::Source));
+
+        // `git checkout -- file` removes and creates the file.
+        let git = root.join(".git");
+        let checkout = [
+            event(create(), &[&git.join("index.lock")]),
+            event(remove(), &[&section]),
+            event(modify(), &[&git]),
+            event(modify(), &[&folder]),
+            event(create(), &[&section]),
+            event(modify(), &[&section]),
+            event(modify(), &[&folder]),
+        ];
+        assert_eq!(settle(&scope, &checkout), Some(ProjectChange::Source));
+
+        // A temporary still on disk when the window ends.
+        std::fs::write(&temporary, "").unwrap();
+        assert_eq!(settle(&scope, &[event(create(), &[&temporary])]), None);
+    }
+
+    #[test]
+    fn assets_written_or_removed_still_reload_as_assets() {
+        use notify::event::{CreateKind, RemoveKind};
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let assets = root.join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        let scope = WatchScope {
+            script_path: root.join("main.py"),
+            root: root.to_path_buf(),
+        };
+        let cover = assets.join("cover.png");
+        std::fs::write(&cover, "").unwrap();
+        let added = [
+            event(EventKind::Create(CreateKind::Any), &[&cover]),
+            event(EventKind::Modify(ModifyKind::Any), &[&assets]),
+        ];
+        assert_eq!(
+            settle(&scope, &added),
+            Some(ProjectChange::Assets(vec![cover.clone()]))
+        );
+
+        // An asset deleted, or renamed away, is a change too.
+        let removed = assets.join("logo.svg");
+        assert_eq!(
+            settle(
+                &scope,
+                &[event(EventKind::Remove(RemoveKind::Any), &[&removed])]
+            ),
+            Some(ProjectChange::Assets(vec![removed.clone()]))
+        );
+        assert_eq!(
+            settle(
+                &scope,
+                &[event(
+                    EventKind::Modify(ModifyKind::Name(RenameMode::From)),
+                    &[&removed]
+                )]
+            ),
+            Some(ProjectChange::Assets(vec![removed.clone()]))
+        );
+        // A folder alone reports only that its entries changed.
+        assert_eq!(
+            settle(
+                &scope,
+                &[event(EventKind::Modify(ModifyKind::Any), &[&assets])]
+            ),
+            None
+        );
     }
 }

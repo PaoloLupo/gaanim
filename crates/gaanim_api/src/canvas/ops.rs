@@ -18,11 +18,20 @@ use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType};
 use crate::canvas::SegmentId;
+use crate::canvas::authored::Authored;
 use crate::canvas::types::{LayoutTreeSnapshot, ObjectSpec};
 
 // -----------------------------------------------------------------------
 // Shared state
 // -----------------------------------------------------------------------
+
+/// The key of operation `op_index` of `segment`, which its clips carry as
+/// their [`Timeline::clip_origins`](gaanim_timeline::timeline::Timeline):
+/// stable while the segment's earlier operations stay, as a reload that
+/// reuses the segment keeps them.
+pub(crate) fn op_origin(segment: super::segment::SegmentId, op_index: usize) -> u64 {
+    (u64::from(segment.raw()) << 32) | (op_index as u64 & 0xFFFF_FFFF)
+}
 
 /// Mutable state shared by a [`SceneModel`](super::SceneModel) and the handles it
 /// creates. This lets fluent object setters and auto-queued animations update
@@ -54,6 +63,14 @@ pub(crate) struct CanvasState {
     pub object_specs: HashMap<ObjectId, SharedObjectSpec>,
     /// Frozen birth state. Once present, later setters must become timeline cuts.
     pub frozen_spawn_specs: HashMap<ObjectId, ObjectSpec>,
+    /// The script lines that created each drawable, innermost first, for
+    /// the editor's inspector. Kept out of the specs: they are not compiled,
+    /// and moving a line must not change the fingerprints that let a reload
+    /// reuse work.
+    pub(crate) object_locations: HashMap<ObjectId, Vec<gaanim_core::console::ScriptLocation>>,
+    /// The script lines of each `play`, by [`op_origin`], for the editor's
+    /// animation timeline; kept out of the ops for the same reason.
+    pub(crate) op_locations: HashMap<u64, Vec<gaanim_core::console::ScriptLocation>>,
     /// The shared scene that owns this state, which drawables compile to
     /// measure themselves.
     pub(crate) owner: Option<std::sync::Weak<Mutex<crate::canvas::SceneModel>>>,
@@ -75,6 +92,25 @@ pub(crate) struct CanvasState {
     pub(crate) stop_gates: Vec<(usize, f64, gaanim_timeline::timeline::GateCondition)>,
     /// Live zones in authoring order.
     pub(crate) live_zones: Vec<super::live::LiveZoneRecord>,
+    /// Draw layers named with `SceneModel::z_layers`.
+    pub(crate) z_layers: Option<ZLayers>,
+}
+
+/// The named draw layers of a scene, from the back to the front.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ZLayers {
+    pub names: Vec<String>,
+    /// Index in `names` of the layer drawables without one draw in.
+    pub default: usize,
+}
+
+impl ZLayers {
+    /// Rank of layer `name`: how many layers in front of the default one it
+    /// is, which the renderer orders by.
+    pub fn rank(&self, name: &str) -> Option<i32> {
+        let index = self.names.iter().position(|layer| layer == name)?;
+        Some(index as i32 - self.default as i32)
+    }
 }
 
 impl CanvasState {
@@ -98,6 +134,8 @@ impl CanvasState {
             parameter_ranges: HashMap::new(),
             object_specs: HashMap::new(),
             frozen_spawn_specs: HashMap::new(),
+            object_locations: HashMap::new(),
+            op_locations: HashMap::new(),
             owner: None,
             polls: Vec::new(),
             poll_session: None,
@@ -108,6 +146,7 @@ impl CanvasState {
             poll_ask: None,
             stop_gates: Vec::new(),
             live_zones: Vec::new(),
+            z_layers: None,
         }
     }
 
@@ -130,6 +169,17 @@ impl CanvasState {
 
     pub fn active_mut(&mut self) -> &mut Segment {
         &mut self.segments[self.active_idx]
+    }
+
+    /// Keep `stack`, the script lines of the operation about to be pushed to
+    /// the active segment, under the key its clips will carry.
+    pub(crate) fn record_op_location(&mut self, stack: Vec<gaanim_core::console::ScriptLocation>) {
+        if stack.is_empty() {
+            return;
+        }
+        let segment = self.active();
+        let key = op_origin(segment.id, segment.ops.len());
+        self.op_locations.insert(key, stack);
     }
 
     pub fn next_object_id(&mut self) -> ObjectId {
@@ -168,7 +218,7 @@ impl CanvasState {
     /// not animated, so a spec already frozen by a `play` takes it too.
     pub(crate) fn set_shader_effect(
         &mut self,
-        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: &SharedObjectSpec,
         effect: Option<super::types::ShaderEffectSpec>,
     ) {
         let id = {
@@ -185,7 +235,7 @@ impl CanvasState {
     /// [`Self::set_shader_effect`].
     pub(crate) fn set_matte(
         &mut self,
-        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: &SharedObjectSpec,
         matte: Option<(ObjectId, gaanim_renderer::object_effects::MatteMode)>,
     ) {
         let id = {
@@ -202,7 +252,7 @@ impl CanvasState {
     /// [`Self::set_shader_effect`].
     pub(crate) fn set_glass(
         &mut self,
-        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: &SharedObjectSpec,
         glass: Option<gaanim_renderer::object_effects::Glass>,
     ) {
         let id = {
@@ -215,9 +265,52 @@ impl CanvasState {
         }
     }
 
+    /// Draw `spec` in the named layer `name` for the whole scene, like
+    /// [`Self::set_glass`]: draw order does not change over time.
+    pub(crate) fn set_z_layer(
+        &mut self,
+        spec: &SharedObjectSpec,
+        name: &str,
+    ) -> Result<(), String> {
+        let Some(layers) = &self.z_layers else {
+            return Err(format!(
+                "no layer `{name}`: name the layers first with scene.z_layers(...)"
+            ));
+        };
+        let Some(rank) = layers.rank(name) else {
+            return Err(format!(
+                "no layer `{name}`; the scene's layers are {}",
+                layers.names.join(", ")
+            ));
+        };
+        let layer = Some((name.to_string(), rank));
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.z_layer = layer.clone();
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.z_layer = layer;
+        }
+        Ok(())
+    }
+
+    /// Let `spec` hide texts on purpose for the whole scene, like
+    /// [`Self::set_z_layer`].
+    pub(crate) fn set_covers_on_purpose(&mut self, spec: &SharedObjectSpec) {
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.covers_on_purpose = true;
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.covers_on_purpose = true;
+        }
+    }
+
     pub(crate) fn set_chalk(
         &mut self,
-        spec: &std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: &SharedObjectSpec,
         chalk: gaanim_renderer::effects::ChalkBrush,
     ) {
         let id = {
@@ -249,11 +342,19 @@ impl CanvasState {
                 AnimationType::SignalFloat { .. } | AnimationType::SignalKeyframes(_) => "signal",
                 AnimationType::PathTrim { .. } => "trim",
                 AnimationType::PathPointsTo { .. } => "points",
+                AnimationType::PivotTo { .. } => "pivot",
                 AnimationType::TextAnimator(_) => "text_animator",
+                AnimationType::TextPathOffset { .. } => "text_path",
                 _ => "other",
             }
         }
 
+        // A pivot change compensates the translation it finds, so it stays
+        // where it was made among the other changes.
+        if matches!(builder.anim_type, AnimationType::PivotTo { .. }) {
+            self.active_mut().ops.push(Op::Immediate(builder));
+            return;
+        }
         let incoming_channel = channel(&builder.anim_type);
         for op in self.active_mut().ops.iter_mut().rev() {
             match op {
@@ -330,6 +431,13 @@ impl CanvasState {
                     }
                     return;
                 }
+                // Nor can a later change merge with one made before it.
+                Op::Immediate(previous)
+                    if previous.target == builder.target
+                        && matches!(previous.anim_type, AnimationType::PivotTo { .. }) =>
+                {
+                    break;
+                }
                 Op::Wait(_) | Op::Play(_) | Op::Launch(_) | Op::Animate { active: true, .. } => {
                     break;
                 }
@@ -346,10 +454,10 @@ impl CanvasState {
     }
 }
 
-pub(crate) type SharedCanvasState = Arc<Mutex<CanvasState>>;
-pub(crate) type SharedObjectSpec = Arc<Mutex<ObjectSpec>>;
+pub(crate) type SharedCanvasState = Arc<Authored<CanvasState>>;
+pub(crate) type SharedObjectSpec = Arc<Authored<ObjectSpec>>;
 
-pub(crate) type SharedCameraBindingSpec = Arc<Mutex<CameraBindingSpec>>;
+pub(crate) type SharedCameraBindingSpec = Arc<Authored<CameraBindingSpec>>;
 
 /// Authoring-time activation window for a persistent camera constraint.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -688,6 +796,14 @@ pub(crate) enum Op {
         sources: Vec<crate::anim::BoundsTarget>,
         gap: f64,
         overhang: f64,
+    },
+    /// Draw a hand-drawn notation around live bounds, grown by `padding`
+    /// (top, right, bottom, left).
+    AttachRoughNotation {
+        target: ObjectId,
+        sources: Vec<crate::anim::BoundsTarget>,
+        padding: [f64; 4],
+        notation: gaanim_math::RoughNotation,
     },
     /// Cycle the stroke color of a drawable through `colors`, `rate` turns
     /// per second from the cursor on.

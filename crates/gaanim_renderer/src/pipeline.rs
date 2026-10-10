@@ -474,6 +474,9 @@ pub struct ExtractedElement {
     glass_root: Option<Entity>,
     outline: Option<Arc<kurbo::BezPath>>,
     render_order: RenderOrder,
+    /// [`gaanim_scene::ZLayer`] rank the element draws in, before its
+    /// `render_order`.
+    z_layer: i32,
     scene: Arc<vello::Scene>,
     /// The soft shadow and glow images `scene` draws, which a renderer that
     /// runs object effects fills before the frame (see
@@ -558,13 +561,14 @@ impl ExtractedCameraView {
 }
 
 impl ExtractedElement {
-    /// Deterministic layering: z-index, then persistent objects above
-    /// segment content, then creation order, then echo copies beneath their
-    /// source and stroke tips beneath the stroke they share an order with.
+    /// Deterministic layering: named layer, z-index, then persistent objects
+    /// above segment content, then creation order, then echo copies beneath
+    /// their source and stroke tips beneath the stroke they share an order
+    /// with.
     fn draw_order(a: &Self, b: &Self) -> std::cmp::Ordering {
-        a.render_order
-            .z_index
-            .cmp(&b.render_order.z_index)
+        a.z_layer
+            .cmp(&b.z_layer)
+            .then(a.render_order.z_index.cmp(&b.render_order.z_index))
             .then(a.persistent.cmp(&b.persistent))
             .then(
                 a.render_order
@@ -612,6 +616,7 @@ impl ExtractedElement {
             glass_root: self.glass_root,
             outline: self.outline.clone(),
             render_order: self.render_order,
+            z_layer: self.z_layer,
             scene: Arc::clone(&self.scene),
             clip_mask: self.clip_mask.clone(),
             blend: self.blend,
@@ -864,6 +869,23 @@ fn stacked_render_order(
         current = parent;
     }
     RenderOrder { z_index, ..own }
+}
+
+/// Named layer of a drawn element: its own [`gaanim_scene::ZLayer`] or its
+/// nearest ancestor's, else the default layer.
+fn inherited_z_layer(
+    entity: Entity,
+    mut parent_of: impl FnMut(Entity) -> Option<Entity>,
+    mut layer_of: impl FnMut(Entity) -> Option<i32>,
+) -> i32 {
+    let mut current = Some(entity);
+    while let Some(node) = current {
+        if let Some(layer) = layer_of(node) {
+            return layer;
+        }
+        current = parent_of(node);
+    }
+    0
 }
 
 /// World rectangle of the opacity layer that composites an element.
@@ -1577,16 +1599,23 @@ fn stroke_clip_path<'a>(
         .then_some(clip_path)
 }
 
-/// Pen drawn for `align`: an outside stroke doubles the width and keeps
-/// only its outer half, so the authored width lies wholly beyond the contour.
+/// Pen whose stroke covers everything an aligned stroke draws, for extents:
+/// an outside stroke reaches its whole authored width beyond the contour,
+/// an inside one stays within it, and open contours center their stroke.
 fn aligned_pen(style: &kurbo::Stroke, align: StrokeAlign) -> std::borrow::Cow<'_, kurbo::Stroke> {
     if align == StrokeAlign::Outside {
-        let mut pen = style.clone();
-        pen.width *= 2.0;
-        std::borrow::Cow::Owned(pen)
+        std::borrow::Cow::Owned(clipped_pen(style))
     } else {
         std::borrow::Cow::Borrowed(style)
     }
+}
+
+/// Pen an inside or outside stroke draws before the contour clips it: twice
+/// the authored width, so the half it keeps is the whole authored width.
+fn clipped_pen(style: &kurbo::Stroke) -> kurbo::Stroke {
+    let mut pen = style.clone();
+    pen.width *= 2.0;
+    pen
 }
 
 /// Stroke `path` aligned to its closed contour (see [`StrokeAlign`]).
@@ -1615,7 +1644,7 @@ pub(crate) fn draw_aligned_stroke(
         draw_stroke(scene, style, kurbo::Affine::IDENTITY, brush, view, path);
         return;
     };
-    let pen = aligned_pen(style, align);
+    let pen = clipped_pen(style);
     if align == StrokeAlign::Outside {
         // Keep the even-odd region between an enclosing rectangle and the
         // contour: outside the shape and inside its counters.
@@ -2846,8 +2875,12 @@ fn extract_world(
     )>();
 
     let mut child_query = world.query::<&ChildOf>();
-    let mut order_query = world.query::<(&RenderOrder, Has<gaanim_scene::SegmentContent>)>();
-    let segmented = order_query.iter(world).any(|(_, member)| member);
+    let mut order_query = world.query::<(
+        &RenderOrder,
+        Has<gaanim_scene::SegmentContent>,
+        Option<&gaanim_scene::ZLayer>,
+    )>();
+    let segmented = order_query.iter(world).any(|(_, member, _)| member);
     let mut blend_query = world.query::<&ElementBlend>();
 
     for (
@@ -2942,11 +2975,18 @@ fn extract_world(
         while let Ok(child_of) = child_query.get(world, opacity_group) {
             opacity_group = child_of.parent();
         }
+        // A HUD stays sharp inside a layer the depth of field blurs.
+        let mut under_hud = false;
         let effect_root = outermost_effect(entity, |node| {
+            under_hud |= world.get::<gaanim_scene::HudOverlay>(node).is_some();
+            let depth_blur = world
+                .get::<crate::object_effects::DepthOfFieldBlur>(node)
+                .is_some();
             (
                 world
                     .get::<crate::object_effects::ShaderEffect>(node)
-                    .is_some(),
+                    .is_some()
+                    && !(depth_blur && under_hud),
                 child_query.get(world, node).ok().map(ChildOf::parent),
             )
         });
@@ -3115,7 +3155,17 @@ fn extract_world(
                 |e| {
                     order_query
                         .get(world, e)
-                        .map_or(0, |(order, _)| order.z_index)
+                        .map_or(0, |(order, _, _)| order.z_index)
+                },
+            ),
+            z_layer: inherited_z_layer(
+                entity,
+                |e| child_query.get(world, e).ok().map(ChildOf::parent),
+                |e| {
+                    order_query
+                        .get(world, e)
+                        .ok()
+                        .and_then(|(_, _, layer)| layer.map(|layer| layer.0))
                 },
             ),
             scene,
@@ -3132,7 +3182,7 @@ fn extract_world(
                 && outside_segments(
                     entity,
                     |e| child_query.get(world, e).ok().map(ChildOf::parent),
-                    |e| order_query.get(world, e).is_ok_and(|(_, member)| member),
+                    |e| order_query.get(world, e).is_ok_and(|(_, member, _)| member),
                 ),
             lineage: if camera_views.is_empty() {
                 Vec::new()
@@ -3456,6 +3506,7 @@ fn three_d_elements<'a>(
                         z_index: i32::MIN,
                         creation_order: creation_order as u64,
                     },
+                    z_layer: i32::MIN,
                     scene: Arc::new(scene),
                     clip_mask: None,
                     blend: None,
@@ -4077,12 +4128,41 @@ fn divert_effects(
         let Some(bounds) = bounds.map(|bounds| bounds.inflate(margin, margin)) else {
             continue;
         };
-        let Some((width, height, _)) = effect_texture_size(bounds, pixels_per_unit) else {
+        // A depth-of-field blur is in scene units: it sets how coarse the
+        // texture may be and becomes pixels at the density it gets.
+        let depth_blur = crate::object_effects::depth_blur_shader();
+        let is_depth_blur =
+            |shader: &crate::post_process::PostProcessShader| depth_blur == Some(shader);
+        let scene_sigma = effect
+            .passes
+            .iter()
+            .filter(|(shader, _)| is_depth_blur(shader))
+            .filter_map(|(_, values)| values.first().copied())
+            .fold(0.0_f64, |largest, sigma| largest.max(f64::from(sigma)));
+        let pixels_per_unit = if scene_sigma > 0.0 {
+            pixels_per_unit.min(crate::object_effects::MAX_DEPTH_BLUR_PIXELS / scene_sigma)
+        } else {
+            pixels_per_unit
+        };
+        let Some((width, height, density)) = effect_texture_size(bounds, pixels_per_unit) else {
             continue;
         };
         let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+        let passes = effect
+            .passes
+            .iter()
+            .map(|(shader, values)| {
+                let mut values = values.clone();
+                if is_depth_blur(shader)
+                    && let Some(sigma) = values.first_mut()
+                {
+                    *sigma *= density as f32;
+                }
+                (shader.clone(), values)
+            })
+            .collect();
         let request = crate::post_process::PostProcessRequest {
-            passes: effect.passes.clone(),
+            passes,
             frame,
             time,
             transition: None,
@@ -4653,6 +4733,8 @@ fn compose_captured_layers(
                 glass_root: element.glass_root,
                 outline: element.glass_root.and_then(|_| element.recipe.path.clone()),
                 render_order: element.render_order,
+                // Captured elements are already in draw order.
+                z_layer: 0,
                 scene,
                 clip_mask: element.clip_mask.clone(),
                 blend: element.blend,
@@ -4923,7 +5005,11 @@ pub fn gaanim_render_system(
     canvas_bg: Option<Res<CanvasBackground>>,
     transition_frame: Option<Res<gaanim_scene::SceneTransitionFrame>>,
     child_query: Query<&ChildOf>,
-    order_query: Query<(&RenderOrder, Has<gaanim_scene::SegmentContent>)>,
+    order_query: Query<(
+        &RenderOrder,
+        Has<gaanim_scene::SegmentContent>,
+        Option<&gaanim_scene::ZLayer>,
+    )>,
     (
         blend_query,
         echo_query,
@@ -5046,7 +5132,7 @@ pub fn gaanim_render_system(
             None
         }
     });
-    let segmented = order_query.iter().any(|(_, member)| member);
+    let segmented = order_query.iter().any(|(_, member, _)| member);
     let opacity_fallback = canvas_bg
         .as_ref()
         .map(|background| {
@@ -5420,7 +5506,17 @@ pub fn gaanim_render_system(
                 *render_order,
                 entity,
                 |e| child_query.get(e).ok().map(ChildOf::parent),
-                |e| order_query.get(e).map_or(0, |(order, _)| order.z_index),
+                |e| order_query.get(e).map_or(0, |(order, _, _)| order.z_index),
+            ),
+            z_layer: inherited_z_layer(
+                entity,
+                |e| child_query.get(e).ok().map(ChildOf::parent),
+                |e| {
+                    order_query
+                        .get(e)
+                        .ok()
+                        .and_then(|(_, _, layer)| layer.map(|layer| layer.0))
+                },
             ),
             scene: fragment,
             clip_mask: clip_ref.as_ref().map(|c| (**c).clone()),
@@ -5435,7 +5531,7 @@ pub fn gaanim_render_system(
                 && outside_segments(
                     entity,
                     |e| child_query.get(e).ok().map(ChildOf::parent),
-                    |e| order_query.get(e).is_ok_and(|(_, member)| member),
+                    |e| order_query.get(e).is_ok_and(|(_, member, _)| member),
                 ),
             lineage: if camera_views.is_empty() {
                 Vec::new()
@@ -5733,6 +5829,40 @@ mod tests {
         assert_eq!(stacked(&world, glyph), order(6, 4));
         assert!(stacked(&world, boxed).z_index > circle.z_index);
         assert!(stacked(&world, glyph).z_index > stacked(&world, boxed).z_index);
+    }
+
+    #[test]
+    fn a_named_layer_draws_above_every_z_index_behind_it() {
+        let mut world = World::new();
+        let overlay = world.spawn(gaanim_scene::ZLayer(1)).id();
+        let inside = world.spawn(ChildOf(overlay)).id();
+        let own = world
+            .spawn((gaanim_scene::ZLayer(-1), ChildOf(overlay)))
+            .id();
+        let plain = world.spawn_empty().id();
+        let layer = |entity| {
+            inherited_z_layer(
+                entity,
+                |e| world.get::<ChildOf>(e).map(ChildOf::parent),
+                |e| world.get::<gaanim_scene::ZLayer>(e).map(|layer| layer.0),
+            )
+        };
+        assert_eq!([layer(inside), layer(own), layer(plain)], [1, -1, 0]);
+
+        let mut lens = group_member(inside, 0.0, 1.0, 1.0);
+        lens.z_layer = 1;
+        lens.render_order.z_index = -5;
+        let mut wall = group_member(plain, 1.0, 1.0, 1.0);
+        wall.render_order.z_index = 400;
+        assert_eq!(
+            ExtractedElement::draw_order(&lens, &wall),
+            std::cmp::Ordering::Greater
+        );
+        wall.z_layer = 1;
+        assert_eq!(
+            ExtractedElement::draw_order(&lens, &wall),
+            std::cmp::Ordering::Less
+        );
     }
 
     fn assert_affine_near(actual: kurbo::Affine, expected: kurbo::Affine) {
@@ -6613,8 +6743,10 @@ mod tests {
     }
 
     #[test]
-    fn outside_strokes_double_the_pen_that_keeps_only_its_outer_half() {
+    fn aligned_strokes_double_the_pen_that_keeps_only_one_half() {
         let stroke = kurbo::Stroke::new(0.3);
+        assert_eq!(clipped_pen(&stroke).width, 0.6);
+        // Only an outside stroke reaches beyond the contour.
         assert_eq!(aligned_pen(&stroke, StrokeAlign::Inside).width, 0.3);
         assert_eq!(aligned_pen(&stroke, StrokeAlign::Center).width, 0.3);
         assert_eq!(aligned_pen(&stroke, StrokeAlign::Outside).width, 0.6);
@@ -6692,6 +6824,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
             blend: None,
@@ -6746,6 +6879,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(scene),
             clip_mask: None,
             blend: None,
@@ -6812,6 +6946,26 @@ mod tests {
         assert_eq!(
             layer.to_pixels * kurbo::Point::new(-0.5, 1.5),
             kurbo::Point::ZERO
+        );
+        // A depth-of-field blur turns its scene-unit sigma into pixels at
+        // a density low enough to keep it within a few texels.
+        let blur = crate::object_effects::depth_of_field_effect(0.5).unwrap();
+        let mut blurred = vec![member(0.0, Some(root))];
+        let effects = evaluate_effects(
+            &blurred,
+            1.0,
+            |entity| (entity == root).then(|| blur.clone()),
+            |_| None,
+        );
+        assert_eq!(effects[0].margin, 1.5);
+        assert_eq!(effects[0].passes[0].1, vec![0.5, 1.0]);
+        let layers = divert_effects(&mut blurred, &effects, 1.0, 100.0);
+        let density = crate::object_effects::MAX_DEPTH_BLUR_PIXELS / 0.5;
+        assert_eq!(layers[0].request.passes[0].1, vec![8.0, 1.0]);
+        assert_eq!(layers[0].request.passes[1].1, vec![8.0, 0.0]);
+        assert_eq!(
+            u32::from(layers[0].image.width),
+            ((1.0 + 2.0 * 1.5) * density).ceil() as u32
         );
         // A drawable without the component is drawn plainly.
         let mut plain = vec![member(0.0, Some(other))];
@@ -6901,6 +7055,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
             blend: None,
@@ -6942,6 +7097,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(scene),
             clip_mask: None,
             blend: None,
@@ -7012,6 +7168,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(vello::Scene::new()),
             clip_mask: None,
             blend,
@@ -7060,6 +7217,7 @@ mod tests {
             glass_root: None,
             outline: None,
             render_order: RenderOrder::default(),
+            z_layer: 0,
             scene: Arc::new(vello::Scene::new()),
             clip_mask,
             blend: None,

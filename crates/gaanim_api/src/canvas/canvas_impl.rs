@@ -21,6 +21,7 @@ use gaanim_timeline::transition::TransitionType;
 
 use crate::anim::{AnimationBuilder, AnimationType, BoundsTarget};
 use crate::canvas::SceneMarker;
+use crate::canvas::authored::Authored;
 use crate::canvas::drawable::DrawableHandle;
 use crate::canvas::ops::{
     CameraBindingSpec, CameraBindingWindowSpec, CanvasCameraBindingKind, CanvasEndpoint, CanvasRay,
@@ -1567,6 +1568,14 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         SpinInFromNothing => &["scale", "rotation"],
         Create3D => &["scale", "opacity"],
         Indicate { .. } => &["scale", "fill"],
+        CameraFollowPath {
+            follow:
+                crate::anim::PathFollowOptions {
+                    orient: Some(_), ..
+                },
+            ..
+        } => &["camera_pose", "camera_rotation"],
+        CameraDollyZoom { .. } => &["camera_pose", "camera_projection"],
         Transform { .. } | ReplacementTransform { .. } | MagicMove { .. } => &[
             "translation",
             "rotation",
@@ -1618,6 +1627,8 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | CameraLookAtSource { .. }
         | CameraOrbit { .. }
         | CameraDolly { .. }
+        | CameraFollowPath { .. }
+        | CameraWhipPan { .. }
         | CameraState { .. }
         | CameraReset => "camera_pose",
         CameraZoom { .. }
@@ -1626,6 +1637,8 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | CameraPerspective { .. } => "camera_projection",
         CameraRotation { .. } | CameraRotationSource { .. } => "camera_rotation",
         CameraShake { .. } => "camera_shake",
+        CameraDepthOfField { .. } => "camera_depth_of_field",
+        TextPathOffset { .. } => "text_path",
         _ => "effect",
     };
     vec![channel.to_owned()]
@@ -2118,6 +2131,18 @@ impl ImageCache {
         self.entries.clear();
         self.bytes = 0;
     }
+
+    /// Forget the images decoded from the files `changed`.
+    fn forget(&mut self, changed: &gaanim_renderer::lottie::ChangedFiles) {
+        let bytes = &mut self.bytes;
+        self.entries.retain(|path, (image, _)| {
+            let keep = !changed.contains(path);
+            if !keep {
+                *bytes -= image.data.len();
+            }
+            keep
+        });
+    }
 }
 
 /// Drop every process-local cache of files read by scenes (raster images,
@@ -2129,6 +2154,20 @@ pub fn clear_asset_caches() {
     }
     gaanim_renderer::lottie::clear_lottie_cache();
     gaanim_text::typst_compiler::clear_typst_layout_cache();
+}
+
+/// Forget what the process-local caches hold from the files `changed` (raster
+/// images, Lottie JSON and the images it references, dotLottie packages), so
+/// the next compile reads them from disk again. Typst layouts read no
+/// project file and stay. Anything else the scene holds from a file was
+/// read while authoring, and reaches the replay's fingerprints: a new image
+/// is a new allocation, the rest is content.
+pub fn forget_assets(changed: &[PathBuf]) {
+    let changed = gaanim_renderer::lottie::ChangedFiles::new(changed);
+    if let Some(cache) = IMAGE_CACHE.get() {
+        cache.lock().expect("image cache poisoned").forget(&changed);
+    }
+    gaanim_renderer::lottie::forget_lottie_files(&changed);
 }
 
 fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, ImageLoadError> {
@@ -2182,8 +2221,16 @@ pub(crate) fn spawn_in(
     drop(guard);
 
     let handle = DrawableHandle::new(id, kind, state.clone(), active_idx);
+    let stack = if super::profile::tracks_script_lines() {
+        super::profile::call_stack()
+    } else {
+        Vec::new()
+    };
     {
         let mut state = state.lock().expect("canvas state poisoned");
+        if !stack.is_empty() {
+            state.object_locations.insert(id, stack);
+        }
         state.object_specs.insert(id, handle.spec.clone());
         state.segments[active_idx]
             .ops
@@ -2284,6 +2331,10 @@ pub struct SceneModel {
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) lighting_3d: gaanim_scene::Lighting3D,
     pub(crate) state: SharedCanvasState,
+    /// The compilation that [`Self::bounds_of`] measures in.
+    pub(crate) measured: super::measure::MeasureCache,
+    /// What authoring this scene cost; see [`Self::measurement_warning`].
+    pub(crate) profile: super::profile::SharedProfile,
 }
 
 impl SceneModel {
@@ -2327,7 +2378,9 @@ impl SceneModel {
             branding: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
             lighting_3d: gaanim_scene::Lighting3D::default(),
-            state: Arc::new(Mutex::new(CanvasState::new())),
+            state: Arc::new(Authored::new(CanvasState::new())),
+            measured: Default::default(),
+            profile: Default::default(),
         }
     }
 
@@ -3064,7 +3117,7 @@ impl SceneModel {
         }
 
         let id = guard.next_segment_id();
-        let mut segment = Segment::new(id, name, notes, template.clone(), background);
+        let mut segment = Segment::new(id, name.clone(), notes, template.clone(), background);
         if replace_implicit {
             // Markers authored at t=0 before the first segment belong to it.
             segment.markers = std::mem::take(&mut guard.segments[0].markers);
@@ -3084,6 +3137,7 @@ impl SceneModel {
             .filter(|segment| segment.explicit)
             .count();
         drop(guard);
+        self.profile.segment_started(&name);
 
         if !replace_implicit {
             self.set_transition_sound(id, transition_sound);
@@ -3221,7 +3275,7 @@ impl SceneModel {
                     | SpawnKind::DashedLine { .. }
                     | SpawnKind::DoubleArrow { .. }
                     | SpawnKind::Arc { .. }
-                    | SpawnKind::Polyline(_)
+                    | SpawnKind::Polyline { .. }
                     | SpawnKind::ReactivePolyline { .. }
                     | SpawnKind::Bezier { .. }
                     | SpawnKind::Curve(_)
@@ -3749,7 +3803,19 @@ impl SceneModel {
     ///
     /// Use this for technical geometry such as springs, rails, or trajectories.
     pub fn polyline(&mut self, points: &[(f64, f64)]) -> DrawableHandle {
-        self.spawn(SpawnKind::Polyline(points.to_vec()))
+        self.spawn(SpawnKind::Polyline {
+            points: points.to_vec(),
+            closed: false,
+        })
+    }
+
+    /// Creates a path connecting the given points in order and the last one
+    /// to the first. Unlike [`Self::polygon`], it has no fill of its own.
+    pub fn closed_polyline(&mut self, points: &[(f64, f64)]) -> DrawableHandle {
+        self.spawn(SpawnKind::Polyline {
+            points: points.to_vec(),
+            closed: true,
+        })
     }
 
     /// The outline of `balls` melted together like drops of liquid: each
@@ -5164,6 +5230,83 @@ impl SceneModel {
         self.camera_anim(AnimationType::CameraDolly { factor }, duration)
     }
 
+    /// Move the 2D camera along the path of `route`, read in scene
+    /// coordinates when the animation is scheduled. With `follow.orient`
+    /// the view turns so the direction of travel points right on screen,
+    /// plus that offset (`-π/2` puts it up).
+    pub fn camera_follow_path(
+        &mut self,
+        route: &DrawableHandle,
+        follow: crate::anim::PathFollowOptions,
+        duration: f64,
+    ) -> Result<Anim, String> {
+        if !Arc::ptr_eq(&route.state, &self.state) {
+            return Err("the camera's route must belong to this scene".to_string());
+        }
+        if !(follow.start.is_finite() && follow.end.is_finite())
+            || !(0.0..=1.0).contains(&follow.start)
+            || !(0.0..=1.0).contains(&follow.end)
+            || follow.start == follow.end
+        {
+            return Err("start and end must be different fractions in [0, 1]".to_string());
+        }
+        if follow.orient.is_some_and(|offset| !offset.is_finite()) {
+            return Err("rotate_offset must be finite".to_string());
+        }
+        Ok(self.camera_anim(
+            AnimationType::CameraFollowPath {
+                route: route.id,
+                follow,
+            },
+            duration,
+        ))
+    }
+
+    /// A whip pan to `target`: a fast move eased hard at both ends. With
+    /// `blur`, exported frames and snapshots of the move get a 360° motion
+    /// blur window, whatever the scene's own motion blur.
+    pub fn camera_whip_pan(&mut self, target: CanvasEndpoint, blur: bool, duration: f64) -> Anim {
+        self.camera_anim(AnimationType::CameraWhipPan { target, blur }, duration)
+    }
+
+    /// Change the depth of field of parallax layers over `duration`: each
+    /// layer blurs by `aperture * |1 - focus / depth|` scene units, at most
+    /// `max_blur`; `None` keeps the current value (focus 1, aperture 0 and
+    /// max_blur 0.5 at first, so nothing blurs).
+    pub fn camera_depth_of_field(
+        &mut self,
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+        duration: f64,
+    ) -> Result<Anim, String> {
+        if focus.is_some_and(|focus| !focus.is_finite() || focus <= 0.0) {
+            return Err("focus must be a finite positive depth".to_string());
+        }
+        for (name, value) in [("aperture", aperture), ("max_blur", max_blur)] {
+            if value.is_some_and(|value| !value.is_finite() || value < 0.0) {
+                return Err(format!("{name} must be finite and non-negative"));
+            }
+        }
+        Ok(self.camera_anim(
+            AnimationType::CameraDepthOfField {
+                focus,
+                aperture,
+                max_blur,
+            },
+            duration,
+        ))
+    }
+
+    /// A dolly zoom (vertigo shot) to `factor` times the distance from the
+    /// look-at target; needs a perspective camera aimed with `look_at`.
+    pub fn camera_dolly_zoom(&mut self, factor: f64, duration: f64) -> Result<Anim, String> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Err("factor must be finite and positive".to_string());
+        }
+        Ok(self.camera_anim(AnimationType::CameraDollyZoom { factor }, duration))
+    }
+
     fn camera_binding(
         &mut self,
         kind: CanvasCameraBindingKind,
@@ -5173,15 +5316,18 @@ impl SceneModel {
         let mut state = self.state.lock().expect("canvas state poisoned");
         let start = state.segments.iter().map(|segment| segment.cursor).sum();
         let order = state.next_camera_binding_order();
-        let spec = Arc::new(Mutex::new(CameraBindingSpec {
-            order,
-            kind,
-            influence,
-            windows: enabled
-                .then_some(CameraBindingWindowSpec { start, end: None })
-                .into_iter()
-                .collect(),
-        }));
+        let spec = Arc::new(Authored::sharing(
+            CameraBindingSpec {
+                order,
+                kind,
+                influence,
+                windows: enabled
+                    .then_some(CameraBindingWindowSpec { start, end: None })
+                    .into_iter()
+                    .collect(),
+            },
+            &self.state,
+        ));
         state
             .active_mut()
             .ops
@@ -5812,6 +5958,11 @@ impl SceneModel {
             }
         }
 
+        let stack = if super::profile::tracks_script_lines() {
+            super::profile::call_stack()
+        } else {
+            Vec::new()
+        };
         let mut guard = self.state.lock().expect("canvas state poisoned");
         for id in camera_captures {
             guard.active_mut().ops.push(Op::CaptureCameraState { id });
@@ -5819,6 +5970,7 @@ impl SceneModel {
         if time_maps.iter().any(Option::is_some) {
             guard.active_mut().ops.push(Op::TimeMaps(time_maps));
         }
+        guard.record_op_location(stack);
         if !advance {
             guard.active_mut().ops.push(Op::Launch(builders));
             return Ok(());
@@ -6191,6 +6343,116 @@ impl SceneModel {
     /// Keep an existing drawable visible and animatable across future segments.
     pub fn persist(&mut self, o: &DrawableHandle) -> Result<(), SceneObjectError> {
         self.persist_many(std::slice::from_ref(o))
+    }
+
+    /// Name the scene's draw layers, from the back to the front. Every
+    /// drawable of a layer draws above every drawable of the layers behind
+    /// it, whatever their `z_index`, which only orders drawables within a
+    /// layer. Drawables without a layer draw in `default`, the first layer
+    /// when `None`. A scene names its layers once; naming the same layers
+    /// again is allowed.
+    pub fn z_layers(&mut self, names: &[&str], default: Option<&str>) -> Result<(), String> {
+        if names.is_empty() {
+            return Err("z_layers needs at least one layer name".to_string());
+        }
+        if let Some(name) = names.iter().find(|name| name.trim().is_empty()) {
+            return Err(format!("layer names cannot be empty, got {name:?}"));
+        }
+        for (index, name) in names.iter().enumerate() {
+            if names[..index].contains(name) {
+                return Err(format!("layer `{name}` is named twice"));
+            }
+        }
+        let default = match default {
+            Some(default) => names
+                .iter()
+                .position(|name| *name == default)
+                .ok_or_else(|| format!("default layer `{default}` is not one of the layers"))?,
+            None => 0,
+        };
+        let layers = super::ops::ZLayers {
+            names: names.iter().map(|name| (*name).to_string()).collect(),
+            default,
+        };
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        match &state.z_layers {
+            Some(declared) if *declared != layers => Err(format!(
+                "the scene's layers are already {} (default {}); a scene names them once",
+                declared.names.join(", "),
+                declared.names[declared.default]
+            )),
+            _ => {
+                state.z_layers = Some(layers);
+                Ok(())
+            }
+        }
+    }
+
+    /// Create an empty 2.5D parallax layer at `depth` and return its root.
+    ///
+    /// Drawables added with [`Self::add_to_parallax_layer`] move by
+    /// `1 / depth` of the orthographic camera's pan and zoom by
+    /// `zoom^(1/depth)`: depth 1 is the scene plane, a larger depth is farther
+    /// and moves less, a smaller one is nearer and moves more, and an infinite
+    /// depth only follows the camera's roll. Farther layers draw behind nearer
+    /// ones: the root's `z_index` defaults to `-100 ln(depth)`, within ±900,
+    /// and its members add their own. A perspective camera leaves layers in
+    /// place, since its own depth already gives parallax.
+    pub fn parallax_layer(&mut self, depth: f64) -> Result<DrawableHandle, String> {
+        if depth.is_nan() || depth <= 0.0 {
+            return Err(format!(
+                "layer depth must be positive (math.inf for a backdrop that never pans), got {depth}"
+            ));
+        }
+        let layer = self.spawn(SpawnKind::GroupNoCenter(Vec::new()));
+        {
+            let mut spec = layer.spec.lock().expect("object spec poisoned");
+            spec.parallax_depth = Some(depth);
+            spec.z_index = (-100.0 * depth.ln()).round().clamp(-900.0, 900.0) as i32;
+        }
+        Ok(layer)
+    }
+
+    /// Move `member` into the parallax `layer`, keeping its current place.
+    pub fn add_to_parallax_layer(
+        &mut self,
+        layer: &DrawableHandle,
+        member: &DrawableHandle,
+    ) -> Result<(), String> {
+        if !Arc::ptr_eq(&layer.state, &self.state) || !layer.same_canvas(member) {
+            return Err("layer members must belong to the layer's scene".to_string());
+        }
+        if layer
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .parallax_depth
+            .is_none()
+        {
+            return Err("only layers created with scene.layer() take members".to_string());
+        }
+        if member.id == layer.id {
+            return Err("a layer cannot contain itself".to_string());
+        }
+        if member
+            .spec
+            .lock()
+            .expect("object spec poisoned")
+            .parallax_depth
+            .is_some()
+        {
+            return Err("a layer cannot contain another layer".to_string());
+        }
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachToGroup {
+                group: layer.id,
+                child: member.id,
+            });
+        Ok(())
     }
 
     /// Keep several existing drawables visible and animatable across future segments.
@@ -7859,7 +8121,11 @@ impl SceneModel {
     /// Submit the scene to the host. Narration takes still playing at the
     /// cursor extend the timeline until they end.
     pub fn render(&self) -> bool {
+        // Authoring is over; measurements no longer need their compilation.
+        self.profile.rendered();
+        self.measured.clear();
         let mut scene = self.clone();
+        scene.measured = Default::default();
         scene.complete_narration();
         crate::host::send_to_host(scene)
     }
@@ -7880,6 +8146,29 @@ impl SceneModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forgetting_an_image_reads_it_again_and_keeps_the_others() {
+        let temp = tempfile::tempdir().unwrap();
+        let write = |name: &str, shade: u8| {
+            let path = temp.path().join(name);
+            image::RgbaImage::from_pixel(2, 2, image::Rgba([shade, 0, 0, 255]))
+                .save(&path)
+                .unwrap();
+            path
+        };
+        let cover = write("cover.png", 10);
+        let logo = write("logo.png", 20);
+        let id = |path: &Path| load_image(path).unwrap().data.id();
+        let (cover_id, logo_id) = (id(&cover), id(&logo));
+        assert_eq!(id(&cover), cover_id, "cached");
+
+        write("cover.png", 30);
+        forget_assets(std::slice::from_ref(&cover));
+        assert_ne!(id(&cover), cover_id, "read again");
+        assert_eq!(load_image(&cover).unwrap().data.data()[0], 30);
+        assert_eq!(id(&logo), logo_id, "another file stays cached");
+    }
 
     #[test]
     fn image_cache_forgets_the_least_recently_used_images_past_its_budget() {

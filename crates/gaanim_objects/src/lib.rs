@@ -1,5 +1,7 @@
 pub mod boolean;
 pub mod character;
+pub mod earcut;
+pub mod extrude;
 pub mod metaballs;
 pub mod offset;
 pub mod prelude;

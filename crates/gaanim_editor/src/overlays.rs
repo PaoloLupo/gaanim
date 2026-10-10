@@ -156,7 +156,7 @@ fn logical_grid_step(pixels_per_unit: f64) -> f64 {
 }
 
 /// The 1, 2 or 5 times a power of ten at or above `raw_step`.
-fn nice_step(raw_step: f64) -> f64 {
+pub(crate) fn nice_step(raw_step: f64) -> f64 {
     if !raw_step.is_finite() || raw_step <= 0.0 {
         return 1.0;
     }
@@ -174,7 +174,7 @@ fn nice_step(raw_step: f64) -> f64 {
     nice * magnitude
 }
 
-fn format_logical_value(value: f64, step: f64) -> String {
+pub(crate) fn format_logical_value(value: f64, step: f64) -> String {
     let decimals = if step >= 1.0 {
         0
     } else {
@@ -344,12 +344,17 @@ pub(crate) const COPIED_FEEDBACK_SECS: f64 = 1.2;
 
 /// Barra flotante con los modos de vista y los overlays.
 /// Solo visible cuando `enabled=true` (activado con `O`, como el modo interactivo con `I`).
+#[allow(clippy::too_many_arguments)]
 pub fn overlays_settings_ui_system(
     mut contexts: EguiContexts,
     mut overlays: ResMut<EditorOverlays>,
     mut interactive: ResMut<PreviewInteractive>,
     authored_camera: Option<Res<Camera>>,
     presentation: Res<PresentationMode>,
+    mut inspector: ResMut<crate::inspector::InspectorPanel>,
+    mut console: ResMut<crate::console_panel::ConsolePanel>,
+    mut capture: ResMut<crate::frame_capture::FrameCapture>,
+    mut animations: ResMut<crate::animation_timeline::AnimationTimeline>,
 ) {
     if presentation.active || !overlays.enabled {
         return;
@@ -499,6 +504,68 @@ pub fn overlays_settings_ui_system(
                             {
                                 interactive.reset();
                             }
+                        }
+                        divider(ui);
+                        if pill_toggle(
+                            ui,
+                            Icon::Inspect,
+                            Some("Inspector"),
+                            inspector.enabled,
+                            palette::ACCENT,
+                            HEIGHT,
+                        )
+                        .on_hover_text(
+                            "Propiedades del objeto seleccionado y su línea en el script
+                             Un clic en la vista selecciona un objeto.",
+                        )
+                        .clicked()
+                        {
+                            inspector.enabled = !inspector.enabled;
+                        }
+                        if pill_toggle(
+                            ui,
+                            Icon::Console,
+                            Some("Consola"),
+                            console.open,
+                            palette::ACCENT,
+                            HEIGHT,
+                        )
+                        .on_hover_text("Avisos, errores y salida del script · J")
+                        .clicked()
+                        {
+                            console.open = !console.open;
+                        }
+                        if pill_toggle(
+                            ui,
+                            Icon::Timeline,
+                            Some("Animaciones"),
+                            animations.open,
+                            palette::ACCENT,
+                            HEIGHT,
+                        )
+                        .on_hover_text(
+                            "Qué anima cada objeto y cuándo · T\n\
+                             Clic en un bloque: ir a su inicio · doble clic: abrir su play.",
+                        )
+                        .clicked()
+                        {
+                            animations.open = !animations.open;
+                        }
+                        if crate::frame_capture::AVAILABLE
+                            && icon_button_sized(
+                                ui,
+                                Icon::Capture,
+                                ButtonTone::Ghost,
+                                !capture.busy(),
+                                HEIGHT,
+                            )
+                            .on_hover_text(
+                                "Guardar el fotograma actual como PNG · Ctrl+Mayús+S
+                                 Sin overlays, en la carpeta captures/ del proyecto.",
+                            )
+                            .clicked()
+                        {
+                            capture.requested = true;
                         }
                         divider(ui);
                         let keyboard =
@@ -888,7 +955,13 @@ const SHORTCUTS: &[(&str, &str)] = &[
         "Arrastrar",
         "Desplazar la vista (en 3D, orbitar con el derecho)",
     ),
-    ("Clic", "Seleccionar el objeto bajo el cursor"),
+    (
+        "Clic",
+        "Seleccionar e inspeccionar el objeto bajo el cursor",
+    ),
+    ("J", "Mostrar u ocultar la consola"),
+    ("T", "Mostrar u ocultar las animaciones"),
+    ("Ctrl+Mayús+S", "Guardar el fotograma actual como PNG"),
     ("Rueda", "Acercar o alejar hacia el cursor"),
     ("W A S D", "Mover la cámara"),
     ("R · F", "Restablecer la vista · encuadrar en 3D"),
@@ -1021,6 +1094,7 @@ pub fn scene_overlays_system(
     state: Res<EditorState>,
     interactive: Res<PreviewInteractive>,
     pickable: Query<crate::PickBoundsQueryData>,
+    children: Query<&Children>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     layouts: Query<LayoutQueryData>,
@@ -1095,8 +1169,7 @@ pub fn scene_overlays_system(
     };
     let selected = state
         .selected
-        .and_then(|entity| pickable.get(entity).ok())
-        .and_then(crate::pick_bounds);
+        .and_then(|entity| crate::selection_bounds(entity, &pickable, &children));
 
     // Área de dibujo full-screen no interactiva
     egui::Area::new("scene_overlays".into())

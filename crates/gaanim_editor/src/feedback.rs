@@ -2,6 +2,7 @@
 //! panel, in the visual language of [`crate::ui_kit`].
 
 use bevy_egui::egui;
+use gaanim_core::console::ScriptLocation;
 
 use crate::ui_kit::{self, Icon, palette};
 
@@ -17,39 +18,18 @@ pub enum ErrorPanelAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ErrorSummary<'a> {
     headline: &'a str,
-    /// `file.py · línea N` of the innermost traceback frame.
-    location: Option<String>,
+    /// The innermost script frame of the traceback.
+    location: Option<ScriptLocation>,
 }
 
 fn summarize_error(message: &str) -> ErrorSummary<'_> {
-    let mut lines = message.lines().filter(|line| !line.trim().is_empty());
-    // The runner prefixes Python tracebacks with `<script> — traceback:`.
-    if !message
-        .lines()
-        .any(|line| line.starts_with("Traceback (most recent call last)"))
-    {
-        return ErrorSummary {
-            headline: lines.next().unwrap_or("").trim(),
-            location: None,
-        };
-    }
-    let headline = message
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty() && !line.starts_with(char::is_whitespace))
-        .unwrap_or("")
-        .trim();
-    let location = lines
-        .filter_map(|line| {
-            let rest = line.trim_start().strip_prefix("File \"")?;
-            let (path, rest) = rest.split_once('"')?;
-            let number = rest.strip_prefix(", line ")?.split(',').next()?;
-            number.parse::<u32>().ok()?;
-            let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
-            Some(format!("{file} · línea {number}"))
-        })
-        .next_back();
+    let (headline, location) = gaanim_core::console::traceback_summary(message);
     ErrorSummary { headline, location }
+}
+
+/// `file.py · línea N`, how the editor names a script line.
+pub(crate) fn location_label(location: &ScriptLocation) -> String {
+    format!("{} · línea {}", location.file_name(), location.line)
 }
 
 /// Badge confirming a reload, faded by `opacity` while it disappears.
@@ -132,10 +112,11 @@ pub fn script_error_panel(ctx: &egui::Context, message: &str) -> ErrorPanelActio
                     );
                     if let Some(location) = &summary.location {
                         ui.label(
-                            egui::RichText::new(location)
+                            egui::RichText::new(location_label(location))
                                 .size(12.0)
                                 .color(palette::TEXT_MUTED),
-                        );
+                        )
+                        .on_hover_text(location.to_string());
                     }
                 });
             });
@@ -176,6 +157,14 @@ pub fn script_error_panel(ctx: &egui::Context, message: &str) -> ErrorPanelActio
                     {
                         ctx.copy_text(message.to_owned());
                     }
+                    if let Some(location) = &summary.location
+                        && crate::source_link::AVAILABLE
+                        && ui_kit::secondary_button(ui, "Abrir en el editor", true)
+                            .on_hover_text(format!("{location}\n{}", crate::source_link::hint()))
+                            .clicked()
+                    {
+                        crate::source_link::open_or_report(location);
+                    }
                 });
             });
         });
@@ -189,12 +178,11 @@ mod tests {
     #[test]
     fn a_traceback_is_summarized_by_its_exception_and_innermost_frame() {
         let traceback = "/work/main.py — traceback:\nTraceback (most recent call last):\n  File \"/home/me/project/main.py\", line 4, in <module>\n    helper()\n  File \"C:\\\\scenes\\\\lib.py\", line 12, in helper\n    1 / 0\n    ~~^~~\nZeroDivisionError: division by zero\n";
+        let summary = summarize_error(traceback);
+        assert_eq!(summary.headline, "ZeroDivisionError: division by zero");
         assert_eq!(
-            summarize_error(traceback),
-            ErrorSummary {
-                headline: "ZeroDivisionError: division by zero",
-                location: Some("lib.py · línea 12".to_owned()),
-            }
+            summary.location.as_ref().map(location_label).as_deref(),
+            Some("lib.py · línea 12")
         );
     }
 

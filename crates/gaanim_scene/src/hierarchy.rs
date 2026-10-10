@@ -62,6 +62,7 @@ impl Plugin for GaanimScenePlugin {
         app.init_resource::<gaanim_math::ResolvedCamera>()
             .init_resource::<gaanim_math::CameraViewOverride>()
             .init_resource::<gaanim_math::CameraViewport>()
+            .init_resource::<crate::components::DepthOfField>()
             .add_systems(
                 Update,
                 crate::systems::resolve_camera_system.in_set(SceneSet::Camera),
@@ -85,8 +86,10 @@ impl Plugin for GaanimScenePlugin {
             (
                 crate::systems::transform_propagation_system
                     .run_if(crate::systems::has_transform_changes),
-                crate::systems::pin_hud_overlays_system
+                crate::systems::pin_parallax_layers_system
                     .after(crate::systems::transform_propagation_system),
+                crate::systems::pin_hud_overlays_system
+                    .after(crate::systems::pin_parallax_layers_system),
                 crate::systems::opacity_propagation_system
                     .run_if(crate::systems::has_opacity_changes)
                     .after(crate::systems::sync_new_opacities),

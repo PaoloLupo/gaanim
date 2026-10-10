@@ -1718,7 +1718,10 @@ class Anim:
         """Select the drawable fade-in effect; scheduling occurs in ``Scene.play``.
 
         The drawable stays hidden before the scheduled fade, including when
-        declared after earlier animations or placed inside a group.
+        declared after earlier animations or placed inside a group. It fades
+        in to the opacity it was declared or last set with, or had before a
+        ``fade_out``: ``opacity(0.3).hidden()`` ends at 0.3. A drawable
+        declared with ``opacity(0)`` ends at 1.
         """
         ...
     def fade_in_from(self, direction: Direction, distance: float = 0.48) -> Anim: ...
@@ -2010,8 +2013,8 @@ class Anim:
         ``transform_to`` nothing is resampled, so every frame is the exact blend
         of both outlines and pixel-art or technical shapes keep their corners.
         The shape keeps its number of vertices: a different count, a shape that
-        is not a polygon or polyline, or a non-finite point raises
-        ``ValueError``. Combine with ``fill``, ``move_to`` and the other
+        is not a polygon or polyline (or is one with reactive coordinates), or
+        a non-finite point raises ``ValueError``. Combine with ``fill``, ``move_to`` and the other
         property targets in one ``Anim``.
 
         Example:
@@ -2162,6 +2165,23 @@ class Anim:
         Example:
             title.tracking(0.4)
             scene.play(title.animate.tracking(0.0).duration(1.2))
+        """
+        ...
+    def path_offset(self, value: float) -> Anim:
+        """Move a Text made by ``scene.text.on_path`` along its path to ``value``.
+
+        ``value`` is a fraction of the path's length measured from the
+        placement ``align`` gives: on a closed path ``1.0`` is one full turn
+        and the text wraps around, on an open one glyphs past an end continue
+        straight along its last direction. Every frame is computed from the
+        offset, so a seek shows what playback does. Default easing is smooth;
+        use ``Easing.LINEAR`` for a steady spin. A Text not made by
+        ``on_path`` or a non-finite value raise ``ValueError``; a text
+        selection raises ``TypeError``.
+
+        Example:
+            ring = scene.text.on_path("GAANIM · MOTION · ", scene.geometry.circle(2.0))
+            scene.play([ring.animate.path_offset(1.0).duration(4).easing(Easing.LINEAR)])
         """
         ...
     def path_arc(self, angle: float) -> Anim:
@@ -3162,6 +3182,133 @@ class Updater:
         """
         ...
 
+class Annotations:
+    """Hand-drawn notations around a drawable or text selection; see ``Drawable.annotate``.
+
+    Every method returns a new stroked Drawable drawn in the style of
+    rough-notation: lines wobble and bow as if drawn by hand, and the shape
+    is drawn ``passes`` times over itself with fresh randomness. The mark
+    follows the target's bounds every frame, keeps its scribble while the
+    target moves, and stays hidden until a ``play`` includes it, so
+    ``mark.animate.create()`` draws it on, one pass after another; fade or
+    restyle it like any other drawable, but move it by moving its target.
+    The same ``seed`` always draws the same scribble.
+
+    Common arguments: ``color`` and ``width`` style the stroke (without a
+    color the theme's stroke applies, and a ``width`` needs a ``color``);
+    ``roughness`` scales the wobble (``0`` draws clean geometry, ``1`` the
+    rough-notation look); ``passes`` is 1 to 8. A negative or non-finite
+    ``roughness`` or ``padding``, a ``passes`` outside 1 to 8 or a
+    non-positive ``width`` raise ``ValueError``.
+    """
+    def underline(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Underline the target with a hand-drawn line.
+
+        ``padding`` grows the target's bounds first (default 0.08 below and 0.04 to each side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def box(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Draw a hand-drawn box around the target.
+
+        ``padding`` grows the target's bounds first (default 0.1 on every side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def circle(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Circle the target with a hand-drawn ellipse through the middle of each padded side.
+
+        ``padding`` grows the target's bounds first (default 0.25 above and below, 0.35 to each side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def strike_through(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Strike the target through its middle with a hand-drawn line.
+
+        ``padding`` grows the target's bounds first (default 0.06 to each side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def crossed_off(
+        self,
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Cross the target off with two hand-drawn diagonals.
+
+        ``padding`` grows the target's bounds first (default 0.05 on every side); it takes a
+        scalar, ``(vertical, horizontal)`` or ``(top, right, bottom, left)``.
+        See ``Annotations`` for the other arguments.
+        """
+        ...
+    def bracket(
+        self,
+        sides: str | Sequence[str] = ("left", "right"),
+        *,
+        color: Optional[ColorLike] = None,
+        width: Optional[float] = None,
+        roughness: float = 1.0,
+        passes: int = 2,
+        seed: int = 0,
+        padding: Optional[Padding] = None,
+    ) -> Drawable:
+        """Draw hand-drawn square brackets on ``sides`` of the target.
+
+        ``sides`` names one or more of ``"left"``, ``"right"``, ``"top"`` and
+        ``"bottom"``; an unknown name raises ``ValueError``. ``padding``
+        defaults to 0.05 above and below and 0.1 to each side. See
+        ``Annotations`` for the other arguments.
+
+        Example:
+            scene.play([eq["rhs"].annotate.bracket("right").animate.create()])
+        """
+        ...
+
 class PathModifiers:
     """Adds path modifiers to a drawable; see ``Drawable.modifiers``."""
     def zigzag(self, size: float = 0.1, ridges: int = 4, *, smooth: bool = False) -> PathModifier:
@@ -3292,6 +3439,16 @@ class Drawable:
         """
         ...
     @property
+    def annotate(self) -> Annotations:
+        """Hand-drawn notations around this drawable: underline, box, circle, strikes and brackets.
+
+        Example:
+            ul = card.annotate.underline(color=RED, roughness=1.0, passes=2, seed=1)
+            box = card.annotate.box(padding=0.1)
+            scene.play([ul.animate.create(), box.animate.create()])
+        """
+        ...
+    @property
     def animate(self) -> Anim:
         """Start a typed compound property animation.
 
@@ -3349,9 +3506,10 @@ class Drawable:
         width follow that scale instead, as ``scale_stroke_with_object`` does.
 
         ``align`` places the stroke on closed contours, including every text
-        glyph. By default it stays inside the shape, so ``write`` draws a
-        constant width; ``"center"`` straddles the contour and ``"outside"``
-        draws the whole width beyond it (a text halo). Open paths always
+        glyph. By default the whole width stays inside the shape, so
+        ``write`` draws a constant width; ``"center"`` straddles the contour
+        and ``"outside"`` draws the whole width beyond it (a text halo). The
+        visible stroke is ``width`` wide in all three. Open paths always
         center their stroke. The alignment is declaration state and is not
         animated. Other values raise ``ValueError``.
 
@@ -3699,9 +3857,10 @@ class Drawable:
 
         Before the first ``scene.play`` it replaces the declared shape; later it
         changes the shape at the cursor. ``animate.points`` then moves the
-        vertices on from there. It needs one finite point per vertex; another
-        count, a non-finite value, or a drawable that is not a polygon or
-        polyline raises ``ValueError``.
+        vertices on from there; a ``closed=True`` polyline stays closed. It
+        needs one finite point per vertex; another count, a non-finite value,
+        a drawable that is not a polygon or polyline, or a polyline with
+        reactive coordinates raises ``ValueError``.
 
         Example:
             frame = scene.geometry.polygon([(0, 0), (1, 0), (0, 1)]).points([(0, 0), (1, 0), (1, 1)])
@@ -3964,10 +4123,38 @@ class Drawable:
         """Set the stacking layer; higher values draw on top.
 
         A group's or text's ``z_index`` is added to every descendant's, so it
-        moves the whole subtree. Ties keep creation order.
+        moves the whole subtree. Ties keep creation order. With
+        ``scene.z_layers``, it orders the drawable within its layer.
 
         Example:
             card = scene.geometry.group([box, label]).z_index(5)
+        """
+        ...
+    def z_layer(self, name: str) -> Self:
+        """Draw this drawable in the named layer ``name`` of ``scene.z_layers``.
+
+        Every drawable of a layer draws above every drawable of the layers
+        behind it, whatever their ``z_index``, which only orders drawables
+        within a layer. A group or text takes its members with it, unless a
+        member names its own layer. Draw order holds for the whole scene, so
+        a call after the drawable is shown applies from its start. A name the
+        scene has not declared raises ``ValueError``.
+
+        Example:
+            scene.z_layers("model", "overlay")
+            lens = scene.geometry.circle(0.8).z_layer("overlay")
+        """
+        ...
+    def covers_on_purpose(self) -> Self:
+        """Let this drawable, and its members, hide texts on purpose.
+
+        ``gaanim check`` warns about a text that an opaque shape drawn above
+        it hides completely; it skips the texts this drawable covers, such
+        as a dialog drawn over a model while it is explained. Nothing
+        changes in the drawing, and it holds for the whole scene.
+
+        Example:
+            dialog = scene.geometry.rect(4, 2).fill(WHITE).covers_on_purpose()
         """
         ...
     @overload
@@ -4005,17 +4192,23 @@ class Drawable:
 
         Works for any object (shapes, text, math, SVG, images, groups): the
         box includes descendants and reflects layout, transforms, text
-        shaping and every animation that ended before ``scene.cursor``, as it
-        would render there. Geometry that reactive updaters rebuild every
+        shaping, every animation that ended by ``scene.cursor`` and every
+        setter applied at it (such as ``move_to`` on an animated object), as
+        it would render there. Geometry that reactive updaters rebuild every
         frame is measured as declared. Raises ``ValueError`` when the object
         has no geometry at the cursor.
 
         Measuring an object declared since the last ``play``/``wait`` that
         nothing else acts on yet (no animation, later group or layout) takes
         about a millisecond: only its declaration, its members and its
-        ``next_to``/``align_to`` references are compiled. Otherwise each call
-        compiles the scene authored so far, so measure before animating or
-        reuse the result.
+        ``next_to``/``align_to`` references are compiled. Otherwise the call
+        compiles the scene authored so far. Calls with nothing authored in
+        between share one compilation, and so do the members of one fresh
+        layout, so measure before animating and measure the boxes you need
+        together. A later call resumes that compilation from the segment
+        where the scene changed, as an editor reload does, and the next run
+        of the script resumes the last one; a segment holding Python
+        functions (reactive values, updaters) is not reused across runs.
 
         Example:
             label = scene.text("PGA = 0.35 g", role="label").move_to(0, 1)
@@ -4217,7 +4410,8 @@ class Drawable:
 
         Without a pivot, shapes turn about their own origin; shapes declared
         in scene coordinates (``line``, ``polygon``, arcs, arrows, curves)
-        turn about the center of their box instead.
+        turn about the center of their box instead. Once the drawable has
+        been shown, the pivot changes at the cursor without moving it.
 
         Example:
             result = drawable.with_pivot(1.0, 1.0)
@@ -4520,6 +4714,30 @@ class SurroundingRect(Drawable):
         Empty, foreign-scene, or invalid targets raise ``ValueError`` or
         ``TypeError``.
         """
+        ...
+
+class ParallaxLayer(Drawable):
+    """A 2.5D parallax layer created by ``Scene.layer``.
+
+    Its members move by ``1 / depth`` of the orthographic camera's pan, so a
+    far layer drifts slowly behind the scene and a near one sweeps past in
+    front. The layer itself is a Drawable: move, fade or animate it to act on
+    all its members at once.
+    """
+    def add(self, drawable: Drawable, *others: Drawable) -> Self:
+        """Move drawables into the layer, keeping their current place; returns the layer.
+
+        Adding a drawable to a second layer moves it there. A drawable from
+        another scene, the layer itself or another layer raise ``ValueError``.
+
+        Example:
+            far = scene.layer(depth=3.0)
+            far.add(scene.geometry.circle(1.0).move_to(4, 2))
+        """
+        ...
+    @property
+    def depth(self) -> float:
+        """The depth the layer was created with."""
         ...
 
 class ForceVector(Drawable):
@@ -4834,6 +5052,14 @@ class TextSelection:
     for example, ``g sin(theta)`` targets the rendered ``g sin(θ)``.
     """
     def __getitem__(self, name: str) -> TextSelection: ...
+    @property
+    def annotate(self) -> Annotations:
+        """Hand-drawn notations around the selected glyphs; see ``Annotations``.
+
+        Example:
+            scene.play([eq["rhs"].annotate.underline(color=RED).animate.create()])
+        """
+        ...
     def fill(self, color: ColorLike) -> TextSelection:
         """Persistently color selected glyphs and invalidate metric state if needed.
 
@@ -5093,6 +5319,18 @@ class Text(Drawable):
         Example:
             title.tracking(0.4)
             scene.play(title.animate.tracking(0.0))
+        """
+        ...
+    def path_offset(self, value: float) -> Self:
+        """Shift a Text made by ``scene.text.on_path`` along its path now.
+
+        ``value`` is a fraction of the path's length, as in
+        ``animate.path_offset``. Declared before the first ``play`` it is the
+        initial offset; later it cuts at the cursor. Returns this Text; a
+        Text not made by ``on_path`` or a non-finite value raise ``ValueError``.
+
+        Example:
+            label = scene.text.on_path("ola", wave, align="center").path_offset(-0.2)
         """
         ...
     @overload
@@ -5404,6 +5642,34 @@ class Camera:
     def rotate_to(self, angle: ScalarSource) -> Camera: ...
     def look_at(self, eye: Endpoint, target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
     def perspective(self, fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera: ...
+    def depth_of_field(
+        self,
+        focus: Optional[float] = None,
+        *,
+        aperture: Optional[float] = None,
+        max_blur: Optional[float] = None,
+    ) -> Camera:
+        """Set the depth of field of parallax layers at the cursor; returns the camera.
+
+        Each layer created with ``Scene.layer`` blurs by its circle of
+        confusion, ``aperture * |1 - focus / depth|`` scene units, at most
+        ``max_blur``: layers at the ``focus`` depth stay sharp and the blur
+        grows with the distance from it in either direction (a layer at
+        ``math.inf`` blurs by ``aperture``). Depths are those of the layers,
+        so ``focus=1`` keeps the scene plane sharp. Omitted values keep
+        their current value; at first focus is 1, aperture 0 (no blur) and
+        max_blur 0.5. Drawables outside layers, and HUD drawables inside
+        them, never blur. A layer is blurred
+        as one image, through a shader effect on its root that replaces any
+        ``shader_effect`` set on the layer itself; drawn offscreen, a blurred
+        layer costs more. A focus that is not a finite positive depth, or a
+        negative or non-finite ``aperture`` or ``max_blur``, raise
+        ``ValueError``.
+
+        Example:
+            scene.camera.depth_of_field(focus=1.0, aperture=0.12)
+        """
+        ...
     def orthographic(self, zoom: float = 1.0) -> Camera: ...
     def reset(self) -> Camera: ...
     def bind_2d(self, *, center: Optional[Endpoint] = None, zoom: Optional[ScalarSource] = None, rotation: Optional[ScalarSource] = None, influence: Optional[ScalarSource] = None, enabled: bool = True) -> CameraConstraint: ...
@@ -5455,6 +5721,95 @@ class Camera:
             view = scene.camera.inset(atom, zoom=4, at=Anchor.TOP_RIGHT)
             scene.play([view.animate.pop_out().duration(0.8)])
             scene.play([view.animate.zoom_to(8).duration(1.5)])
+        """
+        ...
+
+class Axonometric:
+    """An axonometric view of a 3D model and the drawings made with it.
+
+    ``polygon``, ``polyline`` and ``line`` draw model points as ordinary
+    flat drawables, styled and animated like any other (``fill``,
+    ``fade_in``, ``animate.points``...), with their strokes centered on the
+    outline, so a face seen edge-on still draws as a line. ``depth_sort``
+    orders them like a painter and ``animate_to`` moves them to another view.
+    """
+    @property
+    def azimuth(self) -> float:
+        """Radians the view turns about ``z`` from the front view."""
+        ...
+    @property
+    def elevation(self) -> float:
+        """Radians the view rises above the horizon."""
+        ...
+    @property
+    def origin(self) -> tuple[float, float]:
+        """Scene point where the model origin is drawn."""
+        ...
+    @property
+    def scale(self) -> float:
+        """Scene units per model unit along the least shortened axis."""
+        ...
+    def point(self, x: float, y: float, z: float) -> tuple[float, float]:
+        """Return where the model point ``(x, y, z)`` is drawn, in scene units.
+
+        Example:
+            label = scene.text("A").move_to(*iso.point(0, 0, 3))
+        """
+        ...
+    def depth(self, x: float, y: float, z: float) -> float:
+        """Return how near the viewer the model point is; larger is nearer."""
+        ...
+    def polygon(self, points: Sequence[tuple[float, float, float]]) -> Drawable:
+        """Draw a polygon through the model points ``points``, such as a face.
+
+        The result is a regular ``polygon`` in scene coordinates. Fewer than
+        three points or a non-finite coordinate raise ``ValueError``.
+
+        Example:
+            wall = iso.polygon([(0, 0, 0), (5, 0, 0), (5, 0, 3), (0, 0, 3)]).fill(GRAY)
+        """
+        ...
+    def polyline(self, points: Sequence[tuple[float, float, float]], *, closed: bool = False) -> Drawable:
+        """Draw a polyline through the model points ``points``.
+
+        ``closed=True`` joins the last point to the first. Fewer than two
+        points or a non-finite coordinate raise ``ValueError``.
+        """
+        ...
+    def line(self, start: tuple[float, float, float], end: tuple[float, float, float]) -> Drawable:
+        """Draw the segment between two model points, as a polyline of two points.
+
+        Example:
+            column = iso.line((0, 0, 0), (0, 0, 3)).stroke(BLACK, 0.06)
+        """
+        ...
+    def depth_sort(self, drawables: Sequence[Drawable], *, z_index: int = 0, view: Optional[Axonometric] = None) -> None:
+        """Give ``drawables`` drawn with this projection ``z_index`` values back to front.
+
+        The farthest gets ``z_index``, the next ``z_index + 1``, and so on, as
+        seen in the current view, or in ``view``'s when given, such as the
+        view the drawings will move to. Where two drawings overlap on screen,
+        the one nearer the viewer there draws above; the rest follow their
+        mean depth. Call it before the drawings are shown, like ``z_index``.
+        A drawable this projection did not draw, a repeated one, or a
+        ``z_index`` without room for all of them raise ``ValueError``.
+
+        Example:
+            plan.depth_sort([floor, wall, slab, column], z_index=10, view=iso)
+        """
+        ...
+    def animate_to(self, other: Axonometric) -> Composition:
+        """Move every drawing of this projection to ``other``'s view.
+
+        Each drawing's vertices travel straight to where ``other`` draws its
+        model points, as ``animate.points`` does, all in one composition; set
+        its duration with ``defaults(duration=...)``. From then on this
+        projection draws with ``other``'s view. A projection that has drawn
+        nothing raises ``ValueError``.
+
+        Example:
+            plan = scene.geometry.axonometric("plan", origin=(0, -1), scale=0.5)
+            scene.play(iso.animate_to(plan).defaults(duration=1.5))
         """
         ...
 
@@ -5688,6 +6043,53 @@ class CameraAnimation:
             scene.camera.animate.shake(trauma=0.8, decay=1.5, frequency=12, rotation=0.02, seed=0)
         """
         ...
+    def follow_path(
+        self,
+        route: Drawable,
+        *,
+        orient: bool = False,
+        rotate_offset: float = 0.0,
+        start: float = 0.0,
+        end: float = 1.0,
+    ) -> Anim:
+        """Move the 2D camera along the path of ``route``.
+
+        The path is read in scene coordinates when the animation plays, as
+        ``Anim.move_along`` reads it; ``start`` and ``end`` choose the
+        portion as arc-length fractions (``start > end`` travels it
+        backwards). With ``orient`` the view also turns so the direction of
+        travel points right on screen, plus ``rotate_offset`` radians
+        (``-math.pi / 2`` points it up, like a driving view); the turn is
+        computed per frame, so it never jumps. Default easing is smooth.
+        A route from another scene, ``start`` or ``end`` outside ``[0, 1]``
+        or equal, or a non-finite ``rotate_offset`` raise ``ValueError``.
+
+        Example:
+            route = scene.geometry.path([(-6, -2), (-2, 2), (2, -2), (6, 2)])
+            scene.play([scene.camera.animate.follow_path(route, orient=True).duration(4)])
+        """
+        ...
+    def whip_pan(
+        self,
+        to: Endpoint | float,
+        y: Optional[float] = None,
+        *,
+        blur: bool = True,
+    ) -> Anim:
+        """Whip pan to a point or drawable: a fast move eased hard at both ends.
+
+        Takes ``pan_to``'s targets and lasts 0.4 s unless ``.duration`` says
+        otherwise; the default easing is an exponential ease in and out,
+        which keeps most of the travel in a blink around the middle. With
+        ``blur``, exported frames and snapshots of the move get a 360°
+        motion blur of 24 sub-frames even when the scene has none; the live
+        preview stays sharp, as for ``canvas.motion_blur``.
+
+        Example:
+            scene.play([scene.camera.animate.whip_pan(section_b)])
+            scene.play([scene.camera.animate.whip_pan(0, 0, blur=False).duration(0.3)])
+        """
+        ...
     def look_at(
         self,
         eye: Endpoint,
@@ -5742,6 +6144,51 @@ class CameraAnimation:
 
         Example:
             scene.camera.animate.dolly(factor=0.85).duration(0.6)
+        """
+        ...
+
+    def depth_of_field(
+        self,
+        focus: Optional[float] = None,
+        *,
+        aperture: Optional[float] = None,
+        max_blur: Optional[float] = None,
+    ) -> Anim:
+        """Animate the depth of field of parallax layers; see ``Camera.depth_of_field``.
+
+        The focus moves in inverse depth, so a rack focus passes evenly
+        through near and far layers; aperture and max_blur change linearly.
+        Default easing is smooth.
+
+        Example:
+            scene.play([scene.camera.animate.depth_of_field(aperture=0.15).duration(0.5)])
+        """
+        ...
+    def focus_to(self, focus: float) -> Anim:
+        """Rack focus: move the depth of field's focus to the depth ``focus``.
+
+        Example:
+            scene.camera.depth_of_field(focus=0.6, aperture=0.12)
+            scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+        """
+        ...
+    def dolly_zoom(self, factor: float) -> Anim:
+        """Dolly zoom (the vertigo shot) of a perspective camera.
+
+        The camera moves along its line of sight to ``factor`` times its
+        distance from the ``look_at`` target while the field of view changes
+        so the plane through the target keeps its size on screen: the
+        background stretches away (``factor`` above ``1``) or rushes in.
+        The distance changes exponentially. Only 3D content shows it, since
+        the 2D layer does not move under a perspective camera. Without
+        ``perspective`` or with the camera on its target, it warns and does
+        nothing. A ``factor`` that is not finite and positive raises
+        ``ValueError``.
+
+        Example:
+            scene.camera.perspective(fov_y=0.6)
+            scene.camera.look_at(eye=(0, 1, 8), target=(0, 0, 0))
+            scene.play([scene.camera.animate.dolly_zoom(1.8).duration(2.0)])
         """
         ...
 
@@ -7319,6 +7766,40 @@ class Geometry:
             planet = scene.geometry.circle(0.5).fill(BLUE).move_to(2, 0)
         """
         ...
+    def extrude(
+        self,
+        source: Drawable,
+        depth: float = 0.2,
+        *,
+        bevel: float = 0.0,
+        material: Optional[Material3D] = None,
+        tolerance: float = 0.01,
+        keep_source: bool = False,
+    ) -> Primitive3D:
+        """Extrude the area a 2D drawable fills into a closed 3D mesh.
+
+        The outline is read when the scene compiles, so text, equations,
+        groups and imported SVGs work, and filled as it is drawn (nonzero
+        rule): letters keep their holes. The mesh is ``depth`` deep, centered
+        on the source's place in the z = 0 plane with its front facing the
+        default camera, and has a front and back cap, side walls and, with
+        ``bevel`` > 0, a 45° chamfer of that width on both caps (outlines
+        thinner than twice the bevel keep square edges). Curves flatten to
+        ``tolerance`` scene units: smaller is smoother and heavier. Without a
+        ``material`` the mesh is matte in the source's fill color. The source
+        stays a drawable of its own, hidden from the cursor on (2D draws over
+        3D) unless ``keep_source``; later changes to it do not reshape the
+        mesh. Turn the camera to see the depth. A source from another scene,
+        a 3D, image, video or Lottie source, a non-positive ``depth`` or
+        ``tolerance``, or a ``bevel`` that is negative or not less than half
+        the depth raise ``ValueError``; an outline that encloses no area
+        warns and leaves an empty mesh.
+
+        Example:
+            logo3d = scene.geometry.extrude(logo, depth=0.3, bevel=0.03, material=Material3D.metal(GOLD))
+            word = scene.geometry.extrude(scene.text("HOLA"), depth=0.2)
+        """
+        ...
     def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:
         """Create a centered cube with flat faces."""
         ...
@@ -7505,6 +7986,33 @@ class Geometry:
 
         Example:
             section = scene.geometry.points(poincare_points, radius=0.02).fill(GOLD)
+        """
+        ...
+    def axonometric(
+        self,
+        view: Literal["isometric", "dimetric", "plan", "front", "side"] = "isometric",
+        *,
+        azimuth: Optional[float] = None,
+        elevation: Optional[float] = None,
+        origin: tuple[float, float] = (0.0, 0.0),
+        scale: float = 1.0,
+    ) -> Axonometric:
+        """Draw a 3D model as flat shapes seen from an orthographic view.
+
+        The model has ``z`` up and its plan on ``x``/``y``. ``view`` names
+        the angles: ``"isometric"``, ``"dimetric"`` (the 2:1 drawing, whose
+        receding axes rise one unit every two), ``"plan"``, ``"front"``
+        (looking along ``+y``) or ``"side"`` (from ``+x``). ``azimuth``
+        (radians about ``z`` from the front view) and ``elevation`` (radians
+        above the horizon) replace its angles. A model unit along the least
+        shortened axis measures ``scale`` scene units, so an isometric
+        drawing keeps every axis at full length, and the model origin is
+        drawn at ``origin``. A non-finite angle or origin, a ``scale`` that is
+        not positive or another view name raise ``ValueError``.
+
+        Example:
+            iso = scene.geometry.axonometric("isometric", origin=(0, -1), scale=0.5)
+            slab = iso.polygon([(0, 0, 3), (5, 0, 3), (5, 4, 3), (0, 4, 3)])
         """
         ...
     def polygon(self, points: Sequence[tuple[float, float]]) -> Drawable:
@@ -8140,6 +8648,56 @@ class Typography:
         Example:
             from pathlib import Path
             result = scene.typst(Path("assets/title.typ"))
+        """
+        ...
+    def on_path(
+        self,
+        content: TextContent,
+        path: Drawable,
+        *,
+        align: Literal["start", "center", "end"] = "start",
+        orient: bool = True,
+        reverse: bool = False,
+        offset: float = 0.0,
+        role: Optional[TextRole] = None,
+        style: Optional[TextStyle] = None,
+        font: Optional[str] = None,
+        size: Optional[float] = None,
+        weight: Optional[int] = None,
+        italic: Optional[bool] = None,
+        color: Optional[ColorLike] = None,
+        opacity: Optional[float] = None,
+        letter_spacing: Optional[float] = None,
+        word_spacing: Optional[float] = None,
+        markup: Optional[bool] = None,
+    ) -> Text:
+        """Create one line of text whose glyphs follow the path of ``path``.
+
+        Each glyph keeps its shape and spacing: its center on the text's
+        baseline is placed on the path at the same arc length it had along
+        the line, and with ``orient`` it turns to the path's direction (else
+        it stays upright). Glyphs sit on the left of the direction of travel,
+        so on a circle, which runs counterclockwise, the text reads around the
+        inside; ``reverse=True`` follows the path backward and puts it around
+        the outside. ``align`` places the text at the start, middle or end
+        of the path, and ``offset`` shifts it by a fraction of the path's
+        length (animate it with ``animate.path_offset``). On a closed path
+        the text wraps around; on an open one, glyphs past an end continue
+        along its last direction.
+
+        The path is read in scene coordinates where ``path`` stands now and
+        then belongs to the Text: moving the Text moves it along, and later
+        changes to ``path`` do not move the glyphs. ``path`` itself stays an
+        ordinary drawable; hide it or give it a stroke. Style arguments are
+        those of ``scene.text``; the text never wraps. An unknown ``align``,
+        a non-finite ``offset``, a ``path`` from another scene or a group
+        (which has no path of its own), or content without visible characters
+        raise ``ValueError``.
+
+        Example:
+            circle = scene.geometry.circle(2.0).no_fill().stroke(GRAY, 0.02)
+            ring = scene.text.on_path("GAANIM · MOTION · ", circle, reverse=True)
+            scene.play([ring.animate.path_offset(1.0).duration(4).easing(Easing.LINEAR)])
         """
         ...
     def code(
@@ -9681,6 +10239,47 @@ class Scene:
 
         Raises:
             ValueError: If any drawable belongs to another ``Scene``.
+        """
+        ...
+    def layer(self, depth: float) -> ParallaxLayer:
+        """Create an empty 2.5D parallax layer at ``depth``.
+
+        Depth is measured in units of the scene plane's distance from the
+        camera: members added with ``ParallaxLayer.add`` move by
+        ``1 / depth`` of the 2D camera's pan and zoom by ``zoom ** (1 / depth)``,
+        while rotation applies to every layer alike. ``depth=1`` behaves
+        like the rest of the scene, ``depth=3`` drifts at a third of the
+        camera speed, ``depth=0.6`` sweeps past faster, and ``math.inf``
+        never pans or zooms, like ``Drawable.hud`` except for rotation.
+        Shake, follow and bindings move layers too; a member made a HUD with
+        ``Drawable.hud`` still stays on screen. Farther layers draw
+        behind nearer ones: the layer's ``z_index`` defaults to
+        ``round(-100 * ln(depth))`` within ±900, and its members add their
+        own. Under a perspective camera layers stay put, since real depth
+        already gives parallax. A depth that is not positive raises
+        ``ValueError``.
+
+        Example:
+            far = scene.layer(depth=3.0).add(mountains)
+            near = scene.layer(depth=0.6).add(trees)
+            scene.play([scene.camera.animate.pan_to(6, 0).duration(3)])
+        """
+        ...
+    def z_layers(self, *names: str, default: Optional[str] = None) -> None:
+        """Name the scene's draw layers, from the back to the front.
+
+        ``Drawable.z_layer`` puts a drawable in one of them: it then draws
+        above every drawable of the layers behind it, whatever their
+        ``z_index``, which only orders drawables within a layer. Drawables
+        without a layer draw in ``default``, the first layer when omitted, so
+        an overlay can sit above any ``z_index`` the rest of the scene uses.
+        A scene names its layers once (naming the same ones again is
+        allowed); no names, an empty or repeated name, a ``default`` that is
+        not one of them, or different layers raise ``ValueError``.
+
+        Example:
+            scene.z_layers("background", "content", "overlay", default="content")
+            cursor = scene.geometry.dot(0.1).z_layer("overlay")
         """
         ...
     def persist(self, object: Drawable, *others: Drawable) -> None:

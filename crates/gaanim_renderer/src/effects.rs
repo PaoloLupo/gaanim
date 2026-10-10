@@ -38,7 +38,8 @@ pub struct ElementBlend(pub gaanim_core::peniko::BlendMode);
 ///
 /// Without it a closed contour keeps its stroke inside the shape, so a
 /// `write` draws a constant width, and an open path centers its stroke.
-/// `Outside` draws the whole width beyond the contour, e.g. for a text halo.
+/// `Inside` draws the whole authored width within the contour, `Center`
+/// half on each side and `Outside` all of it beyond, e.g. for a text halo.
 /// Open paths always center their stroke.
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -361,6 +362,21 @@ impl MotionBlur {
                 sample.clamp(start, end.max(start))
             })
             .collect()
+    }
+}
+
+/// Time ranges with their own [`MotionBlur`], such as a whip pan's: a frame
+/// inside one is blurred even when the scene has no motion blur of its own.
+#[derive(bevy::prelude::Resource, Debug, Clone, PartialEq, Default)]
+pub struct MotionBlurWindows(pub Vec<(f64, f64, MotionBlur)>);
+
+impl MotionBlurWindows {
+    /// The blur of the first window that holds `time`.
+    pub fn at(&self, time: f64) -> Option<MotionBlur> {
+        self.0
+            .iter()
+            .find(|(start, end, _)| *start - 1e-9 <= time && time <= *end + 1e-9)
+            .map(|(_, _, blur)| *blur)
     }
 }
 

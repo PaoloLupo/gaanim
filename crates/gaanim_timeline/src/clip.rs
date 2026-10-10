@@ -372,6 +372,34 @@ pub enum PropertyLensSpec {
         from_far: f64,
         to_far: f64,
     },
+    /// Move the 2D camera along a world-space path at height `z`, turned to
+    /// the path's tangent plus `orient` radians when set.
+    CameraPathFollow {
+        path: BezPath,
+        z: f64,
+        orient: Option<f64>,
+        /// `path` measured once for every frame that follows it.
+        #[cfg_attr(feature = "serde", serde(skip, default))]
+        route: gaanim_math::MeasuredRoute,
+    },
+    /// Tween the depth of field of parallax layers: `[focus, aperture,
+    /// max_blur]`, the focus in inverse depth so a rack focus moves evenly
+    /// through near and far layers.
+    CameraDepthOfField {
+        from: [f64; 3],
+        to: [f64; 3],
+    },
+    /// A dolly zoom: the camera moves along its line of sight to `factor`
+    /// times its distance from `target` while the field of view keeps the
+    /// target's plane the same size (`gaanim_math::dolly_zoom`).
+    CameraDollyZoom {
+        from_position: gaanim_core::glam::DVec3,
+        target: gaanim_core::glam::DVec3,
+        from_fov: f64,
+        near: f64,
+        far: f64,
+        factor: f64,
+    },
     /// Move the entity's translation along a Bézier path. Sampled at
     /// the rate-function-eased `t` and applied as the entity's
     /// world-space translation.
@@ -383,6 +411,9 @@ pub enum PropertyLensSpec {
         /// while the clip applies, as `move_along` authors it.
         #[cfg_attr(feature = "serde", serde(default))]
         reset_anchor: bool,
+        /// `path` measured once for every frame that follows it.
+        #[cfg_attr(feature = "serde", serde(skip, default))]
+        route: gaanim_math::MeasuredRoute,
     },
     /// Move along a 3D polyline; the pivot anchor is cleared like a 2D
     /// `move_along`.
@@ -519,6 +550,30 @@ impl PropertyLensSpec {
             Self::CameraPosition { from, to } => PropertyLens::CameraPosition {
                 from: *from,
                 to: *to,
+            },
+            Self::CameraPathFollow { path, z, .. } => {
+                let (start, end) = (
+                    gaanim_math::get_point_at_alpha(path, 0.0),
+                    gaanim_math::get_point_at_alpha(path, 1.0),
+                );
+                PropertyLens::CameraPosition {
+                    from: gaanim_core::glam::DVec3::new(start.x, start.y, *z),
+                    to: gaanim_core::glam::DVec3::new(end.x, end.y, *z),
+                }
+            }
+            Self::CameraDepthOfField { from, to } => PropertyLens::CameraZoom {
+                from: from[1],
+                to: to[1],
+            },
+            Self::CameraDollyZoom {
+                from_position,
+                target,
+                from_fov,
+                factor,
+                ..
+            } => PropertyLens::CameraPosition {
+                from: *from_position,
+                to: gaanim_math::dolly_zoom(*from_position, *target, *from_fov, *factor, 1.0).0,
             },
             Self::CameraPositionSource { from, to } => PropertyLens::CameraPositionSource {
                 from: *from,
@@ -669,8 +724,9 @@ impl PropertyLensSpec {
                 path,
                 orient,
                 reset_anchor,
+                route,
             } => PropertyLens::PathFollow {
-                path: std::sync::Arc::new(path.clone()),
+                route: route.shared(path),
                 orient: *orient,
                 reset_anchor: *reset_anchor,
             },

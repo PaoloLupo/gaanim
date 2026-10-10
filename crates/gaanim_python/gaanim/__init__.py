@@ -93,8 +93,10 @@ from .gaanim_core import (
     ForceVector,
     Support,
     SurroundingRect,
+    ParallaxLayer,
     Material3D,
     Primitive3D,
+    Axonometric,
     Text,
     TextAnchor,
     TextPart,
@@ -107,6 +109,7 @@ from .gaanim_core import (
     TextAnimator,
     TextAnimatorAnimation,
     PathModifiers,
+    Annotations,
     PathModifier,
     PathModifierAnimation,
     part,
@@ -269,8 +272,10 @@ __all__ = [
     "ForceVector",
     "Support",
     "SurroundingRect",
+    "ParallaxLayer",
     "Material3D",
     "Primitive3D",
+    "Axonometric",
     "Text",
     "TextAnchor",
     "TextPart",
@@ -282,6 +287,7 @@ __all__ = [
     "TextAnimator",
     "TextAnimatorAnimation",
     "PathModifiers",
+    "Annotations",
     "PathModifier",
     "PathModifierAnimation",
     "TextQuery",
@@ -402,4 +408,4 @@ __all__ = [
     "TEAL",
 ]
 
-__version__ = "0.10.1"
+__version__ = "0.10.2"

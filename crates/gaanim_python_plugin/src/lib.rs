@@ -8,6 +8,7 @@
 // Take the engine crates from the shared engine library.
 use gaanim_engine as _;
 
+mod console_capture;
 mod python_home;
 mod script_runner;
 
@@ -48,8 +49,8 @@ impl ScriptSession for script_runner::ScriptRunner {
         script_runner::ScriptRunner::request_rerun(self);
     }
 
-    fn request_asset_reload(&self) {
-        script_runner::ScriptRunner::request_asset_reload(self);
+    fn request_asset_reload(&self, changed: Vec<std::path::PathBuf>) {
+        script_runner::ScriptRunner::request_asset_reload(self, changed);
     }
 
     fn asset_reload_handle(&self) -> Box<dyn Fn() + Send + Sync> {

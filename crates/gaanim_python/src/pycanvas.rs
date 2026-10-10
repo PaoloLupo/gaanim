@@ -185,6 +185,42 @@ impl PySurroundingRect {
     }
 }
 
+#[pyclass(name = "ParallaxLayer", module = "gaanim_core", extends = PyDrawable, from_py_object)]
+#[derive(Clone)]
+pub struct PyParallaxLayer {
+    layer: gaanim_api::canvas::DrawableHandle,
+    depth: f64,
+    scene: Arc<Mutex<ApiCanvas>>,
+}
+
+#[pymethods]
+impl PyParallaxLayer {
+    /// Move drawables into the layer, keeping their current place.
+    #[pyo3(signature = (drawable, *others))]
+    fn add<'py>(
+        slf: PyRef<'py, Self>,
+        drawable: &PyDrawable,
+        others: &Bound<'_, PyTuple>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let members = drawable_args(drawable, others)?;
+        {
+            let mut scene = slf.scene.lock().expect("scene canvas poisoned");
+            for member in &members {
+                scene
+                    .add_to_parallax_layer(&slf.layer, member)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
+        }
+        Ok(slf)
+    }
+
+    #[getter]
+    fn depth(&self) -> f64 {
+        self.depth
+    }
+}
+
 pub(crate) fn bounds_targets(
     value: &Bound<'_, PyAny>,
 ) -> PyResult<
@@ -2710,6 +2746,92 @@ impl PyCameraAnimation {
             .camera_dolly(factor, 1.0);
         Ok(PyCanvasAnim { inner })
     }
+
+    /// Move the camera along a drawable's path.
+    #[pyo3(signature = (route, *, orient=false, rotate_offset=0.0, start=0.0, end=1.0))]
+    fn follow_path(
+        &self,
+        route: &PyDrawable,
+        orient: bool,
+        rotate_offset: f64,
+        start: f64,
+        end: f64,
+    ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let follow = gaanim_api::anim::PathFollowOptions {
+            orient: orient.then_some(rotate_offset),
+            start,
+            end,
+        };
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_follow_path(&route.0, follow, 1.0)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// A fast pan to a point or drawable, eased hard at both ends.
+    #[pyo3(signature = (to, y=None, *, blur=true))]
+    fn whip_pan(&self, to: Bound<'_, PyAny>, y: Option<f64>, blur: bool) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let endpoint = if let Some(y) = y {
+            let x = to.extract::<f64>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(
+                    "the two-coordinate overload requires numeric x and y",
+                )
+            })?;
+            gaanim_api::canvas::CanvasEndpoint::Static(gaanim_core::glam::DVec3::new(
+                require_finite(x, "x")?,
+                require_finite(y, "y")?,
+                0.0,
+            ))
+        } else {
+            resolve_endpoint(&to)?
+        };
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_whip_pan(endpoint, blur, 0.4);
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Animate the depth of field of parallax layers.
+    #[pyo3(signature = (focus=None, *, aperture=None, max_blur=None))]
+    fn depth_of_field(
+        &self,
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+    ) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_depth_of_field(focus, aperture, max_blur, 1.0)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyCanvasAnim { inner })
+    }
+
+    /// Rack focus: move the depth of field's focus to `focus`.
+    fn focus_to(&self, focus: f64) -> PyResult<PyCanvasAnim> {
+        self.depth_of_field(Some(focus), None, None)
+    }
+
+    /// A dolly zoom (vertigo shot) of a perspective camera.
+    fn dolly_zoom(&self, factor: f64) -> PyResult<PyCanvasAnim> {
+        crate::custom::ensure_authoring_allowed()?;
+        let inner = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_dolly_zoom(factor, 1.0)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(PyCanvasAnim { inner })
+    }
 }
 
 #[pymethods]
@@ -2752,6 +2874,23 @@ impl PyCamera {
             inner: self.inner.clone(),
         }
         .pan_to(target, y)?;
+        self.commit_immediate(animation)?;
+        Ok(self.clone())
+    }
+
+    /// Set the depth of field of parallax layers at the cursor.
+    #[pyo3(signature = (focus=None, *, aperture=None, max_blur=None))]
+    fn depth_of_field(
+        &self,
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let animation = PyCameraAnimation {
+            inner: self.inner.clone(),
+        }
+        .depth_of_field(focus, aperture, max_blur)?;
         self.commit_immediate(animation)?;
         Ok(self.clone())
     }
@@ -3964,6 +4103,26 @@ impl PyGeometry {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
+    #[pyo3(signature = (view="isometric", *, azimuth=None, elevation=None, origin=(0.0, 0.0), scale=1.0))]
+    fn axonometric(
+        &self,
+        view: &str,
+        azimuth: Option<f64>,
+        elevation: Option<f64>,
+        origin: (f64, f64),
+        scale: f64,
+    ) -> PyResult<crate::pyaxonometric::PyAxonometric> {
+        crate::custom::ensure_authoring_allowed()?;
+        let view = crate::pyaxonometric::axonometric_view(view, azimuth, elevation, origin, scale)?;
+        Ok(crate::pyaxonometric::PyAxonometric {
+            inner: self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .axonometric(view),
+        })
+    }
+
     fn polygon(&self, points: Vec<(f64, f64)>) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         if points.len() < 3 || points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
@@ -4475,13 +4634,13 @@ impl PyGeometry {
             .iter()
             .map(|(x, y)| Some((constant(x)?, constant(y)?)))
             .collect();
-        if let (Some(fixed), false) = (&fixed, closed) {
-            return Ok(PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .polyline(fixed),
-            ));
+        if let Some(fixed) = &fixed {
+            let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+            return Ok(PyDrawable(if closed {
+                canvas.closed_polyline(fixed)
+            } else {
+                canvas.polyline(fixed)
+            }));
         }
         // Signals in the coordinates make a polyline redrawn every frame.
         let mut sources = Vec::with_capacity(points.len());
@@ -4665,6 +4824,75 @@ impl PyTypography {
         )
     }
 
+    /// Create a Text whose glyphs follow the path of a drawable.
+    #[pyo3(signature = (content, path, *, align="start", orient=true, reverse=false, offset=0.0, role=None, style=None, font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, markup=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn on_path<'py>(
+        &self,
+        py: Python<'py>,
+        content: &Bound<'py, PyAny>,
+        path: &PyDrawable,
+        align: &str,
+        orient: bool,
+        reverse: bool,
+        offset: f64,
+        role: Option<&str>,
+        style: Option<PyTextStyle>,
+        font: Option<String>,
+        size: Option<f64>,
+        weight: Option<u16>,
+        italic: Option<bool>,
+        color: Option<PyColor>,
+        opacity: Option<f32>,
+        letter_spacing: Option<f64>,
+        word_spacing: Option<f64>,
+        markup: Option<bool>,
+    ) -> PyResult<Py<PyText>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let align = gaanim_api::canvas::TextPathAlign::parse(align).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "align must be {}",
+                gaanim_api::canvas::TextPathAlign::NAMES
+            ))
+        })?;
+        let markup = markup.unwrap_or_else(|| self.default_markup());
+        let mut spec = build_text_spec(
+            &PyTuple::new(py, [content])?,
+            false,
+            role,
+            style,
+            None,
+            font,
+            None,
+            size,
+            weight,
+            italic,
+            color,
+            opacity,
+            letter_spacing,
+            word_spacing,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            markup,
+        )?;
+        // One line laid along the path: wrapping would stack glyphs on it.
+        spec.flow.wrap = gaanim_text::prelude::TextWrap::NoWrap;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .text_on_path(spec.clone(), &path.0, align, orient, reverse, offset)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Py::new(py, PyText::initializer(handle, spec))
+    }
+
     #[pyo3(signature = (*content, role=None, style=None, flow=None, font=None, math_font=None, size=None, weight=None, italic=None, color=None, opacity=None, letter_spacing=None, word_spacing=None, baseline=None, wrap=None, text_align=None, line_spacing=None, max_lines=None, overflow=None, direction=None, hyphenate=None))]
     #[allow(clippy::too_many_arguments)]
     fn equation<'py>(
@@ -4766,6 +4994,36 @@ impl PyVisualization {
 
 #[pymethods]
 impl PyGeometry {
+    /// Extrude the outline a 2D drawable fills into a 3D mesh.
+    #[pyo3(signature = (source, depth=0.2, *, bevel=0.0, material=None, tolerance=0.01, keep_source=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn extrude<'py>(
+        &self,
+        py: Python<'py>,
+        source: &PyDrawable,
+        depth: f64,
+        bevel: f64,
+        material: Option<PyMaterial3D>,
+        tolerance: f64,
+        keep_source: bool,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .extrude(
+                &source.0,
+                depth,
+                bevel,
+                tolerance,
+                material.map(|value| value.0),
+                keep_source,
+            )
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
     #[pyo3(signature = (size=2.0, *, material=None))]
     fn cube<'py>(
         &self,
@@ -6443,6 +6701,37 @@ impl PyScene {
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
+    /// Create an empty 2.5D parallax layer at `depth`.
+    fn layer(&self, py: Python<'_>, depth: f64) -> PyResult<Py<PyParallaxLayer>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let layer = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .parallax_layer(depth)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Py::new(
+            py,
+            PyClassInitializer::from(PyDrawable(layer.clone())).add_subclass(PyParallaxLayer {
+                layer,
+                depth,
+                scene: self.inner.clone(),
+            }),
+        )
+    }
+
+    /// Name the draw layers, from the back to the front.
+    #[pyo3(signature = (*names, default=None))]
+    fn z_layers(&self, names: Vec<String>, default: Option<String>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .z_layers(&names, default.as_deref())
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     /// Keep one or more drawables available across future segments.
     #[pyo3(signature = (object, *others))]
     fn persist(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {
@@ -7095,13 +7384,7 @@ impl PyScene {
         crate::custom::ensure_authoring_allowed()?;
         // Every value a callback reads is final now; see `callback_recipe`.
         crate::callback_recipe::resolve_pending(py)?;
-        if self
-            .inner
-            .lock()
-            .expect("scene canvas poisoned")
-            .clone()
-            .render()
-        {
+        if self.inner.lock().expect("scene canvas poisoned").render() {
             Ok(())
         } else {
             Err(pyo3::exceptions::PyRuntimeError::new_err(

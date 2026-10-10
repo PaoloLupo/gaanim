@@ -292,6 +292,16 @@ impl Package {
     }
 }
 
+/// Forget the packages read from the files `changed`.
+pub(super) fn forget(changed: &super::ChangedFiles) {
+    if let Some(cache) = PACKAGES.get() {
+        cache
+            .lock()
+            .expect("package cache poisoned")
+            .retain(|path, _| !changed.contains(path));
+    }
+}
+
 pub(super) fn clear_cache() {
     if let Some(cache) = PACKAGES.get() {
         cache.lock().expect("package cache poisoned").clear();

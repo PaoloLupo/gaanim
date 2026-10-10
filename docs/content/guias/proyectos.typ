@@ -99,8 +99,14 @@ La vista previa vuelve a ejecutar la escena cada vez que guardas.
 
 Los segmentos anteriores al primero que cambió conservan su escena compilada
 y solo se recompila desde ahí. El aviso de recarga lo indica, por ejemplo
-`replay 0.12s (reused 37/40 segments)`. La primera edición en una zona nueva
-recompila todo una vez; las siguientes en esa zona ya son incrementales.
+`replay 0.12s (reused 37/40 segments)`, y `seek` dice cuánto tardó en volver
+a la posición donde estabas. La primera edición en una zona nueva recompila
+todo una vez; las siguientes en esa zona ya son incrementales.
+
+Si nada de lo que se compila cambió, por ejemplo al guardar sin cambios o al
+editar solo un comentario, la escena se conserva tal cual y el aviso dice
+`(unchanged, 40 segments)`. Volver a la posición de trabajo cuesta entonces
+lo mismo que un salto cualquiera.
 
 Se recompila todo cuando:
 
@@ -115,14 +121,20 @@ El resultado siempre es idéntico al de una recarga completa. Para forzar esta
 
 == Recursos
 
-Guardar cualquier archivo que no sea Python dentro del proyecto (imágenes,
-SVG, Lottie, WGSL, fuentes, documentos Typst, datos) vacía las cachés de
-recursos, vuelve a ejecutar el script y recompila todos los segmentos.
+Guardar un archivo que no sea Python dentro del proyecto (imágenes, SVG,
+Lottie, WGSL, fuentes, documentos Typst, datos) vuelve a ejecutar el script
+leyendo de nuevo ese archivo, no el resto: las cachés olvidan solo lo que
+guardaban de él. La recarga sigue siendo incremental y recompila desde el
+primer segmento que lo usa; si la escena no lo lee, queda igual
+(`unchanged`).
 
 Se ignoran los archivos y carpetas ocultos (`.git`, `.venv`, archivos de
 intercambio del editor), `venv`, `env`, `__pycache__`, `exports`,
 `snapshots`, `target`, los temporales (`~`, `.swp`, `.tmp`, `.bak`) y los
-`.lock`.
+`.lock`. Un guardado cuenta por el archivo que guarda: las herramientas que
+escriben un temporal y lo renombran sobre el archivo (como `main.py.tmp.*`
+o el `sedXXXXXX` de `sed -i`) y la carpeta, que Windows también da por
+cambiada, no cuentan como cambios.
 
 == Módulos de Python del proyecto
 
@@ -192,6 +204,25 @@ muestra el porcentaje (pasa el cursor para ver fotogramas y tiempo restante) y
 una X para cancelar. La terminal desde la que abriste `gaanim` muestra la misma
 barra de progreso que `gaanim export` y el resultado. Al terminar aparece un
 aviso en la esquina con el archivo y un botón para abrirlo.
+
+En *Archivo* escribes solo el nombre: la extensión la pone el formato. Al
+principio es el del proyecto (su carpeta, si el script es `main.py`, o el
+nombre del script), en la carpeta `output_dir` de `gaanim.toml`. *Cambiar…*
+elige otra carpeta con el selector del sistema; pasa el cursor por ella para
+ver la ruta completa. Si ya existe un archivo con ese nombre, el diálogo avisa
+de que lo reemplazará y ofrece el siguiente nombre libre (`intro-2`,
+`intro-3`…). Sin nombre no se puede exportar.
+
+El formato *PNG* exporta un PNG por fotograma (`frame_00000.png`,
+`frame_00001.png`…) para editar o componer en otro programa. Los fotogramas
+van a una carpeta con el nombre que escribas, y el aviso final abre esa
+carpeta.
+
+Para guardar solo el fotograma que estás viendo, pulsa `Ctrl+Mayús+S`
+(`Cmd+Mayús+S` en macOS) o el botón de captura de la barra de overlays. Se
+renderiza aparte, sin overlays ni paneles, a 1920 píxeles en el lado largo, y
+se guarda en `<output_dir>/captures/` con el nombre del script y el instante
+(`main_2.35s.png`); nunca reemplaza una captura anterior.
 
 = Convertir un script suelto en proyecto
 

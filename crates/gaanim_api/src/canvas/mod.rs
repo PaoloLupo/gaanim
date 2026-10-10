@@ -39,6 +39,8 @@ pub use types::{
 pub type ImageHandle = DrawableHandle;
 
 mod audio_signals;
+mod authored;
+mod inspection;
 pub use audio_signals::{AUDIO_SHADER_FUNCTIONS, AUDIO_TIME_UNIFORM, SpectrumScale};
 pub use gaanim_media::analysis::AnalysisError as AudioAnalysisError;
 pub use gaanim_media::analysis::{AudioAnalysis, TempoEstimate};
@@ -95,7 +97,6 @@ pub use visualization::{
 mod canvas_impl;
 mod narration;
 pub use crate::export::{AudioTrack, AudioTrackError};
-pub use canvas_impl::clear_asset_caches;
 pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
@@ -106,6 +107,7 @@ pub use canvas_impl::{
     TypstAssetError, VideoClip, VideoLoadError, VideoSegment, stagger_weights,
 };
 pub use canvas_impl::{InsertPosition, ScheduleLabel};
+pub use canvas_impl::{clear_asset_caches, forget_assets};
 pub use gaanim_media::narration::{MarkerSource, ScriptSection, TakeFiles};
 pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,
@@ -133,19 +135,32 @@ pub use gaanim_objects::prelude::SvgLoadError;
 pub use theme::{
     CanvasTheme, LayoutTokens, ThemeFont, ThemePaint, ThemePalette, ThemeStrokeStyle, ThemeStyle,
 };
+mod axonometric;
 mod compile;
+mod coverage;
+pub use axonometric::{Axonometric, AxonometricView};
 pub(crate) use compile::{
-    CompileCheckpoint, SegmentMarker, split_text_math, text_inline_typst_source,
+    CompileCheckpoint, Compiled, SegmentMarker, split_text_math, take_segment_times,
+    text_inline_typst_source, time_segments,
 };
 mod incremental;
 mod measure;
 pub use measure::{BoundsError, ScatterLayoutError, avoid_boxes, scatter};
+mod profile;
+pub use profile::{
+    reload_profile_enabled, set_call_site_provider, track_script_lines, tracks_script_lines,
+};
 mod text_motion;
 pub(crate) use incremental::SceneFingerprints;
+pub(crate) use inspection::deferred_index;
+mod extrude;
 pub mod text_animator;
+pub mod text_path;
+pub use extrude::ExtrusionSpec;
 pub use text_animator::{
     SelectorShape, TextAnimator, TextAnimatorError, TextAnimatorOut, TextRevealStyle,
 };
+pub use text_path::{TextPathAlign, TextPathSpec};
 
 /// dotLottie selectors and typed inputs.
 pub use gaanim_renderer::lottie::{LottieInput, LottiePackageOptions};

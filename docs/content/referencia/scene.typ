@@ -739,6 +739,25 @@ sin alterar su estado visual. Un objeto de otra escena lanza `ValueError`.
 )
 
 #api-entry(
+  name: "Scene.z_layers",
+  kind: "method",
+  params: (
+    (name: "names", type: "str", default: none, desc: [Nombres de las capas, de atrás hacia adelante.]),
+    (name: "default", type: "str | None", default: "None", desc: [Capa de los objetos sin `z_layer`; sin él, la primera.]),
+  ),
+  returns: (type: "None"),
+  desc: [Nombra las capas de dibujo de la escena. Todo objeto de una capa (`Drawable.z_layer`) se dibuja encima de todos los de las capas de detrás, sea cual sea su `z_index`, que solo ordena dentro de cada capa. Sirve para que lo que va encima (ventanas, lupas, etiquetas, un cursor) no dependa de un `z_index` mayor que cualquiera del resto del diagrama. Una escena nombra sus capas una vez; repetir las mismas no hace nada. Sin nombres, con un nombre vacío o repetido, con un `default` que no está entre ellos o con capas distintas a las ya nombradas lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.z_layers("fondo", "contenido", "overlay", default="contenido")
+rejilla = scene.geometry.rect(14, 8).fill(GRAY).z_layer("fondo")
+cursor = scene.geometry.dot(0.1).fill(GOLD).z_layer("overlay")
+```
+]
+
+#api-entry(
   name: "Scene.persist",
   kind: "method",
   params: (
@@ -1394,6 +1413,45 @@ scene.play([scene.camera.animate.shake(trauma=0.4, seed=3)])  # un golpe más le
 ]
 
 #api-entry(
+  name: "CameraAnimation.follow_path",
+  kind: "method",
+  params: (
+    (name: "route", type: "Drawable", desc: [Drawable cuya trayectoria recorre la cámara.]),
+    (name: "orient", type: "bool", default: "False", desc: [Gira la vista para que el sentido de avance apunte a la derecha de la pantalla.]),
+    (name: "rotate_offset", type: "float", default: "0.0", desc: [Giro extra en radianes; `-math.pi / 2` apunta el avance hacia arriba.]),
+    (name: "start / end", type: "float", default: "0.0 / 1.0", desc: [Tramo recorrido, como fracciones de longitud de arco; `start > end` lo recorre al revés.]),
+  ),
+  returns: (type: "Anim", desc: [Recorrido de la cámara.]),
+  desc: [Lee la trayectoria en coordenadas de escena cuando se reproduce la animación, como `Anim.move_along`. El giro de `orient` se calcula en cada fotograma, así que nunca salta. Easing predeterminado: suave. Una ruta de otra escena, `start` o `end` fuera de `[0, 1]` o iguales, o un `rotate_offset` no finito lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+route = scene.geometry.path([(-6, -2), (-2, 2), (2, -2), (6, 2)])
+scene.play([scene.camera.animate.follow_path(route, orient=True).duration(4)])
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.whip_pan",
+  kind: "method",
+  params: (
+    (name: "to / y", type: "Endpoint | float", desc: [Destino, como en `pan_to`.]),
+    (name: "blur", type: "bool", default: "True", desc: [Desenfoque de movimiento en los fotogramas del barrido.]),
+  ),
+  returns: (type: "Anim", desc: [Barrido rápido.]),
+  desc: [Paneo rápido de 0.4 s salvo `.duration`, con easing exponencial de entrada y salida: casi todo el recorrido ocurre en un instante a mitad de camino. Con `blur`, los fotogramas exportados y los snapshots del barrido reciben un desenfoque de movimiento de 360° y 24 subfotogramas aunque la escena no tenga uno propio; la vista previa sigue nítida, como con `canvas.motion_blur`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+section_b = scene.text("B", role="title").move_to(16, 0)
+scene.play([scene.camera.animate.whip_pan(section_b)])
+scene.play([scene.camera.animate.whip_pan(0, 0, blur=False).duration(0.3)])
+```
+]
+
+#api-entry(
   name: "CameraAnimation.orthographic",
   kind: "method",
   params: ((name: "zoom", type: "float", default: "1.0", desc: [Zoom positivo.]),),
@@ -1411,6 +1469,127 @@ scene.play([scene.camera.animate.shake(trauma=0.4, seed=3)])  # un golpe más le
 >>>scene = Scene(frame=(16, 9))
 scene.play([scene.camera.animate.zoom_to(2.0).duration(0.5)])
 scene.play([scene.camera.animate.reset().duration(0.5)])
+```
+]
+
+=== Capas de parallax <parallax>
+
+Una capa de parallax agrupa drawables que están más lejos o más cerca de la
+cámara que el plano de la escena. Con la cámara ortográfica, sus miembros se
+desplazan `1 / depth` del paneo de cámara: el fondo lejano se mueve despacio y
+el primer plano pasa rápido, sin 3D real. No confundir con `Scene.z_layers`
+(orden de dibujo con nombre), `Drawable.view_layer` (filtro de vistas de
+cámara) ni con `.layer(nombre)` de gráficos y ejes (una parte del objeto).
+
+#api-entry(
+  name: "Scene.layer",
+  kind: "method",
+  params: (
+    (name: "depth", type: "float", desc: [Distancia a la cámara en unidades de la distancia del plano de la escena; positiva, `math.inf` permitido.]),
+  ),
+  returns: (type: "ParallaxLayer", desc: [Capa vacía; es un `Drawable` cuyos miembros se añaden con `add`.]),
+  desc: [La capa ve una cámara centrada en `posición / depth` y con zoom `zoom ** (1 / depth)`; la rotación afecta a todas por igual. `depth=1` se comporta como el resto de la escena, `depth=3` se mueve a un tercio de la velocidad de la cámara, `depth=0.6` pasa más rápido y `math.inf` no se desplaza ni hace zoom, como `Drawable.hud` salvo por la rotación. Sacudida, seguimiento y bindings también mueven las capas; un miembro convertido en HUD con `Drawable.hud` sigue fijo en pantalla. Las capas lejanas se dibujan detrás de las cercanas: su `z_index` por defecto es `round(-100 * ln(depth))`, limitado a ±900, y cada miembro suma el suyo. Con cámara en perspectiva las capas no se mueven, porque la profundidad real ya produce parallax. Una profundidad no positiva lanza `ValueError`.],
+)[
+```python
+# output: parallax.webp
+# show-code: true
+import math
+from gaanim import *
+
+scene = Scene(frame=(16, 9), background="#1d2b53")
+sky = scene.layer(depth=math.inf).add(scene.geometry.circle(0.9).fill(GOLD).move_to(4.5, 2.6))
+far = scene.layer(depth=3.0)
+for i in range(6):
+    far.add(scene.geometry.polygon([(-2.4, 0), (0, 2.6), (2.4, 0)]).fill("#3b4a7a").move_to(-8 + i * 4.2, -1.4))
+for i in range(8):
+    scene.geometry.rect(0.5, 1.2).fill("#8a5a3b").move_to(-6 + i * 3, -2.0)
+near = scene.layer(depth=0.6)
+for i in range(5):
+    near.add(scene.geometry.circle(0.9).fill("#1f4d33").move_to(-7 + i * 5, -3.3))
+scene.play([scene.camera.animate.pan_to(6, 0).duration(3)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "ParallaxLayer.add",
+  kind: "method",
+  params: (
+    (name: "drawable", type: "Drawable", desc: [Primer drawable que entra en la capa.]),
+    (name: "*others", type: "Drawable", desc: [Más drawables.]),
+  ),
+  returns: (type: "Self", desc: [La misma capa, para encadenar.]),
+  desc: [Mueve los drawables a la capa conservando su posición actual; añadirlo a otra capa lo mueve allí. Mover, desvanecer o animar la capa actúa sobre todos sus miembros. Un drawable de otra escena, la propia capa u otra capa lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+far = scene.layer(depth=3.0)
+far.add(scene.geometry.circle(1.0).move_to(4, 2), scene.geometry.square(1.0).move_to(-4, 2))
+print(far.depth)  # 3.0
+```
+]
+
+=== Profundidad de campo <profundidad-campo>
+
+Las capas de parallax pueden desenfocarse según su distancia al foco, como
+con una lente real: cada capa se desenfoca `aperture * |1 - focus / depth|`
+unidades de escena, como máximo `max_blur`. Las capas a la profundidad
+`focus` quedan nítidas y el desenfoque crece al alejarse de ella hacia
+delante o hacia atrás; una capa en `math.inf` se desenfoca `aperture`. Los
+drawables fuera de capas, y los HUD dentro de ellas, nunca se desenfocan. Cada capa se desenfoca como una
+sola imagen, con un efecto de shader en su raíz que reemplaza cualquier
+`shader_effect` puesto en la propia capa; una capa desenfocada se dibuja fuera
+de pantalla y cuesta más.
+
+#api-entry(
+  name: "Camera.depth_of_field",
+  kind: "method",
+  params: (
+    (name: "focus", type: "float | None", default: "None", desc: [Profundidad nítida, finita y positiva; `1` es el plano de la escena.]),
+    (name: "aperture", type: "float | None", default: "None", desc: [Escala del desenfoque, en unidades de escena; `0` lo apaga.]),
+    (name: "max_blur", type: "float | None", default: "None", desc: [Desenfoque máximo, en unidades de escena.]),
+  ),
+  returns: (type: "Camera", desc: [La cámara.]),
+  desc: [Fija la profundidad de campo en el cursor. Los valores omitidos se conservan; al principio el foco es 1, la apertura 0 (sin desenfoque) y `max_blur` 0.5. Un foco no finito o no positivo, o una `aperture` o `max_blur` negativos o no finitos lanzan `ValueError`.],
+)[
+```python
+# output: depth_of_field.webp
+# show-code: true
+import math
+from gaanim import *
+
+scene = Scene(frame=(16, 9), background="#1d2b53")
+far = scene.layer(depth=3.0)
+for i in range(5):
+    far.add(scene.geometry.polygon([(-2.4, 0), (0, 2.6), (2.4, 0)]).fill("#3b4a7a").move_to(-8 + i * 4.2, -1.2))
+for i in range(6):
+    scene.geometry.rect(0.5, 1.2).fill("#8a5a3b").move_to(-6.5 + i * 2.6, -2.0)
+near = scene.layer(depth=0.5)
+for i in range(4):
+    near.add(scene.geometry.circle(0.9).fill("#1f4d33").move_to(-6 + i * 4.4, -3.4))
+scene.camera.depth_of_field(focus=1.0, aperture=0.12)
+scene.wait(0.5)
+scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+scene.render()
+```
+]
+
+#api-entry(
+  name: "CameraAnimation.depth_of_field / focus_to",
+  kind: "method",
+  params: (
+    (name: "focus", type: "float", desc: [Nueva profundidad nítida.]),
+  ),
+  returns: (type: "Anim", desc: [Cambio animado de la profundidad de campo.]),
+  desc: [`depth_of_field` anima los mismos valores que `Camera.depth_of_field`; `focus_to(focus)` es el cambio de foco (rack focus). El foco se mueve en profundidad inversa, así que pasa de forma pareja por capas cercanas y lejanas; la apertura y `max_blur` cambian linealmente. Easing predeterminado: suave.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.depth_of_field(focus=0.6, aperture=0.12)
+scene.play([scene.camera.animate.focus_to(3.0).duration(1.5)])
+scene.play([scene.camera.animate.depth_of_field(aperture=0.0).duration(0.5)])
 ```
 ]
 
@@ -1756,6 +1935,22 @@ scene.play([scene.camera.animate.dolly(factor=0.85).duration(0.6)])
 ```
 ]
 
+#api-entry(
+  name: "CameraAnimation.dolly_zoom",
+  kind: "method",
+  params: ((name: "factor", type: "float", default: none, desc: [Multiplicador positivo de la distancia al objetivo.]),),
+  returns: (type: "Anim", desc: [Efecto vértigo.]),
+  desc: [La cámara avanza o retrocede por su línea de visión hasta `factor` veces su distancia al objetivo de `look_at` mientras el campo de visión cambia para que el plano del objetivo conserve su tamaño en pantalla: el fondo se estira (`factor` mayor que 1) o se precipita. La distancia cambia exponencialmente. Solo el contenido 3D lo muestra, porque la capa 2D no se mueve con una cámara en perspectiva. Sin `perspective` o con la cámara sobre su objetivo avisa y no hace nada. Un `factor` no finito o no positivo lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.camera.perspective(fov_y=0.6)
+scene.camera.look_at(eye=(0, 1, 8), target=(0, 0, 0))
+scene.play([scene.camera.animate.dolly_zoom(1.8).duration(2.0)])
+```
+]
+
 === Cámara de inspección del editor
 
 El editor tiene una cámara de inspección separada de `scene.camera`, que
@@ -1805,13 +2000,74 @@ capturas ni en la exportación. `O` o `Esc` la ocultan.
   márgenes (naranja) y los gaps entre ellos (morado), con una etiqueta de su
   tipo, tamaño, padding y gap en px de diseño. Sigue la caja en cada momento
   de la línea de tiempo, también mientras se reorganiza.
-- El objeto seleccionado se enmarca con su centro y su tamaño en unidades.
+- El objeto seleccionado se enmarca con su centro y su tamaño en unidades, y
+  el *Inspector* muestra sus propiedades (ver más abajo).
 - Con la inspección activa, la barra muestra el zoom de la vista (o *3D libre*)
   en azul cuando ya no coincide con la cámara de la escena, y un botón para
-  restablecerla (`R`). El icono de teclado lista todos los atajos.
+  restablecerla (`R`). El botón de captura guarda el fotograma actual como
+  PNG, sin overlays (`Ctrl+Mayús+S`). El icono de teclado lista todos los
+  atajos.
 
 El editor recuerda qué overlays dejaste activados entre sesiones; el modo en
 sí siempre empieza oculto.
+
+=== Inspector, consola y animaciones
+
+Con los overlays visibles, un clic en la vista previa selecciona un objeto y el
+*Inspector* (botón de la barra) muestra:
+
+- su tipo con el vocabulario del script (`circle`, `rounded_rect`, `text`…) y
+  el nombre que le diste con `named`;
+- la línea del script que lo creó, con *Abrir* para ir a ella en tu editor de
+  código y *Copiar* para llevarte `archivo:línea`. Si lo creó una función tuya,
+  debajo aparecen las líneas que la llamaron (*llamado desde main.py · línea
+  11*), cada una también se abre con un clic;
+- su posición, rotación (en radianes, como `rotate_to`, y en grados), escala,
+  tamaño y centro en unidades de la escena; su relleno y su trazo con el color
+  en hexadecimal, y su opacidad;
+- su `z_index`, su capa, su profundidad de parallax o si es HUD, si es visible,
+  el texto que dibuja y cuántos hijos tiene.
+
+Sin nada seleccionado, el inspector muestra la cámara de la escena: su
+posición, rotación, zoom (o campo de visión, recorte y objetivo en
+perspectiva), el encuadre y, si está activa, la profundidad de campo. Los
+valores son los del instante de la línea de tiempo, así que cambian al
+reproducir o recorrer la escena. Un clic sobre una letra selecciona el texto
+entero y, a igual `z_index`, gana la caja más pequeña bajo el cursor: la
+etiqueta sobre su tarjeta, el miembro dentro de su grupo. *Dentro de…* sube al
+grupo que lo contiene. Las líneas siguen siendo correctas tras cada recarga,
+aunque la recarga reutilice segmentos ya compilados.
+
+La *Consola* (`J`, o el botón de la barra) reúne lo que antes solo llegaba a la
+terminal: los avisos de Gaanim y de Python (`warnings.warn`), lo que escribe
+`print`, los errores del script con su traceback y las líneas de estado de
+cada recarga. Cada mensaje ocupa una fila y enlaza con la línea del script que
+lo produjo; un clic en la fila muestra debajo el mensaje completo y, si lo
+tiene, su traceback. Filtra por errores, avisos y mensajes, busca por texto o archivo,
+copia lo listado como en la terminal y limpia la lista. Por defecto muestra
+solo la última ejecución del script; *Historial* conserva las anteriores.
+Mientras está oculta, una insignia arriba a la izquierda cuenta los errores y
+avisos de la última ejecución y la abre con un clic.
+
+*Animaciones* (`T`, o el botón de la barra) abre sobre la barra de
+reproducción una línea de tiempo de la escena: una fila por objeto animado,
+más la de la cámara, y un bloque por cada `play` que lo anima, coloreado por
+tipo (movimiento, transformación, aparición, estilo, trazo o cámara). Las
+animaciones de las letras de un texto aparecen en la fila del texto. Muestra
+el segmento bajo el cabezal; *Escena completa* muestra toda la escena, y la
+búsqueda filtra por objeto o por animación. Un clic o un arrastre en la regla
+mueve el cabezal. Un clic en un bloque pausa, lleva el cabezal a su inicio y
+selecciona el objeto para verlo en el inspector; un doble clic abre la línea
+del `play`. Al pasar el cursor, el bloque muestra su duración, su curva, la
+línea del `play` y las líneas desde las que se llamó. Un clic en el nombre de la fila
+selecciona el objeto y un doble clic abre la línea que lo creó. Mientras está
+oculto, el panel no cuesta nada por fotograma.
+
+*Abrir* usa el comando de `GAANIM_EDITOR` (por ejemplo
+`code --goto {file}:{line}`); sin ella, el primero que encuentre en el `PATH`
+entre VS Code (`code`), Cursor, VSCodium, Zed y Sublime Text, y si no hay
+ninguno abre el archivo con la aplicación predeterminada, que no salta a la
+línea. El panel de error del script también ofrece *Abrir en el editor*.
 
 == Recorte y máscaras
 

@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_thumbnail_handler"
-version = "0.10.1"
+version = "0.10.2"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "Windows Explorer thumbnail handler that shows the cover image of .gaanim files"

@@ -141,6 +141,12 @@ termina con `pass` o `fail`:
   `set_theme(None)`), que el fondo no sea blanco o casi blanco, porque el
   texto, las formas y los ejes sin color propio también son blancos y no se
   verían.
+- Que ningún texto quede tapado por completo por una figura opaca dibujada
+  encima en una pausa o al final de un segmento. El aviso dice el texto, la
+  figura y dónde se tapa por primera vez; súbelo con `z_layer` o `z_index`.
+  Un texto oculto a propósito (con opacidad 0) o detrás de una figura
+  translúcida, de una imagen o de una figura marcada con
+  `covers_on_purpose()` no cuenta.
 - Si la escena usa segmentos (una presentación): que exista al menos un
   segmento, que ninguno dure cero segundos, que cada uno tenga notas y que
   las pausas tengan nombre; avisa si el marco no es 16:9 o si la escena dura
@@ -362,7 +368,9 @@ gaanim --diff --example mi-charla --capture-stops --stops 3-7 --capture-only
   inset: 7pt,
   [*Variable*], [*Efecto*],
   [`GAANIM_SNAPSHOTS`], [La define `gaanim --diff` con la carpeta donde `scene.snapshots` debe capturar. No la definas a mano.],
+  [`GAANIM_EDITOR`], [Comando con el que el inspector, la consola, las animaciones y el panel de error abren una línea del script, con `{file}` y `{line}` donde van la ruta y el número de línea: `code --goto {file}:{line}`, `zed {file}:{line}`, `idea --line {line} {file}`. Las comillas agrupan palabras con espacios. Sin `{file}`, la ruta se añade al final. Sin la variable, Gaanim prueba `code`, `cursor`, `codium`, `zed` y `subl` en el `PATH`, y si no encuentra ninguno abre el archivo con la aplicación predeterminada.],
   [`GAANIM_INCREMENTAL=0`], [Desactiva la recompilación incremental del hot reload: cada guardado recompila la escena entera.],
+  [`GAANIM_RELOAD_PROFILE=1`], [Escribe en la terminal qué costó cada recarga: el tiempo del script y de sus segmentos más lentos, las mediciones con `bounds()` (cuántas se compilaron aparte, cuántas compilaron la escena y en qué línea del script, cuántas reanudaron una compilación anterior, cuántas la reutilizaron), las fases del replay (las huellas que deciden qué segmentos se reutilizan, la limpieza o la restauración de la escena anterior, la compilación), los segmentos que más tardaron en compilarse y la captura del fotograma de t=0. Al abrir un script, también cuánto tardó cada fase del arranque: el entorno de Python, el intérprete, la preparación de la app y de la GPU, el primer fotograma y la primera escena lista.],
   [`GAANIM_PREVIEW_RESOLUTION`], [Resolución de la previsualización del editor. Con `auto` (por defecto), si al reproducir no llega a 60 fps porque dibujar cuesta demasiado, baja al 75 % y luego al 50 % de los píxeles, y vuelve a la resolución completa al pausar. `full` la mantiene siempre completa; una fracción como `0.5` la fija. Nunca afecta a las exportaciones.],
   [`GAANIM_FRAME_PROFILE=1`], [Reproduce la línea de tiempo entera sin detenerse en las pausas y escribe en la terminal, una vez por segundo, el coste del seek, de la composición y del render, la resolución de la previsualización, el tamaño de la escena de Vello (caminos, segmentos y recortes, el mayor del segundo; un número alto de recortes suele venir de sombras o máscaras por glifo) y cuántos objetos están visibles. Al terminar lista los segundos más lentos y cierra el editor.],
   [`GAANIM_SEGMENT_CHECKPOINTS=0`], [Desactiva los puntos de control por segmento. Por defecto, al reproducir o recorrer un segmento, Gaanim guarda el estado de la escena en su inicio y cada fotograma parte de ahí, así que el coste de un fotograma no crece a lo largo de la presentación. Con `0`, cada fotograma se reconstruye desde el principio de la escena. El resultado es idéntico en ambos casos.],

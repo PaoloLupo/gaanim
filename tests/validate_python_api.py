@@ -196,6 +196,11 @@ def validate_runtime_type_aliases(module: object) -> list[str]:
             failures.append(f"gaanim.{name} is not exported at runtime")
     if typing.get_args(getattr(package, "NavigationState", None)) != ("done", "current", "upcoming"):
         failures.append("gaanim.NavigationState does not list done, current and upcoming")
+    axonometric = getattr(package, "Axonometric", None)
+    if axonometric is not module.Axonometric or "Axonometric" not in package.__all__:
+        failures.append("gaanim.Axonometric is not exported at runtime")
+    elif not isinstance(scene.geometry.axonometric("isometric"), axonometric):
+        failures.append("scene.geometry.axonometric() did not return gaanim.Axonometric")
     return failures
 
 
@@ -1223,7 +1228,7 @@ def validate_camera_rig_contract(module: object) -> list[str]:
 
 
 def validate_camera_motion_contract(module: object) -> list[str]:
-    """Exercise trauma shake and exponential zoom (CA-01, CA-02)."""
+    """Exercise trauma shake, exponential zoom, paths, whip pans and dolly zooms (CA-01 to CA-03)."""
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
     marker = scene.geometry.dot(0.2)
@@ -1235,6 +1240,11 @@ def validate_camera_motion_contract(module: object) -> list[str]:
         camera.zoom_to(8.0, interpolation="exponential"),
         camera.zoom_to(2.0, interpolation="linear"),
         camera.frame_to(marker, 0.5, interpolation="linear"),
+        camera.follow_path(scene.geometry.circle(2.0), orient=True, rotate_offset=0.5, start=0.2, end=0.9),
+        camera.whip_pan((6.0, 0.0)),
+        camera.whip_pan(6.0, 0.0, blur=False),
+        camera.whip_pan(marker),
+        camera.dolly_zoom(1.5),
     )
     if not all(isinstance(animation, module.Anim) for animation in animations):
         failures.append("camera shake/zoom interpolation did not return Anim")
@@ -1244,6 +1254,12 @@ def validate_camera_motion_contract(module: object) -> list[str]:
         lambda: camera.shake(-0.1, 4.0),
         lambda: camera.zoom_to(2.0, interpolation="cubic"),
         lambda: camera.frame_to(marker, interpolation="log"),
+        lambda: camera.follow_path(module.Scene(frame=(16, 9)).geometry.circle(1.0)),
+        lambda: camera.follow_path(marker, start=0.5, end=0.5),
+        lambda: camera.follow_path(marker, start=-0.1),
+        lambda: camera.follow_path(marker, orient=True, rotate_offset=float("inf")),
+        lambda: camera.dolly_zoom(0.0),
+        lambda: camera.dolly_zoom(float("nan")),
     )
     for call in invalid_calls:
         try:
@@ -1252,6 +1268,180 @@ def validate_camera_motion_contract(module: object) -> list[str]:
             pass
         else:
             failures.append("camera motion accepted an invalid shake or interpolation")
+    return failures
+
+
+def validate_parallax_layer_contract(module: object) -> list[str]:
+    """Exercise parallax layers and their depth of field (CA-04, CA-05)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    far = scene.layer(depth=3.0)
+    if not isinstance(far, module.ParallaxLayer) or not isinstance(far, module.Drawable):
+        failures.append("Scene.layer did not return a ParallaxLayer drawable")
+    if far.depth != 3.0:
+        failures.append("ParallaxLayer.depth does not report its depth")
+    member = scene.geometry.dot(0.2)
+    if far.add(member, scene.geometry.dot(0.1)) is not far:
+        failures.append("ParallaxLayer.add did not chain")
+    scene.layer(depth=float("inf"))
+    if scene.camera.depth_of_field(focus=1.0, aperture=0.1, max_blur=0.4) is None:
+        failures.append("Camera.depth_of_field did not return the camera")
+    focus = scene.camera.animate.focus_to(3.0)
+    if not isinstance(focus, module.Anim) or not isinstance(
+        scene.camera.animate.depth_of_field(aperture=0.0), module.Anim
+    ):
+        failures.append("depth of field animations did not return Anim")
+    # A rack focus runs alongside a camera move: it has a channel of its own.
+    try:
+        scene.play([scene.camera.animate.pan_to(1.0, 0.0), scene.camera.animate.focus_to(2.0)])
+    except ValueError as error:
+        failures.append(f"a rack focus cannot run with a pan: {error}")
+    for call in (
+        lambda: scene.camera.depth_of_field(focus=0.0),
+        lambda: scene.camera.depth_of_field(focus=float("inf")),
+        lambda: scene.camera.depth_of_field(aperture=-0.1),
+        lambda: scene.camera.animate.focus_to(float("nan")),
+        lambda: scene.camera.animate.depth_of_field(max_blur=-1.0),
+    ):
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("depth of field accepted an invalid value")
+    other = module.Scene(frame=(16, 9))
+    invalid_calls = (
+        lambda: scene.layer(depth=0.0),
+        lambda: scene.layer(depth=-1.0),
+        lambda: scene.layer(depth=float("nan")),
+        lambda: far.add(far),
+        lambda: far.add(scene.layer(depth=2.0)),
+        lambda: far.add(other.geometry.dot(0.2)),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("parallax layers accepted an invalid depth or member")
+    return failures
+
+
+def validate_text_on_path_contract(module: object) -> list[str]:
+    """Exercise text on a path (TX-06)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    circle = scene.geometry.circle(2.0)
+    ring = scene.text.on_path("GAANIM · ", circle, align="center", reverse=True, offset=0.1)
+    if not isinstance(ring, module.Text):
+        failures.append("Typography.on_path did not return a Text")
+    if ring.path_offset(0.2) is not ring:
+        failures.append("Text.path_offset did not chain")
+    if not isinstance(ring.animate.path_offset(1.0), module.Anim):
+        failures.append("Anim.path_offset did not return an Anim")
+    plain = scene.text("plain")
+    other = module.Scene(frame=(16, 9))
+    invalid_calls = (
+        lambda: scene.text.on_path("x", circle, align="middle"),
+        lambda: scene.text.on_path("x", circle, offset=float("nan")),
+        lambda: scene.text.on_path("x", other.geometry.circle(1.0)),
+        lambda: scene.text.on_path("x", scene.geometry.group([scene.geometry.dot(0.1)])),
+        lambda: scene.text.on_path("   ", circle),
+        lambda: plain.path_offset(0.5),
+        lambda: plain.animate.path_offset(0.5),
+        lambda: ring.animate.path_offset(float("inf")),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("text on a path accepted an invalid argument or target")
+    return failures
+
+
+def validate_rough_notation_contract(module: object) -> list[str]:
+    """Exercise hand-drawn notations (AN-01)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    card = scene.geometry.rect(2.0, 1.0)
+    eq = scene.text.equation("E = ", module.part("rhs", "m c^2"))
+    annotate = card.annotate
+    if not isinstance(annotate, module.Annotations):
+        failures.append("Drawable.annotate is not an Annotations namespace")
+    marks = (
+        annotate.underline(color=module.RED, roughness=1.0, passes=2, seed=1),
+        annotate.box(padding=0.1),
+        annotate.circle(padding=(0.2, 0.3)),
+        annotate.strike_through(roughness=0.0),
+        annotate.crossed_off(passes=1),
+        annotate.bracket("right"),
+        annotate.bracket(["left", "top"], width=0.05, color=module.BLUE),
+        eq["rhs"].annotate.underline(),
+    )
+    if not all(isinstance(mark, module.Drawable) for mark in marks):
+        failures.append("an annotation did not return a Drawable")
+    if not isinstance(marks[0].animate.create(), module.Anim):
+        failures.append("an annotation cannot be drawn on with create()")
+    invalid_calls = (
+        lambda: annotate.box(roughness=-1.0),
+        lambda: annotate.box(roughness=float("nan")),
+        lambda: annotate.box(passes=0),
+        lambda: annotate.box(passes=9),
+        lambda: annotate.box(width=0.05),
+        lambda: annotate.box(color=module.RED, width=0.0),
+        lambda: annotate.box(padding=-0.1),
+        lambda: annotate.bracket("middle"),
+        lambda: annotate.bracket([]),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("annotations accepted an invalid argument")
+    return failures
+
+
+def validate_extrude_contract(module: object) -> list[str]:
+    """Exercise 3D extrusion (CA-06)."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    sources = (
+        scene.geometry.circle(1.0),
+        scene.text("HOLA"),
+        scene.geometry.group([scene.geometry.square(1.0), scene.geometry.star(5, 1.0, 0.4)]),
+    )
+    for source in sources:
+        mesh = scene.geometry.extrude(source, 0.3, bevel=0.05, material=module.Material3D.metal(module.GOLD))
+        if not isinstance(mesh, module.Primitive3D):
+            failures.append("Geometry.extrude did not return a Primitive3D")
+        if mesh.material(module.Material3D.matte(module.BLUE)) is not mesh:
+            failures.append("an extruded mesh does not take a material")
+    kept = scene.geometry.extrude(scene.geometry.square(1.0), keep_source=True, tolerance=0.02)
+    if not isinstance(kept.animate.material(module.Material3D()), module.Anim):
+        failures.append("an extruded mesh cannot animate its material")
+    other = module.Scene(frame=(16, 9))
+    square = scene.geometry.square(1.0)
+    invalid_calls = (
+        lambda: scene.geometry.extrude(square, 0.0),
+        lambda: scene.geometry.extrude(square, -1.0),
+        lambda: scene.geometry.extrude(square, 0.2, bevel=-0.01),
+        lambda: scene.geometry.extrude(square, 0.2, bevel=0.1),
+        lambda: scene.geometry.extrude(square, 0.2, tolerance=0.0),
+        lambda: scene.geometry.extrude(scene.geometry.cube(), 0.2),
+        lambda: scene.geometry.extrude(other.geometry.square(1.0), 0.2),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("Geometry.extrude accepted an invalid argument")
     return failures
 
 
@@ -1840,7 +2030,7 @@ def validate_scene_capability_surface(module) -> list[str]:
     """Keep Scene limited to orchestration and scene-owned capabilities."""
     expected = {
         "assets", "camera", "canvas", "fx", "geometry", "layout", "mechanics",
-        "media", "slides", "text", "viz", "fade_out_all", "link", "persist",
+        "media", "slides", "text", "viz", "fade_out_all", "link", "persist", "z_layers", "layer",
         "play", "release", "render", "reuse", "sections", "segment", "snapshots", "stop",
         "wait", "time", "cursor", "stops", "random", "noise",
         "voiceover", "live_take", "narration_script", "marker", "markers",
@@ -3115,6 +3305,10 @@ def main() -> int:
     missing.extend(validate_reactive_connector_contract(module))
     missing.extend(validate_camera_rig_contract(module))
     missing.extend(validate_camera_motion_contract(module))
+    missing.extend(validate_parallax_layer_contract(module))
+    missing.extend(validate_text_on_path_contract(module))
+    missing.extend(validate_rough_notation_contract(module))
+    missing.extend(validate_extrude_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())

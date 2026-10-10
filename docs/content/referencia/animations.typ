@@ -425,6 +425,7 @@ visible del objeto: si no debe verse antes, empieza con una entrada o dale
   name: "Anim.fade_in",
   kind: "method",
   returns: (type: "Anim", desc: [Aparición por opacidad.]),
+  desc: [Lleva la opacidad de 0 a la que el objeto tenía declarada o fijada, o a la que tenía antes de un `fade_out`: `opacity(0.3).hidden()` termina en 0.3. Un objeto declarado con `opacity(0)` termina en 1.],
 )[
 ```python
 # show-code: true
@@ -1049,6 +1050,21 @@ scene.play(title.animate.tracking(0.0).duration(1.2))
 ```
 ]
 
+#api-entry(
+  name: "Anim.path_offset",
+  kind: "method",
+  params: ((name: "value", type: "float", default: none, desc: [Desplazamiento a lo largo de la trayectoria, como fracción de su longitud.]),),
+  returns: (type: "Anim", desc: [Recorrido animado del texto por su trayectoria.]),
+  desc: [Mueve un texto creado con #link("/referencia/text/#texto-trayectoria")[`scene.text.on_path`] por su trayectoria. En una trayectoria cerrada `1.0` es una vuelta completa. Cada fotograma se calcula a partir del desplazamiento, así que un seek muestra lo mismo que la reproducción. Easing predeterminado: suave; usa `Easing.LINEAR` para un giro constante. Un texto que no sea de `on_path` o un valor no finito lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+ring = scene.text.on_path("GAANIM · MOTION · ", scene.geometry.circle(2.0), reverse=True)
+scene.play([ring.animate.path_offset(1.0).duration(4).easing(Easing.LINEAR)])
+```
+]
+
 == Transformaciones
 
 #api-entry(
@@ -1403,7 +1419,7 @@ scene.render()
     (name: "points", type: "Sequence[tuple[float, float]]", default: none, desc: [Posición final de cada vértice, en las coordenadas en que se declaró la figura.]),
   ),
   returns: (type: "Anim", desc: [Morph vértice a vértice.]),
-  desc: [Para fijar los vértices sin animar, usa `Drawable.points`. Lleva cada vértice de un polígono o una polilínea en línea recta a su nueva posición: el vértice `i` va a `points[i]`. A diferencia de `transform_to` no remuestrea el contorno, así que cada fotograma es la mezcla exacta de los dos y las figuras de píxel o técnicas conservan sus esquinas. Un `move_to` o `shift` posterior se sigue aplicando encima. La figura conserva su número de vértices: otro número de puntos, una figura que no sea polígono o polilínea, o un punto no finito lanzan `ValueError`. Se combina con `fill`, `move_to` y los demás destinos de propiedades en un mismo `Anim`, y `echo` repite el morph en sus copias.],
+  desc: [Para fijar los vértices sin animar, usa `Drawable.points`. Lleva cada vértice de un polígono o una polilínea en línea recta a su nueva posición: el vértice `i` va a `points[i]`. A diferencia de `transform_to` no remuestrea el contorno, así que cada fotograma es la mezcla exacta de los dos y las figuras de píxel o técnicas conservan sus esquinas. Un `move_to` o `shift` posterior se sigue aplicando encima. La figura conserva su número de vértices: otro número de puntos, una figura que no sea polígono o polilínea (o que lo sea con coordenadas reactivas), o un punto no finito lanzan `ValueError`. Se combina con `fill`, `move_to` y los demás destinos de propiedades en un mismo `Anim`, y `echo` repite el morph en sus copias.],
 )[
 ```python
 # show-code: true

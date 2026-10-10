@@ -294,6 +294,29 @@ pub enum AnimationType {
     CameraDolly {
         factor: f64,
     },
+    /// Move the 2D camera along the path of `route`, as `move_along` moves a
+    /// drawable; `follow.orient` turns the view with the path.
+    CameraFollowPath {
+        route: ObjectId,
+        follow: PathFollowOptions,
+    },
+    /// A fast pan to `target`, eased hard at both ends; `blur` gives its
+    /// frames a motion blur window.
+    CameraWhipPan {
+        target: CanvasEndpoint,
+        blur: bool,
+    },
+    /// Change the depth of field of parallax layers; `None` keeps a value.
+    CameraDepthOfField {
+        focus: Option<f64>,
+        aperture: Option<f64>,
+        max_blur: Option<f64>,
+    },
+    /// Dolly to `factor` times the distance from the look-at target while
+    /// the field of view keeps the target's plane the same size.
+    CameraDollyZoom {
+        factor: f64,
+    },
     TranslateTo {
         to: DVec3,
     },
@@ -380,6 +403,11 @@ pub enum AnimationType {
     /// position, in the coordinates the shape was declared in.
     PathPointsTo {
         points: Vec<(f64, f64)>,
+    },
+    /// Rotate, scale and skew about the scene point `pivot` from now on,
+    /// without moving the drawable.
+    PivotTo {
+        pivot: DVec3,
     },
     /// Show `to` copies of a repeater group instead of `from`; the
     /// fractional part fades the next copy.
@@ -604,6 +632,11 @@ pub enum AnimationType {
     /// Per-unit text range animation (sweep, reveal presets, tracking); see
     /// [`crate::canvas::text_animator`].
     TextAnimator(Box<crate::canvas::text_animator::TextAnimatorSpec>),
+    /// Shift a Text laid on a path to `to` along it, as a fraction of the
+    /// path's length; see [`crate::canvas::text_path`].
+    TextPathOffset {
+        to: f64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -786,6 +819,10 @@ impl AnimationType {
                 | Self::CameraOrthographic { .. }
                 | Self::CameraReset
                 | Self::CameraDolly { .. }
+                | Self::CameraFollowPath { .. }
+                | Self::CameraWhipPan { .. }
+                | Self::CameraDollyZoom { .. }
+                | Self::CameraDepthOfField { .. }
         )
     }
 
@@ -805,6 +842,10 @@ impl AnimationType {
             | Self::SignalKeyframes(_)
             | Self::Wiggle => RateFunc::Linear,
             Self::Create { .. } | Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
+            // Most of a whip pan happens in a blink around its middle.
+            Self::CameraWhipPan { .. } => {
+                RateFunc::EaseInOut(gaanim_math::EasingCurve::Exponential)
+            }
             Self::Indicate { .. }
             | Self::Flash { .. }
             | Self::Circumscribe { .. }

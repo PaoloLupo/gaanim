@@ -136,6 +136,37 @@ impl SpatialTransform {
         self
     }
 
+    /// The same drawing, rotated, scaled and skewed about `pivot` from now
+    /// on: the anchor moves to the local point drawn at `pivot`, given in the
+    /// space of the translation, and the translation compensates, so no point
+    /// moves. An axis scaled to zero draws no point there and keeps its
+    /// anchor coordinate.
+    pub fn about_pivot(&self, pivot: DVec3) -> Self {
+        let offset =
+            self.unskew(self.rotation.inverse() * (pivot - self.translation - self.anchor));
+        let local = |offset: f64, scale: f64| {
+            if scale.abs() > f64::EPSILON {
+                offset / scale
+            } else {
+                0.0
+            }
+        };
+        let anchor = self.anchor
+            + DVec3::new(
+                local(offset.x, self.scale.x),
+                local(offset.y, self.scale.y),
+                local(offset.z, self.scale.z),
+            );
+        // Every point p is drawn at translation + anchor + linear(p - anchor).
+        let moved = self.anchor - anchor;
+        let translation = self.translation + moved - self.to_mat4().transform_vector3(moved);
+        Self {
+            translation,
+            anchor,
+            ..*self
+        }
+    }
+
     /// Extract the Z-axis rotation angle from the quaternion.
     ///
     /// In 2D mode the rotation is always around Z, so computing all three Euler
@@ -256,6 +287,36 @@ impl GlobalSpatialTransform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_pivot_moves_nothing_and_is_drawn_where_it_was_asked() {
+        let transform = SpatialTransform {
+            translation: DVec3::new(2.0, -1.0, 0.0),
+            rotation: DQuat::from_rotation_z(0.7),
+            scale: DVec3::new(1.5, -0.5, 1.0),
+            anchor: DVec3::new(0.25, 0.5, 0.0),
+            skew: DVec2::new(0.3, -0.2),
+        };
+        let pivot = DVec3::new(-3.0, 4.0, 0.0);
+        let moved = transform.about_pivot(pivot);
+        assert!(moved.to_mat4().abs_diff_eq(transform.to_mat4(), 1e-12));
+        assert!((moved.translation + moved.anchor).abs_diff_eq(pivot, 1e-12));
+        assert_eq!(
+            (moved.rotation, moved.scale, moved.skew),
+            (transform.rotation, transform.scale, transform.skew)
+        );
+
+        // An untransformed drawing only changes its anchor.
+        let plain = SpatialTransform::new_2d(2.0, 2.0).about_pivot(DVec3::new(0.0, 2.0, 0.0));
+        assert_eq!(plain.translation, DVec3::new(2.0, 2.0, 0.0));
+        assert_eq!(plain.anchor, DVec3::new(-2.0, 0.0, 0.0));
+
+        // A flattened axis keeps its anchor, and still nothing moves.
+        let flat = SpatialTransform::new_2d(1.0, 1.0).with_scale_2d(2.0, 0.0);
+        let moved = flat.about_pivot(pivot);
+        assert!(moved.to_mat4().abs_diff_eq(flat.to_mat4(), 1e-12));
+        assert_eq!(moved.anchor.y, 0.0);
+    }
 
     #[test]
     fn spatial_transform_default_is_identity() {

@@ -656,8 +656,12 @@ pub enum SpawnKind {
         end: (f64, f64),
         offset: f64,
     },
-    /// Open sequence of straight segments. Useful for springs, rails, and paths.
-    Polyline(Vec<(f64, f64)>),
+    /// Sequence of straight segments, for springs, rails, and paths;
+    /// `closed` joins the last point to the first.
+    Polyline {
+        points: Vec<(f64, f64)>,
+        closed: bool,
+    },
     /// A polyline whose coordinates are reactive sources, redrawn every
     /// frame from their current values; closed joins the last point to the
     /// first.
@@ -1015,8 +1019,18 @@ pub struct ObjectSpec {
     /// If true, keep this reactive visual hidden until an animation targets it.
     pub defer_visibility_until_play: bool,
     pub z_index: i32,
+    /// Named draw layer (`SceneModel::z_layers`) and its rank.
+    pub z_layer: Option<(String, i32)>,
+    /// Hides texts on purpose; see `Drawable::covers_on_purpose`.
+    pub covers_on_purpose: bool,
     /// If true, this object is a HUD overlay (screen-space, fixed).
     pub hud: bool,
+    /// Depth of a parallax layer (`SceneModel::parallax_layer`).
+    pub parallax_depth: Option<f64>,
+    /// The path a Text follows (`SceneModel::text_on_path`).
+    pub text_path: Option<super::text_path::TextPathSpec>,
+    /// The drawable a `Primitive3D` is extruded from (`SceneModel::extrude`).
+    pub extrusion: Option<super::extrude::ExtrusionSpec>,
     /// If true, this object was attached to a coordinate space as data.
     /// Its parent's Create/Write animations should not include it as a leaf
     /// (otherwise a plane.create() would also draw every plot).
@@ -1192,11 +1206,16 @@ impl ObjectSpec {
             theme_selector: None,
             defer_visibility_until_play: false,
             z_index: 0,
+            z_layer: None,
+            covers_on_purpose: false,
             billboard: false,
             coordinate_view_role: None,
             coordinate_label_offset: None,
             coordinate_tick_level: None,
             hud: false,
+            parallax_depth: None,
+            text_path: None,
+            extrusion: None,
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),
@@ -1228,7 +1247,7 @@ pub struct Anim {
     consumed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     duration_explicit: bool,
     rate_explicit: bool,
-    pub(crate) property_spec: Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>>,
+    pub(crate) property_spec: Option<crate::canvas::ops::SharedObjectSpec>,
     camera_capture_before_play: Option<u64>,
     repeat: Option<AnimRepeat>,
     /// Sound effect anchored to the animation's resolved start.
@@ -1374,7 +1393,7 @@ impl Anim {
         target: ObjectId,
         state: SharedCanvasState,
         _segment_idx: usize,
-        spec: std::sync::Arc<std::sync::Mutex<ObjectSpec>>,
+        spec: crate::canvas::ops::SharedObjectSpec,
     ) -> Self {
         let mut anim = Self::new(
             target,
@@ -2160,10 +2179,8 @@ impl Anim {
             .property_spec
             .as_ref()
             .ok_or("points() requires Drawable.animate()")?;
-        let declared = match &spec.lock().expect("object spec poisoned").kind {
-            SpawnKind::Polygon(declared) | SpawnKind::Polyline(declared) => declared.len(),
-            _ => return Err("points() requires a polygon or polyline".to_string()),
-        };
+        let declared =
+            super::drawable::declared_vertices(&spec.lock().expect("object spec poisoned").kind)?;
         if points.len() != declared {
             return Err(format!(
                 "points() needs {declared} points, one per vertex of the shape, got {}",
@@ -2988,7 +3005,7 @@ impl Anim {
 /// `canvas::text_motion`).
 impl Anim {
     /// The object spec behind a `.animate` proxy.
-    pub(crate) fn text_motion_spec(&self) -> Option<std::sync::Arc<std::sync::Mutex<ObjectSpec>>> {
+    pub(crate) fn text_motion_spec(&self) -> Option<crate::canvas::ops::SharedObjectSpec> {
         self.property_spec.clone()
     }
 

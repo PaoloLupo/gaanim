@@ -69,8 +69,8 @@ badge = scene.geometry.square(1).fill("#f97316").move_to(3, 0)
 #api-entry(
   name: "Drawable.stroke",
   kind: "method",
-  params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro.]), (name: "scale_with_object", type: "bool | None", default: "None", desc: [`True` hace que el ancho siga la escala de la figura, como `scale_stroke_with_object`.])),
-  desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`.],
+  params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro. En los tres casos el trazo visible mide `width`.]), (name: "scale_with_object", type: "bool | None", default: "None", desc: [`True` hace que el ancho siga la escala de la figura, como `scale_stroke_with_object`.])),
+  desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda entero dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -182,13 +182,40 @@ scene.play([level.animate.set(1.0).duration(1)])
   name: "Drawable.z_index",
   kind: "method",
   params: ((name: "z", type: "int", default: none, desc: [Capa de dibujo; los valores mayores quedan encima.]),),
-  desc: [El `z_index` de un grupo o de un texto se suma al de cada descendiente, así que mueve todo el subárbol. Los empates conservan el orden de creación.],
+  desc: [El `z_index` de un grupo o de un texto se suma al de cada descendiente, así que mueve todo el subárbol. Los empates conservan el orden de creación. Con capas (`Scene.z_layers`), ordena solo dentro de la capa del objeto.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 front = scene.geometry.circle(1).fill(GOLD).z_index(5)
 back = scene.geometry.rect(3, 1).fill(BLUE)
+```
+]
+
+#api-entry(
+  name: "Drawable.z_layer",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Una de las capas nombradas con `Scene.z_layers`.]),),
+  desc: [Dibuja el objeto en la capa `name`: queda encima de todo lo que está en las capas de detrás, sea cual sea su `z_index`, que solo ordena dentro de la capa. Un grupo o un texto se lleva a sus miembros, salvo a los que nombran su propia capa. El orden de dibujo vale para toda la escena, así que una llamada después de mostrar el objeto también rige desde el principio. Un nombre que la escena no declaró lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.z_layers("modelo", "overlay")
+muro = scene.geometry.rect(4, 3).fill(BLUE).z_index(400)
+lupa = scene.geometry.circle(0.8).fill(GOLD).z_layer("overlay")
+```
+]
+
+#api-entry(
+  name: "Drawable.covers_on_purpose",
+  kind: "method",
+  desc: [Marca que el objeto, y sus miembros si es un grupo, tapa textos a propósito, como un diálogo dibujado sobre un modelo mientras se explica: el aviso de textos tapados de `gaanim check` deja de contar los textos que tapa. No cambia nada del dibujo y vale para toda la escena.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+dialogo = scene.geometry.rect(4, 2).fill(WHITE).covers_on_purpose()
 ```
 ]
 
@@ -332,7 +359,7 @@ scene.render()
   name: "Drawable.bounds",
   kind: "method",
   returns: (type: "Bounds", desc: [`x` e `y` (el centro), `left`, `right`, `bottom`, `top`, `width`, `height` y `center` en unidades de escena.]),
-  desc: [Mide la caja de cualquier objeto (figuras, texto, matemática, SVG, imágenes, grupos) en el cursor actual, tal como se dibujaría ahí: cuenta la maquetación, las transformaciones, la composición del texto y las animaciones que terminaron antes de `scene.cursor`, e incluye a los descendientes. La geometría que los objetos reactivos regeneran en cada fotograma se mide como se declaró. Medir un objeto recién creado, antes del siguiente `play` o `wait` y sin nada que actúe sobre él (animaciones, grupos posteriores, layouts), cuesta alrededor de un milisegundo: se compila solo su declaración y la de sus miembros o referencias de `next_to`/`align_to` que cumplan lo mismo. En cualquier otro caso se compila la escena escrita hasta ese punto, así que conviene medir antes de animar o reutilizar el resultado. Lanza `ValueError` si el objeto no tiene geometría en el cursor. Sustituye a `scene.text.measure`.],
+  desc: [Mide la caja de cualquier objeto (figuras, texto, matemática, SVG, imágenes, grupos) en el cursor actual, tal como se dibujaría ahí: cuenta la maquetación, las transformaciones, la composición del texto, las animaciones que terminaron hasta `scene.cursor` y los cambios inmediatos hechos en él (como un `move_to` sobre un objeto ya animado), e incluye a los descendientes. La geometría que los objetos reactivos regeneran en cada fotograma se mide como se declaró. Medir un objeto recién creado, antes del siguiente `play` o `wait` y sin nada que actúe sobre él (animaciones, grupos posteriores, layouts), cuesta alrededor de un milisegundo: se compila solo su declaración y la de sus miembros o referencias de `next_to`/`align_to` que cumplan lo mismo. En cualquier otro caso se compila la escena escrita hasta ese punto. Las mediciones sin nada escrito entre ellas comparten una compilación, y también los miembros de un mismo layout recién creado, así que conviene medir antes de animar y medir juntas las cajas que necesites. Una medición posterior reanuda esa compilación desde el segmento donde cambió la escena, como una recarga del editor, y la siguiente ejecución del script reanuda la última; un segmento con funciones de Python (reactivas, updaters) no se reutiliza entre ejecuciones. Lanza `ValueError` si el objeto no tiene geometría en el cursor. Sustituye a `scene.text.measure`.],
 )[
 ```python
 # show-code: true
@@ -366,7 +393,7 @@ view = scene.camera.inset(ui.pixel(812, 240), zoom=3)
 #api-entry(
   name: "Drawable.with_pivot",
   kind: "method",
-  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. `pivot(x, y)` es un alias.],
+  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. Una vez mostrado el objeto, el pivote cambia en el cursor sin moverlo y vale para las animaciones siguientes. `pivot(x, y)` es un alias.],
 )[
 ```python
 # show-code: true
@@ -758,7 +785,7 @@ ring = scene.geometry.duplicate(scene.geometry.dot(0.1), Distribution.circle(16,
   params: (
     (name: "points", type: "Sequence[tuple[float, float]]", default: none, desc: [Un punto por vértice, en las coordenadas en que se declaró la figura.]),
   ),
-  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. `animate.points` sigue desde ahí. Otro número de puntos, un valor no finito o un objeto que no sea polígono ni polilínea lanzan `ValueError`.],
+  desc: [Fija todos los vértices de un polígono o una polilínea. Antes del primer `scene.play` cambia la forma declarada, así que varias figuras pueden nacer iguales y deformarse luego; después la cambia en el cursor. `animate.points` sigue desde ahí. Una polilínea con `closed=True` sigue cerrada. Otro número de puntos, un valor no finito, un objeto que no sea polígono ni polilínea o una polilínea con coordenadas reactivas lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -818,6 +845,71 @@ scene.render()
   desc: [Atajo de `stroke_profile` para pinceladas y flechas caligráficas.],
   none,
 )
+
+=== Anotaciones a mano alzada <anotaciones>
+
+#api-entry(
+  name: "Drawable.annotate",
+  kind: "property",
+  returns: (type: "Annotations", desc: [Constructor de anotaciones alrededor de este drawable.]),
+  desc: [Subrayados, cajas, círculos, tachados y corchetes con trazo de mano alzada, al estilo de rough-notation. Cada método devuelve un `Drawable` nuevo con trazo: las líneas tiemblan y se arquean como dibujadas a mano, y la forma se dibuja `passes` veces sobre sí misma con otro azar. La marca sigue los límites del objetivo en cada fotograma, conserva su garabato cuando el objetivo se mueve y permanece oculta hasta que un `play` la incluye, así que `marca.animate.create()` la dibuja pasada a pasada. Se puede desvanecer o reestilizar como cualquier drawable, pero se mueve moviendo su objetivo. La misma `seed` dibuja siempre el mismo garabato. También existe en las selecciones de texto (`TextSelection.annotate`); para resaltar con rotulador usa `TextSelection.marker`.],
+)[
+```python
+# output: rough_notation.webp
+# show-code: true
+from gaanim import *
+
+scene = Scene(frame=(16, 9))
+title = scene.text("Anotaciones", role="title").move_to(0, 2.6)
+card = scene.geometry.rounded_rect(3.2, 1.6, 0.2).fill(BLUE).move_to(-3.2, -0.6)
+word = scene.text("importante").move_to(3.2, -0.6)
+ul = title.annotate.underline(color=RED, seed=1)
+box = card.annotate.box(color=GOLD, seed=2)
+circle = word.annotate.circle(color=RED, seed=3)
+scene.play([ul.animate.create(), box.animate.create()], duration=1.2)
+scene.play([circle.animate.create()], duration=0.9)
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Annotations.underline / box / circle / strike_through / crossed_off",
+  kind: "method",
+  params: (
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Color del trazo; sin color se usa el trazo del tema.]),
+    (name: "width", type: "float | None", default: "None", desc: [Grosor del trazo; requiere `color`.]),
+    (name: "roughness", type: "float", default: "1.0", desc: [Escala del temblor: `0` dibuja geometría limpia y `1` el aspecto de rough-notation.]),
+    (name: "passes", type: "int", default: "2", desc: [Veces que se dibuja la forma, de 1 a 8.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla del garabato.]),
+    (name: "padding", type: "Padding | None", default: "None", desc: [Crecimiento de los límites del objetivo: escalar, `(vertical, horizontal)` o `(arriba, derecha, abajo, izquierda)`.]),
+  ),
+  returns: (type: "Drawable", desc: [La marca, oculta hasta que un `play` la incluye.]),
+  desc: [`underline` traza una línea bajo el objetivo (por defecto 0.08 por debajo y 0.04 a cada lado), `box` una caja (0.1 por lado), `circle` una elipse que pasa por el centro de cada lado acolchado (0.25 arriba y abajo, 0.35 a los lados), `strike_through` una línea por el centro (0.06 a cada lado) y `crossed_off` las dos diagonales (0.05 por lado). Un `roughness` o `padding` negativo o no finito, `passes` fuera de 1 a 8 o un `width` no positivo lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+price = scene.text("99 €")
+scene.play([price.annotate.crossed_off(color=RED, roughness=1.5, passes=1).animate.create()])
+```
+]
+
+#api-entry(
+  name: "Annotations.bracket",
+  kind: "method",
+  params: (
+    (name: "sides", type: "str | Sequence[str]", default: "(\"left\", \"right\")", desc: [Lados con corchete: `"left"`, `"right"`, `"top"` o `"bottom"`.]),
+  ),
+  returns: (type: "Drawable", desc: [Los corchetes, ocultos hasta que un `play` los incluye.]),
+  desc: [Corchetes a mano alzada en los lados elegidos; acepta los demás argumentos de `underline`, con `padding` de 0.05 arriba y abajo y 0.1 a los lados. Un lado desconocido lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+block = scene.text("primer paso\nsegundo paso")
+scene.play([block.annotate.bracket("left", color=BLUE).animate.create()])
+```
+]
 
 #api-entry(
   name: "Drawable.modifiers",

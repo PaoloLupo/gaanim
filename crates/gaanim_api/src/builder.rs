@@ -338,6 +338,25 @@ fn arrow_spine(shape: &gaanim_math::ArrowShape) -> gaanim_core::kurbo::BezPath {
     spine
 }
 
+/// The part of `path` between the arc-length fractions `follow.start` and
+/// `follow.end`; `start > end` travels the same portion backwards.
+pub(crate) fn route_portion(
+    path: gaanim_core::kurbo::BezPath,
+    follow: crate::anim::PathFollowOptions,
+) -> gaanim_core::kurbo::BezPath {
+    let (from, to) = (follow.start.min(follow.end), follow.start.max(follow.end));
+    let path = if from <= 0.0 && to >= 1.0 {
+        path
+    } else {
+        gaanim_math::get_subpath_range(&path, from, to)
+    };
+    if follow.start > follow.end {
+        reverse_path(&path)
+    } else {
+        path
+    }
+}
+
 /// Reverses travel along `path`: subpaths run last to first, each backwards.
 fn reverse_path(path: &gaanim_core::kurbo::BezPath) -> gaanim_core::kurbo::BezPath {
     use gaanim_core::kurbo::{BezPath, PathEl};
@@ -834,6 +853,19 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) clipped: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
     pub(crate) text_tracking: HashMap<ObjectId, f64>,
+    /// Time ranges whose frames get a motion blur of their own, such as
+    /// whip pans with `blur`.
+    pub(crate) motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
+    /// Depth of field of parallax layers at the authoring cursor.
+    pub(crate) depth_of_field: gaanim_scene::DepthOfField,
+    /// Glyph layout and current offset of Texts laid on a path.
+    pub(crate) text_paths: HashMap<
+        ObjectId,
+        (
+            std::sync::Arc<crate::canvas::text_path::TextPathLayout>,
+            f64,
+        ),
+    >,
     /// Resting transforms and opacities of camera view screens hidden by
     /// `pop_in`, which the next `pop_out` returns to.
     pub(crate) camera_view_rests: HashMap<ObjectId, CameraViewRest>,
@@ -853,6 +885,18 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// reflow keeps the child's own offset from it, so a child animated
     /// inside its box stays where it was moved.
     pub(crate) layout_rests: HashMap<ObjectId, LayoutRest>,
+    /// Opacity each object had before an animation took it to zero, which
+    /// an entrance shows it at again.
+    faded_opacities: HashMap<ObjectId, f32>,
+}
+
+/// The opacity an entrance shows `target` at: its `current` one, or the one
+/// it had before it faded out; 1 for an object that never had one.
+fn shown_opacity(faded: &HashMap<ObjectId, f32>, target: ObjectId, current: f32) -> f32 {
+    if current > 0.0 {
+        return current;
+    }
+    faded.get(&target).copied().unwrap_or(1.0)
 }
 
 /// A box child's place in its layout, apart from its own animations.
@@ -901,6 +945,15 @@ pub(crate) struct SceneBuilderState {
     connectors: HashSet<ObjectId>,
     clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
+    motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
+    depth_of_field: gaanim_scene::DepthOfField,
+    text_paths: HashMap<
+        ObjectId,
+        (
+            std::sync::Arc<crate::canvas::text_path::TextPathLayout>,
+            f64,
+        ),
+    >,
     camera_view_rests: HashMap<ObjectId, CameraViewRest>,
     text_motion: crate::text_motion::TextMotionState,
     persistent_objects: HashSet<ObjectId>,
@@ -908,6 +961,7 @@ pub(crate) struct SceneBuilderState {
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
     text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
     layout_rests: HashMap<ObjectId, LayoutRest>,
+    faded_opacities: HashMap<ObjectId, f32>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -938,6 +992,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors: self.connectors.clone(),
             clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
+            text_paths: self.text_paths.clone(),
+            motion_blur_windows: self.motion_blur_windows.clone(),
+            depth_of_field: self.depth_of_field,
             camera_view_rests: self.camera_view_rests.clone(),
             text_motion: self.text_motion.clone(),
             persistent_objects: self.persistent_objects.clone(),
@@ -945,6 +1002,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: self.text_cancellation_marks.clone(),
             text_canceled_term_children: self.text_canceled_term_children.clone(),
             layout_rests: self.layout_rests.clone(),
+            faded_opacities: self.faded_opacities.clone(),
         }
     }
 
@@ -982,6 +1040,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors,
             clipped,
             text_tracking,
+            text_paths,
+            motion_blur_windows,
+            depth_of_field,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -989,6 +1050,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            faded_opacities,
         } = state;
         Self {
             property_source_cursors,
@@ -1022,6 +1084,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors,
             clipped,
             text_tracking,
+            text_paths,
+            motion_blur_windows,
+            depth_of_field,
             camera_view_rests,
             text_motion,
             persistent_objects,
@@ -1029,6 +1094,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            faded_opacities,
         }
     }
 
@@ -1330,6 +1396,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             connectors: HashSet::new(),
             clipped: HashSet::new(),
             text_tracking: HashMap::new(),
+            text_paths: HashMap::new(),
+            motion_blur_windows: Vec::new(),
+            depth_of_field: gaanim_scene::DepthOfField::default(),
             camera_view_rests: HashMap::new(),
             text_motion: Default::default(),
             property_bindings: HashMap::new(),
@@ -1339,6 +1408,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: HashMap::new(),
             text_canceled_term_children: HashMap::new(),
             layout_rests: HashMap::new(),
+            faded_opacities: HashMap::new(),
         }
     }
 
@@ -1527,7 +1597,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraPerspective { .. }
             | AnimationType::CameraOrthographic { .. }
             | AnimationType::CameraReset
-            | AnimationType::CameraDolly { .. } => "Camera",
+            | AnimationType::CameraDolly { .. }
+            | AnimationType::CameraFollowPath { .. }
+            | AnimationType::CameraWhipPan { .. }
+            | AnimationType::CameraDollyZoom { .. }
+            | AnimationType::CameraDepthOfField { .. } => "Camera",
             AnimationType::TextMotion(_) => "TextMotion",
             AnimationType::Properties { .. } => "Properties",
             AnimationType::Write { .. } => "Write",
@@ -1561,6 +1635,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::EffectsTo { .. } => "Effects",
             AnimationType::DashOffsetTo { .. } => "DashOffset",
             AnimationType::PathPointsTo { .. } => "Points",
+            AnimationType::PivotTo { .. } => "Pivot",
             AnimationType::CountTo { .. } => "Count",
             AnimationType::ParticleBurst { .. } => "Burst",
             AnimationType::SurroundingRectRetarget { .. } => "Retarget",
@@ -1602,6 +1677,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::Broadcast { .. } => "Broadcast",
             AnimationType::Spotlight { .. } => "Spotlight",
             AnimationType::TextAnimator(_) => "TextAnimator",
+            AnimationType::TextPathOffset { .. } => "TextPathOffset",
         }
     }
 
@@ -3116,6 +3192,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_text_animator_internal(anim, *spec);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::TextPathOffset { .. }) {
+            self.play_text_path_offset_internal(anim);
+            return;
+        }
         if let AnimationType::TextSelectionProperties {
             fragment,
             occurrence,
@@ -3256,6 +3336,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::PathPointsTo { .. }) {
             self.play_path_points_internal(anim, track);
+            return;
+        }
+        if matches!(anim.anim_type, AnimationType::PivotTo { .. }) {
+            self.play_pivot_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::CountTo { .. }) {
@@ -3449,13 +3533,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
             AnimationType::FadeTo { to } => {
                 let from = state.opacity;
+                if to <= 0.0 && from > 0.0 {
+                    self.faded_opacities.insert(anim.target, from);
+                }
                 state.opacity = to;
                 PropertyLensSpec::Opacity { from, to }
             }
             AnimationType::FadeIn => {
                 let from = 0.0;
-                let to = 1.0;
-                state.opacity = 1.0;
+                let to = shown_opacity(&self.faded_opacities, anim.target, state.opacity);
+                state.opacity = to;
                 self.commands.entity(state.entity).insert(Opacity(from));
                 PropertyLensSpec::Opacity { from, to }
             }
@@ -3465,6 +3552,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::FadeOut => {
                 let from = state.opacity;
                 let to = 0.0;
+                if from > 0.0 {
+                    self.faded_opacities.insert(anim.target, from);
+                }
                 state.opacity = 0.0;
                 PropertyLensSpec::Opacity { from, to }
             }
@@ -3599,6 +3689,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CameraOrthographic { .. }
             | AnimationType::CameraReset
             | AnimationType::CameraDolly { .. }
+            | AnimationType::CameraFollowPath { .. }
+            | AnimationType::CameraWhipPan { .. }
+            | AnimationType::CameraDollyZoom { .. }
+            | AnimationType::CameraDepthOfField { .. }
             | AnimationType::TextMotion(_)
             | AnimationType::Write { .. }
             | AnimationType::Create { .. }
@@ -3621,6 +3715,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::EffectsTo { .. }
             | AnimationType::DashOffsetTo { .. }
             | AnimationType::PathPointsTo { .. }
+            | AnimationType::PivotTo { .. }
             | AnimationType::CountTo { .. }
             | AnimationType::ParticleBurst { .. }
             | AnimationType::DrawBorderThenFill { .. }
@@ -3635,7 +3730,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Blink { .. }
             | AnimationType::Broadcast { .. }
             | AnimationType::Spotlight { .. }
-            | AnimationType::TextAnimator(_) => {
+            | AnimationType::TextAnimator(_)
+            | AnimationType::TextPathOffset { .. } => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
             AnimationType::SignalFloat { to } => {
@@ -3660,6 +3756,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     ),
                     orient: None,
                     reset_anchor: false,
+                    route: Default::default(),
                 }
             }
             (_, lens) => lens,
@@ -3858,11 +3955,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
 
         // A draw entrance after a `fade_out()` must show the object again.
+        let shown = shown_opacity(&self.faded_opacities, anim.target, 0.0);
         if !schedule.reversed
             && let Some(state) = self.states.get_mut(anim.target)
             && state.opacity <= 0.0
         {
-            state.opacity = 1.0;
+            state.opacity = shown;
             self.commands.entity(state.entity).insert(Opacity(0.0));
             self.timeline.add_clip(
                 parent_track,
@@ -3870,7 +3968,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 0.0,
                 ClipPayload::Animation(AnimationSpec {
                     target: anim.target,
-                    lens: PropertyLensSpec::Opacity { from: 0.0, to: 1.0 },
+                    lens: PropertyLensSpec::Opacity {
+                        from: 0.0,
+                        to: shown,
+                    },
                     rate_func: gaanim_math::RateFunc::Linear,
                     delay: 0.0,
                     label: self.current_label.clone(),
@@ -5809,6 +5910,34 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
     }
 
+    /// Move the pivot of `target`'s rotations, scales and skews to a scene
+    /// point; the translation compensates, so nothing moves.
+    fn play_pivot_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::PivotTo { pivot } = anim.anim_type else {
+            return;
+        };
+        let Some(state) = self.states.get_mut(anim.target) else {
+            return;
+        };
+        let from = state.transform;
+        let to = from.about_pivot(pivot);
+        state.transform = to;
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time + anim.delay,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                    std::sync::Arc::new(crate::pivot_lens::PivotLens::between(&from, &to)),
+                )),
+                rate_func: anim.rate_func,
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+    }
+
     fn play_path_trim_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let AnimationType::PathTrim {
             start,
@@ -6578,6 +6707,21 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// translation is sampled from the Bézier path at the eased `t`
     /// (parametric, not arc-length uniform). Updates the tracked state
     /// so the final translation equals `path(1.0)`.
+    /// The path `target_id` travels along in scene coordinates as it is
+    /// now; a solid arrow is travelled along its axis, not around its
+    /// silhouette, unless its geometry changed after spawning.
+    pub(crate) fn world_route(&self, target_id: ObjectId) -> Option<gaanim_core::kurbo::BezPath> {
+        let state = self.states.get(target_id)?;
+        let mut path = self
+            .arrow_shapes
+            .get(&target_id)
+            .filter(|shape| *state.path == shape.path())
+            .map(arrow_spine)
+            .unwrap_or_else(|| (*state.path).clone());
+        path.apply_affine(self.get_world_transform(target_id).to_affine_2d());
+        Some(path)
+    }
+
     fn play_move_along_path_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let (path_arg, path_target, follow) = match &anim.anim_type {
             AnimationType::MoveAlongPath {
@@ -6588,37 +6732,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             _ => unreachable!(),
         };
 
-        let path = if let Some(target_id) = path_target {
-            if let Some(state) = self.states.get(target_id) {
-                // A solid arrow is travelled along its axis, not around its
-                // silhouette, unless its geometry changed after spawning.
-                let mut p = self
-                    .arrow_shapes
-                    .get(&target_id)
-                    .filter(|shape| *state.path == shape.path())
-                    .map(arrow_spine)
-                    .unwrap_or_else(|| (*state.path).clone());
-                let world_affine = self.get_world_transform(target_id).to_affine_2d();
-                p.apply_affine(world_affine);
-                p
-            } else {
-                path_arg
-            }
-        } else {
-            path_arg
-        };
-        // `start > end` travels the same portion backwards.
-        let (from, to) = (follow.start.min(follow.end), follow.start.max(follow.end));
-        let path = if from <= 0.0 && to >= 1.0 {
-            path
-        } else {
-            gaanim_math::get_subpath_range(&path, from, to)
-        };
-        let path = if follow.start > follow.end {
-            reverse_path(&path)
-        } else {
-            path
-        };
+        let path = path_target
+            .and_then(|target_id| self.world_route(target_id))
+            .unwrap_or(path_arg);
+        let path = route_portion(path, follow);
 
         // Resolve and persist the final translation so subsequent
         // animations build on top of the new position. The entity keeps its
@@ -6648,6 +6765,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     path,
                     orient: follow.orient,
                     reset_anchor: true,
+                    route: Default::default(),
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -6769,6 +6887,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         path,
                         orient: None,
                         reset_anchor: true,
+                        route: Default::default(),
                     },
                     rate_func: anim.rate_func.clone(),
                     delay: 0.0,
@@ -7463,8 +7582,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Spawns an open path (polyline) primitive.
     pub fn open_path(&mut self, points: &[kurbo::Point]) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
+        self.polyline(points, false)
+    }
+
+    /// Spawns a polyline primitive; `closed` joins its ends.
+    pub fn polyline(
+        &mut self,
+        points: &[kurbo::Point],
+        closed: bool,
+    ) -> MobjectSpawnBuilder<'_, 'w, 's, 'a> {
         let id = self.next_id();
-        let bundle = gaanim_objects::primitives::open_path(id, points);
+        let bundle = gaanim_objects::primitives::polyline(id, points, closed);
         MobjectSpawnBuilder {
             builder: self,
             id,

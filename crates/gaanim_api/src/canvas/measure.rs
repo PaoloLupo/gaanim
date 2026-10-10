@@ -1,5 +1,6 @@
 //! Measuring drawables while a scene is being authored.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use bevy::ecs::world::CommandQueue;
@@ -8,7 +9,9 @@ use gaanim_math::Bounds3D;
 use gaanim_timeline::snapshot::WorldSnapshot;
 use gaanim_timeline::timeline::Timeline;
 
+use super::authored::Authored;
 use super::ops::{CanvasState, Op, Segment};
+use super::profile::Measured;
 use super::types::{LayoutOp, ObjectSpec, SpawnKind};
 use super::{DrawableHandle, SceneModel};
 use gaanim_core::ObjectId;
@@ -34,10 +37,10 @@ impl SceneModel {
     }
 
     /// Scene-space box of `handle` and its descendants at the authoring
-    /// cursor, as they would render there: layout, transforms, text shaping
-    /// and animations that ended before the cursor all count, and so do the
-    /// boxes' backgrounds. Geometry that reactive updaters rebuild every
-    /// frame is measured as declared.
+    /// cursor, as they would render there: layout, transforms, text shaping,
+    /// animations that ended by the cursor and setters applied at it all
+    /// count, and so do the boxes' backgrounds. Geometry that reactive
+    /// updaters rebuild every frame is measured as declared.
     ///
     /// A drawable declared since the scene last advanced (by `play`, `wait`
     /// and the like) that nothing else refers to yet has no animation, cut or
@@ -45,34 +48,142 @@ impl SceneModel {
     /// of its members and, inside a box, those of its box tree when that was
     /// declared since then too and placed without animation. It is measured
     /// by compiling just them. Otherwise this compiles the scene authored so
-    /// far.
+    /// far. Measurements with nothing authored in between share one
+    /// compilation, and a later one resumes it from the segment where the
+    /// scene changed, as an editor reload does. The next run of the script
+    /// resumes the last one, so a reload recompiles to measure only from the
+    /// segment being edited.
     pub fn bounds_of(&self, handle: &DrawableHandle) -> Result<Bounds3D, BoundsError> {
         if !self.owns(handle) {
             return Err(BoundsError::ForeignScene);
         }
-        if let Some(isolated) = self.isolated_declaration(handle.id) {
-            return isolated.compiled_bounds(handle.id, 0.0);
+        if let Some((isolated, closure)) = self.isolated_declaration(handle.id) {
+            return self.measure(handle.id, MeasureScope::Isolated(closure), |previous| {
+                // Free the previous world before compiling the next one.
+                drop(previous);
+                (isolated.compile_measure(Some(0.0)), Measured::Isolated)
+            });
         }
-        self.compiled_bounds(handle.id, self.current_time())
+        self.measured_bounds(handle.id)
     }
 
     /// Box of the object `id` in this scene compiled up to the authoring
-    /// cursor and seeked to `time`.
-    fn compiled_bounds(&self, id: ObjectId, time: f64) -> Result<Bounds3D, BoundsError> {
-        let segments = self
-            .state
-            .lock()
-            .expect("canvas state poisoned")
-            .segments
-            .len();
+    /// cursor.
+    fn measured_bounds(&self, id: ObjectId) -> Result<Bounds3D, BoundsError> {
+        let time = self.current_time();
+        self.measure(id, MeasureScope::Cursor(time), |previous| {
+            self.measure_at_cursor(previous)
+        })
+    }
 
+    /// The scene authored so far, compiled into the world of `previous` or
+    /// of the last run's measurements, resuming what that world compiled,
+    /// and seeked to the end of what it compiled.
+    fn measure_at_cursor(&self, previous: Option<CompiledMeasure>) -> (CompiledMeasure, Measured) {
+        let mut world = previous
+            .and_then(CompiledMeasure::into_resumable)
+            .or_else(|| LAST_MEASURE_WORLD.lock().ok()?.take())
+            .unwrap_or_else(measure_world);
+        let kind = crate::runtime::replay_for_measuring(&mut world, self.clone(), |world| {
+            crate::runtime::drop_elsewhere(std::mem::replace(world, measure_world()));
+        });
+        let how = match kind {
+            crate::runtime::ReplayKind::Full => Measured::Scene,
+            crate::runtime::ReplayKind::Incremental { .. } => Measured::Resumed,
+            // Still seeked to the end it measured at.
+            crate::runtime::ReplayKind::Unchanged { .. } => {
+                return (CompiledMeasure::resumable(world), Measured::Reused);
+            }
+        };
+        let Some(end) = world
+            .get_resource::<crate::runtime::RetainedReplay>()
+            .map(crate::runtime::RetainedReplay::end_time)
+        else {
+            // Nothing was retained to resume or to map ids with.
+            return (self.compile_measure(None), Measured::Scene);
+        };
+        gaanim_timeline::capture_reload_keyframe(&mut world);
+        if let Some(mut timeline) = world.remove_resource::<Timeline>() {
+            timeline.seek(&mut world, end);
+            world.insert_resource(timeline);
+        }
+        // Boxes and their backgrounds take their layout box every frame.
+        gaanim_animation::updaters::resolve_layout_boxes(&mut world, end);
+        (CompiledMeasure::resumable(world), how)
+    }
+
+    /// Box of the object `id` in the compilation `scope` names, compiled
+    /// with `compile` unless the last one is still current. Measurements
+    /// between two changes to the scene share one compilation: nothing it
+    /// reads changed while the authored state's revision and the scene-wide
+    /// settings stayed the same.
+    fn measure(
+        &self,
+        id: ObjectId,
+        scope: MeasureScope,
+        compile: impl FnOnce(Option<CompiledMeasure>) -> (CompiledMeasure, Measured),
+    ) -> Result<Bounds3D, BoundsError> {
+        let started = std::time::Instant::now();
+        // Busy when a callback measures from inside a measurement.
+        let (Ok(mut cache), Some(scene_wide)) = (
+            self.measured.0.try_lock(),
+            self.scene_wide_fingerprint().finish(),
+        ) else {
+            let (mut compiled, how) = compile(None);
+            let bounds = compiled.bounds(id);
+            self.profile.measured(how, started.elapsed());
+            return bounds;
+        };
+        let slot = match scope {
+            MeasureScope::Cursor(_) => &mut cache.cursor,
+            MeasureScope::Isolated(_) => &mut cache.isolated,
+        };
+        let key = MeasureKey {
+            revision: self.state.revision(),
+            scene_wide,
+            scope,
+        };
+        let how = if slot.as_ref().is_none_or(|(current, _)| *current != key) {
+            let previous = slot.take().map(|(_, compiled)| compiled);
+            let (compiled, how) = compile(previous);
+            // Compiling records diagnostics in the authored state, so the
+            // revision it compiled is the one after it.
+            let key = MeasureKey {
+                revision: self.state.revision(),
+                ..key
+            };
+            *slot = Some((key, compiled));
+            how
+        } else {
+            Measured::Reused
+        };
+        let (_, compiled) = slot.as_mut().expect("measurement compiled above");
+        let bounds = compiled.bounds(id);
+        drop(cache);
+        self.profile.measured(how, started.elapsed());
+        bounds
+    }
+
+    /// Box of the object `id` in this scene compiled up to the authoring
+    /// cursor, without reusing a compilation.
+    #[cfg(test)]
+    fn compiled_bounds(&self, id: ObjectId) -> Result<Bounds3D, BoundsError> {
+        self.compile_measure(None).bounds(id)
+    }
+
+    /// The scene compiled up to the authoring cursor and seeked to `time`,
+    /// or to that cursor. The cursor is taken on the compiled clock: it sums
+    /// the durations in another order than [`Self::current_time`], so the two
+    /// can differ by a few ULPs, and what starts at the cursor, such as a cut
+    /// made by a setter, starts exactly at the compiled one.
+    fn compile_measure(&self, time: Option<f64>) -> CompiledMeasure {
         let mut fonts = gaanim_text::font::FontRegistry::without_system_fonts();
         self.register_theme_fonts(&mut fonts);
         let config = self.themed_text_config();
         let mut world = World::new();
         let mut queue = CommandQueue::default();
         let mut timeline = Timeline::new();
-        let checkpoint = {
+        let compiled = {
             let mut commands = Commands::new(&mut queue, &world);
             self.compile_resumable(
                 &mut commands,
@@ -80,25 +191,109 @@ impl SceneModel {
                 &fonts,
                 &config,
                 None,
-                Some(segments),
+                None,
                 Vec::new(),
             )
         };
+        let time = time.unwrap_or(compiled.end_time);
         queue.apply(&mut world);
-        let runtime = checkpoint
-            .and_then(|checkpoint| checkpoint.cursor.runtime_id(id))
-            .ok_or(BoundsError::Empty)?;
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         timeline.seek(&mut world, time);
         // Boxes and their backgrounds take their layout box every frame.
         gaanim_animation::updaters::resolve_layout_boxes(&mut world, time);
+        CompiledMeasure {
+            ids: Some(compiled.ids),
+            world,
+            #[cfg(test)]
+            generation: next_generation(),
+        }
+    }
+}
 
+/// The world the last run of the script measured its scene in, which the
+/// next run's first measurement resumes: a reload recompiles the same
+/// segments up to the one being edited.
+static LAST_MEASURE_WORLD: Mutex<Option<World>> = Mutex::new(None);
+
+/// An empty world to compile a scene into for measuring it.
+fn measure_world() -> World {
+    let mut world = World::new();
+    world.insert_resource(Timeline::new());
+    world.insert_resource(gaanim_text::font::FontRegistry::without_system_fonts());
+    world.insert_resource(gaanim_text::prelude::TextConfig::default());
+    world
+}
+
+/// A number for each compilation measurements make, telling them apart.
+#[cfg(test)]
+fn next_generation() -> u64 {
+    static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// What a measurement compiled.
+#[derive(Debug, Clone, PartialEq)]
+enum MeasureScope {
+    /// The scene up to the authoring cursor at this time.
+    Cursor(f64),
+    /// These declarations on their own; see [`SceneModel::bounds_of`].
+    Isolated(Vec<ObjectId>),
+}
+
+/// The inputs a compiled measurement is current for.
+#[derive(Debug, Clone, PartialEq)]
+struct MeasureKey {
+    /// Revision of the authored state.
+    revision: u64,
+    /// Fingerprint of the scene-wide settings, which live outside that state.
+    scene_wide: u64,
+    scope: MeasureScope,
+}
+
+/// A scene compiled to measure its drawables.
+pub(crate) struct CompiledMeasure {
+    /// The compiled object of each authored one; `None` when the world's
+    /// retained replay holds them, and a later measurement can resume it.
+    ids: Option<HashMap<ObjectId, ObjectId>>,
+    world: World,
+    /// Which compilation this is.
+    #[cfg(test)]
+    generation: u64,
+}
+
+impl CompiledMeasure {
+    /// A measurement in `world`, which a replay for measuring compiled.
+    fn resumable(world: World) -> Self {
+        Self {
+            ids: None,
+            world,
+            #[cfg(test)]
+            generation: next_generation(),
+        }
+    }
+
+    /// The world, when a later replay for measuring can resume it.
+    fn into_resumable(self) -> Option<World> {
+        self.ids.is_none().then_some(self.world)
+    }
+
+    /// Box of the object `id` in this compilation.
+    fn bounds(&mut self, id: ObjectId) -> Result<Bounds3D, BoundsError> {
+        let runtime = match &self.ids {
+            Some(ids) => ids.get(&id).copied(),
+            None => self
+                .world
+                .get_resource::<crate::runtime::RetainedReplay>()
+                .and_then(|replay| replay.runtime_id(id)),
+        }
+        .ok_or(BoundsError::Empty)?;
+        let world = &mut self.world;
         let entity = world
             .query::<(bevy::prelude::Entity, &gaanim_scene::MobjectId)>()
-            .iter(&world)
+            .iter(world)
             .find_map(|(entity, id)| (id.0 == runtime).then_some(entity))
             .ok_or(BoundsError::Empty)?;
-        let bounds = gaanim_animation::updaters::resolve_entity_bounds(entity, &world)
+        let bounds = gaanim_animation::updaters::resolve_entity_bounds(entity, world)
             .ok_or(BoundsError::Empty)?;
         if !(bounds.min.is_finite() && bounds.max.is_finite()) || bounds.min.x > bounds.max.x {
             return Err(BoundsError::Empty);
@@ -107,11 +302,49 @@ impl SceneModel {
     }
 }
 
+/// The compilations a scene's measurements share while the scene stays
+/// unchanged. Copies of a scene share them, since drawables measure in a
+/// copy of their scene.
+#[derive(Clone, Default)]
+pub(crate) struct MeasureCache(Arc<Mutex<Measurements>>);
+
+#[derive(Default)]
+struct Measurements {
+    /// The scene compiled up to the authoring cursor.
+    cursor: Option<(MeasureKey, CompiledMeasure)>,
+    /// The last declarations measured on their own, such as the members of
+    /// one box tree.
+    isolated: Option<(MeasureKey, CompiledMeasure)>,
+}
+
+impl MeasureCache {
+    /// Forget the compilations, e.g. once authoring is over. The next run
+    /// of the script resumes the one at the cursor.
+    pub(crate) fn clear(&self) {
+        let Ok(mut measurements) = self.0.lock() else {
+            return;
+        };
+        let cursor = std::mem::take(&mut *measurements).cursor;
+        drop(measurements);
+        if let Some(world) = cursor.and_then(|(_, compiled)| compiled.into_resumable())
+            && let Ok(mut last) = LAST_MEASURE_WORLD.lock()
+        {
+            *last = Some(world);
+        }
+    }
+}
+
+impl std::fmt::Debug for MeasureCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MeasureCache")
+    }
+}
+
 impl SceneModel {
     /// This scene reduced to the declarations of the object `id` and its
-    /// members, when they are all that decides its box; see
-    /// [`SceneModel::bounds_of`].
-    fn isolated_declaration(&self, id: ObjectId) -> Option<SceneModel> {
+    /// members, when they are all that decides its box, and those objects
+    /// in order; see [`SceneModel::bounds_of`].
+    fn isolated_declaration(&self, id: ObjectId) -> Option<(SceneModel, Vec<ObjectId>)> {
         let state = self.state.lock().expect("canvas state poisoned");
         let closure = independent_closure(&state, id)?;
         let segment = state.segments.get(state.active_idx)?;
@@ -184,8 +417,11 @@ impl SceneModel {
         }];
         drop(state);
         let mut isolated = self.clone();
-        isolated.state = Arc::new(Mutex::new(isolated_state));
-        Some(isolated)
+        isolated.state = Arc::new(Authored::new(isolated_state));
+        isolated.measured = MeasureCache::default();
+        let mut closure: Vec<_> = closure.into_iter().collect();
+        closure.sort_unstable();
+        Some((isolated, closure))
     }
 }
 
@@ -238,9 +474,13 @@ fn independent_closure(
 }
 
 /// Whether nothing outside the declaration of `spec` and its box tree shapes
-/// it: no coordinate view, HUD placement or animation state.
+/// it: no coordinate view, HUD or parallax placement, path to follow or animation
+/// state.
 fn self_contained(spec: &ObjectSpec) -> bool {
     !spec.hud
+        && spec.parallax_depth.is_none()
+        && spec.text_path.is_none()
+        && spec.extrusion.is_none()
         && !spec.defer_visibility_until_play
         && spec.coordinate_view_role.is_none()
         && spec.coordinate_label_offset.is_none()
@@ -285,7 +525,7 @@ fn spawn_members(kind: &SpawnKind) -> Option<&[ObjectId]> {
         | SpawnKind::CurvedArrow { .. }
         | SpawnKind::CurvedArrowArc { .. }
         | SpawnKind::Dimension { .. }
-        | SpawnKind::Polyline(..)
+        | SpawnKind::Polyline { .. }
         | SpawnKind::ReactivePolyline { .. }
         | SpawnKind::Bezier { .. }
         | SpawnKind::Curve(..)
@@ -312,7 +552,7 @@ impl super::Anim {
             .ok_or(BoundsError::SceneDropped)?;
         let scene = owner.upgrade().ok_or(BoundsError::SceneDropped)?;
         let scene = scene.lock().expect("scene poisoned").clone();
-        scene.compiled_bounds(self.inner.target, scene.current_time())
+        scene.measured_bounds(self.inner.target)
     }
 }
 
@@ -411,9 +651,7 @@ mod tests {
             "the fast path applies"
         );
         let fast = scene.bounds_of(handle).unwrap();
-        let full = scene
-            .compiled_bounds(handle.id, scene.current_time())
-            .unwrap();
+        let full = scene.compiled_bounds(handle.id).unwrap();
         for (a, b) in [
             (fast.min.x, full.min.x),
             (fast.min.y, full.min.y),
@@ -728,6 +966,180 @@ mod tests {
             .collect();
         scene.reflow_layout(&row, members, Default::default(), 2, Some(0.5), None, None);
         assert!(scene.isolated_declaration(fresh.id).is_none());
+    }
+
+    /// The compilation the scene's measurements at the cursor currently
+    /// share.
+    fn measured_world(scene: &SceneModel) -> Option<u64> {
+        let measurements = scene.measured.0.lock().unwrap();
+        let (_, compiled) = measurements.cursor.as_ref()?;
+        Some(compiled.generation)
+    }
+
+    #[test]
+    fn measurements_share_a_compilation_until_the_scene_changes() {
+        let mut scene = busy_scene();
+        let label = scene.text("medido").move_to(1.0, 1.0);
+        let dot = scene.circle(0.3).move_to(-1.0, 0.0);
+        scene.play(vec![label.animate().shift_by(1.0, 0.0).duration(0.4)]);
+        assert!(scene.isolated_declaration(label.id).is_none());
+
+        let first = scene.bounds_of(&label).unwrap();
+        let world = measured_world(&scene).expect("a compiled measurement");
+        assert_eq!(scene.bounds_of(&label).unwrap(), first);
+        scene.bounds_of(&dot).unwrap();
+        assert_eq!(measured_world(&scene), Some(world), "nothing changed");
+
+        // A cut on an animated drawable moves it from the cursor on.
+        let label = label.move_to(-2.0, 1.0);
+        let moved = scene.bounds_of(&label).unwrap();
+        assert!((moved.center().x + 2.0).abs() < 1e-6, "{moved:?}");
+        let world = measured_world(&scene).unwrap();
+
+        // A declaration changes what the scene compiles.
+        let fresh = scene.rect(1.0, 1.0);
+        assert_eq!(scene.bounds_of(&label).unwrap(), moved);
+        assert_ne!(measured_world(&scene), Some(world));
+        let world = measured_world(&scene).unwrap();
+        fresh.fill(Color::BLACK);
+        scene.bounds_of(&label).unwrap();
+        assert_ne!(measured_world(&scene), Some(world), "a spec changed");
+
+        // So does a scene-wide setting, which lives outside the authored state.
+        let world = measured_world(&scene).unwrap();
+        scene.background = Some(Color::BLACK);
+        scene.bounds_of(&label).unwrap();
+        assert_ne!(measured_world(&scene), Some(world));
+
+        // Copies measure in the same compilation; a submitted scene drops it.
+        let world = measured_world(&scene).unwrap();
+        assert_eq!(scene.clone().bounds_of(&label).unwrap(), moved);
+        assert_eq!(measured_world(&scene), Some(world));
+        scene.render();
+        assert_eq!(measured_world(&scene), None);
+    }
+
+    /// Box of `handle` measured at the cursor, and how the measurement got
+    /// its compilation, resuming `previous`.
+    fn measure_resuming(
+        scene: &SceneModel,
+        handle: &DrawableHandle,
+        previous: Option<CompiledMeasure>,
+    ) -> (Bounds3D, Measured, CompiledMeasure) {
+        let (mut compiled, how) = scene.measure_at_cursor(previous);
+        (compiled.bounds(handle.id).unwrap(), how, compiled)
+    }
+
+    /// A scene in three segments, with a label animated in each.
+    fn segmented_scene() -> (SceneModel, DrawableHandle) {
+        let mut scene = busy_scene();
+        let label = scene.text("medido").move_to(1.0, 1.0);
+        scene.play(vec![label.animate().shift_by(1.0, 0.0).duration(0.4)]);
+        scene.segment("tres", None).unwrap();
+        let square = scene.rect(1.0, 1.0).move_to(2.0, -2.0);
+        scene.play(vec![
+            label.animate().shift_by(0.0, 1.0).duration(0.3),
+            square.animate().rotate_by(0.4).duration(0.3),
+        ]);
+        (scene, label)
+    }
+
+    #[test]
+    fn measurements_resume_the_compilation_where_the_scene_changed() {
+        let (mut scene, label) = segmented_scene();
+        let (first, how, compiled) = measure_resuming(&scene, &label, None);
+        assert_eq!(how, Measured::Scene);
+        assert_eq!(scene.compiled_bounds(label.id).unwrap(), first);
+
+        // Authoring continues in the last segment: only it compiles again.
+        let fresh = scene.circle(0.5).move_to(-4.0, 2.0);
+        scene.play(vec![
+            label.animate().shift_by(-3.0, 0.0).duration(0.2),
+            fresh.animate().shift_by(1.0, 0.0).duration(0.2),
+        ]);
+        let (moved, how, compiled) = measure_resuming(&scene, &label, Some(compiled));
+        assert_eq!(how, Measured::Resumed);
+        assert_eq!(scene.compiled_bounds(label.id).unwrap(), moved);
+        assert!((moved.center().x - first.center().x + 3.0).abs() < 1e-9);
+        let (circle, _, compiled) = measure_resuming(&scene, &fresh, Some(compiled));
+        assert_eq!(scene.compiled_bounds(fresh.id).unwrap(), circle);
+
+        // A new segment resumes from the start of the one before.
+        scene.segment("cuatro", None).unwrap();
+        let label = label.move_to(0.0, -1.0);
+        let (cut, how, compiled) = measure_resuming(&scene, &label, Some(compiled));
+        assert_eq!(how, Measured::Resumed);
+        assert_eq!(scene.compiled_bounds(label.id).unwrap(), cut);
+
+        // The same script run again resumes the last run's measurement.
+        let (mut again, again_label) = segmented_scene();
+        let again_fresh = again.circle(0.5).move_to(-4.0, 2.0);
+        again.play(vec![
+            again_label.animate().shift_by(-3.0, 0.0).duration(0.2),
+            again_fresh.animate().shift_by(1.0, 0.0).duration(0.2),
+        ]);
+        let (bounds, how, _) = measure_resuming(&again, &again_label, Some(compiled));
+        assert_eq!(how, Measured::Resumed);
+        assert_eq!(bounds, moved);
+
+        // An earlier segment changed: nothing before it is reused wrongly.
+        let (mut edited, edited_label) = segmented_scene();
+        let (_, _, compiled) = measure_resuming(&edited, &edited_label, None);
+        let mut other = busy_scene();
+        other.background = Some(Color::BLACK);
+        let other_label = other.text("medido").move_to(3.0, 1.0);
+        other.play(vec![other_label.animate().shift_by(1.0, 0.0).duration(0.4)]);
+        let (bounds, how, _) = measure_resuming(&other, &other_label, Some(compiled));
+        assert_eq!(how, Measured::Scene);
+        assert_eq!(other.compiled_bounds(other_label.id).unwrap(), bounds);
+        let _ = edited.rect(1.0, 1.0);
+    }
+
+    #[test]
+    fn a_cut_at_the_cursor_counts() {
+        // The second segment's two plays end where the compiled clock
+        // (0.5 + 0.3 + 0.4) is a few ULPs past the authored cursor
+        // (0.5 + (0.3 + 0.4)); the cut starts at the compiled one.
+        let mut scene = busy_scene();
+        let label = scene.text("medido").move_to(1.0, 1.0);
+        scene.play(vec![label.animate().shift_by(1.0, 0.0).duration(0.4)]);
+        let label = label.move_to(-2.0, 1.0);
+        let bounds = scene.bounds_of(&label).unwrap();
+        assert!((bounds.center().x + 2.0).abs() < 1e-9, "{bounds:?}");
+        assert_eq!(scene.compiled_bounds(label.id).unwrap(), bounds);
+
+        // Animations that end at the cursor are measured at their end.
+        let label = label.move_to(1.0, 1.0);
+        scene.play(vec![label.animate().shift_by(0.5, 0.0).duration(0.3)]);
+        let bounds = scene.bounds_of(&label).unwrap();
+        assert!((bounds.center().x - 1.5).abs() < 1e-12, "{bounds:?}");
+    }
+
+    #[test]
+    fn a_box_tree_compiles_once_for_all_its_members() {
+        let mut scene = busy_scene();
+        let (row, card, slot) = card_row(&mut scene);
+        let isolated_world = |scene: &SceneModel| {
+            let measurements = scene.measured.0.lock().unwrap();
+            let (_, compiled) = measurements.isolated.as_ref()?;
+            Some(compiled.generation)
+        };
+        let boxes = [&slot, &card, &row].map(|member| {
+            assert!(scene.isolated_declaration(member.id).is_some());
+            scene.bounds_of(member).unwrap()
+        });
+        let world = isolated_world(&scene).expect("an isolated measurement");
+        assert_eq!(scene.bounds_of(&slot).unwrap(), boxes[0]);
+        assert_eq!(isolated_world(&scene), Some(world), "one box tree");
+
+        let fresh = scene.text("suelto");
+        scene.bounds_of(&fresh).unwrap();
+        assert_ne!(isolated_world(&scene), Some(world));
+        let world = isolated_world(&scene).unwrap();
+        // Another closure, measured after a declaration: compiled again.
+        assert_eq!(scene.bounds_of(&card).unwrap(), boxes[1]);
+        assert_ne!(isolated_world(&scene), Some(world));
+        assert_same(&scene, &row);
     }
 
     #[test]

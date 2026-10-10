@@ -9,7 +9,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyBytes, PyDict};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,27 +68,51 @@ impl ScriptRunner {
         let _ = self.rerun_tx.send(Rerun::Source);
     }
 
-    /// Re-run the script after project assets changed: cached images,
-    /// Lottie, glTF, and Typst layouts are read again and the scene is
-    /// replayed in full.
-    pub fn request_asset_reload(&self) {
-        let _ = self.rerun_tx.send(Rerun::Assets);
+    /// Re-run the script after the project files `changed` changed: the
+    /// cached images and Lottie compositions read from them are read again,
+    /// and the replay recompiles from the first segment whose content
+    /// changed with them.
+    pub fn request_asset_reload(&self, changed: Vec<PathBuf>) {
+        let _ = self.rerun_tx.send(Rerun::Assets(changed));
     }
 
-    /// An asset reload request that other threads and systems can keep.
+    /// A request that other threads and systems can keep to re-run the
+    /// script reading every cached asset (images, Lottie, Typst layouts)
+    /// anew and replaying the whole scene, e.g. after narration takes.
     pub fn asset_reload_handle(&self) -> impl Fn() + Send + Sync + 'static {
         let rerun_tx = self.rerun_tx.clone();
         move || {
-            let _ = rerun_tx.send(Rerun::Assets);
+            let _ = rerun_tx.send(Rerun::AllAssets);
         }
     }
 }
 
 /// Why the script runs again.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Rerun {
     Source,
-    Assets,
+    /// These project files changed.
+    Assets(Vec<PathBuf>),
+    /// Any asset may have changed.
+    AllAssets,
+}
+
+impl Rerun {
+    /// One request standing for `self` and `next`, queued while the script
+    /// ran.
+    fn merge(self, next: Self) -> Self {
+        match (self, next) {
+            (Rerun::AllAssets, _) | (_, Rerun::AllAssets) => Rerun::AllAssets,
+            (Rerun::Assets(mut paths), Rerun::Assets(more)) => {
+                paths.extend(more);
+                Rerun::Assets(paths)
+            }
+            (Rerun::Assets(paths), Rerun::Source) | (Rerun::Source, Rerun::Assets(paths)) => {
+                Rerun::Assets(paths)
+            }
+            (Rerun::Source, Rerun::Source) => Rerun::Source,
+        }
+    }
 }
 
 fn format_py_traceback(py: Python<'_>, err: &PyErr) -> String {
@@ -163,17 +187,27 @@ fn run_script_thread(
         gaanim_core::console::error("python", "could not load the in-memory `gaanim` package");
     }
 
+    if gaanim_core::console::keeps_log()
+        && let Err(error) = Python::attach(crate::console_capture::install)
+    {
+        gaanim_core::console::warn(
+            "python",
+            format!("script output will not reach the editor console · {error}"),
+        );
+    }
+
     // Run immediately on first iteration, then block for re-run signals.
     loop {
         if exited.load(Ordering::SeqCst) {
             break;
         }
 
+        gaanim_core::console::begin_run();
         host::set_compile_started_at(Some(Instant::now()));
         let result = Python::attach(|py| run_script_file(py, &script_path));
         host::set_compile_started_at(None);
         if let Err(e) = result {
-            Python::attach(|py| {
+            let tb = Python::attach(|py| {
                 let tb = without_runner_frames(&format_py_traceback(py, &e));
                 let header = format!("{} — traceback:", script_path.display());
                 let full = format!("{}\n{}", header, tb);
@@ -181,20 +215,38 @@ fn run_script_thread(
                 let color =
                     gaanim_core::console::color_enabled(gaanim_core::console::Stream::Stderr);
                 eprint!("{}", gaanim_core::console::format_traceback(&tb, color));
+                tb
             });
-            gaanim_core::console::error("python", "Script failed · fix it and save to reload");
+            let (headline, location) = gaanim_core::console::traceback_summary(&tb);
+            gaanim_core::console::record(
+                gaanim_core::console::LogEntry::new(
+                    gaanim_core::console::Level::Error,
+                    "python",
+                    headline,
+                )
+                .with_detail(tb.trim_end())
+                .at(location),
+            );
+            gaanim_core::console::print_status(
+                gaanim_core::console::Level::Error,
+                "python",
+                "Script failed · fix it and save to reload",
+            );
         }
 
         // Block until the next re-run request (or channel closed).
         match rerun_rx.recv() {
             Ok(first) => {
                 // Coalesce requests queued while the script ran.
-                let reason = rerun_rx.try_iter().fold(first, |reason, next| {
-                    if next == Rerun::Assets { next } else { reason }
-                });
-                if reason == Rerun::Assets {
-                    gaanim_api::canvas::clear_asset_caches();
-                    gaanim_api::host::mark_assets_changed();
+                match rerun_rx.try_iter().fold(first, Rerun::merge) {
+                    Rerun::Source => {}
+                    // What the forgotten files fed the scene reaches the
+                    // replay's fingerprints, so it can still reuse segments.
+                    Rerun::Assets(changed) => gaanim_api::canvas::forget_assets(&changed),
+                    Rerun::AllAssets => {
+                        gaanim_api::canvas::clear_asset_caches();
+                        gaanim_api::host::mark_assets_changed();
+                    }
                 }
             }
             Err(_) => break,
@@ -470,6 +522,8 @@ fn prepare_script_execution(py: Python<'_>, path: &Path) -> PyResult<()> {
     Ok(())
 }
 
+/// Remove the project's modules from `sys.modules`, so the next run imports
+/// them again, keeping the bytecode of those that did not change.
 fn evict_project_modules(py: Python<'_>, root: &Path) -> PyResult<()> {
     let sys = py.import("sys")?;
     let modules = sys.getattr("modules")?;
@@ -489,20 +543,92 @@ fn evict_project_modules(py: Python<'_>, root: &Path) -> PyResult<()> {
             continue;
         }
         module_names.push(name.unbind());
-        if let Ok(cached) = module.getattr("__cached__")
+        let is_source = file
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("py"));
+        if is_source
+            && let Ok(cached) = module.getattr("__cached__")
             && let Ok(cached) = cached.extract::<String>()
         {
-            bytecode_paths.push(PathBuf::from(cached));
+            bytecode_paths.push((file, PathBuf::from(cached)));
         }
     }
 
     for name in module_names {
         modules.del_item(name.bind(py))?;
     }
-    for bytecode in bytecode_paths {
-        let _ = std::fs::remove_file(bytecode);
+    for (source, bytecode) in bytecode_paths {
+        if checked_bytecode(py, &source, &bytecode).is_none() {
+            let _ = std::fs::remove_file(bytecode);
+        }
     }
     Ok(())
+}
+
+/// Flags of a pyc that Python validates against its source's hash.
+const CHECKED_HASH_PYC: u32 = 0b11;
+
+/// Make `bytecode`, Python's cache of `source`, one that it validates by the
+/// source's hash, when it provably holds the current source. `None` when it
+/// may not and must be removed.
+///
+/// Python validates a timestamp pyc by the source's size and mtime in whole
+/// seconds, so an edit that keeps the size within the second it was cached
+/// would run stale code. A timestamp pyc written after the source last
+/// changed holds the current source, and becomes a hash-checked one; Python
+/// then writes hash-checked pycs for that module, so unchanged modules
+/// never compile again.
+fn checked_bytecode(py: Python<'_>, source: &Path, bytecode: &Path) -> Option<()> {
+    let util = py.import("importlib.util").ok()?;
+    let magic = util.getattr("MAGIC_NUMBER").ok()?;
+    let magic = magic.cast::<PyBytes>().ok()?.as_bytes();
+    let mut pyc = std::fs::read(bytecode).ok()?;
+    if pyc.len() < 16 || pyc[..4] != *magic {
+        return None;
+    }
+    let word = |at: usize| u32::from_le_bytes(pyc[at..at + 4].try_into().unwrap());
+    match word(4) {
+        CHECKED_HASH_PYC => return Some(()),
+        0 => {}
+        // Python never checks an unchecked hash pyc against its source.
+        _ => return None,
+    }
+    let stamp = |metadata: &std::fs::Metadata| {
+        let modified = metadata.modified().ok()?;
+        let seconds = modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        // Python records both in 32 bits.
+        Some((modified, seconds as u32, metadata.len() as u32))
+    };
+    let (modified, seconds, size) = stamp(&std::fs::metadata(source).ok()?)?;
+    let cached_at = std::fs::metadata(bytecode).ok()?.modified().ok()?;
+    if (word(8), word(12)) != (seconds, size) || cached_at <= modified {
+        return None;
+    }
+    let content = std::fs::read(source).ok()?;
+    // The source must not change while it is hashed.
+    if stamp(&std::fs::metadata(source).ok()?)?.0 != modified {
+        return None;
+    }
+    let hash = util
+        .call_method1("source_hash", (PyBytes::new(py, &content),))
+        .ok()?;
+    let hash = hash.cast::<PyBytes>().ok()?.as_bytes();
+    if hash.len() != 8 {
+        return None;
+    }
+    pyc[4..8].copy_from_slice(&CHECKED_HASH_PYC.to_le_bytes());
+    pyc[8..16].copy_from_slice(hash);
+    // Replace the file whole, as Python writes it, so no import reads half.
+    let staged = bytecode.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&staged, &pyc).ok()?;
+    if std::fs::rename(&staged, bytecode).is_err() {
+        let _ = std::fs::remove_file(&staged);
+        return None;
+    }
+    Some(())
 }
 
 fn is_reloadable_project_module(path: &Path, root: &Path) -> bool {
@@ -640,6 +766,67 @@ mod tests {
     }
 
     #[test]
+    fn reruns_keep_unchanged_bytecode_and_see_edits_of_the_same_size() {
+        let _python = python_lock();
+        Python::initialize();
+        if Python::attach(|py| {
+            py.import("sys")
+                .and_then(|sys| sys.getattr("dont_write_bytecode"))
+                .and_then(|flag| flag.extract::<bool>())
+                .unwrap_or(true)
+        }) {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        write_project_manifest(temp.path());
+        let module = temp.path().join("same_size_case.py");
+        std::fs::write(&module, "VALUE = 'first'\n").unwrap();
+        let output = temp.path().join("result.txt");
+        let entry = temp.path().join("main.py");
+        std::fs::write(
+            &entry,
+            format!(
+                "from pathlib import Path\nimport same_size_case\n\
+                 Path({output:?}).write_text(same_size_case.VALUE)\n"
+            ),
+        )
+        .unwrap();
+        let run = || {
+            Python::attach(|py| run_script_file(py, &entry)).unwrap();
+            std::fs::read_to_string(&output).unwrap()
+        };
+        let flags = || {
+            let cache = std::fs::read_dir(temp.path().join("__pycache__"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with("same_size_case."))
+                })
+                .unwrap();
+            let pyc = std::fs::read(cache).unwrap();
+            u32::from_le_bytes(pyc[4..8].try_into().unwrap())
+        };
+
+        assert_eq!(run(), "first");
+        assert_eq!(flags(), 0, "Python caches a new module by timestamp");
+        // Same size, most likely within the second the bytecode records.
+        std::fs::write(&module, "VALUE = 'other'\n").unwrap();
+        assert_eq!(run(), "other");
+        // Unchanged since: kept, and checked by the source's hash.
+        assert_eq!(run(), "other");
+        assert_eq!(flags(), CHECKED_HASH_PYC);
+        std::fs::write(&module, "VALUE = 'third'\n").unwrap();
+        assert_eq!(run(), "third");
+        assert_eq!(
+            flags(),
+            CHECKED_HASH_PYC,
+            "Python keeps checking it by hash"
+        );
+    }
+
+    #[test]
     fn script_output_is_flushed_after_success_and_failure() {
         let _python = python_lock();
         Python::initialize();
@@ -675,5 +862,57 @@ mod tests {
                 format!("{name}-output")
             );
         }
+    }
+
+    #[test]
+    fn script_output_and_warnings_reach_the_console_log() {
+        use gaanim_core::console::{Level, entries_since};
+        let _python = python_lock();
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        write_project_manifest(temp.path());
+        let entry = temp.path().join("scene.py");
+        std::fs::write(
+            &entry,
+            "import warnings\nprint('hola', 'mundo')\nwarnings.warn('cuidado')\n\
+             print('sin salto', end='')\n",
+        )
+        .unwrap();
+        gaanim_core::console::keep_log(true);
+        let before = entries_since(0).last().map_or(0, |entry| entry.seq);
+        let result = Python::attach(|py| {
+            let sys = py.import("sys").unwrap();
+            let warnings = py.import("warnings").unwrap();
+            let stdout = sys.getattr("stdout").unwrap();
+            let show = warnings.getattr("showwarning").unwrap();
+            crate::console_capture::install(py).unwrap();
+            let result = run_script_file(py, &entry);
+            sys.setattr("stdout", stdout).unwrap();
+            warnings.setattr("showwarning", show).unwrap();
+            result
+        });
+        assert!(result.is_ok());
+        let logged = entries_since(before);
+        let printed = logged
+            .iter()
+            .find(|logged| logged.label == "print")
+            .expect("the printed line");
+        assert_eq!(printed.message, "hola mundo");
+        assert_eq!(printed.level, Level::Info);
+        assert_eq!(printed.location.as_ref().map(|at| at.line), Some(2));
+        let unfinished = logged
+            .iter()
+            .find(|logged| logged.message == "sin salto")
+            .expect("the line the run ended without a newline");
+        assert_eq!(unfinished.location.as_ref().map(|at| at.line), Some(4));
+        let warned = logged
+            .iter()
+            .find(|logged| logged.label == "UserWarning")
+            .expect("the warning");
+        assert_eq!(warned.message, "cuidado");
+        assert_eq!(warned.level, Level::Warn);
+        let location = warned.location.as_ref().expect("the warning's line");
+        assert_eq!(location.line, 3);
+        assert_eq!(location.file_name(), "scene.py");
     }
 }

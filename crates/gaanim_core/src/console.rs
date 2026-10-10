@@ -8,9 +8,11 @@
 //! `CLICOLOR_FORCE`/`FORCE_COLOR` force it, and otherwise it is used only when
 //! the stream is a terminal (and `TERM` is not `dumb`).
 
+use std::collections::VecDeque;
 use std::fmt::Display;
 use std::io::{IsTerminal, Write};
-use std::sync::OnceLock;
+use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The standard stream a line is written to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,14 +179,19 @@ pub fn status_label(line: &str) -> Option<&str> {
     rest.split_whitespace().next()
 }
 
-/// Prints a status line on stderr.
+/// Prints a status line on stderr and keeps it in the [log](entries_since).
 pub fn status(level: Level, label: &str, message: impl Display) {
-    let line = format_line(
-        level,
-        label,
-        &message.to_string(),
-        color_enabled(Stream::Stderr),
-    );
+    let message = message.to_string();
+    if keeps_log() {
+        record(LogEntry::new(level, label, &message));
+    }
+    print_status(level, label, &message);
+}
+
+/// Prints a status line on stderr without keeping it in the log, for a line
+/// whose entry was [recorded](record) with more detail.
+pub fn print_status(level: Level, label: &str, message: &str) {
+    let line = format_line(level, label, message, color_enabled(Stream::Stderr));
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
@@ -206,6 +213,173 @@ pub fn warn(label: &str, message: impl Display) {
 /// A failure the person has to act on.
 pub fn error(label: &str, message: impl Display) {
     status(Level::Error, label, message);
+}
+
+/// A line of a scene script: its file and 1-based line number.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ScriptLocation {
+    pub file: Arc<Path>,
+    pub line: u32,
+}
+
+impl ScriptLocation {
+    pub fn new(file: impl AsRef<Path>, line: u32) -> Self {
+        Self {
+            file: Arc::from(plain_path(file.as_ref())),
+            line,
+        }
+    }
+
+    /// The file name without its folders, whichever system wrote them.
+    pub fn file_name(&self) -> String {
+        let path = self.file.to_string_lossy();
+        path.rsplit(['/', '\\']).next().unwrap_or(&path).to_owned()
+    }
+}
+
+impl Display for ScriptLocation {
+    /// `path:line`, the path as [`display_path`] shows it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", display_path(&self.file), self.line)
+    }
+}
+
+/// One line of the console, kept for the editor's console panel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LogEntry {
+    /// Position in the log, increasing from 1.
+    pub seq: u64,
+    /// The script run it belongs to (see [`begin_run`]).
+    pub run: u64,
+    pub level: Level,
+    pub label: String,
+    pub message: String,
+    /// What a person can unfold under the message, such as a traceback.
+    pub detail: Option<String>,
+    /// The script line it is about.
+    pub location: Option<ScriptLocation>,
+}
+
+impl LogEntry {
+    /// An entry to [`record`]; the log numbers it.
+    pub fn new(level: Level, label: &str, message: &str) -> Self {
+        Self {
+            seq: 0,
+            run: 0,
+            level,
+            label: label.to_owned(),
+            message: message.to_owned(),
+            detail: None,
+            location: None,
+        }
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn at(mut self, location: Option<ScriptLocation>) -> Self {
+        self.location = location;
+        self
+    }
+}
+
+/// Most entries the log keeps; older ones are dropped first.
+pub const LOG_CAPACITY: usize = 2000;
+
+struct Log {
+    entries: VecDeque<LogEntry>,
+    next_seq: u64,
+    run: u64,
+}
+
+static LOG: Mutex<Log> = Mutex::new(Log {
+    entries: VecDeque::new(),
+    next_seq: 1,
+    run: 0,
+});
+
+fn log() -> std::sync::MutexGuard<'static, Log> {
+    LOG.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+static KEEP_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Start or stop keeping lines in the log. Only the editor, whose console
+/// shows them, keeps them; command-line runs pay nothing for the log.
+pub fn keep_log(keep: bool) {
+    KEEP_LOG.store(keep, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether lines are kept in the log (see [`keep_log`]).
+pub fn keeps_log() -> bool {
+    KEEP_LOG.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Keep `entry` in the log without printing it, numbered after the last one
+/// and in the current run. Does nothing unless [`keep_log`] asked for it.
+pub fn record(mut entry: LogEntry) {
+    if !keeps_log() {
+        return;
+    }
+    let mut log = log();
+    entry.seq = log.next_seq;
+    entry.run = log.run;
+    log.next_seq += 1;
+    if log.entries.len() == LOG_CAPACITY {
+        log.entries.pop_front();
+    }
+    log.entries.push_back(entry);
+}
+
+/// Start a new run of the scene script: what is logged from now on belongs
+/// to it. Returns its number.
+pub fn begin_run() -> u64 {
+    let mut log = log();
+    log.run += 1;
+    log.run
+}
+
+/// The run that entries are logged in now.
+pub fn current_run() -> u64 {
+    log().run
+}
+
+/// Entries logged after the one numbered `seq` (0 for every kept entry).
+pub fn entries_since(seq: u64) -> Vec<LogEntry> {
+    let log = log();
+    let start = log.entries.partition_point(|entry| entry.seq <= seq);
+    log.entries.range(start..).cloned().collect()
+}
+
+/// The exception line of a Python traceback, or the first non-blank line of
+/// any other message, and the innermost frame a traceback names.
+pub fn traceback_summary(message: &str) -> (&str, Option<ScriptLocation>) {
+    if !message
+        .lines()
+        .any(|line| line.starts_with("Traceback (most recent call last)"))
+    {
+        let headline = message.lines().find(|line| !line.trim().is_empty());
+        return (headline.unwrap_or("").trim(), None);
+    }
+    let headline = message
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty() && !line.starts_with(char::is_whitespace))
+        .unwrap_or("")
+        .trim();
+    let location = message
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim_start().strip_prefix("File \"")?;
+            let (path, rest) = rest.split_once('"')?;
+            let number = rest.strip_prefix(", line ")?.split(',').next()?;
+            let line = number.trim().parse::<u32>().ok()?;
+            (!path.starts_with('<')).then(|| ScriptLocation::new(path, line))
+        })
+        .next_back();
+    (headline, location)
 }
 
 /// Colours a Python traceback: frame locations dimmed, the source lines as
@@ -557,5 +731,49 @@ mod tests {
         assert_eq!(lines.len(), 4);
         assert!(lines[1].ends_with(concat!("gaanim v", env!("CARGO_PKG_VERSION"))));
         assert!(lines[2].ends_with("vector animation on the GPU"));
+    }
+
+    #[test]
+    fn the_log_keeps_recorded_lines_in_order_with_their_run() {
+        keep_log(true);
+        let before = entries_since(0).last().map_or(0, |entry| entry.seq);
+        let run = begin_run();
+        record(LogEntry::new(Level::Warn, "log-test", "first"));
+        record(
+            LogEntry::new(Level::Error, "log-test", "second")
+                .with_detail("Traceback")
+                .at(Some(ScriptLocation::new("/work/main.py", 7))),
+        );
+        let mine: Vec<_> = entries_since(before)
+            .into_iter()
+            .filter(|entry| entry.label == "log-test")
+            .collect();
+        assert_eq!(mine.len(), 2);
+        assert_eq!(mine[0].message, "first");
+        assert!(mine[0].seq < mine[1].seq);
+        assert!(mine.iter().all(|entry| entry.run >= run));
+        assert_eq!(mine[1].detail.as_deref(), Some("Traceback"));
+        assert_eq!(mine[1].location.as_ref().map(|at| at.line), Some(7));
+        assert!(
+            entries_since(mine[1].seq)
+                .iter()
+                .all(|entry| entry.seq > mine[1].seq)
+        );
+    }
+
+    #[test]
+    fn a_traceback_is_summarized_by_its_exception_and_innermost_script_frame() {
+        let traceback = "/work/main.py — traceback:\nTraceback (most recent call last):\n  File \"/home/me/project/main.py\", line 4, in <module>\n    helper()\n  File \"C:\\\\scenes\\\\lib.py\", line 12, in helper\n    1 / 0\n  File \"<frozen runpy>\", line 3, in run\nZeroDivisionError: division by zero\n";
+        let (headline, location) = traceback_summary(traceback);
+        assert_eq!(headline, "ZeroDivisionError: division by zero");
+        let location = location.expect("the innermost script frame");
+        assert_eq!(location.line, 12);
+        assert_eq!(location.file_name(), "lib.py");
+
+        assert_eq!(
+            traceback_summary("\nCustom animation failed\nboom\n"),
+            ("Custom animation failed", None)
+        );
+        assert_eq!(traceback_summary("").0, "");
     }
 }
