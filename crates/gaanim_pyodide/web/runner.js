@@ -1,9 +1,9 @@
 // Runner worker: Pyodide with the gaanim wheel built for it.
 //
-// Each run writes the editor's code and the playground's files into the
-// project folder, runs `main.py` and records its scene into a playback
-// bundle, whose bytes go back to the page for the web player. A run that
-// must stop is stopped by terminating this worker.
+// Each run writes the playground's project (`main.py`, its modules and its
+// assets, in folders) into the project folder, runs `main.py` and records its
+// scene into a playback bundle, whose bytes go back to the page for the
+// player. A run that must stop is stopped by terminating this worker.
 
 let pyodide = null;
 let runner = null;
@@ -37,23 +37,27 @@ async function init(config) {
 
 const PROJECT = "/home/pyodide/proyecto";
 
+// Write `files` ({ path, text } or { path, bytes }) into the project folder.
 function writeFiles(files) {
   const { FS } = pyodide;
   for (const file of files) {
-    FS.writeFile(`${PROJECT}/${file.name}`, new Uint8Array(file.bytes));
+    const path = `${PROJECT}/${file.path}`;
+    FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
+    FS.writeFile(path, file.text ?? new Uint8Array(file.bytes));
   }
 }
 
-async function run({ id, code, files, names, fps, assetsChanged }) {
+async function run({ id, files, paths, folders, imports, fps, assetsChanged }) {
   const started = performance.now();
   try {
-    if (files) writeFiles(files);
+    // The project's files and folders as the page has them: removed ones
+    // go, changed ones are written again.
     const sync = runner.get("sync_files");
-    sync(pyodide.toPy(names));
+    sync(pyodide.toPy(paths), pyodide.toPy(folders));
     sync.destroy();
-    pyodide.FS.writeFile(`${PROJECT}/main.py`, code);
-    // Packages the script imports (numpy, sympy…) load from Pyodide's index.
-    await pyodide.loadPackagesFromImports(code, {
+    writeFiles(files);
+    // Packages the project imports (numpy, sympy…) load from Pyodide's index.
+    await pyodide.loadPackagesFromImports(imports, {
       messageCallback: (text) => post({ type: "info", text }),
       errorCallback: (text) => post({ type: "stderr", text }),
     });

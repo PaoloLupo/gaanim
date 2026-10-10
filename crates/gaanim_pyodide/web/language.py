@@ -1,9 +1,10 @@
 """Editor services of the Gaanim playground.
 
-Jedi analyses the script against the type stubs of the ``gaanim`` package
-(``stubs.zip``), so completions, signatures and hovers show the documented
-API without loading the engine. ``language.js`` runs this module in its own
-Pyodide worker and calls these functions with the editor's text.
+Jedi analyses the playground's project against the type stubs of the
+``gaanim`` package (``stubs.zip``), so completions, signatures and hovers show
+the documented API without loading the engine, and the project's own modules
+complete across files. ``language.js`` runs this module in its own Pyodide
+worker and calls these functions with a file's path and its text.
 """
 
 import glob
@@ -14,7 +15,6 @@ import jedi
 
 STUBS = "/home/pyodide/stubs"
 PROJECT = "/home/pyodide/proyecto"
-SCRIPT = f"{PROJECT}/main.py"
 
 os.makedirs(PROJECT, exist_ok=True)
 
@@ -60,8 +60,8 @@ def _shown(text):
     return text.replace("_GaanimSelf", "Self")
 
 
-def _script(code):
-    return jedi.Script(code, path=SCRIPT, project=_project)
+def _script(path, code):
+    return jedi.Script(code, path=os.path.join(PROJECT, path), project=_project)
 
 
 def _doc(name):
@@ -79,22 +79,33 @@ def _signatures(name):
         return []
 
 
-def set_files(names):
-    """Mirror the playground's files, so paths in strings complete."""
-    keep = set(names)
-    for entry in os.listdir(PROJECT):
-        if entry != "main.py" and entry not in keep:
-            os.remove(os.path.join(PROJECT, entry))
-    for name in keep:
-        path = os.path.join(PROJECT, name)
-        if not os.path.exists(path):
-            open(path, "wb").close()
+def set_project(files):
+    """Mirror the playground's project: ``files`` maps each path to its text
+    (Python and other text files) or ``None`` (assets, kept empty so their
+    paths complete in strings)."""
+    keep = {os.path.join(PROJECT, path) for path in files}
+    for folder, _, names in os.walk(PROJECT, topdown=False):
+        for name in names:
+            path = os.path.join(folder, name)
+            if path not in keep:
+                os.remove(path)
+        if folder != PROJECT and not os.listdir(folder):
+            os.rmdir(folder)
+    for path, text in files.items():
+        full = os.path.join(PROJECT, path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        if text is None:
+            if not os.path.exists(full):
+                open(full, "wb").close()
+        else:
+            with open(full, "w", encoding="utf-8") as file:
+                file.write(text)
 
 
-def complete(code, line, column):
+def complete(path, code, line, column):
     global _completions
     try:
-        _completions = _script(code).complete(line, column)
+        _completions = _script(path, code).complete(line, column)
     except Exception:
         _completions = []
     return [
@@ -121,9 +132,9 @@ def resolve(index, label):
     }
 
 
-def hover(code, line, column):
+def hover(path, code, line, column):
     try:
-        names = _script(code).help(line, column)
+        names = _script(path, code).help(line, column)
     except Exception:
         return None
     if not names:
@@ -146,9 +157,9 @@ def hover(code, line, column):
     }
 
 
-def signatures(code, line, column):
+def signatures(path, code, line, column):
     try:
-        found = _script(code).get_signatures(line, column)
+        found = _script(path, code).get_signatures(line, column)
     except Exception:
         return None
     result = []
@@ -175,9 +186,9 @@ def signatures(code, line, column):
     return result
 
 
-def errors(code):
+def errors(path, code):
     try:
-        found = _script(code).get_syntax_errors()
+        found = _script(path, code).get_syntax_errors()
     except Exception:
         return []
     return [

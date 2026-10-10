@@ -1,9 +1,10 @@
 // Smoke test of the web playground's Python runtime, without a browser.
 //
 // Loads the gaanim wheel that scripts/build_playground.py built into Pyodide
-// for Node, runs every example the playground offers plus a scene with an
-// uploaded image and music, and checks that each records a playback bundle
-// holding them. Exits non-zero on the first failure.
+// for Node, runs every example the playground offers, a scene with an uploaded
+// image and music, and projects with folders (a module that changes between
+// runs, a font, an error inside a module), and checks that each records a
+// playback bundle holding what it should. Exits non-zero on any failure.
 //
 // Usage: PYODIDE_DIR=<node_modules/pyodide> node tests/playground_smoke.mjs [dist/playground]
 // (`npm install --prefix <dir> pyodide@<version in config.json>`).
@@ -36,13 +37,19 @@ pyodide.runPython(readFileSync(join(dist, "runner.py"), "utf8"), { globals: runn
 const PROJECT = "/home/pyodide/proyecto";
 let failures = 0;
 
-// Run `code` as main.py with `files` next to it. `check(bundle)` names what is
-// wrong with the recording; `failsAt` expects the script to fail at that line.
-function run(name, code, { files = {}, check = () => null, failsAt = null } = {}) {
+// Run `code` as main.py with `files` (by path, folders included) next to it,
+// as the page does. `check(bundle, output)` names what is wrong with the
+// recording or what the script printed; `failsAt` expects the run to fail at
+// that line of `failsIn`.
+function run(name, code, { files = {}, check = () => null, failsAt = null, failsIn = "main.py" } = {}) {
   output = [];
-  for (const [file, bytes] of Object.entries(files)) pyodide.FS.writeFile(`${PROJECT}/${file}`, bytes);
   const sync = runner.get("sync_files");
-  sync(pyodide.toPy(Object.keys(files)));
+  sync(pyodide.toPy(Object.keys(files)), pyodide.toPy([]));
+  for (const [file, bytes] of Object.entries(files)) {
+    const path = `${PROJECT}/${file}`;
+    pyodide.FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
+    pyodide.FS.writeFile(path, bytes);
+  }
   pyodide.FS.writeFile(`${PROJECT}/main.py`, code);
   const started = performance.now();
   const value = runner.get("run")(30, true, () => {});
@@ -50,11 +57,11 @@ function run(name, code, { files = {}, check = () => null, failsAt = null } = {}
   const seconds = ((performance.now() - started) / 1000).toFixed(2);
   if (failsAt !== null) {
     const error = result.error;
-    if (error?.line === failsAt && error.traceback.includes(`File "main.py", line ${failsAt}`)) {
+    if (error?.file === failsIn && error?.line === failsAt && error.traceback.includes(`File "${failsIn}", line ${failsAt}`)) {
       console.log(`ok   ${name}`);
     } else {
       failures++;
-      console.log(`FAIL ${name}: expected an error at main.py line ${failsAt}, got ${JSON.stringify(error ?? result)}`);
+      console.log(`FAIL ${name}: expected an error at ${failsIn} line ${failsAt}, got ${JSON.stringify(error ?? result)}`);
     }
     return;
   }
@@ -72,7 +79,7 @@ function run(name, code, { files = {}, check = () => null, failsAt = null } = {}
     return;
   }
   const bundle = pyodide.FS.readFile("/tmp/escena.gaanim");
-  const problem = check(bundle);
+  const problem = check(bundle, output.join("\n"));
   if (problem) {
     failures++;
     console.log(`FAIL ${name}: ${problem}`);
@@ -144,6 +151,44 @@ scene.render()
 );
 
 run("error with its line", "from gaanim import Scene\nscene = Scene()\nscene.missing()\n", { failsAt: 3 });
+
+// A project: main.py imports a module from a folder, which changes between
+// runs; the second run must see the change.
+const encoder = new TextEncoder();
+const MODULE_MAIN = `from gaanim import BLACK, Scene
+from lib.formas import radio
+
+print("radio", radio())
+scene = Scene(frame=(16, 9), background=BLACK)
+circle = scene.geometry.circle(radio())
+scene.play([circle.animate.create().duration(0.5)])
+scene.render()
+`;
+for (const value of [1.5, 2.5]) {
+  run(`module in a folder (radio ${value})`, MODULE_MAIN, {
+    files: { "lib/formas.py": encoder.encode(`def radio():\n    return ${value}\n`) },
+    check: (_, printed) => (printed.includes(`radio ${value}`) ? null : `printed ${JSON.stringify(printed)}`),
+  });
+}
+
+run(
+  "error inside a module",
+  "from lib.roto import falla\nfalla()\n",
+  { files: { "lib/roto.py": encoder.encode("def falla():\n    x = 1\n    raise ValueError('roto')\n") }, failsAt: 3, failsIn: "lib/roto.py" },
+);
+
+// A font uploaded to a folder of the project, embedded through the theme.
+run(
+  "uploaded font",
+  `from gaanim import Scene, Theme
+
+scene = Scene(frame=(16, 9), theme=Theme("technical", font_dir="assets/fonts", fonts={"text": "Victor Mono"}))
+title = scene.text("Fuente propia")
+scene.play([title.animate.write().duration(0.5)])
+scene.render()
+`,
+  { files: { "assets/fonts/VictorMono.ttf": readFileSync(join(dist, "fonts", "VictorMono-VariableFont.ttf")) } },
+);
 
 if (failures) {
   console.log(`${failures} failed`);

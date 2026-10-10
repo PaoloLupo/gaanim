@@ -1,13 +1,16 @@
 """Runs playground scripts in Pyodide and records their scene.
 
 ``runner.js`` loads the ``gaanim`` wheel built for Pyodide, runs this module
-and calls :func:`run` for each execution. The script runs as ``__main__`` from
-the project folder, where the playground's files are, so relative paths such
-as ``scene.media.image("foto.png")`` find them. Its ``scene.render()``
+and calls :func:`run` for each execution. The playground's project (its
+``main.py``, its modules and its assets, in folders) is written to the
+project folder, from which ``main.py`` runs as ``__main__``: relative paths
+such as ``scene.media.image("assets/foto.png")`` find their files, and the
+project's modules import from it, fresh on every run. ``scene.render()``
 submits the scene to the playground host (``gaanim_python::playground``),
 which records it into a playback bundle for the web player.
 """
 
+import importlib
 import importlib.machinery
 import importlib.util
 import os
@@ -46,20 +49,48 @@ core = _load_core()
 import gaanim  # noqa: E402  (needs the native module above)
 
 
-def sync_files(names):
-    """Remove project files the playground no longer has."""
-    keep = set(names) | {"main.py"}
-    for entry in PROJECT.iterdir():
-        if entry.is_file() and entry.name not in keep:
+def sync_files(paths, folders=()):
+    """Remove the project files and folders the playground no longer has.
+
+    ``paths`` are the project's files relative to the project folder
+    (``main.py``, ``lib/util.py``, ``assets/fonts/Inter.ttf``); ``folders``
+    its folders, empty ones included.
+    """
+    keep = {PROJECT / path for path in paths} | {SCRIPT}
+    keep_folders = {PROJECT / folder for folder in folders}
+    for path in keep | keep_folders:
+        keep_folders.update(path.parents)
+    for entry in sorted(PROJECT.rglob("*"), key=lambda entry: len(entry.parts), reverse=True):
+        if entry.is_file() and entry not in keep:
             entry.unlink()
+        elif entry.is_dir() and entry not in keep_folders and not any(entry.iterdir()):
+            entry.rmdir()
+    for folder in folders:
+        (PROJECT / folder).mkdir(parents=True, exist_ok=True)
+
+
+def _forget_project_modules():
+    """Drop the project's modules imported by an earlier run, so the script
+    imports them as they are now."""
+    prefix = str(PROJECT) + "/"
+    for name, module in list(sys.modules.items()):
+        if (getattr(module, "__file__", None) or "").startswith(prefix):
+            del sys.modules[name]
+    importlib.invalidate_caches()
 
 
 def _relative(text):
-    return text.replace(f'"{SCRIPT}"', '"main.py"').replace(str(PROJECT) + "/", "")
+    return text.replace(str(PROJECT) + "/", "")
+
+
+def _in_project(filename):
+    return filename.startswith(str(PROJECT) + "/")
 
 
 def _failure(error, phase):
-    """Describe `error` with the frames of the script and what it called."""
+    """Describe `error` with the frames of the project and what it called,
+    and where in the project it happened: ``file`` (relative to the project
+    folder) and ``line``."""
     summary = traceback.TracebackException.from_exception(error)
     stack = list(summary.stack)
     first = next((i for i, frame in enumerate(stack) if frame.filename == str(SCRIPT)), None)
@@ -68,18 +99,19 @@ def _failure(error, phase):
     elif phase == "run":
         # A syntax error never entered the script: only runpy's frames.
         summary.stack = traceback.StackSummary.from_list([])
-    line = None
+    where = None
     for frame in stack:
-        if frame.filename == str(SCRIPT):
-            line = frame.lineno
-    if isinstance(error, SyntaxError) and error.filename == str(SCRIPT):
-        line = error.lineno
+        if _in_project(frame.filename):
+            where = (frame.filename, frame.lineno)
+    if isinstance(error, SyntaxError) and error.filename and _in_project(error.filename):
+        where = (error.filename, error.lineno)
     return {
         "phase": phase,
         "kind": type(error).__name__,
         "message": _relative(str(error)),
         "traceback": _relative("".join(summary.format())),
-        "line": line,
+        "file": _relative(where[0]) if where else None,
+        "line": where[1] if where else None,
     }
 
 
@@ -92,6 +124,10 @@ def run(fps, assets_changed, report):
     """
     os.chdir(PROJECT)
     sys.argv = [str(SCRIPT)]
+    # The project's modules import from its folder, as a script's do.
+    if sys.path[0] != str(PROJECT):
+        sys.path.insert(0, str(PROJECT))
+    _forget_project_modules()
     if BUNDLE.exists():
         BUNDLE.unlink()
     core._playground_begin(assets_changed)

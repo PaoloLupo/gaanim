@@ -25,7 +25,7 @@ async function init(config) {
   pyodide.runPython(source, { globals: namespace, filename: "language.py" });
   services = namespace;
   // Parse the stubs once, so the first real completion is quick.
-  call("complete", ["from gaanim import Scene\nscene = Scene()\nscene.", 3, 6]);
+  call("complete", ["main.py", "from gaanim import Scene\nscene = Scene()\nscene.", 3, 6]);
 }
 
 function toJs(value) {
@@ -40,7 +40,7 @@ function toJs(value) {
 function call(method, args) {
   const fn = services.get(method);
   try {
-    return toJs(fn(...args.map((arg) => (Array.isArray(arg) ? pyodide.toPy(arg) : arg))));
+    return toJs(fn(...args.map((arg) => (arg !== null && typeof arg === "object" ? pyodide.toPy(arg) : arg))));
   } finally {
     fn.destroy();
   }
@@ -75,8 +75,8 @@ self.onmessage = async ({ data }) => {
   }
   await ready;
   if (!services) return reply(data.id, null, "not ready");
-  // `set_files` and `resolve` are cheap and must not be skipped.
-  if (data.method === "set_files" || data.method === "resolve") {
+  // `set_project` and `resolve` are cheap and must not be skipped.
+  if (data.method === "set_project" || data.method === "resolve") {
     try {
       reply(data.id, call(data.method, data.args));
     } catch (error) {

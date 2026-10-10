@@ -31,11 +31,11 @@
         <option value="60">60 fps</option>
       </select>
     </label>
-    <button type="button" id="share" class="ghost" title="Copiar un enlace con este código">Compartir</button>
+    <button type="button" id="share" class="ghost" title="Copiar un enlace con los archivos de texto del proyecto">Compartir</button>
     <div class="menu">
       <button type="button" id="download-toggle" class="ghost" aria-haspopup="true" aria-expanded="false">Descargar</button>
       <div class="menu-list" id="download-menu" hidden>
-        <button type="button" id="download-py">main.py</button>
+        <button type="button" id="download-project">proyecto-gaanim.zip</button>
         <button type="button" id="download-bundle" disabled>animacion.gaanim</button>
       </div>
     </div>
@@ -48,12 +48,41 @@
   </header>
 
   <main id="layout">
+    <section class="pane explorer" id="explorer" aria-label="Proyecto">
+      <div class="explorer-head">
+        <span class="explorer-title">Proyecto</span>
+        <span class="spacer"></span>
+        <button type="button" class="icon" id="new-file" title="Nuevo archivo" aria-label="Nuevo archivo">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M3.5 1.5h6l3 3v10h-9z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 7v5M5.5 9.5h5" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button type="button" class="icon" id="new-folder" title="Nueva carpeta" aria-label="Nueva carpeta">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 7.5v4.5M5.75 9.75h4.5" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button type="button" class="icon" id="upload-files" title="Subir archivos" aria-label="Subir archivos">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 10.5V2.5M4.5 6 8 2.5 11.5 6M2.5 10.5v3h11v-3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button type="button" class="icon" id="upload-folder" title="Subir una carpeta" aria-label="Subir una carpeta">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M1.5 3.5h5l1.5 1.5h6.5v8.5h-13z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 12V7.5M6 9.5 8 7.5l2 2" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+      </div>
+      <ul class="tree" id="tree" role="tree" aria-label="Archivos del proyecto"></ul>
+      <p class="explorer-note">Arrastra aquí archivos o carpetas: módulos de Python, imágenes, música, fuentes o datos. Las rutas son relativas a <code>main.py</code>.</p>
+      <input type="file" id="file-input" multiple hidden>
+      <input type="file" id="folder-input" webkitdirectory multiple hidden>
+    </section>
+
     <section class="pane editor-pane" aria-label="Editor">
-      <div class="tabs">
-        <span class="tab active">main.py</span>
+      <div class="editor-bar">
+        <button type="button" class="icon" id="explorer-toggle" title="Mostrar u ocultar el proyecto" aria-label="Proyecto">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 2.5h12v11H2zM6 2.5v11" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <div class="editor-tabs" id="editor-tabs" role="tablist" aria-label="Archivos abiertos"></div>
         <span class="hint" id="cursor"></span>
       </div>
-      <div id="editor" class="editor"><div class="placeholder">Cargando editor…</div></div>
+      <div class="editor-stack">
+        <div id="editor" class="editor"><div class="placeholder">Cargando editor…</div></div>
+        <div id="asset-view" class="asset-view" hidden></div>
+      </div>
     </section>
 
     <div class="splitter vertical" id="split-x" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Redimensionar"></div>
@@ -71,23 +100,13 @@
 
       <div class="panel">
         <div class="tabs" role="tablist">
-          <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="console" id="tab-console">Consola</button>
-          <button type="button" class="tab" role="tab" aria-selected="false" data-tab="files" id="tab-files">Archivos <span class="count" id="files-count" hidden></span></button>
+          <span class="tab active" role="tab" aria-selected="true" id="tab-console">Consola</span>
           <span class="spacer"></span>
           <button type="button" class="icon" id="clear-console" title="Limpiar consola" aria-label="Limpiar consola">
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
           </button>
         </div>
         <div class="tab-body" id="console" role="tabpanel" aria-labelledby="tab-console" aria-live="polite"></div>
-        <div class="tab-body files" id="files" role="tabpanel" aria-labelledby="tab-files" hidden>
-          <label class="drop" id="drop">
-            <strong>Suelta aquí imágenes o música</strong>
-            <span>o haz clic para elegirlas. Se quedan en tu navegador.</span>
-            <input type="file" id="file-input" multiple accept="image/*,audio/*,.svg,.json,.lottie,.ttf,.otf,.csv,.txt" hidden>
-          </label>
-          <ul class="file-list" id="file-list"></ul>
-          <p class="note">Usa el nombre del archivo en tu código, por ejemplo <code>scene.media.image("foto.png")</code> o <code>scene.media.audio("musica.mp3")</code>.</p>
-        </div>
       </div>
     </section>
   </main>
@@ -152,8 +171,9 @@
     </div>
   </dialog>
 
+  <div id="context-menu" class="menu-list context-menu" role="menu" hidden></div>
   <div id="toast" role="status" hidden></div>
-  <div id="dropping" hidden><div>Suelta para añadir a Archivos</div></div>
+  <div id="dropping" hidden><div>Suelta para añadir al proyecto</div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min/vs/loader.js"></script>
   <script type="module" src="main.js"></script>
