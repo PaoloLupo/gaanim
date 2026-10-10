@@ -38,11 +38,14 @@ alguna escena mueve objetos por una trayectoria.
   web: descarga el `.gaanim` con el nombre que elijas, compone el `<iframe>`
   con la dirección donde lo publicarás y la proporción de la escena, y muestra
   cómo se verá.
-- El reproductor web se inserta en otras páginas con `?embed&src=`: sin su
-  portada, empieza cuando está a la vista y se pausa al salir de ella, para
+- Un reproductor ligero, `reproductor/insertar/?src=`, pone una animación
+  en otra página: descarga unos 3 MB en lugar de los 24 del reproductor
+  completo, empieza cuando está a la vista y se pausa al salir de ella, para
   que quien lee la entrada vea la animación al llegar a ella. `loop` la
-  repite, `controls=0` oculta la barra (un clic pausa o reanuda) y
-  `autoplay=0` espera un clic. Ver
+  repite, `controls=0` oculta su barra fina (un clic pausa o reanuda) y
+  `autoplay=0` espera un clic. Una escena con posprocesado o con fondos,
+  transiciones o efectos de shader se abre en el reproductor completo. El
+  playground también lo usa. Ver
   #link("/guias/compartir/#insertar")[Insertar en un blog o sitio web].
 
 == Motion design

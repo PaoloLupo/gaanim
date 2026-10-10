@@ -5,7 +5,9 @@
 //   come from Jedi over the gaanim stubs, in a worker (language.js).
 // - Scripts run in another worker (runner.js): Pyodide with the gaanim wheel
 //   built for it. A run records the scene into a .gaanim bundle.
-// - The web player, embedded below (`?embed`), plays that bundle.
+// - The embed player (`reproductor/insertar/`), the light one a blog gets,
+//   plays that bundle; one that needs the GPU passes it leaves out
+//   (post-processing, shader backgrounds) plays in the web player (`?embed`).
 // - Uploaded files (images, music…) are kept in this browser (IndexedDB) and
 //   written next to main.py before each run.
 // - Insertar prepares the recording for a blog or website: the file to
@@ -286,27 +288,40 @@ const monaco = await new Promise((resolve, reject) => {
   throw error;
 });
 
+// The brand's palette (docs/assets/brand/README.md): graphite, violet, and
+// gold for the current frame, here the cursor.
 monaco.editor.defineTheme("gaanim", {
   base: "vs-dark",
   inherit: true,
   rules: [
-    { token: "comment", foreground: "6b7180", fontStyle: "italic" },
-    { token: "keyword", foreground: "c792ea" },
-    { token: "string", foreground: "a5d6a7" },
-    { token: "number", foreground: "f0c674" },
+    { token: "comment", foreground: "6b6b73", fontStyle: "italic" },
+    { token: "keyword", foreground: "a99fff" },
+    { token: "string", foreground: "cbc6ff" },
+    { token: "number", foreground: "ffc933" },
+    { token: "delimiter", foreground: "a0a0a0" },
   ],
   colors: {
-    "editor.background": "#0f1015",
-    "editor.lineHighlightBackground": "#16171e",
-    "editorLineNumber.foreground": "#4a4f5c",
-    "editorLineNumber.activeForeground": "#9499a6",
-    "editorGutter.background": "#0f1015",
-    "editorWidget.background": "#1c1d26",
-    "editorSuggestWidget.background": "#1c1d26",
-    "editorSuggestWidget.selectedBackground": "#2a2d3a",
-    "editorHoverWidget.background": "#1c1d26",
-    "editorCursor.foreground": "#60ce98",
-    "editor.selectionBackground": "#2c3b55",
+    "editor.background": "#121212",
+    "editor.lineHighlightBackground": "#1b1b1b",
+    "editorLineNumber.foreground": "#4a4a4a",
+    "editorLineNumber.activeForeground": "#a0a0a0",
+    "editorGutter.background": "#121212",
+    "editorWidget.background": "#1b1b1b",
+    "editorWidget.border": "#3d3d3d",
+    "editorSuggestWidget.background": "#1b1b1b",
+    "editorSuggestWidget.border": "#3d3d3d",
+    "editorSuggestWidget.selectedBackground": "#2a2650",
+    "editorSuggestWidget.highlightForeground": "#a99fff",
+    "editorHoverWidget.background": "#1b1b1b",
+    "editorHoverWidget.border": "#3d3d3d",
+    "editorCursor.foreground": "#ffc933",
+    "editor.selectionBackground": "#3f37a8aa",
+    "editor.inactiveSelectionBackground": "#3f37a855",
+    "editorBracketMatch.border": "#7c6cff",
+    "editorBracketHighlight.foreground1": "#ffc933",
+    "editorBracketHighlight.foreground2": "#a99fff",
+    "editorBracketHighlight.foreground3": "#cbc6ff",
+    "focusBorder": "#a99fff",
   },
 });
 
@@ -336,6 +351,8 @@ const editor = monaco.editor.create(ui.editor, {
   glyphMargin: true,
 });
 const model = editor.getModel();
+// The code face loads after the editor measured its fallback.
+document.fonts?.ready.then(() => monaco.editor.remeasureFonts());
 
 function revealLine(line) {
   editor.revealLineInCenterIfOutsideViewport(line);
@@ -728,7 +745,7 @@ window.addEventListener("drop", (event) => {
 });
 
 // ---------------------------------------------------------------------------
-// Web player (embedded)
+// Player (embedded)
 // ---------------------------------------------------------------------------
 
 let playerReady = false;
@@ -736,8 +753,18 @@ let pendingBundle = null;
 let lastBundle = null;
 // Size and duration of the last recording: { width, height, duration }.
 let lastScene = null;
+// "embed", the light player, or "full", the web player, for a recording
+// that needs what the light one leaves out.
+let playerKind = null;
 
-ui.player.src = new URL(`${config.player}?embed`, location.href).href;
+function usePlayer(kind) {
+  if (kind === playerKind) return;
+  playerKind = kind;
+  playerReady = false;
+  const page = kind === "embed" ? `${config.player}insertar/` : `${config.player}?embed`;
+  ui.player.src = new URL(page, location.href).href;
+}
+usePlayer("embed");
 
 window.addEventListener("message", (event) => {
   if (event.origin !== location.origin) return;
@@ -752,6 +779,10 @@ window.addEventListener("message", (event) => {
     playerReady = true;
     if (pendingBundle) openInPlayer(pendingBundle);
     pendingBundle = null;
+  } else if (message.kind === "opened" && playerKind === "embed" && message.full?.length) {
+    // Post-processing or a shader background: the web player draws them.
+    usePlayer("full");
+    pendingBundle = lastBundle;
   } else if (message.kind === "opened") {
     ui.overlay.hidden = true;
   } else if (message.kind === "error" || message.kind === "damaged") {
@@ -772,6 +803,8 @@ function showBundle(bytes, scene) {
   ui.embed.disabled = false;
   ui.embed.title = "Insertar la animación en un blog o sitio web";
   if (ui.embedDialog.open) showEmbedScene();
+  // Each recording tries the light player first.
+  usePlayer("embed");
   if (playerReady) {
     openInPlayer(bytes);
   } else {
@@ -959,14 +992,14 @@ ui.examples.addEventListener("change", () => {
   const example = examples.find((entry) => entry.name === ui.examples.value);
   ui.examples.value = "";
   if (!example) return;
-  const current = editor.getValue();
-  if (current.trim() && current !== loadedExample && !confirm(`¿Reemplazar tu código por «${example.title}»?`)) return;
+  const replaced = editor.getValue().trim() && editor.getValue() !== loadedExample;
   editor.pushUndoStop();
   editor.executeEdits("example", [{ range: model.getFullModelRange(), text: example.code }]);
   editor.pushUndoStop();
   editor.setPosition({ lineNumber: 1, column: 1 });
   loadedExample = example.code;
   run();
+  if (replaced) toast("Ejemplo cargado. Ctrl+Z recupera tu código.");
 });
 
 ui.share.addEventListener("click", async () => {
@@ -1002,9 +1035,9 @@ function downloadRecording() {
 // Insertar: the recording in a blog or website
 // ---------------------------------------------------------------------------
 
-// The page embeds the web player in an <iframe> that reads the .gaanim file
-// from the site that publishes it (`?embed&src=…`). How it plays, and the
-// file's name and address, are remembered for the next one.
+// The page embeds the embed player in an <iframe> that reads the .gaanim
+// file from the site that publishes it (`insertar/?src=…`). How it plays,
+// and the file's name and address, are remembered for the next one.
 const embed = (() => {
   const saved = (() => {
     try {
@@ -1022,6 +1055,8 @@ const embed = (() => {
   };
 })();
 const playerUrl = new URL(config.player, location.href);
+// The embed player, which the code and the preview use.
+const embedUrl = new URL("insertar/", playerUrl);
 const EXAMPLE_FOLDER = "https://tu-blog.com/animaciones/";
 let previewReady = false;
 // The recording the preview shows.
@@ -1058,12 +1093,11 @@ function fileUrl() {
 // The player's address for `src`. The file's address stays readable: only
 // what would end it, or the attribute that holds it, is escaped.
 function embedSource(url) {
-  const params = ["embed"];
+  const params = [`src=${url.replace(/[%&#+ "<>]/g, encodeURIComponent)}`];
   if (embed.loop) params.push("loop");
   if (!embed.controls) params.push("controls=0");
   if (!embed.autoplay) params.push("autoplay=0");
-  params.push(`src=${url.replace(/[%&#+ "<>]/g, encodeURIComponent)}`);
-  return `${playerUrl.origin}${playerUrl.pathname}?${params.join("&")}`;
+  return `${embedUrl.href}?${params.join("&")}`;
 }
 
 function aspectRatio(scene) {
@@ -1105,7 +1139,7 @@ function showEmbed() {
   // The full player opens the published file, or says why it cannot.
   ui.embedTestWrap.hidden = !(typed && valid);
   if (typed && valid) {
-    ui.embedTest.href = `${playerUrl.origin}${playerUrl.pathname}?src=${fileUrl().replace(/[%&#+ "<>]/g, encodeURIComponent)}`;
+    ui.embedTest.href = embedSource(fileUrl());
   }
   ui.embedCode.value = embedCode();
 }
@@ -1152,14 +1186,14 @@ function openEmbed() {
   ui.embedLoop.checked = embed.loop;
   ui.embedAutoplay.checked = embed.autoplay;
   ui.embedControls.checked = embed.controls;
-  ui.embedLocal.hidden = !["localhost", "127.0.0.1", "[::1]"].includes(playerUrl.hostname);
+  ui.embedLocal.hidden = !["localhost", "127.0.0.1", "[::1]"].includes(embedUrl.hostname);
   // The preview is a second player, started the first time it is needed.
   if (!ui.embedPreview.src) {
-    const params = new URLSearchParams({ embed: "" });
+    const params = new URLSearchParams();
     if (embed.loop) params.set("loop", "1");
     if (!embed.controls) params.set("controls", "0");
     if (!embed.autoplay) params.set("autoplay", "0");
-    ui.embedPreview.src = `${playerUrl.href}?${params}`;
+    ui.embedPreview.src = `${embedUrl.href}?${params}`;
   } else if (previewReady) {
     ui.embedPreview.contentWindow.postMessage({ type: "gaanim:options", ...previewOptions() }, location.origin);
   }

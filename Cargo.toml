@@ -28,6 +28,7 @@ members = [
   "crates/gaanim_thumbnail",
   "crates/gaanim_thumbnail_handler",
   "crates/gaanim_web",
+  "crates/gaanim_embed",
   "docs"
 ]
 

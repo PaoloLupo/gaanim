@@ -1558,6 +1558,18 @@ impl Bundle {
         self.times.len()
     }
 
+    /// Whether frames blend segments through a shader transition, which
+    /// renders in a GPU pass of its own.
+    pub fn has_shader_transitions(&self) -> bool {
+        !self.tables.transition_shaders.is_empty()
+    }
+
+    /// Whether drawables are drawn through a shader effect, which renders in
+    /// a GPU pass of its own.
+    pub fn has_shader_effects(&self) -> bool {
+        !self.tables.effect_shaders.is_empty()
+    }
+
     /// Time of every recorded frame, by frame index, in recording order: a
     /// recording in two passes stores the frame grid first, then the instants
     /// between grid frames.

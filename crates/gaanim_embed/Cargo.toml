@@ -1,0 +1,26 @@
+[package]
+name = "gaanim_embed"
+version = "0.11.0"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+description = "Gaanim's embed player: draws .gaanim files in other pages with Vello on WebGPU, without the editor"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Built only for wasm32 by scripts/build_web.py; on other targets the crate is
+# empty.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gaanim_bundle = { path = "../gaanim_bundle" }
+gaanim_math = { path = "../gaanim_math" }
+gaanim_renderer = { path = "../gaanim_renderer" }
+serde_json = { workspace = true }
+vello = "0.9.0"
+wgpu = { version = "29", features = ["webgpu"] }
+# Pinned with gaanim_web: one wasm-bindgen CLI generates both bindings.
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
+console_error_panic_hook = "0.1"

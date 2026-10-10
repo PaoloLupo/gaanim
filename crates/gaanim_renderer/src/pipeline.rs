@@ -954,6 +954,64 @@ pub fn output_pixels_per_unit(camera: &gaanim_math::Camera, output_width: u32) -
     }
 }
 
+/// Scene units to the pixels of an output `width` by `height`: the camera's
+/// frame centered and scaled to fit inside it, or to cover it with `cover`,
+/// as exports place a frame and the embed player draws one. Without a
+/// camera, scene units are pixels. Under perspective the canvas stays at the
+/// origin, unrotated: 3D content is projected onto it.
+pub fn camera_to_output(
+    resolved: Option<&gaanim_math::ResolvedCamera>,
+    width: u32,
+    height: u32,
+    cover: bool,
+) -> kurbo::Affine {
+    let (zoom, pixels_per_unit, viewport_width, viewport_height, cam_x, cam_y, angle, viewport) =
+        resolved
+            .map(|resolved| {
+                let camera = &resolved.camera;
+                let (zoom, cam_x, cam_y, angle) = match camera.projection {
+                    gaanim_math::Projection::Orthographic { zoom } => {
+                        (zoom, camera.position.x, camera.position.y, camera.z_angle())
+                    }
+                    _ => (1.0, 0.0, 0.0, 0.0),
+                };
+                (
+                    zoom,
+                    camera.pixels_per_unit(),
+                    camera.viewport_width.max(1),
+                    camera.viewport_height.max(1),
+                    cam_x,
+                    cam_y,
+                    angle,
+                    resolved.viewport,
+                )
+            })
+            .unwrap_or((
+                1.0,
+                1.0,
+                width.max(1),
+                height.max(1),
+                0.0,
+                0.0,
+                0.0,
+                gaanim_math::CameraViewport::default(),
+            ));
+    let fit_x = f64::from(width) / f64::from(viewport_width);
+    let fit_y = f64::from(height) / f64::from(viewport_height);
+    let fit_scale = if cover {
+        fit_x.max(fit_y)
+    } else {
+        fit_x.min(fit_y)
+    };
+    let scale = pixels_per_unit * zoom * fit_scale * viewport.scale;
+    let offset_y = viewport.offset_y * fit_scale;
+
+    kurbo::Affine::translate((f64::from(width) / 2.0, f64::from(height) / 2.0 + offset_y))
+        * kurbo::Affine::scale_non_uniform(scale, -scale)
+        * kurbo::Affine::rotate(-angle)
+        * kurbo::Affine::translate((-cam_x, -cam_y))
+}
+
 /// World bounding box of a fragment's visible path, and how far its strokes
 /// and effects can reach beyond it. `None` for an empty path.
 ///

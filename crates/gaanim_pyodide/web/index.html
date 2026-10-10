@@ -12,8 +12,9 @@
 <body>
   <header class="bar">
     <a class="brand" href="../" title="Documentación de Gaanim">
-      <img src="gaanim-icon-512.png" alt="" width="22" height="22">
-      <span>Gaanim <strong>Playground</strong></span>
+      <img class="logo" src="gaanim-logo-dark.svg" alt="Gaanim" width="142" height="32">
+      <img class="symbol" src="gaanim-icon.svg" alt="Gaanim" width="32" height="32">
+      <span class="product">Playground</span>
     </a>
     <label class="select" title="Cargar un ejemplo">
       <span class="sr-only">Ejemplo</span>
@@ -61,7 +62,7 @@
       <div class="player-wrap" id="player-wrap">
         <iframe id="player" title="Reproductor Gaanim" allow="fullscreen; clipboard-write"></iframe>
         <div class="player-overlay" id="player-overlay" hidden>
-          <div class="spinner" aria-hidden="true"></div>
+          <span class="loader" aria-hidden="true"><i></i><i></i><i></i></span>
           <span id="player-overlay-text">Grabando escena…</span>
         </div>
       </div>

@@ -8,6 +8,10 @@ copies the page and icons next to them. The module ships gzip-compressed
 its compressed size from any static host, GitHub Pages included. Serve the
 folder with any static server, for example `python -m http.server -d dist/web`.
 
+The embed player (`gaanim_embed`), which other pages put in an <iframe>, is
+built into `<out>/insertar/`, in a Cargo run of its own: built with the web
+player, Bevy's features for it would add about a tenth to the module.
+
 Usage: python scripts/build_web.py [--out DIR] [--profile PROFILE]
 """
 
@@ -26,6 +30,8 @@ TARGET = "wasm32-unknown-unknown"
 # getrandom 0.3 needs its web backend selected explicitly.
 RUSTFLAGS = '--cfg getrandom_backend="wasm_js"'
 PAGE_FILES = ("index.html", "main.js")
+# The embed player's page, in its folder of the web player.
+EMBED_DIR = "insertar"
 ICONS = ("favicon.ico", "gaanim-icon-512.png")
 
 
@@ -58,17 +64,40 @@ def main() -> int:
 
     check_wasm_bindgen()
     env = dict(os.environ, CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS=RUSTFLAGS)
-    subprocess.run(
-        ["cargo", "build", "-p", "gaanim_web", "--target", TARGET, "--profile", args.profile],
-        cwd=ROOT,
-        env=env,
-        check=True,
-    )
+    for package_name in ("gaanim_web", "gaanim_embed"):
+        subprocess.run(
+            [
+                "cargo",
+                "build",
+                "-p",
+                package_name,
+                "--target",
+                TARGET,
+                "--profile",
+                args.profile,
+            ],
+            cwd=ROOT,
+            env=env,
+            check=True,
+        )
     profile_dir = "debug" if args.profile == "dev" else args.profile
-    wasm = ROOT / "target" / TARGET / profile_dir / "gaanim_web.wasm"
+    built = ROOT / "target" / TARGET / profile_dir
 
     out = args.out
     shutil.rmtree(out, ignore_errors=True)
+    player = package(built / "gaanim_web.wasm", out, ROOT / "crates" / "gaanim_web" / "web")
+    for name in ICONS:
+        shutil.copy(ROOT / "docs" / "assets" / "brand" / name, out / name)
+    embed = package(
+        built / "gaanim_embed.wasm", out / EMBED_DIR, ROOT / "crates" / "gaanim_embed" / "web"
+    )
+    print(f"web player: {out} ({player}); embed player: {out / EMBED_DIR} ({embed})")
+    return 0
+
+
+def package(wasm: Path, out: Path, page: Path) -> str:
+    """The bindings of `wasm` in `out/pkg`, its module gzip-compressed, and
+    the files of `page` next to them; returns the module's sizes."""
     (out / "pkg").mkdir(parents=True)
     subprocess.run(
         [
@@ -83,21 +112,15 @@ def main() -> int:
         check=True,
     )
     for name in PAGE_FILES:
-        shutil.copy(ROOT / "crates" / "gaanim_web" / "web" / name, out / name)
-    for name in ICONS:
-        shutil.copy(ROOT / "docs" / "assets" / "brand" / name, out / name)
+        shutil.copy(page / name, out / name)
 
-    module = out / "pkg" / "gaanim_web_bg.wasm"
+    module = out / "pkg" / f"{wasm.stem}_bg.wasm"
     size = module.stat().st_size
     compressed = module.with_suffix(".wasm.gz")
     with module.open("rb") as source, gzip.open(compressed, "wb", compresslevel=9) as target:
         shutil.copyfileobj(source, target)
     module.unlink()
-    print(
-        f"web player: {out} (wasm {size / 1e6:.1f} MB, "
-        f"{compressed.stat().st_size / 1e6:.1f} MB compressed)"
-    )
-    return 0
+    return f"wasm {size / 1e6:.1f} MB, {compressed.stat().st_size / 1e6:.1f} MB compressed"
 
 
 if __name__ == "__main__":

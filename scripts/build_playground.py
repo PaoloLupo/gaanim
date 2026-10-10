@@ -9,7 +9,8 @@ player, so it needs no server beyond static files:
   package's Python files as a Pyodide wheel;
 - `stubs.zip`, the package's type stubs, for the editor's completions;
 - `examples.json`, the documentation's example scenes;
-- the page itself (`crates/gaanim_pyodide/web`).
+- the page itself (`crates/gaanim_pyodide/web`), with the brand's logo and
+  the documentation's code face.
 
 The page embeds the web player from `--player` (a URL relative to the
 playground). `--with-player` also builds the player into `<out>/reproductor`
@@ -53,7 +54,9 @@ PAGE_FILES = (
     "language.py",
     "runner.py",
 )
-ICONS = ("favicon.ico", "gaanim-icon-512.png")
+ICONS = ("favicon.ico", "gaanim-icon-512.png", "gaanim-icon.svg", "gaanim-logo-dark.svg")
+# The documentation's code face, with its license (SIL OFL 1.1).
+FONTS = ("VictorMono-VariableFont.ttf", "OFL-1.1.txt")
 EXAMPLES = ROOT / "docs" / "content" / "ejemplos"
 
 
@@ -236,6 +239,9 @@ def main() -> int:
         shutil.copy(WEB / name, out / name)
     for name in ICONS:
         shutil.copy(ROOT / "docs" / "assets" / "brand" / name, out / name)
+    (out / "fonts").mkdir()
+    for name in FONTS:
+        shutil.copy(ROOT / "docs" / "assets" / "fonts" / name, out / "fonts" / name)
 
     if args.with_player:
         subprocess.run(

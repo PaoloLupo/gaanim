@@ -1939,55 +1939,12 @@ fn capture_camera_to_vello_transform(
     output_height: u32,
     fit: crate::config::OutputFit,
 ) -> kurbo::Affine {
-    let (zoom, pixels_per_unit, viewport_width, viewport_height, cam_x, cam_y, angle, viewport) =
-        resolved
-            .map(|resolved| {
-                let camera = &resolved.camera;
-                // Under perspective the canvas stays at the origin, unrotated,
-                // as in the preview: 3D content is projected onto it.
-                let (zoom, cam_x, cam_y, angle) = match camera.projection {
-                    gaanim_math::Projection::Orthographic { zoom } => {
-                        (zoom, camera.position.x, camera.position.y, camera.z_angle())
-                    }
-                    _ => (1.0, 0.0, 0.0, 0.0),
-                };
-                (
-                    zoom,
-                    camera.pixels_per_unit(),
-                    camera.viewport_width.max(1),
-                    camera.viewport_height.max(1),
-                    cam_x,
-                    cam_y,
-                    angle,
-                    resolved.viewport,
-                )
-            })
-            .unwrap_or((
-                1.0,
-                1.0,
-                output_width.max(1),
-                output_height.max(1),
-                0.0,
-                0.0,
-                0.0,
-                gaanim_math::CameraViewport::default(),
-            ));
-    let fit_scale = output_fit_scale(
-        viewport_width,
-        viewport_height,
+    gaanim_renderer::pipeline::camera_to_output(
+        resolved,
         output_width,
         output_height,
-        fit,
-    );
-    let scale = pixels_per_unit * zoom * fit_scale * viewport.scale;
-    let offset_y = viewport.offset_y * fit_scale;
-
-    kurbo::Affine::translate((
-        output_width as f64 / 2.0,
-        output_height as f64 / 2.0 + offset_y,
-    )) * kurbo::Affine::scale_non_uniform(scale, -scale)
-        * kurbo::Affine::rotate(-angle)
-        * kurbo::Affine::translate((-cam_x, -cam_y))
+        fit == crate::config::OutputFit::Cover,
+    )
 }
 
 #[cfg(test)]

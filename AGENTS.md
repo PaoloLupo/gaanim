@@ -20,7 +20,7 @@ This file guides repository work; model selection belongs to the calling client.
 
 ## Repo layout
 
-- **Workspace root:** `Cargo.toml` defines 25 workspace members: 24 crates under
+- **Workspace root:** `Cargo.toml` defines 26 workspace members: 25 crates under
   `crates/` plus the `docs` application. `crates/gaanim_engine` is excluded on
   purpose (see below).
 - **Key crates (bottom-up):**
@@ -76,16 +76,25 @@ This file guides repository work; model selection belongs to the calling client.
     compiled to wasm32 + WebGPU. `just web` builds it into `dist/web/`. Code the
     web cannot run (native windows, files, threads, FFmpeg) is gated on
     `target_arch = "wasm32"` or goes through `gaanim_editor::platform`.
+  - `gaanim_embed` — the embed player (`dist/web/insertar/`, built with the web
+    player): decodes a bundle, composes each frame with
+    `gaanim_renderer::pipeline::compose_captured_at` and draws it with Vello on
+    WebGPU, without Bevy's app or egui (about 3 MB gzipped against 24). Its
+    page (`crates/gaanim_embed/web`) keeps the clock, range downloads,
+    controls and WebAudio. It leaves out GPU passes (post-processing, shader
+    backgrounds, transitions and effects) and hands such files to the web
+    player's `?embed` mode. Keep its transform the exports'
+    (`camera_to_output`).
   - `gaanim_pyodide` — the web playground: `gaanim.gaanim_core` built for
     `wasm32-unknown-emscripten` as a Pyodide extension (empty on other
     targets), plus the page in `crates/gaanim_pyodide/web` (Monaco, Jedi
     completions over the stubs, uploads kept in IndexedDB). Scripts run in
     Pyodide; `scene.render()` submits to the playground host
     (`gaanim_python/src/playground.rs`), which records a `.gaanim` bundle that
-    the embedded web player (`?embed`) plays. The same `?embed` mode, with
-    `src=`, `loop`, `controls=0` and `autoplay=0`, embeds a bundle in other
-    sites (`gaanim_web`'s `setEmbedOptions`/`setPlaying`; the page plays it
-    while it is on screen). `just playground` builds
+    the embed player plays (the web player's `?embed` mode when the bundle
+    needs its GPU passes). Both take `src=`, `loop`, `controls=0` and
+    `autoplay=0` and play while on screen (`gaanim_web`'s
+    `setEmbedOptions`/`setPlaying`). `just playground` builds
     `dist/playground/`. On Emscripten, Bevy's `wasm32` web glue cannot load, so
     the engine builds without Bevy's render, asset, log, window and audio
     subsystems: those features and the code that needs them are gated on
