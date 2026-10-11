@@ -176,6 +176,8 @@ el número se añade al final (`frame_00000.png`).
 
 - `--quality draft` exporta rápido a 30 fps para revisar; `standard` (la
   predeterminada) usa 60 fps y `production`, la mejor codificación.
+- `--fps` elige otra frecuencia: `24`, `25`, `50` o una fracción NTSC como
+  `24000/1001`.
 - `--width` y `--height` eligen la resolución en píxeles (1920 × 1080 por
   defecto). La escena no cambia: sus unidades lógicas se escalan.
 - `--fit contain` o `--fit cover` permiten una salida con otra proporción que
@@ -183,8 +185,9 @@ el número se añade al final (`frame_00000.png`).
   proporción distinta es un error.
 - `--from` y `--to` exportan solo un tramo. Aceptan segundos o el nombre de un
   marcador creado con `scene.marker("nombre")`; el audio se recorta al tramo.
-- `--transparent` conserva el canal alfa en WebM, WebP y PNG; la escena
-  necesita un fondo transparente.
+- `--transparent` conserva el canal alfa en WebM, MOV, WebP y PNG; la escena
+  necesita un fondo transparente. Un `.mov` es Apple ProRes, para montar la
+  animación en un editor de vídeo.
 - `--encoder` elige el codificador de MP4: `auto` (predeterminado) prueba los
   de hardware y recurre a `libx264`; también acepta `libx264`, `nvenc`, `amf`,
   `qsv` y `vaapi`, que no recurren a otro si fallan.

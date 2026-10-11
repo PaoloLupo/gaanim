@@ -42,7 +42,7 @@ página explica cada paso con detalle.
   `uv python install 3.14`. En Ubuntu tiene que ser 3.14 porque el motor
   enlaza `libpython3.14.so`.
 - *#link("https://docs.astral.sh/uv/")[uv]* crea el entorno de cada proyecto.
-- *FFmpeg* solo hace falta para exportar video (MP4, WebM, WebP animado y GIF)
+- *FFmpeg* solo hace falta para exportar video (MP4, WebM, MOV, WebP animado y GIF)
   y para `scene.media.video()`. Sin él tienes la vista previa completa y puedes
   exportar secuencias PNG.
 
