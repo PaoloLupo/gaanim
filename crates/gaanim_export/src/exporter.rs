@@ -50,10 +50,12 @@ pub fn create_progress_bar(total_frames: u64) -> ProgressBar {
     pb
 }
 
-fn format_label(format: &crate::encoder::ExportFormat) -> &str {
-    match format {
+fn format_label(config: &ExportConfig) -> &'static str {
+    match config.format {
         crate::encoder::ExportFormat::Mp4 => "MP4 (H.264)",
         crate::encoder::ExportFormat::Webm => "WebM (VP9)",
+        crate::encoder::ExportFormat::Mov if config.transparent => "MOV (ProRes 4444)",
+        crate::encoder::ExportFormat::Mov => "MOV (ProRes 422 HQ)",
         crate::encoder::ExportFormat::Webp => "WebP (animated)",
         crate::encoder::ExportFormat::Gif => "GIF",
         crate::encoder::ExportFormat::PngSequence => "PNG Sequence",
@@ -64,6 +66,7 @@ fn encoder_label(config: &ExportConfig) -> &'static str {
     match config.format {
         crate::encoder::ExportFormat::Mp4 => config.video_encoder.display_name(),
         crate::encoder::ExportFormat::Webm => "CPU (libvpx-vp9)",
+        crate::encoder::ExportFormat::Mov => "CPU (prores_ks)",
         crate::encoder::ExportFormat::Webp => "CPU (libwebp)",
         crate::encoder::ExportFormat::Gif => "CPU (GIF palette)",
         crate::encoder::ExportFormat::PngSequence => "CPU (PNG sequence)",
@@ -110,7 +113,7 @@ fn export_summary(telemetry: &Option<ExportTelemetry>, config: &ExportConfig) {
         "Resolution",
         format!("{}×{} at {} fps", config.width, config.height, config.fps),
     );
-    export_detail(telemetry, "Format", format_label(&config.format));
+    export_detail(telemetry, "Format", format_label(config));
     export_detail(telemetry, "Encoder", encoder_label(config));
     if config.transparent {
         export_detail(telemetry, "Background", "transparent");
@@ -609,7 +612,7 @@ where
         nv12_input: false,
     })?;
 
-    let total_frames = (render_length * config.fps as f64).ceil() as u64;
+    let total_frames = config.fps.frames_in(render_length);
     if let Some(telemetry) = &telemetry {
         telemetry.set_total_frames(total_frames);
     }
@@ -623,7 +626,7 @@ where
         encoder,
         progress_bar: pb,
         current_time: render_start,
-        frame_time_step: 1.0 / config.fps as f64,
+        frame_time_step: config.fps.frame_duration(),
         total_frames,
         rendered_frames: 0,
         tx,
@@ -731,11 +734,11 @@ where
         nv12_input: nv12,
     })?;
 
-    let total_frames = (render_length * config.fps as f64).ceil() as u64;
+    let total_frames = config.fps.frames_in(render_length);
     if let Some(telemetry) = &telemetry {
         telemetry.set_total_frames(total_frames);
     }
-    let frame_time_step = 1.0 / config.fps as f64;
+    let frame_time_step = config.fps.frame_duration();
     let pb = create_progress_bar(total_frames);
 
     let mut current_time = render_start;
@@ -794,7 +797,7 @@ where
                 &mut gpu,
                 &config,
                 current_time,
-                f64::from(config.fps),
+                config.fps.as_f64(),
                 blur,
             )?;
             timings.render_gpu += render_started_at.elapsed();
@@ -931,7 +934,7 @@ pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Res
     let mut config = config.apply_presets();
     // Every output frame is a recorded frame: the video runs at the rate
     // the bundle was recorded at, whatever the quality preset.
-    config.fps = bundle.scene.fps;
+    config.fps = bundle.scene.fps.into();
     let (frame_width, frame_height) = bundle.scene.output_size;
     if config.fit == crate::config::OutputFit::Error && frame_width > 0 && frame_height > 0 {
         let aspect = f64::from(frame_width) / f64::from(frame_height);
@@ -996,11 +999,11 @@ pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Res
         render_duration: render_length,
         nv12_input: false,
     })?;
-    let total_frames = (render_length * config.fps as f64).ceil() as u64;
+    let total_frames = config.fps.frames_in(render_length);
     if let Some(telemetry) = &telemetry {
         telemetry.set_total_frames(total_frames);
     }
-    let frame_time_step = 1.0 / config.fps as f64;
+    let frame_time_step = config.fps.frame_duration();
     let pb = create_progress_bar(total_frames);
     let mut current_time = render_start;
     for frame_idx in 0..total_frames {
@@ -1479,7 +1482,7 @@ where
                 &mut gpu,
                 &config,
                 seek_time,
-                f64::from(config.fps),
+                config.fps.as_f64(),
                 blur,
             )?;
             render_readback += phase_started.elapsed();

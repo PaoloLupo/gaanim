@@ -9,7 +9,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
-use crate::config::AudioTrack;
+use crate::config::{AudioTrack, FrameRate};
 
 const FFMPEG_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const FFMPEG_PROBE_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -34,6 +34,9 @@ pub type Result<T> = std::result::Result<T, ExportError>;
 pub enum ExportFormat {
     Mp4,
     Webm,
+    /// QuickTime with Apple ProRes: 4444 with alpha when transparent,
+    /// otherwise 422 HQ, for video editors.
+    Mov,
     Webp,
     Gif,
     PngSequence,
@@ -45,6 +48,7 @@ impl ExportFormat {
         match self {
             Self::Mp4 => "MP4",
             Self::Webm => "WebM",
+            Self::Mov => "MOV",
             Self::Webp => "WebP",
             Self::Gif => "GIF",
             Self::PngSequence => "PNG sequence",
@@ -357,7 +361,7 @@ pub struct EncoderConfig {
     pub output_path: String,
     pub width: u32,
     pub height: u32,
-    pub fps: u32,
+    pub fps: FrameRate,
     pub format: ExportFormat,
     pub transparent: bool,
     pub crf: u32,
@@ -472,11 +476,11 @@ fn validate_transparency(format: ExportFormat, transparent: bool) -> Result<()> 
     if transparent
         && !matches!(
             format,
-            ExportFormat::Webm | ExportFormat::Webp | ExportFormat::PngSequence
+            ExportFormat::Webm | ExportFormat::Mov | ExportFormat::Webp | ExportFormat::PngSequence
         )
     {
         return Err(ExportError::General(
-            "transparent export requires WebM, WebP, or PNG output".to_string(),
+            "transparent export requires WebM, MOV, WebP, or PNG output".to_string(),
         ));
     }
     Ok(())
@@ -641,9 +645,12 @@ impl ParallelEncoder {
         if config.audio_tracks.is_empty() {
             return Ok(None);
         }
-        if !matches!(config.format, ExportFormat::Mp4 | ExportFormat::Webm) {
+        if !matches!(
+            config.format,
+            ExportFormat::Mp4 | ExportFormat::Webm | ExportFormat::Mov
+        ) {
             return Err(ExportError::General(
-                "audio tracks can only be exported to MP4 or WebM".to_string(),
+                "audio tracks can only be exported to MP4, WebM, or MOV".to_string(),
             ));
         }
         for track in &config.audio_tracks {
@@ -675,6 +682,13 @@ impl ParallelEncoder {
 
     /// Build and start the FFmpeg process that encodes this export.
     fn spawn_ffmpeg(config: &EncoderConfig, program: &str) -> Result<Child> {
+        Self::ffmpeg_command(config, program)?
+            .spawn()
+            .map_err(|error| ffmpeg_spawn_error(config.format, program, &error))
+    }
+
+    /// The FFmpeg command that encodes this export from frames on stdin.
+    fn ffmpeg_command(config: &EncoderConfig, program: &str) -> Result<Command> {
         let mut cmd = Command::new(program);
         cmd.args(["-y", "-hide_banner", "-loglevel", "error", "-nostats"]);
 
@@ -689,7 +703,7 @@ impl ParallelEncoder {
             .arg("-s")
             .arg(format!("{}x{}", config.width, config.height))
             .arg("-r")
-            .arg(config.fps.to_string())
+            .arg(config.fps.ffmpeg_arg())
             .arg("-i")
             .arg("-");
 
@@ -792,6 +806,31 @@ impl ParallelEncoder {
                     cmd.arg("-pix_fmt").arg("yuv420p");
                 }
             }
+            ExportFormat::Mov => {
+                // ProRes keeps a fixed quality per profile: 4444 carries the
+                // alpha channel at full chroma, 422 HQ is the opaque master.
+                // Frames are converted and tagged as BT.709, which editors
+                // read from the file instead of guessing.
+                let (profile, pixel_format) = if config.transparent {
+                    ("4444", "yuva444p10le")
+                } else {
+                    ("hq", "yuv422p10le")
+                };
+                cmd.arg("-vf")
+                    .arg(format!(
+                        "scale=out_color_matrix=bt709:out_range=tv,format={pixel_format},\
+                         setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
+                    ))
+                    .arg("-c:v")
+                    .arg("prores_ks")
+                    .arg("-profile:v")
+                    .arg(profile)
+                    // Apple's vendor code: Final Cut Pro reads it as its own.
+                    .arg("-vendor")
+                    .arg("apl0")
+                    .arg("-threads")
+                    .arg("0");
+            }
             ExportFormat::Webp => {
                 let quality = Self::webp_quality(config.crf);
                 let compression = Self::webp_compression(config.encoding_speed);
@@ -831,6 +870,10 @@ impl ParallelEncoder {
                 ExportFormat::Webm => {
                     cmd.arg("-c:a").arg("libopus").arg("-b:a").arg("128k");
                 }
+                // Editors take uncompressed audio next to ProRes.
+                ExportFormat::Mov => {
+                    cmd.arg("-c:a").arg("pcm_s24le");
+                }
                 _ => unreachable!("validated audio export format"),
             }
             cmd.arg("-shortest");
@@ -841,9 +884,7 @@ impl ParallelEncoder {
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-
-        cmd.spawn()
-            .map_err(|error| ffmpeg_spawn_error(config.format, program, &error))
+        Ok(cmd)
     }
 
     fn encoder_worker(
@@ -1015,6 +1056,7 @@ mod tests {
         EncoderConfig, EncodingSpeed, ExportError, ExportFormat, ParallelEncoder, VideoEncoder,
         png_pixels, png_sequence_frame_name, select_best_encoder, validate_transparency,
     };
+    use crate::config::{AudioTrack, FrameRate};
 
     fn encoder_config(format: ExportFormat, output: &str) -> EncoderConfig {
         EncoderConfig {
@@ -1024,7 +1066,7 @@ mod tests {
                 .into_owned(),
             width: 16,
             height: 16,
-            fps: 10,
+            fps: FrameRate::whole(10),
             format,
             transparent: false,
             crf: 23,
@@ -1205,7 +1247,81 @@ mod tests {
         assert!(validate_transparency(ExportFormat::Mp4, true).is_err());
         assert!(validate_transparency(ExportFormat::Gif, true).is_err());
         assert!(validate_transparency(ExportFormat::Webm, true).is_ok());
+        assert!(validate_transparency(ExportFormat::Mov, true).is_ok());
         assert!(validate_transparency(ExportFormat::Webp, true).is_ok());
         assert!(validate_transparency(ExportFormat::PngSequence, true).is_ok());
+    }
+
+    /// The arguments FFmpeg receives for `config`.
+    fn ffmpeg_args(config: &EncoderConfig) -> Vec<String> {
+        ParallelEncoder::ffmpeg_command(config, "ffmpeg")
+            .expect("valid encoder configuration")
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn follows(args: &[String], flag: &str) -> Option<String> {
+        let index = args.iter().position(|arg| arg == flag)?;
+        args.get(index + 1).cloned()
+    }
+
+    #[test]
+    fn fractional_frame_rates_reach_ffmpeg_exactly() {
+        let mut config = encoder_config(ExportFormat::Mp4, "gaanim-ntsc.mp4");
+        config.fps = FrameRate::new(24_000, 1001).unwrap();
+        assert_eq!(
+            follows(&ffmpeg_args(&config), "-r").as_deref(),
+            Some("24000/1001")
+        );
+        config.fps = FrameRate::whole(25);
+        assert_eq!(follows(&ffmpeg_args(&config), "-r").as_deref(), Some("25"));
+    }
+
+    #[test]
+    fn mov_exports_prores_4444_with_alpha_and_422_hq_without() {
+        let mut config = encoder_config(ExportFormat::Mov, "gaanim-prores.mov");
+        config.transparent = true;
+        let args = ffmpeg_args(&config);
+        assert_eq!(follows(&args, "-c:v").as_deref(), Some("prores_ks"));
+        assert_eq!(follows(&args, "-profile:v").as_deref(), Some("4444"));
+        let filter = follows(&args, "-vf").unwrap();
+        assert!(filter.contains("format=yuva444p10le"), "{filter}");
+        assert!(filter.contains("colorspace=bt709"), "{filter}");
+
+        config.transparent = false;
+        let args = ffmpeg_args(&config);
+        assert_eq!(follows(&args, "-profile:v").as_deref(), Some("hq"));
+        assert!(
+            follows(&args, "-vf")
+                .unwrap()
+                .contains("format=yuv422p10le")
+        );
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some(config.output_path.as_str())
+        );
+    }
+
+    #[test]
+    fn mov_audio_is_uncompressed_pcm() {
+        let mut config = encoder_config(ExportFormat::Mov, "gaanim-prores-audio.mov");
+        config.audio_tracks.push(AudioTrack {
+            path: "tone.wav".into(),
+            start_time: 0.0,
+            duration: None,
+            volume: 1.0,
+            fade_in: 0.0,
+            fade_out: 0.0,
+            source_offset: 0.0,
+            source_duration: None,
+            speed: 1.0,
+            looping: false,
+        });
+        let args = ffmpeg_args(&config);
+        assert_eq!(follows(&args, "-c:a").as_deref(), Some("pcm_s24le"));
+
+        config.format = ExportFormat::Gif;
+        assert!(ParallelEncoder::ffmpeg_command(&config, "ffmpeg").is_err());
     }
 }

@@ -185,6 +185,7 @@ La extensión de `--output` elige el formato.
   [*Extensión*], [*Formato*], [*Transparencia*],
   [`.mp4`], [H.264. Necesita FFmpeg.], [No],
   [`.webm`], [VP9. Necesita FFmpeg.], [Sí],
+  [`.mov`], [Apple ProRes con audio PCM, para editores de vídeo: 422 HQ, o 4444 con `--transparent`. Necesita FFmpeg.], [Sí],
   [`.webp`], [WebP animado. Necesita FFmpeg.], [Sí],
   [`.gif`], [GIF. Necesita FFmpeg.], [No],
   [`.png`], [Secuencia de PNG, un archivo por fotograma. No necesita FFmpeg.], [Sí],
@@ -194,7 +195,7 @@ La extensión de `--output` elige el formato.
 En una secuencia PNG, un patrón `%d` o `%0Nd` en el nombre se sustituye por el
 número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
 `f_0001.png`…). Sin patrón, el número se añade al nombre: `frame.png` escribe
-`frame_00000.png`. El audio de la escena se mezcla en MP4 y WebM.
+`frame_00000.png`. El audio de la escena se mezcla en MP4, WebM y MOV.
 
 == Opciones
 
@@ -203,16 +204,16 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   inset: 7pt,
   [*Opción*], [*Predeterminado*], [*Efecto*],
   [`-o`, `--output <ARCHIVO>`], [obligatorio], [Archivo de salida; su extensión elige el formato.],
-  [`--quality <PRESET>`], [`standard`], [`draft`: 30 fps y codificación rápida. `standard`: 60 fps y equilibrio. `production`: 60 fps y la mejor compresión, más lenta.],
+  [`--quality <PRESET>`], [`standard`], [`draft`: 30 fps y codificación rápida. `standard`: 60 fps y equilibrio. `production`: 60 fps y la mejor compresión, más lenta. GIF y WebP se quedan en 30 fps.],
+  [`--fps <TASA>`], [la de `--quality`], [Fotogramas por segundo, de 1 a 240: un entero (`24`), una fracción (`24000/1001`) o un decimal (`23.976`). Sustituye a la tasa de la calidad.],
   [`--width <PX>`], [`1920`], [Ancho de salida en píxeles.],
   [`--height <PX>`], [`1080`], [Alto de salida en píxeles.],
   [`--fit <MODO>`], [`error`], [Qué hacer si la proporción de salida no coincide con el marco de la escena: `error` falla, `contain` añade bandas y `cover` recorta los bordes.],
   [`--encoder <CODIFICADOR>`], [`auto`], [Solo MP4: `auto`, `libx264`, `nvenc`, `amf`, `qsv` o `vaapi`.],
-  [`--transparent`], [desactivado], [Conserva el canal alfa en WebM, WebP y PNG. MP4 y GIF lo rechazan.],
+  [`--transparent`], [desactivado], [Conserva el canal alfa en WebM, MOV, WebP y PNG. MP4 y GIF lo rechazan.],
   [`--from <SEGUNDOS|MARCADOR>`], [`0`], [Inicio del tramo exportado.],
   [`--to <SEGUNDOS|MARCADOR>`], [fin de la escena], [Fin del tramo exportado.],
   [`--frame <SEGUNDOS|MARCADOR>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
-  [`--fps <N>`], [`60`], [Solo al grabar un paquete: fotogramas por segundo grabados, de 1 a 240.],
 )
 
 La composición se define en unidades lógicas, así que `--width` y `--height`
@@ -229,6 +230,37 @@ bloquear la GPU.
 `--transparent` solo tiene efecto si la escena tiene un fondo con alfa, por
 ejemplo `Scene(background="#00000000")`.
 
+== Fotogramas por segundo <fotogramas-por-segundo>
+
+Sin `--fps`, un vídeo sale a 30 fps con `--quality draft` y a 60 con
+`standard` o `production`; GIF y WebP no pasan de 30. `--fps` elige otra tasa
+para cualquier formato: 24 para cine y animación, 25 o 50 para PAL, y las
+fracciones NTSC 24000/1001, 30000/1001 y 60000/1001. Un decimal que redondea
+una de ellas (`23.976`, `29.97`, `59.94`) significa esa fracción exacta, que es
+la que lleva el archivo. La duración y el audio no cambian: solo cuántos
+fotogramas la cubren. El desenfoque de movimiento reparte sus muestras en el
+intervalo de cada fotograma de esa tasa.
+
+```bash
+gaanim export mi-video --output exports/cine.mp4 --fps 24
+gaanim export mi-video --output exports/ntsc.mp4 --fps 24000/1001
+```
+
+== Editores de vídeo <editores-video>
+
+Un `.mov` es Apple ProRes, el formato de intercambio que Premiere, DaVinci
+Resolve y Final Cut importan sin conversión. Sin `--transparent` es ProRes 422
+HQ; con `--transparent`, ProRes 4444 con canal alfa, para poner rótulos,
+_lower thirds_ y gráficos de Gaanim encima de un montaje. El color se guarda
+etiquetado como BT.709 y el audio, sin comprimir (PCM de 24 bits). ProRes no
+tiene niveles de compresión: `--quality` solo elige los fps, y los archivos
+pesan mucho más que un MP4.
+
+```bash
+gaanim export rotulo.py --output rotulo.mov --transparent
+gaanim export mi-video --output master.mov --fps 25
+```
+
 == Tramos y marcadores
 
 `--from` y `--to` aceptan segundos o el nombre de un
@@ -243,6 +275,7 @@ después de `--from`.
 gaanim export mi-video --output exports/video.mp4 --quality production
 gaanim export mi-video --output exports/vertical.mp4 --width 1080 --height 1920 --fit cover
 gaanim export overlay.py --output overlay.webm --transparent
+gaanim export rotulo.py --output rotulo.mov --transparent
 gaanim export mi-video --output exports/tramo.mp4 --from 12 --to 15
 gaanim export mi-video --output exports/climax.mp4 --from climax --to fin
 gaanim export mi-video --output frames/f_%04d.png --quality draft
@@ -265,11 +298,13 @@ gaanim export mi-video --output fotos/f.png --frame 3,11.4,climax
 == Paquetes
 
 Con `--output` terminado en `.gaanim`, `export` graba un paquete de la escena
-completa; `--from`, `--to`, `--transparent` y `--encoder` no se aplican. Con un
-paquete como entrada, `export` lo renderiza a vídeo sin ejecutar Python: acepta
-los demás formatos y opciones, incluidos los tramos con marcadores, y el vídeo
-tiene la frecuencia con la que se grabó el paquete. El resultado es idéntico,
-píxel a píxel, a exportar el script con esa frecuencia y el mismo tamaño.
+completa; `--from`, `--to`, `--transparent` y `--encoder` no se aplican, y
+`--fps` (60 por defecto) debe ser un entero. Con un paquete como entrada,
+`export` lo renderiza a vídeo sin ejecutar Python: acepta los demás formatos y
+opciones, incluidos los tramos con marcadores, y el vídeo tiene la frecuencia
+con la que se grabó el paquete; un `--fps` distinto es un error. El resultado
+es idéntico, píxel a píxel, a exportar el script con esa frecuencia y el mismo
+tamaño.
 
 ```bash
 gaanim export mi-charla --output mi-charla.gaanim --fps 30

@@ -21,13 +21,19 @@ from typing import Any
 VIDEO_FORMATS = {
     "mp4": {"video": "h264", "audio": "aac"},
     "webm": {"video": "vp9", "audio": "opus"},
+    # ProRes 422 HQ; the alpha export checks ProRes 4444.
+    "mov": {"video": "prores", "audio": "pcm_s24le", "pix_fmt": "yuv422p10le"},
     # Animated WebP is read from its RIFF container: FFmpeg before 7.1 cannot
     # decode animations and reports a 0x0 "webp" stream without a duration.
     "webp": {},
     "gif": {"video": "gif"},
 }
 ALL_FORMATS = (*VIDEO_FORMATS, "png")
-ALPHA_FORMATS = {"webm", "webp", "png"}
+ALPHA_FORMATS = {"webm", "mov", "webp", "png"}
+AUDIO_FORMATS = {"mp4", "webm", "mov"}
+# `--fps` rates whose exact value the video streams must carry.
+FRAME_RATES = ("24", "25", "24000/1001")
+FRAME_RATE_FORMATS = ("mp4", "webm")
 ENCODERS = ("auto", "libx264", "nvenc", "amf", "qsv", "vaapi")
 ENCODER_LABELS = {
     "libx264": "CPU (libx264)",
@@ -126,7 +132,7 @@ def ffprobe(path: Path, *, cwd: Path) -> dict[str, Any]:
             "error",
             "-count_frames",
             "-show_entries",
-            "stream=index,codec_type,codec_name,width,height,nb_read_frames,r_frame_rate",
+            "stream=index,codec_type,codec_name,profile,pix_fmt,width,height,nb_read_frames,r_frame_rate",
             "-show_entries",
             "format=duration",
             "-of",
@@ -304,6 +310,16 @@ def validate_alpha(artifact: Path, *, cwd: Path, format_name: str) -> None:
         ]
     )
     rgba = run_bytes(command, cwd=cwd)
+    if format_name == "mov":
+        stream = require_stream(ffprobe(artifact, cwd=cwd), "video", "prores", artifact)
+        # FFmpeg decodes ProRes 4444 with alpha at 10 or 12 bits.
+        if stream.get("profile") != "4444" or not str(stream.get("pix_fmt")).startswith(
+            "yuva444p"
+        ):
+            raise SmokeFailure(
+                f"{artifact} is {stream.get('profile')} {stream.get('pix_fmt')}, "
+                "expected ProRes 4444 with alpha"
+            )
     expected = WIDTH * HEIGHT * 4
     if len(rgba) != expected:
         raise SmokeFailure(
@@ -375,7 +391,7 @@ def export_format(
     else:
         artifact.unlink(missing_ok=True)
     environment = os.environ.copy()
-    if format_name in {"mp4", "webm"}:
+    if format_name in AUDIO_FORMATS:
         environment["GAANIM_EXPORT_SMOKE_AUDIO"] = str(audio_fixture)
     else:
         environment.pop("GAANIM_EXPORT_SMOKE_AUDIO", None)
@@ -421,6 +437,8 @@ def export_format(
     video = require_stream(probe, "video", expected["video"], artifact)
     validate_dimensions(video, artifact)
     validate_duration(probe, artifact)
+    if (pix_fmt := expected.get("pix_fmt")) and video.get("pix_fmt") != pix_fmt:
+        raise SmokeFailure(f"{artifact} uses {video.get('pix_fmt')} instead of {pix_fmt}")
     if audio_codec := expected.get("audio"):
         require_stream(probe, "audio", audio_codec, artifact)
     report = {
@@ -433,6 +451,47 @@ def export_format(
         report["requested_encoder"] = encoder
         report["encoder"] = reported_encoder(output, encoder)
     return report
+
+
+def export_frame_rate(
+    executable: Path,
+    scene: Path,
+    output_dir: Path,
+    format_name: str,
+    rate: str,
+    audio_fixture: Path,
+    *,
+    repo: Path,
+) -> dict[str, Any]:
+    """Exports at an explicit `--fps` and checks the stream carries that exact rate."""
+    artifact = output_dir / f"fps-{rate.replace('/', '_')}.{format_name}"
+    artifact.unlink(missing_ok=True)
+    environment = os.environ.copy()
+    environment["GAANIM_EXPORT_SMOKE_AUDIO"] = str(audio_fixture)
+    run(
+        [
+            str(executable),
+            "export",
+            str(scene),
+            "--output",
+            str(artifact),
+            "--quality",
+            "draft",
+            "--fps",
+            rate,
+            *SIZE_ARGS,
+        ],
+        cwd=repo,
+        env=environment,
+    )
+    probe = ffprobe(artifact, cwd=repo)
+    video = require_stream(probe, "video", VIDEO_FORMATS[format_name]["video"], artifact)
+    reported = video.get("r_frame_rate")
+    if Fraction(reported) != Fraction(rate):
+        raise SmokeFailure(f"{artifact} runs at {reported} fps, expected {rate}")
+    validate_duration(probe, artifact)
+    require_stream(probe, "audio", VIDEO_FORMATS[format_name]["audio"], artifact)
+    return {"format": format_name, "fps": reported, "artifact": str(artifact)}
 
 
 def export_three_d_worker(
@@ -555,6 +614,20 @@ def main() -> int:
             for format_name in args.formats
             if format_name in ALPHA_FORMATS
         ]
+        frame_rate_reports = [
+            export_frame_rate(
+                executable,
+                scene,
+                output_dir,
+                format_name,
+                rate,
+                audio_fixture,
+                repo=repo,
+            )
+            for format_name in FRAME_RATE_FORMATS
+            if format_name in args.formats
+            for rate in FRAME_RATES
+        ]
         three_d_report = (
             export_three_d_worker(
                 executable,
@@ -577,6 +650,7 @@ def main() -> int:
                 "requested_encoder": args.encoder,
                 "formats": reports,
                 "alpha": alpha_reports,
+                "frame_rates": frame_rate_reports,
                 "three_d": three_d_report,
             },
             indent=2,

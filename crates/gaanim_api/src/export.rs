@@ -15,8 +15,8 @@ use crate::runtime::replay_canvas_into;
 pub use gaanim_export::bundle::{BundleConfig, RecordingCallback};
 pub use gaanim_export::encoder::{EncodingSpeed, VideoEncoder, detect_best_encoder};
 pub use gaanim_export::prelude::{
-    AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportFormat, OutputFit,
-    QualityPreset,
+    AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportFormat, FrameRate,
+    OutputFit, QualityPreset,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -217,7 +217,7 @@ pub fn export_canvas_to_path(
     let mut config = ExportConfig::new(output_path);
     config.headless = true;
     if let Some(fps) = fps {
-        config.fps = fps;
+        config.fps = FrameRate::whole(fps);
     }
     if let Some(transparent) = transparent {
         config.transparent = transparent;

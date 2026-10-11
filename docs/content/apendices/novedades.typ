@@ -13,14 +13,34 @@ instalar una versión nueva, sigue
 
 = 0.11.1
 
-Sin publicar. Los bloques de `scene.text.code` resaltan la sintaxis con los
-colores del tema. Corrige además cuatro fallos de `animate.transform_to` que
-aparecen al pasar un personaje de un SVG de una pose a otra: los degradados se
-volvían un color liso, un SVG entero o un grupo desaparecía, una forma y su
-espejo se reducían a una astilla a mitad del morph y no había forma de fundir
-el objeto mientras se transformaba. Lee «Al actualizar» si alguna escena
-transforma formas con degradado, grupos o SVG enteros, o usa
-`scene.text.code`.
+Sin publicar. Los vídeos se exportan a cualquier frecuencia (24, 25, 50 o las
+fracciones NTSC como 23,976) y a MOV con Apple ProRes, con canal alfa, para
+montarlos en un editor de vídeo, y los bloques de `scene.text.code` resaltan
+la sintaxis con los colores del tema. Corrige además cuatro fallos de
+`animate.transform_to` que aparecen al pasar un personaje de un SVG de una
+pose a otra: los degradados se volvían un color liso, un SVG entero o un grupo
+desaparecía, una forma y su espejo se reducían a una astilla a mitad del morph
+y no había forma de fundir el objeto mientras se transformaba. Lee «Al
+actualizar» si alguna escena transforma formas con degradado, grupos o SVG
+enteros, o usa `scene.text.code`.
+
+== Exportación
+
+- `gaanim export --fps` elige los fotogramas por segundo de cualquier vídeo,
+  de 1 a 240, en lugar de los 30 o 60 de la calidad: un entero (`24`), una
+  fracción (`24000/1001`) o un decimal (`23.976`, que significa esa fracción
+  exacta). Antes solo se aplicaba al grabar un paquete, y la forma de lograr un
+  vídeo a 24 fps era grabar un paquete a 24 y exportarlo. La duración y el
+  audio no cambian, y el desenfoque de movimiento usa la tasa elegida. El
+  diálogo de exportación del editor tiene el mismo selector. Ver
+  #link("/referencia/cli/#fotogramas-por-segundo")[Fotogramas por segundo].
+- Un `--output` terminado en `.mov` exporta Apple ProRes, que Premiere,
+  DaVinci Resolve y Final Cut importan sin conversión: 422 HQ, o 4444 con
+  canal alfa con `--transparent`, con el color etiquetado como BT.709 y el
+  audio sin comprimir. Sirve para poner rótulos y _lower thirds_ de Gaanim
+  encima de un montaje; WebM también lleva alfa, pero los editores lo leen
+  mal. El diálogo del editor suma MOV a sus formatos y una casilla
+  *Conservar la transparencia* para MOV, WebM, WebP y PNG.
 
 == Texto
 
@@ -46,7 +66,6 @@ transforma formas con degradado, grupos o SVG enteros, o usa
   panel. Antes el nombre, con la letra del cuerpo, se salía por la esquina, y
   el código se centraba en la mitad izquierda: un fragmento ancho se salía del
   panel.
-
 - Un relleno o un trazo con degradado se interpola durante el morph hacia el
   del destino (posición y paradas) y sigue siendo un degradado al terminar;
   dos degradados de tipos distintos pasan por un color liso a mitad. Antes se
@@ -87,6 +106,10 @@ transforma formas con degradado, grupos o SVG enteros, o usa
   arriba a la izquierda. Para recuperar el aspecto monocromo, pasa
   `highlight=False`; si colocabas otros objetos respecto al código, revisa su
   posición.
+- En el editor, un WebM exportado desde un paquete abierto o desde un script
+  fuera de un proyecto ya no conserva el canal alfa por defecto, como
+  ocurre con `gaanim export`: marca *Conservar la transparencia* si la escena
+  tiene un fondo transparente.
 
 = 0.11.0
 
