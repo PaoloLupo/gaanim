@@ -2725,7 +2725,10 @@ impl Anim {
                 semantic_pairs,
             }));
         }
-        Ok(self.effect(AnimationType::Transform { target: target.id }))
+        Ok(self.effect(AnimationType::Transform {
+            target: target.id,
+            pairs: Vec::new(),
+        }))
     }
 
     pub fn move_along(

@@ -528,6 +528,110 @@ fn extract_brush_color(brush: &Brush) -> Option<Color> {
     }
 }
 
+/// One clip of a morph's paint change, placed by fractions of the morph.
+struct PaintMorphClip {
+    start: f64,
+    end: f64,
+    lens: PropertyLensSpec,
+}
+
+/// Clips that carry a morph's fill (or stroke) from `from` to `to`.
+///
+/// Solid colors interpolate as colors: a missing fill fades through the
+/// present one's transparent color and a missing stroke keeps the present
+/// one. Gradients interpolate as paints, geometry and stops, so a morph
+/// keeps them; two that cannot interpolate (different kinds) pass through
+/// their mean solid color halfway. Image paints fall back to colors.
+fn morph_paint_clips(
+    from: Option<&Brush>,
+    to: Option<&Brush>,
+    stroke: bool,
+) -> Vec<PaintMorphClip> {
+    let whole = |lens| {
+        vec![PaintMorphClip {
+            start: 0.0,
+            end: 1.0,
+            lens,
+        }]
+    };
+    let is = |brush: Option<&Brush>, gradient: bool| match brush {
+        Some(Brush::Gradient(_)) => gradient,
+        Some(Brush::Image(_)) => !gradient,
+        _ => false,
+    };
+    if (is(from, true) || is(to, true)) && !is(from, false) && !is(to, false) {
+        let absent = |present: &Brush| {
+            if stroke {
+                present.clone()
+            } else {
+                present.clone().multiply_alpha(0.0)
+            }
+        };
+        let (from, to) = match (from, to) {
+            (Some(from), Some(to)) => (from.clone(), to.clone()),
+            (Some(from), None) => (from.clone(), absent(from)),
+            (None, Some(to)) => (absent(to), to.clone()),
+            (None, None) => return Vec::new(),
+        };
+        let lens = |from, to| {
+            if stroke {
+                PropertyLensSpec::StrokePaint { from, to }
+            } else {
+                PropertyLensSpec::FillPaint { from, to }
+            }
+        };
+        if gaanim_animation::paint::validate_paint_transition(&from, &to).is_ok() {
+            return whole(lens(from, to));
+        }
+        let color = |brush: &Brush| extract_brush_color(brush).unwrap_or(Color::TRANSPARENT);
+        let middle = Brush::Solid(gaanim_core::interpolate_color(
+            color(&from),
+            color(&to),
+            0.5,
+        ));
+        return vec![
+            PaintMorphClip {
+                start: 0.0,
+                end: 0.5,
+                lens: lens(from, middle.clone()),
+            },
+            PaintMorphClip {
+                start: 0.5,
+                end: 1.0,
+                lens: lens(middle, to),
+            },
+        ];
+    }
+    let transparent = |color: Color| {
+        let rgba = color.to_rgba8();
+        Color::from_rgba8(rgba.r, rgba.g, rgba.b, 0)
+    };
+    // `FillColor`/`StrokeColor` materialize a solid brush, so a side that
+    // has none on both ends never gets one.
+    match (
+        from.and_then(extract_brush_color),
+        to.and_then(extract_brush_color),
+    ) {
+        (Some(from), Some(to)) if stroke => whole(PropertyLensSpec::StrokeColor { from, to }),
+        (Some(color), None) | (None, Some(color)) if stroke => {
+            whole(PropertyLensSpec::StrokeColor {
+                from: color,
+                to: color,
+            })
+        }
+        (Some(from), Some(to)) => whole(PropertyLensSpec::FillColor { from, to }),
+        (Some(from), None) => whole(PropertyLensSpec::FillColor {
+            from,
+            to: transparent(from),
+        }),
+        (None, Some(to)) => whole(PropertyLensSpec::FillColor {
+            from: transparent(to),
+            to,
+        }),
+        (None, None) => Vec::new(),
+    }
+}
+
 /// Tracks the active hot state of an Mobject during scene construction.
 /// This enables subsequent layouts and animations to automatically calculate
 /// their offsets and "from" properties without manual user input.
@@ -4603,9 +4707,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     fn play_transform_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        let (target, is_replacement) = match &anim.anim_type {
-            AnimationType::Transform { target } => (*target, false),
-            AnimationType::ReplacementTransform { target } => (*target, true),
+        let (target, is_replacement, pairs) = match &anim.anim_type {
+            AnimationType::Transform { target, pairs } => (*target, false, pairs.clone()),
+            AnimationType::ReplacementTransform { target } => (*target, true, Vec::new()),
             _ => return,
         };
 
@@ -4667,6 +4771,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // has no flattened proxy to morph; replace it leaf by leaf instead.
         if is_replacement && source_state.path.elements().is_empty() && source_has_children {
             self.play_hierarchy_replacement(&anim, target, parent_track);
+            return;
+        }
+        // Nor does a transform to or from such a hierarchy (a group or an
+        // imported SVG): it morphs the hierarchies part by part in place.
+        let aggregate = |state: &MobjectState| {
+            state.path.elements().is_empty()
+                && !state.children.is_empty()
+                && state.child_spans.is_empty()
+        };
+        if !is_replacement && (aggregate(&source_state) || aggregate(&target_state)) {
+            self.play_hierarchy_transform(&anim, target, &pairs, parent_track);
             return;
         }
 
@@ -4819,33 +4934,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }),
         );
 
-        // Morph colors
-        let source_fill = source_state.fill.as_ref().and_then(extract_brush_color);
-        let target_fill = target_state.fill.as_ref().and_then(extract_brush_color);
-        let transparent = |color: Color| {
-            let rgba = color.to_rgba8();
-            Color::from_rgba8(rgba.r, rgba.g, rgba.b, 0)
-        };
-        let fill_colors = match (source_fill, target_fill) {
-            (Some(from), Some(to)) => Some((from, to)),
-            (Some(from), None) => Some((from, transparent(from))),
-            (None, Some(to)) => Some((transparent(to), to)),
-            (None, None) => None,
-        };
-        if let Some((from, to)) = fill_colors {
-            self.timeline.add_clip(
-                parent_track,
-                morph_start_time,
-                anim.duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: anim.target,
-                    lens: PropertyLensSpec::FillColor { from, to },
-                    rate_func: anim.rate_func.clone(),
-                    delay: 0.0,
-                    label: None,
-                }),
-            );
-        }
+        // Morph paints. A no-stroke → no-stroke morph gets no stroke clip,
+        // otherwise text proxies acquire the white one-pixel halo that used
+        // to flash around the final word.
+        self.schedule_paint_morph(
+            parent_track,
+            anim.target,
+            (&source_state, &target_state),
+            morph_start_time,
+            anim.duration,
+            &anim.rate_func,
+        );
 
         let source_stroke = source_state
             .stroke
@@ -4857,30 +4956,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             .brush
             .as_ref()
             .and_then(extract_brush_color);
-
-        // `StrokeColor` materializes a solid brush. Never schedule it for a
-        // no-stroke → no-stroke morph, otherwise text proxies acquire the
-        // white one-pixel halo that used to flash around the final word.
-        let stroke_colors = match (source_stroke, target_stroke) {
-            (Some(from), Some(to)) => Some((from, to)),
-            (Some(from), None) => Some((from, from)),
-            (None, Some(to)) => Some((to, to)),
-            (None, None) => None,
-        };
-        if let Some((from, to)) = stroke_colors {
-            self.timeline.add_clip(
-                parent_track,
-                morph_start_time,
-                anim.duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: anim.target,
-                    lens: PropertyLensSpec::StrokeColor { from, to },
-                    rate_func: anim.rate_func.clone(),
-                    delay: 0.0,
-                    label: None,
-                }),
-            );
-        }
 
         if source_stroke.is_some() || target_stroke.is_some() {
             self.timeline.add_clip(
@@ -5015,6 +5090,47 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if !is_replacement && let Some(metrics) = target_text_metrics {
             self.text_metrics.insert(anim.target, metrics);
+        }
+    }
+
+    /// Schedule the fill and stroke paint clips that morph `target` from the
+    /// first state's paints to the second's over `[start, start + duration]`.
+    fn schedule_paint_morph(
+        &mut self,
+        track: TrackId,
+        target: ObjectId,
+        (from, to): (&MobjectState, &MobjectState),
+        start: f64,
+        duration: f64,
+        rate_func: &gaanim_math::RateFunc,
+    ) {
+        let clips = morph_paint_clips(from.fill.as_ref(), to.fill.as_ref(), false)
+            .into_iter()
+            .chain(morph_paint_clips(
+                from.stroke.brush.as_ref(),
+                to.stroke.brush.as_ref(),
+                true,
+            ));
+        for clip in clips {
+            // A paint that passes through a color halfway changes at a
+            // steady pace; the halves would otherwise each ease.
+            let whole = clip.start == 0.0 && clip.end == 1.0;
+            self.timeline.add_clip(
+                track,
+                start + clip.start * duration,
+                (clip.end - clip.start) * duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target,
+                    lens: clip.lens,
+                    rate_func: if whole {
+                        rate_func.clone()
+                    } else {
+                        gaanim_math::RateFunc::Linear
+                    },
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
         }
     }
 
@@ -5207,8 +5323,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         };
         let result = gaanim_math::matching::match_items(&src_items, &dst_items, &config);
 
-        let end = start + duration;
-
         // Hide all dst leaves at start (zero-duration) — they will be revealed
         // via morph or fade-in. This prevents them being visible before morph.
         for &dst_id in &dst_ids {
@@ -5241,197 +5355,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // For each matched pair, schedule morph on source leaf toward target leaf
         for (src_pos, dst_pos) in &result.pairs {
-            let src_id = src_ids[*src_pos];
-            let dst_id = dst_ids[*dst_pos];
-            let Some(src_state) = self.states.get(src_id).cloned() else {
-                continue;
-            };
-            let Some(dst_state) = self.states.get(dst_id).cloned() else {
-                continue;
-            };
-            let track = self.ensure_track(src_id);
-
-            // Compute final local transform for `src_id` so it lands exactly
-            // on `dst_id`'s world transform (position, rotation, scale) within `src_id`'s parent space.
-            let src_parent_affine = src_state
-                .parent
-                .map(|pid| self.get_world_transform(pid).to_affine_2d())
-                .unwrap_or(gaanim_core::kurbo::Affine::IDENTITY);
-            let dst_world_affine = self.get_world_transform(dst_id).to_affine_2d();
-
-            let target_local_affine = src_parent_affine.inverse() * dst_world_affine;
-            let target_transform = SpatialTransform::from_affine_2d(&target_local_affine);
-
-            // PathMorph
-            self.timeline.add_clip(
-                track,
-                start,
-                duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: src_id,
-                    lens: PropertyLensSpec::PathMorph {
-                        from: (*src_state.path).clone(),
-                        to: (*dst_state.path).clone(),
-                        table: Default::default(),
-                    },
-                    rate_func: rate_func.clone(),
-                    delay: 0.0,
-                    label: Some("TransformMatching".to_string()),
-                }),
-            );
-            // Translation
-            self.timeline.add_clip(
-                track,
-                start,
-                duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: src_id,
-                    lens: PropertyLensSpec::Translation {
-                        from: src_state.transform.translation,
-                        to: target_transform.translation,
-                    },
-                    rate_func: rate_func.clone(),
-                    delay: 0.0,
-                    label: None,
-                }),
-            );
-            // Rotation
-            self.timeline.add_clip(
-                track,
-                start,
-                duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: src_id,
-                    lens: PropertyLensSpec::Rotation {
-                        from: src_state.transform.rotation,
-                        to: target_transform.rotation,
-                    },
-                    rate_func: rate_func.clone(),
-                    delay: 0.0,
-                    label: None,
-                }),
-            );
-            // Scale
-            self.timeline.add_clip(
-                track,
-                start,
-                duration,
-                ClipPayload::Animation(AnimationSpec {
-                    target: src_id,
-                    lens: PropertyLensSpec::Scale {
-                        from: src_state.transform.scale,
-                        to: target_transform.scale,
-                    },
-                    rate_func: rate_func.clone(),
-                    delay: 0.0,
-                    label: None,
-                }),
-            );
-            // FillColor. `FillColor` materializes a solid fill, so a
-            // stroke-only pair (axis lines, grids) must not get one; a
-            // missing side fades through the transparent present color.
-            let src_fill = src_state.fill.as_ref().and_then(extract_brush_color);
-            let dst_fill = dst_state.fill.as_ref().and_then(extract_brush_color);
-            let transparent = |color: Color| {
-                let rgba = color.to_rgba8();
-                Color::from_rgba8(rgba.r, rgba.g, rgba.b, 0)
-            };
-            let fill_colors = match (src_fill, dst_fill) {
-                (Some(from), Some(to)) => Some((from, to)),
-                (Some(from), None) => Some((from, transparent(from))),
-                (None, Some(to)) => Some((transparent(to), to)),
-                (None, None) => None,
-            };
-            if let Some((from, to)) = fill_colors {
-                self.timeline.add_clip(
-                    track,
-                    start,
-                    duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: src_id,
-                        lens: PropertyLensSpec::FillColor { from, to },
-                        rate_func: rate_func.clone(),
-                        delay: 0.0,
-                        label: None,
-                    }),
-                );
-            }
-            // Stroke
-            let src_stroke = src_state
-                .stroke
-                .brush
-                .as_ref()
-                .and_then(extract_brush_color);
-            let dst_stroke = dst_state
-                .stroke
-                .brush
-                .as_ref()
-                .and_then(extract_brush_color);
-            let stroke_colors = match (src_stroke, dst_stroke) {
-                (Some(f), Some(t)) => Some((f, t)),
-                (Some(f), None) => Some((f, f)),
-                (None, Some(t)) => Some((t, t)),
-                (None, None) => None,
-            };
-            if let Some((from, to)) = stroke_colors {
-                self.timeline.add_clip(
-                    track,
-                    start,
-                    duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: src_id,
-                        lens: PropertyLensSpec::StrokeColor { from, to },
-                        rate_func: rate_func.clone(),
-                        delay: 0.0,
-                        label: None,
-                    }),
-                );
-            }
-            if src_stroke.is_some() || dst_stroke.is_some() {
-                self.timeline.add_clip(
-                    track,
-                    start,
-                    duration,
-                    ClipPayload::Animation(AnimationSpec {
-                        target: src_id,
-                        lens: PropertyLensSpec::StrokeWidth {
-                            from: src_state.stroke.style.width,
-                            to: dst_state.stroke.style.width,
-                        },
-                        rate_func: rate_func.clone(),
-                        delay: 0.0,
-                        label: None,
-                    }),
-                );
-            }
-
-            // Lock path at end (continuous seek)
-            self.timeline.add_clip(
-                track,
-                end,
-                0.0,
-                ClipPayload::Animation(AnimationSpec {
-                    target: src_id,
-                    lens: PropertyLensSpec::PathMorph {
-                        from: (*dst_state.path).clone(),
-                        to: (*dst_state.path).clone(),
-                        table: Default::default(),
-                    },
-                    rate_func: gaanim_math::RateFunc::Linear,
-                    delay: 0.0,
-                    label: None,
-                }),
-            );
-
-            // Update hot state for source leaf to target's final appearance
-            if let Some(state) = self.states.get_mut(src_id) {
-                state.path = dst_state.path.clone();
-                state.bounds = dst_state.bounds;
-                state.transform = target_transform;
-                state.fill = dst_state.fill.clone();
-                state.stroke = dst_state.stroke.clone();
+            let (src_id, dst_id) = (src_ids[*src_pos], dst_ids[*dst_pos]);
+            if self.schedule_leaf_morph(src_id, dst_id, start, duration, &rate_func)
+                && let Some(opacity) = self.states.get(dst_id).map(|state| state.opacity)
+                && let Some(state) = self.states.get_mut(src_id)
+            {
                 // Keep opacity 1 for matched
-                state.opacity = dst_state.opacity;
+                state.opacity = opacity;
             }
         }
 
@@ -5490,6 +5420,333 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     s.opacity = target_opacity;
                 }
                 // Also ensure they become visible at end via schedule_show? opacity clip suffices
+            }
+        }
+    }
+
+    /// Schedule the morph of the leaf `src_id` into the leaf `dst_id` over
+    /// `[start, start + duration]`: shape, paints, and a transform that
+    /// lands it on `dst_id` within its own parent. Opacity is left alone.
+    /// Returns whether both leaves exist.
+    fn schedule_leaf_morph(
+        &mut self,
+        src_id: ObjectId,
+        dst_id: ObjectId,
+        start: f64,
+        duration: f64,
+        rate_func: &gaanim_math::RateFunc,
+    ) -> bool {
+        let (Some(src_state), Some(dst_state)) = (
+            self.states.get(src_id).cloned(),
+            self.states.get(dst_id).cloned(),
+        ) else {
+            return false;
+        };
+        let end = start + duration;
+        let track = self.ensure_track(src_id);
+
+        // Compute final local transform for `src_id` so it lands exactly
+        // on `dst_id`'s world transform (position, rotation, scale) within `src_id`'s parent space.
+        let src_parent_affine = src_state
+            .parent
+            .map(|pid| self.get_world_transform(pid).to_affine_2d())
+            .unwrap_or(gaanim_core::kurbo::Affine::IDENTITY);
+        let dst_world_affine = self.get_world_transform(dst_id).to_affine_2d();
+
+        let target_local_affine = src_parent_affine.inverse() * dst_world_affine;
+        let target_transform = SpatialTransform::from_affine_2d(&target_local_affine);
+
+        // PathMorph
+        self.timeline.add_clip(
+            track,
+            start,
+            duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: src_id,
+                lens: PropertyLensSpec::PathMorph {
+                    from: (*src_state.path).clone(),
+                    to: (*dst_state.path).clone(),
+                    table: Default::default(),
+                },
+                rate_func: rate_func.clone(),
+                delay: 0.0,
+                label: Some("TransformMatching".to_string()),
+            }),
+        );
+        // Translation
+        self.timeline.add_clip(
+            track,
+            start,
+            duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: src_id,
+                lens: PropertyLensSpec::Translation {
+                    from: src_state.transform.translation,
+                    to: target_transform.translation,
+                },
+                rate_func: rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        // Rotation
+        self.timeline.add_clip(
+            track,
+            start,
+            duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: src_id,
+                lens: PropertyLensSpec::Rotation {
+                    from: src_state.transform.rotation,
+                    to: target_transform.rotation,
+                },
+                rate_func: rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        // Scale
+        self.timeline.add_clip(
+            track,
+            start,
+            duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: src_id,
+                lens: PropertyLensSpec::Scale {
+                    from: src_state.transform.scale,
+                    to: target_transform.scale,
+                },
+                rate_func: rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
+        // Paints. A stroke-only pair (axis lines, grids) must not get a
+        // fill; a missing side fades through the transparent present one.
+        self.schedule_paint_morph(
+            track,
+            src_id,
+            (&src_state, &dst_state),
+            start,
+            duration,
+            rate_func,
+        );
+        let src_stroke = src_state
+            .stroke
+            .brush
+            .as_ref()
+            .and_then(extract_brush_color);
+        let dst_stroke = dst_state
+            .stroke
+            .brush
+            .as_ref()
+            .and_then(extract_brush_color);
+        if src_stroke.is_some() || dst_stroke.is_some() {
+            self.timeline.add_clip(
+                track,
+                start,
+                duration,
+                ClipPayload::Animation(AnimationSpec {
+                    target: src_id,
+                    lens: PropertyLensSpec::StrokeWidth {
+                        from: src_state.stroke.style.width,
+                        to: dst_state.stroke.style.width,
+                    },
+                    rate_func: rate_func.clone(),
+                    delay: 0.0,
+                    label: None,
+                }),
+            );
+        }
+
+        // Lock path at end (continuous seek)
+        self.timeline.add_clip(
+            track,
+            end,
+            0.0,
+            ClipPayload::Animation(AnimationSpec {
+                target: src_id,
+                lens: PropertyLensSpec::PathMorph {
+                    from: (*dst_state.path).clone(),
+                    to: (*dst_state.path).clone(),
+                    table: Default::default(),
+                },
+                rate_func: gaanim_math::RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+
+        // Update hot state for source leaf to target's final appearance
+        if let Some(state) = self.states.get_mut(src_id) {
+            state.path = dst_state.path.clone();
+            state.bounds = dst_state.bounds;
+            state.transform = target_transform;
+            state.fill = dst_state.fill.clone();
+            state.stroke = dst_state.stroke.clone();
+        }
+        true
+    }
+
+    /// Leaves of `root` that a part-by-part morph pairs (drawn shapes, and
+    /// glyphs for text), split into those with geometry and those without,
+    /// such as images, which can only appear or vanish.
+    fn morph_leaves(&self, root: ObjectId) -> (Vec<ObjectId>, Vec<ObjectId>) {
+        let (mut shaped, mut shapeless) = (Vec::new(), Vec::new());
+        for id in self.collect_leaf_match_data(root).0 {
+            match self.states.get(id) {
+                Some(state) if state.exclude_from_parent_draw => {}
+                Some(state) if state.path.elements().is_empty() => shapeless.push(id),
+                Some(_) => shaped.push(id),
+                None => {}
+            }
+        }
+        (shaped, shapeless)
+    }
+
+    /// `transform_to` to or from a hierarchy whose root draws nothing itself,
+    /// such as a group or an imported SVG. The source morphs part by part in
+    /// place and keeps its identity; the target stays a hidden template.
+    /// Parts that share a name or SVG id (`pairs`) pair first, then the
+    /// leaves inside each pair, or outside every pair, pair by shape. Source
+    /// leaves left over fade out. Target leaves left over fade in where the
+    /// target is, the only part of it that shows, at the source's opacity.
+    fn play_hierarchy_transform(
+        &mut self,
+        anim: &AnimationBuilder,
+        target: ObjectId,
+        pairs: &[(ObjectId, ObjectId)],
+        parent_track: TrackId,
+    ) {
+        let source = anim.target;
+        let (Some(source_opacity), Some(target_state)) = (
+            self.states.get(source).map(|state| state.opacity),
+            self.states.get(target).cloned(),
+        ) else {
+            return;
+        };
+        let start = self.current_time + anim.delay.max(0.0);
+        let duration = anim.duration.max(0.0);
+        let opacity_clip = |target: ObjectId, from: f32, to: f32, rate_func: RateFunc| {
+            ClipPayload::Animation(AnimationSpec {
+                target,
+                lens: PropertyLensSpec::Opacity { from, to },
+                rate_func,
+                delay: 0.0,
+                label: None,
+            })
+        };
+
+        // Each leaf belongs to the innermost keyed pair that holds it; the
+        // roots form the last, outermost one.
+        let (source_leaves, mut leaving) = self.morph_leaves(source);
+        let (target_leaves, mut entering) = self.morph_leaves(target);
+        let target_leaf_set: HashSet<ObjectId> =
+            target_leaves.iter().chain(&entering).copied().collect();
+        let region = |builder: &Self, leaf: ObjectId, root: ObjectId, side: usize| {
+            let mut current = Some(leaf);
+            while let Some(id) = current {
+                if let Some(index) = pairs
+                    .iter()
+                    .position(|&(source, target)| [source, target][side] == id)
+                {
+                    return index;
+                }
+                if id == root {
+                    break;
+                }
+                current = builder.states.get(id).and_then(|state| state.parent);
+            }
+            pairs.len()
+        };
+        let mut regions = vec![(Vec::new(), Vec::new()); pairs.len() + 1];
+        for &leaf in &source_leaves {
+            regions[region(self, leaf, source, 0)].0.push(leaf);
+        }
+        for &leaf in &target_leaves {
+            regions[region(self, leaf, target, 1)].1.push(leaf);
+        }
+        let mut matched = Vec::new();
+        for (sources, targets) in regions {
+            if let ([source], [target]) = (sources.as_slice(), targets.as_slice()) {
+                matched.push((*source, *target));
+                continue;
+            }
+            let items = |ids: &[ObjectId]| {
+                ids.iter()
+                    .enumerate()
+                    .filter_map(|(index, &id)| {
+                        let mut item = self.build_match_item(id, None)?;
+                        item.index = index;
+                        Some(item)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let result = gaanim_math::matching::match_items(
+                &items(&sources),
+                &items(&targets),
+                &MatchingConfig::default(),
+            );
+            matched.extend(result.pairs.iter().map(|&(s, t)| (sources[s], targets[t])));
+            leaving.extend(result.unmatched_src.iter().map(|&s| sources[s]));
+            entering.extend(result.unmatched_dst.iter().map(|&t| targets[t]));
+        }
+
+        // The target is a template, hidden from the start of the morph.
+        // Entering leaves show through its containers, its root at the
+        // source's opacity, while its other leaves stay hidden.
+        self.hide_visuals_now(&target_state);
+        for id in self.hierarchy_ids(target) {
+            let Some(state) = self.states.get(id) else {
+                continue;
+            };
+            let (entity, opacity) = (state.entity, state.opacity);
+            self.commands.entity(entity).insert(Opacity(0.0));
+            let clip = if entering.is_empty() || target_leaf_set.contains(&id) {
+                opacity_clip(id, opacity, 0.0, RateFunc::Linear)
+            } else if id == target {
+                opacity_clip(id, 0.0, source_opacity, RateFunc::Linear)
+            } else {
+                opacity_clip(id, 0.0, opacity, RateFunc::Linear)
+            };
+            self.timeline.add_clip(parent_track, start, 0.0, clip);
+        }
+        if !entering.is_empty()
+            && let Some(state) = self.states.get_mut(target)
+        {
+            state.opacity = source_opacity;
+        }
+        for &leaf in &entering {
+            let opacity = if leaf == target {
+                Some(source_opacity)
+            } else {
+                self.states.get(leaf).map(|state| state.opacity)
+            };
+            if let Some(opacity) = opacity {
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    duration,
+                    opacity_clip(leaf, 0.0, opacity, anim.rate_func.clone()),
+                );
+            }
+        }
+
+        for (source_leaf, target_leaf) in matched {
+            self.schedule_leaf_morph(source_leaf, target_leaf, start, duration, &anim.rate_func);
+        }
+        for leaf in leaving {
+            let Some(opacity) = self.states.get(leaf).map(|state| state.opacity) else {
+                continue;
+            };
+            self.timeline.add_clip(
+                parent_track,
+                start,
+                duration,
+                opacity_clip(leaf, opacity, 0.0, anim.rate_func.clone()),
+            );
+            if let Some(state) = self.states.get_mut(leaf) {
+                state.opacity = 0.0;
             }
         }
     }
@@ -9798,7 +10055,10 @@ mod tests {
 
         builder.play(AnimationBuilder {
             target: source_id,
-            anim_type: AnimationType::Transform { target: target_id },
+            anim_type: AnimationType::Transform {
+                target: target_id,
+                pairs: Vec::new(),
+            },
             duration: 1.0,
             delay: 0.0,
             rate_func: gaanim_math::RateFunc::Linear,
@@ -9874,7 +10134,10 @@ mod tests {
 
         builder.play_at_current_time(AnimationBuilder {
             target: source_id,
-            anim_type: AnimationType::Transform { target: target_id },
+            anim_type: AnimationType::Transform {
+                target: target_id,
+                pairs: Vec::new(),
+            },
             duration: 1.0,
             delay: 2.0,
             rate_func: gaanim_math::RateFunc::Linear,
@@ -9935,7 +10198,10 @@ mod tests {
 
         builder.play(AnimationBuilder {
             target: source_id,
-            anim_type: AnimationType::Transform { target: target_id },
+            anim_type: AnimationType::Transform {
+                target: target_id,
+                pairs: Vec::new(),
+            },
             duration: 1.0,
             delay: 0.0,
             rate_func: gaanim_math::RateFunc::Linear,
@@ -9994,7 +10260,10 @@ mod tests {
 
         builder.play(AnimationBuilder {
             target: source_id,
-            anim_type: AnimationType::Transform { target: target_id },
+            anim_type: AnimationType::Transform {
+                target: target_id,
+                pairs: Vec::new(),
+            },
             duration: 1.0,
             delay: 0.0,
             rate_func: gaanim_math::RateFunc::Linear,

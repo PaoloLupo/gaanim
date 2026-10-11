@@ -520,8 +520,11 @@ pub enum AnimationType {
     },
     /// Morph the source into the target's visual state while preserving the
     /// source ObjectId, so later animations continue from the morphed result.
+    /// Between hierarchies, `pairs` are the `(source, target)` parts that
+    /// share a name or SVG id; the scene fills them in when it compiles.
     Transform {
         target: ObjectId,
+        pairs: Vec<(ObjectId, ObjectId)>,
     },
     /// Morph the source into the target, then hide the source and reveal the
     /// actual target object at the end of the animation.

@@ -1426,7 +1426,8 @@ pub enum PlayError {
     EmptyAnimation,
     #[error(
         "play overlaps {first} and {second} on the same {target_kind} ({target}); both drive its \
-         '{channel}' channel. Play them one after another or combine them into one animation"
+         '{channel}' channel. Play them one after another{}",
+        combine_hint(.combinable)
     )]
     ConflictingChannel {
         target: gaanim_core::ObjectId,
@@ -1436,6 +1437,8 @@ pub enum PlayError {
         /// The earlier animation and its span within the call, e.g. `Trim (0.00–1.00 s)`.
         first: String,
         second: String,
+        /// Both only set properties, so one animation can set them together.
+        combinable: bool,
     },
     #[error("audio declarations can only be played by their owning Scene")]
     ForeignAudio,
@@ -1475,6 +1478,14 @@ pub enum PlayError {
     UnknownLabel { name: String, known: String },
     #[error("invalid insert position {0}")]
     InvalidInsertPosition(String),
+}
+
+fn combine_hint(combinable: &bool) -> &'static str {
+    if *combinable {
+        " or combine them into one animation"
+    } else {
+        ""
+    }
 }
 
 fn animation_channels(anim: &Anim) -> Vec<String> {
@@ -1576,7 +1587,17 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
             ..
         } => &["camera_pose", "camera_rotation"],
         CameraDollyZoom { .. } => &["camera_pose", "camera_projection"],
-        Transform { .. } | ReplacementTransform { .. } | MagicMove { .. } => &[
+        // A transform keeps the source's own opacity, so it can fade at once.
+        Transform { .. } => &[
+            "translation",
+            "rotation",
+            "scale",
+            "fill",
+            "stroke_color",
+            "stroke_width",
+            "effect",
+        ],
+        ReplacementTransform { .. } | MagicMove { .. } => &[
             "translation",
             "rotation",
             "scale",
@@ -5639,12 +5660,23 @@ impl SceneModel {
         // error, so a clip that begins where another ends may appear to
         // overlap it by a few ulps.
         const OVERLAP_EPSILON: f64 = 1e-9;
+        // Property animations of one target can be merged into one.
+        const PROPERTIES: &str = "Properties";
         let described =
             |label: &str, start: f64, end: f64| format!("{label} ({start:.2}–{end:.2} s)");
         // Spans are relative to the cursor; launched animations still
         // running occupy their channels too.
         let cursor = self.current_time();
-        let mut occupied: Vec<(gaanim_core::ObjectId, String, f64, f64, String)> = self
+        // Each occupant: target, channel, span, description, and label.
+        type Occupant = (
+            gaanim_core::ObjectId,
+            String,
+            f64,
+            f64,
+            String,
+            &'static str,
+        );
+        let mut occupied: Vec<Occupant> = self
             .launched_channels
             .iter()
             .filter(|launched| launched.end > cursor + OVERLAP_EPSILON)
@@ -5658,6 +5690,7 @@ impl SceneModel {
                         "{} launched at {:.2} s (until {:.2} s)",
                         launched.label, launched.start, launched.end
                     ),
+                    launched.label,
                 )
             })
             .collect();
@@ -5687,7 +5720,7 @@ impl SceneModel {
                     });
                 }
                 let conflict = occupied.iter().find(
-                    |(target, occupied_channel, occupied_start, occupied_end, _)| {
+                    |(target, occupied_channel, occupied_start, occupied_end, _, _)| {
                         if *target != anim.inner.target || *occupied_channel != channel {
                             return false;
                         }
@@ -5710,7 +5743,7 @@ impl SceneModel {
                         }
                     },
                 );
-                if let Some((_, _, _, _, first)) = conflict {
+                if let Some((_, _, _, _, first, first_label)) = conflict {
                     let target_kind = self
                         .state
                         .lock()
@@ -5728,6 +5761,7 @@ impl SceneModel {
                         target_kind,
                         first: first.clone(),
                         second: described(label, start, end),
+                        combinable: *first_label == PROPERTIES && label == PROPERTIES,
                     });
                 }
                 if !advance {
@@ -5740,7 +5774,7 @@ impl SceneModel {
                     });
                 }
                 let description = described(label, start, end);
-                occupied.push((anim.inner.target, channel, start, end, description));
+                occupied.push((anim.inner.target, channel, start, end, description, label));
             }
         }
         if resolved.iter().any(
@@ -10084,6 +10118,62 @@ mod tests {
         assert!(
             ops.iter()
                 .any(|op| matches!(op, Op::Launch(anims) if anims.len() == 1))
+        );
+    }
+
+    #[test]
+    fn a_transform_can_fade_while_it_morphs() {
+        // transform_to keeps the source's own opacity, so it leaves that
+        // channel free for a fade (issue #421).
+        let mut canvas = SceneModel::new(1280, 720);
+        let shape = canvas.circle(20.0);
+        let template = canvas.square(30.0);
+        canvas
+            .play_items(vec![
+                shape
+                    .animate()
+                    .transform_to(&template)
+                    .unwrap()
+                    .duration(0.3)
+                    .into(),
+                shape
+                    .animate()
+                    .opacity(0.0)
+                    .duration(0.15)
+                    .delay(0.15)
+                    .into(),
+            ])
+            .unwrap();
+        // A move does share a channel with it, and since an effect cannot
+        // join property targets, the error must not suggest merging them.
+        let error = canvas
+            .play_items(vec![
+                shape
+                    .animate()
+                    .transform_to(&template)
+                    .unwrap()
+                    .duration(0.3)
+                    .into(),
+                shape.animate().shift_by(1.0, 0.0).duration(0.3).into(),
+            ])
+            .unwrap_err();
+        assert!(
+            matches!(&error, PlayError::ConflictingChannel { channel, combinable: false, .. }
+                if channel == "translation"),
+            "{error}"
+        );
+        assert!(!error.to_string().contains("combine"), "{error}");
+        let error = canvas
+            .play_items(vec![
+                shape.animate().shift_by(1.0, 0.0).duration(0.3).into(),
+                shape.animate().shift_by(0.0, 1.0).duration(0.3).into(),
+            ])
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .ends_with("or combine them into one animation"),
+            "{error}"
         );
     }
 

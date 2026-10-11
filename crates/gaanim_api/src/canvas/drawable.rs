@@ -2445,7 +2445,10 @@ impl DrawableHandle {
     }
 
     pub(crate) fn transform(&self, target: &DrawableHandle) -> Anim {
-        self.anim(AnimationType::Transform { target: target.id })
+        self.anim(AnimationType::Transform {
+            target: target.id,
+            pairs: Vec::new(),
+        })
     }
 
     pub(crate) fn replacement_transform(&self, target: &DrawableHandle) -> Anim {
