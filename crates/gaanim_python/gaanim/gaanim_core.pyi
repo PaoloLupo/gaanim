@@ -1594,19 +1594,32 @@ class Anim:
     def transform_to(self, target: Drawable) -> Anim:
         """Morph in place to a same-scene target.
 
-        Absent fill and composed timing are preserved. A ``Text`` transformed
-        into another ``Text`` is a structural transition: parts with the same
-        name travel to their new place, matching glyphs morph, the rest
-        collapses or grows in, every glyph keeps its own (``part()``) color,
-        and the target is shown at the end. Texts managed by different
-        Layouts (e.g. cells of two matrices) instead morph as one shape: the
-        source keeps its identity and takes the target's outline, color and
-        typographic baseline.
+        Absent fill and composed timing are preserved. Each outline pairs
+        with the winding and start point that move its points least, so a
+        shape and its mirror do not collapse halfway. A gradient fill or
+        stroke interpolates toward the target's (geometry and stops); two
+        gradients of different kinds pass through a solid color halfway.
+
+        A ``Text`` transformed into another ``Text`` is a structural
+        transition: parts with the same name travel to their new place,
+        matching glyphs morph, the rest collapses or grows in, every glyph
+        keeps its own (``part()``) color, and the target is shown at the end.
+        Texts managed by different Layouts (e.g. cells of two matrices)
+        instead morph as one shape: the source keeps its identity and takes
+        the target's outline, color and typographic baseline.
+
+        Between groups or imported SVGs (an SVG ``<g>`` part too) the morph
+        runs part by part in place: parts with the same name or SVG ``id``
+        pair at any depth, the other leaves pair by shape within their pair,
+        leftover source leaves fade out and leftover target leaves fade in
+        where the target is. The source keeps its identity, so its
+        ``part()`` handles still apply afterwards.
 
         The source keeps its own opacity: the target is only a template,
         hidden during and after the morph, so a target declared with
-        ``.opacity(0)`` still leaves the source visible. Combine with
-        ``animate.opacity`` to change it.
+        ``.opacity(0)`` still leaves the source visible. To change it while
+        morphing, play an ``animate.opacity`` of the same object in the same
+        ``play``.
         """
         ...
     def fill_level(self, level: float) -> Anim:

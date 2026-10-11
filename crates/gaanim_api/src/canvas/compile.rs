@@ -7845,7 +7845,7 @@ impl SceneModel {
         for op in ops {
             match op {
                 Op::Animate { anim, active } if *active => match &anim.anim_type {
-                    AnimationType::Transform { target }
+                    AnimationType::Transform { target, .. }
                     | AnimationType::ReplacementTransform { target }
                     | AnimationType::MagicMove { target, .. }
                     | AnimationType::FadeTransform { target }
@@ -7861,7 +7861,7 @@ impl SceneModel {
                 Op::Play(anims) | Op::Launch(anims) => {
                     for anim in anims {
                         match &anim.anim_type {
-                            AnimationType::Transform { target }
+                            AnimationType::Transform { target, .. }
                             | AnimationType::ReplacementTransform { target }
                             | AnimationType::MagicMove { target, .. }
                             | AnimationType::FadeTransform { target }
@@ -8858,8 +8858,14 @@ impl SceneModel {
             AnimationType::FadeTransform { target } => AnimationType::FadeTransform {
                 target: *id_map.get(target)?,
             },
-            AnimationType::Transform { target } => AnimationType::Transform {
+            AnimationType::Transform { target, .. } => AnimationType::Transform {
                 target: *id_map.get(target)?,
+                pairs: super::magic_move::transform_pairs(anim.target, *target, object_specs)
+                    .into_iter()
+                    .filter_map(|(source, target)| {
+                        Some((*id_map.get(&source)?, *id_map.get(&target)?))
+                    })
+                    .collect(),
             },
             AnimationType::ReplacementTransform { target } => AnimationType::ReplacementTransform {
                 target: *id_map.get(target)?,
@@ -19346,6 +19352,153 @@ mod tests {
                 .iter()
                 .all(|(_, to)| to.x.abs() < 1.0e-6 || (to.x - 30.0).abs() < 1.0e-6),
             "{reflow_moves:?}"
+        );
+    }
+
+    fn temp_svg(name: &str, body: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("gaanim_{name}_{}.svg", std::process::id()));
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn morph_lenses(timeline: &Timeline) -> Vec<(f64, gaanim_timeline::clip::PropertyLensSpec)> {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload};
+        timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec { lens, .. }) => {
+                    Some((clip.duration, lens.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn transform_to_keeps_a_gradient_fill() {
+        use gaanim_timeline::clip::PropertyLensSpec;
+        // Issue #418: the morph used to flatten the gradient to its first stop.
+        let svg = |d: &str| {
+            format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400">
+                  <defs><radialGradient id="r" gradientUnits="userSpaceOnUse" cx="200" cy="200" r="120">
+                    <stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>
+                  </radialGradient></defs>
+                  <path id="a" d="{d}" fill="url(#r)"/>
+                </svg>"##
+            )
+        };
+        let first = temp_svg(
+            "gradient_morph_a",
+            &svg("M 100 100 L 300 100 L 300 300 L 100 300 Z"),
+        );
+        let second = temp_svg(
+            "gradient_morph_b",
+            &svg("M 120 80 L 320 120 L 280 320 L 80 280 Z"),
+        );
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas.svg(&first).unwrap();
+        let target = canvas.svg(&second).unwrap().opacity(0.0);
+        std::fs::remove_file(first).unwrap();
+        std::fs::remove_file(second).unwrap();
+        canvas.play(vec![
+            source
+                .part("a")
+                .unwrap()
+                .animate()
+                .transform_to(&target.part("a").unwrap())
+                .unwrap()
+                .duration(1.0),
+        ]);
+
+        let (_, timeline) = compiled_world(&canvas);
+        let lenses = morph_lenses(&timeline);
+        assert!(
+            lenses.iter().any(|(duration, lens)| *duration == 1.0
+                && matches!(
+                    lens,
+                    PropertyLensSpec::FillPaint {
+                        from: Brush::Gradient(_),
+                        to: Brush::Gradient(_)
+                    }
+                )),
+            "the morph must interpolate the gradient"
+        );
+        assert!(
+            !lenses
+                .iter()
+                .any(|(_, lens)| matches!(lens, PropertyLensSpec::FillColor { .. })),
+            "a solid fill clip flattens the gradient"
+        );
+    }
+
+    #[test]
+    fn transform_to_morphs_svg_hierarchies_part_by_part() {
+        use gaanim_core::kurbo::{BezPath, PathEl};
+        use gaanim_timeline::clip::PropertyLensSpec;
+        // Issue #419: the roots draw nothing, so morphing them as one shape
+        // left nothing to draw.
+        let rect = |id: &str, x: f64| {
+            format!(r##"<rect id="{id}" x="{x}" y="10" width="40" height="40" fill="#ff0000"/>"##)
+        };
+        let circle = |id: &str, x: f64| {
+            format!(r##"<circle id="{id}" cx="{x}" cy="30" r="20" fill="#00ff00"/>"##)
+        };
+        let svg = |parts: String| {
+            format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60"><g id="todo">{parts}</g></svg>"##
+            )
+        };
+        // Part "a" turns from a square into a circle and "b" the other way,
+        // which shape matching alone would not pair; "c" is new.
+        let first = temp_svg(
+            "hierarchy_morph_a",
+            &svg(rect("a", 10.0) + &circle("b", 120.0)),
+        );
+        let second = temp_svg(
+            "hierarchy_morph_b",
+            &svg(circle("a", 30.0) + &rect("b", 100.0) + &circle("c", 175.0)),
+        );
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas.svg(&first).unwrap();
+        let target = canvas.svg(&second).unwrap().opacity(0.0);
+        std::fs::remove_file(first).unwrap();
+        std::fs::remove_file(second).unwrap();
+        canvas.play(vec![
+            source
+                .animate()
+                .transform_to(&target)
+                .unwrap()
+                .duration(1.0),
+        ]);
+
+        let (_, timeline) = compiled_world(&canvas);
+        let curved = |path: &BezPath| {
+            path.elements()
+                .iter()
+                .any(|element| matches!(element, PathEl::CurveTo(..)))
+        };
+        let lenses = morph_lenses(&timeline);
+        let mut morphs: Vec<(bool, bool)> = lenses
+            .iter()
+            .filter_map(|(duration, lens)| match lens {
+                PropertyLensSpec::PathMorph { from, to, .. } if *duration == 1.0 => {
+                    Some((curved(from), curved(to)))
+                }
+                _ => None,
+            })
+            .collect();
+        morphs.sort();
+        assert_eq!(
+            morphs,
+            vec![(false, true), (true, false)],
+            "parts pair by id"
+        );
+        assert!(
+            lenses.iter().any(|(duration, lens)| *duration == 1.0
+                && matches!(lens, PropertyLensSpec::Opacity { from, to } if *from == 0.0 && *to == 1.0)),
+            "the new part fades in"
         );
     }
 

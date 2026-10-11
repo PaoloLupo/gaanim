@@ -713,7 +713,11 @@ fn normalize_contour_pair(
     let source_segments = subdivide_to_count(&source.segments, segment_count);
     let target_segments = subdivide_to_count(&target.segments, segment_count);
     let closed = source.closed || target.closed;
-    let target_segments = align_cubic_segments(&source_segments, &target_segments, closed);
+    // Contours wound in opposite senses (a shape and its mirror) can only be
+    // aligned by reversing one, or every frame between them collapses.
+    let opposite_winding = source.area * target.area < 0.0;
+    let target_segments =
+        align_cubic_segments(&source_segments, &target_segments, closed, opposite_winding);
     (source_segments, target_segments, closed)
 }
 
@@ -775,7 +779,12 @@ fn cubic_alignment_cost(source: &[CubicBez], target: &[CubicBez]) -> f64 {
         .sum()
 }
 
-fn align_cubic_segments(source: &[CubicBez], target: &[CubicBez], closed: bool) -> Vec<CubicBez> {
+fn align_cubic_segments(
+    source: &[CubicBez],
+    target: &[CubicBez],
+    closed: bool,
+    opposite_winding: bool,
+) -> Vec<CubicBez> {
     if source.len() != target.len() || source.is_empty() {
         return target.to_vec();
     }
@@ -789,16 +798,23 @@ fn align_cubic_segments(source: &[CubicBez], target: &[CubicBez], closed: bool) 
         };
     }
 
-    // Keep target winding intact so inner contours remain holes under non-zero fill.
-    (0..target.len())
-        .map(|offset| {
-            target
-                .iter()
-                .cycle()
-                .skip(offset)
-                .take(target.len())
-                .copied()
-                .collect::<Vec<_>>()
+    // A closed contour keeps the target winding when both wind alike, so
+    // inner contours remain holes under non-zero fill. Opposite windings
+    // also try the reversed target: the morph then keeps the source winding,
+    // whose holes are still holes, and the exact target is restored at t = 1.
+    let reversed = opposite_winding.then(|| reverse_cubic_segments(target));
+    std::iter::once(target)
+        .chain(reversed.as_deref())
+        .flat_map(|candidate| {
+            (0..candidate.len()).map(move |offset| {
+                candidate
+                    .iter()
+                    .cycle()
+                    .skip(offset)
+                    .take(candidate.len())
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
         })
         .min_by(|a, b| cubic_alignment_cost(source, a).total_cmp(&cubic_alignment_cost(source, b)))
         .unwrap_or_else(|| target.to_vec())
@@ -1255,6 +1271,31 @@ mod morph_tests {
             assert!(
                 areas[0].signum() != areas[1].signum(),
                 "hole winding collapsed at t={t}: {areas:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mirrored_contours_keep_their_area_through_the_morph() {
+        // A nose and its mirror, wound in opposite senses (issue #420).
+        let source =
+            BezPath::from_svg("M 195 170 C 190 200 185 230 200 240 C 215 230 210 200 205 170 Z")
+                .unwrap();
+        let target =
+            BezPath::from_svg("M 285 170 C 300 200 320 230 300 245 C 290 240 290 200 280 170 Z")
+                .unwrap();
+        let area = |path: &BezPath| SampledContour::new(path.clone(), 64).area;
+        assert!(
+            area(&source) * area(&target) < 0.0,
+            "fixture must wind oppositely"
+        );
+
+        let smallest = area(&source).abs().min(area(&target).abs());
+        for t in [0.25, 0.5, 0.75] {
+            let morphed = area(&interpolate_paths_continuous(&source, &target, t)).abs();
+            assert!(
+                morphed > 0.6 * smallest,
+                "morph collapsed at t={t}: area {morphed} vs {smallest}"
             );
         }
     }

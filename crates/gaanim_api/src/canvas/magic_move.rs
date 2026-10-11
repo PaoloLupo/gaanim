@@ -119,6 +119,34 @@ pub(crate) fn spec_key(spec: &ObjectSpec, key: MagicMoveKey) -> Option<String> {
     }
 }
 
+/// Parts that a `transform_to` between two hierarchies pairs: each
+/// descendant of `source` with the descendant of `target` that answers to the
+/// same name (or SVG `id`), at any depth. Unlike a magic move, keys inside a
+/// keyed group pair too, so that the parts of a pair keep their own pairs.
+pub(crate) fn transform_pairs(
+    source: ObjectId,
+    target: ObjectId,
+    specs: &HashMap<ObjectId, ObjectSpec>,
+) -> Vec<(ObjectId, ObjectId)> {
+    let keyed = |root: ObjectId| {
+        let mut found = Vec::new();
+        let mut seen = HashSet::new();
+        let mut stack: Vec<ObjectId> = specs.get(&root).map(spec_children).unwrap_or_default();
+        stack.reverse();
+        while let Some(id) = stack.pop() {
+            let Some(spec) = specs.get(&id).filter(|_| seen.insert(id)) else {
+                continue;
+            };
+            if let Some(key) = spec_key(spec, MagicMoveKey::Name).filter(|key| !key.is_empty()) {
+                found.push((id, key));
+            }
+            stack.extend(spec_children(spec).into_iter().rev());
+        }
+        found
+    };
+    pair_by_key(&keyed(source), &keyed(target)).pairs
+}
+
 /// Direct members of a group spec; other drawables have none.
 pub(crate) fn spec_children(spec: &ObjectSpec) -> Vec<ObjectId> {
     match &spec.kind {
@@ -243,6 +271,38 @@ mod tests {
         .unwrap();
         assert_eq!(found, keyed(&[(2, "row"), (5, "badge")]));
         assert!(!calls.contains(&1), "roots are not candidates");
+    }
+
+    #[test]
+    fn transform_pairs_keyed_parts_at_every_depth() {
+        let spec = |kind: SpawnKind, svg_id: Option<&str>| {
+            let mut spec = ObjectSpec::new(id(0), kind);
+            spec.svg_id = svg_id.map(str::to_string);
+            spec
+        };
+        // Only group members matter for pairing; leaves are empty groups.
+        let path = || SpawnKind::Group(Vec::new());
+        // 1 = { 2 = "head" { 3 = "eye", 4 }, 5 = "nose" }
+        // 11 = { 15 = "nose", 12 = "head" { 13 = "eye" } }
+        let specs: HashMap<ObjectId, ObjectSpec> = [
+            (1, spec(SpawnKind::Group(vec![id(2), id(5)]), None)),
+            (2, spec(SpawnKind::Group(vec![id(3), id(4)]), Some("head"))),
+            (3, spec(path(), Some("eye"))),
+            (4, spec(path(), None)),
+            (5, spec(path(), Some("nose"))),
+            (11, spec(SpawnKind::Group(vec![id(15), id(12)]), None)),
+            (12, spec(SpawnKind::Group(vec![id(13)]), Some("head"))),
+            (13, spec(path(), Some("eye"))),
+            (15, spec(path(), Some("nose"))),
+        ]
+        .into_iter()
+        .map(|(raw, spec)| (id(raw), spec))
+        .collect();
+        assert_eq!(
+            transform_pairs(id(1), id(11), &specs),
+            vec![(id(2), id(12)), (id(3), id(13)), (id(5), id(15))]
+        );
+        assert!(transform_pairs(id(3), id(13), &specs).is_empty());
     }
 
     #[test]
