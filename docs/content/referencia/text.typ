@@ -792,13 +792,47 @@ title = scene.text.typst(Path("assets/title.typ"))
 #api-entry(
   name: "Typography.code",
   kind: "factory",
-  desc: [Bloque de código monoespaciado dentro de un marco de `width` × `height`, con `font_size`, `background`, `color` y `accent` opcionales. `language` queda registrado para el resaltado futuro: hoy no se colorean tokens.],
+  params: (
+    (name: "source", type: "str", default: none, desc: [El código. Los tabuladores y los saltos de línea se conservan.]),
+    (name: "language", type: "str", default: "\"text\"", desc: [Nombre o extensión del lenguaje: `"python"`, `"rust"`, `"js"`, `"typst"`, `"json"`… Uno desconocido, como `"text"`, queda sin resaltar.]),
+    (name: "width", type: "float", default: "7.6", desc: [Ancho del panel.]),
+    (name: "height", type: "float", default: "3.0", desc: [Alto del panel.]),
+    (name: "font_size", type: "float", default: "0.2", desc: [Tamaño base del texto; el código se dibuja al 80 %.]),
+    (name: "background", type: "ColorLike | None", default: "None", desc: [Fondo del panel; por defecto, el `panel` del tema (o el de `theme`).]),
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Color del texto que no se resalta: nombres, operadores y puntuación; por defecto, el `foreground` del tema (o el de `theme`), o su `background` si el `foreground` no se lee sobre el fondo del bloque.]),
+    (name: "accent", type: "ColorLike | None", default: "None", desc: [Color del borde, la regla y el nombre del lenguaje; por defecto, el `accent` del tema, aclarado u oscurecido si no se lee sobre un `background` propio.]),
+    (name: "theme", type: "str | os.PathLike | None", default: "None", desc: [Archivo `.tmTheme` (el formato de TextMate, Sublime Text y bat) con los colores de los tokens, resuelto como los demás assets.]),
+    (name: "highlight", type: "bool", default: "True", desc: [Con `False`, todo el código va en `color`.]),
+    (name: "font", type: "str | None", default: "None", desc: [Familia monoespaciada. Sin ella, o si no está instalada, DejaVu Sans Mono, incluida en Gaanim, para que el bloque se vea igual en cualquier equipo.]),
+  ),
+  desc: [Panel de código: el nombre del lenguaje sobre una regla y el código debajo, alineado a la izquierda, con sus tokens resaltados. Las palabras clave, las cadenas, los números, los comentarios, las funciones y los tipos toman los colores de código del tema: los temas de editores (`dracula`, `nord`, `solarized-*`, `gruvbox-dark`, `tokyo-night`, `catppuccin-*`) usan su esquema original, y `technical`, `presentation`, `paper` y los temas propios los derivan de la paleta (palabras clave en `accent`, comentarios en `muted`). Los tokens `code`, `code_keyword`, `code_string`, `code_number`, `code_comment`, `code_function` y `code_type` de `Theme(colors=...)` los sustituyen. Sobre un `background` en el que los colores del tema no se leen (un panel oscuro en un tema claro, o al revés), el texto y cada token se ajustan hasta leerse; los que ya se leen no cambian. Cada carácter sigue siendo un glifo propio, coloreado o no. Una fuente vacía, un lenguaje con caracteres distintos de letras y dígitos ASCII, `-` o `_`, una `font` vacía o un tamaño no positivo lanzan `ValueError`; un `theme` inexistente lanza `FileNotFoundError`, y uno que no es un tmTheme, `ValueError`.],
 )[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9))
+snippet = scene.text.code(
+    "def area(radius):\n"
+    "    # circle area\n"
+    "    return 3.14159 * radius ** 2",
+    language="python",
+    width=8,
+    height=2.4,
+    font_size=0.3,
+)
+scene.play([snippet.animate.fade_in().duration(0.5)])
+# output: preview.webp
+scene.render()
+```
+
+Con otro esquema, sin resaltar o con otra fuente:
+
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-snippet = scene.text.code("result = mass * acceleration", language="python", width=6, height=1.2)
-scene.play([snippet.animate.fade_in().duration(0.5)])
+papel = scene.text.code("let x = 42; // respuesta", language="rust", theme="assets/codigo.tmTheme")
+plain = scene.text.code("x = 42", language="python", highlight=False)
+fira = scene.text.code("x = 42", language="python", font="Fira Code")
 ```
 ]
 

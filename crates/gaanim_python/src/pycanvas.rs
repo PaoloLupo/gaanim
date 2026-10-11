@@ -663,14 +663,6 @@ fn parse_curve_elements(commands: &Bound<'_, PyAny>) -> PyResult<Vec<CurveElemen
     Ok(elements)
 }
 
-fn escape_typst_string(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "")
-}
-
 #[derive(Clone, Copy)]
 struct ComponentPalette {
     foreground: gaanim_core::peniko::Color,
@@ -6538,7 +6530,8 @@ impl PySlideKit {
 
 #[pymethods]
 impl PyTypography {
-    /// Create a restrained monospaced code block backed by Typst vector text.
+    /// Create a restrained monospaced code block backed by Typst vector text,
+    /// with its tokens highlighted in the theme's code colors.
     #[pyo3(signature = (
         source,
         *,
@@ -6549,6 +6542,9 @@ impl PyTypography {
         background=None,
         color=None,
         accent=None,
+        theme=None,
+        highlight=true,
+        font=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn code(
@@ -6561,7 +6557,11 @@ impl PyTypography {
         background: Option<PyColor>,
         color: Option<PyColor>,
         accent: Option<PyColor>,
+        theme: Option<PathBuf>,
+        highlight: bool,
+        font: Option<String>,
     ) -> PyResult<PyDrawable> {
+        use gaanim_text::prelude::{CodeColors, CodeHighlight, CodeMarkup};
         crate::custom::ensure_authoring_allowed()?;
         if source.trim().is_empty() {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -6588,21 +6588,80 @@ impl PyTypography {
                 "width, height, and font_size must be finite positive numbers",
             ));
         }
-        let palette = {
-            let scene = self.inner.lock().expect("scene canvas poisoned");
-            component_palette(&scene)
-        };
-        let background = background.map(|color| color.0).unwrap_or(palette.panel);
-        let color = color.map(|color| color.0).unwrap_or(palette.foreground);
-        let accent = accent.map(|color| color.0).unwrap_or(palette.accent);
-        let content_width = (width - 0.64).max(1.0e-6);
-        let typst_source = format!(
-            r#"#set text(font: "Consolas", size: {font_size}pt)
-#block(width: {content_width}pt)[#raw("{}", block: true, lang: "{}")]"#,
-            escape_typst_string(source),
-            escape_typst_string(language),
-        );
+        if font
+            .as_deref()
+            .is_some_and(|font| font.trim().is_empty() || font.contains(['"', '\\', '\n', '\r']))
+        {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "font must be a non-empty font family name",
+            ));
+        }
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
+        let palette = component_palette(&scene);
+        let author_theme = theme
+            .map(|path| {
+                scene.read_code_theme(path).map_err(|error| match &error {
+                    gaanim_api::canvas::CodeThemeError::Read { source, .. }
+                        if source.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        pyo3::exceptions::PyFileNotFoundError::new_err(error.to_string())
+                    }
+                    gaanim_api::canvas::CodeThemeError::Read { .. } => {
+                        pyo3::exceptions::PyOSError::new_err(error.to_string())
+                    }
+                    gaanim_api::canvas::CodeThemeError::Invalid { .. } => {
+                        pyo3::exceptions::PyValueError::new_err(error.to_string())
+                    }
+                })
+            })
+            .transpose()?;
+        // An author's theme brings its own text and background colors.
+        let own_background = background
+            .map(|color| color.0)
+            .or(author_theme.as_ref().and_then(|theme| theme.background));
+        let background = own_background.unwrap_or(palette.panel);
+        // Derived over the actual background, so that plain text and every
+        // token read over a background the theme was not made for.
+        let code_colors = match &scene.theme_style {
+            Some(theme) => theme.code_colors(background),
+            None => CodeColors::derive(
+                palette.foreground,
+                background,
+                palette.accent,
+                palette.rule,
+                palette.foreground,
+            ),
+        };
+        let color = color
+            .map(|color| color.0)
+            .or(author_theme.as_ref().and_then(|theme| theme.foreground))
+            .unwrap_or(code_colors.foreground);
+        let accent = accent
+            .map(|color| color.0)
+            .unwrap_or_else(|| match own_background {
+                Some(background) => gaanim_text::code::with_contrast(
+                    palette.accent,
+                    background,
+                    gaanim_text::code::TOKEN_CONTRAST,
+                ),
+                None => palette.accent,
+            });
+        let highlight = match author_theme {
+            _ if !highlight => CodeHighlight::Off,
+            Some(theme) => CodeHighlight::TmTheme(theme.xml),
+            None => CodeHighlight::Colors(code_colors),
+        };
+        let content_width = (width - 0.64).max(1.0e-6);
+        let typst_source = CodeMarkup {
+            source,
+            language,
+            font_size,
+            width: content_width,
+            font: font.as_deref(),
+            foreground: color,
+            highlight,
+        }
+        .typst();
         let panel = scene
             .rounded_rect(width, height, 0.10)
             .fill(background)
@@ -6615,16 +6674,22 @@ impl PyTypography {
                 height * 0.5 - 0.40,
             )
             .stroke(accent, 0.01);
+        // The language heads the panel and the code starts under the rule,
+        // both from the panel's left padding, whatever their width. The
+        // glyphs keep the colors Typst painted them.
+        let left = -width * 0.5 + 0.32;
         let label = scene
-            .text(&language.to_ascii_uppercase())
-            .fill(accent)
-            .move_to(-width * 0.5 + 0.90, height * 0.5 - 0.20);
-        // Typst hierarchies are centered on their visual bounds. Shift the
-        // resulting raw block into the panel's reading column.
-        let body = scene
-            .typst_in_scene_units(&typst_source)
-            .fill(color)
-            .move_to(-width * 0.25, -0.18);
+            .typst_in_scene_units(&gaanim_text::code::code_caption_typst(
+                &language.to_ascii_uppercase(),
+                font_size * 0.7,
+                accent,
+            ))
+            .at_anchor(left, height * 0.5 - 0.20, gaanim_api::canvas::Anchor::Left);
+        let body = scene.typst_in_scene_units(&typst_source).at_anchor(
+            left,
+            height * 0.5 - 0.62,
+            gaanim_api::canvas::Anchor::TopLeft,
+        );
         Ok(PyDrawable(scene.group(&[&panel, &rule, &label, &body])))
     }
 }

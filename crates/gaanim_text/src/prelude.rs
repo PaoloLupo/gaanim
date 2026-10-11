@@ -1,4 +1,5 @@
 pub use crate::GaanimTextPlugin;
+pub use crate::code::{CODE_FALLBACK_FONT, CodeColors, CodeHighlight, CodeMarkup, TmTheme};
 pub use crate::config::{RoleStyle, TextConfig, TextRole};
 pub use crate::font::{FontFile, FontRegistry, OutlineCollector, regular_faces, scan_font_dir};
 pub use crate::shaper::{

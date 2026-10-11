@@ -8724,17 +8724,43 @@ class Typography:
         background: Optional[ColorLike] = None,
         color: Optional[ColorLike] = None,
         accent: Optional[ColorLike] = None,
+        theme: str | os.PathLike[str] | None = None,
+        highlight: bool = True,
+        font: Optional[str] = None,
     ) -> Drawable:
         """Create a code panel: ``source`` in a monospaced block highlighted as ``language``.
 
         The block sits on a ``width`` by ``height`` rounded panel, centered at
-        the origin, with the language name above a rule. Colors default to the
-        theme's panel, foreground and accent. An empty source, a language with
-        characters other than ASCII letters, digits, ``-`` or ``_``, or a
-        non-positive size raise ``ValueError``.
+        the origin, with the language name above a rule and the code from the
+        panel's left padding. Colors default to the theme's panel, foreground
+        and accent.
+
+        ``language`` is a syntax name or file extension (``"python"``,
+        ``"rust"``, ``"js"``, ``"typst"``…); keywords, strings, numbers,
+        comments, functions and types take the theme's code colors, which the
+        ``code``, ``code_keyword``, ``code_string``, ``code_number``,
+        ``code_comment``, ``code_function`` and ``code_type`` tokens of
+        ``Theme(colors=...)`` override. An unknown language stays plain.
+        ``theme`` reads a ``.tmTheme`` file instead, resolved like other
+        assets, and its own text and background colors unless ``color`` or
+        ``background`` are given. ``highlight=False`` draws every token in
+        ``color``. ``font`` picks the monospaced family; without it, or when it
+        is missing, the block uses DejaVu Sans Mono, bundled with Gaanim.
+
+        Over a ``background`` the theme's colors do not read on, such as a
+        dark panel in a light theme, the default text takes the theme's
+        background color (or white or black), and the accent and every token
+        move toward it until they read; colors that already read are kept,
+        and an explicit ``color`` or ``accent`` is used as given.
+
+        An empty source, a language with characters other than ASCII letters,
+        digits, ``-`` or ``_``, an empty ``font``, or a non-positive size raise
+        ``ValueError``; a missing ``theme`` file raises ``FileNotFoundError``,
+        and one that is not a tmTheme, ``ValueError``.
 
         Example:
-            snippet = scene.code("print('hola')", language="python")
+            snippet = scene.text.code("def area(r):\\n    return 3.14 * r * r", language="python")
+            monokai = scene.text.code("x = 1", language="python", theme="assets/monokai.tmTheme")
         """
         ...
 

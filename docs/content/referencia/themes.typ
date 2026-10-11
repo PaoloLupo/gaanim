@@ -869,7 +869,12 @@ scene = Scene(frame=(16, 9), theme=theme)
 
 Los roles de color incluidos son `background`, `foreground`, `muted`, `title`,
 `accent`, `chart`, `panel`, `header`, `rule`, `success`, `warning` y `danger`;
-`colors` también acepta tokens propios no vacíos para las reglas. Los roles de
+`colors` también acepta tokens propios no vacíos para las reglas. Los tokens
+`code`, `code_keyword`, `code_string`, `code_number`, `code_comment`,
+`code_function` y `code_type` eligen los colores con los que
+#link("/referencia/text/#api-typography-code")[`scene.text.code`] resalta el
+código; sin ellos, los temas de editores usan su esquema y los demás los
+derivan de la paleta. Los roles de
 fuente son `text`, `all`, `title`, `subtitle`, `heading`, `body`, `caption`,
 `label`, `math` y `code`.
 
