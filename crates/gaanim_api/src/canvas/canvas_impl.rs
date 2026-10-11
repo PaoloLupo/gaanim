@@ -2049,6 +2049,19 @@ pub enum TypstAssetError {
     },
 }
 
+/// Failures while loading a code block's tmTheme file.
+#[derive(Debug, thiserror::Error)]
+pub enum CodeThemeError {
+    #[error("could not read code theme '{path}': {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("code theme '{path}' is {message}")]
+    Invalid { path: PathBuf, message: String },
+}
+
 /// Error returned when a scene-lifetime operation receives an incompatible drawable.
 #[derive(Debug, thiserror::Error)]
 pub enum SceneObjectError {
@@ -4142,6 +4155,20 @@ impl SceneModel {
         let source = std::fs::read_to_string(&path)
             .map_err(|source| TypstAssetError::Read { path, source })?;
         Ok(self.typst_inner(&source, page_width))
+    }
+
+    /// Read a tmTheme file for a code block, resolved like other assets.
+    pub fn read_code_theme(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<gaanim_text::prelude::TmTheme, CodeThemeError> {
+        let path = self.resolve_asset_path(path);
+        let xml = std::fs::read_to_string(&path).map_err(|source| CodeThemeError::Read {
+            path: path.clone(),
+            source,
+        })?;
+        gaanim_text::prelude::TmTheme::parse(&xml)
+            .map_err(|message| CodeThemeError::Invalid { path, message })
     }
 
     fn typst_inner(&mut self, source: &str, page_width: Option<&str>) -> DrawableHandle {

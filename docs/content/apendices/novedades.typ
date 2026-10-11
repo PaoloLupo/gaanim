@@ -13,14 +13,36 @@ instalar una versión nueva, sigue
 
 = 0.11.1
 
-Sin publicar. Corrige cuatro fallos de `animate.transform_to` que aparecen al
-pasar un personaje de un SVG de una pose a otra: los degradados se volvían un
-color liso, un SVG entero o un grupo desaparecía, una forma y su espejo se
-reducían a una astilla a mitad del morph y no había forma de fundir el objeto
-mientras se transformaba. Lee «Al actualizar» si alguna escena transforma
-formas con degradado, grupos o SVG enteros.
+Sin publicar. Los bloques de `scene.text.code` resaltan la sintaxis con los
+colores del tema. Corrige además cuatro fallos de `animate.transform_to` que
+aparecen al pasar un personaje de un SVG de una pose a otra: los degradados se
+volvían un color liso, un SVG entero o un grupo desaparecía, una forma y su
+espejo se reducían a una astilla a mitad del morph y no había forma de fundir
+el objeto mientras se transformaba. Lee «Al actualizar» si alguna escena
+transforma formas con degradado, grupos o SVG enteros, o usa
+`scene.text.code`.
+
+== Texto
+
+- `scene.text.code` resalta la sintaxis: las palabras clave, las cadenas, los
+  números, los comentarios, las funciones y los tipos toman los colores de
+  código del tema. Los temas de editores (`dracula`, `nord`, `solarized-*`,
+  `gruvbox-dark`, `tokyo-night`, `catppuccin-*`) usan su esquema original;
+  `technical`, `presentation`, `paper` y los temas propios lo derivan de la
+  paleta, y los tokens `code_keyword`, `code_string`, `code_number`,
+  `code_comment`, `code_function`, `code_type` y `code` de `Theme(colors=...)`
+  lo cambian. `theme="esquema.tmTheme"` usa un esquema de TextMate o Sublime Text,
+  `highlight=False` lo deja monocromo y `font` elige la fuente, con DejaVu
+  Sans Mono como respaldo. Antes, `language` solo se mostraba en la cabecera.
+  Ver #link("/referencia/text/#api-typography-code")[`Typography.code`].
 
 == Correcciones
+
+- El nombre del lenguaje de `scene.text.code` va en monoespaciada dentro de la
+  cabecera, y el código empieza bajo la regla, desde el margen izquierdo del
+  panel. Antes el nombre, con la letra del cuerpo, se salía por la esquina, y
+  el código se centraba en la mitad izquierda: un fragmento ancho se salía del
+  panel.
 
 - Un relleno o un trazo con degradado se interpola durante el morph hacia el
   del destino (posición y paradas) y sigue siendo un degradado al terminar;
@@ -58,6 +80,10 @@ formas con degradado, grupos o SVG enteros.
 - Los fotogramas intermedios de un morph entre contornos de sentidos opuestos
   cambian (los extremos son los mismos). Si normalizabas el sentido de los
   contornos para evitar el colapso, ya no hace falta.
+- Los bloques de `scene.text.code` salen coloreados y con el código alineado
+  arriba a la izquierda. Para recuperar el aspecto monocromo, pasa
+  `highlight=False`; si colocabas otros objetos respecto al código, revisa su
+  posición.
 
 = 0.11.0
 

@@ -1,4 +1,4 @@
-"""A compact vector code block for a technical explainer."""
+"""A highlighted vector code block for a technical explainer."""
 
 import os
 
@@ -10,7 +10,11 @@ scene = Scene(frame=(16, 9), background=BLACK, margin=0.7)
 title = scene.text("Integration step", role="title").fill(WHITE).move_to(0, 3.1875, anchor=Anchor.CENTER)
 subtitle = scene.text("Explicit Euler update", role="subtitle").fill(GRAY).move_to(0, 2.5, anchor=Anchor.CENTER)
 snippet = scene.text.code(
-    "velocity += acceleration * dt\nposition += velocity * dt",
+    "def step(position, velocity, dt=0.01):\n"
+    "    # explicit Euler update\n"
+    "    velocity += GRAVITY * dt\n"
+    "    position += velocity * dt\n"
+    "    return position, velocity",
     language="python",
     width=9.5,
     height=3.25,

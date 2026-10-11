@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use gaanim_core::kurbo::{Cap, Join, Stroke};
 use gaanim_core::peniko::{Brush, Color};
-use gaanim_text::prelude::{TextConfig, TextRole, TextStyle};
+use gaanim_text::prelude::{CodeColors, TextConfig, TextRole, TextStyle};
 
 use super::{ObjectSpec, SpawnKind, ThemeError};
 
@@ -219,6 +219,9 @@ pub struct CanvasTheme {
     /// Default markup mode for text created while this theme is active: with
     /// `false`, `*` and `_` stay literal unless a call passes `markup=True`.
     pub text_markup: bool,
+    /// Token colors of code blocks from a built-in theme's editor scheme;
+    /// `None` derives them from the palette. See [`Self::code_colors`].
+    pub code_syntax: Option<CodeColors>,
 }
 
 impl CanvasTheme {
@@ -401,7 +404,61 @@ impl CanvasTheme {
             },
             _ => return Err(ThemeError { name: name.into() }),
         };
-        Ok(Self::from_palette(canonical, palette))
+        let mut theme = Self::from_palette(canonical, palette);
+        theme.code_syntax = builtin_code_syntax(canonical, palette.foreground);
+        Ok(theme)
+    }
+
+    /// Color tokens that override the colors of code blocks: plain text,
+    /// keywords, strings, numbers, comments, functions and types.
+    pub const CODE_COLOR_TOKENS: [&'static str; 7] = [
+        "code",
+        "code_keyword",
+        "code_string",
+        "code_number",
+        "code_comment",
+        "code_function",
+        "code_type",
+    ];
+
+    /// Colors a code block drawn over `background` paints its tokens with:
+    /// the theme's editor scheme when `background` is as dark as the theme's
+    /// panel, otherwise colors derived from the palette (see
+    /// [`CodeColors::derive`]); plain text takes the foreground. The
+    /// [`Self::CODE_COLOR_TOKENS`] override either.
+    pub fn code_colors(&self, background: Color) -> CodeColors {
+        use gaanim_text::code::is_dark;
+        let palette = &self.palette;
+        let mut colors = self
+            .code_syntax
+            .filter(|_| is_dark(background) == is_dark(palette.panel))
+            .unwrap_or_else(|| {
+                CodeColors::derive(
+                    palette.foreground,
+                    background,
+                    palette.accent,
+                    palette.muted,
+                    palette.title,
+                )
+            });
+        colors.foreground = palette.foreground;
+        let CodeColors {
+            foreground,
+            keyword,
+            string,
+            number,
+            comment,
+            function,
+            type_name,
+        } = &mut colors;
+        for (token, slot) in Self::CODE_COLOR_TOKENS.into_iter().zip([
+            foreground, keyword, string, number, comment, function, type_name,
+        ]) {
+            if let Some(color) = self.colors.get(token) {
+                *slot = *color;
+            }
+        }
+        colors
     }
 
     pub fn from_palette(name: impl Into<String>, palette: ThemePalette) -> Self {
@@ -417,6 +474,7 @@ impl CanvasTheme {
             fonts: Vec::new(),
             layout: LayoutTokens::default(),
             text_markup: true,
+            code_syntax: None,
         };
         result.sync_text_colors();
         result.sync_color_tokens();
@@ -994,6 +1052,32 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
     }
 }
 
+/// The token colors of a built-in theme's editor scheme, for the themes that
+/// come from one; `foreground` is the palette's.
+fn builtin_code_syntax(name: &str, foreground: Color) -> Option<CodeColors> {
+    let [keyword, string, number, comment, function, type_name] = match name {
+        "dracula" => [0xFF79C6, 0xF1FA8C, 0xBD93F9, 0x6272A4, 0x50FA7B, 0x8BE9FD],
+        "nord" => [0x81A1C1, 0xA3BE8C, 0xB48EAD, 0x7B88A1, 0x88C0D0, 0x8FBCBB],
+        "solarized-dark" => [0x859900, 0x2AA198, 0xD33682, 0x657B83, 0x268BD2, 0xB58900],
+        "solarized-light" => [0x859900, 0x2AA198, 0xD33682, 0x93A1A1, 0x268BD2, 0xB58900],
+        "gruvbox-dark" => [0xFB4934, 0xB8BB26, 0xD3869B, 0x928374, 0x8EC07C, 0xFABD2F],
+        "tokyo-night" => [0xBB9AF7, 0x9ECE6A, 0xFF9E64, 0x737AA2, 0x7AA2F7, 0x2AC3DE],
+        "catppuccin-mocha" => [0xCBA6F7, 0xA6E3A1, 0xFAB387, 0x9399B2, 0x89B4FA, 0xF9E2AF],
+        "catppuccin-latte" => [0x8839EF, 0x40A02B, 0xFE640B, 0x7C7F93, 0x1E66F5, 0xDF8E1D],
+        _ => return None,
+    }
+    .map(rgb);
+    Some(CodeColors {
+        foreground,
+        keyword,
+        string,
+        number,
+        comment,
+        function,
+        type_name,
+    })
+}
+
 pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
     match kind {
         SpawnKind::FillLevelOutline { .. } => "fill_level_outline",
@@ -1401,5 +1485,41 @@ mod tests {
 
         assert_eq!(number_size, 0.32);
         assert_eq!(label_size, 0.36);
+    }
+
+    #[test]
+    fn code_blocks_take_a_builtin_editor_scheme_or_a_derived_one() {
+        let dracula = CanvasTheme::builtin("dracula").unwrap();
+        let colors = dracula.code_colors(dracula.palette.panel);
+        assert_eq!(colors.keyword, rgb(0xFF79C6));
+        assert_eq!(colors.string, rgb(0xF1FA8C));
+        assert_eq!(colors.foreground, dracula.palette.foreground);
+
+        // Gaanim's own themes derive their colors from the palette.
+        let technical = CanvasTheme::builtin("technical").unwrap();
+        assert_eq!(technical.code_syntax, None);
+        let colors = technical.code_colors(technical.palette.panel);
+        assert_eq!(colors.keyword, technical.palette.accent);
+        assert_eq!(colors.comment, technical.palette.muted);
+
+        // A light block on a dark theme cannot use the dark scheme.
+        let light = dracula.code_colors(Color::WHITE);
+        assert_ne!(light.string, rgb(0xF1FA8C));
+        assert!(gaanim_text::code::is_dark(light.string));
+    }
+
+    #[test]
+    fn code_color_tokens_override_the_scheme() {
+        let mut theme = CanvasTheme::builtin("nord").unwrap();
+        theme
+            .set_colors(&HashMap::from([
+                ("code_keyword".to_string(), rgb(0x123456)),
+                ("code".to_string(), rgb(0xABCDEF)),
+            ]))
+            .unwrap();
+        let colors = theme.code_colors(theme.palette.panel);
+        assert_eq!(colors.keyword, rgb(0x123456));
+        assert_eq!(colors.foreground, rgb(0xABCDEF));
+        assert_eq!(colors.string, rgb(0xA3BE8C));
     }
 }

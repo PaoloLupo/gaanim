@@ -1320,6 +1320,35 @@ pub fn compile_scaled_typst_to_hierarchy(
     (entity, bounds, cached.metrics)
 }
 
+/// The character and fill of every glyph `source` compiles to, in order.
+#[cfg(test)]
+pub(crate) fn compiled_glyph_fills(source: &str) -> Vec<(char, Option<peniko::Color>)> {
+    let hierarchy = compile_typst_source(
+        &FontRegistry::new(),
+        source,
+        false,
+        None,
+        None,
+        None,
+        None,
+        &None,
+        &StrokeBrush::transparent(),
+    )
+    .expect("the source compiles");
+    hierarchy
+        .children
+        .iter()
+        .filter(|child| child.tag.0 == "TypstGlyph")
+        .map(|child| {
+            let fill = match &child.fill.0 {
+                Some(peniko::Brush::Solid(color)) => Some(*color),
+                _ => None,
+            };
+            (child.span.character, fill)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
