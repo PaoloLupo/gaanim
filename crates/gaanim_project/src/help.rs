@@ -227,6 +227,10 @@ const EXPORT: Page = Page {
                     "VP9 video with audio (needs FFmpeg; supports --transparent)",
                 ),
                 (
+                    ".mov",
+                    "Apple ProRes with PCM audio for video editors (needs\nFFmpeg): 422 HQ, or 4444 with alpha with --transparent",
+                ),
+                (
                     ".webp",
                     "Animated WebP (needs FFmpeg; supports --transparent)",
                 ),
@@ -247,7 +251,11 @@ const EXPORT: Page = Page {
                 ("-o, --output <FILE>", "Output file (required)"),
                 (
                     "--quality <PRESET>",
-                    "draft (30 fps, fast), standard (60 fps, default), or\nproduction (60 fps, best encode)",
+                    "draft (30 fps, fast), standard (60 fps, default), or\nproduction (60 fps, best encode). GIF and WebP stay at\n30 fps",
+                ),
+                (
+                    "--fps <RATE>",
+                    "Frames per second, from 1 to 240, instead of the\nquality's: 24, 25, 50, or a fraction such as 24000/1001\n(23.976 also works). A bundle records a whole rate, and\na video exported from a bundle runs at that rate",
                 ),
                 ("--width <PX>", "Output width in pixels (default 1920)"),
                 ("--height <PX>", "Output height in pixels (default 1080)"),
@@ -261,7 +269,7 @@ const EXPORT: Page = Page {
                 ),
                 (
                     "--transparent",
-                    "Keep the alpha channel (WebM, WebP, PNG); the scene needs\na transparent background",
+                    "Keep the alpha channel (WebM, MOV, WebP, PNG); the scene\nneeds a transparent background",
                 ),
                 (
                     "--from <SECONDS|MARKER>",
@@ -274,10 +282,6 @@ const EXPORT: Page = Page {
                 (
                     "--frame <SECONDS|MARKER>[,...]",
                     "Write exactly one PNG at each instant instead of a range.\nOne instant writes --output; several append 1, 2, ...\n(still.png -> still_1.png). Needs a .png output",
-                ),
-                (
-                    "--fps <N>",
-                    "Bundles only: frames recorded per second (default 60).\nA video exported from a bundle runs at this rate",
                 ),
                 ("-h, --help", "Print this help"),
             ],
@@ -294,8 +298,12 @@ const EXPORT: Page = Page {
                     "Quick, smaller render",
                 ),
                 (
-                    "gaanim export . -o clip.webm --transparent",
-                    "Keep transparency for compositing",
+                    "gaanim export . -o film.mp4 --fps 24",
+                    "A 24 fps video, as cinema and animation use",
+                ),
+                (
+                    "gaanim export . -o title.mov --transparent",
+                    "ProRes 4444 with alpha, to lay over a video in an editor",
                 ),
                 (
                     "gaanim export . -o intro.gif --from 0 --to intro_end",
@@ -584,6 +592,8 @@ mod tests {
             "--transparent",
             "--from",
             "--to",
+            "--fps",
+            ".mov",
         ] {
             assert!(export.contains(option), "{option}");
         }

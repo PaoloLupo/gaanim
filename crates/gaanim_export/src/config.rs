@@ -35,6 +35,150 @@ pub enum OutputFit {
 /// images grow with every frame and gain little visibly above 30 fps.
 const ANIMATED_IMAGE_MAX_FPS: u32 = 30;
 
+/// Frames per second of an export: a whole rate such as 24 or 60, or a
+/// fraction such as the NTSC 24000/1001 (23.976), kept exact so the video
+/// container carries that very rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrameRate {
+    numerator: u32,
+    denominator: u32,
+}
+
+impl FrameRate {
+    /// Lowest and highest rates an export accepts.
+    pub const MIN: f64 = 1.0;
+    pub const MAX: f64 = 240.0;
+
+    /// `numerator / denominator` frames per second, in lowest terms, or
+    /// `None` for a zero term.
+    pub fn new(numerator: u32, denominator: u32) -> Option<Self> {
+        if numerator == 0 || denominator == 0 {
+            return None;
+        }
+        let divisor = gcd(numerator, denominator);
+        Some(Self {
+            numerator: numerator / divisor,
+            denominator: denominator / divisor,
+        })
+    }
+
+    /// `fps` whole frames per second.
+    pub const fn whole(fps: u32) -> Self {
+        Self {
+            numerator: if fps == 0 { 1 } else { fps },
+            denominator: 1,
+        }
+    }
+
+    pub fn numerator(self) -> u32 {
+        self.numerator
+    }
+
+    pub fn denominator(self) -> u32 {
+        self.denominator
+    }
+
+    /// The rate as a whole number of frames per second, if it is one.
+    pub fn as_whole(self) -> Option<u32> {
+        (self.denominator == 1).then_some(self.numerator)
+    }
+
+    pub fn as_f64(self) -> f64 {
+        f64::from(self.numerator) / f64::from(self.denominator)
+    }
+
+    /// Seconds between two frames.
+    pub fn frame_duration(self) -> f64 {
+        f64::from(self.denominator) / f64::from(self.numerator)
+    }
+
+    /// Frames a range of `seconds` takes, counting a partial last frame.
+    pub fn frames_in(self, seconds: f64) -> u64 {
+        (seconds * f64::from(self.numerator) / f64::from(self.denominator)).ceil() as u64
+    }
+
+    /// The rate as FFmpeg's `-r` takes it: `24` or `24000/1001`.
+    pub fn ffmpeg_arg(self) -> String {
+        match self.as_whole() {
+            Some(fps) => fps.to_string(),
+            None => format!("{}/{}", self.numerator, self.denominator),
+        }
+    }
+}
+
+impl From<u32> for FrameRate {
+    fn from(fps: u32) -> Self {
+        Self::whole(fps)
+    }
+}
+
+/// `24`, or a fractional rate with up to three decimals: `23.976`.
+impl std::fmt::Display for FrameRate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(fps) = self.as_whole() {
+            return write!(formatter, "{fps}");
+        }
+        let text = format!("{:.3}", self.as_f64());
+        write!(
+            formatter,
+            "{}",
+            text.trim_end_matches('0').trim_end_matches('.')
+        )
+    }
+}
+
+/// Reads `24`, `24000/1001`, or a decimal such as `25.5`. A decimal that
+/// rounds an NTSC rate (`23.976`, `29.97`, `59.94`) means that exact rate.
+impl std::str::FromStr for FrameRate {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let text = text.trim();
+        let invalid = || {
+            format!(
+                "frame rate {text:?} must be from 1 to 240: a whole number (24), a fraction \
+                 (24000/1001) or a decimal (23.976)"
+            )
+        };
+        let rate = if let Some((numerator, denominator)) = text.split_once('/') {
+            let numerator = numerator.trim().parse().map_err(|_| invalid())?;
+            let denominator = denominator.trim().parse().map_err(|_| invalid())?;
+            Self::new(numerator, denominator)
+        } else if let Some((whole, decimals)) = text.split_once('.') {
+            if decimals.is_empty()
+                || decimals.len() > 6
+                || !decimals.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                return Err(invalid());
+            }
+            let value: f64 = text.parse().map_err(|_| invalid())?;
+            let ntsc = (value * 1.001).round();
+            if ntsc >= 1.0 && (value - ntsc * 1000.0 / 1001.0).abs() < 5e-4 {
+                Self::new(ntsc as u32 * 1000, 1001)
+            } else {
+                let scale = 10_u32.pow(decimals.len() as u32);
+                let whole: u32 = whole.parse().map_err(|_| invalid())?;
+                let decimals: u32 = decimals.parse().map_err(|_| invalid())?;
+                whole
+                    .checked_mul(scale)
+                    .and_then(|scaled| scaled.checked_add(decimals))
+                    .and_then(|numerator| Self::new(numerator, scale))
+            }
+        } else {
+            text.parse().ok().and_then(|fps| Self::new(fps, 1))
+        };
+        rate.filter(|rate| (Self::MIN..=Self::MAX).contains(&rate.as_f64()))
+            .ok_or_else(invalid)
+    }
+}
+
+fn gcd(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
 impl QualityPreset {
     pub fn encoding_speed(self) -> EncodingSpeed {
         match self {
@@ -145,7 +289,7 @@ pub struct ExportConfig {
     pub quality: QualityPreset,
     pub width: u32,
     pub height: u32,
-    pub fps: u32,
+    pub fps: FrameRate,
     pub transparent: bool,
     pub fit: OutputFit,
 
@@ -176,7 +320,7 @@ impl Default for ExportConfig {
             quality: QualityPreset::Standard,
             width: 1920,
             height: 1080,
-            fps: 60,
+            fps: FrameRate::whole(60),
             transparent: false,
             fit: OutputFit::Error,
             start_time: None,
@@ -207,6 +351,9 @@ impl ExportConfig {
                     config.format = ExportFormat::Webm;
                     config.transparent = true;
                 }
+                "mov" => {
+                    config.format = ExportFormat::Mov;
+                }
                 "webp" => {
                     config.format = ExportFormat::Webp;
                 }
@@ -235,7 +382,7 @@ impl ExportConfig {
             return self;
         }
         self.encoding_speed = self.quality.encoding_speed();
-        self.fps = self.quality.fps_for(self.format);
+        self.fps = FrameRate::whole(self.quality.fps_for(self.format));
         self.crf = self.quality.crf();
         self.applied_preset = Some(preset);
         self
@@ -261,7 +408,7 @@ impl ExportConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AudioTrack, ExportConfig, ExportTelemetry, QualityPreset};
+    use super::{AudioTrack, ExportConfig, ExportTelemetry, FrameRate, QualityPreset};
     use crate::encoder::{ExportFormat, VideoEncoder};
 
     #[test]
@@ -310,25 +457,31 @@ mod tests {
                 let config = ExportConfig::new(path)
                     .with_quality(quality)
                     .apply_presets();
-                assert_eq!(config.fps, 30, "{path} {quality:?}");
+                assert_eq!(config.fps, FrameRate::whole(30), "{path} {quality:?}");
                 assert_eq!(config.crf, quality.crf(), "{path} {quality:?}");
             }
         }
-        let video = ExportConfig::new("out.mp4").with_quality(QualityPreset::Production);
-        assert_eq!(video.fps, 60);
+        for path in ["out.mp4", "out.mov"] {
+            let video = ExportConfig::new(path).with_quality(QualityPreset::Production);
+            assert_eq!(video.fps, FrameRate::whole(60), "{path}");
+        }
     }
 
     #[test]
     fn exporter_presets_keep_explicit_fps_and_crf() {
         let mut config = ExportConfig::new("out.mp4").with_quality(QualityPreset::Standard);
-        config.fps = 24;
+        config.fps = FrameRate::whole(24);
         config.crf = 20;
         let config = config.apply_presets();
-        assert_eq!((config.fps, config.crf), (24, 20));
+        assert_eq!((config.fps, config.crf), (FrameRate::whole(24), 20));
 
         let mut config = ExportConfig::new("out.gif");
-        config.fps = 12;
-        assert_eq!(config.apply_presets().fps, 12);
+        config.fps = FrameRate::whole(12);
+        assert_eq!(config.apply_presets().fps, FrameRate::whole(12));
+
+        let mut config = ExportConfig::new("out.mov");
+        config.fps = FrameRate::new(24_000, 1001).unwrap();
+        assert_eq!(config.apply_presets().fps.to_string(), "23.976");
     }
 
     #[test]
@@ -336,15 +489,70 @@ mod tests {
         let mut config = ExportConfig::new("out.mp4").with_quality(QualityPreset::Standard);
         config.format = ExportFormat::Gif;
         let mut config = config.apply_presets();
-        assert_eq!(config.fps, 30);
+        assert_eq!(config.fps, FrameRate::whole(30));
 
         config.quality = QualityPreset::Draft;
         let mut config = config.apply_presets();
         assert_eq!(config.crf, 24);
 
         // An explicit `with_quality` always applies its preset.
-        config.fps = 15;
-        assert_eq!(config.with_quality(QualityPreset::Draft).fps, 30);
+        config.fps = FrameRate::whole(15);
+        assert_eq!(
+            config.with_quality(QualityPreset::Draft).fps,
+            FrameRate::whole(30)
+        );
+    }
+
+    #[test]
+    fn frame_rates_parse_whole_fractional_and_decimal_rates() {
+        let parse = |text: &str| text.parse::<FrameRate>();
+        assert_eq!(parse("24"), Ok(FrameRate::whole(24)));
+        assert_eq!(parse(" 50 "), Ok(FrameRate::whole(50)));
+        assert_eq!(
+            parse("24000/1001"),
+            Ok(FrameRate::new(24_000, 1001).unwrap())
+        );
+        // A fraction is kept in lowest terms; a whole fraction is whole.
+        assert_eq!(parse("48/2"), Ok(FrameRate::whole(24)));
+        // Decimals that round an NTSC rate mean that exact rate.
+        for (decimal, numerator) in [("23.976", 24_000), ("29.97", 30_000), ("59.94", 60_000)] {
+            let rate = parse(decimal).unwrap();
+            assert_eq!((rate.numerator(), rate.denominator()), (numerator, 1001));
+            assert_eq!(rate.to_string(), decimal);
+        }
+        assert_eq!(parse("25.5"), Ok(FrameRate::new(51, 2).unwrap()));
+        assert_eq!(parse("24.0"), Ok(FrameRate::whole(24)));
+        assert_eq!(parse("240"), Ok(FrameRate::whole(240)));
+        for invalid in [
+            "0",
+            "241",
+            "0.5",
+            "-24",
+            "24/0",
+            "0/1",
+            "abc",
+            "24.",
+            "1.2345678",
+            "",
+        ] {
+            assert!(parse(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn frame_rates_time_frames_exactly() {
+        let ntsc = FrameRate::new(24_000, 1001).unwrap();
+        assert_eq!(ntsc.ffmpeg_arg(), "24000/1001");
+        assert_eq!(FrameRate::whole(25).ffmpeg_arg(), "25");
+        assert_eq!(ntsc.as_whole(), None);
+        assert_eq!(FrameRate::whole(60).as_whole(), Some(60));
+        // 1001 frames of 23.976 fps last exactly 41.75 s.
+        assert_eq!(ntsc.frames_in(41.75), 1001);
+        assert!((ntsc.frame_duration() - 1001.0 / 24_000.0).abs() < 1e-15);
+        // Whole rates time frames as `1 / fps` and `seconds * fps`, as before.
+        let sixty = FrameRate::whole(60);
+        assert_eq!(sixty.frame_duration(), 1.0 / 60.0);
+        assert_eq!(sixty.frames_in(2.5), (2.5_f64 * 60.0).ceil() as u64);
     }
 
     #[test]

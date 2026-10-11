@@ -58,6 +58,10 @@ pub struct ExportState {
     /// Record a playback bundle (`.gaanim`) instead of a video.
     pub bundle: bool,
     pub quality: ExportQuality,
+    /// Frame rate chosen in the dialog; `None` takes the quality's.
+    pub fps: Option<FrameRate>,
+    /// Keep the alpha channel, for the formats that carry it.
+    pub transparent: bool,
     pub video_encoder: VideoEncoder,
     pub output_path: String,
     /// The folder and name the dialog edits; `output_path` follows them and
@@ -235,6 +239,26 @@ impl ExportQuality {
     }
 }
 
+/// Rates the dialog offers besides the quality's, with what uses them.
+const FRAME_RATES: [(u32, u32, &str); 8] = [
+    (24, 1, "cine"),
+    (25, 1, "PAL"),
+    (30, 1, ""),
+    (50, 1, "PAL"),
+    (60, 1, ""),
+    (24_000, 1001, "NTSC, cine"),
+    (30_000, 1001, "NTSC"),
+    (60_000, 1001, "NTSC"),
+];
+
+/// Formats whose files keep the alpha channel.
+fn keeps_alpha(format: ExportFormat) -> bool {
+    matches!(
+        format,
+        ExportFormat::Webm | ExportFormat::Mov | ExportFormat::Webp | ExportFormat::PngSequence
+    )
+}
+
 /// What the export dialog writes: a video format or a playback bundle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FormatChoice {
@@ -249,6 +273,8 @@ impl Default for ExportState {
             format: ExportFormat::Mp4,
             bundle: false,
             quality: ExportQuality::Standard,
+            fps: None,
+            transparent: false,
             video_encoder: VideoEncoder::Auto,
             output_path: "output.mp4".to_string(),
             output_parts: None,
@@ -503,6 +529,8 @@ pub fn export_dialog_system(
         FormatChoice::Video(state.format)
     };
     let mut current_quality = state.quality;
+    let mut current_fps = state.fps;
+    let mut current_transparent = state.transparent;
     let mut current_encoder = state.video_encoder;
     let mut current_parts = state
         .output_parts
@@ -525,20 +553,28 @@ pub fn export_dialog_system(
             .map(|canvas| (canvas.frame.width, canvas.frame.height)),
     };
     let dur = timeline.cached_duration;
-    let fps = bundle
-        .as_ref()
-        .map(|bundle| bundle.fps())
-        .unwrap_or_else(|| match current_choice {
-            FormatChoice::Video(format) => current_quality.preset().fps_for(format),
-            FormatChoice::Bundle => current_quality.fps(),
-        });
-    let total = (dur * fps as f64).ceil() as u64;
     // An open bundle exports video; a script's scene can also be recorded
     // into a bundle.
     let offers_bundle = bundle_source.is_none();
     if !offers_bundle {
         current_choice = FormatChoice::Video(current_format);
     }
+    // A bundle records whole rates.
+    if current_choice == FormatChoice::Bundle
+        && current_fps.is_some_and(|fps| fps.as_whole().is_none())
+    {
+        current_fps = None;
+    }
+    let preset_fps = match current_choice {
+        FormatChoice::Video(format) => current_quality.preset().fps_for(format),
+        FormatChoice::Bundle => current_quality.fps(),
+    };
+    // A bundle's video runs at its recorded rate.
+    let fps = match &bundle {
+        Some(bundle) => FrameRate::whole(bundle.fps()),
+        None => current_fps.unwrap_or(FrameRate::whole(preset_fps)),
+    };
+    let total = fps.frames_in(dur);
 
     // Enter submits unless a field is using it (text or number entry).
     let enter_submits = ctx.input(|input| input.key_pressed(egui::Key::Enter))
@@ -583,9 +619,10 @@ pub fn export_dialog_system(
 
             section_label(ui, "Formato");
             let videos = [
-                (FormatChoice::Video(ExportFormat::Mp4), "MP4", "Video H.264"),
-                (FormatChoice::Video(ExportFormat::Webm), "WebM", "Video VP9"),
-                // Six formats share the row: short details keep them apart.
+                (FormatChoice::Video(ExportFormat::Mp4), "MP4", "H.264"),
+                (FormatChoice::Video(ExportFormat::Webm), "WebM", "VP9"),
+                (FormatChoice::Video(ExportFormat::Mov), "MOV", "ProRes"),
+                // Seven formats share the row: short details keep them apart.
                 (FormatChoice::Video(ExportFormat::Webp), "WebP", "Animada"),
                 (FormatChoice::Video(ExportFormat::Gif), "GIF", "Animada"),
                 (FormatChoice::Video(ExportFormat::PngSequence), "PNG", "Fotogramas"),
@@ -594,7 +631,7 @@ pub fn export_dialog_system(
             let choices = if offers_bundle {
                 &videos[..]
             } else {
-                &videos[..5]
+                &videos[..videos.len() - 1]
             };
             segmented(ui, "export_format", &mut current_choice, choices);
             if current_choice == FormatChoice::Video(ExportFormat::PngSequence) {
@@ -602,6 +639,18 @@ pub fn export_dialog_system(
                     egui::Label::new(
                         egui::RichText::new(
                             "Un PNG por fotograma (frame_00000.png, frame_00001.png…) en la carpeta de salida, para editar o componer en otro programa.",
+                        )
+                        .size(12.0)
+                        .color(palette::TEXT_MUTED),
+                    )
+                    .wrap(),
+                );
+            }
+            if current_choice == FormatChoice::Video(ExportFormat::Mov) {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "Apple ProRes para editores de vídeo: 422 HQ, o 4444 con canal alfa si conservas la transparencia. Archivos grandes, sin pérdida visible.",
                         )
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
@@ -621,21 +670,77 @@ pub fn export_dialog_system(
                     .wrap(),
                 );
             }
+            let recording = current_choice == FormatChoice::Bundle;
+            if let FormatChoice::Video(format) = current_choice
+                && keeps_alpha(format)
+            {
+                ui.checkbox(&mut current_transparent, "Conservar la transparencia")
+                    .on_hover_text(
+                        "Guarda el canal alfa. La escena necesita un fondo transparente, por ejemplo Scene(background=\"#00000000\").",
+                    );
+            }
             ui.add_space(6.0);
 
             section_label(ui, "Calidad");
+            // With a rate of its own, the quality only chooses the encoding.
+            let own_rate = current_fps.is_some() && bundle_source.is_none();
             segmented(
                 ui,
                 "export_quality",
                 &mut current_quality,
                 &[
-                    (ExportQuality::Draft, "Borrador", "30 fps · rápida"),
-                    (ExportQuality::Standard, "Estándar", "60 fps · equilibrada"),
-                    (ExportQuality::Production, "Producción", "60 fps · máxima"),
+                    (
+                        ExportQuality::Draft,
+                        "Borrador",
+                        if own_rate { "rápida" } else { "30 fps · rápida" },
+                    ),
+                    (
+                        ExportQuality::Standard,
+                        "Estándar",
+                        if own_rate { "equilibrada" } else { "60 fps · equilibrada" },
+                    ),
+                    (
+                        ExportQuality::Production,
+                        "Producción",
+                        if own_rate { "máxima" } else { "60 fps · máxima" },
+                    ),
                 ],
             );
 
-            let recording = current_choice == FormatChoice::Bundle;
+            // A bundle's video keeps its recorded rate.
+            if bundle_source.is_none() {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    section_label(ui, "Fotogramas por segundo");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let label = |rate: Option<FrameRate>| match rate {
+                            None => format!("Según la calidad · {preset_fps} fps"),
+                            Some(rate) => FRAME_RATES
+                                .iter()
+                                .find(|(numerator, denominator, _)| {
+                                    FrameRate::new(*numerator, *denominator) == Some(rate)
+                                })
+                                .filter(|(_, _, usage)| !usage.is_empty())
+                                .map(|(_, _, usage)| format!("{rate} fps · {usage}"))
+                                .unwrap_or_else(|| format!("{rate} fps")),
+                        };
+                        egui::ComboBox::from_id_salt("export_fps")
+                            .width(200.0)
+                            .selected_text(label(current_fps))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut current_fps, None, label(None));
+                                for (numerator, denominator, _) in FRAME_RATES {
+                                    // A bundle records whole rates.
+                                    if recording && denominator != 1 {
+                                        continue;
+                                    }
+                                    let rate = FrameRate::new(numerator, denominator);
+                                    ui.selectable_value(&mut current_fps, rate, label(rate));
+                                }
+                            });
+                    });
+                });
+            }
             if current_choice == FormatChoice::Video(ExportFormat::Mp4) {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -758,7 +863,7 @@ pub fn export_dialog_system(
 
             ui.horizontal(|ui| {
                 let summary = if recording {
-                    format!("paquete · {} fps", current_quality.fps())
+                    format!("paquete · {fps} fps")
                 } else {
                     format!("{current_width}×{current_height} · {fps} fps")
                 };
@@ -806,6 +911,8 @@ pub fn export_dialog_system(
     state.format = current_format;
     state.bundle = current_choice == FormatChoice::Bundle && offers_bundle;
     state.quality = current_quality;
+    state.fps = current_fps;
+    state.transparent = current_transparent;
     state.video_encoder = current_encoder;
     state.output_path = current_output;
     state.output_parts = Some(current_parts);
@@ -847,6 +954,8 @@ pub fn export_dialog_system(
             let fmt = state.format;
             let record_bundle = state.bundle;
             let qual = state.quality;
+            let fps = state.fps;
+            let transparent = state.transparent && keeps_alpha(fmt) && !record_bundle;
             let video_encoder = if fmt == ExportFormat::Mp4 {
                 state.video_encoder
             } else {
@@ -896,15 +1005,17 @@ pub fn export_dialog_system(
                         &script_path,
                         &project_dir,
                         &out,
-                        qual,
-                        (
-                            if record_bundle {
+                        WorkerEncoding {
+                            quality: qual,
+                            format: if record_bundle {
                                 gaanim_bundle::EXTENSION
                             } else {
                                 export_format_arg(fmt)
                             },
                             video_encoder,
-                        ),
+                            fps,
+                            transparent,
+                        },
                         output_size,
                         output_fit,
                         telemetry.clone(),
@@ -912,12 +1023,11 @@ pub fn export_dialog_system(
                     ),
                     None if record_bundle => match canvas {
                         Some(canvas) => {
-                            let mut config = crate::cli::bundle_config(
-                                None,
-                                &canvas,
-                                &out,
-                                Some(crate::cli::bundle_fps(qual.arg())),
-                            );
+                            let fps = fps
+                                .and_then(FrameRate::as_whole)
+                                .unwrap_or(crate::cli::bundle_fps(qual.arg()));
+                            let mut config =
+                                crate::cli::bundle_config(None, &canvas, &out, Some(fps));
                             config.telemetry = Some(telemetry.clone());
                             gaanim_api::export::record_canvas(canvas, config)
                                 .map_err(|error| error.to_string())
@@ -929,6 +1039,11 @@ pub fn export_dialog_system(
                         // The preset sets fps, CRF and speed for the format.
                         config.format = fmt;
                         let mut config = config.with_quality(qual.preset());
+                        // An open bundle exports at its recorded rate.
+                        if let Some(fps) = fps.filter(|_| bundle_source.is_none()) {
+                            config.fps = fps;
+                        }
+                        config.transparent = transparent;
                         config.width = output_size.0;
                         config.height = output_size.1;
                         config.fit = output_fit;
@@ -1098,19 +1213,27 @@ fn worker_error_context(summary: &str, output_path: &str, telemetry: &ExportTele
     )
 }
 
+/// What the export worker writes and how it encodes it.
+struct WorkerEncoding {
+    quality: ExportQuality,
+    /// A video format's extension, or the bundle's.
+    format: &'static str,
+    video_encoder: VideoEncoder,
+    fps: Option<FrameRate>,
+    transparent: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_export_worker(
     script_path: &std::path::Path,
     project_dir: &std::path::Path,
     output_path: &str,
-    quality: ExportQuality,
-    encoding: (&'static str, VideoEncoder),
+    encoding: WorkerEncoding,
     output_size: (u32, u32),
     fit: OutputFit,
     telemetry: ExportTelemetry,
     cancel_requested: Arc<AtomicBool>,
 ) -> Result<(), String> {
-    let (format, video_encoder) = encoding;
     let executable = std::env::current_exe()
         .map_err(|error| format!("could not locate the Gaanim executable: {error}"))?;
     let mut command = Command::new(executable);
@@ -1118,10 +1241,10 @@ fn run_export_worker(
         .arg("--export-worker")
         .arg(script_path)
         .arg(output_path)
-        .arg(quality.arg())
-        .arg(format)
+        .arg(encoding.quality.arg())
+        .arg(encoding.format)
         .arg("--encoder")
-        .arg(video_encoder.arg_name())
+        .arg(encoding.video_encoder.arg_name())
         .arg("--width")
         .arg(output_size.0.to_string())
         .arg("--height")
@@ -1131,7 +1254,14 @@ fn run_export_worker(
             OutputFit::Error => "error",
             OutputFit::Contain => "contain",
             OutputFit::Cover => "cover",
-        })
+        });
+    if let Some(fps) = encoding.fps {
+        command.arg("--fps").arg(fps.ffmpeg_arg());
+    }
+    if encoding.transparent {
+        command.arg("--transparent");
+    }
+    command
         .env("GAANIM_EXPORT_WORKER", "1")
         .current_dir(project_dir)
         .stdout(Stdio::piped())
@@ -1430,6 +1560,7 @@ fn export_format_arg(format: ExportFormat) -> &'static str {
     match format {
         ExportFormat::Mp4 => "mp4",
         ExportFormat::Webm => "webm",
+        ExportFormat::Mov => "mov",
         ExportFormat::Webp => "webp",
         ExportFormat::Gif => "gif",
         ExportFormat::PngSequence => "png",

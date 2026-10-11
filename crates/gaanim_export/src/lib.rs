@@ -12,8 +12,8 @@ mod nv12;
 
 pub mod prelude {
     pub use crate::config::{
-        AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportTelemetry, OutputFit,
-        QualityPreset,
+        AspectRatioPreset, AudioTrack, AudioTrackError, ExportConfig, ExportTelemetry, FrameRate,
+        OutputFit, QualityPreset,
     };
     pub use crate::encoder::{
         EncodingSpeed, ExportError, ExportFormat, VideoEncoder, detect_available_encoders,

@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use gaanim_core::console;
 use gaanim_export::encoder::{ExportFormat, VideoEncoder};
-use gaanim_export::prelude::{AspectRatioPreset, ExportConfig, OutputFit, QualityPreset};
+use gaanim_export::prelude::{
+    AspectRatioPreset, ExportConfig, FrameRate, OutputFit, QualityPreset,
+};
 
 /// One end of an export range: seconds, or a `scene.marker` name resolved
 /// once the markers are known.
@@ -107,7 +109,10 @@ pub fn resolve_export_range(
 }
 
 /// Output formats `gaanim export` writes, by file extension.
-pub const EXPORT_EXTENSIONS: [&str; 6] = ["mp4", "webm", "webp", "gif", "png", "gaanim"];
+pub const EXPORT_EXTENSIONS: [&str; 7] = ["mp4", "webm", "mov", "webp", "gif", "png", "gaanim"];
+
+/// Video formats that keep the alpha channel with `--transparent`.
+pub const TRANSPARENT_EXTENSIONS: [&str; 4] = ["webm", "mov", "webp", "png"];
 
 /// `gaanim export <INPUT> --output <FILE> [options]`.
 #[derive(Debug, Clone, PartialEq)]
@@ -123,8 +128,9 @@ pub struct ExportCommand {
     pub fit: OutputFit,
     pub from: Option<ExportBound>,
     pub to: Option<ExportBound>,
-    /// Recording rate of a playback bundle.
-    pub fps: Option<u32>,
+    /// Frame rate of a video, or recording rate of a playback bundle;
+    /// `None` takes the quality preset's.
+    pub fps: Option<FrameRate>,
     /// `--frame`: instants written as single PNGs instead of a range.
     pub frames: Vec<ExportBound>,
 }
@@ -157,12 +163,10 @@ impl ExportCommand {
             match args[index].as_str() {
                 "--fps" => {
                     index += 1;
-                    command.fps = Some(
-                        args.get(index)
-                            .and_then(|value| value.parse::<u32>().ok())
-                            .filter(|value| (1..=240).contains(value))
-                            .ok_or_else(|| "--fps requires an integer from 1 to 240".to_string())?,
-                    );
+                    let value = args.get(index).ok_or_else(|| {
+                        "--fps requires a frame rate, e.g. 24 or 24000/1001".to_string()
+                    })?;
+                    command.fps = Some(value.parse().map_err(|error| format!("--fps: {error}"))?);
                 }
                 "--frame" => {
                     index += 1;
@@ -256,18 +260,32 @@ impl ExportCommand {
             .map(str::to_ascii_lowercase)
             .filter(|format| EXPORT_EXTENSIONS.contains(&format.as_str()))
             .ok_or_else(|| {
-                "output extension must be mp4, webm, webp, gif, png, or gaanim".to_string()
+                "output extension must be mp4, webm, mov, webp, gif, png, or gaanim".to_string()
             })?;
         Ok((output, format))
     }
 
+    /// Frames per second a playback bundle records: a whole rate.
+    pub fn recording_fps(&self) -> Result<Option<u32>, String> {
+        self.fps
+            .map(|fps| {
+                fps.as_whole().ok_or_else(|| {
+                    format!(
+                        "--fps: a playback bundle records a whole number of frames per second, \
+                         not {fps}; export a video at {fps} fps instead"
+                    )
+                })
+            })
+            .transpose()
+    }
+
     /// Check the options that apply to a video `format`.
     pub fn validate_video(&self, format: &str) -> Result<(), String> {
-        if self.fps.is_some() {
-            return Err("--fps applies to playback bundles (.gaanim)".to_string());
+        if self.transparent && !TRANSPARENT_EXTENSIONS.contains(&format) {
+            return Err("--transparent requires WebM, MOV, WebP, or PNG output".to_string());
         }
-        if self.transparent && !matches!(format, "webm" | "webp" | "png") {
-            return Err("--transparent requires WebM, WebP, or PNG output".to_string());
+        if self.fps.is_some() && !self.frames.is_empty() {
+            return Err("--frame writes single instants; drop --fps".to_string());
         }
         if format != "mp4" && self.encoder != VideoEncoder::Auto {
             return Err("--encoder requires MP4 output".to_string());
@@ -317,6 +335,7 @@ pub fn export_format(format: &str) -> Option<ExportFormat> {
     Some(match format {
         "mp4" => ExportFormat::Mp4,
         "webm" => ExportFormat::Webm,
+        "mov" => ExportFormat::Mov,
         "webp" => ExportFormat::Webp,
         "gif" => ExportFormat::Gif,
         "png" => ExportFormat::PngSequence,
@@ -331,14 +350,20 @@ pub fn video_config(
     format: ExportFormat,
     range: (Option<f64>, Option<f64>),
 ) -> ExportConfig {
-    let mut config = ExportConfig::new(output).with_quality(quality_preset(&command.quality));
+    let mut config = ExportConfig::new(output);
+    // The preset sets fps, CRF and speed for the format; an explicit --fps
+    // replaces its rate.
+    config.format = format;
+    let mut config = config.with_quality(quality_preset(&command.quality));
+    if let Some(fps) = command.fps {
+        config.fps = fps;
+    }
     config.width = command.width;
     config.height = command.height;
     config.fit = command.fit;
     config.start_time = range.0;
     config.end_time = range.1;
     config.aspect_ratio = AspectRatioPreset::Custom;
-    config.format = format;
     config.video_encoder = command.encoder;
     config.transparent = command.transparent;
     config.headless = true;
@@ -494,7 +519,7 @@ pub fn export_bundle_video(command: &ExportCommand) -> Result<(), CommandError> 
     }
     if format == gaanim_bundle::EXTENSION {
         return Err(CommandError::Usage(
-            "the input is already a playback bundle; export it to mp4, webm, webp, gif, or png"
+            "the input is already a playback bundle; export it to mp4, webm, mov, webp, gif, or png"
                 .to_string(),
         ));
     }
@@ -511,6 +536,19 @@ pub fn export_bundle_video(command: &ExportCommand) -> Result<(), CommandError> 
         .collect();
     let range = resolve_export_range(command.from.as_ref(), command.to.as_ref(), &markers)
         .map_err(CommandError::Usage)?;
+    // Every frame of the video is a recorded frame.
+    let recorded = FrameRate::whole(bundle.scene.fps);
+    if let Some(fps) = command.fps.filter(|fps| *fps != recorded) {
+        return Err(CommandError::Usage(format!(
+            "--fps: a bundle exports at the rate it was recorded at ({recorded} fps); \
+             export its script with --fps {fps}{}",
+            if fps.as_whole().is_some() {
+                ", or record the bundle again with it"
+            } else {
+                ""
+            }
+        )));
+    }
     let format = export_format(&format).expect("validated export format");
     drop(bundle);
     // The video runs at the bundle's recorded rate.
@@ -644,11 +682,14 @@ mod tests {
 
         let bundle =
             ExportCommand::parse(&args(&["scene.py", "-o", "x.gaanim", "--fps", "30"])).unwrap();
-        assert_eq!(bundle.fps, Some(30));
-        assert!(bundle.validate_video("mp4").is_err());
+        assert_eq!(bundle.fps, Some(FrameRate::whole(30)));
+        assert_eq!(bundle.recording_fps(), Ok(Some(30)));
 
         for invalid in [
             &["scene.py", "--fps", "0"][..],
+            &["scene.py", "--fps", "241"],
+            &["scene.py", "--fps", "24/0"],
+            &["scene.py", "--fps"],
             &["scene.py", "--quality", "ultra"],
             &["scene.py", "--fit", "stretch"],
             &["scene.py", "--from", "-1"],
@@ -662,5 +703,64 @@ mod tests {
         let transparent =
             ExportCommand::parse(&args(&["scene.py", "-o", "x.mp4", "--transparent"])).unwrap();
         assert!(transparent.validate_video("mp4").is_err());
+        for format in ["webm", "mov", "webp", "png"] {
+            assert!(transparent.validate_video(format).is_ok(), "{format}");
+        }
+    }
+
+    #[test]
+    fn videos_export_at_an_explicit_frame_rate() {
+        let command = ExportCommand::parse(&args(&[
+            "scene.py",
+            "-o",
+            "film.mp4",
+            "--fps",
+            "24000/1001",
+        ]))
+        .unwrap();
+        let ntsc = FrameRate::new(24_000, 1001).unwrap();
+        assert_eq!(command.fps, Some(ntsc));
+        assert!(command.validate_video("mp4").is_ok());
+        let config = video_config(&command, "film.mp4", ExportFormat::Mp4, (None, None));
+        // The exporter applies the presets again; the explicit rate survives.
+        assert_eq!(config.apply_presets().fps, ntsc);
+        // A bundle cannot record a fractional rate.
+        assert!(command.recording_fps().unwrap_err().contains("23.976"));
+
+        // Without --fps the preset decides, and GIF stays at 30.
+        let preset = ExportCommand::parse(&args(&["scene.py", "-o", "loop.gif"])).unwrap();
+        let config = video_config(&preset, "loop.gif", ExportFormat::Gif, (None, None));
+        assert_eq!(config.apply_presets().fps, FrameRate::whole(30));
+        let explicit =
+            ExportCommand::parse(&args(&["scene.py", "-o", "loop.gif", "--fps", "50"])).unwrap();
+        let config = video_config(&explicit, "loop.gif", ExportFormat::Gif, (None, None));
+        assert_eq!(config.apply_presets().fps, FrameRate::whole(50));
+
+        let still = ExportCommand::parse(&args(&[
+            "scene.py",
+            "-o",
+            "still.png",
+            "--frame",
+            "2",
+            "--fps",
+            "24",
+        ]))
+        .unwrap();
+        assert!(still.validate_video("png").is_err());
+    }
+
+    #[test]
+    fn mov_outputs_export_prores() {
+        let command = ExportCommand::parse(&args(&["lower.py", "-o", "lower.MOV"])).unwrap();
+        assert_eq!(
+            command.output_format().unwrap(),
+            ("lower.MOV".to_string(), "mov".to_string())
+        );
+        assert_eq!(export_format("mov"), Some(ExportFormat::Mov));
+        let config = video_config(&command, "lower.MOV", ExportFormat::Mov, (None, None));
+        assert_eq!(config.format, ExportFormat::Mov);
+        let encoder =
+            ExportCommand::parse(&args(&["a.py", "-o", "a.mov", "--encoder", "nvenc"])).unwrap();
+        assert!(encoder.validate_video("mov").is_err());
     }
 }

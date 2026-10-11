@@ -125,6 +125,7 @@ La extensión de `--output` elige el formato:
   table.header[*Extensión*][*Formato*][*Necesita FFmpeg*],
   [`.mp4`], [video H.264, con audio si la escena lo tiene], [sí],
   [`.webm`], [video VP9; admite fondo transparente], [sí],
+  [`.mov`], [Apple ProRes para editores de vídeo; admite fondo transparente], [sí],
   [`.webp`], [WebP animado, útil para webs y documentación], [sí],
   [`.gif`], [GIF animado], [sí],
   [`.png`], [secuencia de imágenes, una por fotograma], [no],
@@ -134,6 +135,7 @@ Opciones útiles:
 
 - `--quality draft` exporta rápido a 30 fps para revisar; `standard` (la
   predeterminada) usa 60 fps y `production`, la mejor codificación.
+- `--fps` elige otra frecuencia, como `24` o `25`.
 - `--width` y `--height` cambian la resolución (1920 × 1080 por defecto). La
   escena no cambia: sus unidades lógicas se escalan a los píxeles que pidas.
 - `--from` y `--to` exportan solo un tramo, en segundos.

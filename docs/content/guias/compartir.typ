@@ -351,8 +351,9 @@ abierto.
 
 Con un script o proyecto abierto, el botón Exportar ofrece el formato
 *Gaanim*: graba la escena en un `.gaanim` sin salir del editor. La calidad
-elige la frecuencia (Borrador, 30 fps; Estándar y Producción, 60 fps); la
-resolución no se aplica, porque el paquete es vectorial.
+elige la frecuencia (Borrador, 30 fps; Estándar y Producción, 60 fps), salvo
+que elijas otra en *Fotogramas por segundo*; la resolución no se aplica,
+porque el paquete es vectorial.
 
 = Comparar capturas
 

@@ -167,8 +167,12 @@ fn dispatch_export_mode() -> bool {
             );
             std::process::exit(2);
         }
+        let fps = command.recording_fps().unwrap_or_else(|error| {
+            console::error("export", error);
+            std::process::exit(2);
+        });
         console::banner("Bundle");
-        if let Err(error) = run_bundle_export(&script, &output, command.fps) {
+        if let Err(error) = run_bundle_export(&script, &output, fps) {
             console::error("export", error);
             std::process::exit(1);
         }
@@ -206,6 +210,7 @@ fn dispatch_export_mode() -> bool {
         width: command.width,
         height: command.height,
         fit: command.fit,
+        fps: command.fps,
         from: command.from,
         to: command.to,
     }) {
@@ -256,6 +261,9 @@ struct ExportWorkerArgs {
     width: u32,
     height: u32,
     fit: gaanim_export::prelude::OutputFit,
+    /// Frame rate of the video (or whole rate of the bundle); `None` takes
+    /// the quality preset's.
+    fps: Option<gaanim_export::prelude::FrameRate>,
     /// Exported time range in seconds or marker names; `None` means the
     /// scene start/end.
     from: Option<ExportBound>,
@@ -265,17 +273,14 @@ struct ExportWorkerArgs {
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
     if args.len() < 4 {
         return Err(
-            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|webp|gif|png|gaanim> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent]"
+            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|mov|webp|gif|png|gaanim> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent] [--fps <rate>]"
                 .to_string(),
         );
     }
     if !matches!(args[2].as_str(), "draft" | "standard" | "production") {
         return Err(format!("unknown export quality '{}'", args[2]));
     }
-    if !matches!(
-        args[3].as_str(),
-        "mp4" | "webm" | "webp" | "gif" | "png" | "gaanim"
-    ) {
+    if !gaanim_editor::cli::EXPORT_EXTENSIONS.contains(&args[3].as_str()) {
         return Err(format!("unknown export format '{}'", args[3]));
     }
     let mut encoder = VideoEncoder::Auto;
@@ -283,12 +288,20 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     let mut width = 1920_u32;
     let mut height = 1080_u32;
     let mut fit = gaanim_export::prelude::OutputFit::Error;
+    let mut fps = None;
     let mut from = None;
     let mut to = None;
     let mut index = 4;
     while index < args.len() {
         match args[index].as_str() {
             "--transparent" => transparent = true,
+            "--fps" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--fps requires a value".to_string())?;
+                fps = Some(value.parse().map_err(|error| format!("--fps: {error}"))?);
+            }
             "--from" => {
                 index += 1;
                 from = Some(parse_export_seconds("--from", args.get(index))?);
@@ -348,6 +361,7 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
         width,
         height,
         fit,
+        fps,
         from,
         to,
     })
@@ -373,7 +387,12 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     let python = crate::python::runtime(&worker.script)?;
     let canvas = (python.load_script_canvas)(&worker.script)?;
     if worker.format == gaanim_bundle::EXTENSION {
-        let fps = gaanim_editor::cli::bundle_fps(&worker.quality);
+        let fps = match worker.fps {
+            Some(fps) => fps
+                .as_whole()
+                .ok_or_else(|| format!("a playback bundle records whole rates, not {fps} fps"))?,
+            None => gaanim_editor::cli::bundle_fps(&worker.quality),
+        };
         let config = gaanim_editor::cli::bundle_config(
             Some(&worker.script),
             &canvas,
@@ -402,6 +421,7 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
         width: worker.width,
         height: worker.height,
         fit: worker.fit,
+        fps: worker.fps,
         ..Default::default()
     };
     let config = gaanim_editor::cli::video_config(&command, &worker.output, format, range);
@@ -1106,6 +1126,7 @@ mod tests {
                 width: 1920,
                 height: 1080,
                 fit: gaanim_export::prelude::OutputFit::Error,
+                fps: None,
                 from: None,
                 to: None,
             }
@@ -1151,6 +1172,22 @@ mod tests {
         let transparent =
             ["scene.py", "overlay.webm", "draft", "webm", "--transparent"].map(str::to_string);
         assert!(parse_export_worker_args(&transparent).unwrap().transparent);
+        let prores = [
+            "scene.py",
+            "lower.mov",
+            "standard",
+            "mov",
+            "--transparent",
+            "--fps",
+            "30000/1001",
+        ]
+        .map(str::to_string);
+        let prores = parse_export_worker_args(&prores).unwrap();
+        assert_eq!(prores.format, "mov");
+        assert_eq!(
+            prores.fps.map(|fps| fps.to_string()).as_deref(),
+            Some("29.97")
+        );
         let hardware = [
             "scene.py",
             "output.mp4",
@@ -1175,6 +1212,8 @@ mod tests {
         let encoder =
             ["scene.py", "out.mp4", "draft", "mp4", "--encoder", "magic"].map(str::to_string);
         assert!(parse_export_worker_args(&encoder).is_err());
+        let fps = ["scene.py", "out.mp4", "draft", "mp4", "--fps", "0"].map(str::to_string);
+        assert!(parse_export_worker_args(&fps).is_err());
     }
 
     #[test]
