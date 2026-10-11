@@ -11,6 +11,54 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.11.1
+
+Sin publicar. Corrige cuatro fallos de `animate.transform_to` que aparecen al
+pasar un personaje de un SVG de una pose a otra: los degradados se volvían un
+color liso, un SVG entero o un grupo desaparecía, una forma y su espejo se
+reducían a una astilla a mitad del morph y no había forma de fundir el objeto
+mientras se transformaba. Lee «Al actualizar» si alguna escena transforma
+formas con degradado, grupos o SVG enteros.
+
+== Correcciones
+
+- Un relleno o un trazo con degradado se interpola durante el morph hacia el
+  del destino (posición y paradas) y sigue siendo un degradado al terminar;
+  dos degradados de tipos distintos pasan por un color liso a mitad. Antes se
+  pintaba del color de la primera parada desde el inicio del morph. Vale para
+  `transform_to`, `replacement_transform_to`, `magic_move` y
+  `transform_matching_shapes`.
+- `transform_to` de un SVG importado, de una de sus partes `<g>` o de un grupo
+  se transforma pieza a pieza en lugar de desaparecer: las partes con el mismo
+  nombre o `id` de SVG se emparejan, a cualquier profundidad, y las demás
+  hojas se emparejan por forma dentro de su pareja. Las hojas que sobran del
+  objeto se desvanecen y las del destino aparecen donde está el destino. El
+  objeto conserva su identidad, así que sus `part()` siguen valiendo después,
+  y el destino sigue siendo una plantilla oculta.
+- Un contorno se empareja con el de destino en el sentido de recorrido que
+  menos mueve sus puntos. Una forma y su espejo, escritos en sentidos
+  opuestos, se reducían a una línea a mitad del morph; ahora conservan su
+  área, y el resultado ya no depende de cómo se escribió el camino.
+- `transform_to` deja libre la opacidad del objeto, como indicaba la
+  referencia: un `animate.opacity` del mismo objeto en el mismo `play` lo funde
+  mientras se transforma. Antes el `play` fallaba por usar los dos el canal
+  `opacity`, y los mensajes de error se remitían el uno al otro. El error de
+  dos animaciones que se pisan ya solo propone combinarlas en una cuando las
+  dos son de propiedades.
+
+== Al actualizar
+
+- Las formas con degradado que se transforman, o que entran o salen en un
+  `magic_move`, se ven con su degradado durante y después del morph en lugar
+  del color de su primera parada. Si contabas con ese color liso, dale un
+  `fill` liso al objeto y al destino.
+- Si transformabas un SVG hoja a hoja (con un `id` en cada camino) para
+  esquivar el fallo, sigue funcionando; ahora también puedes transformar el
+  SVG o el grupo entero.
+- Los fotogramas intermedios de un morph entre contornos de sentidos opuestos
+  cambian (los extremos son los mismos). Si normalizabas el sentido de los
+  contornos para evitar el colapso, ya no hace falta.
+
 = 0.11.0
 
 Publicada el 10 de octubre de 2026. Gaanim llega al navegador: el playground
