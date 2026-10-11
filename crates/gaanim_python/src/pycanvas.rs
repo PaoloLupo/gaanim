@@ -6616,28 +6616,40 @@ impl PyTypography {
             })
             .transpose()?;
         // An author's theme brings its own text and background colors.
-        let background = background
+        let own_background = background
             .map(|color| color.0)
-            .or(author_theme.as_ref().and_then(|theme| theme.background))
-            .unwrap_or(palette.panel);
+            .or(author_theme.as_ref().and_then(|theme| theme.background));
+        let background = own_background.unwrap_or(palette.panel);
+        // Derived over the actual background, so that plain text and every
+        // token read over a background the theme was not made for.
+        let code_colors = match &scene.theme_style {
+            Some(theme) => theme.code_colors(background),
+            None => CodeColors::derive(
+                palette.foreground,
+                background,
+                palette.accent,
+                palette.rule,
+                palette.foreground,
+            ),
+        };
         let color = color
             .map(|color| color.0)
             .or(author_theme.as_ref().and_then(|theme| theme.foreground))
-            .unwrap_or(palette.foreground);
-        let accent = accent.map(|color| color.0).unwrap_or(palette.accent);
+            .unwrap_or(code_colors.foreground);
+        let accent = accent
+            .map(|color| color.0)
+            .unwrap_or_else(|| match own_background {
+                Some(background) => gaanim_text::code::with_contrast(
+                    palette.accent,
+                    background,
+                    gaanim_text::code::TOKEN_CONTRAST,
+                ),
+                None => palette.accent,
+            });
         let highlight = match author_theme {
             _ if !highlight => CodeHighlight::Off,
             Some(theme) => CodeHighlight::TmTheme(theme.xml),
-            None => CodeHighlight::Colors(match &scene.theme_style {
-                Some(theme) => theme.code_colors(background),
-                None => CodeColors::derive(
-                    palette.foreground,
-                    background,
-                    palette.accent,
-                    palette.rule,
-                    palette.foreground,
-                ),
-            }),
+            None => CodeHighlight::Colors(code_colors),
         };
         let content_width = (width - 0.64).max(1.0e-6);
         let typst_source = CodeMarkup {

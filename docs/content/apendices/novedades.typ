@@ -33,7 +33,10 @@ transforma formas con degradado, grupos o SVG enteros, o usa
   `code_comment`, `code_function`, `code_type` y `code` de `Theme(colors=...)`
   lo cambian. `theme="esquema.tmTheme"` usa un esquema de TextMate o Sublime Text,
   `highlight=False` lo deja monocromo y `font` elige la fuente, con DejaVu
-  Sans Mono como respaldo. Antes, `language` solo se mostraba en la cabecera.
+  Sans Mono como respaldo. Con un `background` en el que los colores del tema
+  no se leen, como un panel oscuro en `paper`, el texto pasa al color de fondo
+  del tema y el acento y los tokens se ajustan hasta leerse. Antes,
+  `language` solo se mostraba en la cabecera.
   Ver #link("/referencia/text/#api-typography-code")[`Typography.code`].
 
 == Correcciones

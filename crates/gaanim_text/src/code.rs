@@ -31,12 +31,25 @@ pub struct CodeColors {
     pub type_name: Color,
 }
 
+/// Least contrast (WCAG 2) of a code block's plain text with its background.
+pub const PLAIN_CONTRAST: f64 = 4.5;
+
+/// Least contrast of a highlighted token, comments included, with the
+/// background: tokens may be quieter than plain text, never unreadable.
+pub const TOKEN_CONTRAST: f64 = 3.0;
+
 impl CodeColors {
     /// Token colors for a block drawn over `background`, from a theme's
     /// colors: keywords take the accent, comments the muted color (or a mix
     /// of the text and the background when muted is the text color), names
     /// of functions and types the title color, and strings and numbers a
     /// green and an orange that read over a dark or a light background.
+    ///
+    /// Every color reads over `background`: a `foreground` below
+    /// [`PLAIN_CONTRAST`] becomes white or black, names of functions and
+    /// types whose title color is below [`TOKEN_CONTRAST`] take the plain
+    /// color, and the other tokens below it move toward white or black (see
+    /// [`with_contrast`]). Colors that already read are kept as they are.
     pub fn derive(
         foreground: Color,
         background: Color,
@@ -45,24 +58,40 @@ impl CodeColors {
         title: Color,
     ) -> Self {
         let dark = is_dark(background);
-        let comment = if distance(muted, foreground) < 0.12 {
-            mix(foreground, background, 0.45)
+        let foreground = if contrast(foreground, background) >= PLAIN_CONTRAST {
+            foreground
+        } else if dark {
+            Color::WHITE
         } else {
-            muted
+            Color::BLACK
         };
+        let comment =
+            if distance(muted, foreground) < 0.12 || contrast(muted, background) < TOKEN_CONTRAST {
+                mix(foreground, background, 0.45)
+            } else {
+                muted
+            };
         let (string, number) = if dark {
             (rgb(0xA9C77E), rgb(0xE08A68))
         } else {
             (rgb(0x3A7D2C), rgb(0xB4531F))
         };
+        let token = |color| with_contrast(color, background, TOKEN_CONTRAST);
+        // A title that does not read is usually the other theme's text color:
+        // names keep the plain text color rather than a gray step toward it.
+        let name = if contrast(title, background) >= TOKEN_CONTRAST {
+            title
+        } else {
+            foreground
+        };
         Self {
             foreground,
-            keyword: accent,
+            keyword: token(accent),
             string,
             number,
-            comment,
-            function: title,
-            type_name: title,
+            comment: token(comment),
+            function: name,
+            type_name: name,
         }
     }
 
@@ -263,6 +292,42 @@ pub fn is_dark(color: Color) -> bool {
     luminance < 0.5
 }
 
+/// Contrast ratio of two colors (WCAG 2), from 1 for equal colors to 21 for
+/// black on white.
+pub fn contrast(a: Color, b: Color) -> f64 {
+    let (a, b) = (relative_luminance(a), relative_luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// `color`, or the first step from it toward white over a dark `background`
+/// (black over a light one) whose contrast with `background` reaches
+/// `minimum`. A color that already reads is returned unchanged.
+pub fn with_contrast(color: Color, background: Color, minimum: f64) -> Color {
+    let target = if is_dark(background) {
+        Color::WHITE
+    } else {
+        Color::BLACK
+    };
+    (0..=10)
+        .map(|step| mix(color, target, f64::from(step) / 10.0))
+        .find(|candidate| contrast(*candidate, background) >= minimum)
+        .unwrap_or(target)
+}
+
+/// WCAG relative luminance of the sRGB color, from 0 to 1.
+fn relative_luminance(color: Color) -> f64 {
+    let rgba = color.to_rgba8();
+    let linear = |channel: u8| {
+        let value = f64::from(channel) / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(rgba.r) + 0.7152 * linear(rgba.g) + 0.0722 * linear(rgba.b)
+}
+
 /// Largest channel difference of two colors, from 0 to 1.
 fn distance(a: Color, b: Color) -> f64 {
     let (a, b) = (a.to_rgba8(), b.to_rgba8());
@@ -450,5 +515,82 @@ mod tests {
         );
         assert_ne!(light.comment, Color::BLACK);
         assert!(is_dark(light.string) && is_dark(light.number));
+    }
+
+    fn assert_reads(colors: &CodeColors, background: Color) {
+        assert!(contrast(colors.foreground, background) >= PLAIN_CONTRAST);
+        for token in [
+            colors.keyword,
+            colors.string,
+            colors.number,
+            colors.comment,
+            colors.function,
+            colors.type_name,
+        ] {
+            assert!(
+                contrast(token, background) >= TOKEN_CONTRAST,
+                "{token:?} over {background:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn contrast_follows_wcag() {
+        assert!((contrast(Color::BLACK, Color::WHITE) - 21.0).abs() < 1e-9);
+        assert!((contrast(FOREGROUND, FOREGROUND) - 1.0).abs() < 1e-9);
+        // A color that reads is kept; one that does not moves toward black
+        // over white until it reads.
+        assert_eq!(with_contrast(Color::BLACK, Color::WHITE, 3.0), Color::BLACK);
+        let amber = with_contrast(rgb(0xF2A541), Color::WHITE, 3.0);
+        assert_ne!(amber, rgb(0xF2A541));
+        assert!(contrast(amber, Color::WHITE) >= 3.0);
+    }
+
+    #[test]
+    fn derived_colors_read_over_a_background_of_the_other_lightness() {
+        // A light theme's colors over a dark panel.
+        let dark = rgb(0x14161B);
+        let colors = CodeColors::derive(
+            Color::BLACK,
+            dark,
+            rgb(0x2563EB),
+            Color::BLACK,
+            Color::BLACK,
+        );
+        assert_eq!(colors.foreground, Color::WHITE);
+        assert_reads(&colors, dark);
+
+        // The dark `technical` colors over white.
+        let colors = CodeColors::derive(
+            FOREGROUND,
+            Color::WHITE,
+            rgb(0xF2A541),
+            rgb(0xA0A0A0),
+            rgb(0xFAFAFA),
+        );
+        assert_eq!(colors.foreground, Color::BLACK);
+        assert_reads(&colors, Color::WHITE);
+        // Names in the other theme's text color fall back to plain text.
+        assert_eq!(colors.function, colors.foreground);
+
+        // Over the panel they were made for, they are kept as they are.
+        let panel = rgb(0x1C1C1C);
+        let colors = CodeColors::derive(
+            FOREGROUND,
+            panel,
+            rgb(0xF2A541),
+            rgb(0xA0A0A0),
+            rgb(0xFAFAFA),
+        );
+        assert_eq!(
+            (
+                colors.foreground,
+                colors.keyword,
+                colors.comment,
+                colors.function
+            ),
+            (FOREGROUND, rgb(0xF2A541), rgb(0xA0A0A0), rgb(0xFAFAFA))
+        );
+        assert_reads(&colors, panel);
     }
 }

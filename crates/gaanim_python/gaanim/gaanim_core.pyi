@@ -8747,6 +8747,12 @@ class Typography:
         ``color``. ``font`` picks the monospaced family; without it, or when it
         is missing, the block uses DejaVu Sans Mono, bundled with Gaanim.
 
+        Over a ``background`` the theme's colors do not read on, such as a
+        dark panel in a light theme, the default text takes the theme's
+        background color (or white or black), and the accent and every token
+        move toward it until they read; colors that already read are kept,
+        and an explicit ``color`` or ``accent`` is used as given.
+
         An empty source, a language with characters other than ASCII letters,
         digits, ``-`` or ``_``, an empty ``font``, or a non-positive size raise
         ``ValueError``; a missing ``theme`` file raises ``FileNotFoundError``,

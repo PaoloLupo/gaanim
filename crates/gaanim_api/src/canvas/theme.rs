@@ -423,25 +423,35 @@ impl CanvasTheme {
 
     /// Colors a code block drawn over `background` paints its tokens with:
     /// the theme's editor scheme when `background` is as dark as the theme's
-    /// panel, otherwise colors derived from the palette (see
-    /// [`CodeColors::derive`]); plain text takes the foreground. The
-    /// [`Self::CODE_COLOR_TOKENS`] override either.
+    /// panel, with plain text in the foreground; otherwise colors derived
+    /// from the palette that read over `background` (see
+    /// [`CodeColors::derive`]). The [`Self::CODE_COLOR_TOKENS`] override
+    /// either.
     pub fn code_colors(&self, background: Color) -> CodeColors {
-        use gaanim_text::code::is_dark;
+        use gaanim_text::code::{PLAIN_CONTRAST, contrast, is_dark};
         let palette = &self.palette;
-        let mut colors = self
+        let mut colors = match self
             .code_syntax
             .filter(|_| is_dark(background) == is_dark(palette.panel))
-            .unwrap_or_else(|| {
-                CodeColors::derive(
-                    palette.foreground,
-                    background,
-                    palette.accent,
-                    palette.muted,
-                    palette.title,
-                )
-            });
-        colors.foreground = palette.foreground;
+        {
+            Some(scheme) => CodeColors {
+                foreground: palette.foreground,
+                ..scheme
+            },
+            // Over a background the foreground does not read on, such as a
+            // dark panel on a light theme, plain text takes the theme's
+            // background color when that one reads.
+            None => CodeColors::derive(
+                [palette.foreground, palette.background]
+                    .into_iter()
+                    .find(|color| contrast(*color, background) >= PLAIN_CONTRAST)
+                    .unwrap_or(palette.foreground),
+                background,
+                palette.accent,
+                palette.muted,
+                palette.title,
+            ),
+        };
         let CodeColors {
             foreground,
             keyword,
@@ -1506,6 +1516,37 @@ mod tests {
         let light = dracula.code_colors(Color::WHITE);
         assert_ne!(light.string, rgb(0xF1FA8C));
         assert!(gaanim_text::code::is_dark(light.string));
+    }
+
+    #[test]
+    fn code_blocks_read_over_a_background_of_the_other_lightness() {
+        use gaanim_text::code::{PLAIN_CONTRAST, TOKEN_CONTRAST, contrast};
+        let dark = rgb(0x14161B);
+        for (name, background, plain) in [
+            // A light theme over a dark panel writes in its background color.
+            ("paper", dark, Color::WHITE),
+            ("solarized-light", dark, rgb(0xFDF6E3)),
+            // A dark theme over white, in its own background color.
+            ("technical", Color::WHITE, rgb(0x121212)),
+            ("dracula", Color::WHITE, rgb(0x282A36)),
+        ] {
+            let colors = CanvasTheme::builtin(name).unwrap().code_colors(background);
+            assert_eq!(colors.foreground, plain, "{name}");
+            assert!(contrast(colors.foreground, background) >= PLAIN_CONTRAST);
+            for token in [
+                colors.keyword,
+                colors.string,
+                colors.number,
+                colors.comment,
+                colors.function,
+                colors.type_name,
+            ] {
+                assert!(
+                    contrast(token, background) >= TOKEN_CONTRAST,
+                    "{name}: {token:?}"
+                );
+            }
+        }
     }
 
     #[test]
