@@ -243,7 +243,7 @@ animadas están en #link("/referencia/animations/")[Animaciones].
   name: "Drawable.move_to",
   kind: "method",
   signature: "move_to(x, y, anchor=None) | move_to(reference) | move_to(point) -> Self",
-  params: ((name: "x / y", type: "float | fuente reactiva", default: none, desc: [Posición de destino en unidades de escena.]), (name: "anchor", type: "Anchor | None", default: "None", desc: [Punto propio que se coloca en `(x, y)`; posicional o por nombre.]), (name: "reference", type: "Drawable", default: none, desc: [Alternativa: centra este objeto sobre otro.]), (name: "point", type: "AnchorPoint", default: none, desc: [Alternativa: coloca el centro sobre un anclaje de otro objeto.])),
+  params: ((name: "x / y", type: "float | fuente reactiva", default: none, desc: [Posición de destino en unidades de escena.]), (name: "anchor", type: "Anchor | str | None", default: "None", desc: [Un `Anchor` o su nombre, como `"top_left"`. Punto propio que se coloca en `(x, y)`; posicional o por nombre.]), (name: "reference", type: "Drawable", default: none, desc: [Alternativa: centra este objeto sobre otro.]), (name: "point", type: "AnchorPoint", default: none, desc: [Alternativa: coloca el centro sobre un anclaje de otro objeto.])),
   desc: [Sin `anchor`, los objetos se colocan por su centro visual, medido con la geometría tal como se declaró: mover después una parte de un SVG (`svg.part("g").shift_by(...)`) no mueve el SVG entero; las raíces de sistemas de coordenadas colocan su origen matemático, para que las etiquetas no desplacen los ejes. `move_to(reference)` crea una relación de layout diferida centro con centro que no sigue animaciones posteriores: usa `follow` o `attach_to` para eso. Una referencia o un `AnchorPoint` no se combinan con `y` ni con `anchor`. `Text` acepta además `TextAnchor` (ver #link("/referencia/text/")[Texto]). Ojo: sin `anchor`, un texto de una línea se coloca por su línea base (`TextAnchor.BASELINE_CENTER`), no por su centro visual, así que un título con `move_to(0, y)` queda medio cuerpo más arriba; usa `move_to(0, y, Anchor.CENTER)` para centrarlo. Las coordenadas aceptan fuentes reactivas, con las mismas reglas que `opacity`.],
 )[
 ```python
@@ -439,7 +439,7 @@ de un `Layout` no usan estos métodos: su posición la decide el contenedor (ver
 #api-entry(
   name: "Drawable.next_to",
   kind: "method",
-  params: ((name: "reference", type: "Drawable", default: none, desc: [Objeto de referencia.]), (name: "direction", type: "Direction", default: none, desc: [Lado donde se coloca este objeto.]), (name: "spacing", type: "float", default: "0.24", desc: [Separación entre bordes en unidades de escena.]), (name: "aligned_edge", type: "Anchor | None", default: "None", desc: [Borde común que se alinea; `None` centra en el eje transversal.])),
+  params: ((name: "reference", type: "Drawable", default: none, desc: [Objeto de referencia.]), (name: "direction", type: "Direction", default: none, desc: [Lado donde se coloca este objeto.]), (name: "spacing", type: "float", default: "0.24", desc: [Separación entre bordes en unidades de escena.]), (name: "aligned_edge", type: "Anchor | str | None", default: "None", desc: [Borde común que se alinea, como `Anchor` o por su nombre; `None` centra en el eje transversal.])),
   desc: [Coloca este objeto junto a otro sin superponerlos.],
 )[
 ```python
@@ -454,7 +454,7 @@ note = scene.text("n = 42", role="caption").next_to(title, Direction.RIGHT, spac
 #api-entry(
   name: "Drawable.align_to",
   kind: "method",
-  params: ((name: "reference", type: "Drawable", default: none, desc: [Objeto de referencia.]), (name: "target_anchor", type: "Anchor", default: none, desc: [Anclaje propio que se alinea.]), (name: "reference_anchor", type: "Anchor | None", default: "None", desc: [Anclaje de la referencia; `None` usa el mismo que `target_anchor`.])),
+  params: ((name: "reference", type: "Drawable", default: none, desc: [Objeto de referencia.]), (name: "target_anchor", type: "Anchor | str", default: none, desc: [Anclaje propio que se alinea.]), (name: "reference_anchor", type: "Anchor | str | None", default: "None", desc: [Anclaje de la referencia; `None` usa el mismo que `target_anchor`.])),
   desc: [Hace coincidir un anclaje propio con un anclaje de otro objeto.],
 )[
 ```python
@@ -480,7 +480,7 @@ title = scene.text("Capítulo 2", role="title").to_edge(Direction.UP, buff=0.4)
 #api-entry(
   name: "Drawable.to_corner",
   kind: "method",
-  desc: [Lleva el objeto a una esquina del área segura (`Anchor.TOP_LEFT`, `Anchor.BOTTOM_RIGHT`…), separado `buff` unidades.],
+  desc: [Lleva el objeto a una esquina del área segura (`Anchor.TOP_LEFT`, `Anchor.BOTTOM_RIGHT`… o su nombre, como `"bottom_right"`), separado `buff` unidades.],
 )[
 ```python
 >>>from gaanim import *
@@ -498,7 +498,7 @@ de líneas, conectores, cotas y seguidores (ver
 #api-entry(
   name: "Drawable.anchor_point",
   kind: "method",
-  params: ((name: "anchor", type: "Anchor | None", default: "None", desc: [Uno de los nueve anclajes de los límites locales; `None` equivale a `Anchor.CENTER`.]), (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento adicional en el espacio local.])),
+  params: ((name: "anchor", type: "Anchor | str | None", default: "None", desc: [Uno de los nueve anclajes de los límites locales, o su nombre (`"top_left"`); `None` equivale a `Anchor.CENTER`.]), (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento adicional en el espacio local.])),
   desc: [El desplazamiento local rota y escala con el objeto y con sus padres. Valores no finitos lanzan `ValueError`.],
 )[
 ```python

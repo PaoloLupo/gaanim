@@ -589,7 +589,7 @@ impl PyCanvasAnim {
         &self,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
-        anchor: Option<&PyAnchor>,
+        anchor: Option<PyAnchor>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -2475,7 +2475,7 @@ impl PyDrawable {
         &self,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
-        anchor: Option<&PyAnchor>,
+        anchor: Option<PyAnchor>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_free_position("move_to")?;
@@ -2714,7 +2714,7 @@ impl PyDrawable {
         reference: &PyDrawable,
         direction: &PyDirection,
         spacing: f64,
-        aligned_edge: Option<&PyAnchor>,
+        aligned_edge: Option<PyAnchor>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_free_position("next_to")?;
@@ -2732,8 +2732,8 @@ impl PyDrawable {
     pub(crate) fn align_to_impl(
         &self,
         reference: &PyDrawable,
-        target_anchor: &PyAnchor,
-        reference_anchor: Option<&PyAnchor>,
+        target_anchor: PyAnchor,
+        reference_anchor: Option<PyAnchor>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_free_position("align_to")?;
@@ -2753,7 +2753,7 @@ impl PyDrawable {
         Ok(Self(self.0.clone().to_edge(direction.0, buff)))
     }
 
-    pub(crate) fn to_corner_impl(&self, corner: &PyAnchor, buff: f64) -> PyResult<Self> {
+    pub(crate) fn to_corner_impl(&self, corner: PyAnchor, buff: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_free_position("to_corner")?;
         Ok(Self(self.0.clone().to_corner(corner.0, buff)))
@@ -3731,7 +3731,7 @@ impl PyDrawable {
         slf: &Bound<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
-        anchor: Option<&PyAnchor>,
+        anchor: Option<PyAnchor>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().move_to_impl(x, y, anchor);
         same_drawable(slf, result)
@@ -3857,7 +3857,7 @@ impl PyDrawable {
         reference: &PyDrawable,
         direction: &PyDirection,
         spacing: f64,
-        aligned_edge: Option<&PyAnchor>,
+        aligned_edge: Option<PyAnchor>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf
             .borrow()
@@ -3868,8 +3868,8 @@ impl PyDrawable {
     fn align_to<'py>(
         slf: &Bound<'py, Self>,
         reference: &PyDrawable,
-        target_anchor: &PyAnchor,
-        reference_anchor: Option<&PyAnchor>,
+        target_anchor: PyAnchor,
+        reference_anchor: Option<PyAnchor>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf
             .borrow()
@@ -3888,7 +3888,7 @@ impl PyDrawable {
     #[pyo3(signature = (corner, buff=0.24))]
     fn to_corner<'py>(
         slf: &Bound<'py, Self>,
-        corner: &PyAnchor,
+        corner: PyAnchor,
         buff: f64,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().to_corner_impl(corner, buff);
@@ -4226,7 +4226,7 @@ macro_rules! media_drawable_methods {
     #[pyo3(signature = (x, y=None, anchor=None))]
     fn move_to<'py>(slf: PyRef<'py, Self>, x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
-        anchor: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
+        anchor: Option<PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).move_to_impl(x, y, anchor)?;
         Ok(slf)
     }
@@ -4330,14 +4330,14 @@ macro_rules! media_drawable_methods {
     fn next_to<'py>(slf: PyRef<'py, Self>, reference: &PyDrawable,
         direction: &PyDirection,
         spacing: f64,
-        aligned_edge: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
+        aligned_edge: Option<PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).next_to_impl(reference, direction, spacing, aligned_edge)?;
         Ok(slf)
     }
     #[pyo3(signature = (reference, target_anchor, reference_anchor=None))]
     fn align_to<'py>(slf: PyRef<'py, Self>, reference: &PyDrawable,
-        target_anchor: &PyAnchor,
-        reference_anchor: Option<&PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
+        target_anchor: PyAnchor,
+        reference_anchor: Option<PyAnchor>,) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).align_to_impl(reference, target_anchor, reference_anchor)?;
         Ok(slf)
     }
@@ -4347,7 +4347,7 @@ macro_rules! media_drawable_methods {
         Ok(slf)
     }
     #[pyo3(signature = (corner, buff=0.24))]
-    fn to_corner<'py>(slf: PyRef<'py, Self>, corner: &PyAnchor, buff: f64) -> PyResult<PyRef<'py, Self>> {
+    fn to_corner<'py>(slf: PyRef<'py, Self>, corner: PyAnchor, buff: f64) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).to_corner_impl(corner, buff)?;
         Ok(slf)
     }

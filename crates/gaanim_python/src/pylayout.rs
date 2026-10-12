@@ -482,30 +482,7 @@ impl Units {
 }
 
 pub(crate) fn parse_anchor(value: &Bound<'_, PyAny>) -> PyResult<Anchor> {
-    if let Ok(anchor) = value.extract::<PyAnchor>() {
-        return Ok(anchor.0);
-    }
-    let name = value.extract::<String>().map_err(|_| {
-        pyo3::exceptions::PyTypeError::new_err("anchor must be an Anchor or its name")
-    })?;
-    Ok(
-        match name.trim().to_ascii_lowercase().replace('-', "_").as_str() {
-            "center" => Anchor::Center,
-            "top" => Anchor::Top,
-            "bottom" => Anchor::Bottom,
-            "left" => Anchor::Left,
-            "right" => Anchor::Right,
-            "top_left" => Anchor::TopLeft,
-            "top_right" => Anchor::TopRight,
-            "bottom_left" => Anchor::BottomLeft,
-            "bottom_right" => Anchor::BottomRight,
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "anchor must be center, top, bottom, left, right, top_left, top_right, bottom_left or bottom_right",
-                ));
-            }
-        },
-    )
+    value.extract::<PyAnchor>().map(|anchor| anchor.0)
 }
 
 /// Box properties that describe the container itself.
@@ -1676,7 +1653,7 @@ impl PyBox {
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
-        anchor: Option<&PyAnchor>,
+        anchor: Option<PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::pydrawable::PyDrawable(slf.handle()).move_to_impl(x, y, anchor)?;
         Ok(slf)
@@ -1820,7 +1797,7 @@ impl PyBox {
         reference: &PyDrawable,
         direction: &PyDirection,
         spacing: f64,
-        aligned_edge: Option<&PyAnchor>,
+        aligned_edge: Option<PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::pydrawable::PyDrawable(slf.handle()).next_to_impl(
             reference,
@@ -1834,8 +1811,8 @@ impl PyBox {
     fn align_to<'py>(
         slf: PyRef<'py, Self>,
         reference: &PyDrawable,
-        target_anchor: &PyAnchor,
-        reference_anchor: Option<&PyAnchor>,
+        target_anchor: PyAnchor,
+        reference_anchor: Option<PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::pydrawable::PyDrawable(slf.handle()).align_to_impl(
             reference,
@@ -1856,7 +1833,7 @@ impl PyBox {
     #[pyo3(signature = (corner, buff=0.24))]
     fn to_corner<'py>(
         slf: PyRef<'py, Self>,
-        corner: &PyAnchor,
+        corner: PyAnchor,
         buff: f64,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::pydrawable::PyDrawable(slf.handle()).to_corner_impl(corner, buff)?;
@@ -2566,7 +2543,39 @@ fn layout_error(error: gaanim_api::canvas::LayoutOwnershipError) -> PyErr {
 #[pyclass(name = "Anchor", module = "gaanim_core", frozen, skip_from_py_object)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyAnchor(pub Anchor);
-copy_from_py_object!(PyAnchor);
+
+/// An `Anchor`, or its name as `AnchorName` spells it (`"top_left"`, also
+/// `"Top-Left"`), wherever a method takes an anchor.
+impl<'a, 'py> pyo3::FromPyObject<'a, 'py> for PyAnchor {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(anchor) = obj.cast::<PyAnchor>() {
+            return Ok(*anchor.borrow());
+        }
+        let name = obj.extract::<String>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err("anchor must be an Anchor or its name")
+        })?;
+        Ok(Self(
+            match name.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+                "center" => Anchor::Center,
+                "top" => Anchor::Top,
+                "bottom" => Anchor::Bottom,
+                "left" => Anchor::Left,
+                "right" => Anchor::Right,
+                "top_left" => Anchor::TopLeft,
+                "top_right" => Anchor::TopRight,
+                "bottom_left" => Anchor::BottomLeft,
+                "bottom_right" => Anchor::BottomRight,
+                _ => {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "anchor must be center, top, bottom, left, right, top_left, top_right, bottom_left or bottom_right",
+                    ));
+                }
+            },
+        ))
+    }
+}
 
 #[pymethods]
 #[allow(non_snake_case)]

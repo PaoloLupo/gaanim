@@ -895,6 +895,34 @@ impl<'a, 'w, 's, 'b> CoordinatedAnimationBuilder<'a, 'w, 's, 'b> {
     }
 }
 
+/// A dynamic camera clip waiting for the rest of its `play`: once every
+/// animation in it is scheduled, the targets' authored state gives the pose
+/// the camera keeps after the clip ends.
+pub(crate) struct PendingCameraHold {
+    pub clip: gaanim_timeline::clip::ClipId,
+    pub kind: PendingCameraHoldKind,
+}
+
+pub(crate) enum PendingCameraHoldKind {
+    /// `follow`: the endpoint plus `offset`, reached through `lag` over the
+    /// clip's `duration` from `from`.
+    Follow {
+        target: Box<crate::canvas::CanvasEndpoint>,
+        from: DVec3,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        lag: f64,
+        duration: f64,
+    },
+    /// `frame_to(..., dynamic=True)`: the union of the targets' bounds with
+    /// `margins` (CSS order), fitted to a `frame` of that width and height.
+    Frame {
+        targets: Vec<ObjectId>,
+        margins: [f64; 4],
+        frame: (f64, f64),
+    },
+}
+
 /// The high-level fluent API builder for constructing gaanim scenes.
 ///
 /// Manages auto-incrementing ObjectId generation, relative layouts, active states,
@@ -925,6 +953,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub procedural_signal_tracks: Vec<(Entity, ObjectId, f64, f64)>,
     /// Time maps of the next play's animations, from `Op::TimeMaps`.
     pub(crate) pending_time_maps: Vec<Option<std::sync::Arc<gaanim_math::TimeMap>>>,
+    /// Dynamic camera clips of the play being scheduled, whose hand-off pose
+    /// is resolved once the whole play is, so it reads where the targets end.
+    pub(crate) pending_camera_holds: Vec<PendingCameraHold>,
     /// Local baselines of reactive numbers, which readouts align their row on.
     pub readout_baselines: HashMap<ObjectId, f64>,
     /// Values whose text each reactive number inside a layout keeps room
@@ -1172,6 +1203,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             readout_baselines,
             readout_reserves: HashMap::new(),
             pending_time_maps: Vec::new(),
+            pending_camera_holds: Vec::new(),
             default_track,
             mobject_tracks,
             mobject_names,
@@ -1484,6 +1516,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             readout_baselines: HashMap::new(),
             readout_reserves: HashMap::new(),
             pending_time_maps: Vec::new(),
+            pending_camera_holds: Vec::new(),
             default_track,
             mobject_tracks: HashMap::new(),
             mobject_names: HashMap::new(),

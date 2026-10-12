@@ -60,7 +60,7 @@ impl PyBarRace {
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
-        anchor: Option<&crate::pylayout::PyAnchor>,
+        anchor: Option<crate::pylayout::PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.race.group.clone()).move_to_impl(x, y, anchor)?;
         Ok(slf)

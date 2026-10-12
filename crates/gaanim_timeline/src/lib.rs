@@ -421,6 +421,7 @@ pub fn camera_rig_system(world: &mut World) {
             offset,
             offset_space,
             lag,
+            ..
         } => {
             let desired = gaanim_animation::resolve_tracking_endpoint_with_offset(
                 &target,
@@ -447,6 +448,7 @@ pub fn camera_rig_system(world: &mut World) {
             frame_width,
             frame_height,
             interpolation,
+            ..
         } = lens
         else {
             return None;
@@ -749,6 +751,7 @@ mod tests {
                     offset: gaanim_core::glam::DVec3::ZERO,
                     offset_space: gaanim_animation::FollowOffsetSpace::World,
                     lag: 0.5,
+                    hold: None,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
                 delay: 0.0,

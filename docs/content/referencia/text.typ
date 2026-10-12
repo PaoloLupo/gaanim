@@ -365,7 +365,7 @@ Colocación por línea base para que palabras y ecuaciones se alineen.
   signature: "move_to(x, y, anchor: Anchor | TextAnchor | None = None) | move_to(reference) | move_to(point) -> Text",
   params: (
     (name: "x / y", type: "float | fuente reactiva", default: none, desc: [Punto de destino en unidades de escena.]),
-    (name: "anchor", type: "Anchor | TextAnchor | None", default: "None", desc: [Anclaje geométrico, o `TextAnchor.BASELINE_LEFT`, `BASELINE_CENTER` o `BASELINE_RIGHT` sobre la línea base.]),
+    (name: "anchor", type: "Anchor | str | TextAnchor | None", default: "None", desc: [Anclaje geométrico (un `Anchor` o su nombre, como `"top_left"`), o `TextAnchor.BASELINE_LEFT`, `BASELINE_CENTER` o `BASELINE_RIGHT` sobre la línea base.]),
   ),
   desc: [Una sola línea se coloca por defecto con `TextAnchor.BASELINE_CENTER`: el centro horizontal visual en `x` y la línea base en `y`. Así, textos y ecuaciones con distintas ascendentes, fracciones o tamaños comparten línea base. Un bloque de varias líneas sin anclaje usa su centro visual, y un `TextAnchor` explícito usa la primera línea. Los anclajes geométricos (`Anchor.TOP_LEFT`…) se basan en los límites y no garantizan una línea base común. Un `Drawable` o un `AnchorPoint` centran el texto sobre la referencia sin seguirla. Un texto gestionado por Layout lanza `LayoutOwnershipError`; `text.animate.move_to(...)` sí lo mueve.],
 )[

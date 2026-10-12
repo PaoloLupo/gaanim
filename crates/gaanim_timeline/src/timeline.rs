@@ -4880,11 +4880,27 @@ fn apply_lens_spec(
                 camera.position.y = position.y;
             }
         }
-        PropertyLensSpec::CameraFollowEndpoint { .. } => {
-            // Applied in the camera phase after persistent bindings.
+        // While the clip plays the camera phase resolves these after
+        // persistent bindings (and layout, for the frame); a finished clip
+        // leaves the camera on the pose it handed off.
+        PropertyLensSpec::CameraFollowEndpoint { hold, .. } => {
+            if completed
+                && let Some(hold) = hold
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera.position.x = hold.x;
+                camera.position.y = hold.y;
+            }
         }
-        PropertyLensSpec::CameraFrameDynamic { .. } => {
-            // Applied in the camera phase after persistent bindings and layout.
+        PropertyLensSpec::CameraFrameDynamic { hold, .. } => {
+            if completed
+                && let Some((position, zoom)) = hold
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera.position.x = position.x;
+                camera.position.y = position.y;
+                camera.projection = gaanim_math::Projection::Orthographic { zoom: *zoom };
+            }
         }
         PropertyLensSpec::CameraShake { .. } => {}
         PropertyLensSpec::CameraTarget { from, to } => {

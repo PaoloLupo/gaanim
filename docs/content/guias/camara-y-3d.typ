@@ -102,7 +102,8 @@ scene.play([scene.camera.animate.to(overview).duration(1.0)])
 == Seguir a un objeto
 
 `scene.camera.animate.follow(objeto, lag=)` mantiene el objeto en el centro
-mientras dura la animación. `lag` añade un retraso suave, en segundos:
+mientras dura la animación, y al terminar la cámara se queda donde lo dejó.
+`lag` añade un retraso suave, en segundos:
 
 ```python
 # output: preview.webp

@@ -135,7 +135,7 @@ impl PyPrimitive3D {
         slf: PyRef<'py, Self>,
         x: &Bound<'_, PyAny>,
         y: Option<&Bound<'_, PyAny>>,
-        anchor: Option<&PyAnchor>,
+        anchor: Option<PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         PyDrawable(slf.handle.clone()).move_to_impl(x, y, anchor)?;

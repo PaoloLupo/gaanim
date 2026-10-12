@@ -2383,6 +2383,10 @@ impl PyCamera {
     }
 }
 
+/// Scene units `frame_to` leaves around its targets on every side when
+/// no margin is given.
+const DEFAULT_FRAME_MARGIN: f64 = 0.5;
+
 #[pymethods]
 impl PyCameraAnimation {
     /// Animate to a reusable camera state.
@@ -2478,7 +2482,7 @@ impl PyCameraAnimation {
                 ));
             }
         } else {
-            [40.0; 4]
+            [DEFAULT_FRAME_MARGIN; 4]
         };
         if margins
             .iter()
@@ -8643,6 +8647,58 @@ mod tests {
             assert_eq!(canvas.getattr("theme")?.extract::<String>()?, "paper");
             assert!(canvas.call_method1("set_theme", ("nope",)).is_err());
             assert!(canvas.call_method1("set_theme", (3,)).is_err());
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn anchors_take_their_names_and_frame_to_leaves_half_a_unit() {
+        use pyo3::types::IntoPyDict;
+        Python::initialize();
+        Python::attach(|py| -> PyResult<()> {
+            let module = PyModule::new(py, "gaanim_core")?;
+            crate::gaanim_core(py, &module)?;
+            let named = |name: &str| name.into_pyobject(py).unwrap().extract::<PyAnchor>();
+            assert!(matches!(
+                named("top_left")?.0,
+                gaanim_layout::Anchor::TopLeft
+            ));
+            assert!(matches!(
+                named("Bottom-Right")?.0,
+                gaanim_layout::Anchor::BottomRight
+            ));
+            assert!(
+                named("middle")
+                    .unwrap_err()
+                    .is_instance_of::<pyo3::exceptions::PyValueError>(py)
+            );
+            let number = 3_i32.into_pyobject(py).unwrap().extract::<PyAnchor>();
+            assert!(
+                number
+                    .unwrap_err()
+                    .is_instance_of::<pyo3::exceptions::PyTypeError>(py)
+            );
+
+            let scene = module.getattr("Scene")?.call0()?;
+            let circle = scene.getattr("geometry")?.call_method1("circle", (1.0,))?;
+            let text = scene.call_method1("text", ("label",))?;
+            let top_left = [("anchor", "top_left")].into_py_dict(py)?;
+            circle.call_method("move_to", (2.0, 1.0), Some(&top_left))?;
+            text.call_method("move_to", (2.0, 1.0), Some(&top_left))?;
+            let other = scene.getattr("geometry")?.call_method1("circle", (0.5,))?;
+            other.call_method1("align_to", (&circle, "left"))?;
+
+            let frame = scene
+                .getattr("camera")?
+                .getattr("animate")?
+                .call_method1("frame_to", (&circle,))?;
+            let frame = frame.extract::<PyRef<'_, crate::pydrawable::PyCanvasAnim>>()?;
+            assert!(matches!(
+                frame.inner.inner.anim_type,
+                gaanim_api::anim::AnimationType::CameraFrameMany { margins, .. }
+                    if margins == [DEFAULT_FRAME_MARGIN; 4]
+            ));
             Ok(())
         })
         .unwrap();

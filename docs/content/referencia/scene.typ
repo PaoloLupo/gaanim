@@ -1222,7 +1222,7 @@ scene.camera.restore("general")
   kind: "method",
   params: (
     (name: "targets", type: "Drawable | Sequence[Drawable]", default: none, desc: [Objetos que deben caber en la vista.]),
-    (name: "margin", type: "float | tuple", default: "None", desc: [Margen alrededor: un valor, `(vertical, horizontal)` o cuatro lados en el orden de CSS.]),
+    (name: "margin", type: "float | tuple", default: "None", desc: [Margen alrededor en unidades de escena: un valor, `(vertical, horizontal)` o cuatro lados en el orden de CSS. Sin él, media unidad por lado.]),
     (name: "dynamic", type: "bool", default: "False", desc: [Recalcula la unión en cada fotograma, después de los updaters y del layout.]),
   ),
   returns: (type: "Camera", desc: [La misma cámara.]),
@@ -1341,7 +1341,7 @@ scene.play([scene.camera.animate.zoom_to(1.0, interpolation="linear").duration(0
   params: (
     (name: "targets", type: "Drawable | Sequence[Drawable]", default: none, desc: [Objetos que deben caber en la vista.]),
     (name: "margin", type: "float | tuple", default: "None", desc: [Igual que en `Camera.frame_to`.]),
-    (name: "dynamic", type: "bool", default: "False", desc: [Sigue a los objetos si se mueven durante el movimiento.]),
+    (name: "dynamic", type: "bool", default: "False", desc: [Sigue a los objetos si se mueven durante el movimiento, y al terminar la cámara conserva el último encuadre.]),
     (name: "interpolation", type: "\"exponential\" | \"linear\"", default: "\"exponential\"", desc: [Con `"exponential"` el zoom es exponencial y el desplazamiento acompaña al cambio de ancho visible, así que la vista escala alrededor de un punto fijo y el contenido viaja en línea recta. `"linear"` interpola posición y zoom por separado.]),
   ),
   returns: (type: "Anim", desc: [Encuadre animado.]),
@@ -1377,7 +1377,7 @@ scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
     (name: "offset_space", type: "\"world\" | \"local\"", default: "\"world\"", desc: [`"local"` gira el desplazamiento con el objetivo.]),
     (name: "lag", type: "float", default: "0.0", desc: [Retraso de seguimiento en segundos, determinista.]),
   ),
-  returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`.]),
+  returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`. Al terminar, la cámara se queda en la pose que alcanzó, calculada con la posición del objetivo al final del `play`, y el siguiente movimiento parte de ahí.]),
 )[
 ```python
 >>>from gaanim import *

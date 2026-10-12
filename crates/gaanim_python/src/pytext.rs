@@ -57,8 +57,11 @@ fn resolve_text_anchor(value: &Bound<'_, PyAny>) -> PyResult<ResolvedTextAnchor>
     if let Ok(anchor) = value.extract::<PyRef<'_, PyTextAnchor>>() {
         return Ok(ResolvedTextAnchor::Typographic(anchor.0));
     }
+    if value.extract::<String>().is_ok() {
+        return crate::pylayout::parse_anchor(value).map(ResolvedTextAnchor::Geometric);
+    }
     Err(PyTypeError::new_err(
-        "anchor must be an Anchor or TextAnchor",
+        "anchor must be an Anchor, its name or a TextAnchor",
     ))
 }
 
@@ -1376,7 +1379,7 @@ impl PyText {
                         PyDrawable(slf.handle.clone()).move_to_impl(
                             x,
                             Some(y),
-                            Some(&PyAnchor(anchor)),
+                            Some(PyAnchor(anchor)),
                         )?;
                     }
                     Some(ResolvedTextAnchor::Typographic(anchor)) => {
@@ -1585,7 +1588,7 @@ impl PyText {
         reference: &PyDrawable,
         direction: &PyDirection,
         spacing: f64,
-        aligned_edge: Option<&PyAnchor>,
+        aligned_edge: Option<PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         slf.require_free_position("next_to")?;
@@ -1602,8 +1605,8 @@ impl PyText {
     fn align_to<'py>(
         slf: PyRef<'py, Self>,
         reference: &PyDrawable,
-        target_anchor: &PyAnchor,
-        reference_anchor: Option<&PyAnchor>,
+        target_anchor: PyAnchor,
+        reference_anchor: Option<PyAnchor>,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         slf.require_free_position("align_to")?;
@@ -1631,7 +1634,7 @@ impl PyText {
     #[pyo3(signature = (corner, buff=0.24))]
     fn to_corner<'py>(
         slf: PyRef<'py, Self>,
-        corner: &PyAnchor,
+        corner: PyAnchor,
         buff: f64,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
