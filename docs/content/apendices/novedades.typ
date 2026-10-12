@@ -52,12 +52,28 @@ enteros, o usa `scene.text.code`.
   paleta, y los tokens `code_keyword`, `code_string`, `code_number`,
   `code_comment`, `code_function`, `code_type` y `code` de `Theme(colors=...)`
   lo cambian. `theme="esquema.tmTheme"` usa un esquema de TextMate o Sublime Text,
-  `highlight=False` lo deja monocromo y `font` elige la fuente, con DejaVu
-  Sans Mono como respaldo. Con un `background` en el que los colores del tema
+  `highlight=False` lo deja monocromo y `font` elige la fuente, con JetBrains
+  Mono como respaldo. Con un `background` en el que los colores del tema
   no se leen, como un panel oscuro en `paper`, el texto pasa al color de fondo
   del tema y el acento y los tokens se ajustan hasta leerse. Antes,
   `language` solo se mostraba en la cabecera.
   Ver #link("/referencia/text/#api-typography-code")[`Typography.code`].
+- El código usa JetBrains Mono, incluida en Gaanim con todos sus pesos y su
+  cursiva: el rol `code` (que antes pedía Consolas y, sin ella, caía en otra
+  fuente) y los bloques de `scene.text.code` (antes DejaVu Sans Mono). Así el
+  código se ve igual en Windows, macOS, Linux, el playground y los paquetes
+  `.gaanim`. Un tema con `fonts={"code": ...}` sigue eligiendo la suya.
+
+== Ejemplos
+
+- Los ejemplos del repositorio se ordenan por temas, como los de Bevy:
+  `examples/animation/easings.py`, `examples/camera/camera_moves.py`,
+  `examples/3d/primitives_3d.py`… Cada uno recorre las variantes que ofrece
+  la API de su tema, con el tema por defecto y una etiqueta con el código que
+  construye cada variante. `examples/examples.toml` los cataloga y
+  `just run easings` abre uno por su nombre. Los scripts sueltos de antes se
+  reescribieron en inglés dentro de su tema, o pasaron a `tests/` los que
+  eran pruebas.
 
 == Correcciones
 
@@ -89,6 +105,35 @@ enteros, o usa `scene.text.code`.
   `opacity`, y los mensajes de error se remitían el uno al otro. El error de
   dos animaciones que se pisan ya solo propone combinarlas en una cuando las
   dos son de propiedades.
+- `PostProcess.lut`, `PostProcess.shader`, `Background.shader`,
+  `Transition.shader`, la imagen de `Transition.preset("luma")` y las fuentes
+  de `Theme(font_dir=..., font_files=...)` buscan una ruta relativa como los
+  demás archivos de una escena: en el directorio de trabajo, luego en la
+  carpeta `assets` del script y luego junto a él. Antes solo la buscaban en el
+  directorio de trabajo, así que un script lanzado desde otra carpeta no
+  encontraba su `.cube`, su `.wgsl`, su imagen o sus fuentes.
+- `gaanim --diff` captura por defecto a 960 píxeles en el lado largo, o a la
+  altura de la baseline que ya existe, y guarda los fotogramas opacos en RGB
+  con la máxima compresión de PNG: una baseline pesa unas cinco veces menos
+  que a 1920 en RGBA. Las baselines que ya tenías se siguen comparando a su
+  tamaño; `--height` elige otro.
+- `create`, `write` y los demás trazos que se dibujan de a poco ya no dejan
+  franjas, barras ni gotas en sus primeros fotogramas. Una curva hecha de
+  muchos trozos, como `implicit` o `contour`, se llenaba de franjas
+  horizontales al empezar a dibujarse, y un `plot` mostraba un rectángulo en
+  su origen: al recortar el trazo quedaban segmentos tan cortos que el
+  trazador de Vello los convertía en esas manchas. Ahora los trozos visibles
+  de menos de una diezmilésima de unidad se omiten.
+- `scene.slides.bullets` alinea cada punto a la izquierda, justo después de
+  su viñeta. Antes cada texto se centraba en la columna, así que los puntos
+  cortos quedaban separados de su viñeta y desalineados entre sí.
+- La vista previa gira la cámara como las exportaciones. Con `rotate_to`,
+  `bind_2d(rotation=...)` o `follow_path(orient=True)` giraba la escena al
+  revés, el `hud()` giraba el doble en vez de quedar fijo y, con la cámara
+  lejos del origen, su centro se desplazaba de la pantalla hasta dejar la
+  curva seguida fuera de vista. Las exportaciones y `--diff` no cambian.
+- Las etiquetas `billboard` de una cámara ortográfica girada quedan derechas
+  también al exportar; antes solo lo estaban en la vista previa equivocada.
 
 == Al actualizar
 
@@ -106,6 +151,10 @@ enteros, o usa `scene.text.code`.
   arriba a la izquierda. Para recuperar el aspecto monocromo, pasa
   `highlight=False`; si colocabas otros objetos respecto al código, revisa su
   posición.
+- El texto con `role="code"` y los bloques de código cambian de fuente a
+  JetBrains Mono, un poco más ancha que Consolas: revisa lo que alineabas con
+  ellos. Para volver a la anterior, nómbrala en el tema, como
+  `Theme(fonts={"code": "Consolas"})`, o en `font=` del bloque.
 - En el editor, un WebM exportado desde un paquete abierto o desde un script
   fuera de un proyecto ya no conserva el canal alfa por defecto, como
   ocurre con `gaanim export`: marca *Conservar la transparencia* si la escena
