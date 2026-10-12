@@ -43,7 +43,7 @@ def gallery(labels, data=None, **options):
     cells = []
     for zone, label, values in zip(grid, labels, data or [DIGITS] * len(labels)):
         top, body = zone.split(Zones.rows(["48px", "1fr"]))
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom")
+        scene.text(label, role="code").place(top, anchor="bottom")
         shown = matrix(values, **options)
         # place() returns the matrix's layout box, so keep the matrix itself.
         shown.place(body)

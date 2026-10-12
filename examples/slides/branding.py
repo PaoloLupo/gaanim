@@ -38,7 +38,7 @@ seeks = []
 
 
 def code(*lines):
-    return scene.text("\n".join(lines), role="code", markup=False)
+    return scene.text("\n".join(lines), role="code")
 
 
 cover = scene.segment("Cover", template=title_slide)

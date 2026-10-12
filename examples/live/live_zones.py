@@ -25,7 +25,7 @@ seeks = []
 
 def code(label, zone, anchor="left"):
     """A variant label: the code that builds it."""
-    return scene.text(label, role="code", markup=False).place(zone, anchor=anchor)
+    return scene.text(label, role="code").place(zone, anchor=anchor)
 
 
 def outline(zone):
@@ -48,7 +48,7 @@ POSES = ["pose(x, y)", "rotation=0.6", "scale=1.5", "sx=1.4, sy=0.7",
 cells = scene.layout.zones(Zones.grid(rows=2, columns=4, gap="24px", padding="page_padding"))
 for label, cell in zip(POSES, cells):
     outline(cell)
-    scene.text(label, role="code", markup=False).place(cell, anchor="top", padding="16px")
+    scene.text(label, role="code").place(cell, anchor="top", padding="16px")
 # Module constants are frozen into the behavior when the zone compiles it.
 SPOTS = tuple(feet(cell, 0.7) for cell in cells)
 

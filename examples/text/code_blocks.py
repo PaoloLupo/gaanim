@@ -46,7 +46,7 @@ def panels(variants, rows):
     )
     for cell, (code, panel) in zip(grid, variants):
         strip, stage = cell.split(Zones.rows(["48px", "1fr"], gap="12px"))
-        scene.text(code, role="code", markup=False).place(strip, anchor="left")
+        scene.text(code, role="code").place(strip, anchor="left")
         panel.place(stage, anchor="left")
     scene.play([panel.animate.fade_in().duration(FADE) for _, panel in variants])
     scene.wait(HOLD)

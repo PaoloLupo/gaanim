@@ -21,7 +21,7 @@ seeks = []
 
 
 def code(label):
-    return scene.text(label, role="code", markup=False, text_align="left")
+    return scene.text(label, role="code", text_align="left")
 
 
 def show(*objects):

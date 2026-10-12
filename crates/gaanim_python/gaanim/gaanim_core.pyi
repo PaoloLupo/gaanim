@@ -762,7 +762,7 @@ class Theme:
         then in the calling script's ``assets`` folder, then beside the script.
 
         ``text_markup=False`` makes ``*`` and ``_`` literal by default in
-        ``scene.text``, ``scene.text.measure``, ``badge`` and ``chip``; a call
+        ``scene.text``, ``badge`` and ``chip``; a call
         that passes ``markup=`` keeps its own choice. ``None`` keeps the
         base theme's value (``True`` for a new theme).
 
@@ -1763,7 +1763,8 @@ class Anim:
         or innermost semantic part together, with the segmentation of
         ``text.words``, ``text.lines``, and ``text.parts``; punctuation joins the
         neighboring group. ``order`` starts groups ``"forward"``, ``"reverse"``,
-        from the ``"center"`` outward, or in a fixed ``"random"`` permutation.
+        from the ``"center"`` outward, or in a ``"random"`` permutation fixed
+        by ``seed``.
         ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
         sequential staggering and a number overrides it. A missing outline is
         synthesized at 0.03 logical units and removed as the authored fill
@@ -4938,6 +4939,13 @@ class TextStyle:
         raise ``ValueError``. Outer width, height, padding, fit, and growth are
         intentionally controlled by boxes.
 
+        As the root style of a text it covers every glyph, and in a ``part``
+        only the part's: ``stroke`` outlines the glyphs ``stroke_width`` wide
+        (0.02 when only ``stroke`` is given), ``letter_spacing`` and
+        ``word_spacing`` add space between glyphs and words, ``decorations``
+        underline or strike them, and a positive ``baseline`` raises them
+        within their line. ``opacity`` applies to the whole text.
+
         Example:
             body = TextStyle(font="Inter", size=0.32, color=WHITE)
         """
@@ -4971,6 +4979,11 @@ class TextFlow:
         font size, like CSS ``line-height``: 1.2 puts them 1.2 sizes apart.
         The default 1.0 puts them one size apart, tight but without overlap;
         raise it for long paragraphs.
+
+        ``max_lines`` limits the text to that many lines: ``overflow="clip"``
+        keeps the words that fit (a first word too long for the lines is cut
+        between characters), ``"ellipsis"`` ends them with ``…``, and
+        ``"visible"`` draws every line.
 
         ``text_box`` is the box a layout measures and places the text by, like
         CSS ``text-box``: ``"line"`` spans full lines (ascent to descent),
@@ -5175,9 +5188,11 @@ class TextSelection:
     def fill(self, color: ColorLike) -> TextSelection:
         """Persistently color selected glyphs and invalidate metric state if needed.
 
-        In mathematics, the selected part remains inside the same Typst
-        equation, so changing its fill does not insert spacing or alter the
-        positions of neighboring unstyled terms.
+        Before the text is first shown this is the selection's declared
+        color; afterwards the glyphs change color at the cursor, like any
+        immediate setter. In mathematics, the selected part remains inside
+        the same Typst equation, so changing its fill does not insert spacing
+        or alter the positions of neighboring unstyled terms.
 
         Example:
             formula["mass"].fill(GOLD)
@@ -5489,8 +5504,11 @@ class Text(Drawable):
         """Replace structured content while retaining Text identity and reflowing owners.
 
         The text version and all owning Layout snapshots are incremented.
-        ``markup=None`` keeps the current markup mode. An invalid delimiter or
-        content tree raises ``ValueError``.
+        Once a free text has been shown, the new content replaces it at the
+        cursor, placed as the text was declared (``move_to``, ``place``), and
+        later animations of this Text act on it. ``markup=None`` keeps the
+        current markup mode. An invalid delimiter or content tree raises
+        ``ValueError``.
 
         Example:
             copy.become("Resultado: ", part("value", "$42$", color=GOLD))
@@ -8714,8 +8732,9 @@ class Typography:
         backslashes), for technical labels such as ``tb:dist_comp`` or
         ``X1_2``; ``$...$`` math still applies. ``markup=None`` uses the
         theme's ``text_markup`` (``True`` without a theme). With
-        ``role="code"`` every ``$`` is literal, so a terminal prompt such as
-        ``"$ gaanim init"`` needs no escaping.
+        ``role="code"`` the text is literal: every ``$``, ``*``, ``_`` and
+        backslash shows as written, so ``"$ gaanim init"`` or
+        ``"stagger(*grows)"`` need no escaping.
 
         Without ``flow`` or ``text_align``, the lines of a text with explicit
         line breaks take their horizontal alignment from the anchor of
@@ -8794,9 +8813,11 @@ class Typography:
         ``#align(center)`` centers within the content and lines only break
         where the source breaks them. ``width`` is a Typst page width
         (``"16cm"``, ``"800pt"``; a number means points) measured before that
-        scaling, for paragraphs that wrap or ``1fr`` columns. Empty inline
-        source raises ``ValueError`` and an unreadable asset raises
-        ``RuntimeError``.
+        scaling, for paragraphs that wrap or ``1fr`` columns. Black strokes,
+        Typst's default for tables, ``rect``, ``line`` and CeTZ drawings, are
+        drawn in the document's text color, so they show over a dark
+        background. Empty inline source raises ``ValueError`` and an
+        unreadable asset raises ``RuntimeError``.
 
         Example:
             from pathlib import Path

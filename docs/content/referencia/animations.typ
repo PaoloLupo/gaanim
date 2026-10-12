@@ -474,10 +474,10 @@ scene.render()
   kind: "method",
   params: (
     (name: "by", type: "\"grapheme\" | \"word\" | \"line\" | \"part\"", default: "\"grapheme\"", desc: [En un texto, qué unidades empiezan juntas: grafemas, palabras, líneas explícitas o partes semánticas. La puntuación se une a su vecina.]),
-    (name: "order", type: "\"forward\" | \"reverse\" | \"center\" | \"random\"", default: "\"forward\"", desc: [Orden de los grupos: hacia delante, al revés, desde el centro hacia fuera o en una permutación aleatoria fija.]),
+    (name: "order", type: "\"forward\" | \"reverse\" | \"center\" | \"random\"", default: "\"forward\"", desc: [Orden de los grupos: hacia delante, al revés, desde el centro hacia fuera o en una permutación aleatoria que fija `seed`.]),
     (name: "stagger", type: "float | None", default: "None", desc: [Retardo relativo entre grupos; `None` lo adapta al número de grupos.]),
     (name: "brush", type: "\"pen\" | \"chalk\"", default: "\"pen\"", desc: [`"chalk"` dibuja el objeto como tiza en una pizarra durante toda la escena, como `Drawable.chalk(seed)`.]),
-    (name: "seed", type: "int", default: "0", desc: [Semilla del temblor y del grano de la tiza.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla del orden `"random"` y del temblor y el grano de la tiza.]),
   ),
   returns: (type: "Anim", desc: [Escritura trazo a trazo.]),
   desc: [Traza los contornos con un grosor lógico constante y luego funde los rellenos. Si el objeto no tiene contorno, usa uno temporal de 0.03 unidades que desaparece al entrar el relleno. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],

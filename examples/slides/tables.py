@@ -26,7 +26,7 @@ ROWS = [["Baseline", "1.8e-1", "48 ms"], ["Cached", "7.2e-2", "32 ms"], ["GPU", 
 
 
 def code(label):
-    return scene.text(label, role="code", markup=False)
+    return scene.text(label, role="code")
 
 
 

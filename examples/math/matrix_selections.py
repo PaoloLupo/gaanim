@@ -49,7 +49,7 @@ def gallery(labels, rows=2):
     for zone, label in zip(grid, labels):
         # The label and the matrix (about 4.7 sizes tall) sit together, centered in the cell.
         _, top, body, _ = zone.split(Zones.rows(["1fr", "48px", 4.7 * size, "1fr"]))
-        scene.text(label, role="code", markup=False, text_align="center").place(top, anchor="bottom")
+        scene.text(label, role="code", text_align="center").place(top, anchor="bottom")
         shown = matrix(size)
         # place() returns the matrix's layout box, so keep the matrix itself.
         shown.place(body)

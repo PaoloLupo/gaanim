@@ -35,7 +35,7 @@ def cells(labels, label_height="96px", outer=False):
         below = outer and index >= 2
         first, second = cell.split(Zones.rows(["1fr", label_height] if below else [label_height, "1fr"]))
         top, stage = (second, first) if below else (first, second)
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom_left" if below else "top_left")
+        scene.text(label, role="code").place(top, anchor="bottom_left" if below else "top_left")
         stages.append(stage)
     return stages
 

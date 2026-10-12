@@ -3,7 +3,7 @@
 
 #show: docs-chapter.with(
   title: "Texto",
-  description: "scene.text: prosa, ecuaciones, partes semánticas, estilo, flujo, selecciones, documentos Typst y medición",
+  description: "scene.text: prosa, ecuaciones, partes semánticas, estilo, flujo, selecciones y documentos Typst",
   route: "/referencia/text/",
   nav: "Texto",
 )
@@ -215,7 +215,7 @@ label["tb:dist"].fill(GOLD)
 Las cadenas admiten un marcado mínimo inspirado en Typst: `*negrita*`,
 `_cursiva_` y ambos anidados, `*_así_*`. Se compila en las mismas pasadas que
 `TextStyle`, así que funciona con ajuste de línea, selecciones, animaciones,
-partes y medición.
+partes y `bounds()`.
 
 ```python
 # show-code: true
@@ -260,9 +260,9 @@ label = scene.text("Valores: V_e del piso 1 (tb:agriet_xy)", markup=False)
   compositor y no crea un objeto distinto.
 - `scene.text.equation(...)` añade `$ … $`: no escribas los delimitadores.
 - `\$` escribe un dólar literal y un delimitador sin pareja lanza `ValueError`.
-- Con `role="code"` todo `$` es literal: `scene.text("$ gaanim init", role="code")`
-  muestra el prompt tal cual, sin escapar nada; un `\$` escrito antes sigue
-  mostrando `$`.
+- Con `role="code"` el texto es literal: todo `$`, `*`, `_` y barra invertida
+  se muestra tal cual, así que `scene.text("$ gaanim init", role="code")` o
+  `scene.text("stagger(*grows)", role="code")` no necesitan escapes.
 - Si todo el contenido es matemático, el rol inferido es `math`; si mezcla prosa
   y matemáticas, `body`.
 - Dentro de la matemática, cada frontera entre piezas es un espacio normal de
@@ -286,13 +286,13 @@ Aspecto de los glifos y composición de las líneas, como valores reutilizables.
     (name: "fallbacks", type: "Sequence[str]", default: "()", desc: [Familias de respaldo en orden.]),
     (name: "size", type: "float | None", default: "None", desc: [Tamaño positivo en unidades de escena.]),
     (name: "weight", type: "int | None", default: "None", desc: [Peso numérico de 1 a 1000.]),
-    (name: "color / stroke / stroke_width", type: "Color | None / Color | None / float | None", default: "None", desc: [Relleno de los glifos y contorno opcional.]),
+    (name: "color / stroke / stroke_width", type: "Color | None / Color | None / float | None", default: "None", desc: [Relleno de los glifos y contorno opcional, de `stroke_width` de ancho (0,02 si solo se da `stroke`).]),
     (name: "opacity", type: "float | None", default: "None", desc: [Opacidad de todo el texto, de 0 a 1.]),
     (name: "letter_spacing / word_spacing", type: "float | None", default: "None", desc: [Espaciado adicional no negativo, en unidades de escena.]),
     (name: "decorations", type: "Sequence[str]", default: "()", desc: [`underline`, `strike` o `strikethrough`.]),
-    (name: "baseline", type: "float | None", default: "None", desc: [Desplazamiento de la línea base; positivo sube los glifos.]),
+    (name: "baseline", type: "float | None", default: "None", desc: [Desplazamiento de la línea base; positivo sube los glifos dentro de su línea.]),
   ),
-  desc: [Estilo tipográfico inmutable y reutilizable. No tiene ancho, alto, relleno ni ajuste de caja: eso es de Layout. `stroke`, `stroke_width` y `opacity` del estilo raíz afectan a todo el texto; en las partes anidadas se resuelven fuente, tamaño, peso, cursiva, color, espaciado, decoraciones y línea base. Valores inválidos lanzan `ValueError`.],
+  desc: [Estilo tipográfico inmutable y reutilizable. No tiene ancho, alto, relleno ni ajuste de caja: eso es de Layout. El estilo raíz se aplica a todos los glifos y el de una parte, a los suyos: fuente, tamaño, peso, cursiva, color, contorno, espaciado, decoraciones y línea base. `opacity` se aplica a todo el texto. Valores inválidos lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -318,7 +318,7 @@ heading = scene.text("Resultados", style=display)
     (name: "wrap", type: "\"auto\" | False | float", default: "\"auto\"", desc: [`"auto"` usa el ancho que ofrece Layout (o el área segura); `False` mantiene una línea salvo saltos explícitos; un número limita el ancho tipográfico.]),
     (name: "align", type: "str", default: "\"left\"", desc: [`left`, `center`, `right` o `justify`.]),
     (name: "line_spacing", type: "float", default: "1.0", desc: [Distancia entre líneas base, en múltiplos del tamaño de letra, como `line-height` en CSS: con `1.2` y letra de 0.4, las líneas quedan a 0.48. Con el valor por defecto, `1.0`, las líneas quedan a un tamaño de letra, sin solaparse; súbelo para párrafos largos. Debe ser positivo.]),
-    (name: "max_lines / overflow", type: "int | None / str", default: "None / \"clip\"", desc: [Límite de líneas y qué pasa después: `visible`, `clip` o `ellipsis` (hoy se recorta igual que `clip`, sin dibujar la elipsis).]),
+    (name: "max_lines / overflow", type: "int | None / str", default: "None / \"clip\"", desc: [Límite de líneas y qué pasa con el resto: `clip` conserva las palabras que caben (una primera palabra que no cabe se corta entre caracteres), `ellipsis` las termina con «…» y `visible` dibuja todas las líneas.]),
     (name: "direction", type: "str", default: "\"auto\"", desc: [`auto`, `ltr` o `rtl`.]),
     (name: "hyphenate / lang", type: "bool / str | None", default: "False / None", desc: [Guiones de Typst y código ISO 639 en minúsculas (`"es"`, `"en"`…) que elige los patrones; `None` usa inglés.]),
   ),
@@ -447,7 +447,7 @@ if "mass" in copy.parts:
 #api-entry(
   name: "TextSelection.fill",
   kind: "method",
-  desc: [Colorea los glifos seleccionados de forma persistente. En matemáticas, la parte sigue en la misma ecuación Typst: cambiar su color no añade espacios ni mueve los términos vecinos.],
+  desc: [Colorea los glifos seleccionados de forma persistente: antes de que el texto se muestre es el color declarado de la selección, y después los glifos cambian de color en el cursor, como con cualquier cambio inmediato. En matemáticas, la parte sigue en la misma ecuación Typst: cambiar su color no añade espacios ni mueve los términos vecinos.],
 )[
 ```python
 >>>from gaanim import *
@@ -746,7 +746,7 @@ Sustituye el contenido de un texto sin crear otro objeto.
 #api-entry(
   name: "Text.become",
   kind: "method",
-  desc: [Reemplaza el contenido conservando la identidad del `Text`, incrementa su versión estructural y pide reflow a su Layout. Es una llamada inmediata de autoría, no un `Anim`: no la pongas en `scene.play`. `markup=None` conserva el modo de marcado actual. Contenido o delimitadores inválidos lanzan `ValueError`.],
+  desc: [Reemplaza el contenido conservando la identidad del `Text`, incrementa su versión estructural y pide reflow a su Layout. Si el texto es libre y ya se mostró, el nuevo contenido lo reemplaza en el cursor, colocado como se declaró el texto (`move_to`, `place`), y las animaciones posteriores del `Text` actúan sobre él. Es una llamada inmediata de autoría, no un `Anim`: no la pongas en `scene.play`. `markup=None` conserva el modo de marcado actual. Contenido o delimitadores inválidos lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -757,10 +757,11 @@ copy.become("Resultado: ", part("value", "$42$", color=GOLD))
 ```
 ]
 
-== Documentos Typst, código y medición
+== Documentos Typst y código
 
-Para lo que no cabe en un `Text`: documentos Typst completos, bloques de código y
-medidas antes de crear nada.
+Para lo que no cabe en un `Text`: documentos Typst completos y bloques de
+código. Para medir cualquier objeto, texto incluido, usa `bounds()` (ver
+#link("/referencia/drawable/")[Drawable]).
 
 #api-entry(
   name: "Typography.typst",
@@ -769,7 +770,7 @@ medidas antes de crear nada.
     (name: "source", type: "str | os.PathLike", default: none, desc: [Marcado Typst en línea o la ruta de un archivo `.typ` (relativa a la carpeta de assets).]),
     (name: "width", type: "str | float | int | None", default: "None", desc: [Ancho de página Typst antes de escalar: `"16cm"`, `"800pt"` o un número en puntos. Sin él, la página se ajusta al contenido: `#align(center)` centra dentro del contenido y los párrafos solo cortan línea donde la fuente lo indica. Pásalo para que un párrafo se ajuste o para columnas `1fr`.]),
   ),
-  desc: [Compila un documento Typst arbitrario (tablas con celdas combinadas, estructuras matemáticas propias, paquetes `@preview/…`) como un `Drawable`. Conserva sus proporciones y se escala para que su texto de 11 pt mida lo mismo que el rol `body`. No ofrece las selecciones de `Text`. Una fuente vacía lanza `ValueError` y un archivo ilegible, `RuntimeError`.],
+  desc: [Compila un documento Typst arbitrario (tablas con celdas combinadas, estructuras matemáticas propias, paquetes `@preview/…`) como un `Drawable`. Conserva sus proporciones y se escala para que su texto de 11 pt mida lo mismo que el rol `body`. No ofrece las selecciones de `Text`. Los trazos negros, los que Typst da por defecto a tablas, `rect`, `line` y dibujos de CeTZ, toman el color del texto del documento, así que se ven sobre un fondo oscuro. Una fuente vacía lanza `ValueError` y un archivo ilegible, `RuntimeError`.],
 )[
 ```python
 # show-code: true

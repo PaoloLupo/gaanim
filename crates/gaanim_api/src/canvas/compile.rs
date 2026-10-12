@@ -738,11 +738,13 @@ impl CompiledLayoutMeasure<'_> {
         text: &CompiledTextMeasure,
         width: Option<f64>,
     ) -> Result<DVec2, gaanim_layout::LayoutError> {
-        let source = structured_text_typst_source(
+        let source = fitted_text_typst_source(
+            self.font_registry,
             &text.spec,
             width,
             text.font_size,
             &text.font_family,
+            &text.math_font,
             text.color,
         );
         let (bounds, metrics) = self.typst_lines(id, text, &source)?;
@@ -1243,13 +1245,33 @@ fn typst_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
     if let Some(color) = style.color {
         args.push(format!("fill: rgb(\"{}\")", color_to_hex(color)));
     }
+    if let Some(stroke) = typst_text_stroke(style) {
+        args.push(format!("stroke: {stroke}"));
+    }
     if let Some(spacing) = style.letter_spacing {
         args.push(format!("tracking: {spacing}pt"));
     }
     if let Some(spacing) = style.word_spacing {
-        args.push(format!("spacing: {spacing}pt"));
+        args.push(format!("spacing: 100% + {spacing}pt"));
+    }
+    // Typst's baseline shift points down; a positive style baseline raises.
+    if let Some(baseline) = style.baseline.filter(|value| *value != 0.0) {
+        args.push(format!("baseline: {}pt", -baseline));
     }
     args
+}
+
+/// Outline width of text whose style names a stroke color but no width.
+const DEFAULT_TEXT_STROKE_WIDTH: f64 = 0.02;
+
+/// The Typst stroke of glyphs styled with a stroke color, or `None`.
+fn typst_text_stroke(style: &StructuredTextStyle) -> Option<String> {
+    let color = style.stroke_color?;
+    let width = style
+        .stroke_width
+        .unwrap_or(DEFAULT_TEXT_STROKE_WIDTH)
+        .max(0.0);
+    (width > 0.0).then(|| format!("{width}pt + rgb(\"{}\")", color_to_hex(color)))
 }
 
 fn typst_math_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
@@ -1272,11 +1294,14 @@ fn typst_math_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
     if let Some(color) = style.color {
         args.push(format!("fill: #rgb(\"{}\")", color_to_hex(color)));
     }
+    if let Some(stroke) = typst_text_stroke(style) {
+        args.push(format!("stroke: #({stroke})"));
+    }
     if let Some(spacing) = style.letter_spacing {
         args.push(format!("tracking: #{spacing}pt"));
     }
     if let Some(spacing) = style.word_spacing {
-        args.push(format!("spacing: #{spacing}pt"));
+        args.push(format!("spacing: #(100% + {spacing}pt)"));
     }
     args
 }
@@ -1305,6 +1330,8 @@ fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> St
         return content;
     }
 
+    // The baseline shift is a text argument, so a raised or lowered part
+    // stays in its line.
     let args = typst_style_arguments(style);
     let content = format!("#text(\"{}\")", escape_typst_string(text));
     let mut content = if args.is_empty() {
@@ -1319,9 +1346,6 @@ fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> St
             _ => content,
         };
     }
-    if let Some(baseline) = style.baseline.filter(|value| *value != 0.0) {
-        content = format!("#move(dy: {}pt)[{content}]", -baseline);
-    }
     content
 }
 
@@ -1329,10 +1353,28 @@ fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> St
 /// Math delimiters are tracked across part boundaries, so a styled nested
 /// part may safely live inside a `$...$` expression.
 fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> String {
+    leaves_typst_content(structured_text_leaves(spec))
+}
+
+/// The root style's arguments that `#set text` does not carry: they wrap
+/// every leaf, as a part's do.
+fn root_leaf_style(style: &StructuredTextStyle) -> StructuredTextStyle {
+    StructuredTextStyle {
+        stroke_color: style.stroke_color,
+        stroke_width: style.stroke_width,
+        decorations: style.decorations.clone(),
+        baseline: style.baseline,
+        ..StructuredTextStyle::default()
+    }
+}
+
+/// The styled leaves of `spec` with its inline markup resolved: plain text
+/// with `$` math delimiters and `\$` escapes.
+fn structured_text_leaves(spec: &StructuredTextSpec) -> Vec<StyledTextLeaf> {
     let mut raw_leaves = Vec::new();
     collect_styled_text_leaves(
         &spec.content,
-        &StructuredTextStyle::default(),
+        &root_leaf_style(&spec.style),
         &mut raw_leaves,
     );
     let mut markup = gaanim_text::structured::InlineMarkupParser::with_markup(spec.markup);
@@ -1364,7 +1406,105 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
     markup
         .finish()
         .expect("TextSpec validates inline markup before compilation");
-    let mut raw_leaves = marked_leaves;
+    marked_leaves
+}
+
+/// The end of one visible unit of text: a character outside math or a
+/// whole formula.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CutPoint {
+    leaf: usize,
+    /// Byte offset in the leaf just after the unit.
+    end: usize,
+    /// Whether the unit is whitespace.
+    space: bool,
+}
+
+/// Where a cut may end text: after each visible unit. A backslash escapes
+/// only a `$`, as in `parse_inline_math`.
+fn leaf_cut_points(leaves: &[StyledTextLeaf]) -> Vec<CutPoint> {
+    let mut points = Vec::new();
+    let mut in_math = false;
+    let mut escaped = false;
+    for (leaf, text) in leaves.iter().enumerate() {
+        for (offset, character) in text.text.char_indices() {
+            let end = offset + character.len_utf8();
+            let point = CutPoint {
+                leaf,
+                end,
+                space: character.is_whitespace(),
+            };
+            if std::mem::take(&mut escaped) && character == '$' {
+                if !in_math {
+                    points.push(point);
+                }
+                continue;
+            }
+            match character {
+                '\\' => escaped = true,
+                '$' => {
+                    in_math = !in_math;
+                    if !in_math {
+                        points.push(point);
+                    }
+                }
+                _ if !in_math => points.push(point),
+                _ => {}
+            }
+        }
+    }
+    points
+}
+
+/// Unit counts at which a cut ends a word: before a space or at the end.
+fn word_cuts(points: &[CutPoint]) -> Vec<usize> {
+    (1..=points.len())
+        .filter(|&keep| !points[keep - 1].space && points.get(keep).is_none_or(|next| next.space))
+        .collect()
+}
+
+/// The first `keep` units of `leaves` (see [`leaf_cut_points`]) without
+/// trailing spaces, followed by an ellipsis in the last leaf's style when
+/// `ellipsis` is set.
+fn cut_leaves(
+    leaves: &[StyledTextLeaf],
+    points: &[CutPoint],
+    keep: usize,
+    ellipsis: bool,
+) -> Vec<StyledTextLeaf> {
+    let mut kept = match keep.checked_sub(1).and_then(|index| points.get(index)) {
+        Some(point) => {
+            let mut kept = leaves[..=point.leaf].to_vec();
+            kept[point.leaf].text.truncate(point.end);
+            kept
+        }
+        None => Vec::new(),
+    };
+    while let Some(last) = kept.last_mut() {
+        let trimmed = last.text.trim_end().len();
+        last.text.truncate(trimmed);
+        if !last.text.is_empty() {
+            break;
+        }
+        kept.pop();
+    }
+    if ellipsis {
+        let style = kept
+            .last()
+            .or(leaves.first())
+            .map(|leaf| leaf.style.clone())
+            .unwrap_or_default();
+        kept.push(StyledTextLeaf {
+            text: "…".to_owned(),
+            style,
+            content_boundary_before: false,
+        });
+    }
+    kept
+}
+
+/// Typst markup of styled leaves.
+fn leaves_typst_content(mut raw_leaves: Vec<StyledTextLeaf>) -> String {
     // Preserve every authored content boundary in math as ordinary Typst
     // whitespace. Typst remains responsible for deciding whether that
     // whitespace separates identifiers, participates in math syntax, or has
@@ -1374,9 +1514,12 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
     let mut escaped = false;
     for index in 0..raw_leaves.len().saturating_sub(1) {
         for character in raw_leaves[index].text.chars() {
-            if escaped {
-                escaped = false;
-            } else if character == '\\' {
+            // A backslash escapes only a `$`; before anything else it is a
+            // literal backslash and the next character keeps its meaning.
+            if std::mem::take(&mut escaped) && character == '$' {
+                continue;
+            }
+            if character == '\\' {
                 escaped = true;
             } else if character == '$' {
                 in_math = !in_math;
@@ -1443,15 +1586,12 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
         let mut chunk = String::new();
         let mut escaped = false;
         for character in text.chars() {
-            if escaped {
+            if std::mem::take(&mut escaped) {
                 if character == '$' {
                     chunk.push('$');
-                } else {
-                    chunk.push('\\');
-                    chunk.push(character);
+                    continue;
                 }
-                escaped = false;
-                continue;
+                chunk.push('\\');
             }
             if character == '\\' {
                 escaped = true;
@@ -1499,6 +1639,100 @@ pub(crate) fn structured_text_typst_source(
     font_family: &str,
     color: gaanim_core::peniko::Color,
 ) -> String {
+    text_typst_source(
+        spec,
+        offered_width,
+        font_size,
+        font_family,
+        color,
+        &structured_typst_content(spec, font_size),
+    )
+}
+
+/// [`structured_text_typst_source`] cut to the text's `max_lines`: unless
+/// its overflow is `visible`, a text that composes into more lines keeps as
+/// many characters as fit, followed by an ellipsis for `ellipsis`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fitted_text_typst_source(
+    font_registry: &gaanim_text::font::FontRegistry,
+    spec: &StructuredTextSpec,
+    offered_width: Option<f64>,
+    font_size: f64,
+    font_family: &str,
+    math_font: &str,
+    color: gaanim_core::peniko::Color,
+) -> String {
+    let source = structured_text_typst_source(spec, offered_width, font_size, font_family, color);
+    let Some(max_lines) = spec.flow.max_lines else {
+        return source;
+    };
+    if matches!(spec.flow.overflow, StructuredTextOverflow::Visible) {
+        return source;
+    }
+    let lines = |source: &str| {
+        gaanim_text::prelude::measure_typst_lines(
+            font_registry,
+            source,
+            false,
+            Some(font_family),
+            Some(math_font),
+            Some(font_size),
+            None,
+            Some(gaanim_core::peniko::Brush::Solid(color)),
+            StrokeBrush::transparent(),
+        )
+        .map_or(0, |(_, metrics)| metrics.line_count)
+    };
+    if lines(&source) <= max_lines {
+        return source;
+    }
+    let leaves = structured_text_leaves(spec);
+    let points = leaf_cut_points(&leaves);
+    let ellipsis = matches!(spec.flow.overflow, StructuredTextOverflow::Ellipsis);
+    let cut = |keep: usize| {
+        text_typst_source(
+            spec,
+            offered_width,
+            font_size,
+            font_family,
+            color,
+            &leaves_typst_content(cut_leaves(&leaves, &points, keep, ellipsis)),
+        )
+    };
+    // The longest cut that still fits, among `cuts` in increasing order;
+    // the whole text does not fit.
+    let longest = |cuts: &[usize]| {
+        let (mut fits, mut overflows) = (None, cuts.len());
+        let mut low = 0;
+        while low < overflows {
+            let middle = (low + overflows) / 2;
+            if lines(&cut(cuts[middle])) <= max_lines {
+                fits = Some(cuts[middle]);
+                low = middle + 1;
+            } else {
+                overflows = middle;
+            }
+        }
+        fits
+    };
+    // Whole words, as the lines broke; a first word too long for the lines
+    // is cut between characters.
+    let words = word_cuts(&points);
+    let characters: Vec<usize> = (1..points.len()).collect();
+    let keep = longest(&words)
+        .or_else(|| longest(&characters))
+        .unwrap_or(0);
+    cut(keep)
+}
+
+fn text_typst_source(
+    spec: &StructuredTextSpec,
+    offered_width: Option<f64>,
+    font_size: f64,
+    font_family: &str,
+    color: gaanim_core::peniko::Color,
+    content: &str,
+) -> String {
     let width = match spec.flow.wrap {
         StructuredTextWrap::NoWrap => None,
         StructuredTextWrap::Auto => offered_width.map(|width| width.max(1.0)),
@@ -1543,6 +1777,11 @@ pub(crate) fn structured_text_typst_source(
         .letter_spacing
         .map(|spacing| format!(", tracking: {spacing}pt"))
         .unwrap_or_default();
+    let spacing = spec
+        .style
+        .word_spacing
+        .map(|spacing| format!(", spacing: 100% + {spacing}pt"))
+        .unwrap_or_default();
     let family = spec.style.font.as_deref().unwrap_or(font_family);
     let font = if spec.style.fallbacks.is_empty() {
         format!("font: \"{}\", ", escape_typst_string(family))
@@ -1562,23 +1801,11 @@ pub(crate) fn structured_text_typst_source(
         .as_deref()
         .map(|lang| format!(", lang: \"{lang}\""))
         .unwrap_or_default();
-    let content = structured_typst_content(spec, font_size);
-    let content = format!("#align({alignment})[{content}]");
-    let content = if let Some(max_lines) = spec.flow.max_lines {
-        let height = font_size * spec.flow.line_spacing.max(0.1) * max_lines as f64;
-        let clip = !matches!(spec.flow.overflow, StructuredTextOverflow::Visible);
-        // Typst currently supplies the clip for both clip and ellipsis. The
-        // structured overflow value remains distinct in the cache/spec so a
-        // renderer-level ellipsis marker can be added without an API change.
-        format!("#block(width: 100%, height: {height}pt, clip: {clip})[{content}]")
-    } else {
-        content
-    };
     format!(
         "#set page(width: {page_width}, height: auto, margin: 0pt)\n\
-         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking}, top-edge: 0.8em, bottom-edge: -0.2em)\n\
+         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking}{spacing}, top-edge: 0.8em, bottom-edge: -0.2em)\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
-         {content}",
+         #align({alignment})[{content}]",
         spec.flow.hyphenate,
     )
 }
@@ -4975,14 +5202,18 @@ impl SceneModel {
                         let SpawnKind::Text(text) = &mut materialized.kind else {
                             continue;
                         };
-                        text.flow.wrap = if width.is_finite() {
-                            StructuredTextWrap::Width(match text.flow.wrap {
-                                StructuredTextWrap::Width(limit) => limit.min(width),
-                                StructuredTextWrap::Auto => width,
-                                StructuredTextWrap::NoWrap => continue,
-                            })
-                        } else {
-                            StructuredTextWrap::NoWrap
+                        // The natural composition of a text with a wrap width
+                        // is already wrapped at it.
+                        text.flow.wrap = match (text.flow.wrap, width.is_finite()) {
+                            (StructuredTextWrap::Width(limit), true) => {
+                                StructuredTextWrap::Width(limit.min(width))
+                            }
+                            (StructuredTextWrap::Width(limit), false) => {
+                                StructuredTextWrap::Width(limit)
+                            }
+                            (StructuredTextWrap::Auto, true) => StructuredTextWrap::Width(width),
+                            (StructuredTextWrap::Auto, false) => StructuredTextWrap::NoWrap,
+                            (StructuredTextWrap::NoWrap, _) => continue,
                         };
                         let replacement = Self::spawn_one(
                             builder,
@@ -10723,20 +10954,17 @@ impl SceneModel {
                 if let Some(opacity) = text.style.opacity {
                     styled_spec.opacity *= opacity.clamp(0.0, 1.0);
                 }
-                if !styled_spec.stroke_overridden
-                    && let (Some(color), Some(width)) =
-                        (text.style.stroke_color, text.style.stroke_width)
-                {
-                    styled_spec.stroke =
-                        Some((gaanim_core::peniko::Brush::Solid(color), width.max(0.0)));
-                }
+                // A style's stroke outlines the glyphs it covers in the
+                // Typst source, the root's like a part's.
                 let compiled = compiled_text_measure(&styled_spec, text_config)
                     .expect("unified text spawn must produce a text measure");
-                let source = structured_text_typst_source(
+                let source = fitted_text_typst_source(
+                    builder.font_registry,
                     text,
                     Some(frame_bounds.width().max(1.0)),
                     compiled.font_size,
                     &compiled.font_family,
+                    &compiled.math_font,
                     compiled.color,
                 );
                 let mr = builder.typst(
@@ -10788,6 +11016,12 @@ impl SceneModel {
                     None,
                     scale,
                 );
+                // Typst strokes tables, rules and shapes black unless told
+                // otherwise, and so do CeTZ drawings: draw those strokes in
+                // the document's text color, as its text.
+                if foreground == "ffffff" {
+                    Self::recolor_black_strokes(builder, mr.id, PenikoColor::WHITE);
+                }
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, spec);
                 mr
@@ -11413,6 +11647,34 @@ impl SceneModel {
 
     /// Applies deferred glyph-level color overrides after the normal object
     /// style has been propagated to the compiled text hierarchy.
+    /// Stroke in `color` the pieces of a compiled Typst hierarchy stroked in
+    /// opaque black.
+    fn recolor_black_strokes(builder: &mut SceneBuilder, id: ObjectId, color: PenikoColor) {
+        let Some(children) = builder
+            .states
+            .get(id)
+            .map(|state| state.child_spans.clone())
+        else {
+            return;
+        };
+        for child in children {
+            let Some(state) = builder.states.get_mut(child.id) else {
+                continue;
+            };
+            let Some(gaanim_core::peniko::Brush::Solid(stroke)) = &state.stroke.brush else {
+                continue;
+            };
+            if stroke.to_rgba8() != PenikoColor::BLACK.to_rgba8() {
+                continue;
+            }
+            state.stroke.brush = Some(gaanim_core::peniko::Brush::Solid(color));
+            builder
+                .commands
+                .entity(child.entity)
+                .insert(state.stroke.clone());
+        }
+    }
+
     fn apply_fragment_fills(builder: &mut SceneBuilder, target: MobjectRef, spec: &ObjectSpec) {
         for (fragment, color) in &spec.fragment_fills {
             builder.select(target, fragment).set_fill(*color);
@@ -11527,9 +11789,12 @@ impl SceneModel {
         if spec.fill_overridden {
             for child in &child_spans {
                 if let Some(child_state) = builder.states.get_mut(child.id) {
-                    child_state.fill = spec.fill.clone();
+                    // Strokes painted like the glyphs (rules, underlines)
+                    // follow the new fill; a styled outline keeps its color.
+                    let previous = std::mem::replace(&mut child_state.fill, spec.fill.clone());
                     if let Some(ref f) = spec.fill
                         && child_state.stroke.brush.is_some()
+                        && child_state.stroke.brush == previous
                     {
                         child_state.stroke.brush = Some(f.clone());
                         builder
@@ -14833,33 +15098,255 @@ mod tests {
     }
 
     #[test]
-    fn paragraph_max_lines_emits_a_clipped_text_box() {
+    fn max_lines_cuts_the_text_and_an_ellipsis_ends_it() {
+        use gaanim_text::prelude::TextOverflow;
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let white = gaanim_core::peniko::Color::WHITE;
+        let spec = |overflow| {
+            StructuredTextSpec::new(
+                vec!["A bounded paragraph that runs over several lines of text.".into()],
+                None,
+                gaanim_text::prelude::TextStyle {
+                    size: Some(30.0),
+                    ..Default::default()
+                },
+                gaanim_text::prelude::TextFlow {
+                    wrap: gaanim_text::prelude::TextWrap::Width(240.0),
+                    line_spacing: 1.2,
+                    max_lines: Some(2),
+                    overflow,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let lines = |source: &str| {
+            gaanim_text::prelude::measure_typst_lines(
+                &fonts,
+                source,
+                false,
+                Some("New Computer Modern"),
+                Some("New Computer Modern Math"),
+                Some(30.0),
+                None,
+                Some(Brush::Solid(white)),
+                StrokeBrush::transparent(),
+            )
+            .unwrap()
+            .1
+            .line_count
+        };
+        let fitted = |overflow| {
+            fitted_text_typst_source(
+                &fonts,
+                &spec(overflow),
+                Some(240.0),
+                30.0,
+                "New Computer Modern",
+                "New Computer Modern Math",
+                white,
+            )
+        };
+        let full = structured_text_typst_source(
+            &spec(TextOverflow::Clip),
+            Some(240.0),
+            30.0,
+            "New Computer Modern",
+            white,
+        );
+        assert!(lines(&full) > 2);
+
+        let clipped = fitted(TextOverflow::Clip);
+        assert_eq!(lines(&clipped), 2);
+        assert!(!clipped.contains('…'));
+        let ellipsis = fitted(TextOverflow::Ellipsis);
+        assert_eq!(lines(&ellipsis), 2);
+        assert!(ellipsis.contains('…'));
+        // Visible overflow draws every line.
+        assert_eq!(fitted(TextOverflow::Visible), full);
+    }
+
+    #[test]
+    fn text_cuts_end_between_characters_or_after_whole_formulas() {
         let spec = StructuredTextSpec::new(
-            vec!["A bounded paragraph".into()],
+            vec!["ab $x^2$ c\\$d".into()],
             None,
-            gaanim_text::prelude::TextStyle {
-                size: Some(30.0),
+            StructuredTextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .unwrap();
+        let leaves = structured_text_leaves(&spec);
+        let points = leaf_cut_points(&leaves);
+        // a, b, a space, the formula, a space, c, the escaped dollar, d.
+        assert_eq!(points.len(), 8);
+        assert_eq!(word_cuts(&points), [2, 4, 8]);
+        let cut = |keep, ellipsis| {
+            cut_leaves(&leaves, &points, keep, ellipsis)
+                .into_iter()
+                .map(|leaf| leaf.text)
+                .collect::<String>()
+        };
+        assert_eq!(cut(4, false), "ab $x^2$");
+        assert_eq!(cut(3, false), "ab");
+        assert_eq!(cut(7, false), "ab $x^2$ c\\$");
+        assert_eq!(cut(2, true), "ab…");
+        assert_eq!(cut(0, true), "…");
+    }
+
+    #[test]
+    fn the_root_style_outlines_decorates_and_spaces_the_whole_text() {
+        let spec = StructuredTextSpec::new(
+            vec!["Notice".into()],
+            None,
+            StructuredTextStyle {
+                decorations: vec!["underline".to_owned()],
+                stroke_color: Some(PenikoColor::from_rgb8(255, 0, 0)),
+                stroke_width: Some(0.05),
+                word_spacing: Some(0.2),
+                baseline: Some(0.1),
                 ..Default::default()
             },
-            gaanim_text::prelude::TextFlow {
-                wrap: gaanim_text::prelude::TextWrap::Width(240.0),
-                line_spacing: 1.2,
-                max_lines: Some(2),
-                overflow: gaanim_text::prelude::TextOverflow::Clip,
-                ..Default::default()
-            },
+            gaanim_text::prelude::TextFlow::default(),
         )
         .unwrap();
         let source = structured_text_typst_source(
             &spec,
-            Some(240.0),
-            30.0,
+            None,
+            0.3,
             "New Computer Modern",
-            gaanim_core::peniko::Color::WHITE,
+            PenikoColor::WHITE,
         );
+        assert!(source.contains("#underline["), "{source}");
+        assert!(
+            source.contains("stroke: 0.05pt + rgb(\"ff0000\")"),
+            "{source}"
+        );
+        assert!(source.contains("spacing: 100% + 0.2pt"), "{source}");
+        // A shifted baseline stays in its line instead of moving a block.
+        assert!(source.contains("baseline: -0.1pt"), "{source}");
+        assert!(!source.contains("#move("), "{source}");
+    }
 
-        assert!(source.contains("height: 72pt"));
-        assert!(source.contains("clip: true"));
+    /// Characters of the glyphs drawn at the timeline's current state, with
+    /// their fills: those whose own and parent opacity are both visible.
+    fn visible_glyphs(world: &mut World) -> Vec<(char, Option<Brush>)> {
+        let parents: HashMap<Entity, f32> = world
+            .query::<(Entity, &Opacity)>()
+            .iter(world)
+            .map(|(entity, opacity)| (entity, opacity.0))
+            .collect();
+        let mut glyphs: Vec<(u64, char, Option<Brush>)> = world
+            .query::<(
+                &gaanim_scene::components::TextSpan,
+                &bevy::prelude::ChildOf,
+                &Opacity,
+                &FillBrush,
+                &MobjectId,
+            )>()
+            .iter(world)
+            .filter(|(_, parent, opacity, ..)| {
+                opacity.0 > 0.5
+                    && parents
+                        .get(&parent.parent())
+                        .is_some_and(|value| *value > 0.5)
+            })
+            .map(|(span, _, _, fill, id)| (id.0.as_raw(), span.character, fill.0.clone()))
+            .collect();
+        glyphs.sort_by_key(|(id, ..)| *id);
+        glyphs
+            .into_iter()
+            .map(|(_, character, fill)| (character, fill))
+            .collect()
+    }
+
+    fn glyph_text(glyphs: &[(char, Option<Brush>)]) -> String {
+        glyphs.iter().map(|(character, _)| character).collect()
+    }
+
+    #[test]
+    fn a_fade_transform_shows_the_glyphs_of_its_text_target() {
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas.text("Old");
+        let target = canvas.text("New");
+        canvas.play(vec![source.animate().write().duration(1.0)]);
+        canvas.play(vec![
+            source
+                .animate()
+                .fade_transform_to(&target)
+                .unwrap()
+                .duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.9);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "Old");
+        timeline.seek(&mut world, 2.0);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "New");
+    }
+
+    #[test]
+    fn become_after_the_text_was_shown_changes_it_at_the_cursor() {
+        let mut canvas = SceneModel::new(640, 360);
+        let text = canvas.text("Before");
+        canvas.play(vec![text.animate().write().duration(1.0)]);
+        text.r#become(
+            StructuredTextSpec::new(
+                vec!["Later".into()],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .unwrap(),
+            None,
+        );
+        canvas.wait(1.0);
+        // The handle keeps its identity: it moves the new content.
+        canvas.play(vec![text.animate().fade_out().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.99);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "Before");
+        timeline.seek(&mut world, 1.5);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "Later");
+        timeline.seek(&mut world, 3.0);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "");
+    }
+
+    #[test]
+    fn a_part_recolored_after_the_text_was_shown_changes_at_the_cursor() {
+        let accent = PenikoColor::from_rgb8(255, 160, 0);
+        let mut canvas = SceneModel::new(640, 360);
+        let text = canvas.text_spec(
+            StructuredTextSpec::new(
+                vec![
+                    "is ".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "mass",
+                        vec!["mass".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .unwrap(),
+        );
+        canvas.play(vec![text.animate().write().duration(1.0)]);
+        assert!(!text.fill_text_part(&["mass".to_owned()], accent));
+        text.select("mass").fill(accent);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let accented = |world: &mut World| {
+            visible_glyphs(world)
+                .into_iter()
+                .filter(|(_, fill)| *fill == Some(Brush::Solid(accent)))
+                .map(|(character, _)| character)
+                .collect::<String>()
+        };
+        timeline.seek(&mut world, 0.99);
+        assert_eq!(accented(&mut world), "");
+        timeline.seek(&mut world, 1.5);
+        assert_eq!(accented(&mut world), "mass");
     }
 
     #[test]

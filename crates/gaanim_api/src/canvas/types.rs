@@ -2838,6 +2838,11 @@ impl Anim {
         self
     }
 
+    pub fn draw_seed(mut self, seed: u64) -> Self {
+        self.inner = self.inner.draw_seed(seed);
+        self
+    }
+
     pub fn stroke_width(mut self, stroke_width: f64) -> Self {
         if matches!(self.inner.anim_type, AnimationType::Properties(_)) {
             assert!(

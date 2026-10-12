@@ -25,7 +25,7 @@ def cells(labels, rows=2, columns=2):
     stages = []
     for cell, label in zip(grid, labels):
         top, stage = cell.split(Zones.rows(["1fr", "5fr"]))
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom")
+        scene.text(label, role="code").place(top, anchor="bottom")
         stages.append(stage)
     return stages
 
@@ -79,7 +79,7 @@ CALLS = [
     'clip.fire_event("reset")',
     "clip.set_theme(None)",
 ]
-labels = [scene.text(call, role="code", markup=False).place(row, anchor="right") for row, call in zip(steps, CALLS)]
+labels = [scene.text(call, role="code").place(row, anchor="right") for row, call in zip(steps, CALLS)]
 toggle = scene.media.lottie(TOGGLE, state_machine_id="main", width=right.width * 0.8).move_to(*right.center)
 labels[0].fill(accent)
 scene.play([toggle.animate.write().duration(0.75)])

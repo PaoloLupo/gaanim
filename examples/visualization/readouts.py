@@ -24,7 +24,7 @@ def table(labels, columns=("2fr", "1fr")):
         Zones.grid(rows=len(labels), columns=list(columns), column_gap="96px", padding="page_padding")
     ))
     for cell, label in zip(grid[0::2], labels):
-        scene.text(label, role="code", markup=False).place(cell, anchor="right")
+        scene.text(label, role="code").place(cell, anchor="right")
     return grid[1::2]
 
 
@@ -118,7 +118,7 @@ rings = [
 for cell, ring, label in zip(cells, rings, LABELS):
     stage, caption = cell.split(Zones.columns(["1fr", "1fr"], gap="48px"))
     ring.move_to(*stage.center)
-    scene.text(label, role="code", markup=False).place(caption, anchor="left")
+    scene.text(label, role="code").place(caption, anchor="left")
 scene.wait(0.3)
 scene.play([
     rings[0].animate.set(0.75).duration(COUNT),

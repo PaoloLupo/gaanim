@@ -42,7 +42,7 @@ def table(rows, tracks=("1fr", "1fr"), anchor="left"):
     )
     equations = []
     for index, (label, _) in enumerate(rows):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
         equations.append(energy().place(grid[2 * index + 1], anchor=anchor))
     scene.play([eq.animate.write().duration(WRITE) for eq in equations])
     scene.play([mark(eq).duration(MARK) for (_, mark), eq in zip(rows, equations)])

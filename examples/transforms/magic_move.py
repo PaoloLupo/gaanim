@@ -37,7 +37,7 @@ def bands(labels):
     stages = []
     for band, label in zip(scene.layout.zones(Zones.rows(len(labels), gap="24px", padding="page_padding")), labels):
         top, stage = band.split(Zones.rows(["40px", "1fr"]))
-        scene.text(label, role="code", markup=False).place(top, anchor="left")
+        scene.text(label, role="code").place(top, anchor="left")
         stages.append(stage)
     return stages
 
@@ -166,7 +166,7 @@ def board(zone, ranking):
 def leaderboard(label, ranking):
     """The label above the board of ``ranking``; return the board."""
     top, rest = scene.layout.zones(Zones.rows(["40px", "1fr"], gap="24px", padding="page_padding"))
-    scene.text(label, role="code", markup=False).place(top, anchor="left")
+    scene.text(label, role="code").place(top, anchor="left")
     return board(rest, ranking)
 
 

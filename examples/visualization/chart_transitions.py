@@ -41,7 +41,7 @@ AXES = {
 def label(text):
     """Write a code label above the chart, hidden until faded in."""
     top, _ = scene.layout.zones(Zones.rows(["1fr", "9fr"], padding="page_padding"))
-    return scene.text(text, role="code", markup=False).place(top, anchor="bottom_left").hidden()
+    return scene.text(text, role="code").place(top, anchor="bottom_left").hidden()
 
 
 def transition(first, setup, target, then, **options):

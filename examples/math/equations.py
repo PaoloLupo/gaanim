@@ -46,11 +46,11 @@ def table(rows, columns=None, build=typeset, tracks=("1fr", "1fr")):
         Zones.grid(rows=len(rows) + bool(header), columns=tracks, column_gap="48px", padding="page_padding")
     )
     for index, (label, _) in enumerate(header, start=1):
-        scene.text(label, role="code", markup=False).place(grid[index], anchor="left")
+        scene.text(label, role="code").place(grid[index], anchor="left")
     equations = []
     for row_index, (label, row) in enumerate(rows, start=bool(header)):
         first = row_index * len(tracks)
-        scene.text(label, role="code", markup=False).place(grid[first], anchor="right")
+        scene.text(label, role="code").place(grid[first], anchor="right")
         cells = [build(row)] if columns is None else [build(row, column) for _, column in columns]
         for index, cell in enumerate(cells, start=1):
             equations.append(cell.place(grid[first + index], anchor="left"))

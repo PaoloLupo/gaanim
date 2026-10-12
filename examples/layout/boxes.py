@@ -36,7 +36,7 @@ def table(variants, split):
     """One row per (label, box): the code on the left, the box it builds on the right."""
     entrances = []
     for (label_zone, zone), (label, box) in zip(columns(len(variants), split), variants):
-        code = scene.text(label, role="code", markup=False).place(label_zone, anchor="right")
+        code = scene.text(label, role="code").place(label_zone, anchor="right")
         box.place(zone, anchor="left")
         entrances += [code.animate.fade_in().duration(0.4), box.animate.fade_in().duration(0.4)]
     start = scene.cursor

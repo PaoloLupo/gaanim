@@ -19,7 +19,7 @@ rule = scene.canvas.color("rule")
 
 
 def code(text, zone, anchor="left"):
-    return scene.text(text, role="code", markup=False).place(zone, anchor=anchor)
+    return scene.text(text, role="code").place(zone, anchor=anchor)
 
 
 def outline(center, width, height):

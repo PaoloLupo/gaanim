@@ -67,7 +67,7 @@ def table(rows, tracks=("1fr", "2fr")):
     )
     operands, solutions = [], []
     for index, (label, build) in enumerate(rows):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
         items, derivation = build()
         results = derivation.result if isinstance(derivation.result, tuple) else (derivation.result,)
         for result in results:

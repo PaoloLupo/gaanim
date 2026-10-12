@@ -2756,6 +2756,24 @@ def validate_stroke_contract(module):
     return failures
 
 
+def validate_text_contract(module):
+    """Code text is literal, root styles outline, and shown text changes at the cursor."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    try:
+        scene.text("stagger(*grows) and x_1 \\$", role="code")
+        outlined = scene.text("Notice", style=module.TextStyle(stroke="#f59e0b", decorations=["underline"]))
+        cut = scene.text("one two three four five six", wrap=2, max_lines=1, overflow="ellipsis")
+        scene.play([outlined.animate.write(order="random", seed=3), cut.animate.fade_in()])
+        outlined.become("Changed")
+        cut["two"].fill("#f59e0b")
+    except Exception as error:
+        failures.append(f"text contract failed: {error}")
+    if not raises_error(ValueError, lambda: scene.text("stagger(*grows)")):
+        failures.append("unbalanced markup outside the code role did not raise ValueError")
+    return failures
+
+
 def validate_layout_box_contract(module):
     """Boxes, styles, classes, zones and item rules keep their contracts."""
     failures = []
@@ -3369,6 +3387,7 @@ def main() -> int:
     missing.extend(validate_falloff_contract(module))
     missing.extend(validate_emphasis_contract(module))
     missing.extend(validate_stroke_contract(module))
+    missing.extend(validate_text_contract(module))
     missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_readout_number_formats(module))
     missing.extend(validate_editorial_contract(module))

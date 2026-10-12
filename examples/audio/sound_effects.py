@@ -74,8 +74,7 @@ def rows(count):
 
 
 def label(text, zone, anchor="right"):
-    # markup=False keeps a * in the code literal instead of starting bold text.
-    scene.text(text, role="code", markup=False).place(zone, anchor=anchor)
+    scene.text(text, role="code").place(zone, anchor=anchor)
 
 
 def grow(bar, seconds=GROW):

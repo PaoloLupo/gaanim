@@ -49,9 +49,19 @@
       "file": "seek_0008_t_15_600000.png"
     },
     {
-      "id": "seek_0009_t_18_200000",
-      "time_seconds": 18.2,
-      "file": "seek_0009_t_18_200000.png"
+      "id": "seek_0009_t_17_600000",
+      "time_seconds": 17.6,
+      "file": "seek_0009_t_17_600000.png"
+    },
+    {
+      "id": "seek_0010_t_19_600000",
+      "time_seconds": 19.6,
+      "file": "seek_0010_t_19_600000.png"
+    },
+    {
+      "id": "seek_0011_t_22_200000",
+      "time_seconds": 22.2,
+      "file": "seek_0011_t_22_200000.png"
     }
   ]
 }

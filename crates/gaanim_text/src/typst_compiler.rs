@@ -591,6 +591,16 @@ fn extract_frame_items(
                 let ttf = font.ttf();
                 // Determine effective fill brush
                 let fill_brush = typst_paint_to_brush(&text.fill, default_fill);
+                // Glyphs outlined in the source (`text(stroke: ...)`) keep
+                // that outline.
+                let glyph_stroke = text
+                    .stroke
+                    .as_ref()
+                    .map(|stroke| StrokeBrush {
+                        brush: typst_paint_to_brush(&stroke.paint, default_fill),
+                        style: typst_stroke_to_kurbo(stroke),
+                    })
+                    .unwrap_or_else(|| default_stroke.clone());
 
                 // Typst accumulates advances manually when rendering.
                 // We must do the same to recover each glyph's correct position
@@ -641,7 +651,7 @@ fn extract_frame_items(
                             path,
                             bounds: local_bounds,
                             fill: FillBrush(fill_brush.clone()),
-                            stroke: default_stroke.clone(),
+                            stroke: glyph_stroke.clone(),
                             tag: ObjectTag("TypstGlyph".into()),
                             span,
                             ligature,
@@ -666,6 +676,17 @@ fn extract_frame_items(
 
                 let bbox = path.bounding_box();
                 let local_bounds = Bounds3D::new_2d(bbox.x0, bbox.y0, bbox.x1, bbox.y1);
+                // A shape with neither fill nor stroke, such as the box CeTZ
+                // places around `content`, draws nothing: it still sizes the
+                // drawing, but is no piece that `write` could outline.
+                if shape.fill.is_none() && shape.stroke.is_none() {
+                    if let Some(tb) = total_bounds {
+                        *tb = tb.union(&local_bounds);
+                    } else {
+                        *total_bounds = Some(local_bounds);
+                    }
+                    continue;
+                }
 
                 let span_range = world.range(*_span).unwrap_or(0..0);
                 let span = gaanim_scene::components::TextSpan {

@@ -26,7 +26,7 @@ def cells(labels, rows=2, columns=3):
     stages = []
     for cell, label in zip(grid, labels):
         top, stage = cell.split(Zones.rows(["88px", "1fr"]))
-        scene.text(label, role="code", markup=False).place(top, anchor="top_left")
+        scene.text(label, role="code").place(top, anchor="top_left")
         stages.append(stage)
     return stages
 
@@ -37,7 +37,7 @@ def lines(labels, tracks=("1fr", "1fr")):
         Zones.grid(rows=len(labels), columns=list(tracks), column_gap="48px", padding="page_padding")
     )
     for index, label in enumerate(labels):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
     return [grid[2 * index + 1] for index in range(len(labels))]
 
 

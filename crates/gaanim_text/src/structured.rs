@@ -273,12 +273,14 @@ impl TextSpec {
         markup: bool,
     ) -> Result<Self, TextSpecError> {
         // Code is literal: a `$` in a terminal prompt or a variable never
-        // opens mathematics.
-        let content = if role == Some(TextRole::Code) {
+        // opens mathematics, and `*` and `_` are not markup.
+        let code = role == Some(TextRole::Code);
+        let content = if code {
             escape_math_delimiters(content)
         } else {
             content
         };
+        let markup = markup && !code;
         validate_content(&content, "<root>")?;
         validate_style(&style)?;
         validate_flow(&flow)?;
@@ -541,24 +543,13 @@ fn validate_content(content: &[TextContent], parent: &str) -> Result<(), TextSpe
     Ok(())
 }
 
-/// Escape every `$` not already escaped, so it is shown instead of
-/// opening mathematics.
+/// Escape every `$`, so it is shown instead of opening mathematics. A
+/// backslash before it stays a backslash: `\$` shows as written.
 fn escape_math_delimiters(content: Vec<TextContent>) -> Vec<TextContent> {
     content
         .into_iter()
         .map(|node| match node {
-            TextContent::Literal(text) => {
-                let mut escaped = String::with_capacity(text.len());
-                let mut previous = None;
-                for character in text.chars() {
-                    if character == '$' && previous != Some('\\') {
-                        escaped.push('\\');
-                    }
-                    escaped.push(character);
-                    previous = Some(character);
-                }
-                TextContent::Literal(escaped)
-            }
+            TextContent::Literal(text) => TextContent::Literal(text.replace('$', "\\$")),
             TextContent::Part(mut part) => {
                 part.content = escape_math_delimiters(part.content);
                 TextContent::Part(part)
@@ -1023,15 +1014,19 @@ mod tests {
             assert_eq!(spec.rendered_text(), "$ gaanim init");
             assert!(!spec.has_math());
         }
-        // An already escaped dollar stays a single literal dollar.
+        // Code is shown as written: backslashes, `*` and `_` included.
         let spec = TextSpec::new(
-            vec!["echo \\$HOME $PATH".into()],
+            vec!["echo \\$HOME $PATH; stagger(*grows) and x_1".into()],
             Some(TextRole::Code),
             TextStyle::default(),
             TextFlow::default(),
         )
         .unwrap();
-        assert_eq!(spec.rendered_text(), "echo $HOME $PATH");
+        assert_eq!(
+            spec.rendered_text(),
+            "echo \\$HOME $PATH; stagger(*grows) and x_1"
+        );
+        assert!(!spec.markup);
         // Other roles still open mathematics with `$`.
         assert!(
             TextSpec::new(

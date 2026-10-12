@@ -561,29 +561,7 @@ impl TextAnimatorSpec {
 /// Stagger slot of each of `count` units; `Random` is a permutation fixed
 /// by `seed` and `count`.
 pub(crate) fn unit_slots(count: usize, order: DrawOrder, seed: u64) -> Vec<usize> {
-    if order != DrawOrder::Random {
-        return crate::builder::draw_group_slots(count, order);
-    }
-    // Fisher-Yates driven by SplitMix64; seed 0 matches `write(order="random")`.
-    let mut state =
-        0x9E37_79B9_7F4A_7C15_u64 ^ count as u64 ^ seed.wrapping_mul(0xD1B5_4A32_D192_ED03);
-    let mut next = || {
-        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut value = state;
-        value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        value ^ (value >> 31)
-    };
-    let mut units: Vec<usize> = (0..count).collect();
-    for index in (1..count).rev() {
-        let other = (next() % (index as u64 + 1)) as usize;
-        units.swap(index, other);
-    }
-    let mut slots = vec![0; count];
-    for (slot, unit) in units.into_iter().enumerate() {
-        slots[unit] = slot;
-    }
-    slots
+    crate::builder::draw_group_slots(count, order, seed)
 }
 
 /// Fraction of the sweep each unit's window spans.
@@ -647,8 +625,10 @@ pub(crate) fn unit_rate(
     }
 }
 
-/// Split explicit lines into visual rows: a glyph whose top lies below the
-/// middle of the current row starts the next one (scene y points up).
+/// Split explicit lines into visual rows: a glyph that goes back to the left
+/// of the previous one with its top below the middle of the current row
+/// starts the next one (scene y points up). Low glyphs further along, such
+/// as a comma, stay in their row.
 pub(crate) fn split_rows(lines: &[Vec<usize>], boxes: &[kurbo::Rect]) -> Vec<Vec<usize>> {
     let mut rows = Vec::new();
     for line in lines {
@@ -657,6 +637,8 @@ pub(crate) fn split_rows(lines: &[Vec<usize>], boxes: &[kurbo::Rect]) -> Vec<Vec
         for &glyph in line {
             let bounds = boxes[glyph];
             if let Some(current) = extent
+                && let Some(&previous) = row.last()
+                && bounds.center().x < boxes[previous].center().x
                 && bounds.y1 < (current.y0 + current.y1) * 0.5
             {
                 rows.push(std::mem::take(&mut row));
@@ -1336,7 +1318,7 @@ mod tests {
         assert_eq!(sorted, (0..12).collect::<Vec<_>>());
         assert_eq!(
             unit_slots(12, DrawOrder::Random, 0),
-            crate::builder::draw_group_slots(12, DrawOrder::Random)
+            crate::builder::draw_group_slots(12, DrawOrder::Random, 0)
         );
         assert_eq!(unit_slots(3, DrawOrder::Reverse, 5), [2, 1, 0]);
     }
@@ -1359,6 +1341,24 @@ mod tests {
         assert_eq!(centered, [-1.0, 0.0, 1.0, -0.5, 0.5]);
         let left = tracking_factors(&rows, &boxes, 0.0, 5);
         assert_eq!(left, [0.0, 1.0, 2.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_comma_stays_in_its_row() {
+        let glyph = |x: f64, y0: f64, y1: f64| kurbo::Rect::new(x, y0, x + 0.4, y1);
+        let boxes = vec![
+            glyph(0.0, 0.0, 0.5),
+            glyph(0.5, 0.0, 0.5),
+            // A comma: low, below the middle of the row, but further along.
+            glyph(1.0, -0.1, 0.1),
+            glyph(1.5, 0.0, 0.5),
+        ];
+        let rows = split_rows(&[vec![0, 1, 2, 3]], &boxes);
+        assert_eq!(rows, vec![vec![0, 1, 2, 3]]);
+        assert_eq!(
+            tracking_factors(&rows, &boxes, 0.0, 4),
+            [0.0, 1.0, 2.0, 3.0]
+        );
     }
 
     #[test]

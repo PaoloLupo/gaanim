@@ -44,7 +44,7 @@ PERIOD = 2.0  # seconds per loop of the physics cells
 
 def code(label, zone, anchor="left"):
     """A variant label: the code that builds it."""
-    return scene.text(label, role="code", markup=False).place(zone, anchor=anchor)
+    return scene.text(label, role="code").place(zone, anchor=anchor)
 
 
 def outline(zone):
@@ -101,7 +101,7 @@ PHYSICS = ["spring(t, 0.8, 0.15)", "wobble(t, 0.8, 1, 1)", "impact(t - land)",
 cells = scene.layout.zones(Zones.grid(rows=3, columns=2, gap="24px", padding="page_padding"))
 for label, cell in zip(PHYSICS, cells):
     outline(cell)
-    scene.text(label, role="code", markup=False).place(cell, anchor="top_left", padding="16px")
+    scene.text(label, role="code").place(cell, anchor="top_left", padding="16px")
 BOXES = tuple((cell.left, cell.bottom, cell.right, cell.top) for cell in cells)
 
 

@@ -545,22 +545,62 @@ impl DrawableHandle {
     }
 
     pub fn r#become(&self, text: gaanim_text::prelude::TextSpec, duration: Option<f64>) {
-        let parts = text.parts();
+        fn set_text(spec: &mut ObjectSpec, text: gaanim_text::prelude::TextSpec) {
+            let parts = text.parts();
+            spec.kind = SpawnKind::Text(text);
+            spec.fragment_tags.clear();
+            spec.fragment_fills.clear();
+            for part in parts {
+                if let Some(color) = part.style.color {
+                    spec.fragment_fills.push((part.text.clone(), color));
+                }
+                spec.fragment_tags
+                    .push((part.path.join("."), part.text, Some(part.occurrence)));
+            }
+        }
+
         let mut spec = self.spec.lock().expect("object spec poisoned");
         if !matches!(spec.kind, SpawnKind::Text(_)) {
             return;
         }
-        spec.kind = SpawnKind::Text(text);
-        spec.fragment_tags.clear();
-        spec.fragment_fills.clear();
-        for part in parts {
-            if let Some(color) = part.style.color {
-                spec.fragment_fills.push((part.text.clone(), color));
-            }
-            spec.fragment_tags
-                .push((part.path.join("."), part.text, Some(part.occurrence)));
-        }
         let owner = spec.layout_owner;
+        let frozen = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .frozen_spawn_specs
+            .contains_key(&self.id);
+        if frozen && owner.is_none() {
+            // The text has been shown and its declaration is frozen: a copy
+            // with the new content takes its place and its identity at the
+            // cursor, as after a replacing text transition.
+            drop(spec);
+            let copy = self.copy();
+            set_text(&mut copy.spec.lock().expect("object spec poisoned"), text);
+            let anim_type = AnimationType::TextTransition {
+                target: copy.id,
+                copy: false,
+                semantic_pairs: Vec::new(),
+            };
+            let rate_func = anim_type.default_rate_func();
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::Animate {
+                    anim: AnimationBuilder {
+                        target: self.id,
+                        anim_type,
+                        duration: 0.0,
+                        delay: 0.0,
+                        rate_func,
+                    },
+                    active: true,
+                });
+            return;
+        }
+        set_text(&mut spec, text);
         drop(spec);
 
         let Some(owner) = owner else {
@@ -874,6 +914,17 @@ impl DrawableHandle {
         }
 
         if path.is_empty() {
+            return false;
+        }
+        // Once the text has been shown its declaration is frozen: the caller
+        // recolors the part's glyphs at the cursor, as for any selection.
+        if self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .frozen_spawn_specs
+            .contains_key(&self.id)
+        {
             return false;
         }
         let mut spec = self.spec.lock().expect("object spec poisoned");
@@ -2770,16 +2821,42 @@ impl FragmentSelection {
         )
     }
 
-    /// Instantly colors this selected fragment.
+    /// Instantly colors this selected fragment: its declared color before
+    /// the text is first shown, a change at the cursor afterwards.
     pub fn fill(self, color: Color) -> Self {
-        if !self.fragment.trim().is_empty() {
-            self.push(Op::FragmentFill {
-                target: self.target,
+        if self.fragment.trim().is_empty() {
+            return self;
+        }
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        if state.frozen_spawn_specs.contains_key(&self.target) {
+            let anim_type = AnimationType::TextSelectionProperties {
                 fragment: self.fragment.clone(),
                 occurrence: self.occurrence,
-                color,
-            });
+                properties: PropertyAnimation {
+                    fill: Some(Brush::Solid(color)),
+                    ..PropertyAnimation::default()
+                },
+            };
+            let rate_func = anim_type.default_rate_func();
+            // Not merged with other immediate changes: another selection of
+            // the same text is another channel.
+            state.active_mut().ops.push(Op::Immediate(AnimationBuilder {
+                target: self.target,
+                anim_type,
+                duration: 0.0,
+                delay: 0.0,
+                rate_func,
+            }));
+            drop(state);
+            return self;
         }
+        drop(state);
+        self.push(Op::FragmentFill {
+            target: self.target,
+            fragment: self.fragment.clone(),
+            occurrence: self.occurrence,
+            color,
+        });
         self
     }
 

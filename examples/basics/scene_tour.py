@@ -30,7 +30,7 @@ def table(rows, tracks=None):
     )
     moves = []
     for index, (label, build) in enumerate(rows):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
         moves.append(build(grid[2 * index + 1]))
     scene.play(moves, duration=DURATION)
     scene.wait(HOLD)

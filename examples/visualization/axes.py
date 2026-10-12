@@ -30,7 +30,7 @@ def table(rows):
         length = zone.width * 0.9
         # The label starts where the line does.
         start = top.inset((0, (zone.width - length) / 2))
-        scene.text(label, role="code", markup=False).place(start, anchor="bottom_left")
+        scene.text(label, role="code").place(start, anchor="bottom_left")
         line = scene.viz.number_line(axis, length=length / ZOOM)
         # A number line's origin is the middle of the axis, above its numbers.
         x, y = body.center
@@ -51,7 +51,7 @@ def planes(cells, size=(0.8, 0.75), **options):
     spaces = []
     for zone, (label, x, y) in zip(grid, cells):
         top, body = zone.split(Zones.rows(["1fr", "4fr"]))
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom")
+        scene.text(label, role="code").place(top, anchor="bottom")
         width, height = body.width * size[0] / PLANE_ZOOM, body.height * size[1] / PLANE_ZOOM
         plane = scene.viz.cartesian_2d(x, y, width=width, height=height, **options)
         # A plane's origin is the middle of its plot area; leave its numbers

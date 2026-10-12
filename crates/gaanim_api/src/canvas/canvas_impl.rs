@@ -2807,17 +2807,18 @@ impl SceneModel {
             .unwrap_or_else(|| role_style.font_family.clone());
         let color = spec.style.color.unwrap_or(role_style.fill_color);
 
-        let source = crate::canvas::compile::structured_text_typst_source(
+        // Typst measurement reads only registered fonts; skip the system scan.
+        let mut registry = gaanim_text::font::FontRegistry::without_system_fonts();
+        self.register_theme_fonts(&mut registry);
+        let source = crate::canvas::compile::fitted_text_typst_source(
+            &registry,
             spec,
             None,
             font_size,
             &font_family,
+            &math_font,
             color,
         );
-
-        // Typst measurement reads only registered fonts; skip the system scan.
-        let mut registry = gaanim_text::font::FontRegistry::without_system_fonts();
-        self.register_theme_fonts(&mut registry);
 
         let bounds = gaanim_text::prelude::measure_typst(
             &registry,

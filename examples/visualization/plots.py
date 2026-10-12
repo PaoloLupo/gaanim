@@ -80,7 +80,7 @@ def gallery(variants, x, y, columns=2, square=False, bands=("1fr", "5fr"), zone=
     ys = y if isinstance(y, list) else [y] * count
     planes, marks = [], []
     for (top, body), (label, build), x_axis, y_axis in zip(cells(count, columns, bands, zone), variants, xs, ys):
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom")
+        scene.text(label, role="code").place(top, anchor="bottom")
         if square:
             side = min(body.width, body.height) * 0.75
             size = (side, side)

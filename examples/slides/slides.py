@@ -22,7 +22,7 @@ seeks = []
 
 def code(*lines):
     """The code of a slide, one string per line."""
-    return scene.text("\n".join(lines), role="code", markup=False)
+    return scene.text("\n".join(lines), role="code")
 
 
 def heading(text, size=None):

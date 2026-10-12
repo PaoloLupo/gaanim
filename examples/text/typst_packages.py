@@ -69,7 +69,7 @@ def pages(variants, rows=1, write=True):
         Zones.grid(rows=rows, columns=2, column_gap="96px", row_gap="48px", padding="page_padding")
     )
     for cell, (code, drawable) in zip(grid, variants):
-        name = scene.text(code, role="code", markup=False)
+        name = scene.text(code, role="code")
         # A band as tall as the label, a gap and the document, centered in the cell.
         height = name.bounds().height + GAP + drawable.bounds().height
         band = cell.inset(((cell.height - height) / 2, 0))

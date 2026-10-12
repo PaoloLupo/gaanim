@@ -397,6 +397,7 @@ fn draw_item_slots(
     config: Option<&crate::anim::DrawAnimationConfig>,
 ) -> (Vec<ObjectId>, Vec<usize>) {
     let order = config.map_or(crate::anim::DrawOrder::Forward, |config| config.order);
+    let seed = config.map_or(0, |config| config.seed);
     let groups: Vec<Vec<ObjectId>> = match config.and_then(|config| config.groups.as_ref()) {
         Some(groups) => {
             let drawn: HashSet<ObjectId> = items.iter().copied().collect();
@@ -422,7 +423,7 @@ fn draw_item_slots(
         }
         None => items.into_iter().map(|id| vec![id]).collect(),
     };
-    let group_slots = draw_group_slots(groups.len(), order);
+    let group_slots = draw_group_slots(groups.len(), order, seed);
     let mut by_slot: Vec<(usize, usize)> = group_slots
         .iter()
         .enumerate()
@@ -468,8 +469,13 @@ fn bounds_edge_point(
     bounds.center() + bounds.size() * 0.5 * unit
 }
 
-/// Stagger slot of each of `count` groups for `order`.
-pub(crate) fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> Vec<usize> {
+/// Stagger slot of each of `count` groups for `order`; `Random` is a
+/// permutation fixed by `seed` and `count`.
+pub(crate) fn draw_group_slots(
+    count: usize,
+    order: crate::anim::DrawOrder,
+    seed: u64,
+) -> Vec<usize> {
     use crate::anim::DrawOrder;
     match order {
         DrawOrder::Forward => (0..count).collect(),
@@ -490,8 +496,10 @@ pub(crate) fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> V
                 .collect()
         }
         DrawOrder::Random => {
-            // Fisher-Yates driven by SplitMix64 seeded from the count only.
-            let mut state = 0x9E37_79B9_7F4A_7C15_u64 ^ count as u64;
+            // Fisher-Yates driven by SplitMix64; seed 0 keeps the
+            // permutation of the count alone.
+            let mut state =
+                0x9E37_79B9_7F4A_7C15_u64 ^ count as u64 ^ seed.wrapping_mul(0xD1B5_4A32_D192_ED03);
             let mut next = || {
                 state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
                 let mut value = state;
@@ -3318,6 +3326,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let cursor = self.current_time;
             self.current_time += anim.delay.max(0.0);
             let start = self.current_time;
+            // Without a duration (`Text.become` on a shown text) the target
+            // simply takes the source's place.
+            if !copy && (anim.duration.is_nan() || anim.duration <= 0.0) {
+                self.schedule_hide_hierarchy(anim.target);
+                self.schedule_show_at(target, start);
+                self.current_time = cursor;
+                return;
+            }
             self.play_equation_transition_eased(
                 anim.target,
                 target,
@@ -4116,9 +4132,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     if child_state.exclude_from_parent_draw {
                         continue;
                     }
-                    // If this child itself has glyph spans, expand to glyphs
+                    // If this child itself has glyph spans, expand to glyphs,
+                    // backwards like everything else here: the final reverse
+                    // restores their reading order.
                     if !child_state.child_spans.is_empty() {
-                        leaves.extend(child_state.child_spans.iter().map(|c| c.id));
+                        leaves.extend(child_state.child_spans.iter().rev().map(|c| c.id));
                     } else if !child_state.children.is_empty() {
                         // Nested group – push its children to stack
                         stack.extend(child_state.children.iter().cloned());
@@ -4813,6 +4831,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target_state.opacity = target_opacity;
             }
             self.commands.entity(target_entity).insert(Opacity(0.0));
+            // A transform target starts hidden down to its glyphs; the root's
+            // opacity fades in, so its descendants show when it starts.
+            self.schedule_show_descendants_at(target, transform_start_time);
         }
     }
 
@@ -9578,15 +9599,16 @@ mod tests {
     #[test]
     fn draw_group_slots_follow_order() {
         use crate::anim::DrawOrder;
-        assert_eq!(draw_group_slots(4, DrawOrder::Forward), [0, 1, 2, 3]);
-        assert_eq!(draw_group_slots(4, DrawOrder::Reverse), [3, 2, 1, 0]);
-        assert_eq!(draw_group_slots(5, DrawOrder::Center), [2, 1, 0, 1, 2]);
-        assert_eq!(draw_group_slots(4, DrawOrder::Center), [1, 0, 0, 1]);
-        assert_eq!(draw_group_slots(1, DrawOrder::Center), [0]);
-        assert!(draw_group_slots(0, DrawOrder::Random).is_empty());
+        assert_eq!(draw_group_slots(4, DrawOrder::Forward, 0), [0, 1, 2, 3]);
+        assert_eq!(draw_group_slots(4, DrawOrder::Reverse, 0), [3, 2, 1, 0]);
+        assert_eq!(draw_group_slots(5, DrawOrder::Center, 0), [2, 1, 0, 1, 2]);
+        assert_eq!(draw_group_slots(4, DrawOrder::Center, 0), [1, 0, 0, 1]);
+        assert_eq!(draw_group_slots(1, DrawOrder::Center, 0), [0]);
+        assert!(draw_group_slots(0, DrawOrder::Random, 0).is_empty());
 
-        let random = draw_group_slots(12, DrawOrder::Random);
-        assert_eq!(random, draw_group_slots(12, DrawOrder::Random));
+        let random = draw_group_slots(12, DrawOrder::Random, 0);
+        assert_eq!(random, draw_group_slots(12, DrawOrder::Random, 0));
+        assert_ne!(random, draw_group_slots(12, DrawOrder::Random, 7));
         let mut sorted = random.clone();
         sorted.sort_unstable();
         assert_eq!(sorted, (0..12).collect::<Vec<_>>());

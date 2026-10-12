@@ -43,7 +43,7 @@ def show(cells, columns, rows, label_height="48px"):
     grid = scene.layout.zones(Zones.grid(rows=rows, columns=columns, gap="24px", padding="page_padding"))
     for zone, (label, shown) in zip(grid, cells):
         top, body = zone.split(Zones.rows([label_height, "1fr"]))
-        scene.text(label, role="code", markup=False, text_align="center").place(top, anchor="bottom")
+        scene.text(label, role="code", text_align="center").place(top, anchor="bottom")
         # place() returns the matrix's layout box, so keep the matrix itself.
         shown.place(body)
     scene.play([shown.animate.write().duration(WRITE) for _, shown in cells])

@@ -35,7 +35,7 @@ ALIASES = [
 
 def label(code):
     """A variant label: the code, in the code role."""
-    return scene.text(code, role="code", markup=False)
+    return scene.text(code, role="code")
 
 
 def text_column(zone, theme):

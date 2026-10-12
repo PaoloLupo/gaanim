@@ -39,7 +39,7 @@ def steps(box, changes):
     scene.play([box.animate.fade_in().duration(0.5)])
     caption = None
     for index, (label, change) in enumerate(changes):
-        line = scene.text(label, role="code", markup=False).place(caption_zone).hidden()
+        line = scene.text(label, role="code").place(caption_zone).hidden()
         fades = [line.animate.fade_in().duration(0.3)]
         if caption is not None:
             fades.append(caption.animate.fade_out().duration(0.3))

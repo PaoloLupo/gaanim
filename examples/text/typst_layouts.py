@@ -46,7 +46,7 @@ def pages(variants):
     """Write two documents side by side, each under its label; ``variants`` are (label, document) pairs."""
     grid = scene.layout.zones(Zones.grid(rows=1, columns=2, column_gap="96px", padding="page_padding"))
     for cell, (code, drawable) in zip(grid, variants):
-        name = scene.text(code, role="code", markup=False)
+        name = scene.text(code, role="code")
         # A band as tall as the label, a gap and the document, centered in the cell.
         height = name.bounds().height + GAP + drawable.bounds().height
         band = cell.inset(((cell.height - height) / 2, 0))

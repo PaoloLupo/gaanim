@@ -25,7 +25,7 @@ COLORS = [accent, scene.canvas.color("success"), scene.canvas.color("danger"), s
 
 def label(code):
     """A variant label: the code that builds it, without markup."""
-    return scene.text(code, role="code", markup=False)
+    return scene.text(code, role="code")
 
 
 def gallery(rows=2, columns=2, caption=0.45):

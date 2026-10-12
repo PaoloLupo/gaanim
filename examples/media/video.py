@@ -23,7 +23,7 @@ def cells(labels, bands=("2fr", "7fr")):
     stages = []
     for cell, label in zip(grid, labels):
         top, stage = cell.split(Zones.rows(list(bands)))
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom")
+        scene.text(label, role="code").place(top, anchor="bottom")
         stages.append(stage)
     return stages
 
@@ -80,7 +80,6 @@ scene.text(
     "scene.play([clip.segment(start=3, end=4)])\n"
     "scene.play([clip.segment(start=1, end=2)])",
     role="code",
-    markup=False,
 ).place(top, anchor="left")
 clip = scene.media.video(CLIP, audio=False).frame(rest.width, rest.height).move_to(*rest.center)
 scene.play([clip.segment(start=0, end=1, speed=2)])

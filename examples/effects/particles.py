@@ -25,7 +25,7 @@ PALETTE = [accent, success, danger, chart]
 
 def label(code):
     """A variant label: the code that builds it, without markup."""
-    return scene.text(code, role="code", markup=False)
+    return scene.text(code, role="code")
 
 
 def gallery(variants, rows=3, columns=2, caption=0.45):

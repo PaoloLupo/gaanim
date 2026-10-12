@@ -53,10 +53,10 @@ def table(rows, header=None, tracks=("1fr", "1fr")):
         Zones.grid(rows=len(rows) + bool(header), columns=list(tracks), column_gap="48px", padding="page_padding")
     )
     if header:
-        scene.text(header, role="code", markup=False).place(grid[1], anchor="left")
+        scene.text(header, role="code").place(grid[1], anchor="left")
     equations = []
     for index, (label, equation) in enumerate(rows, start=bool(header)):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
         equations.append(equation.place(grid[2 * index + 1], anchor="left"))
     return equations
 

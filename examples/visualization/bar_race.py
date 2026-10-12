@@ -44,7 +44,7 @@ def labelled(zone, label, **options):
     bar take the last eighth of the zone.
     """
     top, body = zone.split(Zones.rows(["2fr", "11fr"], gap="24px"))
-    scene.text(label, role="code", markup=False).place(top, anchor="bottom_left")
+    scene.text(label, role="code").place(top, anchor="bottom_left")
     width = body.width * 0.875
     race = scene.viz.bar_race(FRAMES, width=width, height=body.height * 0.95, **options)
     return race.move_to(body.left + width / 2, body.center[1])

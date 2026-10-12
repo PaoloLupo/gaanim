@@ -185,6 +185,28 @@ enteros, o usa `scene.text.code`.
   agrandaba), y un guion de longitud cero con esos remates dibuja un punto.
 - `stroke(paint, width)` después de `stroke_style(...)` conserva los guiones,
   remates y uniones, y `StrokeStyle` acepta `align`.
+- El estilo raíz de un texto subraya, tacha y contornea todo el texto, como ya
+  hacía en una parte, y `word_spacing` separa las palabras en la raíz. Un
+  `stroke` sin `stroke_width` contornea con 0,02. Una parte con `baseline`
+  sube o baja dentro de su línea; antes saltaba a otra o desaparecía.
+- `max_lines` limita las líneas: `overflow="clip"` corta el texto tras la
+  última palabra que cabe y `"ellipsis"` lo termina con «…». Antes no
+  recortaba nada y, en una caja, ponía una palabra por línea.
+- Un `wrap` numérico ajusta el texto dentro de una caja; antes lo dejaba en
+  una sola línea.
+- `text.tracking(...)` espacia bien los glifos que siguen a una coma.
+- `text["parte"].fill(...)` después de un `play` cambia el color de la parte
+  en el cursor, como una selección literal; antes no hacía nada.
+- `role="code"` muestra `*` y `_` tal cual (antes `"stagger(*grows)"` lanzaba
+  `ValueError`).
+- `write(order="random", seed=n)` cambia el orden con la semilla, y `write()`
+  sobre un grupo, como un bloque de `scene.text.code`, escribe cada texto en
+  orden de lectura en lugar de empezar por su última línea. Ya no deja
+  recuadros alrededor de las etiquetas `content(...)` de CeTZ.
+- `text.become(...)` después de un `play` cambia el texto en el cursor, y
+  `animate.fade_transform_to(otro_texto)` deja visible el texto de destino.
+- Los trazos negros de los documentos Typst (tablas, `rect`, `line`, CeTZ)
+  toman el color del texto del documento y se ven sobre fondos oscuros.
 
 == Al actualizar
 
@@ -227,6 +249,16 @@ enteros, o usa `scene.text.code`.
   partida: cámbialos entre sí.
 - `cross()` y `right_angle()` se ven con el trazo del tema; si les dabas
   un `stroke`, no cambia nada.
+- Con `role="code"`, un `\$` muestra la barra invertida y el dólar, como el
+  resto del código; antes mostraba solo el dólar. Quita la barra si la
+  escribías para escapar el dólar.
+- Un `word_spacing` en la raíz, que antes no tenía efecto, ahora separa las
+  palabras: quítalo si no lo querías.
+- Los textos con `max_lines` se cortan; con `overflow="visible"` se ven
+  todas las líneas.
+- `write()` sobre un grupo con textos (ejes, matrices, bloques de código)
+  escribe cada texto desde su primer carácter: los fotogramas intermedios
+  cambian, el resultado final no.
 
 = 0.11.0
 

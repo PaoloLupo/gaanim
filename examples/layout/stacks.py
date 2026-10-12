@@ -25,7 +25,7 @@ stage = BoxStyle(width="480px", height="150px", background=panel, border=rule)
 
 
 def code(label):
-    return scene.text(label, role="code", markup=False)
+    return scene.text(label, role="code")
 
 
 def show(*objects):

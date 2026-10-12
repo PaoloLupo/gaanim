@@ -967,7 +967,8 @@ impl PyCanvasAnim {
             .clone()
             .write()
             .reveal_unit(unit)
-            .draw_order(order);
+            .draw_order(order)
+            .draw_seed(seed);
         if let Some(stagger) = stagger {
             inner = inner.lag_ratio(stagger);
         }
