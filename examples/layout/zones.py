@@ -88,7 +88,7 @@ page = L.zones(Zones.rows(["120px", "1fr", "120px"], names=["header", "body", "f
 body = page["body"].split(Zones.columns(["1fr", "3fr"], names=["side", "main"], gap="16px"))
 cells = body["main"].split(Zones.grid(rows=2, columns=2, gap="16px"))
 labelled = [(page["header"], 'page["header"]'), (page["footer"], 'page["footer"]'),
-            (body["side"], 'body["side"]'), *[(cell, f"cells[{index}]") for index, cell in enumerate(list(cells)[:3])]]
+            (body["side"], 'body["side"]'), *[(cell, f"cells[{index}]") for index, cell in enumerate(cells[:3])]]
 shown = []
 for zone, label in labelled:
     shown += [tile(zone), code(label).place(zone)]
@@ -173,7 +173,7 @@ arranged([
 ])
 
 # Placed objects stay free: animate.place() moves one to another zone, with
-# the same anchor, padding and offset options; fit="contain" scales it.
+# the same anchor, padding, offset and fit options.
 scene.segment("moves")
 page = L.zones(Zones.rows(["1fr", "96px"], names=["stage", "caption"], gap="24px", padding="page_padding"))
 grid = page["stage"].split(Zones.grid(rows=2, columns=3, gap="24px"))
@@ -186,7 +186,7 @@ MOVES = [
     ('place(grid[1], fit="contain", padding="32px")', grid[1], {"fit": "contain", "padding": "32px"}),
     ('place(grid[2], anchor="bottom_left", padding="32px")', grid[2], {"anchor": "bottom_left", "padding": "32px"}),
     ('place(grid[5], fit="contain", padding="96px")', grid[5], {"fit": "contain", "padding": "96px"}),
-    ("place(grid[4])", grid[4], {}),
+    ('place(grid[4], fit="stretch", padding="32px")', grid[4], {"fit": "stretch", "padding": "32px"}),
 ]
 caption = None
 for label, zone, options in MOVES:

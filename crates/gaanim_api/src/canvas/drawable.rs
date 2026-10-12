@@ -635,6 +635,7 @@ impl DrawableHandle {
                 entering: None,
                 leaving: None,
                 resolve: true,
+                remeasure: None,
             });
         }
     }

@@ -2816,10 +2816,34 @@ def validate_layout_box_contract(module):
         pass
     else:
         failures.append("a box child accepted a positional operation")
+    # Shape setters keep a child in its slot: only positioning is the box's.
+    for name, setter in (("scale_to", lambda: child.scale_to(1.0)), ("rotate_to", lambda: child.rotate_to(0.0))):
+        try:
+            setter()
+        except module.LayoutOwnershipError as error:
+            failures.append(f"a box child refused {name}: {error}")
+    # basis takes the sizes width and height take.
+    for basis in ("40%", "hug", "fill", "120px", 1.5):
+        try:
+            L.row(L.box("x").item(basis=basis), "y", width=6)
+        except (TypeError, ValueError) as error:
+            failures.append(f"basis={basis!r} was refused: {error}")
+    # A row or a column names its direction over a style's.
+    first, second = L.box("one"), L.box("two")
+    L.column(first, second, style=module.BoxStyle(direction="row"))
+    if not second.bounds().center[1] < first.bounds().center[1] - 0.1:
+        failures.append("a style's direction turned L.column into a row")
     zones = L.zones(module.Zones.rows(["1fr", "2fr"], names=["top", "body"], gap="10px"))
     body = zones["body"]
     if not (zones["top"].bottom > body.top and body.width > 0):
         failures.append("zones did not divide the safe area in order")
+    part = zones[1:]
+    if not isinstance(part, module.ZoneSet) or len(part) != 1 or part.names != ["body"]:
+        failures.append("a ZoneSet slice is not a ZoneSet of those zones")
+    try:
+        scene.canvas.color("shadow")
+    except ValueError:
+        failures.append("the theme has no shadow color")
     free = scene.geometry.circle(0.5)
     if free.place(body, anchor="top_left", padding="12px") is not free:
         failures.append("Drawable.place did not return the drawable")

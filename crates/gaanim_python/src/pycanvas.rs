@@ -3381,6 +3381,7 @@ impl PyLayoutBuilder {
         crate::pyzones::target_bounds(within)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build<'py>(
         &self,
         py: Python<'py>,
@@ -3389,8 +3390,29 @@ impl PyLayoutBuilder {
         children: &Bound<'py, PyTuple>,
         style: Option<&Bound<'py, PyAny>>,
         props: Option<&Bound<'py, PyDict>>,
+        direction: Option<&str>,
     ) -> PyResult<Py<PyBox>> {
         crate::custom::ensure_authoring_allowed()?;
+        // `row`, `column`, `grid` and `stack` name their direction: a
+        // `direction` from a style or a class does not turn a column into a
+        // row. One written in the call still does.
+        let props = match direction {
+            Some(direction) => {
+                let named = PyDict::new(py);
+                if let Some(props) = props {
+                    named.update(props.as_mapping())?;
+                }
+                if named
+                    .get_item("direction")?
+                    .is_none_or(|value| value.is_none())
+                {
+                    named.set_item("direction", direction)?;
+                }
+                Some(named)
+            }
+            None => props.cloned(),
+        };
+        let props = props.as_ref();
         PyBox::create(
             py,
             self.inner.clone(),
@@ -3426,6 +3448,7 @@ impl PyLayoutBuilder {
             children,
             style,
             props,
+            None,
         )
     }
 
@@ -3445,6 +3468,7 @@ impl PyLayoutBuilder {
             children,
             style,
             props,
+            Some("row"),
         )
     }
 
@@ -3464,6 +3488,7 @@ impl PyLayoutBuilder {
             children,
             style,
             props,
+            Some("column"),
         )
     }
 
@@ -3481,7 +3506,15 @@ impl PyLayoutBuilder {
             columns: vec![gaanim_layout::Track::Fraction(1.0)],
             auto_flow: gaanim_layout::AutoFlow::Row,
         };
-        self.build(py, kind, Align::Stretch, children, style, props)
+        self.build(
+            py,
+            kind,
+            Align::Stretch,
+            children,
+            style,
+            props,
+            Some("grid"),
+        )
     }
 
     /// Divide a region with a ``Zones`` template. ``within`` is ``"safe"``
@@ -3601,6 +3634,7 @@ impl PyLayoutBuilder {
             children,
             style,
             props,
+            Some("stack"),
         )
     }
 

@@ -869,7 +869,9 @@ scene = Scene(frame=(16, 9), theme=theme)
 ]
 
 Los roles de color incluidos son `background`, `foreground`, `muted`, `title`,
-`accent`, `chart`, `panel`, `header`, `rule`, `success`, `warning` y `danger`;
+`accent`, `chart`, `panel`, `header`, `rule`, `success`, `warning`, `danger` y
+`shadow` (la sombra de `shadow=True` en las cajas: negro suave sobre un fondo
+claro y casi opaco sobre uno oscuro, salvo que el tema elija otro);
 `colors` también acepta tokens propios no vacíos para las reglas. Los tokens
 `code`, `code_keyword`, `code_string`, `code_number`, `code_comment`,
 `code_function` y `code_type` eligen los colores con los que

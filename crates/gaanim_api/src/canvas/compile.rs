@@ -1941,6 +1941,29 @@ fn collect_compiled_layout_node(
     Some(node)
 }
 
+/// Widen the margins of the layout child `id`, at any depth below `node`, by
+/// `extra` on each side.
+fn widen_layout_margins(
+    node: &mut gaanim_layout::LayoutNode,
+    id: gaanim_layout::LayoutId,
+    extra: DVec2,
+) -> bool {
+    for child in &mut node.children {
+        if child.node.id == id {
+            let margin = &mut child.style.margin;
+            margin.left += extra.x;
+            margin.right += extra.x;
+            margin.top += extra.y;
+            margin.bottom += extra.y;
+            return true;
+        }
+        if widen_layout_margins(&mut child.node, id, extra) {
+            return true;
+        }
+    }
+    false
+}
+
 fn compile_layout_tree(
     root_source: ObjectId,
     snapshots: &HashMap<ObjectId, LayoutTreeSnapshot>,
@@ -4876,6 +4899,7 @@ impl SceneModel {
                     entering,
                     leaving,
                     resolve,
+                    remeasure,
                 } => {
                     if let Some(expected) = from_version {
                         let actual = layout_versions.get(&to.container).copied();
@@ -4898,7 +4922,7 @@ impl SceneModel {
                     let Some(root_snapshot) = layout_snapshots.get(&root_source) else {
                         continue;
                     };
-                    let Some(tree) = compile_layout_tree(
+                    let Some(mut tree) = compile_layout_tree(
                         root_source,
                         layout_snapshots,
                         id_map,
@@ -4909,6 +4933,48 @@ impl SceneModel {
                     ) else {
                         continue;
                     };
+                    // `box.reflow()` measures each child (a nested box too)
+                    // with the scale and rotation it has now, so a child scaled
+                    // since it was placed gets room for its new size.
+                    if let Some(within) = remeasure {
+                        let inside = |id: gaanim_layout::LayoutId| {
+                            let mut current = tree.parent_by_id.get(&id).copied();
+                            while let Some(parent) = current {
+                                if tree.source_by_id.get(&parent) == Some(within) {
+                                    return true;
+                                }
+                                current = tree.parent_by_id.get(&parent).copied();
+                            }
+                            false
+                        };
+                        for (layout_id, source) in &tree.source_by_id {
+                            if !inside(*layout_id) {
+                                continue;
+                            }
+                            let current = id_map
+                                .get(source)
+                                .and_then(|actual| builder.states.get(*actual))
+                                .map(|state| state.transform);
+                            if let (Some(rest), Some(current)) =
+                                (builder.layout_rests.get_mut(source), current)
+                            {
+                                rest.scale = current.scale;
+                                rest.rotation = current.rotation;
+                            }
+                        }
+                        let Some(remeasured) = compile_layout_tree(
+                            root_source,
+                            layout_snapshots,
+                            id_map,
+                            &builder.states,
+                            object_specs,
+                            text_config,
+                            &builder.layout_rests,
+                        ) else {
+                            continue;
+                        };
+                        tree = remeasured;
+                    }
                     let root_id = tree.root.id;
                     let Some(container) = id_map.get(&root_source).copied() else {
                         continue;
@@ -4957,31 +5023,77 @@ impl SceneModel {
                         LayoutWithin::Frame => raw_frame_bounds,
                         LayoutWithin::Intrinsic => frame_bounds,
                     };
-                    let measurer = CompiledLayoutMeasure {
-                        fixed: tree.fixed.clone(),
-                        texts: tree.texts.clone(),
-                        text_compositions: RefCell::default(),
-                        text_candidates: RefCell::default(),
-                        line_extents: RefCell::default(),
-                        cap_heights: RefCell::default(),
-                        natural_text_sizes: RefCell::default(),
-                        font_registry: builder.font_registry,
-                    };
-                    let resolved =
-                        match gaanim_layout::resolve_layout(&tree.root, viewport, &measurer, &[]) {
-                            Ok(resolved) => resolved,
-                            Err(error) => {
-                                let message =
-                                    format!("layout {} resolution failed: {error}", to.version);
-                                eprintln!("{message}");
-                                diagnostic_state
-                                    .lock()
-                                    .expect("canvas state poisoned")
-                                    .layout_diagnostics
-                                    .push((Some(to.container), message));
-                                continue;
-                            }
+                    let font_registry = builder.font_registry;
+                    let solve = |tree: &CompiledLayoutTree| {
+                        let measurer = CompiledLayoutMeasure {
+                            fixed: tree.fixed.clone(),
+                            texts: tree.texts.clone(),
+                            text_compositions: RefCell::default(),
+                            text_candidates: RefCell::default(),
+                            line_extents: RefCell::default(),
+                            cap_heights: RefCell::default(),
+                            natural_text_sizes: RefCell::default(),
+                            font_registry,
                         };
+                        gaanim_layout::resolve_layout(&tree.root, viewport, &measurer, &[])
+                            .map(|resolved| (measurer, resolved))
+                    };
+                    let mut solved = solve(&tree);
+                    // A nested box takes the room of its scaled size, as a
+                    // scaled leaf does: Taffy sizes a box by its content, so
+                    // its margins make up the difference.
+                    let scaled_boxes: Vec<(gaanim_layout::LayoutId, DVec2)> = tree
+                        .children_by_id
+                        .keys()
+                        .filter(|id| **id != tree.root.id)
+                        .filter_map(|id| {
+                            // Its scale when first placed, as for a leaf: the
+                            // current one until then.
+                            let source = tree.source_by_id.get(id)?;
+                            let scale = match builder.layout_rests.get(source) {
+                                Some(rest) => rest.scale,
+                                None => builder.states.get(*id_map.get(source)?)?.transform.scale,
+                            };
+                            let scale = DVec2::new(scale.x, scale.y);
+                            (scale.min_element() > 1.0e-6
+                                && (scale - DVec2::ONE).abs().max_element() > 1.0e-9)
+                                .then_some((*id, scale))
+                        })
+                        .collect();
+                    if let Ok((_, first)) = &solved
+                        && !scaled_boxes.is_empty()
+                    {
+                        let sizes: Vec<_> = scaled_boxes
+                            .iter()
+                            .filter_map(|(id, scale)| {
+                                let bounds = first.boxes.get(id)?.bounds;
+                                Some((
+                                    *id,
+                                    (*scale - DVec2::ONE)
+                                        * DVec2::new(bounds.width(), bounds.height())
+                                        * 0.5,
+                                ))
+                            })
+                            .collect();
+                        for (id, extra) in sizes {
+                            widen_layout_margins(&mut tree.root, id, extra);
+                        }
+                        solved = solve(&tree);
+                    }
+                    let (measurer, resolved) = match solved {
+                        Ok(solved) => solved,
+                        Err(error) => {
+                            let message =
+                                format!("layout {} resolution failed: {error}", to.version);
+                            eprintln!("{message}");
+                            diagnostic_state
+                                .lock()
+                                .expect("canvas state poisoned")
+                                .layout_diagnostics
+                                .push((Some(to.container), message));
+                            continue;
+                        }
+                    };
                     // A decorated box that resolves to nothing draws nothing:
                     // usually an empty bar or rule missing `width="fill"`.
                     for (layout_id, source) in &tree.source_by_id {
@@ -5269,38 +5381,12 @@ impl SceneModel {
                         if let Some(background) = background {
                             children.insert(0, background);
                         }
-                        // A leaving child, or a text replaced by its rewrapped
-                        // copy, fades out where it stands. It keeps its parent
-                        // in the scene hierarchy: reparenting is not on the
-                        // timeline, so it would also change the child's earlier,
-                        // parent-relative placement and inherited opacity.
-                        let leaving_child = leaving
-                            .as_ref()
-                            .and_then(|member| id_map.get(member))
-                            .copied();
-                        let keeps_parent = |child: &ObjectId| {
-                            Some(*child) == leaving_child
-                                || text_crossfades.iter().any(|(old, ..)| old == child)
-                        };
-                        let removed_children: Vec<_> = builder
-                            .states
-                            .get(parent)
-                            .map(|state| {
-                                state
-                                    .children
-                                    .iter()
-                                    .copied()
-                                    .filter(|child| !children.contains(child))
-                                    .filter(|child| !keeps_parent(child))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        for child in removed_children {
-                            builder.remove_from_group(
-                                MobjectRef { id: parent },
-                                MobjectRef { id: child },
-                            );
-                        }
+                        // A child that leaves the box (removed and fading out,
+                        // detached, or a text replaced by its rewrapped copy)
+                        // keeps its parent in the scene hierarchy: reparenting
+                        // is not on the timeline, so it would also change the
+                        // child's earlier, parent-relative placement and
+                        // inherited opacity, back to the start of the scene.
                         for child in &children {
                             let current_parent =
                                 builder.states.get(*child).and_then(|state| state.parent);
@@ -5536,8 +5622,23 @@ impl SceneModel {
                             gaanim_layout::FitMode::ScaleDown => DVec3::splat(sx.min(sy).min(1.0)),
                         };
                         target.scale *= fit;
-                        if matches!(item_style.fit, gaanim_layout::FitMode::Cover) {
-                            cover_clips.push((*member, target_box.bounds));
+                        // The cell, in its parent box's own space: the solve
+                        // puts the root where it hugs the viewport, not where
+                        // the root was moved.
+                        if matches!(item_style.fit, gaanim_layout::FitMode::Cover)
+                            && let Some(parent_member) = materialized_by_id.get(parent_id)
+                        {
+                            let cell = target_box.bounds;
+                            cover_clips.push((
+                                *member,
+                                *parent_member,
+                                Rect::new(
+                                    cell.min.x - parent_center.x,
+                                    cell.min.y - parent_center.y,
+                                    cell.max.x - parent_center.x,
+                                    cell.max.y - parent_center.y,
+                                ),
+                            ));
                         }
                         targets.push((*member, target));
                         let Some(state) = builder.states.get_mut(*member) else {
@@ -5622,21 +5723,18 @@ impl SceneModel {
                             }
                         });
                     }
-                    for (member, clip_bounds) in cover_clips {
-                        let world_path = Rect::new(
-                            clip_bounds.min.x,
-                            clip_bounds.min.y,
-                            clip_bounds.max.x,
-                            clip_bounds.max.y,
-                        )
-                        .to_path(0.1);
+                    for (member, parent_member, cell) in cover_clips {
+                        let parent_world =
+                            builder.get_world_transform(parent_member).to_affine_2d();
+                        let cell_path = cell.to_path(0.1);
                         for leaf in Self::visual_leaf_ids(builder, member) {
                             let Some(state) = builder.states.get(leaf) else {
                                 continue;
                             };
-                            let mut local_path = world_path.clone();
+                            let mut local_path = cell_path.clone();
                             local_path.apply_affine(
-                                builder.get_world_transform(leaf).to_affine_2d().inverse(),
+                                builder.get_world_transform(leaf).to_affine_2d().inverse()
+                                    * parent_world,
                             );
                             builder.commands.entity(state.entity).insert(
                                 gaanim_renderer::effects::ClipMask {
@@ -20236,6 +20334,184 @@ mod tests {
         assert_eq!(scales.len(), 2);
         for scale in scales {
             assert_point_close(scale, DVec3::ONE);
+        }
+    }
+
+    /// A stack moved after its solve crops a `fit="cover"` layer to the
+    /// stack where it is, not where the solve centred it.
+    #[test]
+    fn a_cover_layer_is_cropped_where_its_moved_stack_is() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let layer = canvas.rect(80.0, 80.0);
+        let root = canvas.group(&[&layer]);
+        layer.claim_layout(&root).unwrap();
+        let root = root.move_to(300.0, 0.0);
+        canvas.reflow_layout(
+            &root,
+            vec![crate::canvas::LayoutMemberSpec {
+                id: layer.id,
+                style: gaanim_layout::LayoutItemStyle {
+                    fit: gaanim_layout::FitMode::Cover,
+                    ..Default::default()
+                },
+            }],
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Stack,
+                style: gaanim_layout::LayoutStyle {
+                    width: gaanim_layout::SizeRule::Fixed(100.0),
+                    height: gaanim_layout::SizeRule::Fixed(50.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let clips: Vec<_> = world
+            .query::<&gaanim_renderer::effects::ClipMask>()
+            .iter(&world)
+            .map(|clip| clip.path.bounding_box())
+            .collect();
+        // The layer is scaled by 1.25 to cover the stack, so the stack's
+        // 100 x 50 box is 80 x 40 in the layer's own space, around its center.
+        assert_eq!(clips.len(), 1);
+        let clip = clips[0];
+        assert!((clip.center().x).abs() < 1.0e-6, "{clip:?}");
+        assert!((clip.width() - 80.0).abs() < 1.0e-6, "{clip:?}");
+        assert!((clip.height() - 40.0).abs() < 1.0e-6, "{clip:?}");
+    }
+
+    /// A child taken out of a moved box keeps its parent: reparenting is not
+    /// on the timeline, so it would move the child back to its unmoved place
+    /// from the start of the scene.
+    #[test]
+    fn a_detached_child_keeps_its_parent() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let first = canvas.rect(80.0, 30.0);
+        let second = canvas.rect(80.0, 30.0);
+        let root = canvas.group(&[&first, &second]);
+        first.claim_layout(&root).unwrap();
+        second.claim_layout(&root).unwrap();
+        let root = root.move_to(300.0, 200.0);
+        let spec = crate::canvas::LayoutSpec {
+            kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+            style: gaanim_layout::LayoutStyle {
+                gap: DVec2::splat(20.0),
+                ..Default::default()
+            },
+            within: LayoutWithin::Intrinsic,
+        };
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        canvas.reflow_layout(
+            &root,
+            vec![member(&first), member(&second)],
+            spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(0.5);
+        second.release_layout(&root);
+        canvas.set_group_members(&root, &[&first]);
+        canvas.reflow_layout(&root, vec![member(&first)], spec, 2, Some(0.5), None, None);
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let children = world
+            .query_filtered::<&SpatialTransform, bevy::prelude::With<bevy::prelude::ChildOf>>()
+            .iter(&world)
+            .count();
+        assert_eq!(children, 2);
+    }
+
+    /// `box.reflow()` measures a child scaled since it was placed at its new
+    /// size, a nested box as well as a leaf, and its siblings make room; any
+    /// other reflow keeps the size the child was placed with, as a CSS
+    /// transform does.
+    #[test]
+    fn remeasuring_makes_room_for_a_scaled_child() {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload, PropertyLensSpec};
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        let third_rest = |remeasure: bool, nested: bool| {
+            let mut canvas = SceneModel::new(1280, 720);
+            let cells: Vec<_> = (0..3)
+                .map(|_| {
+                    let rect = canvas.rect(80.0, 30.0);
+                    if !nested {
+                        return rect;
+                    }
+                    let inner = canvas.group(&[&rect]);
+                    rect.claim_layout(&inner).unwrap();
+                    canvas.reflow_layout(
+                        &inner,
+                        vec![member(&rect)],
+                        crate::canvas::LayoutSpec {
+                            kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                            style: gaanim_layout::LayoutStyle::default(),
+                            within: LayoutWithin::Intrinsic,
+                        },
+                        1,
+                        None,
+                        None,
+                        None,
+                    );
+                    inner
+                })
+                .collect();
+            let refs: Vec<_> = cells.iter().collect();
+            let container = canvas.group(&refs);
+            for cell in &cells {
+                cell.claim_layout(&container).unwrap();
+            }
+            let spec = crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+                style: gaanim_layout::LayoutStyle {
+                    gap: DVec2::splat(20.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            };
+            let members = || cells.iter().map(member).collect::<Vec<_>>();
+            canvas.reflow_layout(&container, members(), spec.clone(), 1, None, None, None);
+            canvas.play(vec![cells[1].animate().scale_to(2.0).duration(0.5)]);
+            if remeasure {
+                canvas.remeasure_layout(&container, members(), spec, 2, Some(0.5), &container);
+            } else {
+                canvas.reflow_layout(&container, members(), spec, 2, Some(0.5), None, None);
+            }
+            let (_, timeline) = compiled_world(&canvas);
+            timeline
+                .clips
+                .values()
+                .filter(|clip| clip.start >= 0.5 - 1.0e-9)
+                .filter_map(|clip| match &clip.payload {
+                    ClipPayload::Animation(AnimationSpec {
+                        lens: PropertyLensSpec::Translation { to, .. },
+                        ..
+                    }) => Some(to.x),
+                    _ => None,
+                })
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        // 80 + 20 + 160 + 20 + 80 wide: the last cell rests 140 from the
+        // middle once the scaled one counts at 160, 100 while it counts at 80.
+        for nested in [false, true] {
+            let (remeasured, kept) = (third_rest(true, nested), third_rest(false, nested));
+            assert!(
+                (remeasured - 140.0).abs() < 1.0e-6,
+                "nested {nested}: {remeasured}"
+            );
+            assert!((kept - 100.0).abs() < 1.0e-6, "nested {nested}: {kept}");
         }
     }
 

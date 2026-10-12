@@ -114,11 +114,13 @@ table([
     ('width="fill"', L.row(*chips("hug"), L.box("fill", style=chip, width="fill"), style=lane)),
 ], SPLIT)
 
-# basis is the size before growing or shrinking; when the line is too
-# full, children shrink, except those with shrink=0.
+# basis is the size before growing or shrinking: a length or a share of
+# the line. When the line is too full, children shrink, except those with
+# shrink=0.
 scene.segment("basis")
 table([
     ('item(basis="320px")', L.row(marked("320px", basis="320px"), *chips("hug", "hug"), style=lane)),
+    ('item(basis="40%")', L.row(marked("40%", basis="40%"), *chips("hug", "hug"), style=lane)),
     ('item(basis="400px")', L.row(*[marked("400px", basis="400px") for _ in range(3)], style=lane)),
     ('item(basis="400px", shrink=0)', L.row(marked("shrink=0", basis="400px", shrink=0),
                                             *[marked("400px", basis="400px") for _ in range(2)], style=lane)),

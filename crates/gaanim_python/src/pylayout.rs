@@ -831,7 +831,7 @@ pub(crate) fn apply_item(
         finite_non_negative(item.shrink, "shrink")?;
     }
     if let Some(value) = prop(props, "basis")? {
-        item.basis = Some(units.non_negative(&value, "basis")?);
+        item.basis = Some(units.size(&value, "basis")?);
     }
     if let Some(value) = prop(props, "align_self")? {
         item.align = Some(parse_align(&value.extract::<String>()?)?);
@@ -1444,13 +1444,24 @@ impl PyBox {
         let background_object = Py::new(py, PyDrawable(background.clone()))?.into_any();
         if let Some(shadow) = shadow {
             let bound = background_object.bind(py);
+            // The theme's shadow: darker on a dark background, where a soft
+            // one would not show.
+            let theme_shadow = canvas
+                .lock()
+                .expect("scene canvas poisoned")
+                .theme_color("shadow")
+                .ok();
+            let default_color: Py<PyAny> = match theme_shadow {
+                Some(color) => Py::new(py, crate::color::PyColor(color))?.into_any(),
+                None => PyString::new(py, DEFAULT_SHADOW_COLOR).into_any().unbind(),
+            };
             if shadow.extract::<bool>().is_ok_and(|enabled| enabled) {
-                bound.call_method1("shadow", (DEFAULT_SHADOW_COLOR,))?;
+                bound.call_method1("shadow", (default_color,))?;
             } else if let Ok(settings) = shadow.cast::<PyDict>() {
                 let color = settings
                     .get_item("color")?
                     .map(|color| color.unbind())
-                    .unwrap_or_else(|| PyString::new(py, DEFAULT_SHADOW_COLOR).into_any().unbind());
+                    .unwrap_or(default_color);
                 let kwargs = PyDict::new(py);
                 let units = Units::new(canvas.clone());
                 for key in ["x", "y", "blur"] {
@@ -1524,6 +1535,23 @@ impl PyBox {
         entering: Option<DrawableHandle>,
         leaving: Option<DrawableHandle>,
     ) {
+        Self::resolve_chain(inner, duration, entering, leaving, false);
+    }
+
+    /// [`Self::reflow_inner`] that also measures this box's children with
+    /// the scale and rotation they have now (`box.reflow()`).
+    fn remeasure_inner(inner: &Arc<Mutex<LayoutState>>, duration: Option<f64>) {
+        Self::resolve_chain(inner, duration, None, None, true);
+    }
+
+    fn resolve_chain(
+        inner: &Arc<Mutex<LayoutState>>,
+        duration: Option<f64>,
+        entering: Option<DrawableHandle>,
+        leaving: Option<DrawableHandle>,
+        remeasure: bool,
+    ) {
+        let asking = inner.lock().expect("layout poisoned").root.clone();
         let mut chain = vec![inner.clone()];
         let mut index = 0;
         while index < chain.len() {
@@ -1562,7 +1590,9 @@ impl PyBox {
                 .collect();
             let mut canvas = canvas.lock().expect("scene canvas poisoned");
             canvas.set_group_members(&root, &refs);
-            if position == last {
+            if position == last && remeasure {
+                canvas.remeasure_layout(&root, snapshots, spec, version, duration, &asking);
+            } else if position == last {
                 canvas.reflow_layout(
                     &root,
                     snapshots,
@@ -2342,12 +2372,13 @@ impl PyBox {
         Ok(slf)
     }
 
-    /// Recompute the box, for example after a child changed size.
+    /// Recompute the box, for example after a child changed size: each child
+    /// is measured with the scale and rotation it has now.
     #[pyo3(signature = (*, duration=None, advance=true))]
     fn reflow(&self, duration: Option<f64>, advance: bool) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
         let duration = duration_value(duration)?;
-        Self::reflow_inner(&self.inner, duration, None, None);
+        Self::remeasure_inner(&self.inner, duration);
         Self::finish(&self.inner, duration, advance);
         Ok(())
     }

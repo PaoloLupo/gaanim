@@ -104,6 +104,15 @@ steps(row, [
     ("scene.play([three.animate.shift_by(0, -1.8)])", lambda: scene.play([three.animate.shift_by(0, -1.8)])),
 ])
 
+# A scaled child keeps its slot too, until reflow() measures it at its new
+# size and the others make room.
+scene.segment("scale")
+row = L.row(card("One"), card("Two"), card("Three"), gap="32px")
+steps(row, [
+    ("scene.play([row[1].animate.scale_to(1.4)])", lambda: scene.play([row[1].animate.scale_to(1.4)])),
+    ("row.reflow(duration=0.6)", lambda: row.reflow(duration=0.6)),
+])
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, seeks)
 else:

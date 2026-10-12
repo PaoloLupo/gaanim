@@ -765,6 +765,10 @@ pub(crate) enum Op {
         /// `false` only records the snapshot: an enclosing box's transition,
         /// which resolves the whole tree, follows at the same instant.
         resolve: bool,
+        /// Measure the children of this box, at any depth, with their current
+        /// scale and rotation rather than the ones they were first placed
+        /// with (`box.reflow()`).
+        remeasure: Option<ObjectId>,
     },
     /// Resolve relational constraints against the current geometry. The
     /// expressions use stable canvas object IDs and are remapped on replay.

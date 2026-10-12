@@ -82,6 +82,15 @@ enteros, o usa `scene.text.code`.
   #link("/referencia/matrices/#api-visualization-matrix")[`Visualization.matrix`].
 - `TextStyle.size` devuelve el tamaño que fija el estilo.
 
+== Layout
+
+- Una porción de un `ZoneSet`, como `zonas[1:]`, es otro `ZoneSet`: se
+  recorre, se indexa y tiene `fill()`. Ver
+  #link("/referencia/layout/#api-zoneset-fill")[`ZoneSet`].
+- El tema tiene un color `shadow`, el de `shadow=True` en las cajas: negro
+  suave sobre fondos claros y casi opaco sobre fondos oscuros. Cámbialo con
+  `Theme(colors={"shadow": ...})`.
+
 == Ejemplos
 
 - Los ejemplos del repositorio se ordenan por temas, como los de Bevy:
@@ -264,6 +273,30 @@ enteros, o usa `scene.text.code`.
   la vez.
 - `reveal("wipe")` deja el término oculto hasta su turno, como `"fade"`;
   antes se veía mientras se escribía el resto y luego se barría.
+- `item(basis=...)` acepta `"N%"`, `"hug"` y `"fill"`, como dice la
+  documentación; antes solo aceptaba longitudes.
+- `fit="cover"` recorta la capa donde está su caja aunque la caja se haya
+  movido con `move_to` o `place`; antes recortaba en el sitio donde se
+  resolvió y la capa desaparecía.
+- `box.detach(hijo)` en una caja movida deja al hijo donde estaba; antes se
+  dibujaba en el sitio de la caja sin mover, desde el principio de la escena.
+- `box.reflow()` hace sitio a un hijo escalado o girado desde que se colocó,
+  como dice la documentación; antes lo medía con su tamaño original y se
+  solapaba con sus hermanos. `scale_to`, `rotate_to` y los demás ajustes de
+  forma inmediatos funcionan sobre un hijo de una caja; antes lanzaban
+  `LayoutOwnershipError`. Una caja anidada escalada ocupa el sitio de su
+  tamaño escalado, como cualquier otro hijo; antes ocupaba el de su tamaño
+  sin escalar.
+- `obj.animate.place(zona, fit="stretch")` estira el objeto a la zona; antes
+  lo escalaba como `"contain"`.
+- Las restricciones entre posiciones ya no encogen objetos: dos relaciones
+  en conflicto sobre los bordes de una caja, como `(sq.center_x ==
+  caja.left).weak()` y `(sq.center_x == caja.right).strong()`, dejan la caja
+  de su tamaño; antes la reducían a cero. `(texto.width <= 0.5).weak()` ya
+  no aplasta los glifos.
+- `L.column`, `L.row`, `L.grid` y `L.stack` mantienen su dirección aunque un
+  `style=` o una clase traigan otro `direction`.
+- El stub de `Zone.arrange` incluye `direction="wrap"`, que ya funcionaba.
 
 == Al actualizar
 
@@ -337,6 +370,20 @@ enteros, o usa `scene.text.code`.
 - `matrix.morph_to(destino)` muestra el destino y oculta el origen al
   terminar; antes el origen tomaba el aspecto del destino y el destino seguía
   oculto.
+- Un objeto conserva su ancho y su alto frente a las restricciones medias y
+  débiles: si una `.weak()` o `.medium()` tenía que redimensionarlo, ahora
+  aparece en `check_layout()` sin cumplirse. Hazla `.strong()` para que lo
+  redimensione.
+- `shadow=True` sobre un fondo oscuro dibuja una sombra casi opaca en lugar
+  de la suave que no se veía. Para la de antes, pasa
+  `shadow={"color": "#00000055"}`.
+- Un hijo sacado con `detach` sigue a la caja si esta se mueve, escala o se
+  desvanece después.
+- `box.reflow()` mide a los hijos con su escala actual: si escalabas un hijo
+  con `.animate` y luego llamabas a `reflow()`, sus hermanos se apartan. Una
+  caja escalada antes de meterla en otra también les hace sitio.
+- Un `L.column(..., style=estilo)` cuyo estilo trae `direction="row"` vuelve
+  a ser una columna: pasa `direction="row"` en la llamada o usa `L.row`.
 
 = 0.11.0
 

@@ -875,7 +875,10 @@ Justify: TypeAlias = Literal["start", "center", "end", "between", "around", "eve
 Fit: TypeAlias = Literal["none", "contain", "cover", "stretch", "scale_down"]
 AnchorName: TypeAlias = Literal["center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"]
 Shadow: TypeAlias = bool | dict[str, Any]
-"""``True`` for a soft default shadow, or ``{"color", "x", "y", "blur"}`` with lengths."""
+"""``True`` for the theme's ``shadow`` color, or ``{"color", "x", "y", "blur"}`` with lengths (``color`` defaults to it too).
+
+The ``shadow`` color is a soft black on a light background and a nearly opaque
+one on a dark background, where a soft one would not show."""
 
 class LayoutExpression:
     """Linear drawable geometry expression used to build layout constraints.
@@ -892,15 +895,20 @@ class LayoutExpression:
     def __ge__(self, other: float | LayoutExpression) -> LayoutConstraint: ...
 
 class LayoutConstraint:
-    """Required or prioritized linear relation between drawable geometry."""
+    """Required or prioritized linear relation between drawable geometry.
+
+    An object keeps its own width and height against medium and weak
+    relations: only a strong or required one resizes it. Relations on
+    positions move objects and never shrink one to settle a conflict.
+    """
     def strong(self) -> LayoutConstraint:
-        """Return a strong-priority copy of this constraint."""
+        """Return a strong-priority copy of this constraint; it can resize the objects it names."""
         ...
     def medium(self) -> LayoutConstraint:
-        """Return a medium-priority copy of this constraint."""
+        """Return a medium-priority copy of this constraint; it moves objects but does not resize them."""
         ...
     def weak(self) -> LayoutConstraint:
-        """Return a weak-priority copy reported by layout diagnostics if violated."""
+        """Return a weak-priority copy, reported by layout diagnostics if violated; it does not resize objects."""
         ...
     def named(self, label: str) -> LayoutConstraint:
         """Return a copy carrying ``label`` in conflict diagnostics."""
@@ -945,12 +953,16 @@ class Box(Drawable):
     them, distributes the space and places them, so nothing needs coordinates.
     Strings become text with the box's typography. A Box is a Drawable:
     ``move_to``, ``animate.fade_in()``, ``place`` and friends act on the whole
-    box. Positional methods on a child it owns raise ``LayoutOwnershipError``.
+    box. Positional methods on a child it owns raise ``LayoutOwnershipError``;
+    ``scale_to``, ``rotate_to`` and the other shape setters work on a child
+    and, like its animations, keep its slot until ``reflow()``.
 
     Structural changes (``add``, ``remove``, ``replace``, ``set``, a child's
     ``item``) accept ``duration=`` to animate the reflow, and ``advance=False``
     to start the next change at the same time. The box's scale and rotation
-    apply to its children on top of their own, as a CSS transform does.
+    apply to its children on top of their own, as a CSS transform does. A
+    box nested in another takes the room of the scale it was placed with,
+    like any child.
     """
     @property
     def children(self) -> list[Drawable]:
@@ -1101,7 +1113,11 @@ class Box(Drawable):
         """Remove a child: it fades out while the others close the gap."""
         ...
     def detach(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
-        """Take a child out of the box without hiding it; it can move freely again."""
+        """Take a child out of the box without hiding it: it stays where it is and can move freely again.
+
+        It keeps the box as its parent, so it still follows the box's own
+        moves, scale and opacity.
+        """
         ...
     def replace(self, old: Drawable, new: Drawable | str, *, duration: Optional[float] = None, advance: bool = True) -> Any:
         """Put ``new`` where ``old`` was (it inherits the old item rules unless it has its own)."""
@@ -1110,7 +1126,14 @@ class Box(Drawable):
         """Change box properties (the same names as when creating it)."""
         ...
     def reflow(self, *, duration: Optional[float] = None, advance: bool = True) -> None:
-        """Lay the tree out again after children changed their own size."""
+        """Lay the tree out again after children changed their own size.
+
+        Each child of this box, at any depth, is measured with the scale and
+        rotation it has now, so one scaled with ``scale_to`` or
+        ``animate.scale_to`` gets room for its new size. Other reflows
+        (``add``, ``set``…) keep the size a child was placed with, as a CSS
+        transform does.
+        """
         ...
     def diagnostics(self) -> list[str]:
         """Layout warnings for this box and the boxes nested in it.
@@ -1143,9 +1166,12 @@ class Zones:
     def names(self) -> list[str]: ...
 
 class ZoneSet:
-    """The zones of a template resolved in a region, by name or index."""
+    """The zones of a template resolved in a region, by name or index; a slice is another ``ZoneSet``."""
     def __len__(self) -> int: ...
+    @overload
     def __getitem__(self, key: int | str) -> Zone: ...
+    @overload
+    def __getitem__(self, key: slice) -> ZoneSet: ...
     def __iter__(self) -> Iterator[Zone]: ...
     @property
     def names(self) -> list[str]: ...
@@ -1171,8 +1197,12 @@ class Zone:
     def split(self, template: Zones) -> ZoneSet:
         """Apply a template inside this zone."""
         ...
-    def arrange(self, *objects: Drawable, direction: Literal["row", "column"] = "row", gap: Optional[Length] = None, align: Align = "center", justify: Justify = "center", padding: Optional[Padding] = None) -> None:
-        """Line up free objects in this zone, once, without owning them."""
+    def arrange(self, *objects: Drawable, direction: Literal["row", "column", "wrap"] = "row", gap: Optional[Length] = None, align: Align = "center", justify: Justify = "center", padding: Optional[Padding] = None) -> None:
+        """Line up free objects in this zone, once, without owning them.
+
+        ``direction="wrap"`` fills rows and breaks to a new one when the next
+        object does not fit.
+        """
         ...
 
 class LayoutOwnershipError(Exception):
@@ -4183,7 +4213,8 @@ class Drawable:
     def item(self, *, duration: Optional[float] = None, advance: bool = True, **props: Any) -> Self:
         """Set how this object sits in the box that holds it, like CSS on the element.
 
-        Properties: ``grow``, ``shrink``, ``basis``, ``align_self``, ``row``,
+        Properties: ``grow``, ``shrink``, ``basis`` (a length, ``"N%"`` of the
+        parent, ``"hug"`` or ``"fill"``), ``align_self``, ``row``,
         ``column``, ``row_span``, ``column_span``, ``margin`` (``"auto"``
         takes the free space), ``fit``, ``anchor``, ``absolute``, ``offset``,
         and a layout ``width``/``height`` that replaces the object's own.
@@ -8997,10 +9028,10 @@ class LayoutBuilder:
         is skipped and strings become text."""
         ...
     def row(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
-        """A box whose children flow left to right."""
+        """A box whose children flow left to right, whatever ``direction`` a ``style`` or class sets."""
         ...
     def column(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
-        """A box whose children flow top to bottom."""
+        """A box whose children flow top to bottom, whatever ``direction`` a ``style`` or class sets."""
         ...
     def grid(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
         """A box that places its children in grid cells (``columns``/``rows``:

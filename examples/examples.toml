@@ -303,7 +303,7 @@ description = "Free objects placed with to_edge, to_corner, next_to, align_to, m
 
 [[example]]
 path = "layout/reflow.py"
-description = "Animated structure changes: add, remove, replace, set, item, move_child, swap, reverse and detach."
+description = "Animated structure changes: add, remove, replace, set, item, move_child, swap, reverse, detach and reflow after a scale."
 
 [[example]]
 path = "layout/box_reveal.py"

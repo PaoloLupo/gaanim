@@ -4865,6 +4865,7 @@ impl SceneModel {
             entering: None,
             leaving: None,
             resolve: false,
+            remeasure: None,
         });
     }
 
@@ -4881,6 +4882,49 @@ impl SceneModel {
         entering: Option<&DrawableHandle>,
         leaving: Option<&DrawableHandle>,
     ) {
+        self.push_reflow(
+            container, members, spec, version, duration, entering, leaving, None,
+        );
+    }
+
+    /// [`Self::reflow_layout`] measuring the children of `within` (the
+    /// container or a box nested in it), at any depth, with the scale and
+    /// rotation they have at the cursor rather than the ones the layout first
+    /// placed them with: a child scaled or rotated since then gets room for
+    /// its new size.
+    pub fn remeasure_layout(
+        &mut self,
+        container: &DrawableHandle,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
+        duration: Option<f64>,
+        within: &DrawableHandle,
+    ) {
+        self.push_reflow(
+            container,
+            members,
+            spec,
+            version,
+            duration,
+            None,
+            None,
+            Some(within.id),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push_reflow(
+        &mut self,
+        container: &DrawableHandle,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
+        duration: Option<f64>,
+        entering: Option<&DrawableHandle>,
+        leaving: Option<&DrawableHandle>,
+        remeasure: Option<gaanim_core::ObjectId>,
+    ) {
         let mut state = self.state.lock().expect("canvas state poisoned");
         let snapshot = LayoutTreeSnapshot {
             version,
@@ -4896,6 +4940,7 @@ impl SceneModel {
             entering: entering.map(|member| member.id),
             leaving: leaving.map(|member| member.id),
             resolve: true,
+            remeasure,
         });
         if !state.layout_constraints.is_empty() {
             let constraints = state.layout_constraints.clone();
