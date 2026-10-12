@@ -31,7 +31,7 @@ pub struct DiffModeArgs {
 /// without Python; `capture_script` captures a script or project into the
 /// directory it is given, or reports that this binary cannot.
 pub fn run_diff(args: &[String], capture_script: impl FnOnce(&DiffModeArgs, &Path, &Path)) -> ! {
-    let parsed = match parse_diff_mode_args(args) {
+    let mut parsed = match parse_diff_mode_args(args) {
         Ok(Some(parsed)) => parsed,
         Ok(None) => {
             gaanim_project::help::print(gaanim_project::help::Topic::Diff);
@@ -43,6 +43,18 @@ pub fn run_diff(args: &[String], capture_script: impl FnOnce(&DiffModeArgs, &Pat
             std::process::exit(2);
         }
     };
+
+    // Without --height a script is captured at the height of its approved
+    // baseline, so the comparison lines up; one without a baseline gets the
+    // default snapshot size.
+    if parsed.height.is_none()
+        && parsed
+            .example
+            .as_deref()
+            .is_some_and(|example| !crate::bundle_player::is_bundle_path(example))
+    {
+        parsed.height = gaanim_diff::snapshot_size(&parsed.baseline).map(|(_, height)| height);
+    }
 
     if let Some(example) = &parsed.example
         && (parsed.capture || parsed.bless)
@@ -359,7 +371,18 @@ pub fn visual_test_case_dir(tests_root: &Path, example: &Path) -> Result<PathBuf
         return Ok(tests_root.join(stem));
     }
 
-    let relative = example.strip_prefix("examples").unwrap_or(example);
+    // Repository scripts drop their top folder: `examples/<path>` maps to
+    // `<tests_root>/<path>` and `tests/scenes/<path>` to `<tests_root>/scenes/<path>`.
+    let relative = example
+        .strip_prefix("examples")
+        .ok()
+        .or_else(|| {
+            example
+                .strip_prefix("tests")
+                .ok()
+                .filter(|rest| rest.starts_with("scenes"))
+        })
+        .unwrap_or(example);
     let mut case_dir = PathBuf::new();
     for component in relative.components() {
         if let std::path::Component::Normal(component) = component {
@@ -396,6 +419,14 @@ mod tests {
             visual_test_case_dir(root, Path::new("examples/nested/demo.py")).unwrap(),
             root.join("nested").join("demo")
         );
+        assert_eq!(
+            visual_test_case_dir(root, Path::new("tests/scenes/stress/demo.py")).unwrap(),
+            root.join("scenes").join("stress").join("demo")
+        );
+        assert_eq!(
+            visual_test_case_dir(root, Path::new("tests/demo.py")).unwrap(),
+            root.join("tests").join("demo")
+        );
     }
 
     #[test]
@@ -424,7 +455,7 @@ mod tests {
     fn parses_capture_only_diff_without_requiring_a_baseline() {
         let args = [
             "--example",
-            "examples/performance_benchmark.py",
+            "tests/performance/scenes/performance_benchmark.py",
             "--current",
             "target/performance/seek",
             "--capture-only",
@@ -490,7 +521,7 @@ mod tests {
 
         let no_capture = [
             "--example",
-            "examples/performance_benchmark.py",
+            "tests/performance/scenes/performance_benchmark.py",
             "--capture-only",
             "--no-capture",
         ]
@@ -499,7 +530,7 @@ mod tests {
 
         let bless = [
             "--example",
-            "examples/performance_benchmark.py",
+            "tests/performance/scenes/performance_benchmark.py",
             "--capture-only",
             "--bless",
         ]
@@ -582,20 +613,20 @@ mod tests {
     fn example_derives_global_snapshot_paths() {
         let args = [
             "--example".to_string(),
-            "examples/visual_diff_demo.py".to_string(),
+            "examples/animation/easings.py".to_string(),
         ];
         let parsed = parse_diff_mode_args(&args).unwrap().unwrap();
         assert_eq!(
             parsed.baseline,
-            PathBuf::from("tests/visual/visual_diff_demo/baseline")
+            PathBuf::from("tests/visual/animation/easings/baseline")
         );
         assert_eq!(
             parsed.current,
-            PathBuf::from("tests/visual/visual_diff_demo/current")
+            PathBuf::from("tests/visual/animation/easings/current")
         );
         assert_eq!(
             parsed.output,
-            PathBuf::from("tests/visual/visual_diff_demo/report")
+            PathBuf::from("tests/visual/animation/easings/report")
         );
         assert!(parsed.capture);
     }
