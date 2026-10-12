@@ -2,7 +2,7 @@
 resolver = "2"
 # `gaanim_engine` is a Rust dylib that must always build as a dependency (see
 # its manifest), so it is not a member.
-exclude = ["vendor/vello_encoding", "vendor/web-task", "crates/gaanim_engine"]
+exclude = ["vendor/web-task", "crates/gaanim_engine"]
 members = [
   "crates/gaanim_core",
   "crates/gaanim_math",
@@ -33,10 +33,14 @@ members = [
 ]
 
 [patch.crates-io]
-# Preserve Vello's resident image atlas across vector-only frames and replay,
-# and size its GPU buffers from the scene instead of fixed limits.
-# See vendor/vello_encoding/GAANIM-PATCH.md for the upstream source and fixes.
-vello_encoding = { path = "vendor/vello_encoding" }
+# Vello 0.9 with Gaanim's fixes, one commit each on the gaanim-0.9 branch of
+# PaoloLupo/vello (see its GAANIM.md): vello_encoding keeps the image atlas
+# across vector-only frames, sizes the GPU buffers from the scene and keeps
+# gradient ramps between renders; vello_shaders keeps hue, saturation, color
+# and luminosity blends from turning some grays black. Cargo.lock is not
+# versioned, so `rev` pins the code every checkout builds.
+vello_encoding = { git = "https://github.com/PaoloLupo/vello", rev = "0c4adcf1b37f5c4976c382cfcc167a01c6c90774" }
+vello_shaders = { git = "https://github.com/PaoloLupo/vello", rev = "0c4adcf1b37f5c4976c382cfcc167a01c6c90774" }
 # Build bevy_tasks for wasm32-unknown-emscripten, where panics unwind (the
 # playground's Pyodide extension). See vendor/web-task/GAANIM-PATCH.md.
 web-task = { path = "vendor/web-task" }

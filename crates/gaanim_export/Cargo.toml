@@ -26,7 +26,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 vello = "0.9.0"
-# Patched in vendor/vello_encoding: sizes and scales Vello's GPU buffers.
+# Patched by the workspace (PaoloLupo/vello): sizes and scales Vello's GPU buffers.
 vello_encoding = "0.9.0"
 indicatif = "0.17"
 pollster = "0.3"
