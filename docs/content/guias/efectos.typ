@@ -166,6 +166,10 @@ con tus propios shaders:
   supera `threshold` brilla, igual a cualquier resolución.
 - `halftone`, `dither`, `crt`, `pixelate` y `glitch`: estilos.
 
+Un objeto con `.post_process(False)` queda fuera de todas las pasadas: se
+dibuja encima del cuadro procesado, así que una etiqueta o un HUD se siguen
+leyendo bajo `pixelate` o `glitch`.
+
 ```python
 from gaanim import CORAL, CYAN, PostProcess, Scene
 
@@ -192,7 +196,7 @@ scene = Scene(frame=(16, 9), background="#1e293b")
 golpe = scene.viz.parameter(0.0)
 scene.canvas.post = PostProcess.glitch(intensity=golpe, seed=3)
 scene.text("¡Corte!", role="title").fill("#f8fafc")
-scene.play([golpe.animate.set(1.0).duration(0.2).repeat(1, yoyo=True)])
+scene.play([golpe.animate.set(1.0).duration(0.2).repeat(2, yoyo=True)])
 scene.render()
 ```
 

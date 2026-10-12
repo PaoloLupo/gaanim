@@ -2561,6 +2561,26 @@ impl SceneModel {
         Ok(())
     }
 
+    /// Override the motion blur of one segment of this scene: `None` keeps
+    /// it sharp, while the scene's blur applies to segments without one.
+    pub fn set_segment_motion_blur(
+        &mut self,
+        segment: &SegmentHandle,
+        blur: Option<gaanim_renderer::effects::MotionBlur>,
+    ) -> Result<(), SegmentError> {
+        if !segment.belongs_to(&self.state) {
+            return Err(SegmentError::ForeignSegment);
+        }
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let target = guard
+            .segments
+            .iter_mut()
+            .find(|candidate| candidate.id == segment.id)
+            .ok_or(SegmentError::UnknownSegment { id: segment.id })?;
+        target.motion_blur = Some(blur);
+        Ok(())
+    }
+
     /// Apply one of the built-in visual themes.
     ///
     /// `technical` is the quiet dark style used by the built-in technical

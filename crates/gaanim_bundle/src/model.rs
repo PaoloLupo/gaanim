@@ -1,6 +1,6 @@
 //! What a bundle stores: static scene data, deduplicated tables and frames.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use bevy::prelude::Entity;
@@ -104,6 +104,8 @@ pub struct Tables {
     pub(crate) transition_shaders: Vec<Arc<TransitionShader>>,
     /// Passes of the drawables' shader effects, deduplicated.
     pub(crate) effect_shaders: Vec<PostProcessShader>,
+    /// Keys of the drawables the post-process leaves out.
+    pub(crate) post_exempt: BTreeSet<u32>,
 }
 
 impl Interner for Tables {
@@ -217,6 +219,9 @@ pub struct DecodedTables {
     /// Shared by every frame of one transition, so its shader is built once.
     pub transition_shaders: Vec<Arc<TransitionShader>>,
     pub effect_shaders: Vec<PostProcessShader>,
+    /// Keys of the drawables the post-process leaves out; empty in a bundle
+    /// recorded without any.
+    pub post_exempt: HashSet<u32>,
 }
 
 impl Resolver for DecodedTables {
@@ -734,8 +739,12 @@ impl ElementRecord {
         lottie: Option<u32>,
     ) -> Self {
         let mut key_of = |entity: Entity| keys.key(entity);
+        let key = key_of(element.entity);
+        if element.post_exempt {
+            tables.post_exempt.insert(key);
+        }
         Self {
-            key: key_of(element.entity),
+            key,
             recipe: tables.recipe(&element.recipe),
             lottie,
             transform: element.transform,
@@ -944,6 +953,7 @@ impl ElementRecord {
                 .transpose()?,
             blend: self.blend,
             transition_side: self.side,
+            post_exempt: tables.post_exempt.contains(&self.key),
             lineage: entities(&self.lineage)?,
             view_bounds: self.view_bounds,
             in_views: self.in_views,

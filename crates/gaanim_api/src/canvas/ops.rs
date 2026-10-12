@@ -1335,6 +1335,9 @@ pub struct Segment {
     pub background: Option<BackgroundPaint>,
     /// Post-processing while this segment is active; inherits the scene's by default.
     pub post_process: PostProcessOverride,
+    /// Motion blur while this segment is active: `None` inherits the
+    /// scene's, `Some(None)` keeps the segment sharp.
+    pub motion_blur: Option<Option<gaanim_renderer::effects::MotionBlur>>,
     pub(crate) stops: Vec<LocalSegmentStop>,
     /// Named timeline markers as `(name, local time)`.
     pub(crate) markers: Vec<(String, f64)>,
@@ -1358,6 +1361,7 @@ impl Segment {
             template: None,
             background: None,
             post_process: PostProcessOverride::Inherit,
+            motion_blur: None,
             stops: Vec::new(),
             markers: Vec::new(),
             explicit: false,
@@ -1383,6 +1387,7 @@ impl Segment {
             template,
             background,
             post_process: PostProcessOverride::Inherit,
+            motion_blur: None,
             stops: Vec::new(),
             markers: Vec::new(),
             explicit: true,

@@ -418,7 +418,7 @@ impl CubeLut {
     /// Read and parse a `.cube` file.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, PostProcessError> {
         let path = path.as_ref();
-        let text = std::fs::read_to_string(path).map_err(|error| PostProcessError::ReadSource {
+        let text = std::fs::read_to_string(path).map_err(|error| PostProcessError::ReadLut {
             path: path.to_path_buf(),
             message: error.to_string(),
         })?;
@@ -479,7 +479,8 @@ mod tests {
         }
         assert!(matches!(
             CubeLut::from_file("/nonexistent/grade.cube"),
-            Err(PostProcessError::ReadSource { .. })
+            Err(error @ PostProcessError::ReadLut { .. })
+                if error.to_string().starts_with("could not read .cube LUT")
         ));
     }
 }

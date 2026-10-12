@@ -322,6 +322,21 @@ enteros, o usa `scene.text.code`.
   `fade_through` tampoco vuelven a mostrar el segmento saliente.
 - `fx.spotlight([a, b])` abre un hueco alrededor de cada objetivo; antes abría
   uno solo alrededor de la caja conjunta.
+- `drawable.post_process(False)` deja un objeto, con sus miembros, fuera del
+  postprocesado de la escena y del de su segmento: se dibuja encima del cuadro
+  procesado, así que un HUD o una etiqueta se leen bajo `pixelate`, `glitch`
+  o `halftone`. Funciona en la vista previa, al exportar y en los `.gaanim`;
+  un reproductor anterior dibuja esos objetos procesados.
+- `segment.motion_blur(...)` da a un segmento su propio desenfoque de
+  movimiento, o ninguno con `None`, en lugar del de `scene.canvas.motion_blur`.
+- El mensaje de un `.cube` que `PostProcess.lut` no puede leer habla de una
+  LUT, no de un «WGSL asset».
+- Los ejemplos de `PostProcess.glitch` y de los pulsos con `Parameter` en la
+  referencia y en la guía de efectos usan `.repeat(2, yoyo=True)`, que sube y
+  vuelve; `.repeat(1, yoyo=True)` solo subía.
+- La referencia de `scene.persist` explica que un objeto nuevo persistido
+  justo después de `scene.segment(...)` entra con la transición de ese
+  segmento.
 - Una cuadrícula con columnas `"auto"` dentro de otra caja mide lo mismo que
   sola. Antes sus columnas se repartían el ancho por igual: la cuadrícula
   quedaba más ancha y, con textos que pueden partirse, el más ancho se partía

@@ -533,7 +533,7 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
 """, uniforms={"amount": amount})
 scene.canvas.post = [split, PostProcess.vignette(0.5)]
 ring = scene.geometry.circle(2).no_fill().stroke(GOLD, 0.2)
-scene.play([amount.animate.set(1.0).duration(0.5).repeat(1, yoyo=True)])
+scene.play([amount.animate.set(1.0).duration(0.5).repeat(2, yoyo=True)])
 # output: preview.webp
 scene.render()
 ```
@@ -600,7 +600,7 @@ burst = scene.viz.parameter(0.0)
 scene.canvas.post = [PostProcess.glitch(intensity=burst, seed=3), PostProcess.grain(0.05)]
 scene.geometry.circle(1.6).fill(GOLD).move_to(-3, 0)
 scene.geometry.rounded_rect(3, 3, 0.3).fill(BLUE).move_to(3, 0)
-scene.play([burst.animate.set(1.0).duration(0.3).repeat(1, yoyo=True)])
+scene.play([burst.animate.set(1.0).duration(0.3).repeat(2, yoyo=True)])
 # output: preview.webp
 scene.render()
 ```
@@ -621,7 +621,7 @@ scene.canvas.post = PostProcess.bloom(threshold=0.55, intensity=glow, radius=0.6
 ring = scene.geometry.circle(1.6).no_fill().stroke("#ff4fd8", 0.12).move_to(-3, 0)
 star = scene.geometry.regular_polygon(5, 1.6).no_fill().stroke("#ffe45c", 0.12).move_to(3, 0)
 scene.play([ring.animate.create(), star.animate.create()])
-scene.play([glow.animate.set(1.4).duration(0.6).repeat(1, yoyo=True)])
+scene.play([glow.animate.set(1.4).duration(0.6).repeat(2, yoyo=True)])
 # output: preview.webp
 scene.render()
 ```
@@ -636,7 +636,7 @@ scene.render()
     (name: "phase", type: "float | None", default: "None", desc: [Dónde se abre el obturador respecto al tiempo del cuadro, en grados de un cuadro; por defecto se centra en él.]),
   ),
   returns: (type: "None"),
-  desc: [Desenfoque de movimiento como el de una cámara de cine en las exportaciones y las capturas: cada cuadro promedia en luz lineal `samples` búsquedas exactas repartidas por el obturador, así que es determinista, y nunca mezcla dos segmentos. La duración del obturador sigue los fps de la exportación (las capturas usan 60). El visor interactivo se ve nítido, y renderizar cuesta `samples` veces más. Un valor fuera de rango lanza `ValueError`. Usa `drawable.motion_blur(False)` para mantener nítido un objeto.],
+  desc: [Desenfoque de movimiento como el de una cámara de cine en las exportaciones y las capturas: cada cuadro promedia en luz lineal `samples` búsquedas exactas repartidas por el obturador, así que es determinista, y nunca mezcla dos segmentos. La duración del obturador sigue los fps de la exportación (las capturas usan 60). El visor interactivo se ve nítido, y renderizar cuesta `samples` veces más. Un valor fuera de rango lanza `ValueError`. Usa `drawable.motion_blur(False)` para mantener nítido un objeto, y #link("/referencia/scene/#api-segment-motion_blur")[`Segment.motion_blur`] para darle a un segmento su propio obturador.],
 )[
 ```python
 # show-code: true
@@ -657,7 +657,7 @@ scene.render()
   kind: "property",
   signature: "post: PostProcess | list[PostProcess] | None",
   returns: (type: "PostProcess | list[PostProcess] | None", desc: [El postprocesado de la escena; se puede leer y asignar.]),
-  desc: [Una lista encadena las pasadas en orden. `None` o una lista vacía lo quitan. Un segmento puede cambiarlo mientras está activo: `post=otro` (o una lista) usa otra cadena, `post=False` dibuja el segmento sin postprocesado y `post=None` (el predeterminado) hereda el de la escena. Un uniform que lee un valor de otra escena lanza `ValueError` y cualquier otro valor, `TypeError`.],
+  desc: [Una lista encadena las pasadas en orden. `None` o una lista vacía lo quitan. Un segmento puede cambiarlo mientras está activo: `post=otro` (o una lista) usa otra cadena, `post=False` dibuja el segmento sin postprocesado y `post=None` (el predeterminado) hereda el de la escena. `drawable.post_process(False)` deja un objeto fuera de todas las pasadas. Un uniform que lee un valor de otra escena lanza `ValueError` y cualquier otro valor, `TypeError`.],
 )[
 ```python
 >>>from gaanim import *

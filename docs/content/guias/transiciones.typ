@@ -62,7 +62,10 @@ Los revelados vectoriales (`wipe`, `clock_wipe`, `iris`, `blinds`, `push` y
 `slide`) recortan los dos segmentos con geometría animada: son nítidos a
 cualquier resolución y funcionan sin texturas. Si los segmentos tienen fondos
 distintos, el fondo entrante se revela con la misma forma. Los objetos que
-marcaste con `scene.persist(...)` no se recortan ni se desplazan.
+marcaste con `scene.persist(...)` no se recortan ni se desplazan. Un objeto
+nuevo que persistes justo después de `scene.segment(...)` entra con ese
+segmento y su transición lo recorta; créalo y persístelo antes de
+`scene.segment(...)` para que quede fuera.
 
 ```python
 from gaanim import WHITE, Scene, Transition

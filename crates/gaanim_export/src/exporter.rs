@@ -819,7 +819,7 @@ where
                 config.height,
                 config.fit,
             );
-            let composed = composed.transformed(camera_to_vello);
+            let mut composed = composed.transformed(camera_to_vello);
             let frame = capture_camera_frame(
                 resolved_camera.as_ref(),
                 config.width,
@@ -827,9 +827,11 @@ where
                 config.fit,
             );
             let post = export_post_process(app.world(), frame, composed.transition.as_ref());
+            let unprocessed = composed.take_unprocessed(post.is_some());
             crate::gpu::FrameJob {
                 scene: composed.scene,
                 layers: composed.transition,
+                unprocessed,
                 effects: composed.effects,
                 backgrounds: composed.backgrounds,
                 base_color: clear_color(app.world()),
@@ -1134,6 +1136,7 @@ impl FrameRasterizer {
                 .render_frame_layers(
                     &job.scene,
                     job.layers.as_ref(),
+                    job.unprocessed.as_ref(),
                     &job.effects,
                     &job.backgrounds,
                     job.base_color,
@@ -1179,7 +1182,7 @@ impl FrameRasterizer {
     ) -> crate::gpu::FrameJob {
         let resolved =
             gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
-        let composed = compose_bundle_layers(
+        let mut composed = compose_bundle_layers(
             frame,
             self.background.as_ref(),
             &mut self.store,
@@ -1215,9 +1218,11 @@ impl FrameRasterizer {
             camera_frame,
             frame.time as f32,
         );
+        let unprocessed = composed.take_unprocessed(post.is_some());
         crate::gpu::FrameJob {
             scene: composed.scene,
             layers: composed.transition,
+            unprocessed,
             effects: composed.effects,
             backgrounds: composed.backgrounds,
             base_color: self.bg_color,
@@ -1495,7 +1500,7 @@ where
 
         let phase_started = Instant::now();
         let resolved_camera = frame_camera(app.world());
-        let composed = gaanim_renderer::pipeline::compile_frame_from_world(
+        let mut composed = gaanim_renderer::pipeline::compile_frame_from_world(
             app.world_mut(),
             resolved_camera.as_ref().map(|resolved| &resolved.camera),
         )
@@ -1515,9 +1520,11 @@ where
             ),
             composed.transition.as_ref(),
         );
+        let unprocessed = composed.take_unprocessed(post.is_some());
         let job = crate::gpu::FrameJob {
             scene: composed.scene,
             layers: composed.transition,
+            unprocessed,
             effects: composed.effects,
             backgrounds: composed.backgrounds,
             base_color: clear_color(app.world()),
@@ -1595,7 +1602,7 @@ fn updated_world_job(
     pins: &mut gaanim_renderer::pipeline::PinnedElements,
 ) -> crate::gpu::FrameJob {
     let resolved_camera = frame_camera(app.world());
-    let composed = gaanim_renderer::pipeline::compile_frame_pinned(
+    let mut composed = gaanim_renderer::pipeline::compile_frame_pinned(
         app.world_mut(),
         resolved_camera.as_ref().map(|resolved| &resolved.camera),
         pins,
@@ -1616,9 +1623,11 @@ fn updated_world_job(
         ),
         composed.transition.as_ref(),
     );
+    let unprocessed = composed.take_unprocessed(post_process.is_some());
     crate::gpu::FrameJob {
         scene: composed.scene,
         layers: composed.transition,
+        unprocessed,
         effects: composed.effects,
         backgrounds: composed.backgrounds,
         base_color: clear_color(app.world()),

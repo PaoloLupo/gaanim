@@ -737,10 +737,14 @@ impl ObjectEffects {
             let Some(slot) = self.slots.get_mut(&layer.image.data.id()) else {
                 continue;
             };
-            if slot
-                .post
-                .prepare(device, queue, &slot.texture, Some(&layer.request), None)
-            {
+            if slot.post.prepare(
+                device,
+                queue,
+                &slot.texture,
+                Some(&layer.request),
+                None,
+                None,
+            ) {
                 slot.post.encode(&mut encoder);
             }
         }

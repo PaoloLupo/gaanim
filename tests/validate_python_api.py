@@ -3229,6 +3229,24 @@ def validate_transition_contract(module: object) -> list[str]:
     scene.wait(0.5)
     if abs(scene.cursor - 1.0) > 1e-9:
         failures.append("transition overlays must not change segment durations")
+
+    # Drawables can stay out of the post-process, and segments blur on their own.
+    scene = module.Scene(frame=(16, 9))
+    scene.canvas.post = module.PostProcess.pixelate(12)
+    label = scene.text("Live").post_process(False)
+    box = scene.geometry.rect(1, 1)
+    if box.post_process(False) is not box or not isinstance(label, module.Text):
+        failures.append("post_process(False) must keep the drawable and its class")
+    segment = scene.segment("wide")
+    if segment.motion_blur(360, samples=12) is not segment or segment.motion_blur(None) is not segment:
+        failures.append("Segment.motion_blur must return the segment")
+    for name, call in [
+        ("shutter", lambda: segment.motion_blur(900)),
+        ("samples", lambda: segment.motion_blur(180, samples=1)),
+    ]:
+        if not raises_error(ValueError, call):
+            failures.append(f"Segment.motion_blur accepted an invalid {name}")
+    scene.wait(0.5)
     return failures
 
 

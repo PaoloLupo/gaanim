@@ -667,7 +667,7 @@ class PostProcess:
         Example:
             burst = scene.viz.parameter(0.0)
             scene.canvas.post = PostProcess.glitch(intensity=burst, seed=3)
-            scene.play([burst.animate.set(1.0).duration(0.2).repeat(1, yoyo=True)])
+            scene.play([burst.animate.set(1.0).duration(0.2).repeat(2, yoyo=True)])
         """
         ...
     @property
@@ -4047,6 +4047,21 @@ class Drawable:
             hud = scene.text("t = 0").move_to(-6, 4).motion_blur(False)
         """
         ...
+    def post_process(self, enabled: bool = True) -> Drawable:
+        """Whether the scene's post-process applies to this drawable (the default).
+
+        With ``False`` the drawable and its members stay out of
+        ``scene.canvas.post`` and of a segment's ``post``: they draw above the
+        processed frame, e.g. labels that pixelation, glitch or halftone would
+        make unreadable. They draw above every processed drawable, whatever
+        their ``z_index``, and still follow their segment's transitions; under
+        a shader transition they cross-fade with it. Echo copies inherit the
+        setting.
+
+        Example:
+            label = scene.text("Live").hud().move_to(-6, 4).post_process(False)
+        """
+        ...
     def echo(
         self,
         count: int = 5,
@@ -5438,6 +5453,15 @@ class Text(Drawable):
             title.motion_blur(False).move_to(0.0, 3.0)
         """
         ...
+    def post_process(self, enabled: bool = True) -> Self:
+        """Whether the scene's post-process applies to the text, preserving Text chaining.
+
+        See ``Drawable.post_process``.
+
+        Example:
+            caption.post_process(False).move_to(0.0, -3.5)
+        """
+        ...
     def echo(
         self,
         count: int = 5,
@@ -5627,7 +5651,8 @@ class Canvas:
         follows the export frame rate (snapshots use 60 fps). ``None`` turns
         the blur off. The interactive preview stays sharp;
         rendering costs ``samples`` times as much. Keep a drawable sharp with
-        ``drawable.motion_blur(False)``.
+        ``drawable.motion_blur(False)``, and give a segment its own blur with
+        ``Segment.motion_blur``.
 
         Example:
             scene.canvas.motion_blur(180, samples=12)
@@ -5645,8 +5670,10 @@ class Canvas:
 
         A sequence chains the passes in order: each one samples, through
         ``gaanim_scene``, what the previous pass wrote. Segments that set
-        their own ``post`` keep their override. Uniforms that read values of
-        another Scene raise ``ValueError``; anything else raises ``TypeError``.
+        their own ``post`` keep their override, and
+        ``drawable.post_process(False)`` keeps a drawable out of every pass.
+        Uniforms that read values of another Scene raise ``ValueError``;
+        anything else raises ``TypeError``.
 
         Example:
             scene.canvas.post = [PostProcess.grain(0.06), PostProcess.vignette(0.35)]
@@ -5747,6 +5774,19 @@ class Segment:
 
         Missing or extra slots raise ``TypeError``; a segment without a
         template raises ``ValueError``.
+        """
+        ...
+    def motion_blur(self, shutter_angle: Optional[float] = 180.0, samples: int = 8, *, phase: Optional[float] = None) -> Segment:
+        """Blur this segment's motion in exported frames and snapshots, in place of the scene's.
+
+        The arguments work as in ``scene.canvas.motion_blur``; ``None`` keeps
+        the segment sharp. Segments without their own blur use the scene's,
+        so each segment can compare a shutter angle or phase. A frame on a
+        cut belongs to the segment it enters. Returns the segment; a value
+        out of range raises ``ValueError``.
+
+        Example:
+            scene.segment("wide").motion_blur(360, samples=16)
         """
         ...
 
@@ -10621,6 +10661,12 @@ class Scene:
         ``z_index(-1)``), except during a shader transition, which composites
         it above the blend. An invisible drawable remains invisible until an
         explicit entry animation changes its opacity.
+
+        A drawable that was not on screen before the current segment and is
+        persisted at its start enters with that segment: its incoming
+        transition reveals it like the rest of the segment, and it becomes
+        global when the transition ends. To keep it out of that transition,
+        create and persist it before ``scene.segment(...)``.
 
         Raises:
             ValueError: If any drawable belongs to another ``Scene``.

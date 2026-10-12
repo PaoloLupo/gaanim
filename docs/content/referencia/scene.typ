@@ -443,6 +443,29 @@ scene.stop("comparación")
 ]
 
 #api-entry(
+  name: "Segment.motion_blur",
+  kind: "method",
+  signature: "segment.motion_blur(shutter_angle=180.0, samples=8, *, phase=None) -> Segment",
+  params: (
+    (name: "shutter_angle, samples, phase", type: "float | None, int, float | None", default: "180.0, 8, None", desc: [Como en #link("/referencia/themes/#api-canvas-motion_blur")[`scene.canvas.motion_blur`]; `None` deja nítido el segmento.]),
+  ),
+  returns: (type: "Segment", desc: [El mismo segmento.]),
+  desc: [Desenfoque de movimiento de este segmento en las exportaciones y las capturas, en lugar del de la escena. Los segmentos sin uno propio usan el de la escena, así que cada segmento puede comparar un ángulo de obturador o una `phase`. Un cuadro justo en un corte pertenece al segmento que entra. Un valor fuera de rango lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+scene.canvas.motion_blur(180)
+scene.segment("normal")
+scene.wait(1)
+scene.segment("amplio").motion_blur(360, samples=16)
+scene.wait(1)
+scene.segment("nítido").motion_blur(None)
+scene.wait(1)
+```
+]
+
+#api-entry(
   name: "Scene.link",
   kind: "method",
   params: (
@@ -765,7 +788,7 @@ cursor = scene.geometry.dot(0.1).fill(GOLD).z_layer("overlay")
     (name: "others", type: "Drawable", default: "()", desc: [Más objetos de la misma escena.]),
   ),
   returns: (type: "None"),
-  desc: [Mantiene objetos visibles y animables en los segmentos siguientes, desde el cursor actual. Las transiciones automáticas (`cross_fade`, `slide`…) no los afectan. Con el mismo `z_index`, un objeto persistente se dibuja encima del contenido de los segmentos, durante las transiciones y fuera de ellas; con un `z_index` menor queda debajo (una rejilla persistente con `z_index(-1)`), salvo en una transición por shader, que lo compone encima de la mezcla. Un objeto invisible sigue invisible hasta que una animación de entrada cambia su opacidad.],
+  desc: [Mantiene objetos visibles y animables en los segmentos siguientes, desde el cursor actual. Las transiciones automáticas (`cross_fade`, `slide`…) no los afectan. Con el mismo `z_index`, un objeto persistente se dibuja encima del contenido de los segmentos, durante las transiciones y fuera de ellas; con un `z_index` menor queda debajo (una rejilla persistente con `z_index(-1)`), salvo en una transición por shader, que lo compone encima de la mezcla. Un objeto invisible sigue invisible hasta que una animación de entrada cambia su opacidad. Un objeto que no estaba en pantalla antes del segmento actual y se persiste al empezarlo entra con ese segmento: su transición de entrada lo revela como al resto del segmento, y pasa a ser global cuando termina. Para dejarlo fuera de esa transición, créalo y persístelo antes de `scene.segment(...)`.],
   none,
 )
 

@@ -424,7 +424,7 @@ allow = ["post"]
 
 [[example]]
 path = "post_processing/finishes.py"
-description = "Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch passes, each ramped in through a Parameter."
+description = "Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch passes, each ramped in through a Parameter, with labels kept out of the post-process."
 allow = ["post"]
 
 [[example]]
@@ -434,7 +434,7 @@ allow = ["post"]
 
 [[example]]
 path = "post_processing/motion_blur.py"
-description = "Film-shutter motion blur that smears dots by speed, spinning, scaling and orbiting shapes, with one dot kept sharp."
+description = "Film-shutter motion blur that smears dots by speed, spinning, scaling and orbiting shapes, with one dot kept sharp, and segments with a shutter of their own."
 
 [[example]]
 path = "post_processing/post_chains.py"

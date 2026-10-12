@@ -1578,6 +1578,14 @@ impl DrawableHandle {
         self.update_style(|spec| spec.motion_blur_exempt = !enabled)
     }
 
+    /// Whether the scene's post-process (the canvas's, or a segment's)
+    /// applies to this drawable (the default). A drawable with `false`, and
+    /// its members, draws above the processed frame, e.g. to keep a label
+    /// readable under pixelation.
+    pub fn post_process(self, enabled: bool) -> Self {
+        self.update_style(|spec| spec.post_exempt = !enabled)
+    }
+
     /// Draw `start` and `end` tips on the path's ends, filled with its stroke
     /// paint; both `None` removes them. Arrowheads shorten the stroke under
     /// them and follow the path's current ends, so trims, `create` and

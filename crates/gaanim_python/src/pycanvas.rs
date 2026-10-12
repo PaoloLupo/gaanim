@@ -3093,6 +3093,32 @@ impl PySegment {
         }
         Ok(result.extract::<Py<PyBox>>()?)
     }
+
+    /// Blur this segment's motion like `scene.canvas.motion_blur`, in place
+    /// of the scene's; `None` keeps the segment sharp.
+    #[pyo3(signature = (shutter_angle=Some(180.0), samples=8, *, phase=None))]
+    fn motion_blur<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        shutter_angle: Option<f64>,
+        samples: u32,
+        phase: Option<f64>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let blur = shutter_angle
+            .map(|angle| gaanim_api::canvas::MotionBlur::new(angle, samples, phase))
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        slf.scene
+            .bind(py)
+            .borrow()
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_segment_motion_blur(&slf.inner, blur)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(slf)
+    }
 }
 
 #[pymethods]

@@ -3,7 +3,8 @@
 Each segment draws the same test card through one PostProcess preset, set
 for the whole frame with ``scene.segment(..., post=...)``. The preset's main
 argument rises from a value that leaves the frame untouched to the one in
-the label, so the label reads before the look takes over.
+the label. The label stays out of the post-process with
+``post_process(False)``, so it reads under every look.
 """
 
 import os
@@ -50,7 +51,7 @@ def finish(template, build, start, end):
     begin = scene.cursor
     scene.segment(code, post=build(amount))
     test_card(page[0])
-    scene.text(code, role="code").place(page[1], anchor="left")
+    scene.text(code, role="code").place(page[1], anchor="left").post_process(False)
     scene.wait(LEAD)
     scene.play([amount.animate.set(end).duration(RAMP)])
     scene.wait(HOLD)
@@ -82,7 +83,7 @@ starts = {template.format(end): finish(template, build, start, end) for template
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # Every look at full strength; halftone and pixelate also early in their
-    # ramp, while their labels still read.
+    # ramp.
     scene.snapshots(snapshots, sorted(
         [begin + LEAD + RAMP + HOLD - 0.2 for begin in starts.values()]
         + [starts[code] + LEAD + 0.3 * RAMP for code in ("PostProcess.halftone(12)", "PostProcess.pixelate(16)")]

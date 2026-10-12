@@ -425,6 +425,8 @@ pub enum PostProcessError {
     InvalidUniforms(String),
     #[error("invalid .cube LUT: {0}")]
     InvalidLut(String),
+    #[error("could not read .cube LUT '{path}': {message}")]
+    ReadLut { path: PathBuf, message: String },
 }
 
 /// One pass of a post-process chain: a shader and the value of each of its
@@ -500,6 +502,11 @@ pub struct CanvasPostProcess {
 }
 
 impl CanvasPostProcess {
+    /// Whether a post-process chain applies at `time_seconds`.
+    pub fn active_at(&self, time_seconds: f64) -> bool {
+        !self.passes_at(time_seconds).is_empty()
+    }
+
     /// Post-process chain active at an exact timeline position; empty when
     /// nothing applies.
     pub fn passes_at(&self, time_seconds: f64) -> &[PostProcessPass] {
@@ -645,6 +652,21 @@ impl PostProcessRequest {
         });
         Some(request)
     }
+}
+
+/// The pass that composites the drawables left out of the post-process above
+/// its result: a transition that keeps the frame as it is, with them as the
+/// layer above.
+fn overlay_shader() -> &'static PostProcessShader {
+    static SHADER: std::sync::LazyLock<PostProcessShader> = std::sync::LazyLock::new(|| {
+        PostProcessShader::transition(
+            "fn transition(uv: vec2<f32>) -> vec4<f32> { return gaanim_from(uv); }",
+            std::iter::empty::<&str>(),
+            None,
+        )
+        .expect("the overlay pass is valid WGSL")
+    });
+    &SHADER
 }
 
 /// The extra textures a shader transition reads: the incoming segment and
@@ -804,6 +826,8 @@ pub struct GpuPostProcess {
     target_view: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// The last transition inputs (incoming, above) and their views.
     input_views: Option<([wgpu::Texture; 2], [wgpu::TextureView; 2])>,
+    /// The last overlay and its view.
+    overlay_view: Option<(wgpu::Texture, wgpu::TextureView)>,
     frame: Option<PreparedFrame>,
 }
 
@@ -813,6 +837,8 @@ impl GpuPostProcess {
     /// [`Self::encode`] will draw a pass. A pass whose shader fails to build
     /// is skipped. A transition in `request` runs first, reading `target` as
     /// the outgoing segment and `inputs`; without `inputs` it is skipped.
+    /// `overlay`, the drawables the post-process leaves out over
+    /// transparency, the size of `target`, is composited above the result.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -820,6 +846,7 @@ impl GpuPostProcess {
         target: &wgpu::Texture,
         request: Option<&PostProcessRequest>,
         inputs: Option<TransitionInputs<'_>>,
+        overlay: Option<&wgpu::Texture>,
     ) -> bool {
         self.frame = None;
         if self.device.as_ref() != Some(device) {
@@ -835,8 +862,8 @@ impl GpuPostProcess {
         let Some(region) = frame_region(request.frame, target.width(), target.height()) else {
             return false;
         };
-        // The transition runs first, then the chain; without its inputs it
-        // cannot run.
+        // The transition runs first, then the chain, then the overlay; without
+        // its inputs the transition cannot run.
         let jobs: Vec<(&PostProcessShader, &[f32])> = request
             .transition
             .as_ref()
@@ -849,6 +876,7 @@ impl GpuPostProcess {
                     .iter()
                     .map(|(shader, values)| (shader, values.as_slice())),
             )
+            .chain(overlay.map(|_| (overlay_shader(), &[][..])))
             .collect();
         // Keep only the pipelines of the current chain; a hot reload replaces them.
         self.pipelines
@@ -933,13 +961,20 @@ impl GpuPostProcess {
                 views
             }
         });
+        // The overlay pass reads the overlay as both of a transition's inputs.
+        let overlay_views = overlay.map(|overlay| {
+            let view = cached_view(&mut self.overlay_view, overlay);
+            [view.clone(), view]
+        });
+        let last = jobs.len().saturating_sub(1);
         self.buffers.resize_with(jobs.len(), PassBuffers::default);
         let mut passes = Vec::with_capacity(jobs.len());
-        for (((shader, values), pipeline), buffers) in jobs
+        for (index, (((shader, values), pipeline), buffers)) in jobs
             .iter()
             .copied()
             .zip(pipelines)
             .zip(self.buffers.iter_mut())
+            .enumerate()
         {
             let Some(pipeline) = pipeline else {
                 continue;
@@ -1004,7 +1039,9 @@ impl GpuPostProcess {
                 buffers.bloom = Some(chain);
                 view
             });
-            let inputs = if shader.transition {
+            let inputs = if index == last && overlay_views.is_some() {
+                overlay_views.clone()
+            } else if shader.transition {
                 let Some(views) = &input_views else {
                     continue;
                 };
@@ -1054,6 +1091,7 @@ impl GpuPostProcess {
     fn release_bindings(&mut self) {
         self.target_view = None;
         self.input_views = None;
+        self.overlay_view = None;
         for buffers in &mut self.buffers {
             buffers.bind_group = None;
             if let Some(chain) = &mut buffers.bloom {
@@ -1596,7 +1634,7 @@ mod tests {
         .request(1.0, frame)
         .unwrap();
         let mut post = GpuPostProcess::default();
-        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None, None));
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         post.encode(&mut encoder);
         gpu.queue.submit(Some(encoder.finish()));
@@ -1612,7 +1650,75 @@ mod tests {
         // The last column clamps its sample to the frame edge (x = 39).
         assert_eq!(at(39, 27), &[255 - 156, 255 - 64, 255 - 200, 255]);
 
-        assert!(!post.prepare(&gpu.device, &gpu.queue, &target, None, None));
+        assert!(!post.prepare(&gpu.device, &gpu.queue, &target, None, None, None));
+    }
+
+    #[test]
+    fn an_overlay_draws_above_the_processed_frame() {
+        let Some(gpu) = test_gpu() else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let (width, height) = (32_u32, 16_u32);
+        let texture = |pixels: &[u8]| {
+            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            gpu.queue.write_texture(
+                texture.as_image_copy(),
+                pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: None,
+                },
+                texture.size(),
+            );
+            texture
+        };
+        let target = texture(&[40, 80, 120, 255].repeat((width * height) as usize));
+        // A transparent overlay with one opaque green pixel at (5, 3).
+        let mut overlay = vec![0_u8; (width * height * 4) as usize];
+        overlay[((3 * width + 5) * 4) as usize..][..4].copy_from_slice(&[0, 255, 0, 255]);
+        let overlay = texture(&overlay);
+
+        let frame = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+        let request = CanvasPostProcess {
+            passes: vec![shader().into()],
+            ..Default::default()
+        }
+        .request(1.0, frame)
+        .unwrap();
+        let mut post = GpuPostProcess::default();
+        assert!(post.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &target,
+            Some(&request),
+            None,
+            Some(&overlay),
+        ));
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        post.encode(&mut encoder);
+        gpu.queue.submit(Some(encoder.finish()));
+        let out = gpu.read(&target);
+        let at = |x: u32, y: u32| &out[((y * width + x) * 4) as usize..][..4];
+        // The pass inverts the frame; the overlay's pixel stays as drawn.
+        assert_eq!(at(10, 8), &[215, 175, 135, 255]);
+        assert_eq!(at(5, 3), &[0, 255, 0, 255]);
     }
 
     const MIX: &str = "fn transition(uv: vec2<f32>) -> vec4<f32> {\n\
@@ -1717,6 +1823,7 @@ mod tests {
                 incoming: &incoming,
                 above: &above,
             }),
+            None,
         ));
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         post.encode(&mut encoder);
@@ -1731,7 +1838,7 @@ mod tests {
         assert_eq!(at(14, 3), &[200, 0, 0, 255]);
 
         // Without its inputs the transition does not run.
-        assert!(!post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
+        assert!(!post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None, None));
     }
 
     const TINT: &str = "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {\n\
@@ -1864,7 +1971,7 @@ mod tests {
         .request(0.0, kurbo::Rect::new(0.0, 0.0, 16.0, 8.0))
         .unwrap();
         let mut post = GpuPostProcess::default();
-        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None, None));
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         post.encode(&mut encoder);
         gpu.queue.submit(Some(encoder.finish()));
@@ -1936,7 +2043,7 @@ mod tests {
         let mut post = GpuPostProcess::default();
         // Twice, to reuse the chain's textures on the second frame.
         for _ in 0..2 {
-            assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
+            assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None, None));
             let mut encoder = gpu.device.create_command_encoder(&Default::default());
             post.encode(&mut encoder);
             gpu.queue.submit(Some(encoder.finish()));
@@ -1951,7 +2058,7 @@ mod tests {
                 target.size(),
             );
         }
-        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None));
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None, None));
         let mut encoder = gpu.device.create_command_encoder(&Default::default());
         post.encode(&mut encoder);
         gpu.queue.submit(Some(encoder.finish()));

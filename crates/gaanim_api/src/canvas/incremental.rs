@@ -180,6 +180,7 @@ fn add_segment(
         template,
         background,
         post_process,
+        motion_blur,
         stops,
         markers,
         explicit,
@@ -195,6 +196,7 @@ fn add_segment(
     fingerprint.add(template);
     fingerprint.add(background);
     fingerprint.add(post_process);
+    fingerprint.add(motion_blur);
     fingerprint.add(stops);
     fingerprint.add(markers);
     fingerprint.add(explicit);

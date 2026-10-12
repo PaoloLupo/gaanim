@@ -2436,6 +2436,11 @@ impl PyDrawable {
         Ok(Self(self.0.clone().motion_blur(enabled)))
     }
 
+    pub(crate) fn post_process_impl(&self, enabled: bool) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().post_process(enabled)))
+    }
+
     pub(crate) fn echo_impl(
         &self,
         count: u32,
@@ -3591,6 +3596,12 @@ impl PyDrawable {
     #[pyo3(signature = (enabled=true))]
     fn motion_blur<'py>(slf: &Bound<'py, Self>, enabled: bool) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().motion_blur_impl(enabled);
+        same_drawable(slf, result)
+    }
+    /// Whether the scene's post-process applies to this drawable.
+    #[pyo3(signature = (enabled=true))]
+    fn post_process<'py>(slf: &Bound<'py, Self>, enabled: bool) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().post_process_impl(enabled);
         same_drawable(slf, result)
     }
     /// Trail the drawable with fading copies of itself as it was earlier.

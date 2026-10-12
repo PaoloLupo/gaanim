@@ -3,8 +3,9 @@ use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
     BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ChalkBrush, ClipMask,
-    DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt, StrokeAlign,
-    StrokeProfile, StrokeScalesWithObject, VectorOutlineBinding, ViewLayer,
+    DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt,
+    PostProcessExempt, StrokeAlign, StrokeProfile, StrokeScalesWithObject, VectorOutlineBinding,
+    ViewLayer,
 };
 use crate::fragment::{FragmentParts, FragmentRecipe, build_fragment, fragment_recipe};
 use crate::lottie::LottiePlayer;
@@ -491,6 +492,9 @@ pub struct ExtractedElement {
     /// In a scene with segments, belongs to none of them (`scene.persist`):
     /// it draws above segment content with the same z-index.
     persistent: bool,
+    /// Left out of the scene post-process ([`PostProcessExempt`]): drawn in
+    /// [`ComposedFrame::unprocessed`].
+    post_exempt: bool,
     /// The element and its ancestors, recorded only while camera views
     /// exist so they can leave excluded subtrees out.
     lineage: Vec<Entity>,
@@ -622,6 +626,7 @@ impl ExtractedElement {
             blend: self.blend,
             transition_side: self.transition_side,
             persistent: self.persistent,
+            post_exempt: self.post_exempt,
             lineage: Vec::new(),
             view_bounds: None,
             in_views: self.in_views,
@@ -1214,24 +1219,31 @@ fn shared_clip_run_end(elements: &[ExtractedElement], start: usize) -> usize {
 
 /// Composite elements, masking each run of transition scene members with its
 /// side's reveal, then draw the transition overlays above everything.
+///
+/// With `unprocessed` it draws only the drawables the post-process leaves
+/// out, otherwise only the others and the transition overlays; camera views
+/// show both.
 fn append_extracted_elements(
     main_scene: &mut vello::Scene,
     elements: &[ExtractedElement],
     transition: Option<&gaanim_scene::SceneTransitionFrame>,
     canvas: Option<&CanvasPaint>,
+    unprocessed: bool,
 ) {
     let views = ViewContext { elements, canvas };
     // Drawables on a view layer exist only for the camera views that list it.
-    let unlayered: Vec<ExtractedElement>;
-    let main = if elements.iter().any(|element| element.layer.is_some()) {
-        unlayered = elements
+    let drawn =
+        |element: &ExtractedElement| element.layer.is_none() && element.post_exempt == unprocessed;
+    let picked: Vec<ExtractedElement>;
+    let main = if elements.iter().all(drawn) {
+        elements
+    } else {
+        picked = elements
             .iter()
-            .filter(|element| element.layer.is_none())
+            .filter(|element| drawn(element))
             .cloned()
             .collect();
-        unlayered.as_slice()
-    } else {
-        elements
+        picked.as_slice()
     };
     let mut index = 0;
     while index < main.len() {
@@ -1253,7 +1265,7 @@ fn append_extracted_elements(
         }
         index = end;
     }
-    if let Some(frame) = transition {
+    if let Some(frame) = transition.filter(|_| !unprocessed) {
         for layer in &frame.overlays {
             main_scene.push_layer(
                 peniko::Fill::NonZero,
@@ -3249,6 +3261,7 @@ fn extract_world(
                     |e| child_query.get(world, e).ok().map(ChildOf::parent),
                     |e| order_query.get(world, e).is_ok_and(|(_, member, _)| member),
                 ),
+            post_exempt: world.get::<PostProcessExempt>(entity).is_some(),
             lineage: if camera_views.is_empty() {
                 Vec::new()
             } else {
@@ -3308,8 +3321,14 @@ fn extract_world(
 }
 
 /// The 3D content of one drawable, with how it composes: whether it is a HUD
-/// overlay and its view layer.
-pub(crate) type ThreeDSource<'a> = (Entity, crate::three_d::Content<'a>, bool, Option<Arc<str>>);
+/// overlay, whether the post-process leaves it out, and its view layer.
+pub(crate) type ThreeDSource<'a> = (
+    Entity,
+    crate::three_d::Content<'a>,
+    bool,
+    bool,
+    Option<Arc<str>>,
+);
 
 /// Components of a drawable with 3D content.
 type ThreeDData = (
@@ -3320,6 +3339,7 @@ type ThreeDData = (
     Option<&'static gaanim_scene::LineListData>,
     Option<&'static gaanim_scene::Material3D>,
     Has<gaanim_scene::HudOverlay>,
+    Has<PostProcessExempt>,
     Option<&'static ViewLayer>,
 );
 type ThreeDFilter = (With<Visible>, With<gaanim_scene::Mesh3DMarker>);
@@ -3337,11 +3357,12 @@ type ThreeDItem<'a> = (
     Option<&'a gaanim_scene::LineListData>,
     Option<&'a gaanim_scene::Material3D>,
     bool,
+    bool,
     Option<&'a ViewLayer>,
 );
 
 fn three_d_source<'a>(
-    (entity, transform, opacity, mesh, lines, material, hud, layer): ThreeDItem<'a>,
+    (entity, transform, opacity, mesh, lines, material, hud, exempt, layer): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     (
         entity,
@@ -3353,6 +3374,7 @@ fn three_d_source<'a>(
             material,
         },
         hud,
+        exempt,
         layer.map(|layer| Arc::clone(&layer.0)),
     )
 }
@@ -3423,7 +3445,7 @@ fn three_d_elements<'a>(
     // How each drawable's elements compose, the same for all of them.
     let mut composition = HashMap::new();
     let mut items = Vec::new();
-    for ((entity, _, hud, layer), projected) in sources.into_iter().zip(projected) {
+    for ((entity, _, hud, exempt, layer), projected) in sources.into_iter().zip(projected) {
         if projected.is_empty() {
             continue;
         }
@@ -3432,6 +3454,7 @@ fn three_d_elements<'a>(
             entity,
             ThreeDComposition {
                 in_views: !hud,
+                post_exempt: exempt,
                 layer,
                 transition_side: transition_frame.map_or_else(Default::default, |frame| {
                     frame.side_of(entity, &mut parent_of)
@@ -3550,6 +3573,7 @@ fn three_d_elements<'a>(
                 ExtractedElement {
                     soft: Default::default(),
                     persistent: false,
+                    post_exempt: composition.post_exempt,
                     entity,
                     recipe: Some(Arc::new(recipe)),
                     lottie: None,
@@ -3602,6 +3626,7 @@ const RUNS_PER_TASK: usize = 128;
 /// How the elements of one drawable with 3D content compose.
 struct ThreeDComposition {
     in_views: bool,
+    post_exempt: bool,
     layer: Option<Arc<str>>,
     transition_side: gaanim_scene::TransitionSide,
     lineage: Vec<Entity>,
@@ -3733,7 +3758,7 @@ fn compose_elements(
     time_seconds: f64,
     rest: f64,
     mut gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
-) -> vello::Scene {
+) -> (vello::Scene, Option<vello::Scene>) {
     let transition = transition.filter(|frame| !frame.is_empty());
     let mut main_scene = vello::Scene::new();
     let mut canvas_paint = None;
@@ -3757,8 +3782,25 @@ fn compose_elements(
             gpu,
         );
     }
-    append_extracted_elements(&mut main_scene, elements, transition, canvas_paint.as_ref());
-    main_scene
+    append_extracted_elements(
+        &mut main_scene,
+        elements,
+        transition,
+        canvas_paint.as_ref(),
+        false,
+    );
+    let unprocessed = elements.iter().any(|element| element.post_exempt).then(|| {
+        let mut scene = vello::Scene::new();
+        append_extracted_elements(
+            &mut scene,
+            elements,
+            transition,
+            canvas_paint.as_ref(),
+            true,
+        );
+        scene
+    });
+    (main_scene, unprocessed)
 }
 
 /// Shader effect layers of the frame the live preview shows, which the
@@ -4311,6 +4353,10 @@ pub struct ComposedFrame {
     /// [`crate::background::GpuShaderBackgrounds`] before the frame,
     /// without reading them back to the CPU.
     pub backgrounds: Vec<ShaderBackgroundRequest>,
+    /// The drawables the post-process leaves out, over a transparent
+    /// background: a renderer that post-processes the frame composites them
+    /// above its result. See [`Self::take_unprocessed`].
+    pub unprocessed: Option<vello::Scene>,
 }
 
 /// The parts of a frame under a shader transition besides the outgoing
@@ -4326,6 +4372,18 @@ pub struct TransitionScenes {
 }
 
 impl ComposedFrame {
+    /// The drawables the post-process leaves out, to composite above the
+    /// processed frame when `post_process` runs; otherwise they join the
+    /// frame on top and this returns `None`.
+    pub fn take_unprocessed(&mut self, post_process: bool) -> Option<vello::Scene> {
+        let layer = self.unprocessed.take()?;
+        if post_process {
+            return Some(layer);
+        }
+        self.top_mut().append(&layer, None);
+        None
+    }
+
     /// The scene drawn last: above the blend under a shader transition.
     pub fn top_mut(&mut self) -> &mut vello::Scene {
         match &mut self.transition {
@@ -4335,8 +4393,10 @@ impl ComposedFrame {
     }
 
     /// One scene for a renderer without the GPU blend: the shader is
-    /// approximated by a cross-fade at its progress.
-    pub fn flattened(self) -> vello::Scene {
+    /// approximated by a cross-fade at its progress, and the drawables the
+    /// post-process leaves out draw on top.
+    pub fn flattened(mut self) -> vello::Scene {
+        let _ = self.take_unprocessed(false);
         let Some(transition) = self.transition else {
             return self.scene;
         };
@@ -4373,6 +4433,7 @@ impl ComposedFrame {
             // placed by their images in the scene.
             effects: self.effects,
             backgrounds: self.backgrounds,
+            unprocessed: self.unprocessed.as_ref().map(place),
         }
     }
 }
@@ -4392,11 +4453,14 @@ fn compose_frame(
         .filter(|frame| !frame.is_empty())
         .and_then(|frame| Some((frame, frame.shader.clone()?)))
     else {
+        let (scene, unprocessed) =
+            compose_elements(elements, transition, background, time_seconds, rest, gpu);
         return ComposedFrame {
-            scene: compose_elements(elements, transition, background, time_seconds, rest, gpu),
+            scene,
             transition: None,
             effects: Vec::new(),
             backgrounds: Vec::new(),
+            unprocessed,
         };
     };
     let side = |side: gaanim_scene::TransitionSide| -> Vec<ExtractedElement> {
@@ -4424,6 +4488,7 @@ fn compose_frame(
         &side(gaanim_scene::TransitionSide::Outgoing),
         None,
         outgoing_paint.as_ref(),
+        false,
     );
     let mut incoming = vello::Scene::new();
     let incoming_paint = background.map(|(canvas, pixel_size)| {
@@ -4442,6 +4507,7 @@ fn compose_frame(
         &side(gaanim_scene::TransitionSide::Incoming),
         None,
         incoming_paint.as_ref(),
+        false,
     );
     let mut above = vello::Scene::new();
     let overlays = gaanim_scene::SceneTransitionFrame {
@@ -4453,7 +4519,52 @@ fn compose_frame(
         &side(gaanim_scene::TransitionSide::None),
         Some(&overlays),
         outgoing_paint.as_ref(),
+        false,
     );
+    // The blend cannot reach drawables left out of the post-process: those
+    // of a segment cross-fade with the transition's progress instead.
+    let unprocessed = elements.iter().any(|element| element.post_exempt).then(|| {
+        let progress = shader.progress.clamp(0.0, 1.0);
+        let everywhere = kurbo::Rect::new(-1.0e7, -1.0e7, 1.0e7, 1.0e7);
+        let mut scene = vello::Scene::new();
+        for (which, alpha, paint) in [
+            (
+                gaanim_scene::TransitionSide::Outgoing,
+                1.0 - progress,
+                outgoing_paint.as_ref(),
+            ),
+            (
+                gaanim_scene::TransitionSide::Incoming,
+                progress,
+                incoming_paint.as_ref(),
+            ),
+            (
+                gaanim_scene::TransitionSide::None,
+                1.0,
+                outgoing_paint.as_ref(),
+            ),
+        ] {
+            let members = side(which);
+            if !members.iter().any(|element| element.post_exempt) {
+                continue;
+            }
+            let faded = alpha < 1.0;
+            if faded {
+                scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::BlendMode::default(),
+                    alpha,
+                    kurbo::Affine::IDENTITY,
+                    &everywhere,
+                );
+            }
+            append_extracted_elements(&mut scene, &members, None, paint, true);
+            if faded {
+                scene.pop_layer();
+            }
+        }
+        scene
+    });
     ComposedFrame {
         scene: outgoing,
         transition: Some(TransitionScenes {
@@ -4463,6 +4574,7 @@ fn compose_frame(
         }),
         effects: Vec::new(),
         backgrounds: Vec::new(),
+        unprocessed,
     }
 }
 
@@ -4495,6 +4607,8 @@ pub struct CapturedElement {
     pub clip_mask: Option<ClipMask>,
     pub blend: Option<peniko::BlendMode>,
     pub transition_side: gaanim_scene::TransitionSide,
+    /// Left out of the scene post-process.
+    pub post_exempt: bool,
     /// The element and its ancestors, while camera views exist.
     pub lineage: Vec<Entity>,
     pub view_bounds: Option<kurbo::Rect>,
@@ -4666,6 +4780,7 @@ fn capture_extraction(
                 clip_mask: element.clip_mask,
                 blend: element.blend,
                 transition_side: element.transition_side,
+                post_exempt: element.post_exempt,
                 lineage: element.lineage,
                 view_bounds: element.view_bounds,
                 in_views: element.in_views,
@@ -4772,6 +4887,7 @@ fn compose_captured_layers(
             ExtractedElement {
                 soft,
                 persistent: false,
+                post_exempt: element.post_exempt,
                 entity: element.entity,
                 recipe: None,
                 lottie: None,
@@ -4914,6 +5030,37 @@ fn publish_transition_layers(
     }
 }
 
+/// Resource: the drawables the post-process leaves out, which the canvas
+/// composites above the processed frame; `None` while there are none or no
+/// post-process runs, when they join the main scene. Written with the main
+/// scene by [`gaanim_render_system`] and [`external_frame_system`].
+#[derive(Resource, Default, Clone)]
+pub struct UnprocessedLayer(pub Option<Arc<vello::Scene>>);
+
+/// Take the frame's [`ComposedFrame::unprocessed`] drawables, which join the
+/// main scene unless a post-process (or a shader transition) runs at
+/// `time_seconds`, and publish them, keeping the resource unchanged while
+/// there are none.
+fn publish_unprocessed_layer(
+    commands: &mut Commands,
+    layer: Option<&mut UnprocessedLayer>,
+    composed: &mut ComposedFrame,
+    post: Option<&crate::post_process::CanvasPostProcess>,
+    time_seconds: f64,
+) {
+    let post_process =
+        composed.transition.is_some() || post.is_some_and(|post| post.active_at(time_seconds));
+    let unprocessed = composed.take_unprocessed(post_process);
+    match layer {
+        Some(layer) => {
+            if layer.0.is_some() || unprocessed.is_some() {
+                layer.0 = unprocessed.map(Arc::new);
+            }
+        }
+        None => commands.insert_resource(UnprocessedLayer(unprocessed.map(Arc::new))),
+    }
+}
+
 /// Resource: a captured frame to show instead of the world's drawables.
 ///
 /// While it exists, [`gaanim_render_system`] stands down and
@@ -4934,12 +5081,24 @@ pub fn external_frame_system(
     mut external: ResMut<ExternalFrame>,
     gaanim_camera: Option<Res<gaanim_math::ResolvedCamera>>,
     canvas_bg: Option<Res<CanvasBackground>>,
-    (mut shader_frame, preview, ambient, mut transition_layers, mut effect_layers): (
+    (
+        mut shader_frame,
+        preview,
+        ambient,
+        mut transition_layers,
+        mut effect_layers,
+        post_process,
+        mut unprocessed_layer,
+        playback,
+    ): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
         Option<Res<gaanim_animation::AmbientClock>>,
         Option<ResMut<TransitionLayers>>,
         Option<ResMut<EffectLayers>>,
+        Option<Res<crate::post_process::CanvasPostProcess>>,
+        Option<ResMut<UnprocessedLayer>>,
+        Option<Res<gaanim_animation::PlaybackState>>,
     ),
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     live: Option<Res<gaanim_animation::live::LiveOverlay>>,
@@ -4978,6 +5137,13 @@ pub fn external_frame_system(
     {
         published.0 = std::mem::take(&mut composed.effects);
     }
+    publish_unprocessed_layer(
+        &mut commands,
+        unprocessed_layer.as_deref_mut(),
+        &mut composed,
+        post_process.as_deref(),
+        playback.map_or(frame.background_time, |state| state.current_time),
+    );
     if let Some(overlay) = live.as_deref() {
         append_live_overlay(composed.top_mut(), overlay);
     }
@@ -5022,13 +5188,15 @@ type CameraScreenQuery<'w, 's> = Query<
     With<Visible>,
 >;
 
-/// Everything the render system reads to compose camera views.
+/// Everything the render system reads to compose camera views, and the
+/// drawables left out of the post-process.
 type CameraViewQueries<'w, 's> = (
     CameraScreenQuery<'w, 's>,
     CameraSourceQuery<'w, 's>,
     Query<'w, 's, (), With<gaanim_scene::HudOverlay>>,
     Query<'w, 's, &'static ViewLayer>,
     Query<'w, 's, &'static gaanim_animation::FloatSignal>,
+    Query<'w, 's, (), With<PostProcessExempt>>,
 );
 
 /// Transforms and bounds of the drawables that camera views frame.
@@ -5140,14 +5308,24 @@ pub fn gaanim_render_system(
         Option<Ref<ChalkBrush>>,
     )>,
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
-    (mut shader_frame, preview, live, ambient, mut transition_layers): (
+    (
+        mut shader_frame,
+        preview,
+        live,
+        ambient,
+        mut transition_layers,
+        post_process,
+        mut unprocessed_layer,
+    ): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
         Option<Res<gaanim_animation::live::LiveOverlay>>,
         Option<Res<gaanim_animation::AmbientClock>>,
         Option<ResMut<TransitionLayers>>,
+        Option<Res<crate::post_process::CanvasPostProcess>>,
+        Option<ResMut<UnprocessedLayer>>,
     ),
-    (camera_screens, camera_sources, hud_query, layer_query, float_signals): CameraViewQueries,
+    (camera_screens, camera_sources, hud_query, layer_query, float_signals, exempt_query): CameraViewQueries,
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
 ) {
     let (local_extracted, local_culled) = &mut *scratch;
@@ -5600,6 +5778,7 @@ pub fn gaanim_render_system(
                     |e| child_query.get(e).ok().map(ChildOf::parent),
                     |e| order_query.get(e).is_ok_and(|(_, member, _)| member),
                 ),
+            post_exempt: exempt_query.contains(entity),
             lineage: if camera_views.is_empty() {
                 Vec::new()
             } else {
@@ -5736,6 +5915,13 @@ pub fn gaanim_render_system(
     if let Some(frame) = shader_frame.as_mut() {
         frame.0 = shader_requests;
     }
+    publish_unprocessed_layer(
+        &mut commands,
+        unprocessed_layer.as_deref_mut(),
+        &mut composed,
+        post_process.as_deref(),
+        time_seconds,
+    );
     if let Some(overlay) = live.as_deref() {
         append_live_overlay(composed.top_mut(), overlay);
     }
@@ -6929,6 +7115,7 @@ mod tests {
         let element = |rect| ExtractedElement {
             soft: Default::default(),
             persistent: false,
+            post_exempt: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -6984,6 +7171,7 @@ mod tests {
         ExtractedElement {
             soft: Default::default(),
             persistent: false,
+            post_exempt: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -7015,6 +7203,29 @@ mod tests {
             tip: false,
             backdrop: None,
         }
+    }
+
+    #[test]
+    fn drawables_left_out_of_the_post_process_compose_apart() {
+        let kept = group_member(Entity::from_raw_u32(21).unwrap(), -2.0, 1.0, 1.0);
+        let mut exempt = group_member(Entity::from_raw_u32(22).unwrap(), 2.0, 1.0, 1.0);
+        exempt.post_exempt = true;
+        let paths = |scene: &vello::Scene| scene.encoding().n_paths;
+        let alone = compose_frame(std::slice::from_ref(&kept), None, None, 1.0, 0.0, None);
+        assert!(alone.unprocessed.is_none());
+
+        let mut composed = compose_frame(&[kept, exempt], None, None, 1.0, 0.0, None);
+        assert_eq!(paths(&composed.scene), paths(&alone.scene));
+        let layer = composed
+            .unprocessed
+            .clone()
+            .expect("the exempt drawable has a layer");
+        assert!(paths(&layer) > 0);
+        // With a post-process the layer stays apart; without one it joins
+        // the frame on top.
+        assert!(composed.clone().take_unprocessed(true).is_some());
+        assert!(composed.take_unprocessed(false).is_none());
+        assert_eq!(paths(&composed.scene), paths(&alone.scene) + paths(&layer));
     }
 
     #[test]
@@ -7160,6 +7371,7 @@ mod tests {
         let element = |opacity| ExtractedElement {
             soft: Default::default(),
             persistent: false,
+            post_exempt: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -7202,6 +7414,7 @@ mod tests {
         let element = |scene: vello::Scene| ExtractedElement {
             soft: Default::default(),
             persistent: false,
+            post_exempt: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -7273,6 +7486,7 @@ mod tests {
         let element = |blend| ExtractedElement {
             soft: Default::default(),
             persistent: false,
+            post_exempt: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,
@@ -7322,6 +7536,7 @@ mod tests {
         let element = |clip_mask| ExtractedElement {
             soft: Default::default(),
             persistent: false,
+            post_exempt: false,
             entity: Entity::PLACEHOLDER,
             recipe: None,
             lottie: None,

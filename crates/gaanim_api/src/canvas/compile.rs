@@ -3169,6 +3169,30 @@ impl SceneModel {
                 },
             )
             .collect();
+        // A segment with its own motion blur turns the scene's into one
+        // window per segment. A frame on a cut belongs to the segment it
+        // enters, so a window stops short of the next segment. Whip pans
+        // follow: they blur the frames that have no blur of their own.
+        let own_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)> =
+            if segments.iter().any(|segment| segment.motion_blur.is_some()) {
+                let last = segment_metadata.len().saturating_sub(1);
+                segments
+                    .iter()
+                    .zip(&segment_metadata)
+                    .enumerate()
+                    .filter_map(|(index, (segment, metadata))| {
+                        let blur = segment.motion_blur.unwrap_or(self.motion_blur)?;
+                        let end = if index < last {
+                            metadata.end_time - 1.0e-8
+                        } else {
+                            metadata.end_time
+                        };
+                        Some((metadata.start_time, end, blur))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
         let segment_post_processes = segments
             .iter()
             .zip(&segment_metadata)
@@ -3651,8 +3675,8 @@ impl SceneModel {
         );
         builder.commands.insert_resource(post_process);
         match self.motion_blur {
-            Some(blur) => builder.commands.insert_resource(blur),
-            None => builder
+            Some(blur) if own_windows.is_empty() => builder.commands.insert_resource(blur),
+            _ => builder
                 .commands
                 .remove_resource::<gaanim_renderer::effects::MotionBlur>(),
         }
@@ -3660,12 +3684,15 @@ impl SceneModel {
         builder
             .commands
             .insert_resource(gaanim_scene::DepthOfField::default());
-        if builder.motion_blur_windows.is_empty() {
+        let windows: Vec<_> = own_windows
+            .into_iter()
+            .chain(builder.motion_blur_windows.iter().copied())
+            .collect();
+        if windows.is_empty() {
             builder
                 .commands
                 .remove_resource::<gaanim_renderer::effects::MotionBlurWindows>();
         } else {
-            let windows = builder.motion_blur_windows.clone();
             builder
                 .commands
                 .insert_resource(gaanim_renderer::effects::MotionBlurWindows(windows));
@@ -11460,6 +11487,14 @@ impl SceneModel {
                     .insert(gaanim_renderer::effects::MotionBlurExempt);
             }
         }
+        if spec.post_exempt {
+            for (entity, _) in Self::hierarchy_entities(builder, mref.id) {
+                builder
+                    .commands
+                    .entity(entity)
+                    .insert(gaanim_renderer::effects::PostProcessExempt);
+            }
+        }
         if let Some(tips) = &spec.tips {
             Self::attach_tips(builder, mref.id, tips.clone());
         }
@@ -11730,6 +11765,7 @@ impl SceneModel {
                             gaanim_renderer::effects::ElementBlend,
                             gaanim_renderer::effects::ViewLayer,
                             gaanim_renderer::effects::MotionBlurExempt,
+                            gaanim_renderer::effects::PostProcessExempt,
                             gaanim_renderer::effects::StrokeProfile,
                             gaanim_renderer::effects::ChalkBrush,
                         )>();
@@ -21564,6 +21600,49 @@ mod tests {
         timeline.seek(&mut world, 2.0);
         let turned = world_matrix_of_width(&mut world, 1.6).transform_point3(local);
         assert!(turned.distance(elbow) < 1e-6, "{turned:?}");
+    }
+
+    #[test]
+    fn a_drawable_left_out_of_the_post_process_marks_its_members() {
+        let mut canvas = SceneModel::new(640, 360);
+        let a = canvas.rect(1.0, 1.0);
+        let b = canvas.circle(0.5);
+        let _label = canvas.group(&[&a, &b]).post_process(false);
+        let _kept = canvas.rect(2.0, 1.0);
+        canvas.wait(0.5);
+        let (mut world, _) = compiled_world(&canvas);
+        let exempt = world
+            .query_filtered::<(), With<gaanim_renderer::effects::PostProcessExempt>>()
+            .iter(&world)
+            .count();
+        // The group and its two members, not the other rectangle.
+        assert_eq!(exempt, 3);
+    }
+
+    #[test]
+    fn segments_blur_their_motion_their_own_way() {
+        use gaanim_renderer::effects::{MotionBlur, MotionBlurWindows};
+        let blur = |angle: f64| MotionBlur::new(angle, 8, None).unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_motion_blur(Some(blur(180.0)));
+        let mut segments = Vec::new();
+        for name in ["scene", "wide", "sharp"] {
+            segments.push(canvas.segment_with(name, None, None, None).unwrap());
+            canvas.wait(1.0);
+        }
+        canvas
+            .set_segment_motion_blur(&segments[1], Some(blur(360.0)))
+            .unwrap();
+        canvas.set_segment_motion_blur(&segments[2], None).unwrap();
+        let (world, _) = compiled_world(&canvas);
+        assert!(world.get_resource::<MotionBlur>().is_none());
+        let windows = world.resource::<MotionBlurWindows>();
+        assert_eq!(windows.at(0.5), Some(blur(180.0)));
+        assert_eq!(windows.at(1.5), Some(blur(360.0)));
+        assert_eq!(windows.at(2.5), None);
+        // A frame on a cut belongs to the segment it enters.
+        assert_eq!(windows.at(1.0), Some(blur(360.0)));
+        assert_eq!(windows.at(2.0), None);
     }
 
     #[test]

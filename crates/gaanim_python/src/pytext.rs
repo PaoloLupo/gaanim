@@ -1333,6 +1333,13 @@ impl PyText {
         Ok(slf)
     }
 
+    #[pyo3(signature = (enabled=true))]
+    fn post_process<'py>(slf: PyRef<'py, Self>, enabled: bool) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.handle.clone().post_process(enabled);
+        Ok(slf)
+    }
+
     #[pyo3(signature = (count=5, *, delay=0.04, decay=0.6, hold=false, start=None, end=None))]
     #[allow(clippy::too_many_arguments)]
     fn echo<'py>(

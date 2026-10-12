@@ -3,8 +3,9 @@
 ``scene.canvas.motion_blur`` averages sub-frames over the time a film
 shutter stays open, in exports and snapshots (the interactive preview stays
 sharp). The first segment moves dots across their tracks at three speeds,
-the second spins, scales and orbits shapes. Each label is the code that
-moves its row or panel.
+the second spins, scales and orbits shapes, and the last four give a
+segment a shutter of its own. Each label is the code that moves its row or
+panel, or that sets its segment's shutter.
 """
 
 import math
@@ -17,8 +18,8 @@ rule = scene.canvas.color("rule")
 
 # A 360 degree shutter stays open for a whole frame (180 is the film
 # standard, 720 the maximum), sampled 32 times; phase= moves the shutter
-# relative to the frame time and None turns the blur off. It is one setting
-# for the whole scene.
+# relative to the frame time and None turns the blur off. It applies to
+# every segment without a shutter of its own.
 scene.canvas.motion_blur(360, samples=32)
 
 # Every dot crosses its track at a constant speed: the faster it goes, the
@@ -86,12 +87,45 @@ scene.wait(0.3)
 scene.play(plays)
 scene.wait(0.3)
 
+# Segment.motion_blur gives one segment a shutter of its own, with the
+# arguments of scene.canvas.motion_blur; None keeps it sharp. A ring kept
+# sharp marks where the dot is at the frame time: a centered shutter smears
+# around it, while phase=0 opens the shutter there and smears ahead.
+SHUTTERS = [
+    ("narrow", {"shutter_angle": 90}, "motion_blur(90, samples=32)"),
+    ("wide", {"shutter_angle": 720}, "motion_blur(720, samples=32)"),
+    ("ahead", {"shutter_angle": 360, "phase": 0}, "motion_blur(360, samples=32, phase=0)"),
+    ("sharp", None, "motion_blur(None)"),
+]
+shutter_starts = []
+for name, options, call in SHUTTERS:
+    shutter_starts.append(scene.cursor)
+    segment = scene.segment(name)
+    if options is None:
+        segment.motion_blur(None)
+    else:
+        segment.motion_blur(samples=32, **options)
+    heading, body = scene.layout.zones(Zones.rows(["2fr", "5fr"], gap="24px", padding="page_padding"))
+    scene.text(f'scene.segment("{name}").{call}', role="code").place(heading, anchor="left")
+    track = body.inset(("0px", "96px"))
+    (start, y), (end, _) = track.point("left"), track.point("right")
+    scene.geometry.line(start, y, end, y).stroke(rule, 0.02)
+    dot = scene.geometry.dot(0.32).move_to(start, y)
+    ring = scene.geometry.circle(0.42).no_fill().stroke(rule, 0.03).move_to(start, y).motion_blur(False)
+    scene.wait(0.3)
+    scene.play([
+        shape.animate.shift_by(track.width, 0).easing(Easing.LINEAR).duration(0.4) for shape in (dot, ring)
+    ])
+    scene.wait(0.3)
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # The dots while all four move and as the slowest goes on alone; the
-    # shapes at a quarter and halfway through their motion.
+    # shapes at a quarter and halfway through their motion; each shutter
+    # halfway along the track.
     scene.snapshots(
         snapshots,
-        [speeds_start + 0.4, speeds_start + 0.8, shapes_start + 0.42, shapes_start + 0.55],
+        [speeds_start + 0.4, speeds_start + 0.8, shapes_start + 0.42, shapes_start + 0.55]
+        + [start + 0.5 for start in shutter_starts],
     )
 else:
     scene.render()

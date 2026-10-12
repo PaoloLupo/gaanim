@@ -1023,6 +1023,26 @@ scene.render()
 )
 
 #api-entry(
+  name: "Drawable.post_process",
+  kind: "method",
+  params: ((name: "enabled", type: "bool", default: "True", desc: [`False` deja fuera del postprocesado el objeto y sus miembros.]),),
+  desc: [Si el #link("/referencia/themes/#api-canvas-post")[postprocesado] de la escena, o el de su segmento, se aplica al objeto. Con `False` se dibuja encima del cuadro ya procesado, por ejemplo una etiqueta o un HUD que `pixelate`, `glitch` o `halftone` harían ilegibles. Queda encima de todo lo procesado, sea cual sea su `z_index`, y sigue las transiciones de su segmento; en una transición por shader se funde con su progreso. Las copias de `echo` heredan el ajuste.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, PostProcess, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.canvas.post = PostProcess.pixelate(24)
+scene.geometry.circle(2).fill(CORAL).move_to(-3, 0)
+scene.text("pixelado", size=0.9).move_to(-3, -3)
+scene.text("legible", size=0.9).move_to(3, -3).post_process(False)
+scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.trim",
   kind: "method",
   params: ((name: "start / end", type: "float | None", default: "None", desc: [Ventana visible del camino como fracción de su longitud; al principio valen 0 y 1.]), (name: "offset", type: "float | None", default: "None", desc: [Desplaza la ventana; da la vuelta al final del camino.]), (name: "mode", type: "str | None", default: "None", desc: [`"simultaneous"` (predeterminado) recorta cada subcamino a la vez; `"sequential"` recorta la longitud total y los subcaminos aparecen uno tras otro.])),

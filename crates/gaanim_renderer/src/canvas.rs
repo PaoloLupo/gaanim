@@ -624,11 +624,14 @@ type CanvasViews<'w, 's> = Query<
 >;
 
 /// What else draws into the canvas this frame: post-processing, a shader
-/// background and a shader transition's targets.
+/// background, a shader transition's targets, and the drawables the
+/// post-process leaves out with their target.
 type CanvasEffects<'w> = (
     Option<Res<'w, crate::post_process_gpu::ExtractedPostProcess>>,
     Option<Res<'w, crate::background_gpu::ExtractedShaderBackground>>,
     Option<Res<'w, crate::post_process_gpu::CanvasTransitionTargets>>,
+    Option<Res<'w, crate::post_process_gpu::ExtractedUnprocessed>>,
+    Option<Res<'w, crate::post_process_gpu::CanvasOverlayTarget>>,
 );
 
 /// Rasterizes the extracted scene into the canvas texture before the camera
@@ -670,7 +673,15 @@ fn render_canvas(
     // Post-processing rewrites the texture in place, and shader backgrounds
     // animate outside the scene encoding: frames with either are always drawn.
     // A soft effect's image keeps its pixels while the scene draws it.
-    let (post, shader, transition_targets) = effects;
+    let (post, shader, transition_targets, unprocessed, overlay_target) = effects;
+    // The drawables the post-process leaves out draw into their own target
+    // when it runs, otherwise into the canvas with the rest.
+    let unprocessed = unprocessed.and_then(|layer| layer.0.clone());
+    let overlay_view = overlay_target
+        .as_deref()
+        .and_then(|target| target.view())
+        .filter(|_| post.as_ref().is_some_and(|post| post.is_active()))
+        .cloned();
     let volatile = post.is_some_and(|post| post.is_active())
         || shader.is_some_and(|shader| shader.is_active())
         || extracted.transition.is_some()
@@ -684,6 +695,11 @@ fn render_canvas(
     let mut scenes = 0;
     if let Some((scene, affine)) = &current.scene {
         frame.append(scene, Some(*affine));
+        if overlay_view.is_none()
+            && let Some(unprocessed) = &unprocessed
+        {
+            frame.append(unprocessed, Some(*affine));
+        }
         scenes = 1;
     }
 
@@ -758,6 +774,25 @@ fn render_canvas(
             ) {
                 error!("Vello failed to render a transition layer: {error}");
             }
+        }
+    }
+    if let (Some(view), Some(unprocessed), Some(affine)) = (&overlay_view, &unprocessed, placement)
+    {
+        let mut placed = Scene::new();
+        placed.append(unprocessed, Some(affine));
+        if let Err(error) = renderer.render_to_texture(
+            device.wgpu_device(),
+            &queue,
+            &placed,
+            view,
+            &RenderParams {
+                base_color: vello::peniko::Color::TRANSPARENT,
+                width: pixels.x,
+                height: pixels.y,
+                antialiasing_method: CANVAS_ANTIALIASING,
+            },
+        ) {
+            error!("Vello failed to render the drawables left out of the post-process: {error}");
         }
     }
 }
