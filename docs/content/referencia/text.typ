@@ -121,7 +121,9 @@ Los roles son `title`, `subtitle`, `kicker`, `heading`, `body`, `caption`,
 `label`, `code` y `math`. Sus tamaños predeterminados, en unidades de escena,
 son: `title` 0.64, `subtitle` 0.48, `kicker` 0.32, `heading` 0.48, `body` 0.40,
 `caption` 0.32, `label` 0.36, `code` 0.36 y `math` 0.44. La prosa usa New
-Computer Modern, el código Consolas y la matemática New Computer Modern Math.
+Computer Modern, el código JetBrains Mono y la matemática New Computer Modern
+Math. Las tres vienen con Gaanim, así que el texto se ve igual en cualquier
+equipo y en el navegador.
 Con un tema, `kicker` toma el color `accent`, ideal para la línea corta sobre un
 título:
 
@@ -803,7 +805,7 @@ title = scene.text.typst(Path("assets/title.typ"))
     (name: "accent", type: "ColorLike | None", default: "None", desc: [Color del borde, la regla y el nombre del lenguaje; por defecto, el `accent` del tema, aclarado u oscurecido si no se lee sobre un `background` propio.]),
     (name: "theme", type: "str | os.PathLike | None", default: "None", desc: [Archivo `.tmTheme` (el formato de TextMate, Sublime Text y bat) con los colores de los tokens, resuelto como los demás assets.]),
     (name: "highlight", type: "bool", default: "True", desc: [Con `False`, todo el código va en `color`.]),
-    (name: "font", type: "str | None", default: "None", desc: [Familia monoespaciada. Sin ella, o si no está instalada, DejaVu Sans Mono, incluida en Gaanim, para que el bloque se vea igual en cualquier equipo.]),
+    (name: "font", type: "str | None", default: "None", desc: [Familia monoespaciada. Sin ella, o si no está instalada, JetBrains Mono, incluida en Gaanim, para que el bloque se vea igual en cualquier equipo.]),
   ),
   desc: [Panel de código: el nombre del lenguaje sobre una regla y el código debajo, alineado a la izquierda, con sus tokens resaltados. Las palabras clave, las cadenas, los números, los comentarios, las funciones y los tipos toman los colores de código del tema: los temas de editores (`dracula`, `nord`, `solarized-*`, `gruvbox-dark`, `tokyo-night`, `catppuccin-*`) usan su esquema original, y `technical`, `presentation`, `paper` y los temas propios los derivan de la paleta (palabras clave en `accent`, comentarios en `muted`). Los tokens `code`, `code_keyword`, `code_string`, `code_number`, `code_comment`, `code_function` y `code_type` de `Theme(colors=...)` los sustituyen. Sobre un `background` en el que los colores del tema no se leen (un panel oscuro en un tema claro, o al revés), el texto y cada token se ajustan hasta leerse; los que ya se leen no cambian. Cada carácter sigue siendo un glifo propio, coloreado o no. Una fuente vacía, un lenguaje con caracteres distintos de letras y dígitos ASCII, `-` o `_`, una `font` vacía o un tamaño no positivo lanzan `ValueError`; un `theme` inexistente lanza `FileNotFoundError`, y uno que no es un tmTheme, `ValueError`.],
 )[

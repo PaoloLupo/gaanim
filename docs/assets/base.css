@@ -1,15 +1,15 @@
 @font-face {
-    font-family: "VictorMono";
-    font-weight: 100 700;
+    font-family: "JetBrains Mono";
+    font-weight: 100 800;
     font-display: swap;
-    src: url("/assets/fonts/VictorMono-VariableFont.ttf") format("truetype");
+    src: url("/assets/fonts/JetBrainsMono-Variable.ttf") format("truetype");
 }
 @font-face {
-    font-family: "VictorMono";
-    font-weight: 100 700;
+    font-family: "JetBrains Mono";
+    font-weight: 100 800;
     font-style: italic;
     font-display: swap;
-    src: url("/assets/fonts/VictorMono-Italic-VariableFont.ttf") format("truetype");
+    src: url("/assets/fonts/JetBrainsMono-Italic-Variable.ttf") format("truetype");
 }
 @font-face {
     font-family: "Aleo";
@@ -71,7 +71,7 @@
     /* Body text uses the reader's system face; headings share Aleo with the PDF. */
     --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --font-display: "Aleo", Georgia, "Times New Roman", serif;
-    --font-code: "VictorMono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --font-code: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --font-math: "NewComputerModernMath", serif;
 
     /* Interface language: square frames that move one frame at a time

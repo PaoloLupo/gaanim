@@ -39,7 +39,7 @@
     set text(font: "Aleo", size: 10.2pt, fill: rgb("#172033"))
     set par(justify: true, leading: 0.72em)
     set heading(numbering: "1.1.")
-    show raw: set text(font: "Victor Mono", size: 8.4pt)
+    show raw: set text(font: "JetBrains Mono", size: 8.4pt)
 
     // Portada independiente.
     block(height: 100%)[

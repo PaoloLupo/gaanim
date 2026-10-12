@@ -1641,6 +1641,30 @@ mod tests {
     }
 
     #[test]
+    fn embedded_code_font_is_monospaced_and_variable_without_system_fonts() {
+        // JetBrains Mono ships inside Gaanim, so code shapes the same on
+        // every machine: every glyph advances 0.6 em, and its weight axis
+        // thickens the strokes.
+        let registry = FontRegistry::without_system_fonts();
+        let family = crate::code::CODE_FALLBACK_FONT;
+        let run = |text: &str, weight| {
+            shape_typst_text_run(&registry, text, family, weight, 1.0).unwrap()
+        };
+        for text in ["iiii", "MMMM", "->=="] {
+            let advance = run(text, None).advance;
+            assert!((advance - 2.4).abs() < 1e-4, "{text}: {advance}");
+        }
+        // A bar is as wide as the stroke.
+        let stroke = |weight| run("|", Some(weight)).path.bounding_box().width();
+        assert!(
+            stroke(800) > 1.5 * stroke(400),
+            "{} vs {}",
+            stroke(800),
+            stroke(400)
+        );
+    }
+
+    #[test]
     fn text_runs_keep_pen_origin_and_whitespace_advances() {
         let registry = FontRegistry::new();
         let run = |text: &str| {

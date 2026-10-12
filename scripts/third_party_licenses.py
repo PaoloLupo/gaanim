@@ -37,6 +37,11 @@ EMBEDDED_ASSETS = (
         "DejaVu Sans Bold (crates/gaanim_objects/assets/fonts/DejaVuSans-Bold.ttf)",
         ROOT / "crates/gaanim_objects/assets/fonts/LICENSE-DejaVu.txt",
     ),
+    (
+        "JetBrains Mono 2.304 (crates/gaanim_text/assets/fonts/JetBrainsMono-Variable.ttf, "
+        "JetBrainsMono-Italic-Variable.ttf)",
+        ROOT / "crates/gaanim_text/assets/fonts/LICENSE-JetBrainsMono.txt",
+    ),
 )
 
 

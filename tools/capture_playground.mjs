@@ -178,7 +178,7 @@ writeFileSync(
     // As `gaanim init` writes it: the packages panel adds to its list.
     "mi-animacion/pyproject.toml": PYPROJECT,
     "mi-animacion/datos/puntos.csv": POINTS,
-    "mi-animacion/assets/fonts/VictorMono.ttf": readFileSync(join(ROOT, "docs", "assets", "fonts", "VictorMono-VariableFont.ttf")),
+    "mi-animacion/assets/fonts/VictorMono.ttf": readFileSync(join(ROOT, "docs", "fixtures", "assets", "fonts", "VictorMono-VariableFont.ttf")),
     "mi-animacion/assets/imagenes/icono.png": readFileSync(join(ROOT, "docs", "assets", "brand", "gaanim-icon-512.png")),
     "mi-animacion/assets/audio/tono.wav": tone(),
   }),

@@ -91,6 +91,7 @@ impl Default for FontRegistry {
             aliases: HashMap::new(),
         };
         registry.register_embedded_scientific_font();
+        registry.register_embedded_code_font();
         registry.catalog_system_fonts();
         registry
     }
@@ -115,6 +116,7 @@ impl FontRegistry {
             aliases: HashMap::new(),
         };
         registry.register_embedded_scientific_font();
+        registry.register_embedded_code_font();
         registry
     }
 
@@ -240,6 +242,22 @@ impl FontRegistry {
                  Ensure standard font directories exist or register fonts manually."
             );
         }
+    }
+
+    /// Register JetBrains Mono, the face of the `code` role and of code
+    /// blocks, upright and italic. Both files are variable fonts, so every
+    /// weight from 100 to 800 resolves without a file per weight.
+    fn register_embedded_code_font(&mut self) {
+        static EMBEDDED: OnceLock<[Arc<[u8]>; 2]> = OnceLock::new();
+        let [upright, italic] = EMBEDDED.get_or_init(|| {
+            [
+                Arc::from(&include_bytes!("../assets/fonts/JetBrainsMono-Variable.ttf")[..]),
+                Arc::from(&include_bytes!("../assets/fonts/JetBrainsMono-Italic-Variable.ttf")[..]),
+            ]
+        });
+        let family = crate::code::CODE_FALLBACK_FONT;
+        self.register_font_bytes(family, upright.clone());
+        self.register_font_bytes(format!("{family} italic"), italic.clone());
     }
 
     /// Register Typst's bundled New Computer Modern text face under Gaanim's
@@ -530,9 +548,14 @@ mod tests {
     fn registry_without_system_fonts_keeps_the_embedded_default() {
         let full = FontRegistry::new();
         let light = FontRegistry::without_system_fonts();
+        let families = |registry: &FontRegistry| {
+            let mut keys = registry.registered.keys().cloned().collect::<Vec<_>>();
+            keys.sort();
+            keys
+        };
         assert_eq!(
-            full.registered.keys().collect::<Vec<_>>(),
-            light.registered.keys().collect::<Vec<_>>(),
+            families(&full),
+            families(&light),
             "measurement and rendering registries must describe the same Typst fonts"
         );
         assert!(std::sync::Arc::ptr_eq(

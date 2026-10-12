@@ -10,9 +10,11 @@ use std::io::Cursor;
 
 use gaanim_core::peniko::Color;
 
-/// Font every code block falls back to. Typst ships it, so a block looks the
-/// same on every machine when its font is missing.
-pub const CODE_FALLBACK_FONT: &str = "DejaVu Sans Mono";
+/// Monospaced family of the `code` text role and of code blocks, and the one
+/// a block falls back to when its font is missing. Gaanim embeds it (see
+/// [`crate::font::FontRegistry`]), so code looks the same on every machine
+/// and on the web.
+pub const CODE_FALLBACK_FONT: &str = "JetBrains Mono";
 
 /// Colors of the token classes a code block tells apart.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -489,7 +491,7 @@ mod tests {
             .len()
         };
         assert_eq!(with(Some("No Such Mono")), with(None));
-        assert!(markup(source, CodeHighlight::Off).contains("\"DejaVu Sans Mono\""));
+        assert!(markup(source, CodeHighlight::Off).contains("\"JetBrains Mono\""));
     }
 
     #[test]

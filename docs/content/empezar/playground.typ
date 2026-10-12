@@ -92,10 +92,11 @@ aplicación: `scene.media.image("assets/imagenes/logo.png")` o
 una fuente en el explorador, el editor la muestra y propone el código que la
 usa.
 
-El navegador solo trae tres fuentes: New Computer Modern, Libertinus Serif y
-DejaVu Sans Mono. Para usar otra, sube su archivo `.ttf` u `.otf` a una
-carpeta del proyecto y nómbrala en el tema. La vista previa de la fuente dice
-el nombre de familia que hay que escribir:
+El navegador solo trae las fuentes que vienen con Gaanim: New Computer Modern,
+Libertinus Serif, DejaVu Sans Mono y JetBrains Mono, la del código. Para usar
+otra, sube su archivo `.ttf` u `.otf` a una carpeta del proyecto y nómbrala en
+el tema. La vista previa de la fuente dice el nombre de familia que hay que
+escribir:
 
 #figure(
   image("../../assets/playground/fuente.webp", alt: "Una fuente subida a assets/fonts, con su muestra, su familia y el código del tema"),

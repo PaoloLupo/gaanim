@@ -22,7 +22,7 @@ const GHOST_LIFE = 1.1;
 const INTRO = 1.4; // radial grid reveal on first paint
 const STILL_TIME = 6.4; // frame shown when motion is reduced
 const RULER = 46; // stage height reserved for the timeline
-const MONO = '"VictorMono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+const MONO = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
 const clamp = (x) => Math.min(1, Math.max(0, x));
 const smooth = (x) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);

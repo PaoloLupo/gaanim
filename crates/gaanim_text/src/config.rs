@@ -118,11 +118,11 @@ impl Default for TextConfig {
             },
         );
 
-        // Monospace code role
+        // Monospace code role, in the embedded code face.
         roles.insert(
             TextRole::Code,
             RoleStyle {
-                font_family: "Consolas".to_string(),
+                font_family: crate::code::CODE_FALLBACK_FONT.to_string(),
                 size: 0.36,
                 fill_color: gaanim_core::peniko::Color::WHITE,
             },
