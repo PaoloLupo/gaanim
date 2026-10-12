@@ -86,22 +86,23 @@ for row, role, name in zip(left.split(Zones.rows(3, gap="24px")), ROLES, NAMES):
 scene.geometry.rounded_rect(right.width, right.height, 0.3).fill(color("success")).place(right)
 scene.wait(HOLD)
 
-# Every transition takes an easing; this one covers most of the way at once.
-caption("Transition.magic_move(0.8, easing=Easing.EXPONENTIAL_DECAY)")
+# Every transition takes an easing; a spring carries the stars past their
+# places and back while the fades never go back.
+caption("Transition.magic_move(0.8, easing=Easing.SNAPPY)")
 starts.append(scene.cursor)
-scene.segment("diagonal", Transition.magic_move(0.8, easing=Easing.EXPONENTIAL_DECAY))
+scene.segment("diagonal", Transition.magic_move(0.8, easing=Easing.SNAPPY))
 cells = stage.split(Zones.grid(rows=3, columns=3, gap="24px"))
 for cell, role, name in zip([cells[6], cells[4], cells[2]], ROLES, NAMES):
     scene.geometry.star(5, 1.0, 0.45).fill(color(role)).place(cell, fit="contain").named(name)
 scene.wait(HOLD)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # The bars at rest, then each transition halfway (the last one early) and
-    # its segment settled.
+    # The bars at rest, then each transition halfway (the spring past its
+    # targets) and its segment settled.
     scene.snapshots(
         snapshots,
         [starts[0] + 0.5] + [start + t for start in starts[1:-1] for t in (0.4, 1.2)]
-        + [starts[-1] + 0.15, starts[-1] + 1.2],
+        + [starts[-1] + 0.1, starts[-1] + 1.2],
     )
 else:
     scene.render()

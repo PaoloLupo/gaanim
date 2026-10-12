@@ -1217,8 +1217,12 @@ class Transition:
     including springs, which may overshoot) and every transition accepts
     ``overlay=`` (an ``Overlay`` drawn above the cut). Neither changes a
     segment's duration. Without ``easing`` the original transitions run
-    linearly and the vector reveals (``wipe``, ``clock_wipe``, ``iris``,
-    ``blinds``, ``push``, ``slide``) use ``Easing.SMOOTH``. Vector reveals
+    linearly, the morphs (``morph``, ``magic_move``) move with
+    ``Easing.SMOOTH`` and fade linearly, and the vector reveals (``wipe``,
+    ``clock_wipe``, ``iris``, ``blinds``, ``push``, ``slide``) use
+    ``Easing.SMOOTH``. A spring or back easing carries motion past its
+    target and back, while fades follow it without going back: once past
+    its target a transition has finished fading. Vector reveals
     clip both segments with animated paths in the visible camera frame, so
     they stay sharp at any resolution and need no textures. Shader
     transitions (``shader``, ``preset``) render each segment alone and blend
@@ -4562,7 +4566,9 @@ class Drawable:
         Without a pivot, shapes turn about their own origin; shapes declared
         in scene coordinates (``line``, ``polygon``, arcs, arrows, curves)
         turn about the center of their box instead. Once the drawable has
-        been shown, the pivot changes at the cursor without moving it.
+        been shown, the pivot changes at the cursor without moving it. The
+        point is in scene coordinates for the part of an SVG too, however the
+        SVG is scaled and placed.
 
         Example:
             result = drawable.with_pivot(1.0, 1.0)
@@ -8506,6 +8512,9 @@ class Geometry:
         """Morph matching pieces of ``source`` into ``target`` and fade the rest.
 
         Plays at the cursor like ``scene.play`` and advances it by ``duration``.
+        ``target`` is hidden until then; at the end it is shown and
+        ``source`` hidden, so later animations of ``target`` move what is on
+        screen.
 
         Example:
             scene.geometry.transform_matching_shapes(source, target, duration=1.2)
@@ -8514,7 +8523,13 @@ class Geometry:
     def transform_matching(self, source: Drawable, target: Drawable, *, mode: str = "shapes", duration: float = 1.0) -> None:
         """Auto-matching morph; ``mode`` is ``"shapes"`` or ``"tex"``.
 
-        Plays at the cursor like ``scene.play`` and advances it by ``duration``.
+        ``"shapes"`` pairs pieces by shape, place and color, like
+        ``transform_matching_shapes``. ``"tex"`` (or ``"text"``) pairs the
+        glyphs of two texts or equations by character, in reading order, and
+        falls back to shapes when either has no glyphs. Plays at the cursor
+        like ``scene.play`` and advances it by ``duration``; at the end
+        ``target`` is shown and ``source`` hidden. Another ``mode`` raises
+        ``ValueError``.
 
         Example:
             scene.geometry.transform_matching(source, target, mode="tex")
@@ -10128,9 +10143,11 @@ class Fx:
         whole cycle, and an easing such as ``Easing.SMOOTH`` keeps it dimmed at
         the end. The hole is a live frame around the target's bounds,
         ``padding`` away (0.2 by default) and rounded by ``corner_radius``; it
-        follows the target if it moves. The returned animation plays on the
-        overlay. A ``dim`` out of range or a target of another scene raises
-        ``ValueError``.
+        follows the target if it moves. A sequence of targets cuts one hole
+        around each, and holes that overlap merge: group the targets to light
+        their joint box instead. The returned animation plays on the
+        overlay. An empty sequence, a ``dim`` out of range or a target of
+        another scene raises ``ValueError``.
 
         Example:
             scene.play([scene.fx.spotlight(card, dim=0.7).duration(1.5)])

@@ -5202,7 +5202,9 @@ fn apply_transition(
 ) {
     use crate::transition::TransitionType;
 
-    // Easing shapes the progress of every effect; the base effect is applied below.
+    // Easing shapes the progress of every effect; the base effect is applied
+    // below. Fades never go back, so a spring does not fade content back in.
+    let fade = transition.fade_progress(t);
     let t = transition.eased_progress(t);
     let transition = transition.base();
 
@@ -5226,7 +5228,7 @@ fn apply_transition(
             );
         }
         TransitionType::CrossFade { .. } => {
-            let t = t.clamp(0.0, 1.0);
+            let t = fade;
             // Crossfade: multiplicatively modulate existing opacity.
             // Only touch root entities — opacity_propagation_system cascades to children.
             for (entity, scene_id) in scene_entities {
@@ -5246,7 +5248,7 @@ fn apply_transition(
             }
         }
         TransitionType::FadeThrough { fade_color, .. } => {
-            let t = t.clamp(0.0, 1.0);
+            let t = fade;
             // Fade-through: multiplicatively modulate existing opacity.
             // Only touch root entities — opacity_propagation_system cascades to children.
             let _ = fade_color;
@@ -5306,7 +5308,7 @@ fn apply_transition(
             }
         }
         TransitionType::Morph { mappings, .. } => {
-            apply_morph_transition(world, scene_entities, mappings, t.clamp(0.0, 1.0), from, to);
+            apply_morph_transition(world, scene_entities, mappings, t, fade, from, to);
         }
         TransitionType::Shader {
             shader, uniforms, ..
@@ -5350,7 +5352,7 @@ fn apply_transition(
         // Keys are resolved into `Morph` pairs by the authoring layer; an
         // unresolved magic move has no pairs and cross-fades like a morph.
         TransitionType::MagicMove { .. } => {
-            apply_morph_transition(world, scene_entities, &[], t.clamp(0.0, 1.0), from, to);
+            apply_morph_transition(world, scene_entities, &[], t, fade, from, to);
         }
     }
 }
@@ -5359,11 +5361,15 @@ fn apply_transition(
 /// that travels from the source's box to the target's, while the target fades
 /// in over the first half and the source fades out over the second. Unmapped
 /// scene roots cross-fade.
+///
+/// The box follows `progress`, past the target box when a spring overshoots;
+/// the fades follow `fade`, in `[0, 1]`.
 fn apply_morph_transition(
     world: &mut World,
     scene_entities: &[(Entity, SceneId)],
     mappings: &[crate::transition::MorphMapping],
-    t: f64,
+    progress: f64,
+    fade: f64,
     from: SceneId,
     to: SceneId,
 ) {
@@ -5376,7 +5382,6 @@ fn apply_morph_transition(
             .map(|(entity, id)| (id.0, entity))
             .collect()
     };
-    let eased = t * t * (3.0 - 2.0 * t);
     let mut placements = Vec::new();
     for mapping in mappings {
         let (Some(&source), Some(&target)) = (
@@ -5394,14 +5399,19 @@ fn apply_morph_transition(
         ) else {
             continue;
         };
-        let shared = Rect::new(
-            source_box.x0 + (target_box.x0 - source_box.x0) * eased,
-            source_box.y0 + (target_box.y0 - source_box.y0) * eased,
-            source_box.x1 + (target_box.x1 - source_box.x1) * eased,
-            source_box.y1 + (target_box.y1 - source_box.y1) * eased,
+        // An overshooting box keeps a size of at least zero.
+        let lerp = |a: f64, b: f64| a + (b - a) * progress;
+        let center = gaanim_core::kurbo::Point::new(
+            lerp(source_box.center().x, target_box.center().x),
+            lerp(source_box.center().y, target_box.center().y),
         );
-        placements.push((source, source_box, shared, (2.0 * (1.0 - t)).min(1.0)));
-        placements.push((target, target_box, shared, (2.0 * t).min(1.0)));
+        let size = gaanim_core::kurbo::Size::new(
+            lerp(source_box.width(), target_box.width()).max(0.0),
+            lerp(source_box.height(), target_box.height()).max(0.0),
+        );
+        let shared = Rect::from_center_size(center, size);
+        placements.push((source, source_box, shared, (2.0 * (1.0 - fade)).min(1.0)));
+        placements.push((target, target_box, shared, (2.0 * fade).min(1.0)));
     }
 
     let paired: HashSet<Entity> = placements.iter().map(|placement| placement.0).collect();
@@ -5410,9 +5420,9 @@ fn apply_morph_transition(
             continue;
         }
         let factor = if *scene_id == from {
-            1.0 - t as f32
+            1.0 - fade as f32
         } else if *scene_id == to {
-            t as f32
+            fade as f32
         } else {
             continue;
         };
@@ -5708,6 +5718,7 @@ mod tests {
             &mut world,
             &[source, target, other],
             &mappings,
+            0.5,
             0.5,
             from,
             to,

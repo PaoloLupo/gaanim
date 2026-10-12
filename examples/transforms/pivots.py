@@ -2,9 +2,10 @@
 
 Without a pivot a shape turns about its own center. ``with_pivot(x, y)`` (or
 its alias ``pivot``) moves that point anywhere in the scene, for hinges,
-corners and orbits; ``animate.rotate_by(...).pivot(x, y)`` turns about a
-point once; ``look_at`` keeps a drawable aimed at a moving target. Dots mark
-the pivots, and each label is the code that moves its cell.
+corners, orbits and the parts of an SVG;
+``animate.rotate_by(...).pivot(x, y)`` turns about a point once; ``look_at``
+keeps a drawable aimed at a moving target. Dots mark the pivots, and each
+label is the code that moves its cell.
 """
 
 import os
@@ -216,16 +217,43 @@ stopping.clear_drive()
 scene.play([dot.animate.move_along(track, start=0.5, end=1.0)], duration=2 * TURN)
 scene.wait(HOLD)
 
+# The part of an SVG turns about a scene point too, however the SVG is
+# scaled and placed: the character raises both arms about its shoulders,
+# the inner ends of the arms' boxes, and lowers them again.
+scene.segment("parts")
+top, stage = scene.layout.zones(Zones.rows(["200px", "1fr"], gap="24px", padding="page_padding"))
+scene.text(
+    'character = scene.media.svg("assets/character.svg").scale_to(1.8)\n'
+    'left = character.part("left-arm").with_pivot(*left_shoulder)\n'
+    'right = character.part("right-arm").with_pivot(*right_shoulder)\n'
+    "scene.play([left.animate.rotate_by(-pi / 3),\n"
+    "            right.animate.rotate_by(pi / 3)])",
+    role="code",
+).place(top, anchor="top_left")
+character = scene.media.svg("assets/character.svg").scale_to(1.8).place(stage)
+left, right = character.part("left-arm"), character.part("right-arm")
+left_box, right_box = left.bounds(), right.bounds()
+left_shoulder, right_shoulder = (left_box.right, left_box.y), (right_box.left, right_box.y)
+left.with_pivot(*left_shoulder)
+right.with_pivot(*right_shoulder)
+mark(*left_shoulder)
+mark(*right_shoulder)
+scene.play([left.animate.rotate_by(-pi / 3), right.animate.rotate_by(pi / 3)], duration=TURN)
+scene.play([left.animate.rotate_by(pi / 3), right.animate.rotate_by(-pi / 3)], duration=TURN)
+scene.wait(HOLD)
+
 SEGMENT = TURN + HOLD
 HINGES = 2 * TURN + HOLD
+LOOK_AT = 4 * TURN + HOLD
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # Rotations, scales and hinges midway and settled; the aimed shapes at
-    # four places of the dot.
+    # four places of the dot; the arms midway up, raised and lowered.
     scene.snapshots(
         snapshots,
         [0.6, SEGMENT - 0.1, SEGMENT + 0.6, 2 * SEGMENT - 0.1]
         + [2 * SEGMENT + t for t in (0.7, TURN + 0.1, TURN + 0.7, HINGES - 0.1)]
-        + [2 * SEGMENT + HINGES + t for t in (0.1, 1.4, 2.8, 4.2, 5.5)],
+        + [2 * SEGMENT + HINGES + t for t in (0.1, 1.4, 2.8, 4.2, 5.5)]
+        + [2 * SEGMENT + HINGES + LOOK_AT + t for t in (TURN / 2, TURN, 2 * TURN + HOLD - 0.1)],
     )
 else:
     scene.render()

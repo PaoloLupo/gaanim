@@ -4843,8 +4843,9 @@ impl SceneModel {
                         *duration,
                     );
                     if let (Some(&src), Some(&dst)) = (id_map.get(source), id_map.get(target)) {
-                        if mode == "tex" {
-                            let semantic_groups = semantic_pairs
+                        let tex = mode == "tex";
+                        let semantic_groups = if tex {
+                            semantic_pairs
                                 .iter()
                                 .filter_map(
                                     |(
@@ -4871,24 +4872,22 @@ impl SceneModel {
                                             .then_some((sources, targets))
                                     },
                                 )
-                                .collect();
-                            builder.play_equation_transition(
-                                src,
-                                dst,
-                                semantic_groups,
-                                *duration,
-                                EquationTransitionMode::Replace,
-                                true,
-                            );
+                                .collect()
                         } else {
-                            builder.play_transform_matching(
-                                src,
-                                dst,
-                                gaanim_math::matching::MatchingMode::Shapes,
-                                *duration,
-                                RateFunc::Smooth,
-                            );
-                        }
+                            Vec::new()
+                        };
+                        builder.play_transform_matching_grouped(
+                            src,
+                            dst,
+                            if tex {
+                                gaanim_math::matching::MatchingMode::Tex
+                            } else {
+                                gaanim_math::matching::MatchingMode::Shapes
+                            },
+                            semantic_groups,
+                            *duration,
+                            RateFunc::Smooth,
+                        );
                     }
                     builder.current_time = end;
                 }
@@ -12268,7 +12267,7 @@ impl SceneModel {
         if pivots_on_box_center && transform.anchor == DVec3::ZERO {
             transform.anchor = bounds.center();
         }
-        let mut pivot_in_scene = None;
+        let mut pivot_in_parent = None;
         let mut pending_text_anchor = uses_default_text_anchor.then_some((
             DVec3::ZERO,
             gaanim_text::prelude::TextAnchor::BaselineCenter,
@@ -12319,7 +12318,9 @@ impl SceneModel {
                     transform.skew = *skew;
                 }
                 LayoutOp::SetPivot(pivot) => {
-                    pivot_in_scene = Some(*pivot);
+                    // The anchor lives in the parent's space, such as the
+                    // document of an SVG part, laid out after its SVG.
+                    pivot_in_parent = Some(builder.declare_pivot(id, *pivot));
                 }
                 LayoutOp::MoveAnchorTo { target, anchor } => {
                     pending_text_anchor = None;
@@ -12470,7 +12471,7 @@ impl SceneModel {
                 })
                 .unwrap_or_else(|| bounds.center());
 
-            if let Some(pivot) = pivot_in_scene {
+            if let Some(pivot) = pivot_in_parent {
                 // Satisfy both constraints exactly: the public pivot remains
                 // fixed in scene space while the requested text point lands on
                 // its target after the final rotation, skew and scale.
@@ -12498,7 +12499,7 @@ impl SceneModel {
             } else {
                 transform = gaanim_layout::compute_move_point_to(&transform, target, point);
             }
-        } else if let Some(pivot) = pivot_in_scene {
+        } else if let Some(pivot) = pivot_in_parent {
             // SpatialTransform stores anchors in local coordinates, while the
             // public API accepts the stable scene-space point users see.
             transform.anchor = pivot - transform.translation;
@@ -21485,6 +21486,114 @@ mod tests {
         );
     }
 
+    /// World matrix of the entity whose local box is `width` wide.
+    fn world_matrix_of_width(world: &mut World, width: f64) -> gaanim_core::glam::DMat4 {
+        let entity = world
+            .query::<(Entity, &LocalBounds)>()
+            .iter(world)
+            .find(|(_, bounds)| (bounds.0.width() - width).abs() < 1e-6)
+            .unwrap()
+            .0;
+        let mut matrix = gaanim_core::glam::DMat4::IDENTITY;
+        let mut current = Some(entity);
+        while let Some(node) = current {
+            let local = world.get::<SpatialTransform>(node).unwrap().to_mat4();
+            matrix = local * matrix;
+            current = world.get::<ChildOf>(node).map(ChildOf::parent);
+        }
+        matrix
+    }
+
+    #[test]
+    fn an_svg_part_turns_about_a_scene_pivot() {
+        let svg_file =
+            std::env::temp_dir().join(format!("gaanim_svg_pivot_test_{}.svg", std::process::id()));
+        std::fs::write(
+            &svg_file,
+            r##"<svg width="300" height="200" xmlns="http://www.w3.org/2000/svg">
+                <rect id="early" x="20" y="40" width="100" height="20"/>
+                <rect id="late" x="160" y="120" width="60" height="20"/>
+              </svg>"##,
+        )
+        .unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        let svg = canvas.svg(&svg_file).unwrap();
+        std::fs::remove_file(svg_file).unwrap();
+        let svg = svg.scale_to(1.5).move_to(3.0, 1.0);
+        let early = svg.part("early").unwrap();
+        let late = svg.part("late").unwrap();
+        // One pivot is declared with the SVG, the other at the cursor.
+        let early_pivot = DVec3::new(-1.0, 2.0, 0.0);
+        let late_pivot = DVec3::new(5.0, -2.0, 0.0);
+        let early = early.with_pivot(early_pivot.x, early_pivot.y);
+        canvas.wait(0.5);
+        let late = late.with_pivot(late_pivot.x, late_pivot.y);
+        canvas.play(vec![
+            early.animate().rotate_by(1.0).duration(1.0),
+            late.animate().rotate_by(-1.0).duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        for (width, pivot) in [(1.0, early_pivot), (0.6, late_pivot)] {
+            timeline.seek(&mut world, 0.5);
+            let local = world_matrix_of_width(&mut world, width)
+                .inverse()
+                .transform_point3(pivot);
+            timeline.seek(&mut world, 1.5);
+            let turned = world_matrix_of_width(&mut world, width).transform_point3(local);
+            assert!(turned.distance(pivot) < 1e-6, "{width}: {turned:?}");
+        }
+    }
+
+    #[test]
+    fn a_joint_turns_about_its_pivot_after_its_group_turned() {
+        let mut canvas = SceneModel::new(640, 360);
+        let upper = canvas.rect(2.0, 0.2).move_to(1.0, 0.0);
+        let lower = canvas.rect(1.5, 0.2).move_to(2.75, 0.0);
+        let joint = canvas.circle(0.1).move_to(2.0, 0.0);
+        // The forearm's box is 1.6 wide, from the joint to its end.
+        let forearm = canvas.group(&[&lower, &joint]).with_pivot(2.0, 0.0);
+        let arm = canvas.group(&[&upper, &forearm]).with_pivot(0.0, 0.0);
+        canvas.play(vec![arm.animate().rotate_by(0.5).duration(1.0)]);
+        canvas.play(vec![forearm.animate().rotate_by(0.7).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let elbow = gaanim_core::glam::DQuat::from_rotation_z(0.5) * DVec3::new(2.0, 0.0, 0.0);
+        timeline.seek(&mut world, 1.0);
+        let local = world_matrix_of_width(&mut world, 1.6)
+            .inverse()
+            .transform_point3(elbow);
+        timeline.seek(&mut world, 2.0);
+        let turned = world_matrix_of_width(&mut world, 1.6).transform_point3(local);
+        assert!(turned.distance(elbow) < 1e-6, "{turned:?}");
+    }
+
+    #[test]
+    fn a_spotlight_cuts_a_hole_around_each_target() {
+        let mut canvas = SceneModel::new(640, 360);
+        let left = canvas.rect(1.0, 1.0).move_to(-4.0, 1.0);
+        let right = canvas.rect(1.0, 1.0).move_to(4.0, -1.0);
+        let anim = canvas
+            .spotlight(
+                vec![
+                    crate::canvas::BoundsTarget::Drawable(left.id),
+                    crate::canvas::BoundsTarget::Drawable(right.id),
+                ],
+                0.7,
+                [0.1; 4],
+                0.05,
+            )
+            .unwrap();
+        canvas.play(vec![anim]);
+        let (mut world, _) = compiled_world(&canvas);
+        let operands: Vec<usize> = world
+            .query::<&gaanim_renderer::effects::BooleanBinding>()
+            .iter(&world)
+            .map(|binding| binding.sources.len())
+            .collect();
+        // The cover, then one hole per target.
+        assert_eq!(operands, vec![3]);
+        assert!(canvas.spotlight(Vec::new(), 0.7, [0.1; 4], 0.05).is_err());
+    }
+
     #[test]
     fn flashes_sweep_a_frame_or_an_underline_that_follow_the_target() {
         let mut canvas = SceneModel::new(640, 360);
@@ -22023,6 +22132,74 @@ mod tests {
             .collect();
         clips.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
         clips
+    }
+
+    /// Opacity of `entity` as drawn: its own times its ancestors'.
+    fn drawn_opacity(world: &World, entity: Entity) -> f32 {
+        let mut opacity = 1.0;
+        let mut current = Some(entity);
+        while let Some(node) = current {
+            opacity *= world.get::<Opacity>(node).map_or(1.0, |value| value.0);
+            current = world.get::<ChildOf>(node).map(ChildOf::parent);
+        }
+        opacity
+    }
+
+    /// The drawn opacities of the glyphs of each root with children, from
+    /// left to right.
+    fn glyph_opacities(world: &mut World) -> Vec<Vec<f32>> {
+        let mut roots: Vec<(Entity, f64)> = world
+            .query_filtered::<(Entity, &SpatialTransform), (With<Children>, Without<ChildOf>)>()
+            .iter(world)
+            .map(|(entity, transform)| (entity, transform.translation.x))
+            .collect();
+        roots.sort_by(|a, b| a.1.total_cmp(&b.1));
+        roots
+            .into_iter()
+            .map(|(root, _)| {
+                let glyphs: Vec<Entity> = world
+                    .query::<(Entity, &ChildOf)>()
+                    .iter(world)
+                    .filter(|(_, child_of)| child_of.parent() == root)
+                    .map(|(entity, _)| entity)
+                    .collect();
+                glyphs
+                    .into_iter()
+                    .map(|glyph| drawn_opacity(world, glyph))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn matching_ends_on_the_target_in_every_mode() {
+        for (mode, after) in [
+            ("tex", "abd"),
+            ("text", "abd"),
+            ("shapes", "abd"),
+            ("shapes", "abcd"),
+        ] {
+            let mut canvas = SceneModel::new(640, 360);
+            let source = canvas.text("abc").move_to(-2.0, 0.0);
+            let target = canvas.text(after).move_to(2.0, 0.0);
+            canvas.wait(0.5);
+            canvas
+                .transform_matching(&source, &target, mode, 1.0)
+                .unwrap();
+            canvas.wait(0.5);
+            let (mut world, mut timeline) = compiled_world(&canvas);
+            timeline.seek(&mut world, 1.9);
+            let [before, after_glyphs] = glyph_opacities(&mut world).try_into().unwrap();
+            assert!(
+                before.iter().all(|&opacity| opacity == 0.0),
+                "{mode}: {before:?}"
+            );
+            assert_eq!(after_glyphs.len(), after.len(), "{mode}");
+            assert!(
+                after_glyphs.iter().all(|&opacity| opacity == 1.0),
+                "{mode} {after}: {after_glyphs:?}"
+            );
+        }
     }
 
     #[test]

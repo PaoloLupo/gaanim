@@ -166,7 +166,7 @@ scene.wait(HOLD)
 
 # scene.fx.spotlight dims everything outside its target, to dim at most,
 # and lights it all again: padding and corner_radius shape the hole, which
-# can frame a text selection or the joint bounds of several targets. With
+# can frame a text selection, and several targets get a hole each. With
 # Easing.SMOOTH the dim stays at the end. Each card is labelled with the
 # call that lights it, abbreviating scene.fx.spotlight(...).
 scene.segment("spotlight")

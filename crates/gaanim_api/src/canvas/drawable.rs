@@ -68,6 +68,12 @@ pub struct RotationAxisError {
     pub axis: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown matching mode '{mode}'; expected \"shapes\", \"tex\" or \"text\"")]
+pub struct MatchingModeError {
+    pub mode: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("material operations require a native Primitive3D drawable")]
 pub struct Primitive3DHandleError;

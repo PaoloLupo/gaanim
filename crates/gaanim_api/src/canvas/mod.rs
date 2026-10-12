@@ -66,7 +66,7 @@ pub use camera_view::{
 };
 pub use drawable::{
     ClipOptions, DrawableHandle, FragmentSelection, ImagePixelError, LayoutOwnershipError,
-    Primitive3DHandleError, RotationAxisError, SvgPartError,
+    MatchingModeError, Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
 pub use particles::{
     Emitter, EmitterShape, GRADIENT_PARTICLE_COLORS, MAX_BURST, MAX_LIVE_PARTICLES,

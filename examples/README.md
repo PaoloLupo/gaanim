@@ -147,7 +147,7 @@ Morphing one object into another, matching parts and pivots.
 | [Transform to](transforms/transform_to.py) | Morphs between shapes and their mirror images, open strokes, solid and gradient fills, transform_to against replacement and fade transforms, fading while morphing, and text to text, equation and shape. |
 | [Matching](transforms/matching.py) | Matching transforms that pair pieces by shape, place and color, glyph matching between words and equations, and group and SVG morphs that pair parts by name or id. |
 | [Magic move](transforms/magic_move.py) | magic_move by name, by SVG id and by a key function, fading or cutting unmatched members, and a leaderboard reordered and carried across a cut with Transition.magic_move. |
-| [Pivots](transforms/pivots.py) | Rotations, scales and skews about a drawable's center, a scene point or a moved pivot, hinged groups and orbits, and shapes that aim at a moving target with look_at. |
+| [Pivots](transforms/pivots.py) | Rotations, scales and skews about a drawable's center, a scene point or a moved pivot, hinged groups, orbits and SVG parts, and shapes that aim at a moving target with look_at. |
 
 ## Emphasis
 

@@ -1098,6 +1098,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// reflow keeps the child's own offset from it, so a child animated
     /// inside its box stays where it was moved.
     pub(crate) layout_rests: HashMap<ObjectId, LayoutRest>,
+    /// The last pivot set on each object, as the scene point it was given
+    /// and the point of its parent's space it was then, which the pivot
+    /// keeps as the parent moves on.
+    declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     /// Opacity each object had before an animation took it to zero, which
     /// an entrance shows it at again.
     faded_opacities: HashMap<ObjectId, f32>,
@@ -1174,6 +1178,7 @@ pub(crate) struct SceneBuilderState {
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
     text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
     layout_rests: HashMap<ObjectId, LayoutRest>,
+    declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     faded_opacities: HashMap<ObjectId, f32>,
 }
 
@@ -1215,6 +1220,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: self.text_cancellation_marks.clone(),
             text_canceled_term_children: self.text_canceled_term_children.clone(),
             layout_rests: self.layout_rests.clone(),
+            declared_pivots: self.declared_pivots.clone(),
             faded_opacities: self.faded_opacities.clone(),
         }
     }
@@ -1263,6 +1269,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            declared_pivots,
             faded_opacities,
         } = state;
         Self {
@@ -1314,6 +1321,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            declared_pivots,
             faded_opacities,
         }
     }
@@ -1554,6 +1562,42 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Sets `id`'s pivot to the scene point `pivot` and returns it in the
+    /// space of its parent now. The pivot stays that point of its parent's
+    /// space, so it moves with the parent from then on.
+    pub(crate) fn declare_pivot(&mut self, id: ObjectId, pivot: DVec3) -> DVec3 {
+        let local = self.scene_to_parent(id, pivot);
+        self.declared_pivots.insert(id, (pivot, local));
+        local
+    }
+
+    /// `id`'s pivot `pivot` in the space of its parent: where it was when
+    /// set, if it is `id`'s pivot, or a scene point now.
+    fn pivot_in_parent(&self, id: ObjectId, pivot: DVec3) -> DVec3 {
+        match self.declared_pivots.get(&id) {
+            Some(&(scene, local)) if scene == pivot => local,
+            _ => self.scene_to_parent(id, pivot),
+        }
+    }
+
+    /// Maps a scene point into the space of `id`'s parent, where its
+    /// translation and anchor live; a root's is the scene's.
+    pub(crate) fn scene_to_parent(&self, id: ObjectId, point: DVec3) -> DVec3 {
+        let mut matrix = gaanim_core::glam::DMat4::IDENTITY;
+        let mut current = self.states.get(id).and_then(|state| state.parent);
+        while let Some(parent) = current {
+            let Some(state) = self.states.get(parent) else {
+                break;
+            };
+            matrix = state.transform.to_mat4() * matrix;
+            current = state.parent;
+        }
+        if matrix.determinant().abs() <= f64::EPSILON {
+            return point;
+        }
+        matrix.inverse().transform_point3(point)
+    }
+
     /// Computes the true world-space transform of a Mobject by walking up the parent chain.
     /// This is necessary during group creation to calculate accurate world bounds for nested children.
     pub fn get_world_transform(&self, id: ObjectId) -> SpatialTransform {
@@ -1635,6 +1679,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: HashMap::new(),
             text_canceled_term_children: HashMap::new(),
             layout_rests: HashMap::new(),
+            declared_pivots: HashMap::new(),
             faded_opacities: HashMap::new(),
         }
     }
@@ -5644,26 +5689,111 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         duration: f64,
         rate_func: gaanim_math::RateFunc,
     ) {
-        if !duration.is_finite() || duration <= 0.0 {
+        self.play_transform_matching_grouped(source, target, mode, Vec::new(), duration, rate_func);
+    }
+
+    /// [`Self::play_transform_matching`] that pairs `semantic_groups` of
+    /// glyphs first in `Tex` mode.
+    ///
+    /// The target ends shown and the source hidden, so later animations of
+    /// the target move what is on screen. Its containers appear at the start,
+    /// so its new pieces fade in through them; its paired pieces appear when
+    /// their source pieces arrive. `Tex` mode falls back to shapes unless
+    /// both drawables have glyphs.
+    pub(crate) fn play_transform_matching_grouped(
+        &mut self,
+        source: ObjectId,
+        target: ObjectId,
+        mode: MatchingMode,
+        semantic_groups: Vec<(Vec<ObjectId>, Vec<ObjectId>)>,
+        duration: f64,
+        rate_func: gaanim_math::RateFunc,
+    ) {
+        if !duration.is_finite() || duration <= 0.0 || source == target {
             return;
         }
-        if self.states.get(source).is_none() || self.states.get(target).is_none() {
+        let (Some(source_state), Some(target_state)) = (
+            self.states.get(source).cloned(),
+            self.states.get(target).cloned(),
+        ) else {
             return;
+        };
+        let start = self.current_time;
+        let end = start + duration;
+        let track = self.ensure_track(target);
+        let source_ids = self.hierarchy_ids(source);
+        let target_ids = self.hierarchy_ids(target);
+        let (target_leaves, _) = self.collect_leaf_match_data(target);
+        for &id in &target_ids {
+            if target_leaves.contains(&id) {
+                continue;
+            }
+            if let Some(opacity) = self.states.get(id).map(|state| state.opacity) {
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    0.0,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: id,
+                        lens: PropertyLensSpec::Opacity {
+                            from: 0.0,
+                            to: opacity,
+                        },
+                        rate_func: gaanim_math::RateFunc::Linear,
+                        delay: 0.0,
+                        label: Some("TransformMatchingHandoff".to_string()),
+                    }),
+                );
+            }
         }
-        if mode == MatchingMode::Tex {
-            self.play_equation_transition(
+
+        let by_glyph = mode == MatchingMode::Tex
+            && !source_state.child_spans.is_empty()
+            && !target_state.child_spans.is_empty();
+        if by_glyph {
+            self.play_equation_transition_eased(
                 source,
                 target,
-                Vec::new(),
+                semantic_groups,
                 duration,
                 EquationTransitionMode::Replace,
                 true,
+                rate_func,
             );
-            return;
+        } else {
+            self.schedule_leaf_matching(
+                source,
+                target,
+                MatchingMode::Shapes,
+                start,
+                duration,
+                rate_func,
+            );
         }
-        let start = self.current_time;
-        self.schedule_leaf_matching(source, target, mode, start, duration, rate_func);
-        self.current_time = start + duration;
+
+        // Handoff: the source hierarchy ends where the target begins.
+        for &id in &source_ids {
+            let Some(from) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            self.timeline.add_clip(
+                track,
+                end,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: id,
+                    lens: PropertyLensSpec::Opacity { from, to: 0.0 },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: Some("TransformMatchingHandoff".to_string()),
+                }),
+            );
+            if let Some(state) = self.states.get_mut(id) {
+                state.opacity = 0.0;
+            }
+        }
+        self.schedule_show_hierarchy(target, &target_state, track, end);
+        self.current_time = end;
     }
 
     /// Schedule the leaf morphs and fades of a matching between `source` and
@@ -6575,6 +6705,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let AnimationType::PivotTo { pivot } = anim.anim_type else {
             return;
         };
+        // The pivot is a scene point; the transform's anchor lives in its
+        // parent's space, such as an SVG part's document.
+        let pivot = self.declare_pivot(anim.target, pivot);
         let Some(state) = self.states.get_mut(anim.target) else {
             return;
         };
@@ -7357,6 +7490,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             } => (*angle_radians, *pivot),
             _ => unreachable!(),
         };
+        // A scene pivot, turned about in the parent's space, where the
+        // translation lives. The drawable's own pivot stays where it was
+        // set in that space, as a joint of a turning group does.
+        let pivot = pivot.map(|pivot| self.pivot_in_parent(anim.target, pivot));
 
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,

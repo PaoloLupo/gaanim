@@ -866,13 +866,13 @@ scene.play(line["resalta"].animate.flash_under(color=GOLD, width=0.05).duration(
   kind: "method",
   signature: "scene.fx.spotlight(target, *, dim=0.7, padding=None, corner_radius=0.1) -> Anim",
   params: (
-    (name: "target", type: "Drawable | TextSelection | Sequence", default: none, desc: [Lo que queda iluminado.]),
+    (name: "target", type: "Drawable | TextSelection | Sequence", default: none, desc: [Lo que queda iluminado. Con una secuencia, cada objetivo tiene su hueco.]),
     (name: "dim", type: "float", default: "0.7", desc: [Opacidad máxima del velo negro, en `(0, 1]`.]),
     (name: "padding", type: "Padding | None", default: "0.2", desc: [Separación entre el objetivo y el borde del hueco.]),
     (name: "corner_radius", type: "float", default: "0.1", desc: [Radio de las esquinas del hueco.]),
   ),
   returns: (type: "Anim", desc: [Un velo con un hueco que se oscurece y vuelve.]),
-  desc: [Un velo negro con un hueco vivo alrededor del objetivo (sigue al objetivo si se mueve) llega a `dim` a mitad de la animación y vuelve a nada; `duration` fija el ciclo entero y una curva como `Easing.SMOOTH` lo deja oscurecido al final. La animación devuelta se reproduce sobre el velo. Un `dim` fuera de rango o un objetivo de otra escena lanzan `ValueError`.],
+  desc: [Un velo negro con un hueco vivo alrededor del objetivo (sigue al objetivo si se mueve) llega a `dim` a mitad de la animación y vuelve a nada; `duration` fija el ciclo entero y una curva como `Easing.SMOOTH` lo deja oscurecido al final. Con varios objetivos hay un hueco alrededor de cada uno, y los que se solapan se unen; para iluminar la caja conjunta, agrúpalos. La animación devuelta se reproduce sobre el velo. Una secuencia vacía, un `dim` fuera de rango o un objetivo de otra escena lanzan `ValueError`.],
 )[
 ```python
 # output: preview.webp
@@ -1143,7 +1143,7 @@ scene.play(square.animate.replacement_transform_to(circle))
     (name: "duration", type: "float", default: "1.0", desc: [Segundos; finito y positivo.]),
   ),
   returns: (type: "None", desc: [Reproduce la transformación en el cursor y lo avanza `duration` segundos.]),
-  desc: [Empareja las piezas de origen y destino por forma, posición y color, transforma las parejas y funde el resto. Se reproduce como un `scene.play`: lo siguiente empieza cuando termina.],
+  desc: [Empareja las piezas de origen y destino por forma, posición y color, transforma las parejas y funde el resto. Se reproduce como un `scene.play`: lo siguiente empieza cuando termina. El destino está oculto hasta entonces; al final se muestra y el origen se oculta, así que las animaciones siguientes del destino mueven lo que se ve.],
 )[
 ```python
 from gaanim import GOLD, WHITE, Scene
@@ -1162,11 +1162,11 @@ scene.render()
   kind: "method",
   params: (
     (name: "source, target", type: "Drawable", default: none, desc: [Objetos de origen y destino.]),
-    (name: "mode", type: "str", default: "\"shapes\"", desc: [`"shapes"` empareja por geometría; `"tex"` empareja glifos de textos y ecuaciones por carácter.]),
+    (name: "mode", type: "str", default: "\"shapes\"", desc: [`"shapes"` empareja por geometría; `"tex"` (o `"text"`) empareja los glifos de dos textos o ecuaciones por carácter, en orden de lectura, y vuelve a la geometría si alguno no tiene glifos.]),
     (name: "duration", type: "float", default: "1.0", desc: [Segundos; finito y positivo.]),
   ),
   returns: (type: "None", desc: [Reproduce la transformación en el cursor y lo avanza `duration` segundos.]),
-  desc: [Versión general de `transform_matching_shapes`. Para textos estructurados es preferible `animate.transform_to`, que es un `Anim` normal.],
+  desc: [Versión general de `transform_matching_shapes`: al final se muestra el destino y se oculta el origen. Otro `mode` lanza `ValueError`. Para textos estructurados es preferible `animate.transform_to`, que es un `Anim` normal.],
   none,
 )
 
@@ -2862,9 +2862,12 @@ scene.play(cube.animate.material(Material3D.metal(GOLD)).rotate_by_3d("y", 1.2).
 con cualquier `Easing`, incluidos los resortes que se pasan del destino, y
 todas aceptan `overlay=`, un `Overlay` dibujado encima del corte. Ninguna de
 las dos opciones cambia la duración de los segmentos. Sin `easing`,
-`cross_fade`, `fade_through`, `zoom_through` y `morph` avanzan de forma lineal
+`cross_fade`, `fade_through` y `zoom_through` avanzan de forma lineal,
+`morph` y `magic_move` se mueven con `Easing.SMOOTH` y funden de forma lineal,
 y los revelados vectoriales (`wipe`, `clock_wipe`, `iris`, `blinds`, `push` y
-`slide`) usan `Easing.SMOOTH`.
+`slide`) usan `Easing.SMOOTH`. Con un resorte o una curva de retroceso, el
+movimiento se pasa del destino y vuelve, pero los fundidos siguen la curva
+sin retroceder: una vez pasado el destino, el fundido ha terminado.
 
 Todas aceptan también `sound=`, la ruta de un efecto de sonido (relativa a la
 carpeta de assets) que suena una vez, con volumen 1, cuando empieza la

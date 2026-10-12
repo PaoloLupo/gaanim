@@ -304,6 +304,24 @@ enteros, o usa `scene.text.code`.
   aceptan un `Computed`.
 - El ejemplo de `Parameter.add_updater_fn` en la referencia calcula el valor a
   partir del tiempo transcurrido; el anterior volvía a 0 al hacer seek.
+- `transform_matching(..., mode="tex")` y `mode="text"` terminan mostrando el
+  destino; antes dejaban ocultos el origen y el destino. Un `mode`
+  desconocido lanza `ValueError` en vez de usar `"shapes"`.
+- `transform_matching_shapes` y `transform_matching` muestran las piezas
+  nuevas del destino, que antes no aparecían, y al final muestran el destino y
+  ocultan el origen: las animaciones siguientes del destino mueven lo que se
+  ve.
+- `with_pivot(x, y)` en una parte de un SVG (`svg.part(...)`) lee el punto en
+  coordenadas de escena, también en `animate.rotate_by`, aunque el SVG esté
+  escalado o movido; antes lo leía en el marco del documento SVG.
+- `Transition.morph` y `Transition.magic_move` con un resorte
+  (`Easing.BOUNCY`, `Easing.SNAPPY`...) dejan que el movimiento se pase del
+  destino y vuelva, y no parpadean: antes el sobrepaso mostraba el estado
+  final de golpe y el rebote volvía a mostrar el contenido saliente. Con un
+  easing explícito, el morph ya no lo suaviza otra vez. `cross_fade` y
+  `fade_through` tampoco vuelven a mostrar el segmento saliente.
+- `fx.spotlight([a, b])` abre un hueco alrededor de cada objetivo; antes abría
+  uno solo alrededor de la caja conjunta.
 - Una cuadrícula con columnas `"auto"` dentro de otra caja mide lo mismo que
   sola. Antes sus columnas se repartían el ancho por igual: la cuadrícula
   quedaba más ancha y, con textos que pueden partirse, el más ancho se partía
@@ -416,6 +434,15 @@ enteros, o usa `scene.text.code`.
 - Una flecha con `fill(color)` y sin `stroke` tiene ahora el contorno del
   mismo color; antes era el del tema. Si querías el contorno del tema, fíjalo
   con `stroke(...)`.
+- Para iluminar la caja conjunta de varios objetivos con `fx.spotlight`,
+  pásale un grupo: `fx.spotlight(scene.geometry.group([a, b]))`.
+- Si compensabas `with_pivot` en las partes de un SVG pasando coordenadas del
+  documento, pasa ahora el punto de la escena. La fórmula de la guía
+  #link("/guias/personajes/")[Personajes] ya lo hacía.
+- `Transition.morph(..., easing=Easing.SMOOTH)` se ve algo más rápido al
+  principio y al final: el easing ya no se aplica dos veces.
+- Después de `transform_matching_shapes`, el origen queda oculto y el destino
+  visible: anima el destino para seguir moviendo lo que se ve.
 
 = 0.11.0
 

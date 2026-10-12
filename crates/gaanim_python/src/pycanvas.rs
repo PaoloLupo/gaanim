@@ -5458,15 +5458,10 @@ impl PyGeometry {
             .transform_matching_shapes(&source.0, &target.0, duration);
         Ok(())
     }
-    /// Auto-match by character/tex — improved TransformMatchingTex.
-    ///
-    /// Matches submobjects (glyphs/letters) between text/math equations using an
-    /// order-preserving Longest Common Subsequence (LCS) algorithm on character keys,
-    /// combined with Hungarian assignment for remaining elements.
-    /// Alias for transform_matching_tex — manim TransformMatchingText compatibility.
-    /// Generic auto-matching morph. `mode` is "shapes" or "tex".
-    ///
-    /// Performs auto-matching transform between `source` and `target` using the specified `mode`.
+    /// Generic auto-matching morph. `mode` is "shapes", or "tex" (also "text")
+    /// to match the glyphs of texts and equations by character: an
+    /// order-preserving longest common subsequence on character keys, then
+    /// Hungarian assignment for the rest. Another mode raises ValueError.
     #[pyo3(signature = (source, target, *, mode="shapes", duration=1.0))]
     fn transform_matching(
         &self,
@@ -5484,7 +5479,8 @@ impl PyGeometry {
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .transform_matching(&source.0, &target.0, mode, duration);
+            .transform_matching(&source.0, &target.0, mode, duration)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(())
     }
 }

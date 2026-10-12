@@ -3329,6 +3329,18 @@ def validate_magic_move_contract(module: object) -> list[str]:
     scene.segment("after", transition=T.magic_move(0.5, key="name"))
     board([("dee", 2), ("bo", 1)])
     scene.wait(0.5)
+
+    # transform_matching takes "shapes", "tex" or "text" and moves the cursor.
+    source, target = scene.text("abc"), scene.text("abd")
+    start = scene.cursor
+    for mode in ("shapes", "tex", "text", "TEX"):
+        scene.geometry.transform_matching(source, target, mode=mode, duration=0.5)
+    if abs(scene.cursor - start - 2.0) > 1e-9:
+        failures.append("transform_matching must advance the cursor in every mode")
+    if not raises_error(ValueError, lambda: scene.geometry.transform_matching(source, target, mode="glyphs")):
+        failures.append("transform_matching accepted an unknown mode")
+    if abs(scene.cursor - start - 2.0) > 1e-9:
+        failures.append("a rejected transform_matching must not move the cursor")
     return failures
 
 

@@ -363,7 +363,7 @@ description = "magic_move by name, by SVG id and by a key function, fading or cu
 
 [[example]]
 path = "transforms/pivots.py"
-description = "Rotations, scales and skews about a drawable's center, a scene point or a moved pivot, hinged groups and orbits, and shapes that aim at a moving target with look_at."
+description = "Rotations, scales and skews about a drawable's center, a scene point or a moved pivot, hinged groups, orbits and SVG parts, and shapes that aim at a moving target with look_at."
 
 [[example]]
 path = "emphasis/indications.py"

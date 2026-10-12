@@ -4301,18 +4301,39 @@ impl SceneModel {
         target: &DrawableHandle,
         duration: f64,
     ) -> DrawableHandle {
-        self.transform_matching(source, target, "shapes", duration)
+        self.queue_transform_matching(source, target, false, duration)
     }
 
-    /// Generic auto-matching morph. `mode` can be `"shapes"` or `"tex"`.
+    /// Generic auto-matching morph. `mode` is `"shapes"`, or `"tex"` (also
+    /// `"text"`) to pair the glyphs of two texts or equations by character.
     ///
     /// Queues an `Op::TransformMatching` operation to pair and morph submobjects between
-    /// `source` and `target`.
+    /// `source` and `target`. At the end the target is shown and the source
+    /// hidden. Another `mode` is an error.
     pub fn transform_matching(
         &mut self,
         source: &DrawableHandle,
         target: &DrawableHandle,
         mode: &str,
+        duration: f64,
+    ) -> Result<DrawableHandle, super::MatchingModeError> {
+        let by_glyph = match mode.to_ascii_lowercase().as_str() {
+            "shapes" => false,
+            "tex" | "text" => true,
+            _ => {
+                return Err(super::MatchingModeError {
+                    mode: mode.to_string(),
+                });
+            }
+        };
+        Ok(self.queue_transform_matching(source, target, by_glyph, duration))
+    }
+
+    fn queue_transform_matching(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        by_glyph: bool,
         duration: f64,
     ) -> DrawableHandle {
         if !Arc::ptr_eq(&self.state, &source.state)
@@ -4322,11 +4343,8 @@ impl SceneModel {
         {
             return target.clone();
         }
-        let mode = match mode.to_ascii_lowercase().as_str() {
-            "tex" | "text" | "chars" => "tex".to_string(),
-            _ => "shapes".to_string(),
-        };
-        let semantic_pairs = if mode == "tex" {
+        let mode = if by_glyph { "tex" } else { "shapes" }.to_string();
+        let semantic_pairs = if by_glyph {
             Self::text_semantic_pairs(source, target, None)
         } else {
             Vec::new()
@@ -11587,7 +11605,15 @@ mod tests {
         canvas.wait(0.5);
         canvas.transform_matching_shapes(&source, &target, 1.5);
         assert_eq!(canvas.current_time(), 2.0);
-        canvas.transform_matching(&target, &source, "tex", 0.25);
+        canvas
+            .transform_matching(&target, &source, "tex", 0.25)
+            .unwrap();
+        assert_eq!(canvas.current_time(), 2.25);
+        assert!(
+            canvas
+                .transform_matching(&target, &source, "glyphs", 0.25)
+                .is_err()
+        );
         assert_eq!(canvas.current_time(), 2.25);
         assert_eq!(canvas.segment_manifest().duration(), 2.25);
     }
