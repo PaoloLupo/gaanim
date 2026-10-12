@@ -3150,6 +3150,7 @@ impl Timeline {
             .cloned();
         let endpoint = world
             .get::<gaanim_animation::EndpointFollow>(entity)
+            .filter(|follow| follow.holds_at(time))
             .cloned();
         // (source, copied axes, offset); the component is not `Clone`.
         let binding = world
@@ -4705,8 +4706,12 @@ fn apply_lens_spec(
                     .get_resource::<crate::snapshot::CapturedCameraStates>()
                     .and_then(|states| states.0.get(id).copied()),
             };
-            if let Some((from, to)) = resolve(from).zip(resolve(to)) {
-                let pose = from.interpolate(to, t);
+            if let Some((from, to)) = resolve(from).zip(resolve(to))
+                && let Some(frame_height) = world
+                    .get_resource::<gaanim_math::Camera>()
+                    .map(|camera| camera.frame_height)
+            {
+                let pose = from.interpolate_in_frame(to, t, frame_height);
                 if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                     camera.position = pose.position;
                     camera.rotation = pose.rotation;
@@ -4850,8 +4855,35 @@ fn apply_lens_spec(
             from_up,
             from_zoom,
             to_zoom,
+            from_lens,
         } => {
-            if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
+            // From a perspective camera the move stays in perspective, toward
+            // the view that matches the 2D pose, until its end.
+            if let Some((fov_y, near, far)) = *from_lens
+                && t < 1.0
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                let from = gaanim_math::CameraPose {
+                    position: *from_position,
+                    rotation: *from_rotation,
+                    target: *from_target,
+                    up: *from_up,
+                    projection: gaanim_math::Projection::Perspective { fov_y, near, far },
+                };
+                let home = gaanim_math::CameraPose {
+                    position: gaanim_core::glam::DVec3::ZERO,
+                    rotation: gaanim_core::glam::DQuat::IDENTITY,
+                    target: gaanim_core::glam::DVec3::ZERO,
+                    up: gaanim_core::glam::DVec3::Y,
+                    projection: gaanim_math::Projection::Orthographic { zoom: *to_zoom },
+                };
+                let pose = from.interpolate_in_frame(home, t, camera.frame_height);
+                camera.position = pose.position;
+                camera.rotation = pose.rotation;
+                camera.target = pose.target;
+                camera.up = pose.up;
+                camera.projection = pose.projection;
+            } else if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
                 camera.position = from_position.lerp(gaanim_core::glam::DVec3::ZERO, t);
                 camera.rotation = from_rotation.slerp(gaanim_core::glam::DQuat::IDENTITY, t);
                 camera.target = from_target.lerp(gaanim_core::glam::DVec3::ZERO, t);
@@ -4880,11 +4912,27 @@ fn apply_lens_spec(
                 camera.position.y = position.y;
             }
         }
-        PropertyLensSpec::CameraFollowEndpoint { .. } => {
-            // Applied in the camera phase after persistent bindings.
+        // While the clip plays the camera phase resolves these after
+        // persistent bindings (and layout, for the frame); a finished clip
+        // leaves the camera on the pose it handed off.
+        PropertyLensSpec::CameraFollowEndpoint { hold, .. } => {
+            if completed
+                && let Some(hold) = hold
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera.position.x = hold.x;
+                camera.position.y = hold.y;
+            }
         }
-        PropertyLensSpec::CameraFrameDynamic { .. } => {
-            // Applied in the camera phase after persistent bindings and layout.
+        PropertyLensSpec::CameraFrameDynamic { hold, .. } => {
+            if completed
+                && let Some((position, zoom)) = hold
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera.position.x = position.x;
+                camera.position.y = position.y;
+                camera.projection = gaanim_math::Projection::Orthographic { zoom: *zoom };
+            }
         }
         PropertyLensSpec::CameraShake { .. } => {}
         PropertyLensSpec::CameraTarget { from, to } => {
@@ -6460,6 +6508,7 @@ mod tests {
                     endpoint: gaanim_animation::TrackingEndpoint::Entity(leader),
                     offset: gaanim_core::glam::DVec3::ZERO,
                     offset_space: gaanim_animation::FollowOffsetSpace::World,
+                    since: 0.0,
                 },
             ))
             .id();

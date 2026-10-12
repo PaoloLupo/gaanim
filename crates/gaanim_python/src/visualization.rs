@@ -1191,9 +1191,9 @@ fn readout_move_to(
     });
     let Some(text_anchor) = text_anchor else {
         let anchor = anchor
-            .map(|value| value.extract::<PyRef<'_, crate::pylayout::PyAnchor>>())
+            .map(|value| value.extract::<crate::pylayout::PyAnchor>())
             .transpose()?;
-        drawable.move_to_impl(x, y, anchor.as_deref())?;
+        drawable.move_to_impl(x, y, anchor)?;
         return Ok(());
     };
     drawable.require_free_position("move_to")?;

@@ -134,6 +134,29 @@ enteros, o usa `scene.text.code`.
   curva seguida fuera de vista. Las exportaciones y `--diff` no cambian.
 - Las etiquetas `billboard` de una cámara ortográfica girada quedan derechas
   también al exportar; antes solo lo estaban en la vista previa equivocada.
+- `camera.frame_to` y `camera.animate.frame_to` sin `margin` dejan media unidad
+  por lado. Antes usaban 40 unidades, un valor de cuando el margen se medía en
+  píxeles, y la vista se alejaba hasta un zoom de 0,1.
+- Al terminar, `camera.animate.follow` y `frame_to(..., dynamic=True)` dejan
+  la cámara donde la llevaron, y el siguiente movimiento parte de ahí. Antes
+  volvía de golpe a la pose de antes de la toma. La pose final sale de dónde
+  acaba el objetivo al final del `play`; si lo mueve otra cosa en tiempo de
+  ejecución, como un updater, la cámara salta a esa pose al terminar.
+- `move_to`, `align_to`, `next_to(aligned_edge=...)`, `to_corner`,
+  `anchor_point` y `with_port` aceptan el nombre de un anclaje
+  (`anchor="top_left"`), como ya hacía `place`; antes lanzaban `TypeError`.
+- `CameraView.follow` y `Drawable.follow` sin `delay` empiezan en el cursor, y
+  `no_camera_view()` quita la vista desde el cursor. Antes un `follow` llamado
+  después de `view.animate.pan_to(...)` se aplicaba desde la creación de la
+  vista y anulaba ese movimiento, y `no_camera_view()` al final de un segmento
+  quitaba la vista en todo el segmento.
+- `camera.animate.to(state)` entre una pose 2D y una en perspectiva, y
+  `camera.animate.reset()` desde una en perspectiva, se mueven en perspectiva
+  desde o hacia la vista equivalente a la 2D, y solo pasan a ortográfica en su
+  extremo 2D. Antes la cámara salía del plano de la escena, así que las
+  primitivas 3D desaparecían la primera mitad del movimiento, y un `reset`
+  pasaba a ortográfica de golpe con la cámara aún inclinada, de modo que el
+  contenido 2D se salía de la vista.
 
 == Al actualizar
 

@@ -176,6 +176,18 @@ pub struct CameraView {
     pub zoom: Option<gaanim_animation::TrackingScalar>,
     /// View layers shown besides the drawables on no layer.
     pub layers: Vec<std::sync::Arc<str>>,
+    /// Timeline time the view appears at, the cursor where it was set.
+    pub since: f64,
+    /// Timeline time `no_camera_view` removed it at, if it did.
+    pub until: Option<f64>,
+}
+
+impl CameraView {
+    /// Whether the screen shows the view at timeline time `time`; outside
+    /// that window it draws as a plain drawable.
+    pub fn shown_at(&self, time: f64) -> bool {
+        time + 1e-9 >= self.since && self.until.is_none_or(|until| time + 1e-9 < until)
+    }
 }
 
 /// Component: puts a drawable on a named view layer. The main camera does not

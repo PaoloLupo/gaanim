@@ -77,9 +77,9 @@ impl PyRollingNumber {
             }
         } else {
             let anchor = anchor
-                .map(|value| value.extract::<PyRef<'_, crate::pylayout::PyAnchor>>())
+                .map(|value| value.extract::<crate::pylayout::PyAnchor>())
                 .transpose()?;
-            slf.visual.move_to_impl(x, y, anchor.as_deref())?;
+            slf.visual.move_to_impl(x, y, anchor)?;
         }
         Ok(slf)
     }

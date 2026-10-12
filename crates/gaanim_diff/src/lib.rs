@@ -224,6 +224,7 @@ pub(crate) fn write_snapshots(
         output_dir.join(MANIFEST_FILE),
         serde_json::to_vec_pretty(&manifest)?,
     )?;
+    prune_stale_snapshots(output_dir, &manifest)?;
     if std::env::var_os("GAANIM_CAPTURE_TELEMETRY").is_some() {
         // Summed over the encoding threads, which overlap the capture.
         eprintln!(
@@ -236,6 +237,29 @@ pub(crate) fn write_snapshots(
 
 /// Threads encoding snapshot PNGs at most; each holds a frame in memory.
 const MAX_PNG_WORKERS: usize = 8;
+
+/// Remove the snapshot PNGs (`seek_*` and `stop_*`) in `dir` that `manifest`
+/// does not list: an earlier capture with other times left them, and a
+/// blessed baseline should hold only the frames it compares.
+fn prune_stale_snapshots(dir: &Path, manifest: &SnapshotManifest) -> Result<()> {
+    let listed: std::collections::HashSet<&str> = manifest
+        .snapshots
+        .iter()
+        .map(|entry| entry.file.as_str())
+        .collect();
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let snapshot =
+            (name.starts_with("seek_") || name.starts_with("stop_")) && name.ends_with(".png");
+        if snapshot && !listed.contains(name) {
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
 
 /// The default capture size: the preview size scaled to
 /// [`SNAPSHOT_LONG_EDGE`] on its long edge.
@@ -656,6 +680,38 @@ mod tests {
             assert_eq!(decoded.color(), color);
             assert_eq!(decoded.to_rgba8().get_pixel(1, 0).0, [40, 50, 60, alpha]);
         }
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn a_new_capture_removes_the_snapshots_it_no_longer_lists() {
+        let directory =
+            std::env::temp_dir().join(format!("gaanim-diff-prune-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        for name in [
+            "seek_0000_t_1_000000.png",
+            "seek_0001_t_2_000000.png",
+            "notes.png",
+        ] {
+            std::fs::write(directory.join(name), b"").unwrap();
+        }
+        let manifest = super::SnapshotManifest {
+            schema_version: 1,
+            width: 2,
+            height: 1,
+            snapshots: vec![super::SnapshotEntry {
+                id: "seek_0000_t_1_000000".to_string(),
+                time_seconds: 1.0,
+                file: "seek_0000_t_1_000000.png".to_string(),
+            }],
+        };
+        super::prune_stale_snapshots(&directory, &manifest).unwrap();
+        let mut left: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["notes.png", "seek_0000_t_1_000000.png"]);
         std::fs::remove_dir_all(&directory).unwrap();
     }
 

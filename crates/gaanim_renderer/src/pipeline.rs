@@ -2895,7 +2895,9 @@ fn extract_world(
             Option<&gaanim_scene::GroupMarker>,
         )>();
         resolve_camera_views(
-            screens.iter(world),
+            screens
+                .iter(world)
+                .filter(|(_, view, ..)| view.shown_at(background_time)),
             |entity| {
                 let (transform, local, source, bounds, group) = sources.get(world, entity).ok()?;
                 camera_source_frame(transform, local, source, bounds, group.is_some())
@@ -5154,7 +5156,9 @@ pub fn gaanim_render_system(
         .as_ref()
         .map_or(0.0, |state| state.current_time);
     let camera_views = resolve_camera_views(
-        camera_screens.iter(),
+        camera_screens
+            .iter()
+            .filter(|(_, view, ..)| view.shown_at(time_seconds)),
         |entity| {
             let (transform, local, source, bounds, group) = camera_sources.get(entity).ok()?;
             camera_source_frame(transform, local, source, bounds, group.is_some())
@@ -6052,6 +6056,8 @@ mod tests {
                 exclude: vec![marker],
                 zoom: None,
                 layers: Vec::new(),
+                since: 0.0,
+                until: None,
             },
         ));
         screen
@@ -6087,6 +6093,8 @@ mod tests {
                 parameters: vec![(signal_id, signal)],
             }),
             layers: vec![Arc::from("xray")],
+            since: 0.0,
+            until: None,
         });
         (lens, signal)
     }

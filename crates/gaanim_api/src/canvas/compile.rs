@@ -3772,6 +3772,12 @@ impl SceneModel {
                                     &anim,
                                     start,
                                 );
+                                Self::resolve_camera_holds(
+                                    builder,
+                                    id_map,
+                                    camera_position,
+                                    camera_zoom,
+                                );
                                 builder.wait(anim.delay.max(0.0) + anim.duration.max(0.0));
                             } else {
                                 builder.play(anim);
@@ -3899,6 +3905,7 @@ impl SceneModel {
                         }
                         builder.timeline.set_time_map(None);
                     }
+                    Self::resolve_camera_holds(builder, id_map, camera_position, camera_zoom);
                     // A launch schedules like a play but leaves the cursor
                     // where it was, so what follows runs over it.
                     if matches!(op, Op::Play(_)) {
@@ -6047,11 +6054,21 @@ impl SceneModel {
                     let Some(screen) = entity_of(target) else {
                         continue;
                     };
+                    // A view shows from the cursor where it was set until
+                    // the one where it was removed.
                     let Some(view) = view else {
-                        builder
-                            .commands
-                            .entity(screen)
-                            .remove::<gaanim_renderer::effects::CameraView>();
+                        match builder.camera_views.remove(&screen) {
+                            Some(mut shown) if shown.since < builder.current_time => {
+                                shown.until = Some(builder.current_time);
+                                builder.commands.entity(screen).insert(shown);
+                            }
+                            _ => {
+                                builder
+                                    .commands
+                                    .entity(screen)
+                                    .remove::<gaanim_renderer::effects::CameraView>();
+                            }
+                        }
                         continue;
                     };
                     let Some(source) = entity_of(&view.source) else {
@@ -6062,17 +6079,18 @@ impl SceneModel {
                         .zoom
                         .as_ref()
                         .map(|zoom| compile_tracking_scalar(zoom, id_map, &builder.states));
-                    builder
-                        .commands
-                        .entity(screen)
-                        .insert(gaanim_renderer::effects::CameraView {
-                            source,
-                            fit: view.fit,
-                            background: view.background.clone(),
-                            exclude,
-                            zoom,
-                            layers: view.layers.clone(),
-                        });
+                    let shown = gaanim_renderer::effects::CameraView {
+                        source,
+                        fit: view.fit,
+                        background: view.background.clone(),
+                        exclude,
+                        zoom,
+                        layers: view.layers.clone(),
+                        since: builder.current_time,
+                        until: None,
+                    };
+                    builder.camera_views.insert(screen, shown.clone());
+                    builder.commands.entity(screen).insert(shown);
                 }
                 Op::SetViewLayer { target, layer } => {
                     let Some(target) = id_map.get(target).copied() else {
@@ -6448,6 +6466,7 @@ impl SceneModel {
                                 ),
                                 offset: *offset,
                                 offset_space: *offset_space,
+                                since: builder.current_time,
                             });
                     }
                 }
@@ -8060,6 +8079,15 @@ impl SceneModel {
         anim: &AnimationBuilder,
         lens: gaanim_timeline::clip::PropertyLensSpec,
     ) {
+        Self::add_camera_clip(builder, start, anim, lens);
+    }
+
+    fn add_camera_clip(
+        builder: &mut SceneBuilder,
+        start: f64,
+        anim: &AnimationBuilder,
+        lens: gaanim_timeline::clip::PropertyLensSpec,
+    ) -> gaanim_timeline::clip::ClipId {
         builder.timeline.add_clip(
             builder.default_track,
             start + anim.delay.max(0.0),
@@ -8071,7 +8099,7 @@ impl SceneModel {
                 delay: 0.0,
                 label: Some("Camera".to_string()),
             }),
-        );
+        )
     }
 
     /// Schedule a static pan+zoom. Linear mode keeps the historical pair of
@@ -8120,6 +8148,126 @@ impl SceneModel {
                     interpolation,
                 },
             ),
+        }
+    }
+
+    /// Give the dynamic camera clips just scheduled the pose the camera
+    /// keeps once they end, from where their targets are as authored after
+    /// the whole play, and continue the authored camera from it. Without
+    /// it a `follow` or a dynamic `frame_to` cut back to the pose before
+    /// the shot. Targets driven at run time (updaters, physics) can end
+    /// elsewhere; the camera then cuts to this estimate when the clip ends.
+    fn resolve_camera_holds(
+        builder: &mut SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        camera_position: &mut DVec3,
+        camera_zoom: &mut f64,
+    ) {
+        use crate::builder::PendingCameraHoldKind;
+        use gaanim_timeline::clip::{ClipPayload, PropertyLensSpec};
+        for pending in std::mem::take(&mut builder.pending_camera_holds) {
+            let (position, zoom) = match &pending.kind {
+                PendingCameraHoldKind::Follow {
+                    target,
+                    from,
+                    offset,
+                    offset_space,
+                    lag,
+                    duration,
+                } => {
+                    let Some((point, basis)) = Self::authored_endpoint(builder, id_map, target)
+                    else {
+                        continue;
+                    };
+                    let offset = match offset_space {
+                        gaanim_animation::FollowOffsetSpace::World => *offset,
+                        gaanim_animation::FollowOffsetSpace::Local => {
+                            basis.transform_vector3(*offset)
+                        }
+                    };
+                    // The lag the camera phase applies, at the clip's end.
+                    let reached = if *lag <= f64::EPSILON {
+                        1.0
+                    } else {
+                        1.0 - (-duration / lag).exp()
+                    };
+                    (from.lerp(point + offset, reached), None)
+                }
+                PendingCameraHoldKind::Frame {
+                    targets,
+                    margins,
+                    frame,
+                } => {
+                    let Some(bounds) = targets
+                        .iter()
+                        .filter_map(|target| {
+                            builder.states.get(*target).map(|state| {
+                                state.bounds.transform_2d(
+                                    &builder.get_world_transform(*target).to_affine_2d(),
+                                )
+                            })
+                        })
+                        .reduce(|left, right| left.union(&right))
+                    else {
+                        continue;
+                    };
+                    let [top, right, bottom, left] = *margins;
+                    let framed = Bounds3D::new_2d(
+                        bounds.min.x - left,
+                        bounds.min.y - bottom,
+                        bounds.max.x + right,
+                        bounds.max.y + top,
+                    );
+                    let zoom =
+                        (frame.0 / framed.width().max(1.0)).min(frame.1 / framed.height().max(1.0));
+                    (framed.center(), Some(zoom))
+                }
+            };
+            if let Some(clip) = builder.timeline.clips.get_mut(pending.clip)
+                && let ClipPayload::Animation(animation) = &mut clip.payload
+            {
+                match &mut animation.lens {
+                    PropertyLensSpec::CameraFollowEndpoint { hold, .. } => *hold = Some(position),
+                    PropertyLensSpec::CameraFrameDynamic { hold, .. } => {
+                        *hold = zoom.map(|zoom| (position, zoom));
+                    }
+                    _ => {}
+                }
+            }
+            camera_position.x = position.x;
+            camera_position.y = position.y;
+            if let Some(zoom) = zoom {
+                *camera_zoom = zoom;
+            }
+        }
+    }
+
+    /// Where `endpoint` is as authored, with the world matrix its local
+    /// offsets turn with; `None` for endpoints only the run time resolves
+    /// (expressions, number lines).
+    fn authored_endpoint(
+        builder: &SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        endpoint: &CanvasEndpoint,
+    ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
+        use gaanim_core::glam::DMat4;
+        match endpoint {
+            CanvasEndpoint::Static(position) => Some((*position, DMat4::IDENTITY)),
+            CanvasEndpoint::Entity(id) => {
+                let runtime = *id_map.get(id)?;
+                builder.states.get(runtime)?;
+                let matrix = builder.get_world_transform(runtime).to_mat4();
+                Some((matrix.transform_point3(DVec3::ZERO), matrix))
+            }
+            CanvasEndpoint::Anchor(anchor) => {
+                let runtime = *id_map.get(&anchor.object)?;
+                let bounds = builder.states.get(runtime)?.bounds;
+                let local =
+                    bounds.center() + bounds.size() * 0.5 * anchor.normalized + anchor.offset;
+                let matrix = builder.get_world_transform(runtime).to_mat4();
+                Some((matrix.transform_point3(local), matrix))
+            }
+            _ => None,
         }
     }
 
@@ -8291,7 +8439,7 @@ impl SceneModel {
                     return;
                 }
                 if *dynamic {
-                    Self::add_camera_lens(
+                    let clip = Self::add_camera_clip(
                         builder,
                         start,
                         anim,
@@ -8303,8 +8451,19 @@ impl SceneModel {
                             frame_width: frame_bounds.width(),
                             frame_height: frame_bounds.height(),
                             interpolation: *interpolation,
+                            hold: None,
                         },
                     );
+                    builder
+                        .pending_camera_holds
+                        .push(crate::builder::PendingCameraHold {
+                            clip,
+                            kind: crate::builder::PendingCameraHoldKind::Frame {
+                                targets: targets.clone(),
+                                margins: *margins,
+                                frame: (frame_bounds.width(), frame_bounds.height()),
+                            },
+                        });
                     // Keep subsequent authored camera animations continuous.
                     // Runtime evaluation still recomputes these bounds every
                     // frame; this authored estimate is only the hand-off pose.
@@ -8382,7 +8541,7 @@ impl SceneModel {
                 offset_space,
                 lag,
             } => {
-                Self::add_camera_lens(
+                let clip = Self::add_camera_clip(
                     builder,
                     start,
                     anim,
@@ -8392,8 +8551,22 @@ impl SceneModel {
                         offset: *offset,
                         offset_space: *offset_space,
                         lag: *lag,
+                        hold: None,
                     },
                 );
+                builder
+                    .pending_camera_holds
+                    .push(crate::builder::PendingCameraHold {
+                        clip,
+                        kind: crate::builder::PendingCameraHoldKind::Follow {
+                            target: Box::new(target.clone()),
+                            from: *camera_position,
+                            offset: *offset,
+                            offset_space: *offset_space,
+                            lag: *lag,
+                            duration: anim.duration.max(0.0),
+                        },
+                    });
             }
             AnimationType::CameraShake {
                 amplitude,
@@ -8551,6 +8724,7 @@ impl SceneModel {
                         from_up: *camera_up,
                         from_zoom: *camera_zoom,
                         to_zoom: 1.0,
+                        from_lens: *camera_fov,
                     },
                 );
                 *camera_position = DVec3::ZERO;
@@ -13065,6 +13239,61 @@ mod tests {
     }
 
     #[test]
+    fn follow_and_dynamic_frames_keep_the_pose_where_their_targets_end() {
+        use gaanim_animation::FollowOffsetSpace;
+        let mut canvas = SceneModel::new(960, 540);
+        let rover = canvas.circle(0.5).move_to(-4.0, 0.0);
+        let follow = canvas.camera_follow_endpoint(
+            crate::canvas::CanvasEndpoint::Entity(rover.id),
+            DVec3::new(0.0, 1.0, 0.0),
+            FollowOffsetSpace::World,
+            0.0,
+            2.0,
+        );
+        // The rover's move comes after the camera's in the same play.
+        canvas.play(vec![
+            follow,
+            rover.animate().move_to(4.0, 0.0).duration(2.0),
+        ]);
+        canvas.wait(1.0);
+        let pan = canvas.camera_pan_to(4.0, 5.0, 1.0);
+        canvas.play(vec![pan]);
+        let card = canvas.rect(2.0, 1.0).move_to(-2.0, -2.0);
+        let frame = canvas.camera_frame_many(std::slice::from_ref(&card), [0.5; 4], true, 1.0);
+        canvas.play(vec![frame, card.animate().move_to(3.0, -3.0).duration(1.0)]);
+        canvas.wait(1.0);
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        let pose = |world: &World| {
+            let camera = world.resource::<gaanim_math::Camera>();
+            let gaanim_math::Projection::Orthographic { zoom } = camera.projection else {
+                panic!("orthographic camera");
+            };
+            (camera.position.truncate(), zoom)
+        };
+        // After the follow the camera stays over the rover's end, offset.
+        timeline.seek(&mut world, 2.5);
+        assert!((pose(&world).0 - DVec2::new(4.0, 1.0)).length() < 1e-9);
+        // The next move starts there instead of cutting back to the origin.
+        timeline.seek(&mut world, 3.0);
+        assert!((pose(&world).0 - DVec2::new(4.0, 1.0)).length() < 1e-9);
+        timeline.seek(&mut world, 4.0);
+        assert!((pose(&world).0 - DVec2::new(4.0, 5.0)).length() < 1e-9);
+        // The dynamic frame keeps the framing of the card where it ends.
+        timeline.seek(&mut world, 5.5);
+        let (center, zoom) = pose(&world);
+        assert!(
+            (center - DVec2::new(3.0, -3.0)).length() < 1e-9,
+            "{center:?}"
+        );
+        // A 3 x 2 box (the card plus its margins) in the 960 x 540 frame.
+        assert!(
+            (zoom - (540.0 / 2.0f64).min(960.0 / 3.0)).abs() < 1e-9,
+            "{zoom}"
+        );
+    }
+
+    #[test]
     fn named_camera_state_restores_complete_authored_pose() {
         let mut canvas = SceneModel::new(960, 540);
         let _marker = canvas.circle(1.0);
@@ -13964,6 +14193,33 @@ mod tests {
                 "{time}: {transform:?}"
             );
         }
+    }
+
+    #[test]
+    fn camera_view_follows_and_removals_act_from_the_cursor() {
+        use gaanim_renderer::effects::CameraView;
+
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 1.0).move_to(3.0, 2.0);
+        let screen = canvas.rect(4.0, 2.0).move_to(-4.0, -1.0);
+        let view = screen.clone().camera_view(&frame).unwrap();
+        let dot = canvas.dot(0.1).move_to(1.0, 1.0);
+        canvas.play(vec![dot.animate().move_to(2.0, 1.0).duration(1.0)]);
+        view.follow(crate::canvas::CanvasEndpoint::Entity(dot.id), DVec3::ZERO);
+        canvas.play(vec![dot.animate().move_to(5.0, 2.0).duration(1.0)]);
+        screen.no_camera_view();
+        canvas.wait(1.0);
+
+        let (mut world, _) = compiled_world(&canvas);
+        let shown = world.query::<&CameraView>().single(&world).unwrap().clone();
+        assert_eq!((shown.since, shown.until), (0.0, Some(2.0)));
+        assert!(shown.shown_at(0.0) && shown.shown_at(1.99) && !shown.shown_at(2.0));
+        let follow = world
+            .query::<&gaanim_animation::EndpointFollow>()
+            .single(&world)
+            .unwrap();
+        assert_eq!(follow.since, 1.0);
+        assert!(!follow.holds_at(0.5) && follow.holds_at(1.0));
     }
 
     #[test]

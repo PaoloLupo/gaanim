@@ -83,16 +83,17 @@ scene.camera.pan_to(-6, -3).zoom_to(1.5).rotate_to(0)
 captions.shot("scene.camera.pan_to(-6, -3).zoom_to(1.5).rotate_to(0)")
 captions.shot("scene.camera.animate.reset()", scene.camera.animate.reset())
 
-# frame_to pans and zooms so the targets fit the view. The margin is one
-# value, (vertical, horizontal) or four sides in CSS order; dynamic=True
-# keeps framing targets that move during the shot.
+# frame_to pans and zooms so the targets fit the view. The margin is half a
+# unit by default, one value, (vertical, horizontal) or four sides in CSS
+# order; dynamic=True keeps framing targets that move during the shot, and
+# the camera keeps the last framing when it ends.
 scene.segment("frame_to")
 scene.camera.reset()
 world()
 circle = scene.geometry.circle(0.8).fill(success).move_to(-6, 3.2)
 square = scene.geometry.square(1.4).fill(danger).move_to(6, -2.8)
 captions = Captions()
-captions.shot("scene.camera.animate.frame_to(circle, margin=0.5)", scene.camera.animate.frame_to(circle, margin=0.5))
+captions.shot("scene.camera.animate.frame_to(circle)", scene.camera.animate.frame_to(circle))
 captions.shot("frame_to(circle, margin=3)", scene.camera.animate.frame_to(circle, margin=3))
 captions.shot("frame_to(square, margin=(0.5, 4))", scene.camera.animate.frame_to(square, margin=(0.5, 4)))
 captions.shot(
@@ -104,24 +105,17 @@ captions.shot(
     scene.camera.animate.frame_to(circle, margin=1, interpolation="linear"),
 )
 captions.shot("frame_to([circle, square], margin=1)", scene.camera.animate.frame_to([circle, square], margin=1))
-# A dynamic frame holds only while it plays: a cut keeps its last pose.
 captions.shot(
     "frame_to([circle, square], margin=1, dynamic=True)",
     scene.camera.animate.frame_to([circle, square], margin=1, dynamic=True),
     square.animate.move_to(15, -8.8),
     duration=1.6,
-    hold=0,
-    end=False,
 )
-scene.camera.frame_to([circle, square], margin=1)
-scene.wait(HOLD)
-SEEKS.append(scene.cursor - 0.2)
 
-# follow keeps a target in view while it plays: lag eases the camera onto it
-# over about that many seconds, offset shifts the view from the target, and
-# offset_space="local" turns the offset with it. When the shot ends the camera
-# is back at its own pose, so each shot here starts with a cut onto the rover
-# and lasts through the hold.
+# follow keeps a target in view while it plays and leaves the camera where it
+# took it: lag eases the camera onto the target over about that many seconds,
+# offset shifts the view from the target, and offset_space="local" turns the
+# offset with it. Each shot lasts through the hold, so the camera settles.
 scene.segment("follow")
 scene.camera.reset()
 world()
@@ -132,7 +126,6 @@ captions = Captions()
 
 def follow(label, move, quarter):
     """Follow the rover with ``move`` while it drives a quarter of the route, and through the hold."""
-    scene.camera.pan_to(rover)
     drive = rover.animate.move_along(route, orient=True, start=quarter / 4, end=(quarter + 1) / 4)
     drive = drive.duration(LEG).easing(Easing.LINEAR)
     captions.shot(label, move, duration=LEG + HOLD, hold=0, midway=True, end=False, also=[drive])
@@ -146,7 +139,6 @@ follow(
     scene.camera.animate.follow(rover, offset=(4, 0), offset_space="local"),
     3,
 )
-scene.camera.pan_to(rover)
 captions.shot("scene.camera.animate.reset()", scene.camera.animate.reset())
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

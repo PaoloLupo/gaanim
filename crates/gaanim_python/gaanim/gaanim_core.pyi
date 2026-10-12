@@ -1645,7 +1645,7 @@ class Anim:
     @overload
     def move_to(self, point: AnchorPoint, /) -> Anim: ...
     @overload
-    def move_to(self, x: ScalarSource, y: ScalarSource, anchor: Optional[Anchor] = None) -> Anim:
+    def move_to(self, x: ScalarSource, y: ScalarSource, anchor: Optional[AnchorName | Anchor] = None) -> Anim:
         """Target an absolute 2D position, placing ``anchor`` at ``(x, y)``.
 
         Omitting ``anchor`` uses ``Anchor.CENTER``. The returned animation can
@@ -4042,7 +4042,8 @@ class Drawable:
     def no_camera_view(self) -> Drawable:
         """Remove the camera view shown inside this drawable and return it.
 
-        The drawable draws as a plain shape again.
+        From the cursor on the drawable draws as a plain shape again; before
+        it the view still shows.
         """
         ...
     def view_layer(self, name: Optional[str]) -> Drawable:
@@ -4183,13 +4184,14 @@ class Drawable:
     @overload
     def move_to(self, point: AnchorPoint, /) -> Self: ...
     @overload
-    def move_to(self, x: ScalarSource, y: ScalarSource, anchor: Optional[Anchor] = None) -> Self:
+    def move_to(self, x: ScalarSource, y: ScalarSource, anchor: Optional[AnchorName | Anchor] = None) -> Self:
         """Place this drawable at coordinates, another drawable, or an anchor point.
 
         Omitting ``anchor`` places ordinary drawables by their visual center.
         Coordinate-system roots instead place their authored local origin, so
-        labels cannot displace the mathematical axes. The optional anchor can
-        be passed positionally or by keyword. Passing one ``Drawable`` creates a deferred
+        labels cannot displace the mathematical axes. The optional anchor, an
+        ``Anchor`` or its name (``"top_left"``), can be passed positionally or
+        by keyword. Passing one ``Drawable`` creates a deferred
         center-to-center layout relation; use ``follow`` or ``attach_to`` when
         the target must continue following an animated reference. Passing an
         ``AnchorPoint`` places this drawable's center on that transformed local
@@ -4256,7 +4258,7 @@ class Drawable:
         ...
     def anchor_point(
         self,
-        anchor: Optional[Anchor] = None,
+        anchor: Optional[AnchorName | Anchor] = None,
         *,
         offset: tuple[float, float] = (0.0, 0.0),
     ) -> AnchorPoint:
@@ -4271,7 +4273,7 @@ class Drawable:
             corner = frame.anchor_point(Anchor.TOP_RIGHT)
         """
         ...
-    def with_port(self, name: str, anchor: Anchor, *, offset: tuple[float, float] = (0.0, 0.0)) -> Self:
+    def with_port(self, name: str, anchor: AnchorName | Anchor, *, offset: tuple[float, float] = (0.0, 0.0)) -> Self:
         """Define a unique named local anchor and return this same drawable.
 
         Empty/duplicate names and nonfinite offsets raise ValueError. A port
@@ -4457,7 +4459,7 @@ class Drawable:
         reference: Drawable,
         direction: Direction,
         spacing: float = 0.24,
-        aligned_edge: Optional[Anchor] = None,
+        aligned_edge: Optional[AnchorName | Anchor] = None,
     ) -> Self:
         """Apply next to to this drawable and return the result.
 
@@ -4468,8 +4470,8 @@ class Drawable:
     def align_to(
         self,
         reference: Drawable,
-        target_anchor: Anchor,
-        reference_anchor: Optional[Anchor] = None,
+        target_anchor: AnchorName | Anchor,
+        reference_anchor: Optional[AnchorName | Anchor] = None,
     ) -> Self:
         """Apply align to to this drawable and return the result.
 
@@ -4484,7 +4486,7 @@ class Drawable:
             result = drawable.to_edge(Direction.RIGHT)
         """
         ...
-    def to_corner(self, corner: Anchor, buff: float = 0.24) -> Self:
+    def to_corner(self, corner: AnchorName | Anchor, buff: float = 0.24) -> Self:
         """Apply to corner to this drawable and return the result.
 
         Example:
@@ -4650,7 +4652,9 @@ class Drawable:
 
         World offsets remain screen-aligned; local offsets rotate and scale with
         drawable or anchored sources. Non-finite offsets and invalid modes error.
-        The drawable stays hidden until its entry animation is played.
+        The drawable stays hidden until its entry animation is played. Without
+        ``delay`` the follow starts at the cursor, so earlier animations of this
+        drawable still play.
 
         ``delay`` (seconds) places this drawable where a Drawable ``source``
         was ``delay`` seconds earlier, like After Effects'
@@ -5364,7 +5368,7 @@ class Text(Drawable):
         self,
         x: ScalarSource,
         y: ScalarSource,
-        anchor: Optional[Anchor | TextAnchor] = None,
+        anchor: Optional[AnchorName | Anchor | TextAnchor] = None,
     ) -> Self:
         """Place this Text and preserve its specialized handle.
 
@@ -5659,7 +5663,13 @@ class Camera:
     @overload
     def pan_to(self, target: Endpoint) -> Camera: ...
     def zoom_to(self, zoom: ScalarSource) -> Camera: ...
-    def frame_to(self, targets: Drawable | Sequence[Drawable], margin: float | tuple[float, float] | tuple[float, float, float, float] | None = None, *, dynamic: bool = False) -> Camera: ...
+    def frame_to(self, targets: Drawable | Sequence[Drawable], margin: float | tuple[float, float] | tuple[float, float, float, float] | None = None, *, dynamic: bool = False) -> Camera:
+        """Cut to the pose that fits ``targets`` with ``margin`` and return the camera.
+
+        ``margin`` works as in ``CameraAnimation.frame_to``: half a scene unit
+        on every side when omitted.
+        """
+        ...
     def rotate_to(self, angle: ScalarSource) -> Camera: ...
     def look_at(self, eye: Endpoint, target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
     def perspective(self, fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera: ...
@@ -5894,8 +5904,8 @@ class CameraView:
     def follow(self, target: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0)) -> CameraView:
         """Keep the camera on ``target`` plus ``offset`` from now on and return this view.
 
-        The frame follows the endpoint every frame, so ``pan_to`` has no
-        effect afterwards, and ``pop_out``/``pop_in`` start from where a
+        From the cursor the frame follows the endpoint every frame, so
+        ``pan_to`` has no effect afterwards (earlier moves still play), and ``pop_out``/``pop_in`` start from where a
         followed drawable or anchor point is at that moment. A non-finite
         offset raises ``ValueError``.
         """
@@ -5952,8 +5962,11 @@ class CameraAnimation:
     def to(self, state: CameraState) -> Anim:
         """Animate to a reusable camera state and return a composable Anim.
 
-        A state owned by another Scene raises ``ValueError``. Configure timing
-        on the returned animation.
+        Between an orthographic and a perspective state the move stays in
+        perspective, from or to the view that matches the orthographic pose,
+        and turns orthographic only at its orthographic end, so 3D content
+        stays in front of the eye. A state owned by another Scene raises
+        ``ValueError``. Configure timing on the returned animation.
         """
         ...
     def restore(self, name: str) -> Anim:
@@ -6001,6 +6014,11 @@ class CameraAnimation:
     ) -> Anim:
         """Pan and zoom so ``targets`` fit the viewport with ``margin``.
 
+        ``margin`` is in scene units: one value, ``(vertical, horizontal)`` or
+        four sides in CSS order, half a unit on every side when omitted. With
+        ``dynamic=True`` the view keeps framing targets that move while the
+        animation plays, and keeps their last framing when it ends.
+
         With ``interpolation="exponential"`` (the default) the zoom is
         exponential and the pan follows the change of visible width, so the
         view scales about a fixed point instead of drifting before it settles.
@@ -6025,10 +6043,16 @@ class CameraAnimation:
         offset_space: Literal["world", "local"] = "world",
         lag: float = 0.0,
     ) -> Anim:
-        """Configure the camera with follow.
+        """Keep ``target`` plus ``offset`` in the center while the animation plays.
+
+        ``offset_space="local"`` turns the offset with the target, and ``lag``
+        (seconds) eases the camera onto it from where it started. When the
+        animation ends the camera keeps the pose it reached, so the next camera
+        move starts there; that pose comes from where the target is as
+        authored at the end of the ``play``.
 
         Example:
-            scene.camera.follow(target)
+            scene.play([car.animate.move_to(6, 2), scene.camera.animate.follow(car, lag=0.2)])
         """
         ...
     def shake(
@@ -6218,7 +6242,11 @@ class CameraAnimation:
         ...
 
     def reset(self) -> Anim:
-        """Restore the default 2D pose, up vector, target, and projection."""
+        """Restore the default 2D pose, up vector, target, and projection.
+
+        From a perspective camera the move stays in perspective, toward the
+        view that matches the 2D pose, and turns orthographic at its end.
+        """
         ...
 
 class Axis:
@@ -6992,7 +7020,7 @@ class Readout(Drawable):
     def number(self) -> Drawable: ...
     @property
     def unit(self) -> Optional[Drawable]: ...
-    def move_to(self, x: Any, y: Any = None, anchor: Anchor | TextAnchor | None = None) -> Readout:
+    def move_to(self, x: Any, y: Any = None, anchor: AnchorName | Anchor | TextAnchor | None = None) -> Readout:
         """Position the readout and return it.
 
         An Anchor places that point of its box at (x, y); without one, its
@@ -7009,7 +7037,7 @@ class RollingNumber(Drawable):
     Use visual.animate for position, opacity and other drawable animations.
     Formatting is fixed at creation; movement is deterministic under seeks.
     """
-    def move_to(self, x: Any, y: Any = None, anchor: Anchor | TextAnchor | None = None) -> RollingNumber:
+    def move_to(self, x: Any, y: Any = None, anchor: AnchorName | Anchor | TextAnchor | None = None) -> RollingNumber:
         """Position the display and return this counter.
 
         Anchor uses the complete wheel window, including line_height padding;
@@ -7076,7 +7104,7 @@ class ProgressRing(Drawable):
     def visual(self) -> Drawable:
         """The group of track, arc and label; use ``visual.animate`` to move or fade the ring."""
         ...
-    def move_to(self, x: Any, y: Any = None, anchor: Anchor | None = None) -> ProgressRing:
+    def move_to(self, x: Any, y: Any = None, anchor: AnchorName | Anchor | None = None) -> ProgressRing:
         """Position the ring by its center and return this ProgressRing."""
         ...
     def shift_by(self, dx: float, dy: float) -> ProgressRing:
@@ -7172,7 +7200,7 @@ class BarRace(Drawable):
     def visual(self) -> Drawable:
         """The group of every row and the ticker; use ``visual.animate`` to move or fade the race."""
         ...
-    def move_to(self, x: Any, y: Any = None, anchor: Anchor | None = None) -> BarRace:
+    def move_to(self, x: Any, y: Any = None, anchor: AnchorName | Anchor | None = None) -> BarRace:
         """Position the race by its center and return this BarRace."""
         ...
     def shift_by(self, dx: float, dy: float) -> BarRace:
@@ -7245,7 +7273,7 @@ class Variable(Drawable):
     def number(self) -> Drawable: ...
     @property
     def unit(self) -> Optional[Drawable]: ...
-    def move_to(self, x: Any, y: Any = None, anchor: Anchor | TextAnchor | None = None) -> Variable:
+    def move_to(self, x: Any, y: Any = None, anchor: AnchorName | Anchor | TextAnchor | None = None) -> Variable:
         """Position the variable and return it, as Readout.move_to does."""
         ...
 _ReactiveScalar: TypeAlias = ScalarSource
@@ -9440,7 +9468,7 @@ class SlideKit:
         logo: Optional[str] = None,
         footer: Optional[str] = None,
         slide_numbers: bool = True,
-        number_anchor: Optional[Anchor] = None,
+        number_anchor: Optional[AnchorName | Anchor] = None,
         rule: bool = True,
         show_on_cover: bool = False,
         logo_scale: float = 1.0,

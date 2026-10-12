@@ -292,6 +292,9 @@ pub enum PropertyLensSpec {
         to: f64,
     },
     /// Restore the complete authored camera rig to its 2D defaults.
+    ///
+    /// `from_lens` is the perspective lens (`fov_y`, `near`, `far`) the
+    /// camera had, if any: the move then stays in perspective until its end.
     CameraReset {
         from_position: gaanim_core::glam::DVec3,
         from_rotation: gaanim_core::glam::DQuat,
@@ -299,11 +302,15 @@ pub enum PropertyLensSpec {
         from_up: gaanim_core::glam::DVec3,
         from_zoom: f64,
         to_zoom: f64,
+        from_lens: Option<(f64, f64, f64)>,
     },
     /// Center the camera on a moving mobject for the lifetime of the clip.
     CameraFollow {
         target: ObjectId,
     },
+    /// Keep the camera on a tracked endpoint while the clip plays; the
+    /// camera phase resolves it every frame. Once the clip ends the camera
+    /// keeps `hold`, the pose it reached as authored, when one is known.
     #[cfg_attr(feature = "serde", serde(skip))]
     CameraFollowEndpoint {
         target: gaanim_animation::TrackingEndpoint,
@@ -311,7 +318,11 @@ pub enum PropertyLensSpec {
         offset: gaanim_core::glam::DVec3,
         offset_space: gaanim_animation::FollowOffsetSpace,
         lag: f64,
+        hold: Option<gaanim_core::glam::DVec3>,
     },
+    /// Frame moving targets while the clip plays, resolved every frame in
+    /// the camera phase. Once it ends the camera keeps `hold` (position and
+    /// zoom), the framing of the targets as authored, when one is known.
     #[cfg_attr(feature = "serde", serde(skip))]
     CameraFrameDynamic {
         targets: Vec<bevy::prelude::Entity>,
@@ -321,6 +332,7 @@ pub enum PropertyLensSpec {
         frame_width: f64,
         frame_height: f64,
         interpolation: gaanim_math::ZoomInterpolation,
+        hold: Option<(gaanim_core::glam::DVec3, f64)>,
     },
     /// A deterministic damped shake around `origin`.
     ///
@@ -612,6 +624,7 @@ impl PropertyLensSpec {
                 from_up,
                 from_zoom,
                 to_zoom,
+                ..
             } => PropertyLens::CameraReset {
                 from_position: *from_position,
                 from_rotation: *from_rotation,
@@ -627,6 +640,7 @@ impl PropertyLensSpec {
                 offset,
                 offset_space,
                 lag,
+                ..
             } => PropertyLens::CameraFollowEndpoint {
                 target: target.clone(),
                 from: *from,
