@@ -568,9 +568,6 @@ fn extract_mirror(mirror: Extract<Res<CanvasMirror>>, mut extracted: ResMut<Extr
 
 /// Maps the scene from world space to the canvas pixels of `view`, with the
 /// viewport rasterized at `scale` of its pixels per axis.
-///
-/// Same chain as bevy_vello 0.14: world → view → projection → NDC → pixels,
-/// with Y flipped into Vello's Y-down space.
 fn scene_to_pixels(
     model: Mat4,
     camera: &ExtractedCamera,
@@ -578,29 +575,44 @@ fn scene_to_pixels(
     scale: Vec2,
 ) -> Option<Affine> {
     let size = camera.physical_viewport_size?;
-    let (pixels_x, pixels_y) = (size.x as f32 * scale.x, size.y as f32 * scale.y);
-    let ndc_to_pixels = Mat4::from_cols_array_2d(&[
-        [pixels_x / 2.0, 0.0, 0.0, pixels_x / 2.0],
-        [0.0, pixels_y / 2.0, 0.0, pixels_y / 2.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ])
-    .transpose();
-    let mut view_matrix = view.world_from_view.to_matrix();
-    view_matrix.w_axis.y *= -1.0;
-    let view_proj = view.clip_from_view * view_matrix.inverse();
-    let mut model = model;
-    model.w_axis.y *= -1.0;
-    let m = (ndc_to_pixels * view_proj * model).to_cols_array();
-    // Negated skews keep rotations turning the same way as the Y-up world.
-    Some(Affine::new([
+    Some(scene_to_canvas(
+        model,
+        view.world_from_view.to_matrix(),
+        view.clip_from_view,
+        Vec2::new(size.x as f32 * scale.x, size.y as f32 * scale.y),
+    ))
+}
+
+/// Maps a scene placed by `model` to a canvas `pixels` large, seen by a
+/// camera at `world_from_view` through `clip_from_view`.
+///
+/// As in bevy_vello, a scene's units are Y-down and the model places them in
+/// the Y-up world (the main scene's model flips Y back, since it is composed
+/// Y-up); clip space is Y-up and the canvas Y-down. Built as one matrix, a
+/// rotated camera turns the view about its own position, as exports do.
+fn scene_to_canvas(
+    model: Mat4,
+    world_from_view: Mat4,
+    clip_from_view: Mat4,
+    pixels: Vec2,
+) -> Affine {
+    let ndc_to_pixels = Mat4::from_cols(
+        Vec4::new(pixels.x / 2.0, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, -pixels.y / 2.0, 0.0, 0.0),
+        Vec4::Z,
+        Vec4::new(pixels.x / 2.0, pixels.y / 2.0, 0.0, 1.0),
+    );
+    let y_down = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
+    let m = (ndc_to_pixels * clip_from_view * world_from_view.inverse() * model * y_down)
+        .to_cols_array();
+    Affine::new([
         m[0] as f64,
-        -m[1] as f64,
-        -m[4] as f64,
+        m[1] as f64,
+        m[4] as f64,
         m[5] as f64,
         m[12] as f64,
         m[13] as f64,
-    ]))
+    ])
 }
 
 /// Render-world cameras that show the canvas.
@@ -1068,6 +1080,54 @@ mod tests {
             &Circle::new((0.0, 0.0), radius),
         );
         scene
+    }
+
+    #[test]
+    fn the_canvas_shows_a_turned_camera_as_exports_do() {
+        use bevy::camera::CameraProjection;
+        use gaanim_core::glam::{DQuat, DVec3};
+        use gaanim_math::{CameraViewport, Projection as Lens, ResolvedCamera};
+        use vello::kurbo::Point;
+
+        let (width, height) = (1600.0_f32, 900.0_f32);
+        let shifted = CameraViewport {
+            scale: 0.8,
+            offset_y: -120.0,
+        };
+        for (angle, (x, y), zoom, viewport) in [
+            (0.0, (0.0, 0.0), 1.0, CameraViewport::default()),
+            (0.0, (4.0, -2.0), 2.5, shifted),
+            (0.3, (-9.0, 3.2), 0.7, CameraViewport::default()),
+            (2.03, (6.0, 1.5), 1.0, shifted),
+            (-2.5, (-3.0, -7.0), 1.7, shifted),
+        ] {
+            let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+            camera.position = DVec3::new(x, y, 0.0);
+            camera.rotation = DQuat::from_rotation_z(angle);
+            camera.projection = Lens::Orthographic { zoom };
+            let pose = crate::pipeline::canvas_camera_pose(&ResolvedCamera::new(camera, viewport));
+            let mut projection = OrthographicProjection {
+                scale: pose.scale,
+                ..OrthographicProjection::default_2d()
+            };
+            projection.update(width, height);
+            let canvas = scene_to_canvas(
+                Transform::from_scale(Vec3::new(1.0, -1.0, 1.0)).to_matrix(),
+                Transform::from_translation(pose.translation.extend(0.0))
+                    .with_rotation(pose.rotation)
+                    .to_matrix(),
+                projection.get_clip_from_view(),
+                Vec2::new(width, height),
+            );
+            let export = camera.to_vello_transform_with_viewport(viewport);
+            for point in [Point::ORIGIN, Point::new(3.0, -1.0), Point::new(x, y)] {
+                let (shown, exported) = (canvas * point, export * point);
+                assert!(
+                    (shown - exported).hypot() < 0.05,
+                    "angle {angle}: {point:?} at {shown:?}, exported at {exported:?}"
+                );
+            }
+        }
     }
 
     /// Play `seconds` of frames whose duration depends on the preview scale.

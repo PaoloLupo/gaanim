@@ -1015,10 +1015,11 @@ pub fn billboard_system(
             billboard.affine_2d = gaanim_core::kurbo::Affine::translate((vpos.x, vpos.y))
                 * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
         } else {
-            // Orthographic: previous 2D behavior (rotate to stay upright)
+            // Orthographic: turn with the camera, whose view turns the other
+            // way, so the label stays upright on screen.
             let z_angle = cam.z_angle();
             billboard.affine_2d = gaanim_core::kurbo::Affine::translate((trans.x, trans.y))
-                * gaanim_core::kurbo::Affine::rotate(-z_angle)
+                * gaanim_core::kurbo::Affine::rotate(z_angle)
                 * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
         }
         if *global != billboard {
@@ -1305,6 +1306,41 @@ mod tests {
         for entity in [far, near, plane] {
             assert!((pixel(&world, &authored, entity) - at_rest).hypot() < 1e-6);
         }
+    }
+
+    #[test]
+    fn orthographic_billboards_stay_upright_while_the_camera_turns() {
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+        camera.rotation = gaanim_core::glam::DQuat::from_rotation_z(0.7);
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            camera,
+            gaanim_math::CameraViewport::default(),
+        ));
+        let local = SpatialTransform::new_2d(2.0, 1.0);
+        let label = world
+            .spawn((
+                local,
+                GlobalSpatialTransform::from_local(&local),
+                crate::components::Billboard,
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(billboard_system);
+        schedule.run(&mut world);
+
+        let global = world
+            .get::<GlobalSpatialTransform>(label)
+            .unwrap()
+            .affine_2d;
+        let [a, b, c, d, _, _] = (camera.to_vello_transform() * global).as_coeffs();
+        assert!(
+            b.abs() < 1e-9 && c.abs() < 1e-9,
+            "turned on screen: {b} {c}"
+        );
+        assert!(a > 0.0 && d < 0.0);
+        let at = global * gaanim_core::kurbo::Point::ORIGIN;
+        assert!((at - gaanim_core::kurbo::Point::new(2.0, 1.0)).hypot() < 1e-9);
     }
 
     #[test]

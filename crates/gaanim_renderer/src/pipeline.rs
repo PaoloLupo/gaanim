@@ -2426,63 +2426,66 @@ pub fn sync_gaanim_camera_to_bevy_system(
     mut bevy_cameras: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
 ) {
     let Some(cam) = gaanim_camera else { return };
+    let pose = canvas_camera_pose(&cam);
     for (mut transform, mut projection) in &mut bevy_cameras {
-        // Position — incorporate viewport_offset_y so the scene shifts up
-        // when the timeline panel is visible (offset is in screen pixels).
-        // In perspective mode the Vello (2D) camera must stay fixed at the
-        // origin so that Vello world coordinates map to screen pixels via a
-        // stable orthographic transform. 3D billboard labels are then
-        // projected to screen via `world_to_screen` and placed in this fixed
-        // Vello space. Following the 3D eye with the 2D camera would shift
-        // HUD and 2D background incorrectly and break the projection.
-        let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
-        let effective_zoom = match cam.projection {
-            gaanim_math::Projection::Orthographic { zoom } => {
-                cam.pixels_per_unit() * zoom * cam.viewport.scale
-            }
-            _ => cam.pixels_per_unit() * cam.viewport.scale,
-        };
-        let offset_world_y = if effective_zoom > 0.0 {
-            cam.viewport.offset_y / effective_zoom
-        } else {
-            0.0
-        };
-        if is_perspective {
-            transform.translation.x = 0.0;
-            transform.translation.y = (-offset_world_y) as f32;
-            transform.rotation = Quat::IDENTITY;
-            if let Projection::Orthographic(ortho) = projection.as_mut() {
-                let effective = cam.pixels_per_unit() * cam.viewport.scale;
-                let scale = if effective > 0.0 {
-                    1.0 / effective as f32
-                } else {
-                    1.0
-                };
-                ortho.scale = scale;
-            }
-        } else {
-            transform.translation.x = cam.position.x as f32;
-            transform.translation.y = (cam.position.y - offset_world_y) as f32;
-            // Rotation (2D Z-axis only) — compute directly from quaternion
-            // to avoid the three-trig overhead of full Euler decomposition.
-            let z_angle = 2.0 * f64::atan2(cam.rotation.z, cam.rotation.w);
-            transform.rotation = Quat::from_rotation_z(-z_angle as f32);
-
-            // Projection: only Orthographic is supported for 2D Vello
-            if let gaanim_math::Projection::Orthographic { zoom } = cam.projection {
-                // Apply viewport_scale so the scene maintains its aspect ratio
-                // when the window dimensions differ from the scene's native resolution.
-                let effective = cam.pixels_per_unit() * zoom * cam.viewport.scale;
-                let scale = if effective > 0.0 {
-                    1.0 / effective as f32
-                } else {
-                    1.0
-                };
-                if let Projection::Orthographic(ortho) = projection.as_mut() {
-                    ortho.scale = scale;
-                }
-            }
+        transform.translation.x = pose.translation.x;
+        transform.translation.y = pose.translation.y;
+        transform.rotation = pose.rotation;
+        if let Projection::Orthographic(ortho) = projection.as_mut() {
+            ortho.scale = pose.scale;
         }
+    }
+}
+
+/// Pose and orthographic scale of the Bevy 2D camera that shows the canvas.
+#[cfg(not(target_os = "emscripten"))]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CanvasCameraPose {
+    pub translation: Vec2,
+    pub rotation: Quat,
+    pub scale: f32,
+}
+
+/// The Bevy 2D camera pose that shows `cam` on the canvas as
+/// [`gaanim_math::Camera::to_vello_transform_with_viewport`] shows it in
+/// exports: same center, zoom and turn. The viewport's offset moves the
+/// picture down that many screen pixels (up when negative, above a bottom
+/// panel), so the camera moves the other way along its own vertical axis.
+///
+/// In perspective mode the 2D camera stays at the origin, unrotated, so that
+/// Vello world coordinates map to screen pixels through a fixed orthographic
+/// transform: 3D content and billboard labels are projected into that space,
+/// and following the 3D eye would shift HUD and 2D backgrounds.
+#[cfg(not(target_os = "emscripten"))]
+pub(crate) fn canvas_camera_pose(cam: &gaanim_math::ResolvedCamera) -> CanvasCameraPose {
+    let orthographic = match cam.projection {
+        gaanim_math::Projection::Orthographic { zoom } => Some(zoom),
+        _ => None,
+    };
+    // The viewport scale keeps the scene's aspect ratio when the window's
+    // differs from the scene's native resolution.
+    let effective = cam.pixels_per_unit() * orthographic.unwrap_or(1.0) * cam.viewport.scale;
+    let (scale, offset) = if effective > 0.0 {
+        (1.0 / effective as f32, cam.viewport.offset_y / effective)
+    } else {
+        (1.0, 0.0)
+    };
+    if orthographic.is_none() {
+        return CanvasCameraPose {
+            translation: Vec2::new(0.0, offset as f32),
+            rotation: Quat::IDENTITY,
+            scale,
+        };
+    }
+    let angle = cam.z_angle();
+    let (sin, cos) = angle.sin_cos();
+    CanvasCameraPose {
+        translation: Vec2::new(
+            (cam.position.x - offset * sin) as f32,
+            (cam.position.y + offset * cos) as f32,
+        ),
+        rotation: Quat::from_rotation_z(angle as f32),
+        scale,
     }
 }
 
