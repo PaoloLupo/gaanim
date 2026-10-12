@@ -943,6 +943,16 @@ pub struct EndpointFollow {
     pub endpoint: TrackingEndpoint,
     pub offset: DVec3,
     pub offset_space: FollowOffsetSpace,
+    /// Timeline time the follow starts at, the cursor where it was set:
+    /// before it the drawable keeps its authored transform.
+    pub since: f64,
+}
+
+impl EndpointFollow {
+    /// Whether the follow places its drawable at timeline time `time`.
+    pub fn holds_at(&self, time: f64) -> bool {
+        time + 1e-9 >= self.since
+    }
 }
 
 /// Angular sweep selection used by an angle dimension.
@@ -2230,9 +2240,15 @@ fn bounds_in_frame(entity: Entity, frame: &DMat4, world: &World) -> Option<gaani
 
 /// Follow arbitrary endpoints after authored transforms and custom updaters.
 pub fn endpoint_follow_system(world: &mut World) {
+    let current_time = world
+        .get_resource::<PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
     let mut updates = Vec::new();
     let mut query = world.query::<(Entity, &EndpointFollow)>();
     for (entity, follow) in query.iter(world) {
+        if !follow.holds_at(current_time) {
+            continue;
+        }
         let Some(mut position) = resolve_tracking_endpoint(&follow.endpoint, world) else {
             continue;
         };
@@ -3571,6 +3587,36 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_follow_starts_at_its_cursor() {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState {
+            current_time: 1.0,
+            ..Default::default()
+        });
+        let target = world
+            .spawn((
+                SpatialTransform::new_2d(-1.0, 0.0),
+                EndpointFollow {
+                    endpoint: TrackingEndpoint::Static(DVec3::new(4.0, 2.0, 0.0)),
+                    offset: DVec3::ZERO,
+                    offset_space: FollowOffsetSpace::World,
+                    since: 2.0,
+                },
+            ))
+            .id();
+        endpoint_follow_system(&mut world);
+        let at = |world: &World| world.get::<SpatialTransform>(target).unwrap().translation;
+        assert_eq!(
+            at(&world),
+            DVec3::new(-1.0, 0.0, 0.0),
+            "held before its cursor"
+        );
+        world.resource_mut::<PlaybackState>().current_time = 2.0;
+        endpoint_follow_system(&mut world);
+        assert_eq!(at(&world), DVec3::new(4.0, 2.0, 0.0));
+    }
+
+    #[test]
     fn endpoint_follow_converts_world_position_into_parent_space() {
         let mut world = World::new();
         let parent = world.spawn(SpatialTransform::new_2d(10.0, 20.0)).id();
@@ -3581,6 +3627,7 @@ mod tests {
                     endpoint: TrackingEndpoint::Static(DVec3::new(30.0, 50.0, 0.0)),
                     offset: DVec3::new(2.0, -3.0, 0.0),
                     offset_space: FollowOffsetSpace::World,
+                    since: 0.0,
                 },
             ))
             .id();
@@ -3600,6 +3647,7 @@ mod tests {
                     endpoint: TrackingEndpoint::Static(DVec3::new(3.0, 4.0, 0.0)),
                     offset: DVec3::ZERO,
                     offset_space: FollowOffsetSpace::World,
+                    since: 0.0,
                 },
             ))
             .id();
@@ -3618,6 +3666,7 @@ mod tests {
                     endpoint: TrackingEndpoint::Static(DVec3::new(-5.0, 6.0, 0.0)),
                     offset: DVec3::ZERO,
                     offset_space: FollowOffsetSpace::World,
+                    since: 0.0,
                 },
             ))
             .id();

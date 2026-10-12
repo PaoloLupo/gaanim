@@ -4042,7 +4042,8 @@ class Drawable:
     def no_camera_view(self) -> Drawable:
         """Remove the camera view shown inside this drawable and return it.
 
-        The drawable draws as a plain shape again.
+        From the cursor on the drawable draws as a plain shape again; before
+        it the view still shows.
         """
         ...
     def view_layer(self, name: Optional[str]) -> Drawable:
@@ -4651,7 +4652,9 @@ class Drawable:
 
         World offsets remain screen-aligned; local offsets rotate and scale with
         drawable or anchored sources. Non-finite offsets and invalid modes error.
-        The drawable stays hidden until its entry animation is played.
+        The drawable stays hidden until its entry animation is played. Without
+        ``delay`` the follow starts at the cursor, so earlier animations of this
+        drawable still play.
 
         ``delay`` (seconds) places this drawable where a Drawable ``source``
         was ``delay`` seconds earlier, like After Effects'
@@ -5901,8 +5904,8 @@ class CameraView:
     def follow(self, target: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0)) -> CameraView:
         """Keep the camera on ``target`` plus ``offset`` from now on and return this view.
 
-        The frame follows the endpoint every frame, so ``pan_to`` has no
-        effect afterwards, and ``pop_out``/``pop_in`` start from where a
+        From the cursor the frame follows the endpoint every frame, so
+        ``pan_to`` has no effect afterwards (earlier moves still play), and ``pop_out``/``pop_in`` start from where a
         followed drawable or anchor point is at that moment. A non-finite
         offset raises ``ValueError``.
         """

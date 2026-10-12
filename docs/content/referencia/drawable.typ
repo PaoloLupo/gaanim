@@ -1103,7 +1103,7 @@ scene.render()
 #api-entry(
   name: "Drawable.no_camera_view",
   kind: "method",
-  desc: [Quita la vista de cámara y la figura vuelve a dibujarse como una forma normal.],
+  desc: [Quita la vista de cámara desde el cursor: a partir de ahí la figura vuelve a dibujarse como una forma normal, y antes la vista se sigue viendo.],
   none,
 )
 

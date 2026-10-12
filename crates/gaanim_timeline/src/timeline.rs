@@ -3150,6 +3150,7 @@ impl Timeline {
             .cloned();
         let endpoint = world
             .get::<gaanim_animation::EndpointFollow>(entity)
+            .filter(|follow| follow.holds_at(time))
             .cloned();
         // (source, copied axes, offset); the component is not `Clone`.
         let binding = world
@@ -6476,6 +6477,7 @@ mod tests {
                     endpoint: gaanim_animation::TrackingEndpoint::Entity(leader),
                     offset: gaanim_core::glam::DVec3::ZERO,
                     offset_space: gaanim_animation::FollowOffsetSpace::World,
+                    since: 0.0,
                 },
             ))
             .id();

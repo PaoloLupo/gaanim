@@ -1753,7 +1753,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
   kind: "method",
   params: ((name: "target", type: "Endpoint", default: none, desc: [Qué seguir.]), (name: "offset", type: "tuple[float, float]", default: "(0, 0)", desc: [Desplazamiento en unidades de escena.])),
   returns: (type: "CameraView", desc: [La misma vista.]),
-  desc: [Mantiene la cámara sobre `target` desde ese momento; `pan_to` deja de tener efecto.],
+  desc: [Mantiene la cámara sobre `target` desde el cursor; `pan_to` deja de tener efecto después, y los movimientos anteriores se siguen viendo.],
   none,
 )
 

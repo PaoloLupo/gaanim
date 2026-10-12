@@ -290,6 +290,7 @@ mod tests {
                     endpoint: TrackingEndpoint::Static(expected),
                     offset: DVec3::ZERO,
                     offset_space: FollowOffsetSpace::World,
+                    since: 0.0,
                 },
             ))
             .id();
@@ -358,6 +359,7 @@ mod tests {
                     endpoint: TrackingEndpoint::Entity(marker),
                     offset: DVec3::ZERO,
                     offset_space: FollowOffsetSpace::World,
+                    since: 0.0,
                 },
             ))
             .id();

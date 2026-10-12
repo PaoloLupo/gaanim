@@ -145,6 +145,11 @@ enteros, o usa `scene.text.code`.
 - `move_to`, `align_to`, `next_to(aligned_edge=...)`, `to_corner`,
   `anchor_point` y `with_port` aceptan el nombre de un anclaje
   (`anchor="top_left"`), como ya hacía `place`; antes lanzaban `TypeError`.
+- `CameraView.follow` y `Drawable.follow` sin `delay` empiezan en el cursor, y
+  `no_camera_view()` quita la vista desde el cursor. Antes un `follow` llamado
+  después de `view.animate.pan_to(...)` se aplicaba desde la creación de la
+  vista y anulaba ese movimiento, y `no_camera_view()` al final de un segmento
+  quitaba la vista en todo el segmento.
 
 == Al actualizar
 

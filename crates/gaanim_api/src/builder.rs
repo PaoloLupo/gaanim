@@ -956,6 +956,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Dynamic camera clips of the play being scheduled, whose hand-off pose
     /// is resolved once the whole play is, so it reads where the targets end.
     pub(crate) pending_camera_holds: Vec<PendingCameraHold>,
+    /// The camera view each screen shows, so `no_camera_view` can end it at
+    /// its cursor instead of removing it from the whole timeline.
+    pub(crate) camera_views: HashMap<Entity, gaanim_renderer::effects::CameraView>,
     /// Local baselines of reactive numbers, which readouts align their row on.
     pub readout_baselines: HashMap<ObjectId, f64>,
     /// Values whose text each reactive number inside a layout keeps room
@@ -1204,6 +1207,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             readout_reserves: HashMap::new(),
             pending_time_maps: Vec::new(),
             pending_camera_holds: Vec::new(),
+            camera_views: HashMap::new(),
             default_track,
             mobject_tracks,
             mobject_names,
@@ -1517,6 +1521,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             readout_reserves: HashMap::new(),
             pending_time_maps: Vec::new(),
             pending_camera_holds: Vec::new(),
+            camera_views: HashMap::new(),
             default_track,
             mobject_tracks: HashMap::new(),
             mobject_names: HashMap::new(),

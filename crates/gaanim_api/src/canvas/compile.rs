@@ -6054,11 +6054,21 @@ impl SceneModel {
                     let Some(screen) = entity_of(target) else {
                         continue;
                     };
+                    // A view shows from the cursor where it was set until
+                    // the one where it was removed.
                     let Some(view) = view else {
-                        builder
-                            .commands
-                            .entity(screen)
-                            .remove::<gaanim_renderer::effects::CameraView>();
+                        match builder.camera_views.remove(&screen) {
+                            Some(mut shown) if shown.since < builder.current_time => {
+                                shown.until = Some(builder.current_time);
+                                builder.commands.entity(screen).insert(shown);
+                            }
+                            _ => {
+                                builder
+                                    .commands
+                                    .entity(screen)
+                                    .remove::<gaanim_renderer::effects::CameraView>();
+                            }
+                        }
                         continue;
                     };
                     let Some(source) = entity_of(&view.source) else {
@@ -6069,17 +6079,18 @@ impl SceneModel {
                         .zoom
                         .as_ref()
                         .map(|zoom| compile_tracking_scalar(zoom, id_map, &builder.states));
-                    builder
-                        .commands
-                        .entity(screen)
-                        .insert(gaanim_renderer::effects::CameraView {
-                            source,
-                            fit: view.fit,
-                            background: view.background.clone(),
-                            exclude,
-                            zoom,
-                            layers: view.layers.clone(),
-                        });
+                    let shown = gaanim_renderer::effects::CameraView {
+                        source,
+                        fit: view.fit,
+                        background: view.background.clone(),
+                        exclude,
+                        zoom,
+                        layers: view.layers.clone(),
+                        since: builder.current_time,
+                        until: None,
+                    };
+                    builder.camera_views.insert(screen, shown.clone());
+                    builder.commands.entity(screen).insert(shown);
                 }
                 Op::SetViewLayer { target, layer } => {
                     let Some(target) = id_map.get(target).copied() else {
@@ -6455,6 +6466,7 @@ impl SceneModel {
                                 ),
                                 offset: *offset,
                                 offset_space: *offset_space,
+                                since: builder.current_time,
                             });
                     }
                 }
@@ -14180,6 +14192,33 @@ mod tests {
                 "{time}: {transform:?}"
             );
         }
+    }
+
+    #[test]
+    fn camera_view_follows_and_removals_act_from_the_cursor() {
+        use gaanim_renderer::effects::CameraView;
+
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 1.0).move_to(3.0, 2.0);
+        let screen = canvas.rect(4.0, 2.0).move_to(-4.0, -1.0);
+        let view = screen.clone().camera_view(&frame).unwrap();
+        let dot = canvas.dot(0.1).move_to(1.0, 1.0);
+        canvas.play(vec![dot.animate().move_to(2.0, 1.0).duration(1.0)]);
+        view.follow(crate::canvas::CanvasEndpoint::Entity(dot.id), DVec3::ZERO);
+        canvas.play(vec![dot.animate().move_to(5.0, 2.0).duration(1.0)]);
+        screen.no_camera_view();
+        canvas.wait(1.0);
+
+        let (mut world, _) = compiled_world(&canvas);
+        let shown = world.query::<&CameraView>().single(&world).unwrap().clone();
+        assert_eq!((shown.since, shown.until), (0.0, Some(2.0)));
+        assert!(shown.shown_at(0.0) && shown.shown_at(1.99) && !shown.shown_at(2.0));
+        let follow = world
+            .query::<&gaanim_animation::EndpointFollow>()
+            .single(&world)
+            .unwrap();
+        assert_eq!(follow.since, 1.0);
+        assert!(!follow.holds_at(0.5) && follow.holds_at(1.0));
     }
 
     #[test]
