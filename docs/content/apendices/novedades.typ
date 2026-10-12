@@ -280,6 +280,16 @@ enteros, o usa `scene.text.code`.
   resolvió y la capa desaparecía.
 - `box.detach(hijo)` en una caja movida deja al hijo donde estaba; antes se
   dibujaba en el sitio de la caja sin mover, desde el principio de la escena.
+  Cambiar de padre ocurre en la línea de tiempo: el hijo sigue a la caja
+  hasta el `detach` y desde ahí se mueve solo.
+- Pasar un hijo de una caja a otra (`a.detach(hijo)` y luego
+  `b.add(hijo, duration=...)`) lo desliza desde donde está; antes no se veía
+  desde el principio de la escena hasta entrar en la segunda caja, y su
+  posición anterior se leía respecto a ella.
+- Una cuadrícula con columnas `"auto"` dentro de otra caja mide lo mismo que
+  sola. Antes sus columnas se repartían el ancho por igual: la cuadrícula
+  quedaba más ancha y, con textos que pueden partirse, el más ancho se partía
+  en dos líneas.
 - `box.reflow()` hace sitio a un hijo escalado o girado desde que se colocó,
   como dice la documentación; antes lo medía con su tamaño original y se
   solapaba con sus hermanos. `scale_to`, `rotate_to` y los demás ajustes de
@@ -377,8 +387,6 @@ enteros, o usa `scene.text.code`.
 - `shadow=True` sobre un fondo oscuro dibuja una sombra casi opaca en lugar
   de la suave que no se veía. Para la de antes, pasa
   `shadow={"color": "#00000055"}`.
-- Un hijo sacado con `detach` sigue a la caja si esta se mueve, escala o se
-  desvanece después.
 - `box.reflow()` mide a los hijos con su escala actual: si escalabas un hijo
   con `.animate` y luego llamabas a `reflow()`, sus hermanos se apartan. Una
   caja escalada antes de meterla en otra también les hace sitio.

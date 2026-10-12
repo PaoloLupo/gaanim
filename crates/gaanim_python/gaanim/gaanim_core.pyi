@@ -1106,7 +1106,9 @@ class Box(Drawable):
     def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True) -> Any:
         """Insert a child (at ``at`` or at the end) and return it.
 
-        With ``duration`` the others slide to make room while it fades in.
+        With ``duration`` the others slide to make room while it fades in. A
+        child that comes from another box (taken out with ``detach``) slides
+        from where it stands instead, and follows its former box until then.
         """
         ...
     def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
@@ -1115,8 +1117,8 @@ class Box(Drawable):
     def detach(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
         """Take a child out of the box without hiding it: it stays where it is and can move freely again.
 
-        It keeps the box as its parent, so it still follows the box's own
-        moves, scale and opacity.
+        From then on it no longer follows the box's moves, scale or opacity;
+        before, it still does. ``other.add(child)`` puts it in another box.
         """
         ...
     def replace(self, old: Drawable, new: Drawable | str, *, duration: Optional[float] = None, advance: bool = True) -> Any:

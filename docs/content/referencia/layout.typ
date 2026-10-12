@@ -263,7 +263,7 @@ Con `advance=False` el siguiente cambio empieza a la vez.
 #api-entry(
   name: "Box.add / remove / replace",
   kind: "method",
-  desc: [`add(hijo, at=None)` inserta un hijo (o una cadena) y lo devuelve; `remove(hijo)` lo quita con un fundido; `replace(viejo, nuevo)` pone `nuevo` en su lugar, heredando sus reglas de `item` si no trae las suyas. Un índice fuera de rango lanza `IndexError`.],
+  desc: [`add(hijo, at=None)` inserta un hijo (o una cadena) y lo devuelve; con `duration`, entra con un fundido, salvo un hijo que viene de otra caja (sacado con `detach`), que se desliza desde donde está. `remove(hijo)` lo quita con un fundido; `replace(viejo, nuevo)` pone `nuevo` en su lugar, heredando sus reglas de `item` si no trae las suyas. Un índice fuera de rango lanza `IndexError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -292,7 +292,7 @@ grid.set(columns=2, gap="30px", duration=0.8)
 #api-entry(
   name: "Box.detach",
   kind: "method",
-  desc: [Saca a un hijo de la caja sin ocultarlo: conserva su posición, deja de ocupar sitio y vuelve a aceptar `move_to` y las animaciones de posición. Sigue teniendo a la caja como padre, así que acompaña a la caja si esta se mueve, escala o se desvanece.],
+  desc: [Saca a un hijo de la caja sin ocultarlo: conserva su posición, deja de ocupar sitio y vuelve a aceptar `move_to` y las animaciones de posición. Desde ese instante ya no sigue a la caja si esta se mueve, escala o se desvanece; antes sí. `otra.add(hijo)` lo mete en otra caja.],
   none,
 )
 

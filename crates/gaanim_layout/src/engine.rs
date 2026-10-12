@@ -550,6 +550,121 @@ pub fn resolve_layout(
     relations: &[LayoutConstraint],
 ) -> Result<ResolvedLayout, LayoutError> {
     validate_tree(root)?;
+    let resolved = resolve_tree(root, viewport, measurer, relations)?;
+    // A nested grid that hugs its content, and has room for it, keeps the
+    // columns it has alone (#466): given a definite width, Taffy shares it
+    // out over `auto` tracks again, evenly and wider than a root grid, sized
+    // under a max-content constraint, makes them; texts that can wrap then
+    // break in columns narrower than they need.
+    let mut natural = BTreeMap::new();
+    collect_natural_grid_columns(root, true, viewport, measurer, &resolved, &mut natural);
+    if natural.is_empty() {
+        return Ok(resolved);
+    }
+    let mut held = root.clone();
+    hold_grid_columns(&mut held, &natural);
+    resolve_tree(&held, viewport, measurer, relations)
+}
+
+/// The column widths of each grid below `node` that [`resolve_layout`]
+/// holds: one that hugs its content, of `auto` and fixed columns, as wide in
+/// `resolved` as its content takes alone.
+fn collect_natural_grid_columns(
+    node: &LayoutNode,
+    is_root: bool,
+    viewport: Bounds3D,
+    measurer: &impl IntrinsicMeasure,
+    resolved: &ResolvedLayout,
+    out: &mut BTreeMap<LayoutId, Vec<f64>>,
+) {
+    if !is_root
+        && let Some((columns, width)) = natural_grid_columns(node, viewport, measurer)
+        && resolved
+            .boxes
+            .get(&node.id)
+            .is_some_and(|box_| box_.bounds.width() >= width - 1.0e-4)
+    {
+        out.insert(node.id, columns);
+    }
+    for child in &node.children {
+        collect_natural_grid_columns(&child.node, false, viewport, measurer, resolved, out);
+    }
+}
+
+/// The width of each column of a grid laid out on its own, as a root, and
+/// its whole width; `None` for a grid [`resolve_layout`] leaves to Taffy.
+fn natural_grid_columns(
+    node: &LayoutNode,
+    viewport: Bounds3D,
+    measurer: &impl IntrinsicMeasure,
+) -> Option<(Vec<f64>, f64)> {
+    let LayoutNodeKind::Grid { columns, .. } = &node.kind else {
+        return None;
+    };
+    if node.style.width != SizeRule::Hug
+        || !columns
+            .iter()
+            .all(|track| matches!(track, Track::Auto | Track::Fixed(_)))
+        || !columns.iter().any(|track| matches!(track, Track::Auto))
+    {
+        return None;
+    }
+    // Stretched across their cells, the children show the columns.
+    let mut alone = node.clone();
+    for child in &mut alone.children {
+        if child.style.margin != Insets::default() || child.style.absolute {
+            return None;
+        }
+        child.style.align = Some(Align::Stretch);
+    }
+    let layout = resolve_tree(&alone, viewport, measurer, &[]).ok()?;
+    let edges = |pick: fn(&Bounds3D) -> f64| {
+        let mut values: Vec<f64> = alone
+            .children
+            .iter()
+            .filter_map(|child| layout.boxes.get(&child.node.id))
+            .map(|box_| pick(&box_.bounds))
+            .collect();
+        values.sort_by(f64::total_cmp);
+        values.dedup_by(|a, b| (*a - *b).abs() < 1.0e-4);
+        values
+    };
+    let (starts, ends) = (edges(|bounds| bounds.min.x), edges(|bounds| bounds.max.x));
+    // Every column starts and ends some child; an empty one is left alone.
+    if starts.len() != columns.len() || ends.len() != columns.len() {
+        return None;
+    }
+    let widths = starts
+        .iter()
+        .zip(&ends)
+        .map(|(start, end)| end - start)
+        .collect();
+    Some((widths, layout.boxes.get(&node.id)?.bounds.width()))
+}
+
+/// Replace the `auto` columns of the grids in `columns` with their widths.
+fn hold_grid_columns(node: &mut LayoutNode, held: &BTreeMap<LayoutId, Vec<f64>>) {
+    if let (Some(widths), LayoutNodeKind::Grid { columns, .. }) =
+        (held.get(&node.id), &mut node.kind)
+    {
+        for (track, width) in columns.iter_mut().zip(widths) {
+            if matches!(track, Track::Auto) {
+                *track = Track::Fixed(*width);
+            }
+        }
+    }
+    for child in &mut node.children {
+        hold_grid_columns(&mut child.node, held);
+    }
+}
+
+/// [`resolve_layout`] without holding nested grids' columns.
+fn resolve_tree(
+    root: &LayoutNode,
+    viewport: Bounds3D,
+    measurer: &impl IntrinsicMeasure,
+    relations: &[LayoutConstraint],
+) -> Result<ResolvedLayout, LayoutError> {
     let mut tree: TaffyTree<LayoutId> = TaffyTree::new();
     tree.disable_rounding();
     let available = DVec2::new(viewport.width(), viewport.height()).max(DVec2::ZERO);
@@ -2285,5 +2400,101 @@ mod tests {
         assert!((row(SizeRule::Fill(1.0)) - 170.0).abs() < EPSILON);
         assert!((row(SizeRule::Hug) - 30.0).abs() < EPSILON);
         assert!((row(SizeRule::Fixed(50.0)) - 50.0).abs() < EPSILON);
+    }
+
+    /// Short texts, 6, 10 and 14 wide on one line by column, or two lines
+    /// two thirds as wide when offered less.
+    struct Words(bool);
+    impl IntrinsicMeasure for Words {
+        fn measure(&self, id: LayoutId, constraints: BoxConstraints) -> Result<DVec2, LayoutError> {
+            let width = [6.0, 10.0, 14.0][(id.0 as usize - 1) % 3];
+            Ok(if constraints.max.x >= width {
+                DVec2::new(width, 4.0)
+            } else {
+                DVec2::new(width * 2.0 / 3.0, 8.0)
+            })
+        }
+
+        fn is_width_sensitive(&self, _: LayoutId) -> bool {
+            self.0
+        }
+    }
+
+    /// A grid of `auto` columns measures the same as the root of its layout
+    /// and inside another box (#466), where Taffy alone gives it even
+    /// columns, wider than its content and, with texts that can wrap, too
+    /// narrow for the widest.
+    #[test]
+    fn a_nested_grid_keeps_its_columns() {
+        let grid = || {
+            let children = (1..=6)
+                .map(|id| LayoutChild {
+                    node: Box::new(LayoutNode::leaf(LayoutId(id))),
+                    style: LayoutItemStyle::default(),
+                })
+                .collect();
+            let mut grid = LayoutNode::container(
+                LayoutId(10),
+                LayoutNodeKind::Grid {
+                    rows: vec![Track::Auto; 2],
+                    columns: vec![Track::Auto; 3],
+                    auto_flow: AutoFlow::Row,
+                },
+                children,
+            );
+            grid.style.gap = DVec2::splat(2.0);
+            grid
+        };
+        let viewport = Bounds3D::new_2d(-80.0, -45.0, 80.0, 45.0);
+        for (words, kind) in [true, false].into_iter().flat_map(|wraps| {
+            [
+                LayoutNodeKind::Stack,
+                LayoutNodeKind::Column { wrap: false },
+                LayoutNodeKind::Row { wrap: false },
+            ]
+            .map(|kind| (Words(wraps), kind))
+        }) {
+            let root = resolve_layout(&grid(), viewport, &words, &[]).unwrap();
+            let outer = LayoutNode::container(
+                LayoutId(20),
+                kind.clone(),
+                vec![LayoutChild {
+                    node: Box::new(grid()),
+                    style: LayoutItemStyle::default(),
+                }],
+            );
+            let nested = resolve_layout(&outer, viewport, &words, &[]).unwrap();
+            let grid_box = nested.boxes[&LayoutId(10)].bounds;
+            assert!(
+                (grid_box.width() - 34.0).abs() < EPSILON,
+                "{kind:?}, wrapping {}: {grid_box:?}",
+                words.0
+            );
+            for id in 1..=6 {
+                let (a, b) = (
+                    root.boxes[&LayoutId(id)].bounds,
+                    nested.boxes[&LayoutId(id)].bounds,
+                );
+                let center = root.boxes[&LayoutId(10)].bounds.center().x;
+                assert!(
+                    (a.width() - b.width()).abs() < EPSILON
+                        && (a.height() - b.height()).abs() < EPSILON
+                        && ((a.min.x - center) - (b.min.x - grid_box.center().x)).abs() < EPSILON,
+                    "{kind:?} {id}: {a:?} vs {b:?}"
+                );
+            }
+        }
+        // A box narrower than the texts still wraps them in the grid.
+        let mut narrow = LayoutNode::container(
+            LayoutId(20),
+            LayoutNodeKind::Column { wrap: false },
+            vec![LayoutChild {
+                node: Box::new(grid()),
+                style: LayoutItemStyle::default(),
+            }],
+        );
+        narrow.style.width = SizeRule::Fixed(24.0);
+        let squeezed = resolve_layout(&narrow, viewport, &Words(true), &[]).unwrap();
+        assert!(squeezed.boxes[&LayoutId(10)].bounds.width() <= 24.0 + EPSILON);
     }
 }

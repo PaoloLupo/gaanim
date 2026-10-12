@@ -7842,6 +7842,61 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Layout reflow uses this when a versioned tree no longer contains a
     /// member. The child remains alive and visible, but subsequent transforms
     /// are evaluated in world space instead of the former group's local space.
+    /// Move `child` under `parent`, or out of every group with `None`, from
+    /// the current time on, where it stands in the scene. Unlike
+    /// [`Self::add_to_group`] and [`Self::remove_from_group`], which change
+    /// the hierarchy for the whole scene, this is a timeline clip: before it
+    /// the child still follows its former parent. Returns its new local
+    /// transform.
+    /// With `keep_own`, the child keeps its own scale and rotation under the
+    /// new parent, which then scales and turns it too, as a box does.
+    pub(crate) fn reparent_at_cursor(
+        &mut self,
+        child: ObjectId,
+        parent: Option<ObjectId>,
+        keep_own: bool,
+    ) -> Option<SpatialTransform> {
+        let child_world = self.get_world_transform(child);
+        let mut transform = match parent {
+            Some(parent) => {
+                let parent_world = self.get_world_transform(parent).to_affine_2d();
+                SpatialTransform::from_affine_2d(
+                    &(parent_world.inverse() * child_world.to_affine_2d()),
+                )
+            }
+            None => child_world,
+        };
+        let state = self.states.get_mut(child)?;
+        if keep_own {
+            transform.scale = state.transform.scale;
+            transform.rotation = state.transform.rotation;
+        }
+        let previous = std::mem::replace(&mut state.parent, parent);
+        state.transform = transform;
+        if let Some(previous) = previous
+            && let Some(group) = self.states.get_mut(previous)
+        {
+            group.children.retain(|id| *id != child);
+        }
+        if let Some(parent) = parent
+            && let Some(group) = self.states.get_mut(parent)
+            && !group.children.contains(&child)
+        {
+            group.children.push(child);
+        }
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            0.0,
+            ClipPayload::Reparent {
+                target: child,
+                parent,
+                transform,
+            },
+        );
+        Some(transform)
+    }
+
     pub fn remove_from_group(&mut self, group: MobjectRef, child: MobjectRef) {
         let is_direct_child = self
             .states

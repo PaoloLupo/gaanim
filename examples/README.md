@@ -118,7 +118,7 @@ Boxes, rows, grids, zones and animated reflow.
 | [Stacks](layout/stacks.py) | Stacked layers placed by the nine anchors and offsets, every fit mode, and draw order with z_index. |
 | [Zones](layout/zones.py) | Zones templates, nesting and inset, place() with anchor, padding, offset and fit, arrange(), fill() and animated moves between zones. |
 | [Positioning](layout/positioning.py) | Free objects placed with to_edge, to_corner, next_to, align_to, move_to and linear layout constraints with priorities. |
-| [Reflow](layout/reflow.py) | Animated structure changes: add, remove, replace, set, item, move_child, swap, reverse, detach and reflow after a scale. |
+| [Reflow](layout/reflow.py) | Animated structure changes: add, remove, replace, set, item, move_child, swap, reverse, detach, moves between boxes and reflow after a scale. |
 | [Box reveal](layout/box_reveal.py) | Revealing a box piece by piece with reveal, cascade and stagger, and changing pieces with find, find_all and each. |
 | [Scatter](layout/scatter.py) | Seeded scatter of formulas around a character's parts, with seeds, gaps, avoided zones and object regions. |
 

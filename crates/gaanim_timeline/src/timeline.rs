@@ -1913,6 +1913,10 @@ impl Timeline {
                 | ClipPayload::Transition { .. } => {}
                 // Ungrouping reads the transforms it is replayed onto.
                 ClipPayload::Ungroup { .. } => return None,
+                // A whole restore puts the former parent back first.
+                ClipPayload::Reparent { target, .. } => {
+                    objects.insert(*target);
+                }
             }
         }
 
@@ -2378,6 +2382,24 @@ impl Timeline {
                         };
                         active_transition = Some((transition_type, progress, from, to));
                         active_transition_span = Some((clip.start, clip.end()));
+                    }
+                }
+                ClipPayload::Reparent {
+                    target,
+                    parent,
+                    transform,
+                } => {
+                    // Earlier clips wrote the transform under the former
+                    // parent; this one replaces it, and later clips write
+                    // under the new one.
+                    if clip.start <= self.current_time
+                        && let Some(&entity) = entity_map.get(&target)
+                    {
+                        let parent_entity = parent.and_then(|parent| entity_map.get(&parent));
+                        if parent.is_none() || parent_entity.is_some() {
+                            crate::snapshot::restore_parent(world, entity, parent_entity.copied());
+                            world.entity_mut(entity).insert(transform);
+                        }
                     }
                 }
                 ClipPayload::Ungroup {

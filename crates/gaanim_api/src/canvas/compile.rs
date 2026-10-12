@@ -4979,6 +4979,16 @@ impl SceneModel {
                     let Some(container) = id_map.get(&root_source).copied() else {
                         continue;
                     };
+                    // A child that comes from another box, still showing,
+                    // slides from where it stands instead of fading in at its
+                    // new place.
+                    let entering = entering.filter(|source| {
+                        !(builder.layout_rests.contains_key(source)
+                            && id_map
+                                .get(source)
+                                .and_then(|id| builder.states.get(*id))
+                                .is_some_and(|state| state.opacity > 0.0))
+                    });
                     // A child entering now appears in its place: only the
                     // others move, from where they were.
                     let entering_subtree = |id: gaanim_layout::LayoutId| {
@@ -4991,7 +5001,7 @@ impl SceneModel {
                         }
                         false
                     };
-                    let before: HashMap<ObjectId, SpatialTransform> = tree
+                    let mut before: HashMap<ObjectId, SpatialTransform> = tree
                         .source_by_id
                         .iter()
                         .filter(|(id, _)| **id != root_id && !entering_subtree(**id))
@@ -5381,16 +5391,68 @@ impl SceneModel {
                         if let Some(background) = background {
                             children.insert(0, background);
                         }
-                        // A child that leaves the box (removed and fading out,
-                        // detached, or a text replaced by its rewrapped copy)
-                        // keeps its parent in the scene hierarchy: reparenting
-                        // is not on the timeline, so it would also change the
-                        // child's earlier, parent-relative placement and
-                        // inherited opacity, back to the start of the scene.
+                        // A child that leaves the box fading out (removed, or a
+                        // text replaced by its rewrapped copy) keeps its parent.
+                        // One detached, which stays in sight, leaves every group
+                        // from now on, as one moving to another box changes
+                        // parent from now on: [`SceneBuilder::reparent_at_cursor`]
+                        // puts the change on the timeline, so the child still
+                        // follows its former box before it.
+                        let leaving_child = leaving
+                            .as_ref()
+                            .and_then(|member| id_map.get(member))
+                            .copied();
+                        let detached: Vec<_> = builder
+                            .states
+                            .get(parent)
+                            .map(|state| {
+                                state
+                                    .children
+                                    .iter()
+                                    .copied()
+                                    .filter(|child| {
+                                        Some(*child) != leaving_child
+                                            && !materialized_by_id.values().any(|id| id == child)
+                                            && !text_crossfades.iter().any(|(old, ..)| old == child)
+                                            && id_map
+                                                .iter()
+                                                .find(|(_, actual)| *actual == child)
+                                                .is_some_and(|(source, _)| {
+                                                    builder.layout_rests.contains_key(source)
+                                                })
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        for child in detached {
+                            builder.reparent_at_cursor(child, None, false);
+                        }
                         for child in &children {
                             let current_parent =
                                 builder.states.get(*child).and_then(|state| state.parent);
-                            if current_parent != Some(parent) {
+                            let source = tree
+                                .source_by_id
+                                .get(&gaanim_layout::LayoutId(child.as_raw()))
+                                .copied();
+                            let moved_in = current_parent != Some(parent)
+                                && source.is_some_and(|source| {
+                                    builder.layout_rests.contains_key(&source)
+                                });
+                            if moved_in {
+                                // It slides from where it stands, measured anew
+                                // in this box.
+                                if let Some(source) = source {
+                                    builder.layout_rests.remove(&source);
+                                }
+                                // A child fading in appears at its new place.
+                                let fading_in = entering.is_some() && entering == source;
+                                if let Some(transform) =
+                                    builder.reparent_at_cursor(*child, Some(parent), true)
+                                    && !fading_in
+                                {
+                                    before.insert(*child, transform);
+                                }
+                            } else if current_parent != Some(parent) {
                                 // A child keeps its own scale and rotation in
                                 // the box, as an element does in a CSS
                                 // container: a scaled box scales it too.
@@ -20385,50 +20447,104 @@ mod tests {
         assert!((clip.height() - 40.0).abs() < 1.0e-6, "{clip:?}");
     }
 
-    /// A child taken out of a moved box keeps its parent: reparenting is not
-    /// on the timeline, so it would move the child back to its unmoved place
-    /// from the start of the scene.
+    /// A child detached from a moved box leaves the hierarchy from then on,
+    /// where it stands, and then moves into another box: before each change
+    /// it still follows the box it was in. Seeking back restores each one.
     #[test]
-    fn a_detached_child_keeps_its_parent() {
+    fn a_child_changes_box_on_the_timeline() {
         let mut canvas = SceneModel::new(1280, 720);
         let first = canvas.rect(80.0, 30.0);
         let second = canvas.rect(80.0, 30.0);
-        let root = canvas.group(&[&first, &second]);
-        first.claim_layout(&root).unwrap();
-        second.claim_layout(&root).unwrap();
-        let root = root.move_to(300.0, 200.0);
-        let spec = crate::canvas::LayoutSpec {
-            kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+        let other = canvas.rect(80.0, 30.0);
+        let row = canvas.group(&[&first, &second]);
+        first.claim_layout(&row).unwrap();
+        second.claim_layout(&row).unwrap();
+        let row = row.move_to(300.0, 200.0);
+        let column = canvas.group(&[&other]);
+        other.claim_layout(&column).unwrap();
+        let column = column.move_to(-300.0, -200.0);
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        let spec = |kind| crate::canvas::LayoutSpec {
+            kind,
             style: gaanim_layout::LayoutStyle {
                 gap: DVec2::splat(20.0),
                 ..Default::default()
             },
             within: LayoutWithin::Intrinsic,
         };
-        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
-            id: handle.id,
-            style: gaanim_layout::LayoutItemStyle::default(),
-        };
+        let row_spec = spec(gaanim_layout::LayoutNodeKind::Row { wrap: false });
+        let column_spec = spec(gaanim_layout::LayoutNodeKind::Column { wrap: false });
         canvas.reflow_layout(
-            &root,
+            &row,
             vec![member(&first), member(&second)],
-            spec.clone(),
+            row_spec.clone(),
             1,
             None,
             None,
             None,
         );
-        canvas.wait(0.5);
-        second.release_layout(&root);
-        canvas.set_group_members(&root, &[&first]);
-        canvas.reflow_layout(&root, vec![member(&first)], spec, 2, Some(0.5), None, None);
+        canvas.reflow_layout(
+            &column,
+            vec![member(&other)],
+            column_spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(1.0);
+        second.release_layout(&row);
+        canvas.set_group_members(&row, &[&first]);
+        canvas.reflow_layout(&row, vec![member(&first)], row_spec, 2, None, None, None);
+        canvas.wait(1.0);
+        second.claim_layout(&column).unwrap();
+        canvas.set_group_members(&column, &[&other, &second]);
+        canvas.reflow_layout(
+            &column,
+            vec![member(&other), member(&second)],
+            column_spec,
+            2,
+            Some(0.5),
+            Some(&second),
+            None,
+        );
+        canvas.wait(1.0);
 
-        let mut world = compile_canvas_for_layout(canvas);
-        let children = world
-            .query_filtered::<&SpatialTransform, bevy::prelude::With<bevy::prelude::ChildOf>>()
-            .iter(&world)
-            .count();
-        assert_eq!(children, 2);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let state = |world: &mut World, time: f64, timeline: &mut Timeline| {
+            timeline.seek(world, time);
+            let entity = entity_of(world, &second);
+            let parent = world
+                .get::<bevy::prelude::ChildOf>(entity)
+                .map(|of| of.parent());
+            let opacity = opacity_of(world, &second);
+            (parent, transform_of(world, &second).translation, opacity)
+        };
+        let row_entity = entity_of(&mut world, &row);
+        let column_entity = entity_of(&mut world, &column);
+        // In the row, 50 right of its middle; detached at (350, 200).
+        for time in [0.5, 3.5, 1.5, 0.5] {
+            let (parent, translation, opacity) = state(&mut world, time, &mut timeline);
+            assert!((opacity - 1.0).abs() < 1e-6, "hidden at {time}");
+            match time {
+                0.5 => {
+                    assert_eq!(parent, Some(row_entity), "at {time}");
+                    assert_point_close(translation, DVec3::new(50.0, 0.0, 0.0));
+                }
+                1.5 => {
+                    assert_eq!(parent, None, "at {time}");
+                    assert_point_close(translation, DVec3::new(350.0, 200.0, 0.0));
+                }
+                _ => {
+                    // Under the other rect, 25 below the column's middle.
+                    assert_eq!(parent, Some(column_entity), "at {time}");
+                    assert_point_close(translation, DVec3::new(0.0, -25.0, 0.0));
+                }
+            }
+        }
     }
 
     /// `box.reflow()` measures a child scaled since it was placed at its new

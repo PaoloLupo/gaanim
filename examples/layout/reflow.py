@@ -104,6 +104,18 @@ steps(row, [
     ("scene.play([three.animate.shift_by(0, -1.8)])", lambda: scene.play([three.animate.shift_by(0, -1.8)])),
 ])
 
+# A child moves to another box: detach() takes it out where it stands, and
+# the other box's add() slides it into its new place while the first box
+# closes the gap.
+scene.segment("between")
+moving = card("Two")
+top = L.row(card("One"), moving, card("Three"), gap="32px")
+bottom = L.row(card("Four"), gap="32px")
+steps(L.column(top, bottom, gap="96px", align="center"), [
+    ("top.detach(moving, duration=0.6, advance=False)\nbottom.add(moving, duration=0.6)",
+     lambda: (top.detach(moving, duration=0.6, advance=False), bottom.add(moving, duration=0.6))),
+])
+
 # A scaled child keeps its slot too, until reflow() measures it at its new
 # size and the others make room.
 scene.segment("scale")
