@@ -157,6 +157,27 @@ enteros, o usa `scene.text.code`.
   primitivas 3D desaparecían la primera mitad del movimiento, y un `reset`
   pasaba a ortográfica de golpe con la cámara aún inclinada, de modo que el
   contenido 2D se salía de la vista.
+- `animate.flash()` dispara rayos alrededor del objeto (`lines`, `length`,
+  `gap`, `color`, `width`) y `animate.circumscribe()` dibuja un marco a su
+  alrededor y lo borra, como `flash_around(time_width=1.0)`. Antes el primero
+  fundía y agrandaba el objeto y el segundo solo lo agrandaba un 10 %.
+- `with_pen_tip()` dibuja una punta en el extremo de cada trazo mientras
+  `write`, `create` o `draw_border_then_fill` lo trazan; antes no hacía nada.
+- `grow_from_edge`, `grow_from_point`, `spin_in_from_nothing`, `indicate`,
+  `wiggle`, `blink`, `broadcast` y `scene.spotlight` respetan su lugar en
+  `sequence`, `stagger` o con `delay`; antes empezaban todos a la vez.
+- `animate.indicate()` crece 1,2 veces y tiñe el objeto del `"accent"` del
+  tema, de su `"foreground"` si el objeto ya tiene el color del acento, o de
+  `color=`; antes solo crecía un 10 %. `animate.wiggle()` acepta
+  `amplitude` y `count`, y sacude 0,1 unidades a cada lado en lugar de 0,05.
+- En una selección de texto, `pulse()` late dos veces, `wave()` levanta los
+  glifos uno tras otro y `highlight()` los tiñe del acento sin moverlos;
+  `indicate()` crece y tiñe. Antes los cuatro eran casi el mismo salto.
+- `magic_move(...)` sin `duration` y los movimientos de
+  `scene.camera.animate` toman la `duration` de `scene.play` cuando no fijan
+  la suya; antes duraban siempre un segundo.
+- `clear_drive()` deja el objeto girado como lo tenía su `look_at`; antes
+  volvía a su rotación propia.
 
 == Al actualizar
 
@@ -182,6 +203,17 @@ enteros, o usa `scene.text.code`.
   fuera de un proyecto ya no conserva el canal alfa por defecto, como
   ocurre con `gaanim export`: marca *Conservar la transparencia* si la escena
   tiene un fondo transparente.
+- `indicate()` crece más (1,2 en lugar de 1,1) y tiñe el objeto: para el
+  salto de antes, usa `indicate(color=..., scale_factor=1.1)` con el color
+  del propio objeto. `wiggle()` sacude el doble; `wiggle(amplitude=0.05)`
+  recupera la sacudida anterior.
+- Las escenas que usaban `flash()`, `circumscribe()` o los énfasis de texto
+  `pulse`, `wave` y `highlight` se ven distintas: revisa sus tomas.
+- Un `play(..., duration=...)` que incluye `magic_move` sin `duration` o
+  movimientos de cámara sin `.duration()` ahora los alarga o acorta a esa
+  duración. Fija `.duration(1)` si contabas con el segundo de antes.
+- Los efectos que antes ignoraban su lugar en un `sequence` o `stagger` ahora
+  esperan su turno, así que la escena puede durar más.
 
 = 0.11.0
 

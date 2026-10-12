@@ -1389,7 +1389,12 @@ mod tests {
         canvas.wait(0.5);
         let after = board(&mut canvas, &[("bo", 5.0), ("ana", 3.5), ("dee", 1.0)]);
         let anim = before
-            .magic_move_to(&after, MagicMoveKey::Name, MagicMoveUnmatched::Fade, 0.8)
+            .magic_move_to(
+                &after,
+                MagicMoveKey::Name,
+                MagicMoveUnmatched::Fade,
+                Some(0.8),
+            )
             .unwrap();
         canvas.play(vec![anim]);
         canvas.wait(0.5);

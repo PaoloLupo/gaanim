@@ -1539,6 +1539,15 @@ impl Anim {
         Ok(self.linear())
     }
 
+    /// Last `seconds` unless a duration was set, while `Scene.play`'s
+    /// default duration still replaces it.
+    pub(crate) fn default_duration(mut self, seconds: f64) -> Self {
+        if !self.duration_explicit {
+            self.inner.duration = seconds.max(0.0);
+        }
+        self
+    }
+
     /// A duration the motion itself decides, kept over `Scene.play`
     /// defaults unless one was set.
     fn natural_duration(&mut self, seconds: f64) {
@@ -2586,31 +2595,21 @@ impl Anim {
         })
     }
 
-    pub fn circumscribe(self) -> Self {
-        self.effect(AnimationType::Circumscribe { color: None })
-    }
-
-    pub fn flash(self) -> Self {
-        self.effect(AnimationType::Flash {
-            color: None,
-            n_lines: 16,
-            radius: 1.0,
-        })
-    }
-
     pub fn show_passing_flash(self, time_width: f64) -> Self {
         self.effect(AnimationType::ShowPassingFlash {
             time_width: time_width.clamp(f64::EPSILON, 1.0),
         })
     }
 
-    pub fn indicate(self) -> Self {
+    /// Grow the target by `scale_factor` and tint it with `color` (the
+    /// theme's accent when `None`), then return to rest.
+    pub fn indicate(self, color: Option<Color>, scale_factor: f64) -> Self {
         if self.property_target_is_text_selection() {
             return self.selection_effect(crate::anim::TextSelectionEffect::Indicate);
         }
         self.effect(AnimationType::Indicate {
-            color: None,
-            scale_factor: 1.1,
+            color,
+            scale_factor,
         })
     }
 
@@ -2625,11 +2624,16 @@ impl Anim {
         anim
     }
 
-    pub fn wiggle(self) -> Self {
+    /// Shake the target sideways `count` times, `amplitude` scene units each
+    /// way.
+    pub fn wiggle(self, amplitude: f64, count: u32) -> Self {
         if self.property_target_is_text_selection() {
             return self.selection_effect(crate::anim::TextSelectionEffect::Wiggle);
         }
-        self.effect(AnimationType::Wiggle)
+        self.effect(AnimationType::Wiggle {
+            amplitude,
+            count: count.max(1),
+        })
     }
 
     pub fn pulse(self) -> Self {

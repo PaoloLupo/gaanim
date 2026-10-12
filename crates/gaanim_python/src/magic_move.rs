@@ -38,14 +38,14 @@ fn callable_key(value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
 
 /// Keyed "magic move" from `before` to `after`.
 #[pyfunction]
-#[pyo3(signature = (before, after, *, key=None, unmatched="fade", duration=1.0))]
+#[pyo3(signature = (before, after, *, key=None, unmatched="fade", duration=None))]
 pub fn magic_move(
     py: Python<'_>,
     before: PyRef<'_, PyDrawable>,
     after: PyRef<'_, PyDrawable>,
     key: Option<&Bound<'_, PyAny>>,
     unmatched: &str,
-    duration: f64,
+    duration: Option<f64>,
 ) -> PyResult<PyCanvasAnim> {
     crate::custom::ensure_authoring_allowed()?;
     let unmatched = parse_unmatched(unmatched)?;

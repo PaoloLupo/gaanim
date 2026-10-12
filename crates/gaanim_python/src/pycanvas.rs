@@ -2735,7 +2735,8 @@ impl PyCameraAnimation {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_orthographic(zoom, 0.0);
+            .camera_orthographic(zoom, 0.0)
+            .duration(0.0);
         Ok(PyCanvasAnim { inner })
     }
 

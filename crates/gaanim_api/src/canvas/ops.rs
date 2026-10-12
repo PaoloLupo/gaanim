@@ -797,6 +797,14 @@ pub(crate) enum Op {
         gap: f64,
         overhang: f64,
     },
+    /// Turn a drawable into live radial lines around `sources`, starting
+    /// `gap` beyond their bounds.
+    AttachRays {
+        target: ObjectId,
+        sources: Vec<crate::anim::BoundsTarget>,
+        gap: f64,
+        rays: gaanim_animation::SurroundingRays,
+    },
     /// Draw a hand-drawn notation around live bounds, grown by `padding`
     /// (top, right, bottom, left).
     AttachRoughNotation {

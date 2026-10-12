@@ -569,7 +569,7 @@ scene.render()
   name: "Anim.with_pen_tip",
   kind: "method",
   returns: (type: "Anim", desc: [El mismo `Anim`.]),
-  desc: [En `write`, `create` y sus inversas, dibuja una punta de pluma en el extremo del trazo, como una escritura a mano.],
+  desc: [En `write`, `create` y `draw_border_then_fill`, dibuja una punta de pluma en el extremo de cada trazo mientras se traza, como una escritura a mano: un punto del color del trazo (o del relleno, si la forma no tiene trazo) que desaparece cuando el trazo está completo. Un trazo con puntas propias (`tip(...)`) las conserva; las demás animaciones lo ignoran.],
 )[
 ```python
 # show-code: true
@@ -705,8 +705,12 @@ solo se tocan no se consideran solapados.
 #api-entry(
   name: "Anim.indicate",
   kind: "method",
-  returns: (type: "Anim", desc: [Un pequeño salto con resaltado.]),
-  desc: [Salta un poco hacia arriba desde su centro visual y resalta el objeto; el objeto vuelve a su estado.],
+  params: (
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Tinte de los rellenos y trazos sólidos; sin él, el `"accent"` del tema, o su `"foreground"` si el objeto ya tiene el color del acento.]),
+    (name: "scale_factor", type: "float", default: "1.2", desc: [Cuánto crece. Debe ser positivo.]),
+  ),
+  returns: (type: "Anim", desc: [Un salto con resaltado.]),
+  desc: [Crece desde su centro visual la primera mitad y vuelve la segunda, mientras se tiñe de `color` y recupera su color; el objeto termina en su estado.],
 )[
 ```python
 # show-code: true
@@ -724,15 +728,26 @@ scene.render()
 #api-entry(
   name: "Anim.wiggle",
   kind: "method",
+  params: (
+    (name: "amplitude", type: "float", default: "0.1", desc: [Desplazamiento a cada lado, en unidades de escena. No negativo.]),
+    (name: "count", type: "int", default: "3", desc: [Vaivenes a derecha e izquierda. Al menos 1.]),
+  ),
   returns: (type: "Anim", desc: [Una sacudida breve.]),
-  desc: [Útil para señalar una respuesta incorrecta.],
+  desc: [Sacude el objeto de lado a lado y lo deja donde estaba. Útil para señalar una respuesta incorrecta.],
   none,
 )
 
 #api-entry(
   name: "Anim.circumscribe",
   kind: "method",
+  params: (
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Color del marco; sin él, el trazo del tema.]),
+    (name: "width", type: "float | None", default: "None", desc: [Grosor del marco; necesita `color`.]),
+    (name: "padding", type: "float | Padding | None", default: "None", desc: [Separación del marco a los límites; 0,12 por defecto.]),
+    (name: "corner_radius", type: "float", default: "0.08", desc: [Radio de las esquinas.]),
+  ),
   returns: (type: "Anim", desc: [Un contorno que rodea el objeto.]),
+  desc: [Dibuja un marco vivo alrededor del objeto la primera mitad y lo borra desde su inicio la segunda, como el `Circumscribe` de Manim: es `flash_around(time_width=1.0)`. Fuera de la animación el marco es invisible. El `Anim` se reproduce sobre el marco, no sobre el objeto.],
 )[
 ```python
 >>>from gaanim import *
@@ -745,7 +760,15 @@ scene.play(result.animate.circumscribe().duration(1.0))
 #api-entry(
   name: "Anim.flash",
   kind: "method",
+  params: (
+    (name: "color", type: "ColorLike | None", default: "None", desc: [Color de los rayos; sin él, el trazo del tema.]),
+    (name: "width", type: "float | None", default: "None", desc: [Grosor de los rayos; necesita `color`.]),
+    (name: "lines", type: "int", default: "12", desc: [Número de rayos, de 1 a 64.]),
+    (name: "length", type: "float", default: "0.3", desc: [Largo de cada rayo. Positivo.]),
+    (name: "gap", type: "float", default: "0.15", desc: [Distancia entre el círculo que contiene los límites del objeto y el inicio de los rayos. No negativa.]),
+  ),
   returns: (type: "Anim", desc: [Un destello de líneas alrededor del objeto.]),
+  desc: [Los rayos son un objeto vivo nuevo, repartidos desde la derecha y que siguen al objeto si se mueve. Cada uno se dibuja hacia fuera y luego se va desde su extremo interior; fuera de la animación son invisibles. El `Anim` se reproduce sobre los rayos, no sobre el objeto.],
 )[
 ```python
 >>>from gaanim import *
@@ -1149,7 +1172,7 @@ scene.render()
 #api-entry(
   name: "magic_move",
   kind: "function",
-  signature: "magic_move(before: Drawable, after: Drawable, *, key: str | Callable[[Drawable], object] = \"name\", unmatched: str = \"fade\", duration: float = 1.0) -> Anim",
+  signature: "magic_move(before: Drawable, after: Drawable, *, key: str | Callable[[Drawable], object] = \"name\", unmatched: str = \"fade\", duration: float | None = None) -> Anim",
   params: (
     (name: "before, after", type: "Drawable", default: none, desc: [Estados de origen y destino, normalmente grupos de la misma escena.]),
     (name: "key", type: "str | Callable[[Drawable], object]", default: "\"name\"", desc: [`"name"` usa los nombres de `Drawable.named` (una parte SVG sin nombre responde a su `id`); `"id"` usa solo los `id` SVG; una función recibe cada candidato y devuelve su clave, o `None` para buscar dentro de él.]),
@@ -1157,7 +1180,7 @@ scene.render()
     (name: "duration", type: "float", default: "1.0", desc: [Segundos; finito y positivo.]),
   ),
   returns: (type: "Anim", desc: [Magic move listo para `scene.play`.]),
-  desc: [Los miembros de `before` y `after` con la misma clave interpolan posición, tamaño, color y forma; una pareja de grupos transforma también sus piezas, como `transform_matching`. Los candidatos se buscan en profundidad y un miembro con clave se mueve entero. Las claves se leen al llamar a `magic_move` y las repetidas se emparejan en orden de declaración. `after` queda oculto hasta el movimiento y lo sustituye al final, así que las animaciones siguientes continúan desde él. Objetos de escenas distintas, el mismo objeto dos veces, una duración no positiva o un `key`/`unmatched` desconocido lanzan `ValueError`; una excepción de la función clave se propaga.],
+  desc: [Los miembros de `before` y `after` con la misma clave interpolan posición, tamaño, color y forma; una pareja de grupos transforma también sus piezas, como `transform_matching`. Los candidatos se buscan en profundidad y un miembro con clave se mueve entero. Las claves se leen al llamar a `magic_move` y las repetidas se emparejan en orden de declaración. `after` queda oculto hasta el movimiento y lo sustituye al final, así que las animaciones siguientes continúan desde él. Sin `duration` dura un segundo, o la `duration` que reciba `scene.play`. Objetos de escenas distintas, el mismo objeto dos veces, una duración no positiva o un `key`/`unmatched` desconocido lanzan `ValueError`; una excepción de la función clave se propaga.],
 )[
 ```python
 # show-code: true
@@ -2744,7 +2767,7 @@ scene.render()
   kind: "method",
   signature: "clear_drive() -> None",
   returns: (type: "None", desc: [Termina en el cursor todos los `drive` y `look_at` del objeto o de los miembros del grupo.]),
-  desc: [Los valores autorados vuelven a verse desde ese instante; lo anterior no cambia.],
+  desc: [Los `drive` dejan de sumar su desplazamiento, así que los valores autorados vuelven a verse desde ese instante. Un `look_at` deja el objeto girado como estaba en el cursor: ese giro, medido sobre las posiciones autoradas, pasa a su rotación (si el objetivo solo lo mueve un updater, puede quedar un poco desviado). Lo anterior no cambia.],
 )[
 ```python
 >>>from gaanim import *

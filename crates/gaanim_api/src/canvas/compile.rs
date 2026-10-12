@@ -2758,6 +2758,12 @@ impl SceneModel {
             None => SceneBuilder::new(commands, timeline, font_registry, text_config),
         };
         builder.readout_reserves = self.layout_readout_reserves();
+        if let Ok(accent) = self.theme_color("accent") {
+            builder.emphasis_color = accent;
+        }
+        if let Ok(foreground) = self.theme_color("foreground") {
+            builder.emphasis_contrast = foreground;
+        }
         let mut checkpoint = None;
         // Raw bounds for the canvas background (visual, no margin).
         let raw_bounds = self.frame.bounds();
@@ -3743,6 +3749,7 @@ impl SceneModel {
                             id_map,
                         );
                         if let Some(mut remapped) = Self::remap_anim(anim, id_map, object_specs) {
+                            Self::resolve_emphasis_color(builder, &mut remapped);
                             Self::resolve_reveal_groups(
                                 builder,
                                 object_specs,
@@ -3858,6 +3865,7 @@ impl SceneModel {
                             .enumerate()
                             .filter_map(|(index, anim)| {
                                 let mut remapped = Self::remap_anim(anim, id_map, object_specs)?;
+                                Self::resolve_emphasis_color(builder, &mut remapped);
                                 Self::resolve_reveal_groups(
                                     builder,
                                     object_specs,
@@ -3971,8 +3979,14 @@ impl SceneModel {
                         .map(|(index, target)| AnimationBuilder {
                             target,
                             anim_type: match kind.as_str() {
-                                "wiggle" | "wave" => AnimationType::Wiggle,
-                                "highlight" => AnimationType::Circumscribe { color: None },
+                                "wiggle" | "wave" => AnimationType::Wiggle {
+                                    amplitude: crate::anim::DEFAULT_WIGGLE_AMPLITUDE,
+                                    count: crate::anim::DEFAULT_WIGGLE_COUNT,
+                                },
+                                "highlight" => AnimationType::Indicate {
+                                    color: Some(builder.emphasis_tint(target)),
+                                    scale_factor: 1.0,
+                                },
                                 _ => AnimationType::Indicate {
                                     color: None,
                                     scale_factor: if kind == "pulse" { 1.16 } else { 1.1 },
@@ -6345,6 +6359,27 @@ impl SceneModel {
                 }
                 Op::AttachFalloff { target, effect } => {
                     if let Some(target_id) = id_map.get(target).copied() {
+                        if let gaanim_animation::FalloffEffect::LookAt {
+                            target: goal,
+                            offset,
+                        } = effect
+                        {
+                            let goal = match goal {
+                                gaanim_animation::FalloffTarget::Object(object) => id_map
+                                    .get(object)
+                                    .map(|id| gaanim_animation::FalloffTarget::Object(*id)),
+                                other => Some(*other),
+                            };
+                            if let Some(goal) = goal {
+                                for member in Self::falloff_member_ids(builder, target_id) {
+                                    builder
+                                        .look_ats
+                                        .entry(member)
+                                        .or_default()
+                                        .push((goal, *offset));
+                                }
+                            }
+                        }
                         let mut effect = effect.clone();
                         effect.resolve_targets(&mut |object| {
                             id_map
@@ -6379,6 +6414,9 @@ impl SceneModel {
                 Op::ClearFalloff(target) => {
                     if let Some(target_id) = id_map.get(target).copied() {
                         let end = builder.current_time;
+                        for member in Self::falloff_member_ids(builder, target_id) {
+                            Self::keep_look_at_turn(builder, member);
+                        }
                         for entity in Self::falloff_members(builder, target_id) {
                             builder.commands.entity(entity).queue(
                                 move |mut entity: bevy::prelude::EntityWorldMut| {
@@ -6648,6 +6686,21 @@ impl SceneModel {
                     {
                         builder.commands.entity(state.entity).insert(
                             gaanim_animation::SurroundingRect::underline(compiled, *gap, *overhang),
+                        );
+                    }
+                }
+                Op::AttachRays {
+                    target,
+                    sources,
+                    gap,
+                    rays,
+                } => {
+                    let compiled = Self::bounds_source_ids(builder, id_map, sources);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(state.entity).insert(
+                            gaanim_animation::SurroundingRect::rays(compiled, *gap, *rays),
                         );
                     }
                 }
@@ -11051,20 +11104,90 @@ impl SceneModel {
     /// The instances a falloff drives: the members of a group, or the
     /// drawable itself when it has none.
     fn falloff_members(builder: &SceneBuilder, id: ObjectId) -> Vec<bevy::prelude::Entity> {
+        Self::falloff_member_ids(builder, id)
+            .into_iter()
+            .filter_map(|member| builder.states.get(member))
+            .map(|member| member.entity)
+            .collect()
+    }
+
+    /// An indication without a color tints with the theme's accent, or its
+    /// foreground for what already shows the accent.
+    fn resolve_emphasis_color(builder: &SceneBuilder, anim: &mut AnimationBuilder) {
+        if let AnimationType::Indicate {
+            color: color @ None,
+            ..
+        } = &mut anim.anim_type
+        {
+            *color = Some(builder.emphasis_tint(anim.target));
+        }
+    }
+
+    /// The compiled ids of [`Self::falloff_members`].
+    fn falloff_member_ids(builder: &SceneBuilder, id: ObjectId) -> Vec<ObjectId> {
         let Some(state) = builder.states.get(id) else {
             return Vec::new();
         };
         let members: Vec<_> = state
             .children
             .iter()
-            .filter_map(|child| builder.states.get(*child))
-            .map(|child| child.entity)
+            .copied()
+            .filter(|child| builder.states.contains_key(*child))
             .collect();
         if members.is_empty() {
-            vec![state.entity]
+            vec![id]
         } else {
             members
         }
+    }
+
+    /// Turn `member` for good by the angle its `look_at`s give it at the
+    /// cursor, measured on the authored state as the falloff measures it,
+    /// so it keeps pointing where they left it when they end.
+    fn keep_look_at_turn(builder: &mut SceneBuilder, member: ObjectId) {
+        let Some(look_ats) = builder.look_ats.remove(&member) else {
+            return;
+        };
+        let center = |builder: &SceneBuilder, id: ObjectId| {
+            let state = builder.states.get(id)?;
+            let world = builder.get_world_transform(id);
+            let center = gaanim_layout::transform_bounds(state.bounds, &world).center();
+            Some(DVec2::new(center.x, center.y))
+        };
+        let Some(position) = center(builder, member) else {
+            return;
+        };
+        let turn: f64 = look_ats
+            .iter()
+            .filter_map(|(goal, offset)| {
+                let point = match goal {
+                    gaanim_animation::FalloffTarget::Point(point) => Some(*point),
+                    gaanim_animation::FalloffTarget::Object(id) => center(builder, *id),
+                    gaanim_animation::FalloffTarget::Entity(_) => None,
+                }?;
+                let toward = point - position;
+                (toward.length_squared() > f64::EPSILON).then(|| toward.y.atan2(toward.x) + offset)
+            })
+            .sum();
+        let Some(state) = builder.states.get_mut(member) else {
+            return;
+        };
+        let from = state.transform.rotation;
+        let to = from * gaanim_core::glam::DQuat::from_rotation_z(turn);
+        state.transform.rotation = to;
+        let track = builder.ensure_track(member);
+        builder.timeline.add_clip(
+            track,
+            builder.current_time,
+            0.0,
+            gaanim_timeline::clip::ClipPayload::Animation(gaanim_timeline::clip::AnimationSpec {
+                target: member,
+                lens: gaanim_timeline::clip::PropertyLensSpec::Rotation { from, to },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: Some("LookAtHold".into()),
+            }),
+        );
     }
 
     /// The compiled object ids a bounds frame follows: the drawables, and the
@@ -17087,6 +17210,269 @@ mod tests {
     }
 
     #[test]
+    fn entries_and_emphasis_wait_for_their_delay() {
+        let mut canvas = SceneModel::new(640, 360);
+        let squares: Vec<_> = (0..5)
+            .map(|index| canvas.square(0.6).move_to(index as f64 * 1.5 - 3.0, 0.0))
+            .collect();
+        canvas.play(
+            vec![
+                squares[0].animate().grow_from_point(0.0, 0.0),
+                squares[1]
+                    .animate()
+                    .grow_from_edge(gaanim_layout::Direction::Left),
+                squares[2].animate().spin_in_from_nothing(),
+                squares[3].animate().indicate(None, 1.2),
+                squares[4].animate().wiggle(0.1, 3),
+            ]
+            .into_iter()
+            .map(|anim| anim.duration(1.0).delay(1.0))
+            .collect(),
+        );
+        let (mut world, mut timeline) = compiled_world(&canvas);
+
+        timeline.seek(&mut world, 0.5);
+        for square in &squares[..3] {
+            assert_eq!(transform_of(&mut world, square).scale.x, 0.0, "hidden");
+        }
+        for (index, square) in squares[3..].iter().enumerate() {
+            let transform = transform_of(&mut world, square);
+            assert_eq!(transform.scale.x, 1.0);
+            assert_eq!(transform.translation.x, (index + 3) as f64 * 1.5 - 3.0);
+        }
+        timeline.seek(&mut world, 1.5);
+        for square in &squares[..3] {
+            let scale = transform_of(&mut world, square).scale.x;
+            assert!(scale > 0.0 && scale < 1.0, "growing: {scale}");
+        }
+        let indicated = transform_of(&mut world, &squares[3]).scale.x;
+        assert!(indicated > 1.0, "indicating: {indicated}");
+        let wiggled = transform_of(&mut world, &squares[4]).translation.x;
+        assert!((wiggled - 3.0).abs() > 1e-6, "wiggling: {wiggled}");
+    }
+
+    #[test]
+    fn flashes_shoot_rays_and_circumscribe_draws_a_frame_around_the_target() {
+        let mut canvas = SceneModel::new(640, 360);
+        let star = canvas.circle(0.5).move_to_default(1.0, 1.0);
+        let flash = star.animate().flash(None, None, 8, 0.3, 0.1).unwrap();
+        let circumscribe = star
+            .animate()
+            .circumscribe(None, None, [0.1; 4], 0.0)
+            .unwrap();
+        for anim in [&flash, &circumscribe] {
+            assert!(matches!(
+                anim.inner.anim_type,
+                AnimationType::ShowPassingFlash { time_width } if time_width == 1.0
+            ));
+        }
+        assert!(star.animate().flash(None, None, 0, 0.3, 0.1).is_err());
+        assert!(star.animate().flash(None, None, 8, 0.0, 0.1).is_err());
+        assert!(star.animate().flash(None, None, 8, 0.3, -0.1).is_err());
+        canvas.play(vec![flash, circumscribe]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.5);
+        gaanim_animation::surrounding_rect_system(&mut world);
+        let rays = world
+            .query::<(
+                &gaanim_animation::SurroundingRect,
+                &gaanim_scene::PathSource,
+            )>()
+            .iter(&world)
+            .find_map(|(frame, path)| frame.rays.map(|rays| (rays, path.0.clone())))
+            .expect("a flash draws rays");
+        assert_eq!(rays.0.count, 8);
+        let starts: Vec<_> = rays
+            .1
+            .elements()
+            .iter()
+            .filter_map(|element| match element {
+                gaanim_core::kurbo::PathEl::MoveTo(point) => Some(*point),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(starts.len(), 8);
+        for point in starts {
+            // Half the circle's side plus the gap from its center.
+            let distance = point.distance(gaanim_core::kurbo::Point::new(1.0, 1.0));
+            assert!((distance - 0.6).abs() < 1e-6, "{distance}");
+        }
+    }
+
+    #[test]
+    fn indications_tint_with_the_accent_unless_given_a_color() {
+        let mut canvas = SceneModel::new(640, 360);
+        let red = gaanim_core::peniko::Color::from_rgb8(255, 0, 0);
+        let accent = canvas
+            .theme_color("accent")
+            .unwrap_or(crate::builder::DEFAULT_EMPHASIS_COLOR);
+        let foreground = canvas
+            .theme_color("foreground")
+            .unwrap_or(crate::builder::DEFAULT_EMPHASIS_CONTRAST);
+        let plain = canvas.circle(0.5).fill(gaanim_core::peniko::Color::BLACK);
+        let colored = canvas.circle(0.5).fill(gaanim_core::peniko::Color::BLACK);
+        let accented = canvas.circle(0.5).fill(accent);
+        canvas.play(vec![
+            plain.animate().indicate(None, 1.2),
+            colored.animate().indicate(Some(red), 1.5),
+            accented.animate().indicate(None, 1.2),
+        ]);
+        let (_, timeline) = compiled_world(&canvas);
+        let tints: Vec<_> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(
+                    gaanim_timeline::clip::AnimationSpec {
+                        lens: gaanim_timeline::clip::PropertyLensSpec::FillColor { to, .. },
+                        ..
+                    },
+                ) => Some(*to),
+                _ => None,
+            })
+            .collect();
+        assert!(tints.contains(&accent), "{tints:?}");
+        assert!(tints.contains(&red));
+        assert!(
+            tints.contains(&foreground),
+            "an accent circle turns to the foreground: {tints:?}"
+        );
+    }
+
+    #[test]
+    fn text_emphases_differ_pulse_beats_twice_wave_lifts_in_turn_highlight_tints() {
+        let mut canvas = SceneModel::new(640, 360);
+        let text = canvas.text("ab cd");
+        canvas.play(vec![text.select("cd").wave(1.0)]);
+        canvas.play(vec![text.select("cd").pulse(1.0)]);
+        canvas.play(vec![text.select("cd").highlight(1.0)]);
+        let (_, timeline) = compiled_world(&canvas);
+        let starts =
+            |within: std::ops::Range<f64>,
+             pick: &dyn Fn(&gaanim_timeline::clip::PropertyLensSpec) -> bool| {
+                let mut starts: Vec<f64> = timeline
+                    .clips
+                    .values()
+                    .filter(|clip| within.contains(&clip.start))
+                    .filter(|clip| match &clip.payload {
+                        gaanim_timeline::clip::ClipPayload::Animation(animation) => {
+                            pick(&animation.lens)
+                        }
+                        _ => false,
+                    })
+                    .map(|clip| (clip.start * 1000.0).round() / 1000.0)
+                    .collect();
+                starts.sort_by(f64::total_cmp);
+                starts.dedup();
+                starts
+            };
+        use gaanim_timeline::clip::PropertyLensSpec as Lens;
+        let lifts = starts(0.0..1.0, &|lens| matches!(lens, Lens::Translation { .. }));
+        assert_eq!(
+            lifts,
+            vec![0.0, 0.25, 0.5, 0.75],
+            "one glyph after the other"
+        );
+        let beats = starts(
+            1.0..2.0,
+            &|lens| matches!(lens, Lens::Scale { from, to } if from != to),
+        );
+        assert_eq!(beats, vec![1.0, 1.25, 1.5, 1.75], "two beats");
+        let accent = canvas
+            .theme_color("accent")
+            .unwrap_or(crate::builder::DEFAULT_EMPHASIS_COLOR);
+        let tints = starts(
+            2.0..3.0,
+            &|lens| matches!(lens, Lens::FillColor { to, .. } if *to == accent),
+        );
+        assert_eq!(tints, vec![2.0]);
+        let grows = starts(
+            2.0..3.0,
+            &|lens| matches!(lens, Lens::Scale { from, to } if from != to),
+        );
+        assert!(grows.is_empty(), "a highlight only tints");
+    }
+
+    #[test]
+    fn clearing_a_look_at_keeps_the_turn_it_gave() {
+        let mut canvas = SceneModel::new(640, 360);
+        let pointer = canvas.rect(1.0, 0.2);
+        pointer.drive_falloff(gaanim_animation::FalloffEffect::LookAt {
+            target: gaanim_animation::FalloffTarget::Point(DVec2::new(0.0, 5.0)),
+            offset: 0.0,
+        });
+        canvas.wait(1.0);
+        pointer.clear_falloff();
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        for time in [0.5, 1.5] {
+            timeline.seek(&mut world, time);
+            world.insert_resource(gaanim_animation::PlaybackState {
+                current_time: time,
+                ..Default::default()
+            });
+            gaanim_animation::falloff::apply_falloff_system(&mut world);
+            let (_, _, turn) = transform_of(&mut world, &pointer)
+                .rotation
+                .to_euler(gaanim_core::glam::EulerRot::XYZ);
+            assert!(
+                (turn - std::f64::consts::FRAC_PI_2).abs() < 1e-9,
+                "{turn} at {time}"
+            );
+            let mut restore = Schedule::default();
+            restore.add_systems(gaanim_animation::falloff::restore_falloff_system);
+            restore.run(&mut world);
+        }
+    }
+
+    #[test]
+    fn camera_moves_and_magic_moves_take_the_play_default_duration() {
+        use crate::canvas::PlayItem;
+        let mut canvas = SceneModel::new(640, 360);
+        let before = magic_move_board(&mut canvas, &[("dot", 1.0)]);
+        let after = magic_move_board(&mut canvas, &[("dot", 2.0)]);
+        let pan = canvas.camera_pan_to(3.0, 0.0, 1.0);
+        let keyed = before
+            .magic_move_to(
+                &after,
+                crate::canvas::MagicMoveKey::Name,
+                crate::canvas::MagicMoveUnmatched::Fade,
+                None,
+            )
+            .unwrap();
+        canvas
+            .play_items_configured(
+                vec![PlayItem::Animation(pan), PlayItem::Animation(keyed)],
+                Some(2.5),
+                None,
+            )
+            .unwrap();
+        let fixed = canvas.camera_pan_to(0.0, 0.0, 1.0).duration(0.5);
+        canvas
+            .play_items_configured(vec![PlayItem::Animation(fixed)], Some(2.5), None)
+            .unwrap();
+        let (_, timeline) = compiled_world(&canvas);
+        let mut pans: Vec<_> = timeline
+            .clips
+            .values()
+            .filter(|clip| {
+                matches!(
+                    &clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(
+                        gaanim_timeline::clip::AnimationSpec {
+                            lens: gaanim_timeline::clip::PropertyLensSpec::CameraPosition { .. },
+                            ..
+                        }
+                    )
+                )
+            })
+            .map(|clip| (clip.start, clip.duration))
+            .collect();
+        pans.sort_by(|left, right| left.0.total_cmp(&right.0));
+        assert_eq!(pans, vec![(0.0, 2.5), (2.5, 0.5)]);
+    }
+
+    #[test]
     fn text_declared_transparent_fades_back_in_with_its_root_opacity() {
         let mut canvas = SceneModel::new(16.0, 9.0);
         let text = canvas.text("(4.6) texto").opacity(0.0);
@@ -20369,7 +20755,7 @@ mod tests {
         let tile = canvas.rect(2.0, 1.0);
         canvas.wait(1.0);
         canvas.play(vec![tile.animate().grow_from_center().duration(0.5)]);
-        canvas.play(vec![tile.animate().indicate().duration(0.6)]);
+        canvas.play(vec![tile.animate().indicate(None, 1.2).duration(0.6)]);
         let (mut world, mut timeline) = compiled_world(&canvas);
         timeline.seek(&mut world, 0.5);
         assert_eq!(transform_of(&mut world, &tile).scale, DVec3::ZERO);
@@ -20643,7 +21029,7 @@ mod tests {
                 &after,
                 crate::canvas::MagicMoveKey::Name,
                 crate::canvas::MagicMoveUnmatched::Fade,
-                0.8,
+                Some(0.8),
             )
             .unwrap();
         canvas.play(vec![anim]);
@@ -20670,7 +21056,7 @@ mod tests {
                 &after,
                 crate::canvas::MagicMoveKey::Name,
                 crate::canvas::MagicMoveUnmatched::Cut,
-                0.5,
+                Some(0.5),
             )
             .unwrap();
         canvas.play(vec![anim]);
@@ -20691,17 +21077,23 @@ mod tests {
         let key = crate::canvas::MagicMoveKey::Name;
         let fade = crate::canvas::MagicMoveUnmatched::Fade;
         assert_eq!(
-            before.magic_move_to(&before, key, fade, 1.0).unwrap_err(),
+            before
+                .magic_move_to(&before, key, fade, Some(1.0))
+                .unwrap_err(),
             crate::canvas::MagicMoveError::SameDrawable
         );
         assert_eq!(
-            before.magic_move_to(&after, key, fade, 0.0).unwrap_err(),
+            before
+                .magic_move_to(&after, key, fade, Some(0.0))
+                .unwrap_err(),
             crate::canvas::MagicMoveError::InvalidDuration
         );
         let mut other = SceneModel::new(640, 360);
         let foreign = other.circle(1.0);
         assert_eq!(
-            before.magic_move_to(&foreign, key, fade, 1.0).unwrap_err(),
+            before
+                .magic_move_to(&foreign, key, fade, Some(1.0))
+                .unwrap_err(),
             crate::canvas::MagicMoveError::ForeignScene
         );
         let members = before
@@ -20709,7 +21101,7 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].1, "ANA");
-        let failed = before.magic_move_to_by(&after, |_| Err("no key"), fade, 1.0);
+        let failed = before.magic_move_to_by(&after, |_| Err("no key"), fade, None);
         assert!(matches!(
             failed,
             Err(crate::canvas::MagicMoveFailure::Key("no key"))

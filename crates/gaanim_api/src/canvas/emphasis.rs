@@ -1,5 +1,5 @@
-//! Emphasis effects that draw their own helpers: a flash around or under a
-//! target, ripples, a spotlight and an animated boundary.
+//! Emphasis effects that draw their own helpers: a burst of rays, a flash
+//! around or under a target, ripples, a spotlight and an animated boundary.
 //!
 //! Each one spawns its helper drawables when it is declared, the way a
 //! `surrounding_rect` is, and returns an [`Anim`] that plays on them. The
@@ -26,6 +26,9 @@ const DEFAULT_STROKE_WIDTH: f64 = 0.05;
 
 /// Most passes a hand-drawn notation draws over itself.
 pub const MAX_NOTATION_PASSES: u32 = 8;
+
+/// Most lines one flash draws.
+pub const MAX_FLASH_LINES: u32 = 64;
 
 fn check_padding(padding: [f64; 4]) -> Result<(), String> {
     if padding
@@ -143,6 +146,61 @@ impl Anim {
             .map_err(|error: SurroundingRectError| error.to_string())?;
         let helper = stroked(frame.drawable, color, width)?;
         Self::passing_flash(state, helper, time_width)
+    }
+
+    /// A frame is drawn around the target and leaves from where it started,
+    /// as Manim's `Circumscribe` does: [`Anim::flash_around`] with a window
+    /// as long as the frame.
+    pub fn circumscribe(
+        self,
+        color: Option<Color>,
+        width: Option<f64>,
+        padding: [f64; 4],
+        corner_radius: f64,
+    ) -> Result<Anim, String> {
+        self.flash_around(color, width, padding, corner_radius, 1.0)
+    }
+
+    /// `lines` rays burst out around the target: radial lines `length` long,
+    /// starting `gap` beyond the circle that holds its bounds, are drawn
+    /// outward and leave from their inner ends. The rays are a new drawable
+    /// that follows the target and is invisible outside the flash.
+    pub fn flash(
+        self,
+        color: Option<Color>,
+        width: Option<f64>,
+        lines: u32,
+        length: f64,
+        gap: f64,
+    ) -> Result<Anim, String> {
+        if !(1..=MAX_FLASH_LINES).contains(&lines) {
+            return Err(format!(
+                "lines must be between 1 and {MAX_FLASH_LINES}, got {lines}"
+            ));
+        }
+        check_positive("length", length)?;
+        if !gap.is_finite() || gap < 0.0 {
+            return Err("gap must be finite and non-negative".to_string());
+        }
+        check_stroke(color, width)?;
+        let (state, target) = self.emphasis_target()?;
+        let rays = spawn_in(&state, SpawnKind::SurroundingRect, true).no_fill();
+        state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachRays {
+                target: rays.id,
+                sources: vec![target],
+                gap,
+                rays: gaanim_animation::SurroundingRays {
+                    count: lines,
+                    length,
+                },
+            });
+        let helper = stroked(rays, color, width)?;
+        Self::passing_flash(state, helper, 1.0)
     }
 
     /// A bright window sweeps a line under the target, `gap` scene units

@@ -194,7 +194,8 @@ scene.wait(HOLD)
 
 # look_at turns each member to point its x axis at a drawable it follows, or
 # at a point; offset adds radians. clear_drive ends every drive and look_at
-# at the cursor, and the members return to how they were authored.
+# at the cursor: the drives let go, and the members keep the turn look_at
+# gave them.
 aim_start = scene.cursor
 scene.segment("look_at")
 panels = scene.layout.zones(Zones.grid(rows=1, columns=2, gap="48px", padding="page_padding"))

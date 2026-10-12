@@ -1269,7 +1269,7 @@ scene.camera.reset()
   name: "Camera.animate",
   kind: "property",
   returns: (type: "CameraAnimation", desc: [El vocabulario animado de la cámara.]),
-  desc: [Cada método devuelve un `Anim` nuevo; construirlo no cambia nada hasta pasarlo a `scene.play`.],
+  desc: [Cada método devuelve un `Anim` nuevo; construirlo no cambia nada hasta pasarlo a `scene.play`. Un movimiento dura un segundo salvo que `.duration()` fije otra; la `duration` de `scene.play` sustituye ese valor por defecto, como en las demás animaciones. `shake` (medio segundo la sacudida senoidal) y `whip_pan` (0,4 s) tienen sus propios valores por defecto, que `scene.play` también sustituye; una sacudida con trauma dura hasta apagarse y `orthographic` cambia al instante, salvo que `.duration()` diga otra cosa.],
   none,
 )
 

@@ -42,6 +42,13 @@ pub enum BoundsTarget {
     },
 }
 
+/// How far, in scene units, `wiggle` shakes its target each way by default.
+pub const DEFAULT_WIGGLE_AMPLITUDE: f64 = 0.1;
+/// Swings right and left of a default `wiggle`.
+pub const DEFAULT_WIGGLE_COUNT: u32 = 3;
+/// How much `indicate` grows its target by default.
+pub const DEFAULT_INDICATE_SCALE: f64 = 1.2;
+
 /// Order in which the items or groups of a staggered draw animation start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DrawOrder {
@@ -540,8 +547,12 @@ pub enum AnimationType {
         pairs: Vec<(ObjectId, ObjectId)>,
         unmatched: crate::canvas::MagicMoveUnmatched,
     },
-    /// Oscillating wiggle vibration (horizontal).
-    Wiggle,
+    /// A sideways shake: `count` swings right and left, `amplitude` scene
+    /// units each way, back at rest at the end.
+    Wiggle {
+        amplitude: f64,
+        count: u32,
+    },
     /// Scale from 0 at a specific anchor point, growing to full size.
     GrowFromPoint {
         px: f64,
@@ -576,16 +587,6 @@ pub enum AnimationType {
     /// Draw the outline first (like Write) then fill in.
     DrawBorderThenFill {
         config: DrawAnimationConfig,
-    },
-    /// Lines radiating outward from a point (flash of insight effect).
-    Flash {
-        color: Option<Color>,
-        n_lines: u32,
-        radius: f64,
-    },
-    /// A rectangle/circle that appears around the target, grows, and fades.
-    Circumscribe {
-        color: Option<Color>,
     },
     /// Move the target's translation along a Bézier path. The path is
     /// sampled at the rate-function-eased `t` and the target's world
@@ -800,6 +801,24 @@ impl AnimationType {
             || matches!(self, Self::TextSelectionProperties { properties, .. } if properties.is_empty())
     }
 
+    /// Effects whose clips are laid out from the builder's cursor rather
+    /// than from the animation's delay.
+    pub(crate) fn schedules_from_the_cursor(&self) -> bool {
+        matches!(
+            self,
+            Self::SpinInFromNothing
+                | Self::Indicate { .. }
+                | Self::Wiggle { .. }
+                | Self::GrowFromPoint { .. }
+                | Self::GrowFromEdge { .. }
+                | Self::GrowFromCenter
+                | Self::CameraViewPop { .. }
+                | Self::Blink { .. }
+                | Self::Broadcast { .. }
+                | Self::Spotlight { .. }
+        )
+    }
+
     pub(crate) fn is_camera(&self) -> bool {
         matches!(
             self,
@@ -843,16 +862,13 @@ impl AnimationType {
             | Self::TextMotion(_)
             | Self::Motion(_)
             | Self::SignalKeyframes(_)
-            | Self::Wiggle => RateFunc::Linear,
+            | Self::Wiggle { .. } => RateFunc::Linear,
             Self::Create { .. } | Self::DrawBorderThenFill { .. } => RateFunc::DoubleSmooth,
             // Most of a whip pan happens in a blink around its middle.
             Self::CameraWhipPan { .. } => {
                 RateFunc::EaseInOut(gaanim_math::EasingCurve::Exponential)
             }
-            Self::Indicate { .. }
-            | Self::Flash { .. }
-            | Self::Circumscribe { .. }
-            | Self::Spotlight { .. } => RateFunc::ThereAndBack,
+            Self::Indicate { .. } | Self::Spotlight { .. } => RateFunc::ThereAndBack,
             _ => RateFunc::Smooth,
         }
     }
@@ -1194,7 +1210,10 @@ impl MobjectRef {
     pub fn wiggle(self) -> AnimationBuilder {
         AnimationBuilder {
             target: self.id,
-            anim_type: AnimationType::Wiggle,
+            anim_type: AnimationType::Wiggle {
+                amplitude: DEFAULT_WIGGLE_AMPLITUDE,
+                count: DEFAULT_WIGGLE_COUNT,
+            },
             duration: 1.0,
             rate_func: RateFunc::Linear,
             delay: 0.0,
@@ -1234,30 +1253,6 @@ impl MobjectRef {
                 config: DrawAnimationConfig::default(),
             }
             .default_rate_func(),
-            delay: 0.0,
-        }
-    }
-
-    pub fn flash(self, color: Option<Color>, n_lines: u32, radius: f64) -> AnimationBuilder {
-        AnimationBuilder {
-            target: self.id,
-            anim_type: AnimationType::Flash {
-                color,
-                n_lines,
-                radius,
-            },
-            duration: 1.0,
-            rate_func: RateFunc::ThereAndBack,
-            delay: 0.0,
-        }
-    }
-
-    pub fn circumscribe(self, color: Option<Color>) -> AnimationBuilder {
-        AnimationBuilder {
-            target: self.id,
-            anim_type: AnimationType::Circumscribe { color },
-            duration: 1.5,
-            rate_func: RateFunc::ThereAndBack,
             delay: 0.0,
         }
     }

@@ -49,6 +49,9 @@ pub struct StrokeTips {
     pub width: Option<f64>,
     pub start_entity: Option<Entity>,
     pub end_entity: Option<Entity>,
+    /// Show the tips only while a draw animation is tracing the path, as a
+    /// pen tip does.
+    pub while_drawing: bool,
     /// Authored and shortened paths while the shortened one is shown.
     applied: Option<(Arc<BezPath>, Arc<BezPath>)>,
     cache: Option<TipCache>,
@@ -70,9 +73,20 @@ impl StrokeTips {
             width,
             start_entity: None,
             end_entity: None,
+            while_drawing: false,
             applied: None,
             cache: None,
             hidden: Arc::new(BezPath::new()),
+        }
+    }
+
+    /// A pen tip: a dot on the end of the path, drawn by `end_entity` only
+    /// while a draw animation traces the path.
+    pub fn pen(end_entity: Entity) -> Self {
+        Self {
+            end_entity: Some(end_entity),
+            while_drawing: true,
+            ..Self::new(None, Some(TipKind::Dot), None, None)
         }
     }
 
@@ -218,6 +232,10 @@ pub fn apply_stroke_tips_system(
         // The renderer draws nothing of a path whose entry has not started
         // (a Write at zero completion), so neither do its tips.
         let hidden = write.is_some_and(|write| write.completion <= f64::EPSILON);
+        let drawing = write.is_some_and(|write| {
+            write.completion > f64::EPSILON && write.completion < 1.0 - f64::EPSILON
+        });
+        let shown = visible && (drawing || !stroke_tips.while_drawing);
         let source = if hidden {
             stroke_tips.hidden.clone()
         } else {
@@ -272,9 +290,9 @@ pub fn apply_stroke_tips_system(
                 *tip_order = *order;
             }
             // The tip shows exactly when its path does.
-            if visible && !tip_visible {
+            if shown && !tip_visible {
                 commands.entity(entity).insert(Visible);
-            } else if !visible && tip_visible {
+            } else if !shown && tip_visible {
                 commands.entity(entity).remove::<Visible>();
             }
         }
@@ -470,5 +488,53 @@ mod tests {
             &authored
         ));
         assert!(!world.get::<Path2D>(tip).unwrap().0.elements().is_empty());
+    }
+
+    #[test]
+    fn a_pen_tip_shows_only_while_its_path_is_drawn() {
+        let mut world = World::new();
+        let tip = world
+            .spawn((
+                StrokeTip,
+                Path2D(Arc::new(BezPath::new())),
+                FillBrush(None),
+                RenderOrder::default(),
+            ))
+            .id();
+        let route = world
+            .spawn((
+                StrokeTips::pen(tip),
+                Path2D(Arc::new(line(3.0))),
+                StrokeBrush::new(gaanim_core::peniko::Color::WHITE, 0.05),
+                RenderOrder::default(),
+                Visible,
+            ))
+            .id();
+        let mut apply = IntoSystem::into_system(apply_stroke_tips_system);
+        apply.initialize(&mut world);
+        for (completion, shown) in [
+            (None, false),
+            (Some(0.0), false),
+            (Some(0.5), true),
+            (Some(1.0), false),
+        ] {
+            match completion {
+                Some(completion) => {
+                    world.entity_mut(route).insert(WriteTipGlow {
+                        completion,
+                        ..Default::default()
+                    });
+                }
+                None => {
+                    world.entity_mut(route).remove::<WriteTipGlow>();
+                }
+            }
+            apply.run((), &mut world).unwrap();
+            apply.apply_deferred(&mut world);
+            assert_eq!(world.get::<Visible>(tip).is_some(), shown, "{completion:?}");
+        }
+        // The dot sits on the end of the path.
+        let dot = world.get::<Path2D>(tip).unwrap().0.bounding_box();
+        assert!(dot.center().distance(Point::new(3.0, 0.0)) < 1e-6);
     }
 }

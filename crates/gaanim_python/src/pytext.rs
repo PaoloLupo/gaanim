@@ -664,14 +664,21 @@ impl PyTextSelectionAnimation {
     fn indicate(&self) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(PyCanvasAnim {
-            inner: self.source.clone().animate_properties().indicate(),
+            inner: self
+                .source
+                .clone()
+                .animate_properties()
+                .indicate(None, gaanim_api::anim::DEFAULT_INDICATE_SCALE),
         })
     }
 
     fn wiggle(&self) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(PyCanvasAnim {
-            inner: self.source.clone().animate_properties().wiggle(),
+            inner: self.source.clone().animate_properties().wiggle(
+                gaanim_api::anim::DEFAULT_WIGGLE_AMPLITUDE,
+                gaanim_api::anim::DEFAULT_WIGGLE_COUNT,
+            ),
         })
     }
 
