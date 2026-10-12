@@ -348,7 +348,10 @@ mod tests {
             .world_mut()
             .spawn((
                 SpatialTransform::default(),
-                PointOnCurve::new(curve, tracker),
+                PointOnCurve::new(
+                    curve,
+                    TrackingScalar::signal(gaanim_core::ObjectId::from_raw(1), tracker),
+                ),
             ))
             .id();
         let follower = app

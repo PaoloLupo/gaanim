@@ -397,6 +397,11 @@ impl MotionBlurWindows {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MotionBlurExempt;
 
+/// Leaves a drawable out of the scene post-process: it draws above the
+/// processed frame, such as a label that pixelation would make unreadable.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PostProcessExempt;
+
 #[cfg(test)]
 mod motion_blur_tests {
     use super::*;

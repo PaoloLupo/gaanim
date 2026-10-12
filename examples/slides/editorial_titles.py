@@ -24,7 +24,7 @@ TITLE, SUBTITLE = "Vector motion", "A short explanation"
 
 
 def code(label):
-    return scene.text(label, role="code", markup=False)
+    return scene.text(label, role="code")
 
 
 def show(*objects, hold=1.0):

@@ -63,7 +63,7 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
 
 def label(code):
     """A variant label: the code that builds it, without markup."""
-    return scene.text(code, role="code", markup=False)
+    return scene.text(code, role="code")
 
 
 def gallery(rows, columns, caption=0.45):

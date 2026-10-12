@@ -36,7 +36,7 @@ def table(variants, split):
     """One row per (label, box): the code on the left, the box it builds on the right."""
     entrances = []
     for (label_zone, zone), (label, box) in zip(columns(len(variants), split), variants):
-        code = scene.text(label, role="code", markup=False).place(label_zone, anchor="right")
+        code = scene.text(label, role="code").place(label_zone, anchor="right")
         box.place(zone, anchor="left")
         entrances += [code.animate.fade_in().duration(0.4), box.animate.fade_in().duration(0.4)]
     start = scene.cursor
@@ -95,14 +95,15 @@ table(
     SPLIT,
 )
 
-# A shadow is a color blurred and offset under the box (shadow=True gives
-# a soft black one, which a dark theme hides); clip=True cuts the content
-# at the box's rounded edge.
+# A shadow is a color blurred and offset under the box (shadow=True takes
+# the theme's shadow color); clip=True cuts the content at the box's rounded
+# edge.
 scene.segment("shadow_and_clip")
 SPLIT = ("3fr", "2fr")
 tile = tile.but(width=example_width(SPLIT), height="160px")
 table(
     [
+        ("shadow=True", L.box("Box", style=tile, background=header, shadow=True)),
         ('shadow={"color": accent, "blur": "32px"}',
          L.box("Box", style=tile, background=header, shadow={"color": accent, "blur": "32px"})),
         ('shadow={"color": rule, "blur": 0}', L.box("Box", style=tile, background=header,

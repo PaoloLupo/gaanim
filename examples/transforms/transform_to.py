@@ -33,7 +33,7 @@ def rows(labels):
         Zones.grid(rows=len(labels), columns=["1fr", "1fr"], column_gap="48px", padding="page_padding")
     )
     for index, label in enumerate(labels):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
     return [grid[2 * index + 1] for index in range(len(labels))]
 
 

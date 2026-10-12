@@ -140,8 +140,9 @@ impl TransitionType {
     /// Eased progress of the effect at linear progress `t` in `[0, 1]`.
     ///
     /// Without an explicit easing, the original transitions and shaders stay
-    /// linear and the vector reveals (wipes, iris, blinds, push) use `Smooth`. The result
-    /// may overshoot `[0, 1]` for springs and back curves.
+    /// linear and the vector reveals (wipes, iris, blinds, push) and the
+    /// morphs use `Smooth`. The result may overshoot `[0, 1]` for springs and
+    /// back curves.
     pub fn eased_progress(&self, t: f64) -> f64 {
         match self {
             Self::Styled {
@@ -153,8 +154,35 @@ impl TransitionType {
             | Self::ClockWipe { .. }
             | Self::Iris { .. }
             | Self::Blinds { .. }
-            | Self::Push { .. } => RateFunc::Smooth.evaluate(t),
+            | Self::Push { .. }
+            | Self::Morph { .. }
+            | Self::MagicMove { .. } => RateFunc::Smooth.evaluate(t),
             _ => t,
+        }
+    }
+
+    /// Progress of the effect's fades at linear progress `t` in `[0, 1]`.
+    ///
+    /// Fades are linear without an explicit easing. With one, they follow
+    /// the eased progress kept in `[0, 1]` and never go back: past its target
+    /// a spring or back curve has finished fading, and its rebound does not
+    /// fade the outgoing content back in.
+    pub fn fade_progress(&self, t: f64) -> f64 {
+        const SAMPLES: usize = 64;
+        match self {
+            Self::Styled {
+                easing: Some(easing),
+                ..
+            } => {
+                let t = t.clamp(0.0, 1.0);
+                (0..SAMPLES)
+                    .map(|index| t * index as f64 / SAMPLES as f64)
+                    .chain(std::iter::once(t))
+                    .map(|sample| easing.evaluate(sample).clamp(0.0, 1.0))
+                    .fold(0.0, f64::max)
+            }
+            Self::Styled { base, .. } => base.fade_progress(t),
+            _ => t.clamp(0.0, 1.0),
         }
     }
 

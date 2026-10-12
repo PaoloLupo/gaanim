@@ -21,7 +21,7 @@ seeks = []
 
 
 def code(label):
-    return scene.text(label, role="code", markup=False, text_align="left")
+    return scene.text(label, role="code", text_align="left")
 
 
 def show(*objects):
@@ -188,7 +188,7 @@ shown += [a, b, sq]
 show(*shown)
 
 # Sizes are expressions too, and when relations conflict the stronger one
-# wins.
+# wins. Only strong and required relations resize an object.
 scene.segment("constrain_sizes")
 lanes, shown = iter(rows(2, SPLIT)), []
 
@@ -198,11 +198,10 @@ box, bar = reference(zone, 3.0), scene.geometry.rect(1, 0.4)
 L.constrain(bar.left == box.left, bar.center_y == box.center_y, bar.width == box.width * 0.6)
 shown += [box, bar]
 
-zone = lane("L.constrain(box.width == 2, sq.bottom == box.top,\n    (sq.center_x == box.left).weak(),\n"
+zone = lane("L.constrain(sq.bottom == box.top,\n    (sq.center_x == box.left).weak(),\n"
             "    (sq.center_x == box.right).strong())")
 box, sq = reference(zone, 2.0), scene.geometry.square(0.6)
-L.constrain(box.width == 2, sq.bottom == box.top, (sq.center_x == box.left).weak(),
-            (sq.center_x == box.right).strong())
+L.constrain(sq.bottom == box.top, (sq.center_x == box.left).weak(), (sq.center_x == box.right).strong())
 shown += [box, sq]
 show(*shown)
 

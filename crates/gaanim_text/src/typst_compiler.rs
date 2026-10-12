@@ -277,6 +277,38 @@ pub fn clear_typst_layout_cache() {
     }
 }
 
+/// The errors Typst reports compiling `source` as markup with Gaanim's
+/// embedded fonts, empty when it compiles. Results are remembered per
+/// source, so a scene that creates the same equation again, or runs again,
+/// does not compile it twice.
+pub fn typst_source_errors(source: &str) -> Vec<String> {
+    static CHECKED: OnceLock<Mutex<RecentlyUsed<String, Arc<Vec<String>>>>> = OnceLock::new();
+    let checked =
+        CHECKED.get_or_init(|| Mutex::new(RecentlyUsed::new(TYPST_HIERARCHY_CACHE_ENTRIES)));
+    let key = source.to_string();
+    if let Some(errors) = checked
+        .lock()
+        .expect("Typst check cache poisoned")
+        .get(&key)
+    {
+        return errors.as_ref().clone();
+    }
+    let (_, resources) = typst_resources_for(&FontRegistry::without_system_fonts());
+    let world = GaanimTypstWorld::with_resources(source, resources);
+    let errors = match typst::compile::<PagedDocument>(&world).output {
+        Ok(_) => Vec::new(),
+        Err(errors) => errors
+            .iter()
+            .map(|error| error.message.to_string())
+            .collect(),
+    };
+    checked
+        .lock()
+        .expect("Typst check cache poisoned")
+        .insert(key, Arc::new(errors.clone()));
+    errors
+}
+
 /// Combining accent that Typst lays out for a math symbol called as a
 /// function, such as `⋅` in `dot(x)`, using Typst's own accent table.
 pub fn math_accent_for_symbol(symbol: &str) -> Option<char> {
@@ -591,6 +623,16 @@ fn extract_frame_items(
                 let ttf = font.ttf();
                 // Determine effective fill brush
                 let fill_brush = typst_paint_to_brush(&text.fill, default_fill);
+                // Glyphs outlined in the source (`text(stroke: ...)`) keep
+                // that outline.
+                let glyph_stroke = text
+                    .stroke
+                    .as_ref()
+                    .map(|stroke| StrokeBrush {
+                        brush: typst_paint_to_brush(&stroke.paint, default_fill),
+                        style: typst_stroke_to_kurbo(stroke),
+                    })
+                    .unwrap_or_else(|| default_stroke.clone());
 
                 // Typst accumulates advances manually when rendering.
                 // We must do the same to recover each glyph's correct position
@@ -641,7 +683,7 @@ fn extract_frame_items(
                             path,
                             bounds: local_bounds,
                             fill: FillBrush(fill_brush.clone()),
-                            stroke: default_stroke.clone(),
+                            stroke: glyph_stroke.clone(),
                             tag: ObjectTag("TypstGlyph".into()),
                             span,
                             ligature,
@@ -666,6 +708,53 @@ fn extract_frame_items(
 
                 let bbox = path.bounding_box();
                 let local_bounds = Bounds3D::new_2d(bbox.x0, bbox.y0, bbox.x1, bbox.y1);
+                // A shape with neither fill nor stroke, such as the box CeTZ
+                // places around `content`, draws nothing: it still sizes the
+                // drawing, but is no piece that `write` could outline.
+                if shape.fill.is_none() && shape.stroke.is_none() {
+                    if let Some(tb) = total_bounds {
+                        *tb = tb.union(&local_bounds);
+                    } else {
+                        *total_bounds = Some(local_bounds);
+                    }
+                    continue;
+                }
+
+                if let Some(tb) = total_bounds {
+                    *tb = tb.union(&local_bounds);
+                } else {
+                    *total_bounds = Some(local_bounds);
+                }
+                let fill = FillBrush(
+                    shape
+                        .fill
+                        .as_ref()
+                        .and_then(|p| typst_paint_to_brush(p, default_fill)),
+                );
+                let stroke = shape
+                    .stroke
+                    .as_ref()
+                    .map(|stroke| StrokeBrush {
+                        brush: typst_paint_to_brush(&stroke.paint, default_fill),
+                        style: typst_stroke_to_kurbo(stroke),
+                    })
+                    .unwrap_or_else(StrokeBrush::transparent);
+                // Strokes that continue one another are one piece, drawn as
+                // one stroke: plotting packages draw a sampled curve as one
+                // `line` per sample.
+                if fill.0.is_none()
+                    && let Some(previous) = extracted_children.last_mut()
+                    && previous.tag.0 == "TypstShape"
+                    && previous.fill.0.is_none()
+                    && previous.stroke == stroke
+                    && continues_stroke(&previous.path, &path)
+                {
+                    previous
+                        .path
+                        .extend(path.elements().iter().skip(1).copied());
+                    previous.bounds = previous.bounds.union(&local_bounds);
+                    continue;
+                }
 
                 let span_range = world.range(*_span).unwrap_or(0..0);
                 let span = gaanim_scene::components::TextSpan {
@@ -679,35 +768,34 @@ fn extract_frame_items(
                 extracted_children.push(PendingTypstChild {
                     path,
                     bounds: local_bounds,
-                    fill: FillBrush(
-                        shape
-                            .fill
-                            .as_ref()
-                            .and_then(|p| typst_paint_to_brush(p, default_fill)),
-                    ),
-                    stroke: shape
-                        .stroke
-                        .as_ref()
-                        .map(|stroke| StrokeBrush {
-                            brush: typst_paint_to_brush(&stroke.paint, default_fill),
-                            style: typst_stroke_to_kurbo(stroke),
-                        })
-                        .unwrap_or_else(StrokeBrush::transparent),
+                    fill,
+                    stroke,
                     tag: ObjectTag("TypstShape".into()),
                     span,
                     ligature: None,
                 });
                 *char_index_counter += 1;
-
-                if let Some(tb) = total_bounds {
-                    *tb = tb.union(&local_bounds);
-                } else {
-                    *total_bounds = Some(local_bounds);
-                }
             }
             _ => {}
         }
     }
+}
+
+/// Whether `next` starts where the open `previous` ends, as the next segment
+/// of one stroke.
+fn continues_stroke(previous: &kurbo::BezPath, next: &kurbo::BezPath) -> bool {
+    let end = match previous.elements().last() {
+        Some(
+            kurbo::PathEl::LineTo(end)
+            | kurbo::PathEl::QuadTo(_, end)
+            | kurbo::PathEl::CurveTo(_, _, end),
+        ) => *end,
+        _ => return false,
+    };
+    let Some(kurbo::PathEl::MoveTo(start)) = next.elements().first() else {
+        return false;
+    };
+    end.distance(*start) <= 1.0e-6 * (1.0 + end.to_vec2().hypot())
 }
 
 /// Collect the baselines of visual lines without mistaking the numerator,
@@ -1354,6 +1442,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn source_errors_report_invalid_mathematics_only() {
+        assert!(typst_source_errors("$ a + b^2 $").is_empty());
+        assert!(!typst_source_errors("$ a dot.circle b $").is_empty());
+        assert!(!typst_source_errors("$ rank = 2 $").is_empty());
+        assert!(typst_source_errors("$ op(\"rank\") = 2 $").is_empty());
+    }
+
+    #[test]
     fn layout_cache_forgets_the_least_recently_used_half_when_full() {
         let mut cache = RecentlyUsed::new(4);
         for key in 0..4 {
@@ -1546,6 +1642,36 @@ mod tests {
             "a subscripted formula baseline must not collapse to its visual center"
         );
         assert_eq!(compiled.metrics.line_count, 1);
+    }
+
+    #[test]
+    fn strokes_that_continue_one_another_are_one_piece() {
+        let registry = FontRegistry::new();
+        let compiled = compile_typst_source(
+            &registry,
+            "#set page(width: 40pt, height: 40pt, margin: 0pt)\n\
+             #place(line(start: (0pt, 0pt), end: (10pt, 0pt)))\
+             #place(line(start: (10pt, 0pt), end: (20pt, 10pt)))\
+             #place(line(start: (20pt, 10pt), end: (30pt, 10pt)))\
+             #place(line(start: (0pt, 30pt), end: (10pt, 30pt)))\
+             #place(line(start: (10pt, 30pt), end: (20pt, 30pt), stroke: 2pt))",
+            false,
+            None,
+            None,
+            None,
+            None,
+            &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+            &StrokeBrush::transparent(),
+        )
+        .expect("lines should compile");
+        // The first three lines draw one stroke; the fourth starts elsewhere
+        // and the fifth has another width.
+        let segments: Vec<usize> = compiled
+            .children
+            .iter()
+            .map(|child| child.path.segments().count())
+            .collect();
+        assert_eq!(segments, [3, 1, 1]);
     }
 
     #[test]

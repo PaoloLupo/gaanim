@@ -823,6 +823,12 @@ def validate_visualization_contract(module: object) -> list[str]:
         pass
     else:
         failures.append("Scene.equation accepted empty content")
+    try:
+        scene.text.equation("a dot.circle b")
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.equation accepted invalid mathematics")
 
     for invalid_parts in (
         lambda: module.parts(),
@@ -1015,6 +1021,23 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
     frame = scene.geometry.rect(240.0, 120.0)
+    # Trackers, arcs and point_between take any reactive scalar.
+    base = scene.viz.parameter(0.2)
+    doubled = module.computed(lambda value: 2 * value, inputs=[base])
+    curve = scene.geometry.polyline([(-2, 0), (2, 0)])
+    for name, make in (
+        ("point_on_curve", lambda tracker: scene.geometry.point_on_curve(curve, tracker)),
+        ("tangent_on_curve", lambda tracker: scene.geometry.tangent_on_curve(curve, tracker)),
+        ("normal_on_curve", lambda tracker: scene.geometry.normal_on_curve(curve, tracker)),
+        ("curvature_on_curve", lambda tracker: scene.geometry.curvature_on_curve(curve, tracker)),
+        ("always_redraw_arc", lambda tracker: scene.geometry.always_redraw_arc(tracker, 0, 0, 1, 0)),
+        ("point_between", lambda tracker: scene.geometry.point_between((0, 0), (1, 0), alpha=tracker)),
+    ):
+        for tracker in (doubled, base, 0.5):
+            try:
+                make(tracker)
+            except (TypeError, ValueError) as error:
+                failures.append(f"{name} refused {type(tracker).__name__}: {error}")
     for line in [
         scene.geometry.line(length=3.0).next_to(frame, module.Direction.DOWN, spacing=0.2),
         scene.geometry.line(length=2.0, direction=module.Direction.UP),
@@ -1480,6 +1503,12 @@ def validate_matrix_contract(module: object) -> list[str]:
     replacement = matrix.set(0, 1, "x")
     if not isinstance(replacement, module.Drawable):
         failures.append("Matrix.set did not return the replacement Drawable")
+    if matrix.place(scene.layout.safe) is not matrix:
+        failures.append("Matrix.place returned its layout box instead of the Matrix")
+    root = matrix.drawable
+    matrix.insert_row(0, [0, 0, 0]).become([[1, 2], [3, 4]])
+    if matrix.drawable is not root or matrix.shape != (2, 2):
+        failures.append("Matrix edits replaced the root that keeps its place")
     try:
         scene.viz.matrix([[1, 2], [3]])
     except ValueError:
@@ -1532,7 +1561,7 @@ def validate_matrix_logical_units(module: object) -> list[str]:
                 return bounds.width, bounds.height
 
             delimiter_width, delimiter_height = measure(
-                scene.text(glyph, size=matrix_module._default_delimiter_size(size))
+                scene.text(glyph, size=matrix_module._auto_delimiter_size(size, options))
             )
             cells = [measure(scene.text(f"${value}$")) for row in data for value in row]
             cell_width = max(width for width, _ in cells)
@@ -2737,6 +2766,43 @@ def validate_emphasis_contract(module):
     return failures
 
 
+def validate_stroke_contract(module):
+    """Stroke styles keep their dashes under stroke() and take an alignment."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    try:
+        dotted = module.StrokeStyle("#f59e0b", 0.08, dashes=[0, 0.2], align="outside")
+        box = scene.geometry.rect(2, 1).stroke_style(dotted).stroke("#ffffff", 0.05)
+        if not isinstance(box, module.Drawable):
+            failures.append("stroke after stroke_style did not return a Drawable")
+        scene.geometry.cross(0.5)
+        scene.geometry.right_angle(0.5)
+        scene.geometry.fill_level(scene.geometry.rect(2, 0.4), "#f59e0b", 0.5, direction="right")
+    except Exception as error:
+        failures.append(f"stroke styles failed: {error}")
+    if not raises_error(ValueError, lambda: module.StrokeStyle("#ffffff", 0.1, align="middle")):
+        failures.append("an unknown StrokeStyle align did not raise ValueError")
+    return failures
+
+
+def validate_text_contract(module):
+    """Code text is literal, root styles outline, and shown text changes at the cursor."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    try:
+        scene.text("stagger(*grows) and x_1 \\$", role="code")
+        outlined = scene.text("Notice", style=module.TextStyle(stroke="#f59e0b", decorations=["underline"]))
+        cut = scene.text("one two three four five six", wrap=2, max_lines=1, overflow="ellipsis")
+        scene.play([outlined.animate.write(order="random", seed=3), cut.animate.fade_in()])
+        outlined.become("Changed")
+        cut["two"].fill("#f59e0b")
+    except Exception as error:
+        failures.append(f"text contract failed: {error}")
+    if not raises_error(ValueError, lambda: scene.text("stagger(*grows)")):
+        failures.append("unbalanced markup outside the code role did not raise ValueError")
+    return failures
+
+
 def validate_layout_box_contract(module):
     """Boxes, styles, classes, zones and item rules keep their contracts."""
     failures = []
@@ -2767,10 +2833,34 @@ def validate_layout_box_contract(module):
         pass
     else:
         failures.append("a box child accepted a positional operation")
+    # Shape setters keep a child in its slot: only positioning is the box's.
+    for name, setter in (("scale_to", lambda: child.scale_to(1.0)), ("rotate_to", lambda: child.rotate_to(0.0))):
+        try:
+            setter()
+        except module.LayoutOwnershipError as error:
+            failures.append(f"a box child refused {name}: {error}")
+    # basis takes the sizes width and height take.
+    for basis in ("40%", "hug", "fill", "120px", 1.5):
+        try:
+            L.row(L.box("x").item(basis=basis), "y", width=6)
+        except (TypeError, ValueError) as error:
+            failures.append(f"basis={basis!r} was refused: {error}")
+    # A row or a column names its direction over a style's.
+    first, second = L.box("one"), L.box("two")
+    L.column(first, second, style=module.BoxStyle(direction="row"))
+    if not second.bounds().center[1] < first.bounds().center[1] - 0.1:
+        failures.append("a style's direction turned L.column into a row")
     zones = L.zones(module.Zones.rows(["1fr", "2fr"], names=["top", "body"], gap="10px"))
     body = zones["body"]
     if not (zones["top"].bottom > body.top and body.width > 0):
         failures.append("zones did not divide the safe area in order")
+    part = zones[1:]
+    if not isinstance(part, module.ZoneSet) or len(part) != 1 or part.names != ["body"]:
+        failures.append("a ZoneSet slice is not a ZoneSet of those zones")
+    try:
+        scene.canvas.color("shadow")
+    except ValueError:
+        failures.append("the theme has no shadow color")
     free = scene.geometry.circle(0.5)
     if free.place(body, anchor="top_left", padding="12px") is not free:
         failures.append("Drawable.place did not return the drawable")
@@ -3139,6 +3229,24 @@ def validate_transition_contract(module: object) -> list[str]:
     scene.wait(0.5)
     if abs(scene.cursor - 1.0) > 1e-9:
         failures.append("transition overlays must not change segment durations")
+
+    # Drawables can stay out of the post-process, and segments blur on their own.
+    scene = module.Scene(frame=(16, 9))
+    scene.canvas.post = module.PostProcess.pixelate(12)
+    label = scene.text("Live").post_process(False)
+    box = scene.geometry.rect(1, 1)
+    if box.post_process(False) is not box or not isinstance(label, module.Text):
+        failures.append("post_process(False) must keep the drawable and its class")
+    segment = scene.segment("wide")
+    if segment.motion_blur(360, samples=12) is not segment or segment.motion_blur(None) is not segment:
+        failures.append("Segment.motion_blur must return the segment")
+    for name, call in [
+        ("shutter", lambda: segment.motion_blur(900)),
+        ("samples", lambda: segment.motion_blur(180, samples=1)),
+    ]:
+        if not raises_error(ValueError, call):
+            failures.append(f"Segment.motion_blur accepted an invalid {name}")
+    scene.wait(0.5)
     return failures
 
 
@@ -3239,6 +3347,18 @@ def validate_magic_move_contract(module: object) -> list[str]:
     scene.segment("after", transition=T.magic_move(0.5, key="name"))
     board([("dee", 2), ("bo", 1)])
     scene.wait(0.5)
+
+    # transform_matching takes "shapes", "tex" or "text" and moves the cursor.
+    source, target = scene.text("abc"), scene.text("abd")
+    start = scene.cursor
+    for mode in ("shapes", "tex", "text", "TEX"):
+        scene.geometry.transform_matching(source, target, mode=mode, duration=0.5)
+    if abs(scene.cursor - start - 2.0) > 1e-9:
+        failures.append("transform_matching must advance the cursor in every mode")
+    if not raises_error(ValueError, lambda: scene.geometry.transform_matching(source, target, mode="glyphs")):
+        failures.append("transform_matching accepted an unknown mode")
+    if abs(scene.cursor - start - 2.0) > 1e-9:
+        failures.append("a rejected transform_matching must not move the cursor")
     return failures
 
 
@@ -3349,6 +3469,8 @@ def main() -> int:
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))
     missing.extend(validate_emphasis_contract(module))
+    missing.extend(validate_stroke_contract(module))
+    missing.extend(validate_text_contract(module))
     missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_readout_number_formats(module))
     missing.extend(validate_editorial_contract(module))

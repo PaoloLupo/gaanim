@@ -29,7 +29,7 @@ def cells(labels, rows=2, columns=3):
     stages = []
     for cell, label in zip(grid, labels):
         top, stage = cell.split(Zones.rows(["48px", "1fr"]))
-        scene.text(label, role="code", markup=False).place(top, anchor="top_left")
+        scene.text(label, role="code").place(top, anchor="top_left")
         stages.append(stage)
     return stages
 
@@ -82,11 +82,11 @@ def table(rows):
         Zones.grid(rows=len(rows) + 1, columns=["5fr", "2fr", "2fr", "2fr"], column_gap="48px", padding="page_padding")
     )
     for index, name in enumerate(kinds, start=1):
-        scene.text(f"{name}(...)", role="code", markup=False).place(grid[index])
+        scene.text(f"{name}(...)", role="code").place(grid[index])
     marks = []
     for row_index, (label, options) in enumerate(rows, start=1):
         first = row_index * 4
-        scene.text(label, role="code", markup=False).place(grid[first], anchor="right")
+        scene.text(label, role="code").place(grid[first], anchor="right")
         for index, name in enumerate(kinds, start=1):
             target = scene.text("Notice", size=0.6).move_to(*grid[first + index].center)
             marks.append(getattr(target.annotate, name)(**options))
@@ -138,7 +138,7 @@ def rows(labels):
         Zones.grid(rows=len(labels), columns=["4fr", "3fr"], column_gap="48px", padding="page_padding")
     )
     for index, label in enumerate(labels):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
     return [grid[2 * index + 1] for index in range(len(labels))]
 
 

@@ -58,7 +58,7 @@ def gallery(variants):
     """Draw a plane per (label, build) cell and the view ``build(plane)`` returns on it."""
     planes, views = [], []
     for (top, body), (label, build) in zip(cells(len(variants)), variants):
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom")
+        scene.text(label, role="code").place(top, anchor="bottom")
         plane = plane_in(body)
         planes.append(plane)
         views.append(build(plane))

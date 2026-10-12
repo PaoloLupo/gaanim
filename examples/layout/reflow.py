@@ -39,7 +39,7 @@ def steps(box, changes):
     scene.play([box.animate.fade_in().duration(0.5)])
     caption = None
     for index, (label, change) in enumerate(changes):
-        line = scene.text(label, role="code", markup=False).place(caption_zone).hidden()
+        line = scene.text(label, role="code").place(caption_zone).hidden()
         fades = [line.animate.fade_in().duration(0.3)]
         if caption is not None:
             fades.append(caption.animate.fade_out().duration(0.3))
@@ -102,6 +102,27 @@ steps(row, [
      lambda: row.add(card("Four", new=True), at=0, duration=0.6)),
     ("row.detach(three, duration=0.6)", lambda: row.detach(three, duration=0.6)),
     ("scene.play([three.animate.shift_by(0, -1.8)])", lambda: scene.play([three.animate.shift_by(0, -1.8)])),
+])
+
+# A child moves to another box: detach() takes it out where it stands, and
+# the other box's add() slides it into its new place while the first box
+# closes the gap.
+scene.segment("between")
+moving = card("Two")
+top = L.row(card("One"), moving, card("Three"), gap="32px")
+bottom = L.row(card("Four"), gap="32px")
+steps(L.column(top, bottom, gap="96px", align="center"), [
+    ("top.detach(moving, duration=0.6, advance=False)\nbottom.add(moving, duration=0.6)",
+     lambda: (top.detach(moving, duration=0.6, advance=False), bottom.add(moving, duration=0.6))),
+])
+
+# A scaled child keeps its slot too, until reflow() measures it at its new
+# size and the others make room.
+scene.segment("scale")
+row = L.row(card("One"), card("Two"), card("Three"), gap="32px")
+steps(row, [
+    ("scene.play([row[1].animate.scale_to(1.4)])", lambda: scene.play([row[1].animate.scale_to(1.4)])),
+    ("row.reflow(duration=0.6)", lambda: row.reflow(duration=0.6)),
 ])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

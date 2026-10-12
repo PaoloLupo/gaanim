@@ -279,10 +279,10 @@ impl Anim {
 }
 
 impl SceneModel {
-    /// Dim everything outside `targets`: an overlay with a hole around them (a
-    /// frame `padding` away, rounded by `corner_radius`) fades in to `dim`
-    /// opacity and, by the default rate function, back out. The hole follows
-    /// the targets if they move.
+    /// Dim everything outside `targets`: an overlay with a hole around each
+    /// (a frame `padding` away, rounded by `corner_radius`) fades in to `dim`
+    /// opacity and, by the default rate function, back out. The holes follow
+    /// their targets if they move; holes that overlap merge.
     pub fn spotlight(
         &mut self,
         targets: Vec<BoundsTarget>,
@@ -297,20 +297,26 @@ impl SceneModel {
         if !corner_radius.is_finite() || corner_radius < 0.0 {
             return Err("corner_radius must be finite and non-negative".to_string());
         }
+        if targets.is_empty() {
+            return Err("spotlight needs at least one target".to_string());
+        }
         // Bigger than the frame, so a moving camera still sees it whole.
         let cover = self
             .rect(self.frame.width * 2.0, self.frame.height * 2.0)
             .fill(Color::BLACK)
             .no_stroke();
-        let hole = self
-            .surrounding_rect(targets, padding, corner_radius)
-            .map_err(|error| error.to_string())?
-            .drawable
-            .no_fill()
-            .no_stroke();
+        let holes = targets
+            .into_iter()
+            .map(|target| {
+                self.surrounding_rect(vec![target], padding, corner_radius)
+                    .map(|hole| hole.drawable.no_fill().no_stroke())
+                    .map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let operands: Vec<&DrawableHandle> = std::iter::once(&cover).chain(&holes).collect();
         let overlay = self
             .boolean(
-                &[&cover, &hole],
+                &operands,
                 super::BooleanOperation::Difference,
                 true,
                 0.0025,
@@ -320,7 +326,9 @@ impl SceneModel {
             .z_index(10_000);
         // The overlay copied the cover's look; the operands only shape it.
         cover.opacity(0.0);
-        hole.opacity(0.0);
+        for hole in holes {
+            hole.opacity(0.0);
+        }
         let state = self.state.clone();
         let active = state.lock().expect("canvas state poisoned").active_idx;
         Ok(Anim::queued(

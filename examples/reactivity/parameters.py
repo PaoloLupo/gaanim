@@ -24,8 +24,8 @@ rule = scene.canvas.color("rule")
 
 
 def code(text):
-    """A code label, its lines aligned left; markup off, so ``*`` and ``$`` stay as typed."""
-    return scene.text(text, role="code", markup=False, text_align="left")
+    """A code label, its lines aligned left; the code role keeps ``*`` and ``$`` as typed."""
+    return scene.text(text, role="code", text_align="left")
 
 
 def table(count):

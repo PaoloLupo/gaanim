@@ -70,7 +70,7 @@ badge = scene.geometry.square(1).fill("#f97316").move_to(3, 0)
   name: "Drawable.stroke",
   kind: "method",
   params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro. En los tres casos el trazo visible mide `width`.]), (name: "scale_with_object", type: "bool | None", default: "None", desc: [`True` hace que el ancho siga la escala de la figura, como `scale_stroke_with_object`.])),
-  desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda entero dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`.],
+  desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda entero dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`. Los guiones conservan su longitud con cualquier alineación, y los remates, uniones y guiones fijados antes con `stroke_style` se conservan: `stroke` solo cambia la pintura y el ancho.],
 )[
 ```python
 # show-code: true
@@ -128,8 +128,8 @@ scene.play([box.animate.write().duration(1)])
 #api-entry(
   name: "Drawable.stroke_style",
   kind: "method",
-  params: ((name: "style", type: "StrokeStyle", default: none, desc: [Pintura, ancho, extremo, unión, límite de inglete, guiones y desfase de guiones.]),),
-  desc: [Aplica la geometría completa del trazo. En una llamada directa, la pintura debe ser un color CSS literal o un `Brush`; los nombres de token se resuelven cuando el `StrokeStyle` va dentro de `Theme.styles`. Métricas inválidas lanzan `ValueError`.],
+  params: ((name: "style", type: "StrokeStyle", default: none, desc: [Pintura, ancho, extremo, unión, límite de inglete, guiones, desfase de guiones y alineación.]),),
+  desc: [Aplica la geometría completa del trazo; el `align` del estilo, si lo tiene, coloca el trazo como `stroke(align=...)`. En una llamada directa, la pintura debe ser un color CSS literal o un `Brush`; los nombres de token se resuelven cuando el `StrokeStyle` va dentro de `Theme.styles`. Métricas inválidas lanzan `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -393,7 +393,7 @@ view = scene.camera.inset(ui.pixel(812, 240), zoom=3)
 #api-entry(
   name: "Drawable.with_pivot",
   kind: "method",
-  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. Una vez mostrado el objeto, el pivote cambia en el cursor sin moverlo y vale para las animaciones siguientes. `pivot(x, y)` es un alias.],
+  desc: [Fija el pivote de rotación, escala y sesgo en coordenadas de escena. Úsalo para bisagras y brazos que giran alrededor de un extremo. Sin él, el pivote es el centro de la caja en las figuras declaradas con coordenadas de escena (`line`, `polygon`, arcos, flechas y curvas) y el origen propio en las demás, que en `circle`, `rect` o `text` también es su centro. Una vez mostrado el objeto, el pivote cambia en el cursor sin moverlo y vale para las animaciones siguientes. En una parte de un SVG el punto también está en coordenadas de escena, aunque el SVG esté escalado o movido. `pivot(x, y)` es un alias.],
 )[
 ```python
 # show-code: true
@@ -1023,6 +1023,26 @@ scene.render()
 )
 
 #api-entry(
+  name: "Drawable.post_process",
+  kind: "method",
+  params: ((name: "enabled", type: "bool", default: "True", desc: [`False` deja fuera del postprocesado el objeto y sus miembros.]),),
+  desc: [Si el #link("/referencia/themes/#api-canvas-post")[postprocesado] de la escena, o el de su segmento, se aplica al objeto. Con `False` se dibuja encima del cuadro ya procesado, por ejemplo una etiqueta o un HUD que `pixelate`, `glitch` o `halftone` harían ilegibles. Queda encima de todo lo procesado, sea cual sea su `z_index`, y sigue las transiciones de su segmento; en una transición por shader se funde con su progreso. Las copias de `echo` heredan el ajuste.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, PostProcess, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.canvas.post = PostProcess.pixelate(24)
+scene.geometry.circle(2).fill(CORAL).move_to(-3, 0)
+scene.text("pixelado", size=0.9).move_to(-3, -3)
+scene.text("legible", size=0.9).move_to(3, -3).post_process(False)
+scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.trim",
   kind: "method",
   params: ((name: "start / end", type: "float | None", default: "None", desc: [Ventana visible del camino como fracción de su longitud; al principio valen 0 y 1.]), (name: "offset", type: "float | None", default: "None", desc: [Desplaza la ventana; da la vuelta al final del camino.]), (name: "mode", type: "str | None", default: "None", desc: [`"simultaneous"` (predeterminado) recorta cada subcamino a la vez; `"sequential"` recorta la longitud total y los subcaminos aparecen uno tras otro.])),
@@ -1249,7 +1269,7 @@ scene.play([shadow.animate.fade_in(), point.animate.shift_by(4, 0.5)])
 #api-entry(
   name: "Drawable.bind_rotation_from",
   kind: "method",
-  desc: [Copia la rotación mundial de `source` como `rotación * ratio + phase`, en radianes. Es la base del acoplamiento de engranajes.],
+  desc: [Copia la rotación mundial de `source` como `rotación * ratio + phase`, en radianes. Es la base del acoplamiento de engranajes. Cuenta la rotación de `source` y de sus padres, también la de un `Updater.rotate` y la de un `rotate_to(Parameter)`.],
 )[
 ```python
 >>>from gaanim import *
@@ -1263,7 +1283,7 @@ scene.play([driven.animate.fade_in(), driver.animate.rotate_by(2.0)])
 #api-entry(
   name: "Drawable.bind_translation_from_rotation",
   kind: "method",
-  desc: [Traslada el objeto a lo largo de `axis` según el giro acumulado de `source` multiplicado por `scale`, como una cremallera movida por un piñón. Es una relación visual, no un solver de contacto.],
+  desc: [Traslada el objeto a lo largo de `axis` según el giro acumulado de `source` multiplicado por `scale`, como una cremallera movida por un piñón. Cuenta las vueltas completas de un `rotate_to(Parameter)` y de un `Updater.rotate`; las demás rotaciones, hasta dos vueltas en cada sentido. Es una relación visual, no un solver de contacto.],
 )[
 ```python
 >>>from gaanim import *

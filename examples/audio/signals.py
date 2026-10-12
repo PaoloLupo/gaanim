@@ -35,9 +35,9 @@ def label(text, zone):
 
 
 def meter(zone, signal):
-    """A horizontal meter across ``zone`` whose fill follows ``signal`` from its left end."""
+    """A horizontal meter across ``zone`` whose fill follows ``signal``, growing to the right."""
     mask = scene.geometry.rounded_rect(zone.width, 0.36, 0.18).no_fill().stroke(rule, 0.03).move_to(*zone.center)
-    scene.geometry.fill_level(mask, accent, signal, direction="left")
+    scene.geometry.fill_level(mask, accent, signal, direction="right")
 
 
 def play(music):

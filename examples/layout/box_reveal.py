@@ -46,7 +46,7 @@ def table(variants, split, visible=False):
     """
     labels, cards = [], []
     for (label_zone, zone), (label, _) in zip(columns(len(variants), split), variants):
-        code = scene.text(label, role="code", markup=False, text_align="left")
+        code = scene.text(label, role="code", text_align="left")
         labels.append(code.place(label_zone, anchor="right"))
         cards.append(card(zone.width).place(zone, anchor="left"))
     shown = labels + (cards if visible else [])

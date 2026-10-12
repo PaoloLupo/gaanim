@@ -210,6 +210,12 @@ impl PyTextStyle {
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self(style))
     }
+
+    /// The size this style sets, in scene units; `None` keeps the role's.
+    #[getter]
+    fn size(&self) -> Option<f64> {
+        self.0.size
+    }
 }
 
 #[pyclass(name = "TextFlow", module = "gaanim_core", frozen, from_py_object)]
@@ -1324,6 +1330,13 @@ impl PyText {
     fn motion_blur<'py>(slf: PyRef<'py, Self>, enabled: bool) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
         slf.handle.clone().motion_blur(enabled);
+        Ok(slf)
+    }
+
+    #[pyo3(signature = (enabled=true))]
+    fn post_process<'py>(slf: PyRef<'py, Self>, enabled: bool) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        slf.handle.clone().post_process(enabled);
         Ok(slf)
     }
 

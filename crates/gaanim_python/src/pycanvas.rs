@@ -3093,6 +3093,32 @@ impl PySegment {
         }
         Ok(result.extract::<Py<PyBox>>()?)
     }
+
+    /// Blur this segment's motion like `scene.canvas.motion_blur`, in place
+    /// of the scene's; `None` keeps the segment sharp.
+    #[pyo3(signature = (shutter_angle=Some(180.0), samples=8, *, phase=None))]
+    fn motion_blur<'py>(
+        slf: PyRef<'py, Self>,
+        py: Python<'py>,
+        shutter_angle: Option<f64>,
+        samples: u32,
+        phase: Option<f64>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let blur = shutter_angle
+            .map(|angle| gaanim_api::canvas::MotionBlur::new(angle, samples, phase))
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        slf.scene
+            .bind(py)
+            .borrow()
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_segment_motion_blur(&slf.inner, blur)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(slf)
+    }
 }
 
 #[pymethods]
@@ -3381,6 +3407,7 @@ impl PyLayoutBuilder {
         crate::pyzones::target_bounds(within)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build<'py>(
         &self,
         py: Python<'py>,
@@ -3389,8 +3416,29 @@ impl PyLayoutBuilder {
         children: &Bound<'py, PyTuple>,
         style: Option<&Bound<'py, PyAny>>,
         props: Option<&Bound<'py, PyDict>>,
+        direction: Option<&str>,
     ) -> PyResult<Py<PyBox>> {
         crate::custom::ensure_authoring_allowed()?;
+        // `row`, `column`, `grid` and `stack` name their direction: a
+        // `direction` from a style or a class does not turn a column into a
+        // row. One written in the call still does.
+        let props = match direction {
+            Some(direction) => {
+                let named = PyDict::new(py);
+                if let Some(props) = props {
+                    named.update(props.as_mapping())?;
+                }
+                if named
+                    .get_item("direction")?
+                    .is_none_or(|value| value.is_none())
+                {
+                    named.set_item("direction", direction)?;
+                }
+                Some(named)
+            }
+            None => props.cloned(),
+        };
+        let props = props.as_ref();
         PyBox::create(
             py,
             self.inner.clone(),
@@ -3426,6 +3474,7 @@ impl PyLayoutBuilder {
             children,
             style,
             props,
+            None,
         )
     }
 
@@ -3445,6 +3494,7 @@ impl PyLayoutBuilder {
             children,
             style,
             props,
+            Some("row"),
         )
     }
 
@@ -3464,6 +3514,7 @@ impl PyLayoutBuilder {
             children,
             style,
             props,
+            Some("column"),
         )
     }
 
@@ -3481,7 +3532,15 @@ impl PyLayoutBuilder {
             columns: vec![gaanim_layout::Track::Fraction(1.0)],
             auto_flow: gaanim_layout::AutoFlow::Row,
         };
-        self.build(py, kind, Align::Stretch, children, style, props)
+        self.build(
+            py,
+            kind,
+            Align::Stretch,
+            children,
+            style,
+            props,
+            Some("grid"),
+        )
     }
 
     /// Divide a region with a ``Zones`` template. ``within`` is ``"safe"``
@@ -3601,6 +3660,7 @@ impl PyLayoutBuilder {
             children,
             style,
             props,
+            Some("stack"),
         )
     }
 
@@ -4967,6 +5027,13 @@ impl PyTypography {
             None,
             true,
         )?;
+        let errors = gaanim_text::typst_compiler::typst_source_errors(&spec.spaced_text());
+        if !errors.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "invalid equation: {}",
+                errors.join("; ")
+            )));
+        }
         let handle = self
             .inner
             .lock()
@@ -5417,15 +5484,10 @@ impl PyGeometry {
             .transform_matching_shapes(&source.0, &target.0, duration);
         Ok(())
     }
-    /// Auto-match by character/tex — improved TransformMatchingTex.
-    ///
-    /// Matches submobjects (glyphs/letters) between text/math equations using an
-    /// order-preserving Longest Common Subsequence (LCS) algorithm on character keys,
-    /// combined with Hungarian assignment for remaining elements.
-    /// Alias for transform_matching_tex — manim TransformMatchingText compatibility.
-    /// Generic auto-matching morph. `mode` is "shapes" or "tex".
-    ///
-    /// Performs auto-matching transform between `source` and `target` using the specified `mode`.
+    /// Generic auto-matching morph. `mode` is "shapes", or "tex" (also "text")
+    /// to match the glyphs of texts and equations by character: an
+    /// order-preserving longest common subsequence on character keys, then
+    /// Hungarian assignment for the rest. Another mode raises ValueError.
     #[pyo3(signature = (source, target, *, mode="shapes", duration=1.0))]
     fn transform_matching(
         &self,
@@ -5443,7 +5505,8 @@ impl PyGeometry {
         self.inner
             .lock()
             .expect("scene canvas poisoned")
-            .transform_matching(&source.0, &target.0, mode, duration);
+            .transform_matching(&source.0, &target.0, mode, duration)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         Ok(())
     }
 }
@@ -7512,12 +7575,12 @@ impl PyGeometry {
         tracker: Bound<'_, PyAny>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .point_on_curve(&curve.0, &tracker),
+                .point_on_curve(&curve.0, tracker),
         ))
     }
 
@@ -7529,12 +7592,12 @@ impl PyGeometry {
         length: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .tangent_on_curve(&curve.0, &tracker, length),
+                .tangent_on_curve(&curve.0, tracker, length),
         ))
     }
 
@@ -7546,12 +7609,12 @@ impl PyGeometry {
         length: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .normal_on_curve(&curve.0, &tracker, length),
+                .normal_on_curve(&curve.0, tracker, length),
         ))
     }
 
@@ -7563,12 +7626,12 @@ impl PyGeometry {
         window: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .curvature_on_curve(&curve.0, &tracker, window),
+                .curvature_on_curve(&curve.0, tracker, window),
         ))
     }
 
@@ -7585,13 +7648,18 @@ impl PyGeometry {
         sweep_offset: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, current) = reactive_scalar(tracker)?;
+        // The arc's first shape; the source redraws it from its first frame.
+        let current = reactive_scalar(tracker.clone())
+            .map(|(_, current)| current)
+            .ok();
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
+        let current = current.or(tracker.constant_value()).unwrap_or(0.0);
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .always_redraw_arc(
-                    &tracker,
+                    tracker,
                     cx,
                     cy,
                     radius,
@@ -7725,20 +7793,24 @@ impl PyGeometry {
         Ok(PyPointRef(point))
     }
 
-    #[pyo3(signature = (from, to, *, alpha=0.5, offset=(0.0, 0.0)))]
+    #[pyo3(signature = (from, to, *, alpha=None, offset=(0.0, 0.0)))]
     fn point_between(
         &self,
         from: Bound<'_, PyAny>,
         to: Bound<'_, PyAny>,
-        alpha: f64,
+        alpha: Option<Bound<'_, PyAny>>,
         offset: (f64, f64),
     ) -> PyResult<PyPointRef> {
         crate::custom::ensure_authoring_allowed()?;
-        if !alpha.is_finite() || !offset.0.is_finite() || !offset.1.is_finite() {
+        if !offset.0.is_finite() || !offset.1.is_finite() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "alpha and offset must be finite",
             ));
         }
+        let alpha = match alpha {
+            Some(alpha) => extract_scalar_source(alpha, &self.inner)?,
+            None => 0.5.into(),
+        };
         let point = self
             .inner
             .lock()
@@ -8417,12 +8489,12 @@ impl PyMechanics {
         normal_length: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .contact_on_curve(&curve.0, &tracker, tangent_length, normal_length),
+                .contact_on_curve(&curve.0, tracker, tangent_length, normal_length),
         ))
     }
 

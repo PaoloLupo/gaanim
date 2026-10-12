@@ -967,7 +967,8 @@ impl PyCanvasAnim {
             .clone()
             .write()
             .reveal_unit(unit)
-            .draw_order(order);
+            .draw_order(order)
+            .draw_seed(seed);
         if let Some(stagger) = stagger {
             inner = inner.lag_ratio(stagger);
         }
@@ -2067,6 +2068,17 @@ impl PyDrawable {
         Ok(())
     }
 
+    /// Scales, rotations and shears keep a box child in its slot, as CSS
+    /// transforms do: only live derived geometry refuses them.
+    pub(crate) fn require_free_shape(&self, operation: &str) -> PyResult<()> {
+        if self.0.is_live_derived_geometry() {
+            return Err(PyValueError::new_err(format!(
+                "live derived geometry owns this drawable's path and position; operation '{operation}' is not available"
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn require_free_position(&self, operation: &str) -> PyResult<()> {
         if self.0.is_live_derived_geometry() {
             return Err(PyValueError::new_err(format!(
@@ -2247,7 +2259,11 @@ impl PyDrawable {
                     })?
             }
         };
-        Ok(Self(self.0.clone().stroke_with_style(brush, style.0.style)))
+        let mut handle = self.0.clone().stroke_with_style(brush, style.0.style);
+        if let Some(align) = style.0.align {
+            handle = handle.stroke_align(align);
+        }
+        Ok(Self(handle))
     }
 
     pub(crate) fn no_stroke_impl(&self) -> PyResult<Self> {
@@ -2418,6 +2434,11 @@ impl PyDrawable {
     pub(crate) fn motion_blur_impl(&self, enabled: bool) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().motion_blur(enabled)))
+    }
+
+    pub(crate) fn post_process_impl(&self, enabled: bool) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().post_process(enabled)))
     }
 
     pub(crate) fn echo_impl(
@@ -2614,7 +2635,7 @@ impl PyDrawable {
 
     pub(crate) fn scale_to_impl(&self, factor: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("scale_to")?;
+        self.require_free_shape("scale_to")?;
         let source = extract_scalar_source_for_drawable(factor.clone(), &self.0)?;
         if let Some(value) = source.constant_value() {
             return Ok(Self(self.0.clone().scale_to(value)));
@@ -2632,7 +2653,7 @@ impl PyDrawable {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("scale_to_3d")?;
+        self.require_free_shape("scale_to_3d")?;
         let values = [
             extract_scalar_source_for_drawable(x.clone(), &self.0)?,
             extract_scalar_source_for_drawable(y.clone(), &self.0)?,
@@ -2650,21 +2671,21 @@ impl PyDrawable {
 
     pub(crate) fn scale_by_impl(&self, factor: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("scale_by")?;
+        self.require_free_shape("scale_by")?;
         free_channel(&self.0, PropertyChannel::Scale)?;
         Ok(Self(self.0.clone().scale_by(factor)))
     }
 
     pub(crate) fn scale_by_3d_impl(&self, x: f64, y: f64, z: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("scale_by_3d")?;
+        self.require_free_shape("scale_by_3d")?;
         free_channel(&self.0, PropertyChannel::Scale)?;
         Ok(Self(self.0.clone().scale_by_3d(x, y, z)))
     }
 
     pub(crate) fn rotate_to_impl(&self, radians: &Bound<'_, PyAny>) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("rotate_to")?;
+        self.require_free_shape("rotate_to")?;
         let source = extract_scalar_source_for_drawable(radians.clone(), &self.0)?;
         if let Some(value) = source.constant_value() {
             return Ok(Self(self.0.clone().rotate_to(value)));
@@ -2682,7 +2703,7 @@ impl PyDrawable {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("rotate_to_3d")?;
+        self.require_free_shape("rotate_to_3d")?;
         let values = [
             extract_scalar_source_for_drawable(x.clone(), &self.0)?,
             extract_scalar_source_for_drawable(y.clone(), &self.0)?,
@@ -2700,21 +2721,21 @@ impl PyDrawable {
 
     pub(crate) fn rotate_by_impl(&self, radians: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("rotate_by")?;
+        self.require_free_shape("rotate_by")?;
         free_channel(&self.0, PropertyChannel::Rotation)?;
         Ok(Self(self.0.clone().rotate_by(radians)))
     }
 
     pub(crate) fn skew_to_impl(&self, x: f64, y: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("skew_to")?;
+        self.require_free_shape("skew_to")?;
         finite_skew(x, y)?;
         Ok(Self(self.0.clone().skew_to(x, y)))
     }
 
     pub(crate) fn matrix_to_impl(&self, matrix: ((f64, f64), (f64, f64))) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("matrix_to")?;
+        self.require_free_shape("matrix_to")?;
         free_channel(&self.0, PropertyChannel::Rotation)?;
         free_channel(&self.0, PropertyChannel::Scale)?;
         let map = linear_map(matrix)?;
@@ -2723,7 +2744,7 @@ impl PyDrawable {
 
     pub(crate) fn rotate_by_3d_impl(&self, axis: &str, radians: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        self.require_free_position("rotate_by_3d")?;
+        self.require_free_shape("rotate_by_3d")?;
         free_channel(&self.0, PropertyChannel::Rotation)?;
         self.0
             .clone()
@@ -3575,6 +3596,12 @@ impl PyDrawable {
     #[pyo3(signature = (enabled=true))]
     fn motion_blur<'py>(slf: &Bound<'py, Self>, enabled: bool) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().motion_blur_impl(enabled);
+        same_drawable(slf, result)
+    }
+    /// Whether the scene's post-process applies to this drawable.
+    #[pyo3(signature = (enabled=true))]
+    fn post_process<'py>(slf: &Bound<'py, Self>, enabled: bool) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().post_process_impl(enabled);
         same_drawable(slf, result)
     }
     /// Trail the drawable with fading copies of itself as it was earlier.

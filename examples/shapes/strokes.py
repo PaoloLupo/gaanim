@@ -114,25 +114,26 @@ draw(table(
     columns=("4fr", "1fr"),
 ))
 
-# Dashes alternate on and off lengths from the start of the path; a very
-# short dash with round caps makes a dot. The offset (StrokeStyle's
+# Dashes alternate on and off lengths from the start of the path; a dash of
+# no length with round caps makes a dot. The offset (StrokeStyle's
 # dash_offset) slides the pattern: animate it with animate.dash_offset, or let
-# Updater.dash_flow run it endlessly. The three borders use the butt-capped style.
+# Updater.dash_flow run it endlessly. The three borders keep their gaps with
+# the round-capped style, inside their contour as strokes are by default.
 scene.segment("dashes")
 DASHED = StrokeStyle(accent, 0.08, dashes=[0.3, 0.15])
 BUTT = StrokeStyle(accent, 0.08, cap="butt", dashes=[0.3, 0.15])
-marching = scene.geometry.rounded_rect(2.2, 0.6, 0.2).no_fill().stroke_style(BUTT)
-flowing = scene.geometry.rounded_rect(2.2, 0.6, 0.2).no_fill().stroke_style(BUTT)
-returning = scene.geometry.rounded_rect(2.2, 0.6, 0.2).no_fill().stroke_style(BUTT)
+marching = scene.geometry.rounded_rect(2.2, 0.6, 0.2).no_fill().stroke_style(DASHED)
+flowing = scene.geometry.rounded_rect(2.2, 0.6, 0.2).no_fill().stroke_style(DASHED)
+returning = scene.geometry.rounded_rect(2.2, 0.6, 0.2).no_fill().stroke_style(DASHED)
 draw(table(
     [
         ("StrokeStyle(accent, 0.08, dashes=[0.3, 0.15])", bar(DASHED)),
         ('StrokeStyle(accent, 0.08, cap="butt", dashes=[0.3, 0.15])', bar(BUTT)),
         (
-            "StrokeStyle(accent, 0.08, dashes=[0.4, 0.15, 0.01, 0.15])",
-            bar(StrokeStyle(accent, 0.08, dashes=[0.4, 0.15, 0.01, 0.15])),
+            "StrokeStyle(accent, 0.08, dashes=[0.4, 0.15, 0, 0.15])",
+            bar(StrokeStyle(accent, 0.08, dashes=[0.4, 0.15, 0, 0.15])),
         ),
-        ("StrokeStyle(accent, 0.12, dashes=[0.01, 0.25])", bar(StrokeStyle(accent, 0.12, dashes=[0.01, 0.25]))),
+        ("StrokeStyle(accent, 0.12, dashes=[0, 0.25])", bar(StrokeStyle(accent, 0.12, dashes=[0, 0.25]))),
         (
             "dashed_line((0, 0), (2.2, 0), dash_length=0.4)",
             scene.geometry.dashed_line((0, 0), (2.2, 0), dash_length=0.4),

@@ -72,6 +72,9 @@ impl GpuContextError {
 pub struct FrameJob {
     pub scene: vello::Scene,
     pub layers: Option<TransitionScenes>,
+    /// The drawables the post-process leaves out, composited above its
+    /// result; see [`gaanim_renderer::pipeline::ComposedFrame::take_unprocessed`].
+    pub unprocessed: Option<vello::Scene>,
     pub effects: Vec<gaanim_renderer::object_effects::EffectLayer>,
     pub backgrounds: Vec<gaanim_renderer::background::ShaderBackgroundRequest>,
     pub base_color: vello::peniko::Color,
@@ -85,6 +88,11 @@ impl FrameJob {
     pub fn same_output(&self, other: &Self) -> bool {
         self.layers.is_none()
             && other.layers.is_none()
+            && match (&self.unprocessed, &other.unprocessed) {
+                (None, None) => true,
+                (Some(layer), Some(other)) => gaanim_renderer::fragment::draws_same(layer, other),
+                _ => false,
+            }
             && self.backgrounds.is_empty()
             && other.backgrounds.is_empty()
             && self.base_color == other.base_color
@@ -127,6 +135,9 @@ pub struct GpuContext {
     /// Targets of a shader transition's incoming segment and of the layer
     /// above its blend, created on first use.
     transition_targets: Option<[(vello::wgpu::Texture, vello::wgpu::TextureView); 2]>,
+    /// Target of the drawables the post-process leaves out, created on
+    /// first use.
+    overlay_target: Option<(vello::wgpu::Texture, vello::wgpu::TextureView)>,
     /// Textures of drawables drawn through a shader effect.
     effects: gaanim_renderer::object_effects::ObjectEffects,
     /// The textures of shader backgrounds, drawn on this device.
@@ -285,6 +296,7 @@ impl GpuContext {
             pending_error,
             post: GpuPostProcess::default(),
             transition_targets: None,
+            overlay_target: None,
             effects: Default::default(),
             backgrounds: Default::default(),
             bump_scale: 1,
@@ -303,6 +315,46 @@ impl GpuContext {
         self.nv12 =
             crate::nv12::Nv12Converter::new(&self.device, &self.texture, self.width, self.height);
         self.nv12.is_some()
+    }
+
+    /// Render the drawables the post-process leaves out over transparency
+    /// into their own target.
+    fn render_unprocessed(&mut self, layer: &vello::Scene) -> Result<(), GpuContextError> {
+        let (width, height) = (self.width, self.height);
+        let device = &self.device;
+        let (_, view) = self.overlay_target.get_or_insert_with(|| {
+            let texture = device.create_texture(&TextureDescriptor {
+                label: Some("gaanim-export-unprocessed"),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&Default::default());
+            (texture, view)
+        });
+        self.renderer
+            .render_to_texture(
+                &self.device,
+                &self.queue,
+                layer,
+                view,
+                &vello::RenderParams {
+                    base_color: vello::peniko::Color::TRANSPARENT,
+                    width,
+                    height,
+                    antialiasing_method: EXPORT_ANTIALIASING,
+                },
+            )
+            .map_err(|e| GpuContextError::Render(e.to_string()))?;
+        self.check_error()
     }
 
     /// Render the incoming segment over `base_color` and the layer above
@@ -433,27 +485,36 @@ impl GpuContext {
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
-        self.render_frame_layers(scene, None, &[], &[], base_color, post)
+        self.render_frame_layers(scene, None, None, &[], &[], base_color, post)
     }
 
     /// [`Self::render_frame`] for a frame under a shader transition: `scene`
     /// is the outgoing segment, `layers` the incoming one and the layer
-    /// above, which `post` (with its transition) blends. `effects` fill the
-    /// images of drawables drawn through a shader effect, and `backgrounds`
-    /// the images of shader backgrounds.
+    /// above, which `post` (with its transition) blends. `unprocessed`, the
+    /// drawables the post-process leaves out, draws above its result.
+    /// `effects` fill the images of drawables drawn through a shader effect,
+    /// and `backgrounds` the images of shader backgrounds.
+    #[allow(clippy::too_many_arguments)]
     pub fn render_frame_layers(
         &mut self,
         scene: &vello::Scene,
         layers: Option<&TransitionScenes>,
+        unprocessed: Option<&vello::Scene>,
         effects: &[gaanim_renderer::object_effects::EffectLayer],
         backgrounds: &[gaanim_renderer::background::ShaderBackgroundRequest],
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Vec<u8>, GpuContextError> {
         loop {
-            if let Some(pixels) =
-                self.render_attempt(scene, layers, effects, backgrounds, base_color, post)?
-            {
+            if let Some(pixels) = self.render_attempt(
+                scene,
+                layers,
+                unprocessed,
+                effects,
+                backgrounds,
+                base_color,
+                post,
+            )? {
                 return Ok(pixels);
             }
             if self.bump_scale >= MAX_BUMP_SCALE {
@@ -482,6 +543,7 @@ impl GpuContext {
         self.submit_attempt(
             &frame.scene,
             frame.layers.as_ref(),
+            frame.unprocessed.as_ref(),
             &frame.effects,
             &frame.backgrounds,
             frame.base_color,
@@ -511,6 +573,7 @@ impl GpuContext {
         self.render_frame_layers(
             &frame.scene,
             frame.layers.as_ref(),
+            frame.unprocessed.as_ref(),
             &frame.effects,
             &frame.backgrounds,
             frame.base_color,
@@ -520,31 +583,54 @@ impl GpuContext {
     }
 
     /// One render and readback; `None` when Vello skipped the frame.
+    #[allow(clippy::too_many_arguments)]
     fn render_attempt(
         &mut self,
         scene: &vello::Scene,
         layers: Option<&TransitionScenes>,
+        unprocessed: Option<&vello::Scene>,
         effects: &[gaanim_renderer::object_effects::EffectLayer],
         backgrounds: &[gaanim_renderer::background::ShaderBackgroundRequest],
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<Option<Vec<u8>>, GpuContextError> {
-        self.submit_attempt(scene, layers, effects, backgrounds, base_color, post)?;
+        self.submit_attempt(
+            scene,
+            layers,
+            unprocessed,
+            effects,
+            backgrounds,
+            base_color,
+            post,
+        )?;
         self.read_attempt()
     }
 
     /// Render a frame and queue the copies of its probes and pixels, without
     /// waiting for the GPU; [`Self::read_attempt`] reads them.
+    #[allow(clippy::too_many_arguments)]
     fn submit_attempt(
         &mut self,
         scene: &vello::Scene,
         layers: Option<&TransitionScenes>,
+        unprocessed: Option<&vello::Scene>,
         effects: &[gaanim_renderer::object_effects::EffectLayer],
         backgrounds: &[gaanim_renderer::background::ShaderBackgroundRequest],
         base_color: vello::peniko::Color,
         post: Option<&PostProcessRequest>,
     ) -> Result<(), GpuContextError> {
         self.check_error()?;
+        // Without a post-process, the drawables it leaves out draw with the rest.
+        let joined;
+        let (scene, unprocessed) = match (unprocessed, post) {
+            (Some(layer), None) => {
+                let mut scene = scene.clone();
+                scene.append(layer, None);
+                joined = scene;
+                (&joined, None)
+            }
+            (unprocessed, _) => (scene, unprocessed),
+        };
         // Vello reads these on the thread that renders.
         vello_encoding::set_bump_buffer_scale(self.bump_scale);
         vello_encoding::set_max_bump_buffer_bytes(self.max_bump_bytes);
@@ -605,6 +691,9 @@ impl GpuContext {
         if let Some(layers) = layers {
             self.render_transition_layers(layers, base_color)?;
         }
+        if let Some(layer) = unprocessed {
+            self.render_unprocessed(layer)?;
+        }
 
         let mut encoder = self
             .device
@@ -641,10 +730,15 @@ impl GpuContext {
                 incoming: &incoming.0,
                 above: &above.0,
             });
-        if self
-            .post
-            .prepare(&self.device, &self.queue, &self.texture, post, inputs)
-        {
+        let overlay = unprocessed.and(self.overlay_target.as_ref());
+        if self.post.prepare(
+            &self.device,
+            &self.queue,
+            &self.texture,
+            post,
+            inputs,
+            overlay.map(|(texture, _)| texture),
+        ) {
             self.post.encode(&mut encoder);
         }
 
@@ -1090,6 +1184,7 @@ mod tests {
         FrameJob {
             scene,
             layers: None,
+            unprocessed: None,
             effects: Vec::new(),
             backgrounds: Vec::new(),
             base_color: vello::peniko::Color::from_rgb8(9, 11, 23),

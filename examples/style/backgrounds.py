@@ -33,7 +33,7 @@ HALF_WIDTH = scene.canvas.frame_width / 2
 def show(code, moves=()):
     """Fade in a panel at the bottom of the frame holding ``code``, then hold it while ``moves`` play."""
     _, strip = scene.layout.zones(Zones.rows(["4fr", "1fr"], padding="page_padding"))
-    text = scene.text(code, role="code", markup=False)
+    text = scene.text(code, role="code")
     box = scene.layout.box(text, padding=("16px", "28px"), background=panel, radius="12px")
     box.place(strip, anchor="bottom")
     scene.play([box.animate.fade_in()], duration=SHOW)

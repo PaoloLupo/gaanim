@@ -42,8 +42,8 @@ muted = scene.canvas.color("muted")
 
 
 def label(code):
-    """A variant label: the code, in the code role, with markup off so it reads literally."""
-    return scene.text(code, role="code", markup=False)
+    """A variant label: the code, in the code role, which reads literally."""
+    return scene.text(code, role="code")
 
 
 def swatch(zone, paint, outline=None):

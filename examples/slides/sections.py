@@ -28,7 +28,7 @@ ZOOM = 1.4
 
 
 def code(label):
-    return scene.text(label, role="code", markup=False)
+    return scene.text(label, role="code")
 
 
 def show(*objects):

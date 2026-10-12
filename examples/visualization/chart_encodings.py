@@ -57,7 +57,7 @@ def show(label, spec, guides=True):
     ``guides`` says whether the spec has a legend or colorbar to bring in.
     """
     top, _ = scene.layout.zones(Zones.rows(["1fr", "5fr"], padding="page_padding"))
-    text = scene.text(label, role="code", markup=False).place(top, anchor="bottom_left")
+    text = scene.text(label, role="code").place(top, anchor="bottom_left")
     chart = scene.viz.chart(spec).move_to(0, -0.3)
     scene.play([chart.layer("axes").animate.create(), text.animate.fade_in()], duration=DRAW)
     layers = ["marks", "guides"] if guides else ["marks"]

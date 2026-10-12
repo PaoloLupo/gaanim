@@ -131,8 +131,7 @@ def lines(rows):
     grid = scene.layout.zones(Zones.rows(tracks, gap="12px", padding="page_padding"))
     groups = []
     for index, (label, build) in enumerate(rows):
-        # markup=False keeps the * of *houses literal.
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="left")
+        scene.text(label, role="code").place(grid[2 * index], anchor="left")
         groups.append(build(grid[2 * index + 1]))
     scene.play([group.animate.create().lag_ratio(0.5) for group in groups], duration=DURATION)
     scene.wait(HOLD)

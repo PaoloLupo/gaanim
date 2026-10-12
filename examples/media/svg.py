@@ -29,7 +29,7 @@ def columns(labels, rows=1, bands=("1fr", "7fr")):
     stages = []
     for cell, label in zip(grid, labels):
         top, stage = cell.split(Zones.rows(list(bands)))
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom")
+        scene.text(label, role="code").place(top, anchor="bottom")
         stages.append(stage)
     return stages
 

@@ -192,7 +192,7 @@ scene.render()
   name: "Geometry.arrow",
   kind: "factory",
   params: ((name: "x1, y1", type: "float", default: none, desc: [Cola.]), (name: "x2, y2", type: "float", default: none, desc: [Punta.]), (name: "head_length / head_width / body_width", type: "float | None", default: "None", desc: [Medidas en unidades de escena; por defecto 0.18, 0.15 y 0.036.]), (name: "max_head_ratio", type: "float | None", default: "None", desc: [En `(0, 1]`, limita la punta respecto a la longitud total y escala su ancho en proporción.])),
-  desc: [Flecha sólida de `(x1, y1)` a `(x2, y2)`. Para flechas cortas añade `max_head_ratio=0.3`, y `.no_stroke()` para una silueta limpia. Extremos no finitos o medidas no positivas lanzan `ValueError`; extremos coincidentes dan un camino vacío.],
+  desc: [Flecha sólida de `(x1, y1)` a `(x2, y2)`. `fill` la colorea entera: salvo que `stroke` fije otro, su contorno sigue al relleno (igual en `double_arrow`, `curved_arrow` y `curved_arrow_arc`). Para flechas cortas añade `max_head_ratio=0.3`, y `.no_stroke()` para una silueta limpia. Extremos no finitos o medidas no positivas lanzan `ValueError`; extremos coincidentes dan un camino vacío.],
 )[
 ```python
 # show-code: true
@@ -432,7 +432,7 @@ ok = scene.geometry.checkmark(0.425).fill(GREEN)
 #api-entry(
   name: "Geometry.cross",
   kind: "factory",
-  desc: [Aspa de tamaño `size` para errores, rechazos o botones de cierre.],
+  desc: [Aspa de tamaño `size` para errores, rechazos o botones de cierre. No tiene relleno y toma el estilo de línea del tema, como `line`.],
 )[
 ```python
 >>>from gaanim import *
@@ -444,7 +444,7 @@ no = scene.geometry.cross(0.425).stroke(WHITE, 0.05)
 #api-entry(
   name: "Geometry.right_angle",
   kind: "factory",
-  desc: [Marca de ángulo recto con brazos de `arm_length`. Colócala en la esquina de un triángulo.],
+  desc: [Marca de ángulo recto con brazos de `arm_length`. Colócala en la esquina de un triángulo. No tiene relleno y toma el estilo de línea del tema, como `line`.],
 )[
 ```python
 >>>from gaanim import *
@@ -537,7 +537,7 @@ scene.render()
   name: "Geometry.curve",
   kind: "factory",
   params: ((name: "commands", type: "Sequence[CurveCommand]", default: none, desc: [Pares `(nombre, puntos)`: `move`, `line`, `quad`, `cubic`, `close` y `close_smooth`. Añade `_rel` a un comando de dibujo para usar puntos relativos al cursor.]),),
-  desc: [Curva compuesta con comandos de cursor, al estilo de Typst. Los controles de `quad` y `cubic` aceptan un punto, `None` o `"auto"` para tangentes automáticas. `close` y `close_smooth` llevan una lista vacía.],
+  desc: [Curva compuesta con comandos de cursor, al estilo de Typst. Los controles de `quad` y `cubic` aceptan un punto, `None` (el control cae sobre su extremo) o `"auto"`: en un `quad` refleja respecto al cursor el control del `quad` anterior, y en el primer control de un `cubic`, el segundo control del `cubic` anterior. Tras otro tipo de tramo, o como segundo control de un `cubic`, `"auto"` equivale a `None`. `close` y `close_smooth` llevan una lista vacía.],
 )[
 ```python
 >>>from gaanim import *
@@ -691,8 +691,10 @@ scene.render()
 Unión, intersección, diferencia y diferencia simétrica de áreas vectoriales
 cerradas.
 
-Los operandos se conservan como objetos independientes y el resultado hereda el
-estilo del primero. Con `live=True`, el resultado se reconstruye cuando cambian
+Los operandos se conservan como objetos independientes y el resultado copia el
+estilo que tiene el primero al crearlo (relleno, trazo, opacidad y efectos); los
+cambios de estilo posteriores de los operandos no lo cambian, ni siquiera con
+`live=True`. Con `live=True`, el resultado se reconstruye cuando cambian
 los caminos o las transformaciones de sus fuentes. `tolerance` es el error
 máximo, en unidades de escena, al aproximar las curvas; el valor predeterminado
 (`0.0025`, unos 0.3 px a 1080p) mantiene suaves los círculos. Súbelo solo para
@@ -775,7 +777,7 @@ progreso con forma.
 #api-entry(
   name: "Geometry.fill_level",
   kind: "factory",
-  params: ((name: "mask", type: "Drawable", default: none, desc: [Silueta que recorta el relleno; conserva su visibilidad propia.]), (name: "paint", type: "Paint", default: none, desc: [Color o pincel del interior.]), (name: "level", type: "float | Parameter | Variable | Computed | TimeInput | None", default: "None", desc: [Nivel en `[0, 1]`; `None` empieza vacío.]), (name: "direction", type: "str", default: "\"up\"", desc: [`up`, `down`, `left` o `right`.]), (name: "keep_outline", type: "bool", default: "True", desc: [Añade una copia reactiva que solo usa el trazo de la máscara.])),
+  params: ((name: "mask", type: "Drawable", default: none, desc: [Silueta que recorta el relleno; conserva su visibilidad propia.]), (name: "paint", type: "Paint", default: none, desc: [Color o pincel del interior.]), (name: "level", type: "float | Parameter | Variable | Computed | TimeInput | None", default: "None", desc: [Nivel en `[0, 1]`; `None` empieza vacío.]), (name: "direction", type: "str", default: "\"up\"", desc: [Hacia dónde crece el relleno: `up` (desde abajo), `down`, `left` (desde la derecha) o `right` (desde la izquierda).]), (name: "keep_outline", type: "bool", default: "True", desc: [Añade una copia reactiva que solo usa el trazo de la máscara.])),
   desc: [Genera un interior vectorial que se intersecta con la silueta en cada fotograma. Oculta la máscara original si su relleno no debe tapar el nivel. Con una fuente reactiva, las muestras finitas se limitan a `[0, 1]`; una muestra no finita genera un diagnóstico y usa el valor de respaldo. Anima el nivel con `animate.fill_level(...)`; los saltos en la línea de tiempo restauran vínculos, valores y cortes.],
 )[
 ```python
@@ -861,7 +863,7 @@ tag = scene.text("m", role="label").follow(above)
 #api-entry(
   name: "Geometry.point_between",
   kind: "factory",
-  desc: [Punto afín entre dos extremos (`alpha=0` en el primero, `1` en el segundo) más un desplazamiento en el mundo.],
+  desc: [Punto afín entre dos extremos (`alpha=0` en el primero, `1` en el segundo) más un desplazamiento en el mundo. `alpha` puede ser un número, un `Parameter`, una `Variable` o un `Computed`.],
 )[
 ```python
 >>>from gaanim import *
@@ -911,8 +913,8 @@ scene.render()
 #api-entry(
   name: "Geometry.point_on_curve",
   kind: "factory",
-  params: ((name: "curve", type: "Drawable", default: none, desc: [Polilínea o Bézier muestreada.]), (name: "tracker", type: "Parameter", default: none, desc: [Posición de 0 a 1 por longitud de arco; se limita a ese rango.])),
-  desc: [Punto oculto que recorre la curva por longitud de arco, sin callbacks de Python durante la reproducción.],
+  params: ((name: "curve", type: "Drawable", default: none, desc: [Polilínea, Bézier, arco, círculo o polígono.]), (name: "tracker", type: "float | Parameter | Variable | Computed", default: none, desc: [Posición de 0 a 1 por longitud de arco; se limita a ese rango.])),
+  desc: [Punto oculto que recorre la curva por longitud de arco, sin callbacks de Python durante la reproducción. Lee la curva tal como se dibuja: si se mueve, gira, escala o anima, o está dentro de un grupo como unos ejes, el punto sigue sobre ella. Lo mismo vale para `tangent_on_curve`, `normal_on_curve` y `curvature_on_curve`.],
 )[
 ```python
 # show-code: true
@@ -965,7 +967,7 @@ normal = scene.geometry.normal_on_curve(curve, t, length=0.6).stroke(RED, 0.04)
 #api-entry(
   name: "Geometry.curvature_on_curve",
   kind: "factory",
-  desc: [Círculo osculador oculto, estimado a partir de muestras vecinas por longitud de arco (`window` es la fracción de la curva usada). Dale estilo con `no_fill().stroke(...)`.],
+  desc: [Círculo osculador oculto, estimado a partir de tres muestras separadas `window` (una fracción de la longitud de arco). En los extremos de una curva abierta las muestras se desplazan hacia dentro, y en una curva cerrada pasan por la costura, así que el círculo existe también en 0 y en 1. En un tramo recto no se dibuja. Dale estilo con `no_fill().stroke(...)`.],
 )[
 ```python
 # show-code: true
@@ -984,8 +986,8 @@ scene.render()
 #api-entry(
   name: "Geometry.always_redraw_arc",
   kind: "factory",
-  params: ((name: "tracker", type: "Parameter", default: none, desc: [Conduce el ángulo de barrido.]), (name: "cx, cy, radius, start_angle", type: "float", default: none, desc: [Centro, radio y ángulo inicial en radianes.]), (name: "sweep_scale / sweep_offset", type: "float", default: "1.0 / 0.0", desc: [El barrido es `tracker * sweep_scale + sweep_offset`.])),
-  desc: [Arco oculto que se regenera en cada fotograma a partir de un `Parameter`, sin callbacks de Python. Ideal para marcar un ángulo que cambia.],
+  params: ((name: "tracker", type: "float | Parameter | Variable | Computed", default: none, desc: [Conduce el ángulo de barrido.]), (name: "cx, cy, radius, start_angle", type: "float", default: none, desc: [Centro, radio y ángulo inicial en radianes.]), (name: "sweep_scale / sweep_offset", type: "float", default: "1.0 / 0.0", desc: [El barrido es `tracker * sweep_scale + sweep_offset`.])),
+  desc: [Flecha en arco oculta que se regenera en cada fotograma a partir de un escalar, sin callbacks de Python. Ideal para marcar un ángulo que cambia. Como toda flecha sólida, `fill` la colorea entera; `stroke` fija su contorno.],
 )[
 ```python
 # show-code: true

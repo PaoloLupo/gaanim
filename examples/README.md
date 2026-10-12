@@ -118,7 +118,7 @@ Boxes, rows, grids, zones and animated reflow.
 | [Stacks](layout/stacks.py) | Stacked layers placed by the nine anchors and offsets, every fit mode, and draw order with z_index. |
 | [Zones](layout/zones.py) | Zones templates, nesting and inset, place() with anchor, padding, offset and fit, arrange(), fill() and animated moves between zones. |
 | [Positioning](layout/positioning.py) | Free objects placed with to_edge, to_corner, next_to, align_to, move_to and linear layout constraints with priorities. |
-| [Reflow](layout/reflow.py) | Animated structure changes: add, remove, replace, set, item, move_child, swap, reverse and detach. |
+| [Reflow](layout/reflow.py) | Animated structure changes: add, remove, replace, set, item, move_child, swap, reverse, detach, moves between boxes and reflow after a scale. |
 | [Box reveal](layout/box_reveal.py) | Revealing a box piece by piece with reveal, cascade and stagger, and changing pieces with find, find_all and each. |
 | [Scatter](layout/scatter.py) | Seeded scatter of formulas around a character's parts, with seeds, gaps, avoided zones and object regions. |
 
@@ -147,7 +147,7 @@ Morphing one object into another, matching parts and pivots.
 | [Transform to](transforms/transform_to.py) | Morphs between shapes and their mirror images, open strokes, solid and gradient fills, transform_to against replacement and fade transforms, fading while morphing, and text to text, equation and shape. |
 | [Matching](transforms/matching.py) | Matching transforms that pair pieces by shape, place and color, glyph matching between words and equations, and group and SVG morphs that pair parts by name or id. |
 | [Magic move](transforms/magic_move.py) | magic_move by name, by SVG id and by a key function, fading or cutting unmatched members, and a leaderboard reordered and carried across a cut with Transition.magic_move. |
-| [Pivots](transforms/pivots.py) | Rotations, scales and skews about a drawable's center, a scene point or a moved pivot, hinged groups and orbits, and shapes that aim at a moving target with look_at. |
+| [Pivots](transforms/pivots.py) | Rotations, scales and skews about a drawable's center, a scene point or a moved pivot, hinged groups, orbits and SVG parts, and shapes that aim at a moving target with look_at. |
 
 ## Emphasis
 
@@ -183,9 +183,9 @@ Full-frame passes: color grading, bloom, motion blur and finishes.
 | Example | Description |
 | --- | --- |
 | [Color grading](post_processing/color_grading.py) | Exposure, contrast, saturation and temperature grades and a 3D lookup table, applied to the whole frame. |
-| [Finishes](post_processing/finishes.py) | Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch passes, each ramped in through a Parameter. |
+| [Finishes](post_processing/finishes.py) | Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch passes, each ramped in through a Parameter, with labels kept out of the post-process. |
 | [Bloom](post_processing/bloom.py) | Bloom threshold, intensity and radius on neon outlines, and a glow that pulses with a Parameter. |
-| [Motion blur](post_processing/motion_blur.py) | Film-shutter motion blur that smears dots by speed, spinning, scaling and orbiting shapes, with one dot kept sharp. |
+| [Motion blur](post_processing/motion_blur.py) | Film-shutter motion blur that smears dots by speed, spinning, scaling and orbiting shapes, with one dot kept sharp, and segments with a shutter of their own. |
 | [Post chains](post_processing/post_chains.py) | Chained passes in both orders, the scene post-process with segment overrides, and a custom WGSL pass whose uniform is a number, a Parameter or noise. |
 
 ## Transitions

@@ -596,7 +596,7 @@ fn compile_tracking_endpoint(
         } => TrackingEndpoint::Between {
             from: Box::new(compile_tracking_endpoint(from, id_map, states)),
             to: Box::new(compile_tracking_endpoint(to, id_map, states)),
-            alpha: *alpha,
+            alpha: compile_tracking_scalar(alpha, id_map, states),
             offset: *offset,
         },
         CanvasEndpoint::Polar {
@@ -738,11 +738,13 @@ impl CompiledLayoutMeasure<'_> {
         text: &CompiledTextMeasure,
         width: Option<f64>,
     ) -> Result<DVec2, gaanim_layout::LayoutError> {
-        let source = structured_text_typst_source(
+        let source = fitted_text_typst_source(
+            self.font_registry,
             &text.spec,
             width,
             text.font_size,
             &text.font_family,
+            &text.math_font,
             text.color,
         );
         let (bounds, metrics) = self.typst_lines(id, text, &source)?;
@@ -1063,14 +1065,6 @@ fn escape_typst_string(text: &str) -> String {
         .replace('\r', "")
 }
 
-fn typst_foreground_for_background(background: gaanim_core::peniko::Color) -> &'static str {
-    let rgba = background.to_rgba8();
-    let luminance =
-        (0.2126 * f64::from(rgba.r) + 0.7152 * f64::from(rgba.g) + 0.0722 * f64::from(rgba.b))
-            / 255.0;
-    if luminance > 0.5 { "000000" } else { "ffffff" }
-}
-
 /// Opacity layers of a fading plexus: links split into this many length ranges.
 const CONNECT_FADE_LAYERS: usize = 6;
 
@@ -1243,13 +1237,33 @@ fn typst_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
     if let Some(color) = style.color {
         args.push(format!("fill: rgb(\"{}\")", color_to_hex(color)));
     }
+    if let Some(stroke) = typst_text_stroke(style) {
+        args.push(format!("stroke: {stroke}"));
+    }
     if let Some(spacing) = style.letter_spacing {
         args.push(format!("tracking: {spacing}pt"));
     }
     if let Some(spacing) = style.word_spacing {
-        args.push(format!("spacing: {spacing}pt"));
+        args.push(format!("spacing: 100% + {spacing}pt"));
+    }
+    // Typst's baseline shift points down; a positive style baseline raises.
+    if let Some(baseline) = style.baseline.filter(|value| *value != 0.0) {
+        args.push(format!("baseline: {}pt", -baseline));
     }
     args
+}
+
+/// Outline width of text whose style names a stroke color but no width.
+const DEFAULT_TEXT_STROKE_WIDTH: f64 = 0.02;
+
+/// The Typst stroke of glyphs styled with a stroke color, or `None`.
+fn typst_text_stroke(style: &StructuredTextStyle) -> Option<String> {
+    let color = style.stroke_color?;
+    let width = style
+        .stroke_width
+        .unwrap_or(DEFAULT_TEXT_STROKE_WIDTH)
+        .max(0.0);
+    (width > 0.0).then(|| format!("{width}pt + rgb(\"{}\")", color_to_hex(color)))
 }
 
 fn typst_math_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
@@ -1272,11 +1286,14 @@ fn typst_math_style_arguments(style: &StructuredTextStyle) -> Vec<String> {
     if let Some(color) = style.color {
         args.push(format!("fill: #rgb(\"{}\")", color_to_hex(color)));
     }
+    if let Some(stroke) = typst_text_stroke(style) {
+        args.push(format!("stroke: #({stroke})"));
+    }
     if let Some(spacing) = style.letter_spacing {
         args.push(format!("tracking: #{spacing}pt"));
     }
     if let Some(spacing) = style.word_spacing {
-        args.push(format!("spacing: #{spacing}pt"));
+        args.push(format!("spacing: #(100% + {spacing}pt)"));
     }
     args
 }
@@ -1305,6 +1322,8 @@ fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> St
         return content;
     }
 
+    // The baseline shift is a text argument, so a raised or lowered part
+    // stays in its line.
     let args = typst_style_arguments(style);
     let content = format!("#text(\"{}\")", escape_typst_string(text));
     let mut content = if args.is_empty() {
@@ -1319,9 +1338,6 @@ fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> St
             _ => content,
         };
     }
-    if let Some(baseline) = style.baseline.filter(|value| *value != 0.0) {
-        content = format!("#move(dy: {}pt)[{content}]", -baseline);
-    }
     content
 }
 
@@ -1329,10 +1345,28 @@ fn styled_typst_chunk(text: &str, math: bool, style: &StructuredTextStyle) -> St
 /// Math delimiters are tracked across part boundaries, so a styled nested
 /// part may safely live inside a `$...$` expression.
 fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> String {
+    leaves_typst_content(structured_text_leaves(spec))
+}
+
+/// The root style's arguments that `#set text` does not carry: they wrap
+/// every leaf, as a part's do.
+fn root_leaf_style(style: &StructuredTextStyle) -> StructuredTextStyle {
+    StructuredTextStyle {
+        stroke_color: style.stroke_color,
+        stroke_width: style.stroke_width,
+        decorations: style.decorations.clone(),
+        baseline: style.baseline,
+        ..StructuredTextStyle::default()
+    }
+}
+
+/// The styled leaves of `spec` with its inline markup resolved: plain text
+/// with `$` math delimiters and `\$` escapes.
+fn structured_text_leaves(spec: &StructuredTextSpec) -> Vec<StyledTextLeaf> {
     let mut raw_leaves = Vec::new();
     collect_styled_text_leaves(
         &spec.content,
-        &StructuredTextStyle::default(),
+        &root_leaf_style(&spec.style),
         &mut raw_leaves,
     );
     let mut markup = gaanim_text::structured::InlineMarkupParser::with_markup(spec.markup);
@@ -1364,7 +1398,105 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
     markup
         .finish()
         .expect("TextSpec validates inline markup before compilation");
-    let mut raw_leaves = marked_leaves;
+    marked_leaves
+}
+
+/// The end of one visible unit of text: a character outside math or a
+/// whole formula.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CutPoint {
+    leaf: usize,
+    /// Byte offset in the leaf just after the unit.
+    end: usize,
+    /// Whether the unit is whitespace.
+    space: bool,
+}
+
+/// Where a cut may end text: after each visible unit. A backslash escapes
+/// only a `$`, as in `parse_inline_math`.
+fn leaf_cut_points(leaves: &[StyledTextLeaf]) -> Vec<CutPoint> {
+    let mut points = Vec::new();
+    let mut in_math = false;
+    let mut escaped = false;
+    for (leaf, text) in leaves.iter().enumerate() {
+        for (offset, character) in text.text.char_indices() {
+            let end = offset + character.len_utf8();
+            let point = CutPoint {
+                leaf,
+                end,
+                space: character.is_whitespace(),
+            };
+            if std::mem::take(&mut escaped) && character == '$' {
+                if !in_math {
+                    points.push(point);
+                }
+                continue;
+            }
+            match character {
+                '\\' => escaped = true,
+                '$' => {
+                    in_math = !in_math;
+                    if !in_math {
+                        points.push(point);
+                    }
+                }
+                _ if !in_math => points.push(point),
+                _ => {}
+            }
+        }
+    }
+    points
+}
+
+/// Unit counts at which a cut ends a word: before a space or at the end.
+fn word_cuts(points: &[CutPoint]) -> Vec<usize> {
+    (1..=points.len())
+        .filter(|&keep| !points[keep - 1].space && points.get(keep).is_none_or(|next| next.space))
+        .collect()
+}
+
+/// The first `keep` units of `leaves` (see [`leaf_cut_points`]) without
+/// trailing spaces, followed by an ellipsis in the last leaf's style when
+/// `ellipsis` is set.
+fn cut_leaves(
+    leaves: &[StyledTextLeaf],
+    points: &[CutPoint],
+    keep: usize,
+    ellipsis: bool,
+) -> Vec<StyledTextLeaf> {
+    let mut kept = match keep.checked_sub(1).and_then(|index| points.get(index)) {
+        Some(point) => {
+            let mut kept = leaves[..=point.leaf].to_vec();
+            kept[point.leaf].text.truncate(point.end);
+            kept
+        }
+        None => Vec::new(),
+    };
+    while let Some(last) = kept.last_mut() {
+        let trimmed = last.text.trim_end().len();
+        last.text.truncate(trimmed);
+        if !last.text.is_empty() {
+            break;
+        }
+        kept.pop();
+    }
+    if ellipsis {
+        let style = kept
+            .last()
+            .or(leaves.first())
+            .map(|leaf| leaf.style.clone())
+            .unwrap_or_default();
+        kept.push(StyledTextLeaf {
+            text: "…".to_owned(),
+            style,
+            content_boundary_before: false,
+        });
+    }
+    kept
+}
+
+/// Typst markup of styled leaves.
+fn leaves_typst_content(mut raw_leaves: Vec<StyledTextLeaf>) -> String {
     // Preserve every authored content boundary in math as ordinary Typst
     // whitespace. Typst remains responsible for deciding whether that
     // whitespace separates identifiers, participates in math syntax, or has
@@ -1374,9 +1506,12 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
     let mut escaped = false;
     for index in 0..raw_leaves.len().saturating_sub(1) {
         for character in raw_leaves[index].text.chars() {
-            if escaped {
-                escaped = false;
-            } else if character == '\\' {
+            // A backslash escapes only a `$`; before anything else it is a
+            // literal backslash and the next character keeps its meaning.
+            if std::mem::take(&mut escaped) && character == '$' {
+                continue;
+            }
+            if character == '\\' {
                 escaped = true;
             } else if character == '$' {
                 in_math = !in_math;
@@ -1443,15 +1578,12 @@ fn structured_typst_content(spec: &StructuredTextSpec, _font_size: f64) -> Strin
         let mut chunk = String::new();
         let mut escaped = false;
         for character in text.chars() {
-            if escaped {
+            if std::mem::take(&mut escaped) {
                 if character == '$' {
                     chunk.push('$');
-                } else {
-                    chunk.push('\\');
-                    chunk.push(character);
+                    continue;
                 }
-                escaped = false;
-                continue;
+                chunk.push('\\');
             }
             if character == '\\' {
                 escaped = true;
@@ -1499,6 +1631,103 @@ pub(crate) fn structured_text_typst_source(
     font_family: &str,
     color: gaanim_core::peniko::Color,
 ) -> String {
+    text_typst_source(
+        spec,
+        offered_width,
+        font_size,
+        font_family,
+        color,
+        &structured_typst_content(spec, font_size),
+    )
+}
+
+/// [`structured_text_typst_source`] cut to the text's `max_lines`: unless
+/// its overflow is `visible`, a text that composes into more lines keeps as
+/// many characters as fit, followed by an ellipsis for `ellipsis`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fitted_text_typst_source(
+    font_registry: &gaanim_text::font::FontRegistry,
+    spec: &StructuredTextSpec,
+    offered_width: Option<f64>,
+    font_size: f64,
+    font_family: &str,
+    math_font: &str,
+    color: gaanim_core::peniko::Color,
+) -> String {
+    let source = structured_text_typst_source(spec, offered_width, font_size, font_family, color);
+    let Some(max_lines) = spec.flow.max_lines else {
+        return source;
+    };
+    if matches!(spec.flow.overflow, StructuredTextOverflow::Visible) {
+        return source;
+    }
+    let lines = |source: &str| {
+        gaanim_text::prelude::measure_typst_lines(
+            font_registry,
+            source,
+            false,
+            Some(font_family),
+            Some(math_font),
+            Some(font_size),
+            None,
+            Some(gaanim_core::peniko::Brush::Solid(color)),
+            StrokeBrush::transparent(),
+        )
+        .map_or(0, |(_, metrics)| metrics.line_count)
+    };
+    if lines(&source) <= max_lines {
+        return source;
+    }
+    let leaves = structured_text_leaves(spec);
+    let points = leaf_cut_points(&leaves);
+    let ellipsis = matches!(spec.flow.overflow, StructuredTextOverflow::Ellipsis);
+    let cut = |keep: usize| {
+        text_typst_source(
+            spec,
+            offered_width,
+            font_size,
+            font_family,
+            color,
+            &leaves_typst_content(cut_leaves(&leaves, &points, keep, ellipsis)),
+        )
+    };
+    // The longest cut that still fits, among `cuts` in increasing order;
+    // the whole text does not fit.
+    let longest = |cuts: &[usize]| {
+        let (mut fits, mut overflows) = (None, cuts.len());
+        let mut low = 0;
+        while low < overflows {
+            let middle = (low + overflows) / 2;
+            if lines(&cut(cuts[middle])) <= max_lines {
+                fits = Some(cuts[middle]);
+                low = middle + 1;
+            } else {
+                overflows = middle;
+            }
+        }
+        fits
+    };
+    // Whole words, as the lines broke; a first word too long for the lines
+    // is cut between characters.
+    let words = word_cuts(&points);
+    let characters: Vec<usize> = (1..points.len()).collect();
+    let keep = longest(&words)
+        .or_else(|| longest(&characters))
+        .unwrap_or(0);
+    cut(keep)
+}
+
+/// Typst's default gap between the rows of an equation, in ems.
+const MATH_ROW_GAP_EM: f64 = 0.65;
+
+fn text_typst_source(
+    spec: &StructuredTextSpec,
+    offered_width: Option<f64>,
+    font_size: f64,
+    font_family: &str,
+    color: gaanim_core::peniko::Color,
+    content: &str,
+) -> String {
     let width = match spec.flow.wrap {
         StructuredTextWrap::NoWrap => None,
         StructuredTextWrap::Auto => offered_width.map(|width| width.max(1.0)),
@@ -1517,6 +1746,10 @@ pub(crate) fn structured_text_typst_source(
     // the baseline) would put them a cap height closer, overlapping lines in
     // fonts with tall ascenders.
     let leading = font_size * (spec.flow.line_spacing.max(0.1) - 1.0);
+    // The rows of an equation broken with `\` stack by their ink instead,
+    // so they keep Typst's own gap between rows at `line_spacing` 1, and
+    // each extra em of spacing widens it as it does between text lines.
+    let math_leading = font_size * (spec.flow.line_spacing.max(0.1) - 1.0 + MATH_ROW_GAP_EM);
     let (alignment, justify) = match spec.flow.align {
         gaanim_text::prelude::TextAlign::Left => ("left", false),
         gaanim_text::prelude::TextAlign::Center => ("center", false),
@@ -1543,6 +1776,11 @@ pub(crate) fn structured_text_typst_source(
         .letter_spacing
         .map(|spacing| format!(", tracking: {spacing}pt"))
         .unwrap_or_default();
+    let spacing = spec
+        .style
+        .word_spacing
+        .map(|spacing| format!(", spacing: 100% + {spacing}pt"))
+        .unwrap_or_default();
     let family = spec.style.font.as_deref().unwrap_or(font_family);
     let font = if spec.style.fallbacks.is_empty() {
         format!("font: \"{}\", ", escape_typst_string(family))
@@ -1562,23 +1800,12 @@ pub(crate) fn structured_text_typst_source(
         .as_deref()
         .map(|lang| format!(", lang: \"{lang}\""))
         .unwrap_or_default();
-    let content = structured_typst_content(spec, font_size);
-    let content = format!("#align({alignment})[{content}]");
-    let content = if let Some(max_lines) = spec.flow.max_lines {
-        let height = font_size * spec.flow.line_spacing.max(0.1) * max_lines as f64;
-        let clip = !matches!(spec.flow.overflow, StructuredTextOverflow::Visible);
-        // Typst currently supplies the clip for both clip and ellipsis. The
-        // structured overflow value remains distinct in the cache/spec so a
-        // renderer-level ellipsis marker can be added without an API change.
-        format!("#block(width: 100%, height: {height}pt, clip: {clip})[{content}]")
-    } else {
-        content
-    };
     format!(
         "#set page(width: {page_width}, height: auto, margin: 0pt)\n\
-         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking}, top-edge: 0.8em, bottom-edge: -0.2em)\n\
+         #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking}{spacing}, top-edge: 0.8em, bottom-edge: -0.2em)\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
-         {content}",
+         #show math.equation.where(block: true): set par(leading: {math_leading}pt)\n\
+         #align({alignment})[{content}]",
         spec.flow.hyphenate,
     )
 }
@@ -1712,6 +1939,29 @@ fn collect_compiled_layout_node(
     };
     visiting.remove(&source);
     Some(node)
+}
+
+/// Widen the margins of the layout child `id`, at any depth below `node`, by
+/// `extra` on each side.
+fn widen_layout_margins(
+    node: &mut gaanim_layout::LayoutNode,
+    id: gaanim_layout::LayoutId,
+    extra: DVec2,
+) -> bool {
+    for child in &mut node.children {
+        if child.node.id == id {
+            let margin = &mut child.style.margin;
+            margin.left += extra.x;
+            margin.right += extra.x;
+            margin.top += extra.y;
+            margin.bottom += extra.y;
+            return true;
+        }
+        if widen_layout_margins(&mut child.node, id, extra) {
+            return true;
+        }
+    }
+    false
 }
 
 fn compile_layout_tree(
@@ -2767,6 +3017,11 @@ impl SceneModel {
         let mut checkpoint = None;
         // Raw bounds for the canvas background (visual, no margin).
         let raw_bounds = self.frame.bounds();
+        builder.draw_outline_width =
+            raw_bounds.height() * crate::builder::WRITE_OUTLINE_PER_FRAME_HEIGHT;
+        builder.typst_theme = self.typst_theme_prelude(
+            text_config.roles[&gaanim_text::prelude::TextRole::Body].fill_color,
+        );
         // Inset bounds for layout operations (to_edge, to_corner respect margin).
         let m = &self.margin;
         let frame_bounds = Bounds3D::new_2d(
@@ -2852,7 +3107,6 @@ impl SceneModel {
                 raw_bounds,
                 text_config,
                 self.theme_style.as_ref(),
-                bg_color,
                 &mut camera_position,
                 &mut camera_zoom,
                 &mut camera_rotation,
@@ -2915,6 +3169,30 @@ impl SceneModel {
                 },
             )
             .collect();
+        // A segment with its own motion blur turns the scene's into one
+        // window per segment. A frame on a cut belongs to the segment it
+        // enters, so a window stops short of the next segment. Whip pans
+        // follow: they blur the frames that have no blur of their own.
+        let own_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)> =
+            if segments.iter().any(|segment| segment.motion_blur.is_some()) {
+                let last = segment_metadata.len().saturating_sub(1);
+                segments
+                    .iter()
+                    .zip(&segment_metadata)
+                    .enumerate()
+                    .filter_map(|(index, (segment, metadata))| {
+                        let blur = segment.motion_blur.unwrap_or(self.motion_blur)?;
+                        let end = if index < last {
+                            metadata.end_time - 1.0e-8
+                        } else {
+                            metadata.end_time
+                        };
+                        Some((metadata.start_time, end, blur))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
         let segment_post_processes = segments
             .iter()
             .zip(&segment_metadata)
@@ -3397,8 +3675,8 @@ impl SceneModel {
         );
         builder.commands.insert_resource(post_process);
         match self.motion_blur {
-            Some(blur) => builder.commands.insert_resource(blur),
-            None => builder
+            Some(blur) if own_windows.is_empty() => builder.commands.insert_resource(blur),
+            _ => builder
                 .commands
                 .remove_resource::<gaanim_renderer::effects::MotionBlur>(),
         }
@@ -3406,12 +3684,15 @@ impl SceneModel {
         builder
             .commands
             .insert_resource(gaanim_scene::DepthOfField::default());
-        if builder.motion_blur_windows.is_empty() {
+        let windows: Vec<_> = own_windows
+            .into_iter()
+            .chain(builder.motion_blur_windows.iter().copied())
+            .collect();
+        if windows.is_empty() {
             builder
                 .commands
                 .remove_resource::<gaanim_renderer::effects::MotionBlurWindows>();
         } else {
-            let windows = builder.motion_blur_windows.clone();
             builder
                 .commands
                 .insert_resource(gaanim_renderer::effects::MotionBlurWindows(windows));
@@ -3512,7 +3793,6 @@ impl SceneModel {
         raw_frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
         theme: Option<&crate::canvas::CanvasTheme>,
-        scene_background: gaanim_core::peniko::Color,
         camera_position: &mut DVec3,
         camera_zoom: &mut f64,
         camera_rotation: &mut gaanim_core::glam::DQuat,
@@ -3603,14 +3883,7 @@ impl SceneModel {
                     if spec.defer_visibility_until_play {
                         deferred_visibility.insert(spec.id);
                     }
-                    let actual = Self::spawn_one(
-                        builder,
-                        &spec,
-                        id_map,
-                        frame_bounds,
-                        text_config,
-                        scene_background,
-                    );
+                    let actual = Self::spawn_one(builder, &spec, id_map, frame_bounds, text_config);
                     if spec.hud {
                         Self::apply_hud(builder, actual.id);
                     }
@@ -4597,8 +4870,9 @@ impl SceneModel {
                         *duration,
                     );
                     if let (Some(&src), Some(&dst)) = (id_map.get(source), id_map.get(target)) {
-                        if mode == "tex" {
-                            let semantic_groups = semantic_pairs
+                        let tex = mode == "tex";
+                        let semantic_groups = if tex {
+                            semantic_pairs
                                 .iter()
                                 .filter_map(
                                     |(
@@ -4625,24 +4899,22 @@ impl SceneModel {
                                             .then_some((sources, targets))
                                     },
                                 )
-                                .collect();
-                            builder.play_equation_transition(
-                                src,
-                                dst,
-                                semantic_groups,
-                                *duration,
-                                EquationTransitionMode::Replace,
-                                true,
-                            );
+                                .collect()
                         } else {
-                            builder.play_transform_matching(
-                                src,
-                                dst,
-                                gaanim_math::matching::MatchingMode::Shapes,
-                                *duration,
-                                RateFunc::Smooth,
-                            );
-                        }
+                            Vec::new()
+                        };
+                        builder.play_transform_matching_grouped(
+                            src,
+                            dst,
+                            if tex {
+                                gaanim_math::matching::MatchingMode::Tex
+                            } else {
+                                gaanim_math::matching::MatchingMode::Shapes
+                            },
+                            semantic_groups,
+                            *duration,
+                            RateFunc::Smooth,
+                        );
                     }
                     builder.current_time = end;
                 }
@@ -4653,6 +4925,7 @@ impl SceneModel {
                     entering,
                     leaving,
                     resolve,
+                    remeasure,
                 } => {
                     if let Some(expected) = from_version {
                         let actual = layout_versions.get(&to.container).copied();
@@ -4675,7 +4948,7 @@ impl SceneModel {
                     let Some(root_snapshot) = layout_snapshots.get(&root_source) else {
                         continue;
                     };
-                    let Some(tree) = compile_layout_tree(
+                    let Some(mut tree) = compile_layout_tree(
                         root_source,
                         layout_snapshots,
                         id_map,
@@ -4686,10 +4959,62 @@ impl SceneModel {
                     ) else {
                         continue;
                     };
+                    // `box.reflow()` measures each child (a nested box too)
+                    // with the scale and rotation it has now, so a child scaled
+                    // since it was placed gets room for its new size.
+                    if let Some(within) = remeasure {
+                        let inside = |id: gaanim_layout::LayoutId| {
+                            let mut current = tree.parent_by_id.get(&id).copied();
+                            while let Some(parent) = current {
+                                if tree.source_by_id.get(&parent) == Some(within) {
+                                    return true;
+                                }
+                                current = tree.parent_by_id.get(&parent).copied();
+                            }
+                            false
+                        };
+                        for (layout_id, source) in &tree.source_by_id {
+                            if !inside(*layout_id) {
+                                continue;
+                            }
+                            let current = id_map
+                                .get(source)
+                                .and_then(|actual| builder.states.get(*actual))
+                                .map(|state| state.transform);
+                            if let (Some(rest), Some(current)) =
+                                (builder.layout_rests.get_mut(source), current)
+                            {
+                                rest.scale = current.scale;
+                                rest.rotation = current.rotation;
+                            }
+                        }
+                        let Some(remeasured) = compile_layout_tree(
+                            root_source,
+                            layout_snapshots,
+                            id_map,
+                            &builder.states,
+                            object_specs,
+                            text_config,
+                            &builder.layout_rests,
+                        ) else {
+                            continue;
+                        };
+                        tree = remeasured;
+                    }
                     let root_id = tree.root.id;
                     let Some(container) = id_map.get(&root_source).copied() else {
                         continue;
                     };
+                    // A child that comes from another box, still showing,
+                    // slides from where it stands instead of fading in at its
+                    // new place.
+                    let entering = entering.filter(|source| {
+                        !(builder.layout_rests.contains_key(source)
+                            && id_map
+                                .get(source)
+                                .and_then(|id| builder.states.get(*id))
+                                .is_some_and(|state| state.opacity > 0.0))
+                    });
                     // A child entering now appears in its place: only the
                     // others move, from where they were.
                     let entering_subtree = |id: gaanim_layout::LayoutId| {
@@ -4702,7 +5027,7 @@ impl SceneModel {
                         }
                         false
                     };
-                    let before: HashMap<ObjectId, SpatialTransform> = tree
+                    let mut before: HashMap<ObjectId, SpatialTransform> = tree
                         .source_by_id
                         .iter()
                         .filter(|(id, _)| **id != root_id && !entering_subtree(**id))
@@ -4734,31 +5059,77 @@ impl SceneModel {
                         LayoutWithin::Frame => raw_frame_bounds,
                         LayoutWithin::Intrinsic => frame_bounds,
                     };
-                    let measurer = CompiledLayoutMeasure {
-                        fixed: tree.fixed.clone(),
-                        texts: tree.texts.clone(),
-                        text_compositions: RefCell::default(),
-                        text_candidates: RefCell::default(),
-                        line_extents: RefCell::default(),
-                        cap_heights: RefCell::default(),
-                        natural_text_sizes: RefCell::default(),
-                        font_registry: builder.font_registry,
-                    };
-                    let resolved =
-                        match gaanim_layout::resolve_layout(&tree.root, viewport, &measurer, &[]) {
-                            Ok(resolved) => resolved,
-                            Err(error) => {
-                                let message =
-                                    format!("layout {} resolution failed: {error}", to.version);
-                                eprintln!("{message}");
-                                diagnostic_state
-                                    .lock()
-                                    .expect("canvas state poisoned")
-                                    .layout_diagnostics
-                                    .push((Some(to.container), message));
-                                continue;
-                            }
+                    let font_registry = builder.font_registry;
+                    let solve = |tree: &CompiledLayoutTree| {
+                        let measurer = CompiledLayoutMeasure {
+                            fixed: tree.fixed.clone(),
+                            texts: tree.texts.clone(),
+                            text_compositions: RefCell::default(),
+                            text_candidates: RefCell::default(),
+                            line_extents: RefCell::default(),
+                            cap_heights: RefCell::default(),
+                            natural_text_sizes: RefCell::default(),
+                            font_registry,
                         };
+                        gaanim_layout::resolve_layout(&tree.root, viewport, &measurer, &[])
+                            .map(|resolved| (measurer, resolved))
+                    };
+                    let mut solved = solve(&tree);
+                    // A nested box takes the room of its scaled size, as a
+                    // scaled leaf does: Taffy sizes a box by its content, so
+                    // its margins make up the difference.
+                    let scaled_boxes: Vec<(gaanim_layout::LayoutId, DVec2)> = tree
+                        .children_by_id
+                        .keys()
+                        .filter(|id| **id != tree.root.id)
+                        .filter_map(|id| {
+                            // Its scale when first placed, as for a leaf: the
+                            // current one until then.
+                            let source = tree.source_by_id.get(id)?;
+                            let scale = match builder.layout_rests.get(source) {
+                                Some(rest) => rest.scale,
+                                None => builder.states.get(*id_map.get(source)?)?.transform.scale,
+                            };
+                            let scale = DVec2::new(scale.x, scale.y);
+                            (scale.min_element() > 1.0e-6
+                                && (scale - DVec2::ONE).abs().max_element() > 1.0e-9)
+                                .then_some((*id, scale))
+                        })
+                        .collect();
+                    if let Ok((_, first)) = &solved
+                        && !scaled_boxes.is_empty()
+                    {
+                        let sizes: Vec<_> = scaled_boxes
+                            .iter()
+                            .filter_map(|(id, scale)| {
+                                let bounds = first.boxes.get(id)?.bounds;
+                                Some((
+                                    *id,
+                                    (*scale - DVec2::ONE)
+                                        * DVec2::new(bounds.width(), bounds.height())
+                                        * 0.5,
+                                ))
+                            })
+                            .collect();
+                        for (id, extra) in sizes {
+                            widen_layout_margins(&mut tree.root, id, extra);
+                        }
+                        solved = solve(&tree);
+                    }
+                    let (measurer, resolved) = match solved {
+                        Ok(solved) => solved,
+                        Err(error) => {
+                            let message =
+                                format!("layout {} resolution failed: {error}", to.version);
+                            eprintln!("{message}");
+                            diagnostic_state
+                                .lock()
+                                .expect("canvas state poisoned")
+                                .layout_diagnostics
+                                .push((Some(to.container), message));
+                            continue;
+                        }
+                    };
                     // A decorated box that resolves to nothing draws nothing:
                     // usually an empty bar or rule missing `width="fill"`.
                     for (layout_id, source) in &tree.source_by_id {
@@ -4975,14 +5346,18 @@ impl SceneModel {
                         let SpawnKind::Text(text) = &mut materialized.kind else {
                             continue;
                         };
-                        text.flow.wrap = if width.is_finite() {
-                            StructuredTextWrap::Width(match text.flow.wrap {
-                                StructuredTextWrap::Width(limit) => limit.min(width),
-                                StructuredTextWrap::Auto => width,
-                                StructuredTextWrap::NoWrap => continue,
-                            })
-                        } else {
-                            StructuredTextWrap::NoWrap
+                        // The natural composition of a text with a wrap width
+                        // is already wrapped at it.
+                        text.flow.wrap = match (text.flow.wrap, width.is_finite()) {
+                            (StructuredTextWrap::Width(limit), true) => {
+                                StructuredTextWrap::Width(limit.min(width))
+                            }
+                            (StructuredTextWrap::Width(limit), false) => {
+                                StructuredTextWrap::Width(limit)
+                            }
+                            (StructuredTextWrap::Auto, true) => StructuredTextWrap::Width(width),
+                            (StructuredTextWrap::Auto, false) => StructuredTextWrap::NoWrap,
+                            (StructuredTextWrap::NoWrap, _) => continue,
                         };
                         let replacement = Self::spawn_one(
                             builder,
@@ -4990,7 +5365,6 @@ impl SceneModel {
                             id_map,
                             frame_bounds,
                             text_config,
-                            scene_background,
                         );
                         let entering_ancestor = entering.is_some_and(|entering| {
                             let mut current = Some(*layout_id);
@@ -5043,20 +5417,18 @@ impl SceneModel {
                         if let Some(background) = background {
                             children.insert(0, background);
                         }
-                        // A leaving child, or a text replaced by its rewrapped
-                        // copy, fades out where it stands. It keeps its parent
-                        // in the scene hierarchy: reparenting is not on the
-                        // timeline, so it would also change the child's earlier,
-                        // parent-relative placement and inherited opacity.
+                        // A child that leaves the box fading out (removed, or a
+                        // text replaced by its rewrapped copy) keeps its parent.
+                        // One detached, which stays in sight, leaves every group
+                        // from now on, as one moving to another box changes
+                        // parent from now on: [`SceneBuilder::reparent_at_cursor`]
+                        // puts the change on the timeline, so the child still
+                        // follows its former box before it.
                         let leaving_child = leaving
                             .as_ref()
                             .and_then(|member| id_map.get(member))
                             .copied();
-                        let keeps_parent = |child: &ObjectId| {
-                            Some(*child) == leaving_child
-                                || text_crossfades.iter().any(|(old, ..)| old == child)
-                        };
-                        let removed_children: Vec<_> = builder
+                        let detached: Vec<_> = builder
                             .states
                             .get(parent)
                             .map(|state| {
@@ -5064,25 +5436,68 @@ impl SceneModel {
                                     .children
                                     .iter()
                                     .copied()
-                                    .filter(|child| !children.contains(child))
-                                    .filter(|child| !keeps_parent(child))
+                                    .filter(|child| {
+                                        Some(*child) != leaving_child
+                                            && !materialized_by_id.values().any(|id| id == child)
+                                            && !text_crossfades.iter().any(|(old, ..)| old == child)
+                                            && id_map
+                                                .iter()
+                                                .find(|(_, actual)| *actual == child)
+                                                .is_some_and(|(source, _)| {
+                                                    builder.layout_rests.contains_key(source)
+                                                })
+                                    })
                                     .collect()
                             })
                             .unwrap_or_default();
-                        for child in removed_children {
-                            builder.remove_from_group(
-                                MobjectRef { id: parent },
-                                MobjectRef { id: child },
-                            );
+                        for child in detached {
+                            builder.reparent_at_cursor(child, None, false);
                         }
                         for child in &children {
                             let current_parent =
                                 builder.states.get(*child).and_then(|state| state.parent);
-                            if current_parent != Some(parent) {
+                            let source = tree
+                                .source_by_id
+                                .get(&gaanim_layout::LayoutId(child.as_raw()))
+                                .copied();
+                            let moved_in = current_parent != Some(parent)
+                                && source.is_some_and(|source| {
+                                    builder.layout_rests.contains_key(&source)
+                                });
+                            if moved_in {
+                                // It slides from where it stands, measured anew
+                                // in this box.
+                                if let Some(source) = source {
+                                    builder.layout_rests.remove(&source);
+                                }
+                                // A child fading in appears at its new place.
+                                let fading_in = entering.is_some() && entering == source;
+                                if let Some(transform) =
+                                    builder.reparent_at_cursor(*child, Some(parent), true)
+                                    && !fading_in
+                                {
+                                    before.insert(*child, transform);
+                                }
+                            } else if current_parent != Some(parent) {
+                                // A child keeps its own scale and rotation in
+                                // the box, as an element does in a CSS
+                                // container: a scaled box scales it too.
+                                let own = builder
+                                    .states
+                                    .get(*child)
+                                    .map(|state| (state.transform.scale, state.transform.rotation));
                                 builder.add_to_group(
                                     MobjectRef { id: parent },
                                     MobjectRef { id: *child },
                                 );
+                                if let Some((scale, rotation)) = own
+                                    && let Some(state) = builder.states.get_mut(*child)
+                                {
+                                    state.transform.scale = scale;
+                                    state.transform.rotation = rotation;
+                                    let (entity, transform) = (state.entity, state.transform);
+                                    Self::insert_transform_keeping_grow(builder, entity, transform);
+                                }
                             }
                         }
                         if let Some(background) = background
@@ -5295,8 +5710,23 @@ impl SceneModel {
                             gaanim_layout::FitMode::ScaleDown => DVec3::splat(sx.min(sy).min(1.0)),
                         };
                         target.scale *= fit;
-                        if matches!(item_style.fit, gaanim_layout::FitMode::Cover) {
-                            cover_clips.push((*member, target_box.bounds));
+                        // The cell, in its parent box's own space: the solve
+                        // puts the root where it hugs the viewport, not where
+                        // the root was moved.
+                        if matches!(item_style.fit, gaanim_layout::FitMode::Cover)
+                            && let Some(parent_member) = materialized_by_id.get(parent_id)
+                        {
+                            let cell = target_box.bounds;
+                            cover_clips.push((
+                                *member,
+                                *parent_member,
+                                Rect::new(
+                                    cell.min.x - parent_center.x,
+                                    cell.min.y - parent_center.y,
+                                    cell.max.x - parent_center.x,
+                                    cell.max.y - parent_center.y,
+                                ),
+                            ));
                         }
                         targets.push((*member, target));
                         let Some(state) = builder.states.get_mut(*member) else {
@@ -5381,21 +5811,18 @@ impl SceneModel {
                             }
                         });
                     }
-                    for (member, clip_bounds) in cover_clips {
-                        let world_path = Rect::new(
-                            clip_bounds.min.x,
-                            clip_bounds.min.y,
-                            clip_bounds.max.x,
-                            clip_bounds.max.y,
-                        )
-                        .to_path(0.1);
+                    for (member, parent_member, cell) in cover_clips {
+                        let parent_world =
+                            builder.get_world_transform(parent_member).to_affine_2d();
+                        let cell_path = cell.to_path(0.1);
                         for leaf in Self::visual_leaf_ids(builder, member) {
                             let Some(state) = builder.states.get(leaf) else {
                                 continue;
                             };
-                            let mut local_path = world_path.clone();
+                            let mut local_path = cell_path.clone();
                             local_path.apply_affine(
-                                builder.get_world_transform(leaf).to_affine_2d().inverse(),
+                                builder.get_world_transform(leaf).to_affine_2d().inverse()
+                                    * parent_world,
                             );
                             builder.commands.entity(state.entity).insert(
                                 gaanim_renderer::effects::ClipMask {
@@ -7204,21 +7631,16 @@ impl SceneModel {
                     sweep_offset,
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
-                        let tracker_entity = tracker_st.entity;
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         let center = Point::new(center.0, center.1);
                         let radius = *radius;
                         let start_angle = *start_angle;
                         let sweep_scale = *sweep_scale;
                         let sweep_offset = *sweep_offset;
                         let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
-                            let value = world
-                                .get::<gaanim_animation::FloatSignal>(tracker_entity)
-                                .map(|signal| signal.value)
-                                .unwrap_or(0.0);
+                            let value = tracker.evaluate(world).unwrap_or(0.0);
                             gaanim_objects::primitives::curved_arrow_arc(
                                 gaanim_core::ObjectId::from_raw(0),
                                 center,
@@ -7241,15 +7663,14 @@ impl SceneModel {
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(curve_id) = id_map.get(curve).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(curve_st) = builder.states.get(curve_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         builder
                             .commands
                             .entity(target_st.entity)
-                            .insert(PointOnCurve::new(curve_st.entity, tracker_st.entity));
+                            .insert(PointOnCurve::new(curve_st.entity, tracker));
                     }
                 }
                 Op::AttachTangentOnCurve {
@@ -7259,15 +7680,14 @@ impl SceneModel {
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(curve_id) = id_map.get(curve).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(curve_st) = builder.states.get(curve_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         builder
                             .commands
                             .entity(target_st.entity)
-                            .insert(TangentOnCurve::new(curve_st.entity, tracker_st.entity));
+                            .insert(TangentOnCurve::new(curve_st.entity, tracker));
                     }
                 }
                 Op::AttachNormalOnCurve {
@@ -7277,15 +7697,14 @@ impl SceneModel {
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(curve_id) = id_map.get(curve).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(curve_st) = builder.states.get(curve_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         builder
                             .commands
                             .entity(target_st.entity)
-                            .insert(NormalOnCurve::new(curve_st.entity, tracker_st.entity));
+                            .insert(NormalOnCurve::new(curve_st.entity, tracker));
                     }
                 }
                 Op::AttachCurvatureOnCurve {
@@ -7296,19 +7715,14 @@ impl SceneModel {
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(curve_id) = id_map.get(curve).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(curve_st) = builder.states.get(curve_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         builder
                             .commands
                             .entity(target_st.entity)
-                            .insert(CurvatureOnCurve::new(
-                                curve_st.entity,
-                                tracker_st.entity,
-                                *window,
-                            ));
+                            .insert(CurvatureOnCurve::new(curve_st.entity, tracker, *window));
                     }
                 }
                 Op::AttachCustomUpdater { target, updater } => {
@@ -9287,7 +9701,6 @@ impl SceneModel {
         id_map: &HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
-        scene_background: gaanim_core::peniko::Color,
     ) -> MobjectRef {
         let mref = match &spec.kind {
             SpawnKind::FillLevelOutline { mask } => {
@@ -10723,20 +11136,17 @@ impl SceneModel {
                 if let Some(opacity) = text.style.opacity {
                     styled_spec.opacity *= opacity.clamp(0.0, 1.0);
                 }
-                if !styled_spec.stroke_overridden
-                    && let (Some(color), Some(width)) =
-                        (text.style.stroke_color, text.style.stroke_width)
-                {
-                    styled_spec.stroke =
-                        Some((gaanim_core::peniko::Brush::Solid(color), width.max(0.0)));
-                }
+                // A style's stroke outlines the glyphs it covers in the
+                // Typst source, the root's like a part's.
                 let compiled = compiled_text_measure(&styled_spec, text_config)
                     .expect("unified text spawn must produce a text measure");
-                let source = structured_text_typst_source(
+                let source = fitted_text_typst_source(
+                    builder.font_registry,
                     text,
                     Some(frame_bounds.width().max(1.0)),
                     compiled.font_size,
                     &compiled.font_family,
+                    &compiled.math_font,
                     compiled.color,
                 );
                 let mr = builder.typst(
@@ -10756,8 +11166,10 @@ impl SceneModel {
                 page_width,
                 scene_units,
             } => {
+                // A document's text takes the body role's color, as the
+                // theme's text does.
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
-                let foreground = typst_foreground_for_background(scene_background);
+                let foreground = color_to_hex(body.fill_color);
                 let page_directive = if let Some(w) = page_width {
                     // ponytail: raw interpolation into Typst source — reject control chars to avoid injection
                     if w.trim().is_empty() || w.contains(['\n', '\r', ';', '"', '\'']) {
@@ -10769,8 +11181,10 @@ impl SceneModel {
                     // within it instead of widening the drawable to a page.
                     "#set page(width: auto, height: auto, margin: 0pt)\n".to_string()
                 };
-                let source =
-                    format!("{page_directive}#set text(fill: rgb(\"{foreground}\"))\n{source}");
+                let source = format!(
+                    "{page_directive}{}#set text(fill: rgb(\"{foreground}\"))\n{source}",
+                    builder.typst_theme
+                );
                 // A document keeps Typst's own proportions (11pt text, table
                 // insets, rule widths) and is scaled so its default text is
                 // as large as the body role.
@@ -10788,6 +11202,11 @@ impl SceneModel {
                     None,
                     scale,
                 );
+                // Typst strokes tables, rules and shapes black unless told
+                // otherwise: those strokes take the body color, as the
+                // document's text does. Packages that pick their own colors
+                // take the theme's from `theme`.
+                Self::recolor_black_strokes(builder, mr.id, body.fill_color);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, spec);
                 mr
@@ -11068,6 +11487,14 @@ impl SceneModel {
                     .insert(gaanim_renderer::effects::MotionBlurExempt);
             }
         }
+        if spec.post_exempt {
+            for (entity, _) in Self::hierarchy_entities(builder, mref.id) {
+                builder
+                    .commands
+                    .entity(entity)
+                    .insert(gaanim_renderer::effects::PostProcessExempt);
+            }
+        }
         if let Some(tips) = &spec.tips {
             Self::attach_tips(builder, mref.id, tips.clone());
         }
@@ -11338,6 +11765,7 @@ impl SceneModel {
                             gaanim_renderer::effects::ElementBlend,
                             gaanim_renderer::effects::ViewLayer,
                             gaanim_renderer::effects::MotionBlurExempt,
+                            gaanim_renderer::effects::PostProcessExempt,
                             gaanim_renderer::effects::StrokeProfile,
                             gaanim_renderer::effects::ChalkBrush,
                         )>();
@@ -11411,11 +11839,41 @@ impl SceneModel {
         b.spawn_with_effects(spec.glow.clone(), spec.blur, spec.shadow.clone())
     }
 
+    /// Stroke in `color` the pieces of a compiled Typst hierarchy stroked in
+    /// opaque black.
+    fn recolor_black_strokes(builder: &mut SceneBuilder, id: ObjectId, color: PenikoColor) {
+        let Some(children) = builder
+            .states
+            .get(id)
+            .map(|state| state.child_spans.clone())
+        else {
+            return;
+        };
+        for child in children {
+            let Some(state) = builder.states.get_mut(child.id) else {
+                continue;
+            };
+            let Some(gaanim_core::peniko::Brush::Solid(stroke)) = &state.stroke.brush else {
+                continue;
+            };
+            if stroke.to_rgba8() != PenikoColor::BLACK.to_rgba8() {
+                continue;
+            }
+            state.stroke.brush = Some(gaanim_core::peniko::Brush::Solid(color));
+            builder
+                .commands
+                .entity(child.entity)
+                .insert(state.stroke.clone());
+        }
+    }
+
     /// Applies deferred glyph-level color overrides after the normal object
     /// style has been propagated to the compiled text hierarchy.
     fn apply_fragment_fills(builder: &mut SceneBuilder, target: MobjectRef, spec: &ObjectSpec) {
-        for (fragment, color) in &spec.fragment_fills {
-            builder.select(target, fragment).set_fill(*color);
+        for (fragment, occurrence, color) in &spec.fragment_fills {
+            builder
+                .select_occurrence(target, fragment, *occurrence)
+                .set_fill(*color);
         }
     }
 
@@ -11527,9 +11985,12 @@ impl SceneModel {
         if spec.fill_overridden {
             for child in &child_spans {
                 if let Some(child_state) = builder.states.get_mut(child.id) {
-                    child_state.fill = spec.fill.clone();
+                    // Strokes painted like the glyphs (rules, underlines)
+                    // follow the new fill; a styled outline keeps its color.
+                    let previous = std::mem::replace(&mut child_state.fill, spec.fill.clone());
                     if let Some(ref f) = spec.fill
                         && child_state.stroke.brush.is_some()
+                        && child_state.stroke.brush == previous
                     {
                         child_state.stroke.brush = Some(f.clone());
                         builder
@@ -11842,7 +12303,7 @@ impl SceneModel {
         if pivots_on_box_center && transform.anchor == DVec3::ZERO {
             transform.anchor = bounds.center();
         }
-        let mut pivot_in_scene = None;
+        let mut pivot_in_parent = None;
         let mut pending_text_anchor = uses_default_text_anchor.then_some((
             DVec3::ZERO,
             gaanim_text::prelude::TextAnchor::BaselineCenter,
@@ -11893,7 +12354,9 @@ impl SceneModel {
                     transform.skew = *skew;
                 }
                 LayoutOp::SetPivot(pivot) => {
-                    pivot_in_scene = Some(*pivot);
+                    // The anchor lives in the parent's space, such as the
+                    // document of an SVG part, laid out after its SVG.
+                    pivot_in_parent = Some(builder.declare_pivot(id, *pivot));
                 }
                 LayoutOp::MoveAnchorTo { target, anchor } => {
                     pending_text_anchor = None;
@@ -12044,7 +12507,7 @@ impl SceneModel {
                 })
                 .unwrap_or_else(|| bounds.center());
 
-            if let Some(pivot) = pivot_in_scene {
+            if let Some(pivot) = pivot_in_parent {
                 // Satisfy both constraints exactly: the public pivot remains
                 // fixed in scene space while the requested text point lands on
                 // its target after the final rotation, skew and scale.
@@ -12072,7 +12535,7 @@ impl SceneModel {
             } else {
                 transform = gaanim_layout::compute_move_point_to(&transform, target, point);
             }
-        } else if let Some(pivot) = pivot_in_scene {
+        } else if let Some(pivot) = pivot_in_parent {
             // SpatialTransform stores anchors in local coordinates, while the
             // public API accepts the stable scene-space point users see.
             transform.anchor = pivot - transform.translation;
@@ -14833,33 +15296,255 @@ mod tests {
     }
 
     #[test]
-    fn paragraph_max_lines_emits_a_clipped_text_box() {
+    fn max_lines_cuts_the_text_and_an_ellipsis_ends_it() {
+        use gaanim_text::prelude::TextOverflow;
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let white = gaanim_core::peniko::Color::WHITE;
+        let spec = |overflow| {
+            StructuredTextSpec::new(
+                vec!["A bounded paragraph that runs over several lines of text.".into()],
+                None,
+                gaanim_text::prelude::TextStyle {
+                    size: Some(30.0),
+                    ..Default::default()
+                },
+                gaanim_text::prelude::TextFlow {
+                    wrap: gaanim_text::prelude::TextWrap::Width(240.0),
+                    line_spacing: 1.2,
+                    max_lines: Some(2),
+                    overflow,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let lines = |source: &str| {
+            gaanim_text::prelude::measure_typst_lines(
+                &fonts,
+                source,
+                false,
+                Some("New Computer Modern"),
+                Some("New Computer Modern Math"),
+                Some(30.0),
+                None,
+                Some(Brush::Solid(white)),
+                StrokeBrush::transparent(),
+            )
+            .unwrap()
+            .1
+            .line_count
+        };
+        let fitted = |overflow| {
+            fitted_text_typst_source(
+                &fonts,
+                &spec(overflow),
+                Some(240.0),
+                30.0,
+                "New Computer Modern",
+                "New Computer Modern Math",
+                white,
+            )
+        };
+        let full = structured_text_typst_source(
+            &spec(TextOverflow::Clip),
+            Some(240.0),
+            30.0,
+            "New Computer Modern",
+            white,
+        );
+        assert!(lines(&full) > 2);
+
+        let clipped = fitted(TextOverflow::Clip);
+        assert_eq!(lines(&clipped), 2);
+        assert!(!clipped.contains('…'));
+        let ellipsis = fitted(TextOverflow::Ellipsis);
+        assert_eq!(lines(&ellipsis), 2);
+        assert!(ellipsis.contains('…'));
+        // Visible overflow draws every line.
+        assert_eq!(fitted(TextOverflow::Visible), full);
+    }
+
+    #[test]
+    fn text_cuts_end_between_characters_or_after_whole_formulas() {
         let spec = StructuredTextSpec::new(
-            vec!["A bounded paragraph".into()],
+            vec!["ab $x^2$ c\\$d".into()],
             None,
-            gaanim_text::prelude::TextStyle {
-                size: Some(30.0),
+            StructuredTextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        )
+        .unwrap();
+        let leaves = structured_text_leaves(&spec);
+        let points = leaf_cut_points(&leaves);
+        // a, b, a space, the formula, a space, c, the escaped dollar, d.
+        assert_eq!(points.len(), 8);
+        assert_eq!(word_cuts(&points), [2, 4, 8]);
+        let cut = |keep, ellipsis| {
+            cut_leaves(&leaves, &points, keep, ellipsis)
+                .into_iter()
+                .map(|leaf| leaf.text)
+                .collect::<String>()
+        };
+        assert_eq!(cut(4, false), "ab $x^2$");
+        assert_eq!(cut(3, false), "ab");
+        assert_eq!(cut(7, false), "ab $x^2$ c\\$");
+        assert_eq!(cut(2, true), "ab…");
+        assert_eq!(cut(0, true), "…");
+    }
+
+    #[test]
+    fn the_root_style_outlines_decorates_and_spaces_the_whole_text() {
+        let spec = StructuredTextSpec::new(
+            vec!["Notice".into()],
+            None,
+            StructuredTextStyle {
+                decorations: vec!["underline".to_owned()],
+                stroke_color: Some(PenikoColor::from_rgb8(255, 0, 0)),
+                stroke_width: Some(0.05),
+                word_spacing: Some(0.2),
+                baseline: Some(0.1),
                 ..Default::default()
             },
-            gaanim_text::prelude::TextFlow {
-                wrap: gaanim_text::prelude::TextWrap::Width(240.0),
-                line_spacing: 1.2,
-                max_lines: Some(2),
-                overflow: gaanim_text::prelude::TextOverflow::Clip,
-                ..Default::default()
-            },
+            gaanim_text::prelude::TextFlow::default(),
         )
         .unwrap();
         let source = structured_text_typst_source(
             &spec,
-            Some(240.0),
-            30.0,
+            None,
+            0.3,
             "New Computer Modern",
-            gaanim_core::peniko::Color::WHITE,
+            PenikoColor::WHITE,
         );
+        assert!(source.contains("#underline["), "{source}");
+        assert!(
+            source.contains("stroke: 0.05pt + rgb(\"ff0000\")"),
+            "{source}"
+        );
+        assert!(source.contains("spacing: 100% + 0.2pt"), "{source}");
+        // A shifted baseline stays in its line instead of moving a block.
+        assert!(source.contains("baseline: -0.1pt"), "{source}");
+        assert!(!source.contains("#move("), "{source}");
+    }
 
-        assert!(source.contains("height: 72pt"));
-        assert!(source.contains("clip: true"));
+    /// Characters of the glyphs drawn at the timeline's current state, with
+    /// their fills: those whose own and parent opacity are both visible.
+    fn visible_glyphs(world: &mut World) -> Vec<(char, Option<Brush>)> {
+        let parents: HashMap<Entity, f32> = world
+            .query::<(Entity, &Opacity)>()
+            .iter(world)
+            .map(|(entity, opacity)| (entity, opacity.0))
+            .collect();
+        let mut glyphs: Vec<(u64, char, Option<Brush>)> = world
+            .query::<(
+                &gaanim_scene::components::TextSpan,
+                &bevy::prelude::ChildOf,
+                &Opacity,
+                &FillBrush,
+                &MobjectId,
+            )>()
+            .iter(world)
+            .filter(|(_, parent, opacity, ..)| {
+                opacity.0 > 0.5
+                    && parents
+                        .get(&parent.parent())
+                        .is_some_and(|value| *value > 0.5)
+            })
+            .map(|(span, _, _, fill, id)| (id.0.as_raw(), span.character, fill.0.clone()))
+            .collect();
+        glyphs.sort_by_key(|(id, ..)| *id);
+        glyphs
+            .into_iter()
+            .map(|(_, character, fill)| (character, fill))
+            .collect()
+    }
+
+    fn glyph_text(glyphs: &[(char, Option<Brush>)]) -> String {
+        glyphs.iter().map(|(character, _)| character).collect()
+    }
+
+    #[test]
+    fn a_fade_transform_shows_the_glyphs_of_its_text_target() {
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas.text("Old");
+        let target = canvas.text("New");
+        canvas.play(vec![source.animate().write().duration(1.0)]);
+        canvas.play(vec![
+            source
+                .animate()
+                .fade_transform_to(&target)
+                .unwrap()
+                .duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.9);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "Old");
+        timeline.seek(&mut world, 2.0);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "New");
+    }
+
+    #[test]
+    fn become_after_the_text_was_shown_changes_it_at_the_cursor() {
+        let mut canvas = SceneModel::new(640, 360);
+        let text = canvas.text("Before");
+        canvas.play(vec![text.animate().write().duration(1.0)]);
+        text.r#become(
+            StructuredTextSpec::new(
+                vec!["Later".into()],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .unwrap(),
+            None,
+        );
+        canvas.wait(1.0);
+        // The handle keeps its identity: it moves the new content.
+        canvas.play(vec![text.animate().fade_out().duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.99);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "Before");
+        timeline.seek(&mut world, 1.5);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "Later");
+        timeline.seek(&mut world, 3.0);
+        assert_eq!(glyph_text(&visible_glyphs(&mut world)), "");
+    }
+
+    #[test]
+    fn a_part_recolored_after_the_text_was_shown_changes_at_the_cursor() {
+        let accent = PenikoColor::from_rgb8(255, 160, 0);
+        let mut canvas = SceneModel::new(640, 360);
+        let text = canvas.text_spec(
+            StructuredTextSpec::new(
+                vec![
+                    "is ".into(),
+                    gaanim_text::prelude::TextPart::new(
+                        "mass",
+                        vec!["mass".into()],
+                        StructuredTextStyle::default(),
+                    )
+                    .into(),
+                ],
+                None,
+                StructuredTextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .unwrap(),
+        );
+        canvas.play(vec![text.animate().write().duration(1.0)]);
+        assert!(!text.fill_text_part(&["mass".to_owned()], accent));
+        text.select("mass").fill(accent);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let accented = |world: &mut World| {
+            visible_glyphs(world)
+                .into_iter()
+                .filter(|(_, fill)| *fill == Some(Brush::Solid(accent)))
+                .map(|(character, _)| character)
+                .collect::<String>()
+        };
+        timeline.seek(&mut world, 0.99);
+        assert_eq!(accented(&mut world), "");
+        timeline.seek(&mut world, 1.5);
+        assert_eq!(accented(&mut world), "mass");
     }
 
     #[test]
@@ -15919,6 +16604,38 @@ mod tests {
             .find(|(object, _)| object.0 == id)
             .unwrap()
             .1
+    }
+
+    #[test]
+    fn a_boolean_keeps_the_look_its_first_operand_had_when_it_was_made() {
+        use gaanim_core::peniko::{Brush, Color};
+        let mut canvas = SceneModel::new(640, 360);
+        let red = Color::from_rgb8(255, 0, 0);
+        let a = canvas.circle(1.0).fill(red);
+        let b = canvas.square(1.5).move_to_default(0.5, 0.0);
+        let union = canvas
+            .boolean(
+                &[&a, &b],
+                crate::canvas::BooleanOperation::Union,
+                false,
+                0.0025,
+                crate::canvas::BooleanRule::NonZero,
+            )
+            .unwrap();
+        let _ = a
+            .fill(Color::from_rgb8(0, 0, 255))
+            .stroke(Color::WHITE, 0.1);
+        canvas.wait(1.0);
+        let (mut world, _) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(union.id.as_raw() - 1);
+        let (fill, stroke) = world
+            .query::<(&MobjectId, &FillBrush, &StrokeBrush)>()
+            .iter(&world)
+            .find(|(object, ..)| object.0 == id)
+            .map(|(_, fill, stroke)| (fill.0.clone(), stroke.brush.clone()))
+            .unwrap();
+        assert_eq!(fill, Some(Brush::Solid(red)));
+        assert_eq!(stroke, None, "{stroke:?}");
     }
 
     #[test]
@@ -18552,6 +19269,9 @@ mod tests {
                             lens: gaanim_timeline::clip::PropertyLensSpec::PathCompletion {
                                 from,
                                 to,
+                            } | gaanim_timeline::clip::PropertyLensSpec::PathPartial {
+                                from,
+                                to,
                             },
                             ..
                         }
@@ -18574,6 +19294,54 @@ mod tests {
             }
         }
         counts
+    }
+
+    #[test]
+    fn write_lasts_and_draws_each_piece_as_manim_does() {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload, PropertyLensSpec};
+        let mut canvas = SceneModel::new(640, 360);
+        let short = canvas.text("I");
+        let long = canvas.text("Sphinx of black quartz");
+        // 1 s for fewer than 15 pieces, 2 s from 15, unless a duration is set.
+        assert_eq!(short.animate().write().into_builder().duration, 1.0);
+        assert_eq!(long.animate().write().into_builder().duration, 2.0);
+        assert_eq!(long.animate().unwrite().into_builder().duration, 2.0);
+        assert_eq!(
+            long.animate().write().duration(0.5).into_builder().duration,
+            0.5
+        );
+        canvas.play(vec![short.animate().write()]);
+
+        let timeline = compiled_timeline(&canvas);
+        let clips: Vec<(f64, f64, PropertyLensSpec, RateFunc)> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    lens, rate_func, ..
+                }) if clip.duration > 0.5 => {
+                    Some((clip.start, clip.duration, lens.clone(), rate_func.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let half = |rate: &RateFunc, from: f64, to: f64| matches!(rate, RateFunc::Squish { start, end, .. } if *start == from && *end == to);
+        // The one piece spans the second: its outline over the first half...
+        assert!(clips.iter().any(|(start, duration, lens, rate)| {
+            *start == 0.0
+                && *duration == 1.0
+                && matches!(lens, PropertyLensSpec::PathPartial { from, to } if *from == 0.0 && *to == 1.0)
+                && half(rate, 0.0, 0.5)
+        }));
+        // ...then its fill, while the outline thins out to its own (none).
+        assert!(clips.iter().any(|(_, _, lens, rate)| {
+            matches!(lens, PropertyLensSpec::FillDrawProgress { from, to } if *from == 0.0 && *to == 1.0)
+                && half(rate, 0.5, 1.0)
+        }));
+        assert!(clips.iter().any(|(_, _, lens, rate)| {
+            matches!(lens, PropertyLensSpec::StrokeWidth { from, to } if *from > 0.0 && *to == 0.0)
+                && half(rate, 0.5, 1.0)
+        }));
     }
 
     #[test]
@@ -19612,6 +20380,281 @@ mod tests {
         assert_point_close(transform.translation, DVec3::new(400.0, 200.0, 0.0));
     }
 
+    /// A scaled box scales its children with it, as a CSS transform does:
+    /// they keep their own scale under it instead of undoing the box's.
+    #[test]
+    fn a_scaled_box_keeps_its_children_at_their_own_scale() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let first = canvas.rect(160.0, 60.0);
+        let second = canvas.rect(120.0, 40.0);
+        let root = canvas.group(&[&first, &second]);
+        first.claim_layout(&root).unwrap();
+        second.claim_layout(&root).unwrap();
+        let root = root.scale_to(2.0);
+        canvas.reflow_layout(
+            &root,
+            [&first, &second]
+                .iter()
+                .map(|member| crate::canvas::LayoutMemberSpec {
+                    id: member.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                })
+                .collect(),
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                style: gaanim_layout::LayoutStyle::default(),
+                within: LayoutWithin::Intrinsic,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let scales: Vec<DVec3> = world
+            .query_filtered::<&SpatialTransform, bevy::prelude::With<bevy::prelude::ChildOf>>()
+            .iter(&world)
+            .map(|transform| transform.scale)
+            .collect();
+        assert_eq!(scales.len(), 2);
+        for scale in scales {
+            assert_point_close(scale, DVec3::ONE);
+        }
+    }
+
+    /// A stack moved after its solve crops a `fit="cover"` layer to the
+    /// stack where it is, not where the solve centred it.
+    #[test]
+    fn a_cover_layer_is_cropped_where_its_moved_stack_is() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let layer = canvas.rect(80.0, 80.0);
+        let root = canvas.group(&[&layer]);
+        layer.claim_layout(&root).unwrap();
+        let root = root.move_to(300.0, 0.0);
+        canvas.reflow_layout(
+            &root,
+            vec![crate::canvas::LayoutMemberSpec {
+                id: layer.id,
+                style: gaanim_layout::LayoutItemStyle {
+                    fit: gaanim_layout::FitMode::Cover,
+                    ..Default::default()
+                },
+            }],
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Stack,
+                style: gaanim_layout::LayoutStyle {
+                    width: gaanim_layout::SizeRule::Fixed(100.0),
+                    height: gaanim_layout::SizeRule::Fixed(50.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let clips: Vec<_> = world
+            .query::<&gaanim_renderer::effects::ClipMask>()
+            .iter(&world)
+            .map(|clip| clip.path.bounding_box())
+            .collect();
+        // The layer is scaled by 1.25 to cover the stack, so the stack's
+        // 100 x 50 box is 80 x 40 in the layer's own space, around its center.
+        assert_eq!(clips.len(), 1);
+        let clip = clips[0];
+        assert!((clip.center().x).abs() < 1.0e-6, "{clip:?}");
+        assert!((clip.width() - 80.0).abs() < 1.0e-6, "{clip:?}");
+        assert!((clip.height() - 40.0).abs() < 1.0e-6, "{clip:?}");
+    }
+
+    /// A child detached from a moved box leaves the hierarchy from then on,
+    /// where it stands, and then moves into another box: before each change
+    /// it still follows the box it was in. Seeking back restores each one.
+    #[test]
+    fn a_child_changes_box_on_the_timeline() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let first = canvas.rect(80.0, 30.0);
+        let second = canvas.rect(80.0, 30.0);
+        let other = canvas.rect(80.0, 30.0);
+        let row = canvas.group(&[&first, &second]);
+        first.claim_layout(&row).unwrap();
+        second.claim_layout(&row).unwrap();
+        let row = row.move_to(300.0, 200.0);
+        let column = canvas.group(&[&other]);
+        other.claim_layout(&column).unwrap();
+        let column = column.move_to(-300.0, -200.0);
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        let spec = |kind| crate::canvas::LayoutSpec {
+            kind,
+            style: gaanim_layout::LayoutStyle {
+                gap: DVec2::splat(20.0),
+                ..Default::default()
+            },
+            within: LayoutWithin::Intrinsic,
+        };
+        let row_spec = spec(gaanim_layout::LayoutNodeKind::Row { wrap: false });
+        let column_spec = spec(gaanim_layout::LayoutNodeKind::Column { wrap: false });
+        canvas.reflow_layout(
+            &row,
+            vec![member(&first), member(&second)],
+            row_spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.reflow_layout(
+            &column,
+            vec![member(&other)],
+            column_spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(1.0);
+        second.release_layout(&row);
+        canvas.set_group_members(&row, &[&first]);
+        canvas.reflow_layout(&row, vec![member(&first)], row_spec, 2, None, None, None);
+        canvas.wait(1.0);
+        second.claim_layout(&column).unwrap();
+        canvas.set_group_members(&column, &[&other, &second]);
+        canvas.reflow_layout(
+            &column,
+            vec![member(&other), member(&second)],
+            column_spec,
+            2,
+            Some(0.5),
+            Some(&second),
+            None,
+        );
+        canvas.wait(1.0);
+
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let state = |world: &mut World, time: f64, timeline: &mut Timeline| {
+            timeline.seek(world, time);
+            let entity = entity_of(world, &second);
+            let parent = world
+                .get::<bevy::prelude::ChildOf>(entity)
+                .map(|of| of.parent());
+            let opacity = opacity_of(world, &second);
+            (parent, transform_of(world, &second).translation, opacity)
+        };
+        let row_entity = entity_of(&mut world, &row);
+        let column_entity = entity_of(&mut world, &column);
+        // In the row, 50 right of its middle; detached at (350, 200).
+        for time in [0.5, 3.5, 1.5, 0.5] {
+            let (parent, translation, opacity) = state(&mut world, time, &mut timeline);
+            assert!((opacity - 1.0).abs() < 1e-6, "hidden at {time}");
+            match time {
+                0.5 => {
+                    assert_eq!(parent, Some(row_entity), "at {time}");
+                    assert_point_close(translation, DVec3::new(50.0, 0.0, 0.0));
+                }
+                1.5 => {
+                    assert_eq!(parent, None, "at {time}");
+                    assert_point_close(translation, DVec3::new(350.0, 200.0, 0.0));
+                }
+                _ => {
+                    // Under the other rect, 25 below the column's middle.
+                    assert_eq!(parent, Some(column_entity), "at {time}");
+                    assert_point_close(translation, DVec3::new(0.0, -25.0, 0.0));
+                }
+            }
+        }
+    }
+
+    /// `box.reflow()` measures a child scaled since it was placed at its new
+    /// size, a nested box as well as a leaf, and its siblings make room; any
+    /// other reflow keeps the size the child was placed with, as a CSS
+    /// transform does.
+    #[test]
+    fn remeasuring_makes_room_for_a_scaled_child() {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload, PropertyLensSpec};
+        let member = |handle: &crate::canvas::DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        let third_rest = |remeasure: bool, nested: bool| {
+            let mut canvas = SceneModel::new(1280, 720);
+            let cells: Vec<_> = (0..3)
+                .map(|_| {
+                    let rect = canvas.rect(80.0, 30.0);
+                    if !nested {
+                        return rect;
+                    }
+                    let inner = canvas.group(&[&rect]);
+                    rect.claim_layout(&inner).unwrap();
+                    canvas.reflow_layout(
+                        &inner,
+                        vec![member(&rect)],
+                        crate::canvas::LayoutSpec {
+                            kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                            style: gaanim_layout::LayoutStyle::default(),
+                            within: LayoutWithin::Intrinsic,
+                        },
+                        1,
+                        None,
+                        None,
+                        None,
+                    );
+                    inner
+                })
+                .collect();
+            let refs: Vec<_> = cells.iter().collect();
+            let container = canvas.group(&refs);
+            for cell in &cells {
+                cell.claim_layout(&container).unwrap();
+            }
+            let spec = crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+                style: gaanim_layout::LayoutStyle {
+                    gap: DVec2::splat(20.0),
+                    ..Default::default()
+                },
+                within: LayoutWithin::Intrinsic,
+            };
+            let members = || cells.iter().map(member).collect::<Vec<_>>();
+            canvas.reflow_layout(&container, members(), spec.clone(), 1, None, None, None);
+            canvas.play(vec![cells[1].animate().scale_to(2.0).duration(0.5)]);
+            if remeasure {
+                canvas.remeasure_layout(&container, members(), spec, 2, Some(0.5), &container);
+            } else {
+                canvas.reflow_layout(&container, members(), spec, 2, Some(0.5), None, None);
+            }
+            let (_, timeline) = compiled_world(&canvas);
+            timeline
+                .clips
+                .values()
+                .filter(|clip| clip.start >= 0.5 - 1.0e-9)
+                .filter_map(|clip| match &clip.payload {
+                    ClipPayload::Animation(AnimationSpec {
+                        lens: PropertyLensSpec::Translation { to, .. },
+                        ..
+                    }) => Some(to.x),
+                    _ => None,
+                })
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        // 80 + 20 + 160 + 20 + 80 wide: the last cell rests 140 from the
+        // middle once the scaled one counts at 160, 100 while it counts at 80.
+        for nested in [false, true] {
+            let (remeasured, kept) = (third_rest(true, nested), third_rest(false, nested));
+            assert!(
+                (remeasured - 140.0).abs() < 1.0e-6,
+                "nested {nested}: {remeasured}"
+            );
+            assert!((kept - 100.0).abs() < 1.0e-6, "nested {nested}: {kept}");
+        }
+    }
+
     #[test]
     fn root_layout_replays_anchor_scale_and_rotation_against_resolved_bounds() {
         let mut canvas = SceneModel::new(1280, 720);
@@ -20479,6 +21522,157 @@ mod tests {
         );
     }
 
+    /// World matrix of the entity whose local box is `width` wide.
+    fn world_matrix_of_width(world: &mut World, width: f64) -> gaanim_core::glam::DMat4 {
+        let entity = world
+            .query::<(Entity, &LocalBounds)>()
+            .iter(world)
+            .find(|(_, bounds)| (bounds.0.width() - width).abs() < 1e-6)
+            .unwrap()
+            .0;
+        let mut matrix = gaanim_core::glam::DMat4::IDENTITY;
+        let mut current = Some(entity);
+        while let Some(node) = current {
+            let local = world.get::<SpatialTransform>(node).unwrap().to_mat4();
+            matrix = local * matrix;
+            current = world.get::<ChildOf>(node).map(ChildOf::parent);
+        }
+        matrix
+    }
+
+    #[test]
+    fn an_svg_part_turns_about_a_scene_pivot() {
+        let svg_file =
+            std::env::temp_dir().join(format!("gaanim_svg_pivot_test_{}.svg", std::process::id()));
+        std::fs::write(
+            &svg_file,
+            r##"<svg width="300" height="200" xmlns="http://www.w3.org/2000/svg">
+                <rect id="early" x="20" y="40" width="100" height="20"/>
+                <rect id="late" x="160" y="120" width="60" height="20"/>
+              </svg>"##,
+        )
+        .unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        let svg = canvas.svg(&svg_file).unwrap();
+        std::fs::remove_file(svg_file).unwrap();
+        let svg = svg.scale_to(1.5).move_to(3.0, 1.0);
+        let early = svg.part("early").unwrap();
+        let late = svg.part("late").unwrap();
+        // One pivot is declared with the SVG, the other at the cursor.
+        let early_pivot = DVec3::new(-1.0, 2.0, 0.0);
+        let late_pivot = DVec3::new(5.0, -2.0, 0.0);
+        let early = early.with_pivot(early_pivot.x, early_pivot.y);
+        canvas.wait(0.5);
+        let late = late.with_pivot(late_pivot.x, late_pivot.y);
+        canvas.play(vec![
+            early.animate().rotate_by(1.0).duration(1.0),
+            late.animate().rotate_by(-1.0).duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        for (width, pivot) in [(1.0, early_pivot), (0.6, late_pivot)] {
+            timeline.seek(&mut world, 0.5);
+            let local = world_matrix_of_width(&mut world, width)
+                .inverse()
+                .transform_point3(pivot);
+            timeline.seek(&mut world, 1.5);
+            let turned = world_matrix_of_width(&mut world, width).transform_point3(local);
+            assert!(turned.distance(pivot) < 1e-6, "{width}: {turned:?}");
+        }
+    }
+
+    #[test]
+    fn a_joint_turns_about_its_pivot_after_its_group_turned() {
+        let mut canvas = SceneModel::new(640, 360);
+        let upper = canvas.rect(2.0, 0.2).move_to(1.0, 0.0);
+        let lower = canvas.rect(1.5, 0.2).move_to(2.75, 0.0);
+        let joint = canvas.circle(0.1).move_to(2.0, 0.0);
+        // The forearm's box is 1.6 wide, from the joint to its end.
+        let forearm = canvas.group(&[&lower, &joint]).with_pivot(2.0, 0.0);
+        let arm = canvas.group(&[&upper, &forearm]).with_pivot(0.0, 0.0);
+        canvas.play(vec![arm.animate().rotate_by(0.5).duration(1.0)]);
+        canvas.play(vec![forearm.animate().rotate_by(0.7).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let elbow = gaanim_core::glam::DQuat::from_rotation_z(0.5) * DVec3::new(2.0, 0.0, 0.0);
+        timeline.seek(&mut world, 1.0);
+        let local = world_matrix_of_width(&mut world, 1.6)
+            .inverse()
+            .transform_point3(elbow);
+        timeline.seek(&mut world, 2.0);
+        let turned = world_matrix_of_width(&mut world, 1.6).transform_point3(local);
+        assert!(turned.distance(elbow) < 1e-6, "{turned:?}");
+    }
+
+    #[test]
+    fn a_drawable_left_out_of_the_post_process_marks_its_members() {
+        let mut canvas = SceneModel::new(640, 360);
+        let a = canvas.rect(1.0, 1.0);
+        let b = canvas.circle(0.5);
+        let _label = canvas.group(&[&a, &b]).post_process(false);
+        let _kept = canvas.rect(2.0, 1.0);
+        canvas.wait(0.5);
+        let (mut world, _) = compiled_world(&canvas);
+        let exempt = world
+            .query_filtered::<(), With<gaanim_renderer::effects::PostProcessExempt>>()
+            .iter(&world)
+            .count();
+        // The group and its two members, not the other rectangle.
+        assert_eq!(exempt, 3);
+    }
+
+    #[test]
+    fn segments_blur_their_motion_their_own_way() {
+        use gaanim_renderer::effects::{MotionBlur, MotionBlurWindows};
+        let blur = |angle: f64| MotionBlur::new(angle, 8, None).unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_motion_blur(Some(blur(180.0)));
+        let mut segments = Vec::new();
+        for name in ["scene", "wide", "sharp"] {
+            segments.push(canvas.segment_with(name, None, None, None).unwrap());
+            canvas.wait(1.0);
+        }
+        canvas
+            .set_segment_motion_blur(&segments[1], Some(blur(360.0)))
+            .unwrap();
+        canvas.set_segment_motion_blur(&segments[2], None).unwrap();
+        let (world, _) = compiled_world(&canvas);
+        assert!(world.get_resource::<MotionBlur>().is_none());
+        let windows = world.resource::<MotionBlurWindows>();
+        assert_eq!(windows.at(0.5), Some(blur(180.0)));
+        assert_eq!(windows.at(1.5), Some(blur(360.0)));
+        assert_eq!(windows.at(2.5), None);
+        // A frame on a cut belongs to the segment it enters.
+        assert_eq!(windows.at(1.0), Some(blur(360.0)));
+        assert_eq!(windows.at(2.0), None);
+    }
+
+    #[test]
+    fn a_spotlight_cuts_a_hole_around_each_target() {
+        let mut canvas = SceneModel::new(640, 360);
+        let left = canvas.rect(1.0, 1.0).move_to(-4.0, 1.0);
+        let right = canvas.rect(1.0, 1.0).move_to(4.0, -1.0);
+        let anim = canvas
+            .spotlight(
+                vec![
+                    crate::canvas::BoundsTarget::Drawable(left.id),
+                    crate::canvas::BoundsTarget::Drawable(right.id),
+                ],
+                0.7,
+                [0.1; 4],
+                0.05,
+            )
+            .unwrap();
+        canvas.play(vec![anim]);
+        let (mut world, _) = compiled_world(&canvas);
+        let operands: Vec<usize> = world
+            .query::<&gaanim_renderer::effects::BooleanBinding>()
+            .iter(&world)
+            .map(|binding| binding.sources.len())
+            .collect();
+        // The cover, then one hole per target.
+        assert_eq!(operands, vec![3]);
+        assert!(canvas.spotlight(Vec::new(), 0.7, [0.1; 4], 0.05).is_err());
+    }
+
     #[test]
     fn flashes_sweep_a_frame_or_an_underline_that_follow_the_target() {
         let mut canvas = SceneModel::new(640, 360);
@@ -21017,6 +22211,74 @@ mod tests {
             .collect();
         clips.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
         clips
+    }
+
+    /// Opacity of `entity` as drawn: its own times its ancestors'.
+    fn drawn_opacity(world: &World, entity: Entity) -> f32 {
+        let mut opacity = 1.0;
+        let mut current = Some(entity);
+        while let Some(node) = current {
+            opacity *= world.get::<Opacity>(node).map_or(1.0, |value| value.0);
+            current = world.get::<ChildOf>(node).map(ChildOf::parent);
+        }
+        opacity
+    }
+
+    /// The drawn opacities of the glyphs of each root with children, from
+    /// left to right.
+    fn glyph_opacities(world: &mut World) -> Vec<Vec<f32>> {
+        let mut roots: Vec<(Entity, f64)> = world
+            .query_filtered::<(Entity, &SpatialTransform), (With<Children>, Without<ChildOf>)>()
+            .iter(world)
+            .map(|(entity, transform)| (entity, transform.translation.x))
+            .collect();
+        roots.sort_by(|a, b| a.1.total_cmp(&b.1));
+        roots
+            .into_iter()
+            .map(|(root, _)| {
+                let glyphs: Vec<Entity> = world
+                    .query::<(Entity, &ChildOf)>()
+                    .iter(world)
+                    .filter(|(_, child_of)| child_of.parent() == root)
+                    .map(|(entity, _)| entity)
+                    .collect();
+                glyphs
+                    .into_iter()
+                    .map(|glyph| drawn_opacity(world, glyph))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn matching_ends_on_the_target_in_every_mode() {
+        for (mode, after) in [
+            ("tex", "abd"),
+            ("text", "abd"),
+            ("shapes", "abd"),
+            ("shapes", "abcd"),
+        ] {
+            let mut canvas = SceneModel::new(640, 360);
+            let source = canvas.text("abc").move_to(-2.0, 0.0);
+            let target = canvas.text(after).move_to(2.0, 0.0);
+            canvas.wait(0.5);
+            canvas
+                .transform_matching(&source, &target, mode, 1.0)
+                .unwrap();
+            canvas.wait(0.5);
+            let (mut world, mut timeline) = compiled_world(&canvas);
+            timeline.seek(&mut world, 1.9);
+            let [before, after_glyphs] = glyph_opacities(&mut world).try_into().unwrap();
+            assert!(
+                before.iter().all(|&opacity| opacity == 0.0),
+                "{mode}: {before:?}"
+            );
+            assert_eq!(after_glyphs.len(), after.len(), "{mode}");
+            assert!(
+                after_glyphs.iter().all(|&opacity| opacity == 1.0),
+                "{mode} {after}: {after_glyphs:?}"
+            );
+        }
     }
 
     #[test]

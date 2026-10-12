@@ -101,6 +101,16 @@ pub enum ClipPayload {
         /// re-applied to overwrite those stale values.
         children_world_transforms: Vec<(ObjectId, SpatialTransform)>,
     },
+    /// Move an object under another parent, or to the top of the hierarchy,
+    /// at this instant: before it, the object keeps its former parent.
+    Reparent {
+        target: ObjectId,
+        /// The new parent; `None` takes the object out of every group.
+        parent: Option<ObjectId>,
+        /// Its local transform under the new parent from now on: where it
+        /// stood in the scene at this instant.
+        transform: SpatialTransform,
+    },
     /// Marks the beginning of a scene at this timestamp.
     SceneStart(SceneId),
     /// Marks the end of a scene at this timestamp.
@@ -207,6 +217,13 @@ pub enum PropertyLensSpec {
         to: gaanim_scene::Material3D,
     },
     PathCompletion {
+        from: f64,
+        to: f64,
+    },
+    /// Draw progress counted in Bézier segments, sub-paths one after
+    /// another, as Manim draws a `Write`; see
+    /// [`gaanim_math::get_subpath_by_curves`].
+    PathPartial {
         from: f64,
         to: f64,
     },
@@ -522,6 +539,10 @@ impl PropertyLensSpec {
                 to: *to,
             },
             Self::PathCompletion { from, to } => PropertyLens::PathCompletion {
+                from: *from,
+                to: *to,
+            },
+            Self::PathPartial { from, to } => PropertyLens::PathPartial {
                 from: *from,
                 to: *to,
             },

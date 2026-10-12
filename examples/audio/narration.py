@@ -28,7 +28,7 @@ def page():
 
 
 def code(text, zone):
-    scene.text(text, role="code", markup=False).place(zone, anchor="left")
+    scene.text(text, role="code").place(zone, anchor="left")
 
 
 def read(text, zone):

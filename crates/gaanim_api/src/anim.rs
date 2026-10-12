@@ -58,8 +58,8 @@ pub enum DrawOrder {
     /// Middle first, then outward; groups equally far from the middle start
     /// together.
     Center,
-    /// A pseudo-random permutation fixed by the number of groups, so seeks,
-    /// snapshots, and exports agree.
+    /// A pseudo-random permutation fixed by the number of groups and the
+    /// seed, so seeks, snapshots, and exports agree.
     Random,
 }
 
@@ -71,6 +71,8 @@ pub struct DrawAnimationConfig {
     /// Text unit whose glyphs start together (`write(by=...)`).
     pub reveal_unit: gaanim_text::prelude::TextRevealUnit,
     pub order: DrawOrder,
+    /// Seed of the `Random` order's permutation.
+    pub seed: u64,
     /// Glyph groups in reading order, resolved from `reveal_unit` when the
     /// scene is compiled. `None` staggers every drawn item on its own.
     pub groups: Option<Vec<Vec<ObjectId>>>,
@@ -736,6 +738,21 @@ impl AnimationBuilder {
             | AnimationType::Unwrite { config }
             | AnimationType::DrawBorderThenFill { config } => {
                 config.order = order;
+            }
+            _ => {}
+        }
+        self
+    }
+
+    /// Seed of the permutation a `Random` draw order follows.
+    pub fn draw_seed(mut self, seed: u64) -> Self {
+        match &mut self.anim_type {
+            AnimationType::Write { config }
+            | AnimationType::Create { config }
+            | AnimationType::Uncreate { config }
+            | AnimationType::Unwrite { config }
+            | AnimationType::DrawBorderThenFill { config } => {
+                config.seed = seed;
             }
             _ => {}
         }

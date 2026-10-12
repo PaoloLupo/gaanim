@@ -26,7 +26,7 @@ rule = scene.canvas.color("rule")
 
 def code(text):
     """A code label, its lines aligned left."""
-    return scene.text(text, role="code", markup=False, text_align="left")
+    return scene.text(text, role="code", text_align="left")
 
 
 def panels(rows, columns, head="0.5"):
@@ -50,9 +50,8 @@ def ride(tracker, duration=RUN):
 
 
 # Each tracker takes the curve and a Parameter from 0 (its start) to 1 (its
-# end), measured along the arc length. They start hidden: fade them in. Build
-# the curve where it is drawn, in scene coordinates: the trackers follow the
-# curve's own points.
+# end), measured along the arc length. They start hidden: fade them in. They
+# follow the curve as it is drawn, even when it moves.
 trackers_start = scene.cursor
 scene.segment("trackers")
 t = scene.viz.parameter(0.0)

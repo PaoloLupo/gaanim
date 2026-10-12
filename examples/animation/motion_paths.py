@@ -84,7 +84,7 @@ arcs = [
 ]
 moves = []
 for (head, stage), (label, angle) in zip(panels(2, 3, 0.5), arcs):
-    scene.text(label, role="code", markup=False).place(head, anchor="center")
+    scene.text(label, role="code").place(head, anchor="center")
     (x, y), half = stage.center, min(stage.width, stage.height) * 0.42
     start, end = (x - half, y), (x + half, y)
     for point in (start, end):

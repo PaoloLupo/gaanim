@@ -14,7 +14,8 @@ HOLD = 0.8
 SHOW = WRITE + HOLD
 SEGMENTS = 5
 # Entries are set larger than the theme's math size (0.44) so that each
-# matrix reads at a glance; gaps, labels and delimiters grow to match.
+# matrix reads at a glance; gaps and labels grow to match, and the delimiters
+# follow the entries.
 SIZE = 0.8
 GROWTH = SIZE / 0.44
 
@@ -26,14 +27,13 @@ SQUARE = [[1, 2], [3, 4]]
 
 
 def matrix(data, **options):
-    """scene.viz.matrix with entries of SIZE and its gaps and delimiters scaled to them."""
+    """scene.viz.matrix with entries of SIZE and its gaps scaled to them."""
     sized = {
         "entry_style": TextStyle(size=SIZE),
         "label_style": TextStyle(size=0.8 * SIZE),
         "row_gap": 0.24 * GROWTH,
         "column_gap": 0.24 * GROWTH,
         "delimiter_gap": 0.12 * GROWTH,
-        "delimiter_size": max(0.72, 0.6 * len(data)) * GROWTH,
     }
     return scene.viz.matrix(data, **{**sized, **options})
 
@@ -43,8 +43,7 @@ def show(cells, columns, rows, label_height="48px"):
     grid = scene.layout.zones(Zones.grid(rows=rows, columns=columns, gap="24px", padding="page_padding"))
     for zone, (label, shown) in zip(grid, cells):
         top, body = zone.split(Zones.rows([label_height, "1fr"]))
-        scene.text(label, role="code", markup=False, text_align="center").place(top, anchor="bottom")
-        # place() returns the matrix's layout box, so keep the matrix itself.
+        scene.text(label, role="code", text_align="center").place(top, anchor="bottom")
         shown.place(body)
     scene.play([shown.animate.write().duration(WRITE) for _, shown in cells])
     scene.wait(HOLD)

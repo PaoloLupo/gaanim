@@ -76,8 +76,7 @@ def compose(entries, label_share="5fr", stage_share="2fr"):
     grid = rows(len(entries), label_share, stage_share)
     plays = []
     for index, (label, compose_grows) in enumerate(entries):
-        # markup=False keeps the * of *grows literal instead of starting bold text.
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
         plays.append(compose_grows(bars(grid[2 * index + 1].inset(("12px", 0)))))
     # Every grow lasts GROW seconds unless its composition says otherwise.
     scene.play(plays, duration=GROW)

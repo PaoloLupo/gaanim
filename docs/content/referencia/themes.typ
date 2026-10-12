@@ -279,15 +279,16 @@ o dentro de un tema.
 #api-entry(
   name: "StrokeStyle",
   kind: "class",
-  signature: "StrokeStyle(paint: Paint, width: float = 0.02, *, cap: str = \"round\", join: str = \"round\", miter_limit: float = 4.0, dashes: Sequence[float] = (), dash_offset: float = 0.0)",
+  signature: "StrokeStyle(paint: Paint, width: float = 0.02, *, cap: str = \"round\", join: str = \"round\", miter_limit: float = 4.0, dashes: Sequence[float] = (), dash_offset: float = 0.0, align: str | None = None)",
   params: (
     (name: "paint", type: "Paint", default: none, desc: [Color, `Brush` o nombre de un token del tema.]),
     (name: "width", type: "float", default: "0.02", desc: [Ancho en unidades lógicas.]),
     (name: "cap", type: "\"butt\" | \"round\" | \"square\"", default: "\"round\"", desc: [Remate de los extremos.]),
     (name: "join", type: "\"bevel\" | \"miter\" | \"round\"", default: "\"round\"", desc: [Unión entre segmentos.]),
     (name: "miter_limit", type: "float", default: "4.0", desc: [Límite de inglete.]),
-    (name: "dashes", type: "Sequence[float]", default: "()", desc: [Longitudes alternas de trazo y hueco; vacío es continuo.]),
+    (name: "dashes", type: "Sequence[float]", default: "()", desc: [Longitudes alternas de trazo y hueco; vacío es continuo. Un trazo de longitud cero con remate `"round"` o `"square"` dibuja un punto o un cuadrado.]),
     (name: "dash_offset", type: "float", default: "0.0", desc: [Desplazamiento del patrón.]),
+    (name: "align", type: "\"inside\" | \"center\" | \"outside\" | None", default: "None", desc: [Posición del trazo en los contornos cerrados, como en `Drawable.stroke`; `None` conserva la del objeto.]),
   ),
   returns: (type: "StrokeStyle"),
   desc: [Métricas inválidas lanzan `ValueError`.],
@@ -532,7 +533,7 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
 """, uniforms={"amount": amount})
 scene.canvas.post = [split, PostProcess.vignette(0.5)]
 ring = scene.geometry.circle(2).no_fill().stroke(GOLD, 0.2)
-scene.play([amount.animate.set(1.0).duration(0.5).repeat(1, yoyo=True)])
+scene.play([amount.animate.set(1.0).duration(0.5).repeat(2, yoyo=True)])
 # output: preview.webp
 scene.render()
 ```
@@ -599,7 +600,7 @@ burst = scene.viz.parameter(0.0)
 scene.canvas.post = [PostProcess.glitch(intensity=burst, seed=3), PostProcess.grain(0.05)]
 scene.geometry.circle(1.6).fill(GOLD).move_to(-3, 0)
 scene.geometry.rounded_rect(3, 3, 0.3).fill(BLUE).move_to(3, 0)
-scene.play([burst.animate.set(1.0).duration(0.3).repeat(1, yoyo=True)])
+scene.play([burst.animate.set(1.0).duration(0.3).repeat(2, yoyo=True)])
 # output: preview.webp
 scene.render()
 ```
@@ -620,7 +621,7 @@ scene.canvas.post = PostProcess.bloom(threshold=0.55, intensity=glow, radius=0.6
 ring = scene.geometry.circle(1.6).no_fill().stroke("#ff4fd8", 0.12).move_to(-3, 0)
 star = scene.geometry.regular_polygon(5, 1.6).no_fill().stroke("#ffe45c", 0.12).move_to(3, 0)
 scene.play([ring.animate.create(), star.animate.create()])
-scene.play([glow.animate.set(1.4).duration(0.6).repeat(1, yoyo=True)])
+scene.play([glow.animate.set(1.4).duration(0.6).repeat(2, yoyo=True)])
 # output: preview.webp
 scene.render()
 ```
@@ -635,7 +636,7 @@ scene.render()
     (name: "phase", type: "float | None", default: "None", desc: [Dónde se abre el obturador respecto al tiempo del cuadro, en grados de un cuadro; por defecto se centra en él.]),
   ),
   returns: (type: "None"),
-  desc: [Desenfoque de movimiento como el de una cámara de cine en las exportaciones y las capturas: cada cuadro promedia en luz lineal `samples` búsquedas exactas repartidas por el obturador, así que es determinista, y nunca mezcla dos segmentos. La duración del obturador sigue los fps de la exportación (las capturas usan 60). El visor interactivo se ve nítido, y renderizar cuesta `samples` veces más. Un valor fuera de rango lanza `ValueError`. Usa `drawable.motion_blur(False)` para mantener nítido un objeto.],
+  desc: [Desenfoque de movimiento como el de una cámara de cine en las exportaciones y las capturas: cada cuadro promedia en luz lineal `samples` búsquedas exactas repartidas por el obturador, así que es determinista, y nunca mezcla dos segmentos. La duración del obturador sigue los fps de la exportación (las capturas usan 60). El visor interactivo se ve nítido, y renderizar cuesta `samples` veces más. Un valor fuera de rango lanza `ValueError`. Usa `drawable.motion_blur(False)` para mantener nítido un objeto, y #link("/referencia/scene/#api-segment-motion_blur")[`Segment.motion_blur`] para darle a un segmento su propio obturador.],
 )[
 ```python
 # show-code: true
@@ -656,7 +657,7 @@ scene.render()
   kind: "property",
   signature: "post: PostProcess | list[PostProcess] | None",
   returns: (type: "PostProcess | list[PostProcess] | None", desc: [El postprocesado de la escena; se puede leer y asignar.]),
-  desc: [Una lista encadena las pasadas en orden. `None` o una lista vacía lo quitan. Un segmento puede cambiarlo mientras está activo: `post=otro` (o una lista) usa otra cadena, `post=False` dibuja el segmento sin postprocesado y `post=None` (el predeterminado) hereda el de la escena. Un uniform que lee un valor de otra escena lanza `ValueError` y cualquier otro valor, `TypeError`.],
+  desc: [Una lista encadena las pasadas en orden. `None` o una lista vacía lo quitan. Un segmento puede cambiarlo mientras está activo: `post=otro` (o una lista) usa otra cadena, `post=False` dibuja el segmento sin postprocesado y `post=None` (el predeterminado) hereda el de la escena. `drawable.post_process(False)` deja un objeto fuera de todas las pasadas. Un uniform que lee un valor de otra escena lanza `ValueError` y cualquier otro valor, `TypeError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -868,7 +869,9 @@ scene = Scene(frame=(16, 9), theme=theme)
 ]
 
 Los roles de color incluidos son `background`, `foreground`, `muted`, `title`,
-`accent`, `chart`, `panel`, `header`, `rule`, `success`, `warning` y `danger`;
+`accent`, `chart`, `panel`, `header`, `rule`, `success`, `warning`, `danger` y
+`shadow` (la sombra de `shadow=True` en las cajas: negro suave sobre un fondo
+claro y casi opaco sobre uno oscuro, salvo que el tema elija otro);
 `colors` también acepta tokens propios no vacíos para las reglas. Los tokens
 `code`, `code_keyword`, `code_string`, `code_number`, `code_comment`,
 `code_function` y `code_type` eligen los colores con los que

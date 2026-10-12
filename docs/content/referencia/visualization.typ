@@ -477,13 +477,13 @@ scene.play([axes.animate.create(), curve.animate.write(), amplitude.animate.set(
 #api-entry(
   name: "Parameter.add_updater_fn",
   kind: "method",
-  desc: [Conduce el escalar con `callback(actual, dt, transcurrido) -> valor`. Para simulaciones con estado, pasa `reset` y un `fixed_dt` positivo: Gaanim llama a `reset()` y repite los pasos fijos al hacer seek y al exportar. Las simulaciones de objetos de paso fijo se ejecutan antes, así que el callback ve su estado del mismo fotograma. Resultados no finitos lanzan `ValueError`.],
+  desc: [Conduce el escalar con `callback(actual, dt, transcurrido) -> valor`. Sin `reset` ni `fixed_dt`, calcula el valor a partir de `transcurrido`, como en el ejemplo: un valor que acumula `dt` vuelve al inicial al hacer seek o capturar fotogramas sueltos. Para simulaciones con estado, pasa `reset` y un `fixed_dt` positivo: Gaanim llama a `reset()` y repite los pasos fijos al hacer seek y al exportar. Las simulaciones de objetos de paso fijo se ejecutan antes, así que el callback ve su estado del mismo fotograma. Resultados no finitos lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 phase = scene.viz.parameter(0.0)
-phase.add_updater_fn(lambda value, dt, elapsed: value + 2.0 * dt)
+phase.add_updater_fn(lambda value, dt, elapsed: 2.0 * elapsed)
 hand = scene.geometry.line((0, 0), scene.geometry.polar_point((0, 0), 1.5, phase))
 scene.wait(1)
 ```

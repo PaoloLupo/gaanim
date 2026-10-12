@@ -217,7 +217,8 @@ impl PyPostProcess {
 
 pub(crate) fn post_process_error(error: gaanim_api::canvas::PostProcessError) -> PyErr {
     match error {
-        gaanim_api::canvas::PostProcessError::ReadSource { .. } => {
+        gaanim_api::canvas::PostProcessError::ReadSource { .. }
+        | gaanim_api::canvas::PostProcessError::ReadLut { .. } => {
             pyo3::exceptions::PyRuntimeError::new_err(error.to_string())
         }
         _ => PyValueError::new_err(error.to_string()),

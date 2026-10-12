@@ -29,7 +29,7 @@ APPEARANCES = ["soft", "solid", "outline"]
 
 
 def code(label):
-    return scene.text(label, role="code", markup=False)
+    return scene.text(label, role="code")
 
 
 def show(*objects, hold=1.0):

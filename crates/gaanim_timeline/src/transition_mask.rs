@@ -772,6 +772,33 @@ mod tests {
     }
 
     #[test]
+    fn a_spring_overshoots_its_motion_but_never_fades_back() {
+        let morph = TransitionType::Morph {
+            duration: 1.0,
+            mappings: Vec::new(),
+        };
+        // Morphs move smoothly and fade linearly by default.
+        let smooth = gaanim_math::RateFunc::Smooth.evaluate(0.3);
+        assert!((morph.eased_progress(0.3) - smooth).abs() < 1e-12);
+        assert_eq!(morph.fade_progress(0.3), 0.3);
+
+        let spring = morph.with_easing(gaanim_math::RateFunc::spring_bounce(0.45, 0.0, 0.6));
+        let samples: Vec<f64> = (0..=100).map(|step| step as f64 / 100.0).collect();
+        let motion: Vec<f64> = samples.iter().map(|&t| spring.eased_progress(t)).collect();
+        let fades: Vec<f64> = samples.iter().map(|&t| spring.fade_progress(t)).collect();
+        assert!(
+            motion.iter().any(|&value| value > 1.02),
+            "the spring overshoots"
+        );
+        assert!(fades.windows(2).all(|pair| pair[1] >= pair[0]), "{fades:?}");
+        assert!(fades.iter().all(|&value| (0.0..=1.0).contains(&value)));
+        assert_eq!(fades[100], 1.0);
+        // Once past its target, the fade has finished.
+        let first_past = motion.iter().position(|&value| value >= 1.0).unwrap();
+        assert!(fades[first_past..].iter().all(|&value| value == 1.0));
+    }
+
+    #[test]
     fn seeks_publish_the_transition_frame_only_while_it_is_active() {
         use crate::clip::ClipPayload;
         use crate::scene::SceneMember;

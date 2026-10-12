@@ -32,7 +32,7 @@ def table(labels, tracks):
         Zones.grid(rows=len(labels), columns=list(tracks), column_gap="48px", padding="page_padding")
     )
     for index, label in enumerate(labels):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
     return [grid[2 * index + 1] for index in range(len(labels))]
 
 
@@ -108,7 +108,12 @@ morph(
 # cancelled term is struck out, a revealed one stays hidden until it appears...
 scene.segment("terms")
 zones = table(
-    ['eq["three"].animate.cancel()', 'eq["rhs"].animate.reveal("fade")', 'eq["rhs"].animate.reveal("from_below")'],
+    [
+        'eq["three"].animate.cancel()',
+        'eq["rhs"].animate.reveal("fade")',
+        'eq["rhs"].animate.reveal("from_below")',
+        'eq["rhs"].animate.reveal("wipe")',
+    ],
     tracks=("9fr", "7fr"),
 )
 cancelled = equation("x", part("three", "+ 3"), "= 7").place(zones[0], anchor="left")
@@ -118,6 +123,7 @@ scene.play([anim.duration(STEP) for anim in [
     cancelled["three"].animate.cancel(),
     pythagoras[0]["rhs"].animate.reveal("fade"),
     pythagoras[1]["rhs"].animate.reveal("from_below"),
+    pythagoras[2]["rhs"].animate.reveal("wipe"),
 ]])
 scene.wait(HOLD)
 

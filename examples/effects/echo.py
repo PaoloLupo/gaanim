@@ -24,7 +24,7 @@ success = scene.canvas.color("success")
 
 def label(code):
     """A variant label: the code that builds it, without markup."""
-    return scene.text(code, role="code", markup=False)
+    return scene.text(code, role="code")
 
 
 def rows(count, labels="15fr"):

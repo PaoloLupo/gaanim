@@ -1,9 +1,9 @@
 """Matrix edits: insert, remove, swap and reorder rows and columns, set entries, and morph into another matrix.
 
-Structural edits rebuild the matrix at the timeline cursor, so each cell
-shows its matrix before and after the cut; ``morph_to`` instead animates
-the entries into their places in another matrix. Each label is the call
-that edits the matrix below it.
+Structural edits change the matrix in place at the timeline cursor, so each
+cell shows its matrix before and after the cut; ``morph_to`` instead
+animates the entries into their places in another matrix, which stays. Each
+label is the call that edits the matrix below it.
 """
 
 import os
@@ -23,14 +23,14 @@ DIGITS = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 def matrix(data, size=0.66, **options):
     """scene.viz.matrix with entries of ``size``, larger than the theme's math size (0.44).
 
-    Without options the delimiters keep their automatic size, which follows
+    The delimiters keep their automatic size, which follows the entries and
     the number of rows through every edit.
     """
     return scene.viz.matrix(data, entry_style=TextStyle(size=size), **{"column_gap": 0.36, **options})
 
 
-# Morphs keep their shape, so their matrices are larger, with delimiters to match.
-LARGE = {"size": 1.1, "row_gap": 0.4, "column_gap": 0.6, "delimiter_size": 3.0}
+# Morphs keep their shape, so their matrices are larger.
+LARGE = {"size": 1.1, "row_gap": 0.4, "column_gap": 0.6}
 
 
 def gallery(labels, data=None, **options):
@@ -43,26 +43,21 @@ def gallery(labels, data=None, **options):
     cells = []
     for zone, label, values in zip(grid, labels, data or [DIGITS] * len(labels)):
         top, body = zone.split(Zones.rows(["48px", "1fr"]))
-        scene.text(label, role="code", markup=False).place(top, anchor="bottom")
-        shown = matrix(values, **options)
-        # place() returns the matrix's layout box, so keep the matrix itself.
-        shown.place(body)
-        cells.append((shown, body))
+        scene.text(label, role="code").place(top, anchor="bottom")
+        cells.append((matrix(values, **options).place(body), body))
     return cells
 
 
 def edit(rows):
     """Write each cell's matrix, then apply every (label, change) at the same cut.
 
-    ``change(m)`` edits the matrix; the edited matrix is placed back in its
-    zone, because a structural edit builds the new grid from scratch.
+    ``change(m)`` edits the matrix, which stays in its zone.
     """
     cells = gallery([label for label, _ in rows])
     scene.play([shown.animate.write().duration(WRITE) for shown, _ in cells])
     scene.wait(HOLD)
-    for (shown, zone), (_, change) in zip(cells, rows):
+    for (shown, _), (_, change) in zip(cells, rows):
         change(shown)
-        shown.place(zone)
     scene.wait(HOLD)
 
 

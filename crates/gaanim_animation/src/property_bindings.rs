@@ -232,19 +232,7 @@ impl ResolvedPropertySources {
                         .unwrap_or(parameter.initial),
                 )
             } else {
-                if let Some(driver) = world
-                    .get::<crate::SampledSeriesDrivers>(parameter.entity)
-                    .and_then(|drivers| drivers.get(crate::SampledProperty::Signal))
-                {
-                    let mut driver = driver.clone();
-                    if let Some(stops) = world.get_resource::<PropertySignalStops>() {
-                        driver.stop_at = stops.0.get(&parameter.native).copied();
-                    }
-                    return Some(driver.sample_at(time));
-                }
-                world
-                    .get::<FloatSignal>(parameter.entity)
-                    .map(|value| value.value)
+                live_parameter(world, parameter, time)
             }
         })?;
         Ok(match value {
@@ -254,6 +242,41 @@ impl ResolvedPropertySources {
             other => other,
         })
     }
+
+    /// The turn about Z a rotation binding sets at `time`, as its source
+    /// gives it: whole turns included, which its quaternion does not keep.
+    pub fn rotation_z(&self, world: &World, time: f64) -> Option<f64> {
+        let PropertySources::Rotation(values) = &self.sources else {
+            return None;
+        };
+        values[2]
+            .evaluate(time, &mut |logical| {
+                let parameter = self
+                    .parameters
+                    .iter()
+                    .find(|parameter| parameter.logical == logical)?;
+                live_parameter(world, parameter, time)
+            })
+            .ok()
+    }
+}
+
+/// A parameter's value at `time` while playing: its sampled series, or its
+/// signal.
+fn live_parameter(world: &World, parameter: &PropertyParameter, time: f64) -> Option<f64> {
+    if let Some(driver) = world
+        .get::<crate::SampledSeriesDrivers>(parameter.entity)
+        .and_then(|drivers| drivers.get(crate::SampledProperty::Signal))
+    {
+        let mut driver = driver.clone();
+        if let Some(stops) = world.get_resource::<PropertySignalStops>() {
+            driver.stop_at = stops.0.get(&parameter.native).copied();
+        }
+        return Some(driver.sample_at(time));
+    }
+    world
+        .get::<FloatSignal>(parameter.entity)
+        .map(|value| value.value)
 }
 
 /// Signal clips copied from the timeline for exact source evaluation at a clip's start.

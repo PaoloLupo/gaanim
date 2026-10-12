@@ -36,7 +36,7 @@ def bands(labels):
     stages = []
     for band, label in zip(scene.layout.zones(Zones.rows(len(labels), gap="24px", padding="page_padding")), labels):
         top, stage = band.split(Zones.rows(["40px", "1fr"]))
-        scene.text(label, role="code", markup=False).place(top, anchor="left")
+        scene.text(label, role="code").place(top, anchor="left")
         stages.append(stage)
     return stages
 
@@ -106,12 +106,14 @@ for source, target in [shapes_pair(stage, before, after) for stage, (before, aft
 scene.wait(HOLD)
 
 
-# Glyphs are pieces too: transform_matching(mode="shapes"), the general form,
-# pairs letters by outline and place. transform_to between two texts instead
-# moves named parts and matching glyphs and lets the others shrink and grow.
+# Glyphs are pieces too: transform_matching(mode="tex") pairs letters by
+# character, so an anagram's letters trade places, and
+# transform_matching_shapes pairs them by outline and place. transform_to
+# between two texts instead moves named parts and matching glyphs and lets
+# the others shrink and grow.
 scene.segment("glyphs")
 stages = bands([
-    'geometry.transform_matching(listen, silent, mode="shapes")',
+    'geometry.transform_matching(listen, silent, mode="tex")',
     "geometry.transform_matching_shapes(energy, momentum)",
     "listen.animate.transform_to(silent)",
     "energy.animate.transform_to(momentum)",
@@ -122,7 +124,7 @@ pairs = [
     texts(stages[2], scene.text, "listen", "silent"),
     texts(stages[3], scene.text.equation, "E = m c^2", "p = m v^2"),
 ]
-geometry.transform_matching(*pairs[0], mode="shapes", duration=MORPH)
+geometry.transform_matching(*pairs[0], mode="tex", duration=MORPH)
 scene.wait(GAP)
 geometry.transform_matching_shapes(*pairs[1], duration=MORPH)
 scene.wait(GAP)

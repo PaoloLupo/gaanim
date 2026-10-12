@@ -46,11 +46,11 @@ def table(rows, columns=None, build=typeset, tracks=("1fr", "1fr")):
         Zones.grid(rows=len(rows) + bool(header), columns=tracks, column_gap="48px", padding="page_padding")
     )
     for index, (label, _) in enumerate(header, start=1):
-        scene.text(label, role="code", markup=False).place(grid[index], anchor="left")
+        scene.text(label, role="code").place(grid[index], anchor="left")
     equations = []
     for row_index, (label, row) in enumerate(rows, start=bool(header)):
         first = row_index * len(tracks)
-        scene.text(label, role="code", markup=False).place(grid[first], anchor="right")
+        scene.text(label, role="code").place(grid[first], anchor="right")
         cells = [build(row)] if columns is None else [build(row, column) for _, column in columns]
         for index, cell in enumerate(cells, start=1):
             equations.append(cell.place(grid[first + index], anchor="left"))
@@ -163,14 +163,14 @@ table(
 )
 
 # A backslash breaks the line and & marks the column the lines align on;
-# line_spacing sets the distance between baselines.
+# line_spacing widens the gap between the lines, Typst's own at 1.
 scene.segment("aligned")
 table(
     sources(
         "f &= x^2 \\ f' &= 2 x",
         "x &= 2 + 3 \\ &= 5",
     ),
-    [("line_spacing=1.4", 1.4), ("line_spacing=2.0", 2.0)],
+    [("line_spacing=1.0", 1.0), ("line_spacing=1.6", 1.6)],
     lambda source, spacing: equation(source, size=SIZE, line_spacing=spacing),
     tracks=("5fr", "4fr"),
 )

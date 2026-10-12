@@ -283,25 +283,42 @@ impl PyZoneSet {
         self.zones.len()
     }
 
-    /// A zone by name or index.
-    fn __getitem__(&self, key: &Bound<'_, PyAny>) -> PyResult<PyZone> {
+    /// A zone by name or index, or the zones of a slice as another set.
+    fn __getitem__(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         if let Ok(name) = key.cast::<PyString>() {
             let name = name.to_str()?;
-            return self
+            let zone = self
                 .names
                 .iter()
                 .position(|candidate| candidate == name)
                 .map(|index| self.zone(index))
-                .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(name.to_owned()));
+                .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(name.to_owned()))?;
+            return Ok(Py::new(py, zone)?.into_any());
+        }
+        if let Ok(slice) = key.cast::<pyo3::types::PySlice>() {
+            let indices = slice.indices(self.zones.len() as isize)?;
+            let picked: Vec<usize> = (0..indices.slicelength)
+                .map(|step| (indices.start + step as isize * indices.step) as usize)
+                .collect();
+            let zones = Self {
+                canvas: self.canvas.clone(),
+                zones: picked.iter().map(|index| self.zones[*index]).collect(),
+                names: picked
+                    .iter()
+                    .filter_map(|index| self.names.get(*index).cloned())
+                    .collect(),
+            };
+            return Ok(Py::new(py, zones)?.into_any());
         }
         let index = key.extract::<isize>()?;
         let len = self.zones.len() as isize;
         let index = if index < 0 { len + index } else { index };
-        usize::try_from(index)
+        let zone = usize::try_from(index)
             .ok()
             .filter(|index| *index < self.zones.len())
             .map(|index| self.zone(index))
-            .ok_or_else(|| pyo3::exceptions::PyIndexError::new_err("zone index out of range"))
+            .ok_or_else(|| pyo3::exceptions::PyIndexError::new_err("zone index out of range"))?;
+        Ok(Py::new(py, zone)?.into_any())
     }
 
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -646,24 +663,25 @@ impl Placement {
         let bounds = anim
             .target_bounds()
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-        let factor = {
-            let scale = self.scale(DVec2::new(bounds.width(), bounds.height()), region);
-            scale.x.min(scale.y)
-        };
+        // `stretch` scales each axis on its own; the other modes, both alike.
+        let scale = self.scale(DVec2::new(bounds.width(), bounds.height()), region);
         // The anchor is found on the box the object will have once scaled:
         // aim its center there, since the move starts from the unscaled box.
         let (half_width, half_height) = (
-            bounds.width() * factor * 0.5,
-            bounds.height() * factor * 0.5,
+            bounds.width() * scale.x * 0.5,
+            bounds.height() * scale.y * 0.5,
         );
         let center = point
             - anchor_point(
                 Bounds3D::new_2d(-half_width, -half_height, half_width, half_height),
                 self.anchor,
             );
-        Ok(anim
-            .scale_by(factor)
-            .move_to_anchor(center.x, center.y, gaanim_layout::Anchor::Center))
+        let anim = if self.fit == FitMode::Stretch {
+            anim.scale_by_3d(scale.x, scale.y, 1.0)
+        } else {
+            anim.scale_by(scale.x)
+        };
+        Ok(anim.move_to_anchor(center.x, center.y, gaanim_layout::Anchor::Center))
     }
 }
 

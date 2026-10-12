@@ -8,7 +8,7 @@ SymPy. Each label is the call that computes the row.
 
 import os
 
-from gaanim import Matrix, Scene, Zones
+from gaanim import Matrix, Scene, TextStyle, Zones
 
 WRITE = 0.8
 CELL = 0.6
@@ -19,8 +19,10 @@ HOLD = 0.8
 MATRICES = WRITE + CELL + 3 * STAGGER + HOLD
 SCALARS = WRITE + CELL + HOLD
 # Entries are set larger than the theme's math size (0.44) so that each
-# matrix reads at a glance; gaps, delimiters, symbols and scalar results grow
-# to match. The results inherit the operands' options, cell_factory included.
+# matrix reads at a glance; gaps, symbols and scalar results grow to match,
+# and the delimiters follow the entries. The results inherit the operands'
+# options: their size, gaps and inline fractions (3/2), which keep the height
+# of the other entries.
 SIZE = 0.66
 GROWTH = SIZE / 0.44
 
@@ -30,24 +32,15 @@ A = [[1, 2], [3, 4]]
 B = [[2, 0], [1, 2]]
 
 
-def entry(value, row, column):
-    """A cell_factory: the entry as Typst math of SIZE, a fraction written inline (3/2).
-
-    Inline fractions keep the height of the other entries, which the
-    delimiters are sized for.
-    """
-    return scene.text.equation(str(value).replace("/", "\\/"), size=SIZE)
-
-
 def matrix(data):
-    """A 2 x 2 scene.viz.matrix with entries of SIZE and its gaps and delimiters scaled to them."""
+    """A 2 x 2 scene.viz.matrix with entries of SIZE, its gaps scaled to them and inline fractions."""
     return scene.viz.matrix(
         data,
-        cell_factory=entry,
+        entry_style=TextStyle(size=SIZE),
+        fractions="inline",
         row_gap=0.24 * GROWTH,
         column_gap=0.3 * GROWTH,
         delimiter_gap=0.12 * GROWTH,
-        delimiter_size=1.2 * GROWTH,
     )
 
 
@@ -67,7 +60,7 @@ def table(rows, tracks=("1fr", "2fr")):
     )
     operands, solutions = [], []
     for index, (label, build) in enumerate(rows):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
         items, derivation = build()
         results = derivation.result if isinstance(derivation.result, tuple) else (derivation.result,)
         for result in results:
@@ -139,6 +132,7 @@ scene.segment("scalars")
 table([
     ("a.determinant()", lambda: unary(lambda a: a.determinant())),
     ("a.trace()", lambda: unary(lambda a: a.trace())),
+    ("a.rank()", lambda: unary(lambda a: a.rank())),
 ])
 
 # Decompositions return two matrices: L and U, Q and R, eigenvalues and

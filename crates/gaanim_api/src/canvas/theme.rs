@@ -46,6 +46,9 @@ impl From<&str> for ThemePaint {
 pub struct ThemeStrokeStyle {
     pub paint: ThemePaint,
     pub style: Stroke,
+    /// Where the stroke sits on closed contours; `None` keeps the
+    /// drawable's own alignment.
+    pub align: Option<gaanim_renderer::effects::StrokeAlign>,
 }
 
 impl ThemeStrokeStyle {
@@ -53,6 +56,7 @@ impl ThemeStrokeStyle {
         Self {
             paint: paint.into(),
             style: Stroke::new(width),
+            align: None,
         }
     }
 
@@ -594,6 +598,8 @@ impl CanvasTheme {
         self.colors
             .entry("danger".into())
             .or_insert_with(|| Color::from_rgb8(0xEF, 0x44, 0x44));
+        let shadow = default_shadow(self.palette.background);
+        self.colors.entry("shadow".into()).or_insert(shadow);
     }
 
     pub fn sync_text_colors(&mut self) {
@@ -633,6 +639,12 @@ impl CanvasTheme {
     }
 
     pub fn set_colors(&mut self, colors: &HashMap<String, Color>) -> Result<(), String> {
+        // A shadow nobody chose follows a new background.
+        if !colors.contains_key("shadow")
+            && self.colors.get("shadow") == Some(&default_shadow(self.palette.background))
+        {
+            self.colors.remove("shadow");
+        }
         for (role, color) in colors {
             match role.as_str() {
                 "background" => self.palette.background = *color,
@@ -744,9 +756,21 @@ impl CanvasTheme {
         if !spec.stroke_overridden
             && let Some(stroke) = &style.stroke
         {
-            resolved.stroke = Some((self.resolve_paint(&stroke.paint)?, stroke.style.width));
+            // A solid arrow is one color: its outline follows a fill set on
+            // it, or `fill` would recolor only the inside of its head.
+            let paint = match (
+                &spec.fill,
+                spec.fill_overridden && is_solid_arrow(&spec.kind),
+            ) {
+                (Some(fill), true) => fill.clone(),
+                _ => self.resolve_paint(&stroke.paint)?,
+            };
+            resolved.stroke = Some((paint, stroke.style.width));
             resolved.stroke_style = Some(stroke.style.clone());
             resolved.stroke_overridden = true;
+            if spec.stroke_align.is_none() {
+                resolved.stroke_align = stroke.align;
+            }
         }
         if !spec.opacity_overridden
             && let Some(opacity) = style.opacity
@@ -1007,6 +1031,18 @@ fn merge_text_style(base: &TextStyle, overlay: &TextStyle) -> TextStyle {
     }
 }
 
+/// Arrows drawn as a closed outline around a body and a head.
+fn is_solid_arrow(kind: &SpawnKind) -> bool {
+    matches!(
+        kind,
+        SpawnKind::Arrow(_, _, _, _)
+            | SpawnKind::SizedArrow { .. }
+            | SpawnKind::DoubleArrow { .. }
+            | SpawnKind::CurvedArrow { .. }
+            | SpawnKind::CurvedArrowArc { .. }
+    )
+}
+
 fn spawn_family(kind: &SpawnKind) -> &'static str {
     match kind {
         SpawnKind::FillLevelOutline { .. } => "fill_level_outline",
@@ -1025,10 +1061,11 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::RegularPolygon { .. }
         | SpawnKind::Sector { .. }
         | SpawnKind::Annulus { .. }
-        | SpawnKind::Checkmark(_)
-        | SpawnKind::Cross(_)
-        | SpawnKind::RightAngle(_) => "shape",
-        SpawnKind::Line(_, _, _, _)
+        | SpawnKind::Checkmark(_) => "shape",
+        // Marks drawn with a pen: they have no area to fill.
+        SpawnKind::Cross(_)
+        | SpawnKind::RightAngle(_)
+        | SpawnKind::Line(_, _, _, _)
         | SpawnKind::Arrow(_, _, _, _)
         | SpawnKind::SizedArrow { .. }
         | SpawnKind::DashedLine { .. }
@@ -1203,6 +1240,17 @@ fn check_contrast(
     }
 }
 
+/// Box shadows on `background`: soft black on a light one, nearly opaque
+/// on a dark one, where a soft one does not show.
+fn default_shadow(background: Color) -> Color {
+    let alpha = if relative_luminance(background) < 0.18 {
+        0.8
+    } else {
+        1.0 / 3.0
+    };
+    Color::BLACK.with_alpha(alpha)
+}
+
 fn contrast_ratio(a: Color, b: Color) -> f64 {
     let a = relative_luminance(a);
     let b = relative_luminance(b);
@@ -1306,6 +1354,29 @@ mod tests {
         }
     }
 
+    /// `shadow=True` shows on every built-in background: soft on light ones,
+    /// nearly opaque on dark ones, and a new background takes its own unless
+    /// the theme chose one.
+    #[test]
+    fn the_shadow_token_follows_the_background() {
+        let alpha = |theme: &CanvasTheme| theme.color("shadow").unwrap().components[3];
+        let mut theme = CanvasTheme::builtin("technical").unwrap();
+        assert!((alpha(&theme) - 0.8).abs() < 1e-6);
+        assert!((alpha(&CanvasTheme::builtin("paper").unwrap()) - 1.0 / 3.0).abs() < 1e-6);
+        theme
+            .set_colors(&HashMap::from([("background".to_owned(), Color::WHITE)]))
+            .unwrap();
+        assert!((alpha(&theme) - 1.0 / 3.0).abs() < 1e-6);
+        let chosen = Color::from_rgba8(0x40, 0, 0x80, 0x99);
+        theme
+            .set_colors(&HashMap::from([("shadow".to_owned(), chosen)]))
+            .unwrap();
+        theme
+            .set_colors(&HashMap::from([("background".to_owned(), Color::BLACK)]))
+            .unwrap();
+        assert_eq!(theme.color("shadow").unwrap(), chosen);
+    }
+
     #[test]
     fn aliases_select_their_canonical_builtin() {
         for (alias, canonical) in CanvasTheme::BUILTIN_ALIASES {
@@ -1404,6 +1475,43 @@ mod tests {
         spec.fill_overridden = true;
         let resolved = theme.resolve_object(&spec).unwrap();
         assert_eq!(resolved.fill, Some(Brush::Solid(Color::BLACK)));
+    }
+
+    /// `curved_arrow_arc(...).fill(color)` colors the whole arrow: its theme
+    /// outline follows the fill; a stroke set on it still wins, and a line
+    /// keeps the theme's.
+    #[test]
+    fn a_filled_arrow_is_outlined_in_its_fill() {
+        let theme = CanvasTheme::builtin("technical").unwrap();
+        let foreground = theme.color("foreground").unwrap();
+        let accent = Brush::Solid(theme.color("accent").unwrap());
+        let mut arrow = ObjectSpec::new(
+            gaanim_core::ObjectId::from_parts(3, 1),
+            SpawnKind::CurvedArrowArc {
+                center: (0.0, 0.0),
+                radius: 1.0,
+                start_angle: 0.0,
+                sweep_angle: 2.0,
+                head_length: 0.18,
+                head_width: 0.15,
+                body_width: 0.036,
+            },
+        );
+        let stroke = |spec: &ObjectSpec| theme.resolve_object(spec).unwrap().stroke.unwrap().0;
+        assert_eq!(stroke(&arrow), Brush::Solid(foreground));
+        arrow.fill = Some(accent.clone());
+        arrow.fill_overridden = true;
+        assert_eq!(stroke(&arrow), accent);
+        arrow.stroke = Some((Brush::Solid(Color::WHITE), 0.02));
+        arrow.stroke_overridden = true;
+        assert_eq!(stroke(&arrow), Brush::Solid(Color::WHITE));
+        let mut line = ObjectSpec::new(
+            gaanim_core::ObjectId::from_parts(3, 2),
+            SpawnKind::Line(0.0, 0.0, 1.0, 0.0),
+        );
+        line.fill = Some(accent);
+        line.fill_overridden = true;
+        assert_eq!(stroke(&line), Brush::Solid(foreground));
     }
 
     #[test]

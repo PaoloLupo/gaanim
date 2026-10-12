@@ -1,9 +1,10 @@
 """Typography: text roles, style, spacing, parts, inline markup, paragraphs, anchors and selections.
 
 Each segment covers one part of ``scene.text``: the theme's text roles, the
-style keywords, spacing, locally styled parts, inline markup and math,
-paragraph alignment and wrapping, anchors, and selections that restyle part
-of a text. Each label is the code that styles the sample next to it.
+style keywords, spacing, locally styled parts, a root style, inline markup
+and math, paragraph alignment, wrapping and line limits, anchors, and
+selections that restyle part of a text. Each label is the code that styles
+the sample next to it.
 """
 
 import os
@@ -20,11 +21,12 @@ scene = Scene()
 accent = scene.canvas.color("accent")
 success = scene.canvas.color("success")
 rule = scene.canvas.color("rule")
+background = scene.canvas.color("background")
 
 
 def label(code):
-    """A variant label: the code, in the code role, with markup off so it reads literally."""
-    return scene.text(code, role="code", markup=False)
+    """A variant label: the code, in the code role, which reads literally."""
+    return scene.text(code, role="code")
 
 
 def table(rows, columns=("1fr", "1fr"), then=()):
@@ -95,7 +97,8 @@ table([
     ("style=WIDE", scene.text(SAMPLE, style=WIDE)),
 ])
 
-# part() names a piece of the content and can style it locally.
+# part() names a piece of the content and can style it locally; a baseline
+# raises or lowers it within its line.
 scene.segment("parts")
 UNDERLINE = TextStyle(decorations=["underline"])
 STRIKE = TextStyle(decorations=["strike"])
@@ -107,12 +110,29 @@ table(
         ('part("v", "vow", size=0.26)', scene.text("Judge my ", part("v", "vow", size=0.26))),
         ('part("v", "vow", style=UNDERLINE)', scene.text("Judge my ", part("v", "vow", style=UNDERLINE))),
         ('part("v", "vow", style=STRIKE)', scene.text("Judge my ", part("v", "vow", style=STRIKE))),
+        ('part("n", "2", size=0.26, baseline=0.14)', scene.text("x", part("n", "2", size=0.26, baseline=0.14))),
+        ('part("n", "2", size=0.26, baseline=-0.08)', scene.text("x", part("n", "2", size=0.26, baseline=-0.08))),
     ],
     columns=("3fr", "2fr"),
 )
 
+# The same TextStyle as the root style covers the whole text. A stroke
+# outlines the glyphs, 0.02 wide unless stroke_width says otherwise: filled
+# with the background, bold glyphs read as hollow.
+scene.segment("root_style")
+OUTLINE = TextStyle(size=0.64, weight=700, color=background, stroke=accent)
+table(
+    [
+        ("style=UNDERLINE", scene.text(SAMPLE, style=UNDERLINE)),
+        ("style=STRIKE", scene.text(SAMPLE, style=STRIKE)),
+        ("style=OUTLINE", scene.text(SAMPLE, style=OUTLINE)),
+    ],
+    columns=("1fr", "2fr"),
+)
+
 # *strong* and _emphasis_ are markup and $...$ is math; markup=False keeps
-# * and _ literal, \$ is a literal dollar, and the code role keeps every $.
+# * and _ literal, \$ is a literal dollar, and the code role shows every
+# character as typed.
 scene.segment("markup")
 table([
     ('"_emphasis_ and *strong*"', scene.text("_emphasis_ and *strong*")),
@@ -121,6 +141,7 @@ table([
     ('"x_1 * y_2", markup=False', scene.text("x_1 * y_2", markup=False)),
     ('"the area $pi r^2$ of a disc"', scene.text("the area $pi r^2$ of a disc")),
     ('"$ gaanim init", role="code"', scene.text("$ gaanim init", role="code")),
+    ('"stagger(*grows)", role="code"', scene.text("stagger(*grows)", role="code")),
 ])
 
 # A paragraph wraps at a width in scene units and aligns its lines.
@@ -139,6 +160,16 @@ paragraphs([
     ("wrap=3, hyphenate=True", scene.text(PARAGRAPH, wrap=3, hyphenate=True)),
     ("wrap=6.5", scene.text(PARAGRAPH, wrap=6.5)),
     ("flow=LOOSE", scene.text(PARAGRAPH, flow=LOOSE)),
+])
+
+# max_lines limits a paragraph: overflow="clip" (the default) keeps what
+# fits, "ellipsis" ends it with an ellipsis and "visible" shows every line.
+scene.segment("line_limits")
+paragraphs([
+    ("wrap=5, max_lines=2", scene.text(PARAGRAPH, wrap=5, max_lines=2)),
+    ('wrap=5, max_lines=2,\noverflow="ellipsis"', scene.text(PARAGRAPH, wrap=5, max_lines=2, overflow="ellipsis")),
+    ('wrap=5, max_lines=1,\noverflow="ellipsis"', scene.text(PARAGRAPH, wrap=5, max_lines=1, overflow="ellipsis")),
+    ('wrap=5, max_lines=2,\noverflow="visible"', scene.text(PARAGRAPH, wrap=5, max_lines=2, overflow="visible")),
 ])
 
 # move_to(x, y, anchor) puts the anchor on the dot. A TextAnchor sits on the
@@ -211,6 +242,6 @@ table(
 STEP = WRITE + HOLD
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # Mid-write in the first segment, then each segment settled.
-    scene.snapshots(snapshots, [0.4] + [STEP * index + 1.6 for index in range(8)] + [8 * STEP + 2.2])
+    scene.snapshots(snapshots, [0.4] + [STEP * index + 1.6 for index in range(10)] + [10 * STEP + 2.2])
 else:
     scene.render()

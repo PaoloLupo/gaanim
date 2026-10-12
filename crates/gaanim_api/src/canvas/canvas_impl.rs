@@ -2561,6 +2561,26 @@ impl SceneModel {
         Ok(())
     }
 
+    /// Override the motion blur of one segment of this scene: `None` keeps
+    /// it sharp, while the scene's blur applies to segments without one.
+    pub fn set_segment_motion_blur(
+        &mut self,
+        segment: &SegmentHandle,
+        blur: Option<gaanim_renderer::effects::MotionBlur>,
+    ) -> Result<(), SegmentError> {
+        if !segment.belongs_to(&self.state) {
+            return Err(SegmentError::ForeignSegment);
+        }
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let target = guard
+            .segments
+            .iter_mut()
+            .find(|candidate| candidate.id == segment.id)
+            .ok_or(SegmentError::UnknownSegment { id: segment.id })?;
+        target.motion_blur = Some(blur);
+        Ok(())
+    }
+
     /// Apply one of the built-in visual themes.
     ///
     /// `technical` is the quiet dark style used by the built-in technical
@@ -2633,6 +2653,55 @@ impl SceneModel {
             self.code_font_family_override = Some(code_font);
         }
         Ok(())
+    }
+
+    /// Typst source defining `theme`, a dictionary of the active theme's
+    /// colors by token (`theme.accent`, `theme.foreground`…), that Typst
+    /// documents and the packages they import can be styled with. Without a
+    /// theme it holds the background and the body text color.
+    pub(crate) fn typst_theme_prelude(&self, body: Color) -> String {
+        fn typst_rgb(color: Color) -> String {
+            let rgba = color.to_rgba8();
+            if rgba.a == u8::MAX {
+                format!("rgb(\"#{:02x}{:02x}{:02x}\")", rgba.r, rgba.g, rgba.b)
+            } else {
+                format!(
+                    "rgb(\"#{:02x}{:02x}{:02x}{:02x}\")",
+                    rgba.r, rgba.g, rgba.b, rgba.a
+                )
+            }
+        }
+        let mut colors: Vec<(String, Color)> = match &self.theme_style {
+            Some(theme) => theme
+                .colors
+                .iter()
+                .map(|(token, color)| (token.clone(), *color))
+                .collect(),
+            None => vec![
+                (
+                    "background".to_owned(),
+                    self.background.unwrap_or(Color::WHITE),
+                ),
+                ("foreground".to_owned(), body),
+            ],
+        };
+        // Tokens that are Typst identifiers, in a fixed order.
+        colors.retain(|(token, _)| {
+            token.starts_with(|c: char| c.is_ascii_alphabetic())
+                && token
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        });
+        colors.sort_by(|a, b| a.0.cmp(&b.0));
+        let entries = colors
+            .iter()
+            .map(|(token, color)| format!("{token}: {}", typst_rgb(*color)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if entries.is_empty() {
+            return "#let theme = (:)\n".to_owned();
+        }
+        format!("#let theme = ({entries},)\n")
     }
 
     /// Resolve a semantic token from the active theme.
@@ -2807,17 +2876,18 @@ impl SceneModel {
             .unwrap_or_else(|| role_style.font_family.clone());
         let color = spec.style.color.unwrap_or(role_style.fill_color);
 
-        let source = crate::canvas::compile::structured_text_typst_source(
+        // Typst measurement reads only registered fonts; skip the system scan.
+        let mut registry = gaanim_text::font::FontRegistry::without_system_fonts();
+        self.register_theme_fonts(&mut registry);
+        let source = crate::canvas::compile::fitted_text_typst_source(
+            &registry,
             spec,
             None,
             font_size,
             &font_family,
+            &math_font,
             color,
         );
-
-        // Typst measurement reads only registered fonts; skip the system scan.
-        let mut registry = gaanim_text::font::FontRegistry::without_system_fonts();
-        self.register_theme_fonts(&mut registry);
 
         let bounds = gaanim_text::prelude::measure_typst(
             &registry,
@@ -4111,7 +4181,7 @@ impl SceneModel {
         let mut handle = self.spawn(SpawnKind::Text(spec.clone()));
         for part in spec.parts() {
             if let Some(color) = part.style.color {
-                handle = handle.color_by(part.text.clone(), color);
+                handle = handle.color_nth(part.text.clone(), part.occurrence, color);
             }
             handle = handle.define_tag(part.path.join("."), part.text, Some(part.occurrence));
         }
@@ -4251,18 +4321,39 @@ impl SceneModel {
         target: &DrawableHandle,
         duration: f64,
     ) -> DrawableHandle {
-        self.transform_matching(source, target, "shapes", duration)
+        self.queue_transform_matching(source, target, false, duration)
     }
 
-    /// Generic auto-matching morph. `mode` can be `"shapes"` or `"tex"`.
+    /// Generic auto-matching morph. `mode` is `"shapes"`, or `"tex"` (also
+    /// `"text"`) to pair the glyphs of two texts or equations by character.
     ///
     /// Queues an `Op::TransformMatching` operation to pair and morph submobjects between
-    /// `source` and `target`.
+    /// `source` and `target`. At the end the target is shown and the source
+    /// hidden. Another `mode` is an error.
     pub fn transform_matching(
         &mut self,
         source: &DrawableHandle,
         target: &DrawableHandle,
         mode: &str,
+        duration: f64,
+    ) -> Result<DrawableHandle, super::MatchingModeError> {
+        let by_glyph = match mode.to_ascii_lowercase().as_str() {
+            "shapes" => false,
+            "tex" | "text" => true,
+            _ => {
+                return Err(super::MatchingModeError {
+                    mode: mode.to_string(),
+                });
+            }
+        };
+        Ok(self.queue_transform_matching(source, target, by_glyph, duration))
+    }
+
+    fn queue_transform_matching(
+        &mut self,
+        source: &DrawableHandle,
+        target: &DrawableHandle,
+        by_glyph: bool,
         duration: f64,
     ) -> DrawableHandle {
         if !Arc::ptr_eq(&self.state, &source.state)
@@ -4272,11 +4363,8 @@ impl SceneModel {
         {
             return target.clone();
         }
-        let mode = match mode.to_ascii_lowercase().as_str() {
-            "tex" | "text" | "chars" => "tex".to_string(),
-            _ => "shapes".to_string(),
-        };
-        let semantic_pairs = if mode == "tex" {
+        let mode = if by_glyph { "tex" } else { "shapes" }.to_string();
+        let semantic_pairs = if by_glyph {
             Self::text_semantic_pairs(source, target, None)
         } else {
             Vec::new()
@@ -4815,6 +4903,7 @@ impl SceneModel {
             entering: None,
             leaving: None,
             resolve: false,
+            remeasure: None,
         });
     }
 
@@ -4831,6 +4920,49 @@ impl SceneModel {
         entering: Option<&DrawableHandle>,
         leaving: Option<&DrawableHandle>,
     ) {
+        self.push_reflow(
+            container, members, spec, version, duration, entering, leaving, None,
+        );
+    }
+
+    /// [`Self::reflow_layout`] measuring the children of `within` (the
+    /// container or a box nested in it), at any depth, with the scale and
+    /// rotation they have at the cursor rather than the ones the layout first
+    /// placed them with: a child scaled or rotated since then gets room for
+    /// its new size.
+    pub fn remeasure_layout(
+        &mut self,
+        container: &DrawableHandle,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
+        duration: Option<f64>,
+        within: &DrawableHandle,
+    ) {
+        self.push_reflow(
+            container,
+            members,
+            spec,
+            version,
+            duration,
+            None,
+            None,
+            Some(within.id),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push_reflow(
+        &mut self,
+        container: &DrawableHandle,
+        members: Vec<LayoutMemberSpec>,
+        spec: LayoutSpec,
+        version: u64,
+        duration: Option<f64>,
+        entering: Option<&DrawableHandle>,
+        leaving: Option<&DrawableHandle>,
+        remeasure: Option<gaanim_core::ObjectId>,
+    ) {
         let mut state = self.state.lock().expect("canvas state poisoned");
         let snapshot = LayoutTreeSnapshot {
             version,
@@ -4846,6 +4978,7 @@ impl SceneModel {
             entering: entering.map(|member| member.id),
             leaving: leaving.map(|member| member.id),
             resolve: true,
+            remeasure,
         });
         if !state.layout_constraints.is_empty() {
             let constraints = state.layout_constraints.clone();
@@ -6589,7 +6722,7 @@ impl SceneModel {
     pub fn point_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
     ) -> DrawableHandle {
         let handle = self.dot(0.08);
         handle.defer_visibility_until_play();
@@ -6601,7 +6734,7 @@ impl SceneModel {
             .push(Op::AttachPointOnCurve {
                 target: handle.id,
                 curve: curve.id,
-                tracker: tracker.id,
+                tracker: tracker.into(),
             });
         handle
     }
@@ -6610,7 +6743,7 @@ impl SceneModel {
     pub fn tangent_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         length: f64,
     ) -> DrawableHandle {
         let half_length = length.max(0.0) / 2.0;
@@ -6624,7 +6757,7 @@ impl SceneModel {
             .push(Op::AttachTangentOnCurve {
                 target: handle.id,
                 curve: curve.id,
-                tracker: tracker.id,
+                tracker: tracker.into(),
             });
         handle
     }
@@ -6633,7 +6766,7 @@ impl SceneModel {
     pub fn normal_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         length: f64,
     ) -> DrawableHandle {
         let half_length = length.max(0.0) / 2.0;
@@ -6647,7 +6780,7 @@ impl SceneModel {
             .push(Op::AttachNormalOnCurve {
                 target: handle.id,
                 curve: curve.id,
-                tracker: tracker.id,
+                tracker: tracker.into(),
             });
         handle
     }
@@ -6656,7 +6789,7 @@ impl SceneModel {
     pub fn curvature_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         window: f64,
     ) -> DrawableHandle {
         let handle = self.circle(1.0);
@@ -6669,7 +6802,7 @@ impl SceneModel {
             .push(Op::AttachCurvatureOnCurve {
                 target: handle.id,
                 curve: curve.id,
-                tracker: tracker.id,
+                tracker: tracker.into(),
                 window,
             });
         handle
@@ -6680,7 +6813,7 @@ impl SceneModel {
     #[allow(clippy::too_many_arguments)]
     pub fn always_redraw_arc(
         &mut self,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         cx: f64,
         cy: f64,
         radius: f64,
@@ -6705,7 +6838,7 @@ impl SceneModel {
             .ops
             .push(Op::AttachTrackerArc {
                 target,
-                tracker: tracker.id,
+                tracker: tracker.into(),
                 center: (cx, cy),
                 radius,
                 start_angle,
@@ -6833,13 +6966,13 @@ impl SceneModel {
         &self,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
-        alpha: f64,
+        alpha: impl Into<ScalarSource>,
         offset: DVec3,
     ) -> PointRef {
         PointRef(CanvasEndpoint::Between {
             from: Box::new(from),
             to: Box::new(to),
-            alpha,
+            alpha: alpha.into(),
             offset,
         })
     }
@@ -7653,12 +7786,13 @@ impl SceneModel {
     pub fn contact_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         tangent_length: f64,
         normal_length: f64,
     ) -> DrawableHandle {
-        let point = self.point_on_curve(curve, tracker);
-        let tangent = self.tangent_on_curve(curve, tracker, tangent_length);
+        let tracker = tracker.into();
+        let point = self.point_on_curve(curve, tracker.clone());
+        let tangent = self.tangent_on_curve(curve, tracker.clone(), tangent_length);
         let normal = self.normal_on_curve(curve, tracker, normal_length);
         self.group_no_center(&[&tangent, &normal, &point])
     }
@@ -7713,13 +7847,13 @@ impl SceneModel {
         let x_tip = PointRef(CanvasEndpoint::Between {
             from: Box::new(origin.clone()),
             to: Box::new(origin.clone()),
-            alpha: 0.0,
+            alpha: 0.0.into(),
             offset: DVec3::new(x.x * length, x.y * length, 0.0),
         });
         let y_tip = PointRef(CanvasEndpoint::Between {
             from: Box::new(origin.clone()),
             to: Box::new(origin.clone()),
-            alpha: 0.0,
+            alpha: 0.0.into(),
             offset: DVec3::new(y.x * length, y.y * length, 0.0),
         });
         let x_arrow = self.vector_between(
@@ -7849,7 +7983,7 @@ impl SceneModel {
                     } => {
                         valid(from, state)
                             && valid(to, state)
-                            && alpha.is_finite()
+                            && scalar(alpha)
                             && offset.is_finite()
                     }
                     CanvasEndpoint::Polar {
@@ -11011,7 +11145,16 @@ mod tests {
     fn tracker_arc_compiles_with_signal_and_regenerator() {
         let mut canvas = SceneModel::new(1280, 720);
         let tracker = canvas.value_tracker(0.4);
-        let _arrow = canvas.always_redraw_arc(&tracker, 0.0, 0.0, 120.0, 0.0, 0.4, 1.0, 0.0);
+        let _arrow = canvas.always_redraw_arc(
+            ScalarSource::signal(tracker.id),
+            0.0,
+            0.0,
+            120.0,
+            0.0,
+            0.4,
+            1.0,
+            0.0,
+        );
         canvas.play(vec![tracker.animate_value_to(1.2).duration(1.0)]);
 
         let mut world = World::new();
@@ -11482,7 +11625,15 @@ mod tests {
         canvas.wait(0.5);
         canvas.transform_matching_shapes(&source, &target, 1.5);
         assert_eq!(canvas.current_time(), 2.0);
-        canvas.transform_matching(&target, &source, "tex", 0.25);
+        canvas
+            .transform_matching(&target, &source, "tex", 0.25)
+            .unwrap();
+        assert_eq!(canvas.current_time(), 2.25);
+        assert!(
+            canvas
+                .transform_matching(&target, &source, "glyphs", 0.25)
+                .is_err()
+        );
         assert_eq!(canvas.current_time(), 2.25);
         assert_eq!(canvas.segment_manifest().duration(), 2.25);
     }
@@ -13276,7 +13427,7 @@ mod scene_unit_default_tests {
         let mut canvas = SceneModel::new(320, 180);
         let curve = canvas.line(-2.0, 0.0, 2.0, 0.0);
         let tracker = canvas.value_tracker(0.0);
-        let marker = canvas.point_on_curve(&curve, &tracker);
+        let marker = canvas.point_on_curve(&curve, ScalarSource::signal(tracker.id));
         let spec = marker.spec.lock().expect("object spec poisoned");
         assert!(matches!(spec.kind, SpawnKind::Dot(radius) if radius == 0.08));
     }

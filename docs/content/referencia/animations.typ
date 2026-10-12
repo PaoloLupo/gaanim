@@ -474,13 +474,13 @@ scene.render()
   kind: "method",
   params: (
     (name: "by", type: "\"grapheme\" | \"word\" | \"line\" | \"part\"", default: "\"grapheme\"", desc: [En un texto, qué unidades empiezan juntas: grafemas, palabras, líneas explícitas o partes semánticas. La puntuación se une a su vecina.]),
-    (name: "order", type: "\"forward\" | \"reverse\" | \"center\" | \"random\"", default: "\"forward\"", desc: [Orden de los grupos: hacia delante, al revés, desde el centro hacia fuera o en una permutación aleatoria fija.]),
+    (name: "order", type: "\"forward\" | \"reverse\" | \"center\" | \"random\"", default: "\"forward\"", desc: [Orden de los grupos: hacia delante, al revés, desde el centro hacia fuera o en una permutación aleatoria que fija `seed`.]),
     (name: "stagger", type: "float | None", default: "None", desc: [Retardo relativo entre grupos; `None` lo adapta al número de grupos.]),
     (name: "brush", type: "\"pen\" | \"chalk\"", default: "\"pen\"", desc: [`"chalk"` dibuja el objeto como tiza en una pizarra durante toda la escena, como `Drawable.chalk(seed)`.]),
-    (name: "seed", type: "int", default: "0", desc: [Semilla del temblor y del grano de la tiza.]),
+    (name: "seed", type: "int", default: "0", desc: [Semilla del orden `"random"` y del temblor y el grano de la tiza.]),
   ),
   returns: (type: "Anim", desc: [Escritura trazo a trazo.]),
-  desc: [Traza los contornos con un grosor lógico constante y luego funde los rellenos. Si el objeto no tiene contorno, usa uno temporal de 0.03 unidades que desaparece al entrar el relleno. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
+  desc: [Dibuja los contornos y luego los rellena, como el `Write` de Manim. Cada pieza (un glifo, una forma, un miembro de un grupo) ocupa su parte de la animación, escalonada por `stagger`, y la curva (lineal por defecto) se aplica al avance de cada pieza. En la primera mitad de su parte la pieza traza su contorno, un tramo de Bézier tras otro y sus contornos en orden, centrado y de un 0,25 % del alto del cuadro, en el color de su trazo (el de su relleno si no tiene). En la segunda mitad el contorno pasa a su aspecto propio: aparece el relleno y el trazo toma su ancho, o desaparece. Sin duración, dura 1 s con menos de 15 piezas y 2 s con más; `scene.play(duration=...)` la sigue fijando. Sin `stagger`, el retardo entre piezas es el de Manim, `min(4 / piezas, 0.2)`; agrupada con `by` por palabras, líneas o partes es `min(4 / grupos, 1)`, así que hasta cuatro grupos se escriben uno tras otro. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -510,6 +510,7 @@ scene.render()
   name: "Anim.unwrite",
   kind: "method",
   returns: (type: "Anim", desc: [La escritura al revés.]),
+  desc: [Borra como el `Unwrite` de Manim: `write` al revés, desde la última pieza. Cada pieza vuelve primero a su contorno y luego el contorno se recoge hasta su inicio. Dura lo que duraría `write`.],
 )[
 ```python
 # show-code: true
@@ -865,13 +866,13 @@ scene.play(line["resalta"].animate.flash_under(color=GOLD, width=0.05).duration(
   kind: "method",
   signature: "scene.fx.spotlight(target, *, dim=0.7, padding=None, corner_radius=0.1) -> Anim",
   params: (
-    (name: "target", type: "Drawable | TextSelection | Sequence", default: none, desc: [Lo que queda iluminado.]),
+    (name: "target", type: "Drawable | TextSelection | Sequence", default: none, desc: [Lo que queda iluminado. Con una secuencia, cada objetivo tiene su hueco.]),
     (name: "dim", type: "float", default: "0.7", desc: [Opacidad máxima del velo negro, en `(0, 1]`.]),
     (name: "padding", type: "Padding | None", default: "0.2", desc: [Separación entre el objetivo y el borde del hueco.]),
     (name: "corner_radius", type: "float", default: "0.1", desc: [Radio de las esquinas del hueco.]),
   ),
   returns: (type: "Anim", desc: [Un velo con un hueco que se oscurece y vuelve.]),
-  desc: [Un velo negro con un hueco vivo alrededor del objetivo (sigue al objetivo si se mueve) llega a `dim` a mitad de la animación y vuelve a nada; `duration` fija el ciclo entero y una curva como `Easing.SMOOTH` lo deja oscurecido al final. La animación devuelta se reproduce sobre el velo. Un `dim` fuera de rango o un objetivo de otra escena lanzan `ValueError`.],
+  desc: [Un velo negro con un hueco vivo alrededor del objetivo (sigue al objetivo si se mueve) llega a `dim` a mitad de la animación y vuelve a nada; `duration` fija el ciclo entero y una curva como `Easing.SMOOTH` lo deja oscurecido al final. Con varios objetivos hay un hueco alrededor de cada uno, y los que se solapan se unen; para iluminar la caja conjunta, agrúpalos. La animación devuelta se reproduce sobre el velo. Una secuencia vacía, un `dim` fuera de rango o un objetivo de otra escena lanzan `ValueError`.],
 )[
 ```python
 # output: preview.webp
@@ -1142,7 +1143,7 @@ scene.play(square.animate.replacement_transform_to(circle))
     (name: "duration", type: "float", default: "1.0", desc: [Segundos; finito y positivo.]),
   ),
   returns: (type: "None", desc: [Reproduce la transformación en el cursor y lo avanza `duration` segundos.]),
-  desc: [Empareja las piezas de origen y destino por forma, posición y color, transforma las parejas y funde el resto. Se reproduce como un `scene.play`: lo siguiente empieza cuando termina.],
+  desc: [Empareja las piezas de origen y destino por forma, posición y color, transforma las parejas y funde el resto. Se reproduce como un `scene.play`: lo siguiente empieza cuando termina. El destino está oculto hasta entonces; al final se muestra y el origen se oculta, así que las animaciones siguientes del destino mueven lo que se ve.],
 )[
 ```python
 from gaanim import GOLD, WHITE, Scene
@@ -1161,11 +1162,11 @@ scene.render()
   kind: "method",
   params: (
     (name: "source, target", type: "Drawable", default: none, desc: [Objetos de origen y destino.]),
-    (name: "mode", type: "str", default: "\"shapes\"", desc: [`"shapes"` empareja por geometría; `"tex"` empareja glifos de textos y ecuaciones por carácter.]),
+    (name: "mode", type: "str", default: "\"shapes\"", desc: [`"shapes"` empareja por geometría; `"tex"` (o `"text"`) empareja los glifos de dos textos o ecuaciones por carácter, en orden de lectura, y vuelve a la geometría si alguno no tiene glifos.]),
     (name: "duration", type: "float", default: "1.0", desc: [Segundos; finito y positivo.]),
   ),
   returns: (type: "None", desc: [Reproduce la transformación en el cursor y lo avanza `duration` segundos.]),
-  desc: [Versión general de `transform_matching_shapes`. Para textos estructurados es preferible `animate.transform_to`, que es un `Anim` normal.],
+  desc: [Versión general de `transform_matching_shapes`: al final se muestra el destino y se oculta el origen. Otro `mode` lanza `ValueError`. Para textos estructurados es preferible `animate.transform_to`, que es un `Anim` normal.],
   none,
 )
 
@@ -2861,9 +2862,12 @@ scene.play(cube.animate.material(Material3D.metal(GOLD)).rotate_by_3d("y", 1.2).
 con cualquier `Easing`, incluidos los resortes que se pasan del destino, y
 todas aceptan `overlay=`, un `Overlay` dibujado encima del corte. Ninguna de
 las dos opciones cambia la duración de los segmentos. Sin `easing`,
-`cross_fade`, `fade_through`, `zoom_through` y `morph` avanzan de forma lineal
+`cross_fade`, `fade_through` y `zoom_through` avanzan de forma lineal,
+`morph` y `magic_move` se mueven con `Easing.SMOOTH` y funden de forma lineal,
 y los revelados vectoriales (`wipe`, `clock_wipe`, `iris`, `blinds`, `push` y
-`slide`) usan `Easing.SMOOTH`.
+`slide`) usan `Easing.SMOOTH`. Con un resorte o una curva de retroceso, el
+movimiento se pasa del destino y vuelve, pero los fundidos siguen la curva
+sin retroceder: una vez pasado el destino, el fundido ha terminado.
 
 Todas aceptan también `sound=`, la ruta de un efecto de sonido (relativa a la
 carpeta de assets) que suena una vez, con volumen 1, cuando empieza la

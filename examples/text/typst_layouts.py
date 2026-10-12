@@ -20,21 +20,13 @@ GAP = 0.3
 scene = Scene()
 
 
-def typst_color(role):
-    """A theme color as a Typst ``rgb(...)`` expression."""
-    color = scene.canvas.color(role)
-    return f"rgb({color.r}, {color.g}, {color.b})"
-
-
-# Typst draws text in the theme's foreground; strokes and fills come from the
-# document, so a preamble passes the theme's colors in.
-THEME = f"""
-#let accent = {typst_color("accent")}
-#let rule = {typst_color("rule")}
-#let panel = {typst_color("panel")}
-#set table(stroke: 0.6pt + rule, inset: 6pt)
-#set rect(stroke: 0.6pt + rule)
-#set line(stroke: 0.6pt + rule)
+# Typst draws text in the theme's foreground, and every document starts with
+# the theme's colors as the dictionary `theme`: a preamble strokes tables,
+# rectangles and lines with its rule color.
+THEME = """
+#set table(stroke: 0.6pt + theme.rule, inset: 6pt)
+#set rect(stroke: 0.6pt + theme.rule)
+#set line(stroke: 0.6pt + theme.rule)
 """
 
 
@@ -46,7 +38,7 @@ def pages(variants):
     """Write two documents side by side, each under its label; ``variants`` are (label, document) pairs."""
     grid = scene.layout.zones(Zones.grid(rows=1, columns=2, column_gap="96px", padding="page_padding"))
     for cell, (code, drawable) in zip(grid, variants):
-        name = scene.text(code, role="code", markup=False)
+        name = scene.text(code, role="code")
         # A band as tall as the label, a gap and the document, centered in the cell.
         height = name.bounds().height + GAP + drawable.bounds().height
         band = cell.inset(((cell.height - height) / 2, 0))
@@ -73,7 +65,7 @@ pages([
 #table(
   columns: (auto, auto, auto),
   align: (left, right, right),
-  fill: (x, y) => if y == 0 { panel } else if calc.even(y) { panel.lighten(4%) },
+  fill: (x, y) => if y == 0 { theme.panel } else if calc.even(y) { theme.panel.lighten(4%) },
   table.header([*Method*], [*Error*], [*Time*]),
   [Baseline], [0.18], [12 s],
   [Adaptive], [0.07], [19 s],
@@ -93,7 +85,7 @@ pages([
   columns: (1fr, 2fr),
   gutter: 8pt,
   rect(width: 100%, height: 2.4cm)[*Figure*],
-  rect(width: 100%, height: 2.4cm, stroke: 0.6pt + accent)[A wider column takes two shares of the width.],
+  rect(width: 100%, height: 2.4cm, stroke: 0.6pt + theme.accent)[A wider column takes two shares of the width.],
 )
 """, width="6cm")),
     ("#columns(2)", document("""

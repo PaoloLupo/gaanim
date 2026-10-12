@@ -49,7 +49,7 @@ def cells(variants, columns=3, width=3.6, caption="48px"):
     bases, movers = [], []
     for cell, (code, build) in zip(grid, variants):
         art, text = cell.split(Zones.rows(["1fr", caption], gap="12px"))
-        scene.text(code, role="code", markup=False).place(text)
+        scene.text(code, role="code").place(text)
         bases += base(art, width)
         x, y = art.center
         movers.append(build(x - width / 2, y))

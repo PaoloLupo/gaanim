@@ -765,6 +765,10 @@ pub(crate) enum Op {
         /// `false` only records the snapshot: an enclosing box's transition,
         /// which resolves the whole tree, follows at the same instant.
         resolve: bool,
+        /// Measure the children of this box, at any depth, with their current
+        /// scale and rotation rather than the ones they were first placed
+        /// with (`box.reflow()`).
+        remeasure: Option<ObjectId>,
     },
     /// Resolve relational constraints against the current geometry. The
     /// expressions use stable canvas object IDs and are remapped on replay.
@@ -1023,7 +1027,7 @@ pub(crate) enum Op {
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {
         target: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
         center: (f64, f64),
         radius: f64,
         start_angle: f64,
@@ -1034,24 +1038,24 @@ pub(crate) enum Op {
     AttachPointOnCurve {
         target: ObjectId,
         curve: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
     },
     /// Keep a line centered and tangent to a sampled curve.
     AttachTangentOnCurve {
         target: ObjectId,
         curve: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
     },
     /// Keep a line centered and normal to a sampled curve.
     AttachNormalOnCurve {
         target: ObjectId,
         curve: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
     },
     AttachCurvatureOnCurve {
         target: ObjectId,
         curve: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
         window: f64,
     },
     /// Custom callback updater retained by the deferred canvas operation.
@@ -1146,7 +1150,7 @@ pub enum CanvasEndpoint {
     Between {
         from: Box<CanvasEndpoint>,
         to: Box<CanvasEndpoint>,
-        alpha: f64,
+        alpha: ScalarSource,
         offset: DVec3,
     },
     /// Polar point around another endpoint.
@@ -1331,6 +1335,9 @@ pub struct Segment {
     pub background: Option<BackgroundPaint>,
     /// Post-processing while this segment is active; inherits the scene's by default.
     pub post_process: PostProcessOverride,
+    /// Motion blur while this segment is active: `None` inherits the
+    /// scene's, `Some(None)` keeps the segment sharp.
+    pub motion_blur: Option<Option<gaanim_renderer::effects::MotionBlur>>,
     pub(crate) stops: Vec<LocalSegmentStop>,
     /// Named timeline markers as `(name, local time)`.
     pub(crate) markers: Vec<(String, f64)>,
@@ -1354,6 +1361,7 @@ impl Segment {
             template: None,
             background: None,
             post_process: PostProcessOverride::Inherit,
+            motion_blur: None,
             stops: Vec::new(),
             markers: Vec::new(),
             explicit: false,
@@ -1379,6 +1387,7 @@ impl Segment {
             template,
             background,
             post_process: PostProcessOverride::Inherit,
+            motion_blur: None,
             stops: Vec::new(),
             markers: Vec::new(),
             explicit: true,

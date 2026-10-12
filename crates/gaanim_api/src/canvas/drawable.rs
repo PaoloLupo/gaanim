@@ -68,6 +68,12 @@ pub struct RotationAxisError {
     pub axis: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown matching mode '{mode}'; expected \"shapes\", \"tex\" or \"text\"")]
+pub struct MatchingModeError {
+    pub mode: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("material operations require a native Primitive3D drawable")]
 pub struct Primitive3DHandleError;
@@ -545,22 +551,63 @@ impl DrawableHandle {
     }
 
     pub fn r#become(&self, text: gaanim_text::prelude::TextSpec, duration: Option<f64>) {
-        let parts = text.parts();
+        fn set_text(spec: &mut ObjectSpec, text: gaanim_text::prelude::TextSpec) {
+            let parts = text.parts();
+            spec.kind = SpawnKind::Text(text);
+            spec.fragment_tags.clear();
+            spec.fragment_fills.clear();
+            for part in parts {
+                if let Some(color) = part.style.color {
+                    spec.fragment_fills
+                        .push((part.text.clone(), Some(part.occurrence), color));
+                }
+                spec.fragment_tags
+                    .push((part.path.join("."), part.text, Some(part.occurrence)));
+            }
+        }
+
         let mut spec = self.spec.lock().expect("object spec poisoned");
         if !matches!(spec.kind, SpawnKind::Text(_)) {
             return;
         }
-        spec.kind = SpawnKind::Text(text);
-        spec.fragment_tags.clear();
-        spec.fragment_fills.clear();
-        for part in parts {
-            if let Some(color) = part.style.color {
-                spec.fragment_fills.push((part.text.clone(), color));
-            }
-            spec.fragment_tags
-                .push((part.path.join("."), part.text, Some(part.occurrence)));
-        }
         let owner = spec.layout_owner;
+        let frozen = self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .frozen_spawn_specs
+            .contains_key(&self.id);
+        if frozen && owner.is_none() {
+            // The text has been shown and its declaration is frozen: a copy
+            // with the new content takes its place and its identity at the
+            // cursor, as after a replacing text transition.
+            drop(spec);
+            let copy = self.copy();
+            set_text(&mut copy.spec.lock().expect("object spec poisoned"), text);
+            let anim_type = AnimationType::TextTransition {
+                target: copy.id,
+                copy: false,
+                semantic_pairs: Vec::new(),
+            };
+            let rate_func = anim_type.default_rate_func();
+            self.state
+                .lock()
+                .expect("canvas state poisoned")
+                .active_mut()
+                .ops
+                .push(Op::Animate {
+                    anim: AnimationBuilder {
+                        target: self.id,
+                        anim_type,
+                        duration: 0.0,
+                        delay: 0.0,
+                        rate_func,
+                    },
+                    active: true,
+                });
+            return;
+        }
+        set_text(&mut spec, text);
         drop(spec);
 
         let Some(owner) = owner else {
@@ -594,6 +641,7 @@ impl DrawableHandle {
                 entering: None,
                 leaving: None,
                 resolve: true,
+                remeasure: None,
             });
         }
     }
@@ -874,6 +922,17 @@ impl DrawableHandle {
         }
 
         if path.is_empty() {
+            return false;
+        }
+        // Once the text has been shown its declaration is frozen: the caller
+        // recolors the part's glyphs at the cursor, as for any selection.
+        if self
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .frozen_spawn_specs
+            .contains_key(&self.id)
+        {
             return false;
         }
         let mut spec = self.spec.lock().expect("object spec poisoned");
@@ -1191,10 +1250,17 @@ impl DrawableHandle {
         self.stroke_brush(Brush::Solid(color), width)
     }
 
+    /// Stroke with `brush` at `width`, keeping the caps, joins and dashes
+    /// of a stroke style set before.
     pub fn stroke_brush(self, brush: Brush, width: f64) -> Self {
         self.update_style(|spec| {
             spec.stroke = Some((brush.clone(), width));
-            spec.stroke_style = Some(gaanim_core::kurbo::Stroke::new(width));
+            let mut style = spec
+                .stroke_style
+                .take()
+                .unwrap_or_else(|| gaanim_core::kurbo::Stroke::new(width));
+            style.width = width;
+            spec.stroke_style = Some(style);
             spec.stroke_overridden = true;
         })
     }
@@ -1512,6 +1578,14 @@ impl DrawableHandle {
         self.update_style(|spec| spec.motion_blur_exempt = !enabled)
     }
 
+    /// Whether the scene's post-process (the canvas's, or a segment's)
+    /// applies to this drawable (the default). A drawable with `false`, and
+    /// its members, draws above the processed frame, e.g. to keep a label
+    /// readable under pixelation.
+    pub fn post_process(self, enabled: bool) -> Self {
+        self.update_style(|spec| spec.post_exempt = !enabled)
+    }
+
     /// Draw `start` and `end` tips on the path's ends, filled with its stroke
     /// paint; both `None` removes them. Arrowheads shorten the stroke under
     /// them and follow the path's current ends, so trims, `create` and
@@ -1599,10 +1673,19 @@ impl DrawableHandle {
     /// no literal match exists. Later calls take precedence when selections
     /// overlap.
     pub fn color_by(self, fragment: impl Into<String>, color: Color) -> Self {
-        let fragment = fragment.into();
+        self.color_fragment(fragment.into(), None, color)
+    }
+
+    /// Colors only the `occurrence`-th match of `fragment`, counted as
+    /// [`Self::select_nth`] counts them.
+    pub fn color_nth(self, fragment: impl Into<String>, occurrence: usize, color: Color) -> Self {
+        self.color_fragment(fragment.into(), Some(occurrence), color)
+    }
+
+    fn color_fragment(self, fragment: String, occurrence: Option<usize>, color: Color) -> Self {
         self.update_spec(|spec| {
             if !fragment.is_empty() {
-                spec.fragment_fills.push((fragment, color));
+                spec.fragment_fills.push((fragment, occurrence, color));
             }
         })
     }
@@ -2763,16 +2846,42 @@ impl FragmentSelection {
         )
     }
 
-    /// Instantly colors this selected fragment.
+    /// Instantly colors this selected fragment: its declared color before
+    /// the text is first shown, a change at the cursor afterwards.
     pub fn fill(self, color: Color) -> Self {
-        if !self.fragment.trim().is_empty() {
-            self.push(Op::FragmentFill {
-                target: self.target,
+        if self.fragment.trim().is_empty() {
+            return self;
+        }
+        let mut state = self.state.lock().expect("canvas state poisoned");
+        if state.frozen_spawn_specs.contains_key(&self.target) {
+            let anim_type = AnimationType::TextSelectionProperties {
                 fragment: self.fragment.clone(),
                 occurrence: self.occurrence,
-                color,
-            });
+                properties: PropertyAnimation {
+                    fill: Some(Brush::Solid(color)),
+                    ..PropertyAnimation::default()
+                },
+            };
+            let rate_func = anim_type.default_rate_func();
+            // Not merged with other immediate changes: another selection of
+            // the same text is another channel.
+            state.active_mut().ops.push(Op::Immediate(AnimationBuilder {
+                target: self.target,
+                anim_type,
+                duration: 0.0,
+                delay: 0.0,
+                rate_func,
+            }));
+            drop(state);
+            return self;
         }
+        drop(state);
+        self.push(Op::FragmentFill {
+            target: self.target,
+            fragment: self.fragment.clone(),
+            occurrence: self.occurrence,
+            color,
+        });
         self
     }
 

@@ -667,7 +667,7 @@ class PostProcess:
         Example:
             burst = scene.viz.parameter(0.0)
             scene.canvas.post = PostProcess.glitch(intensity=burst, seed=3)
-            scene.play([burst.animate.set(1.0).duration(0.2).repeat(1, yoyo=True)])
+            scene.play([burst.animate.set(1.0).duration(0.2).repeat(2, yoyo=True)])
         """
         ...
     @property
@@ -690,8 +690,15 @@ class StrokeStyle:
         miter_limit: float = 4.0,
         dashes: Sequence[float] = (),
         dash_offset: float = 0.0,
+        align: Optional[Literal["inside", "center", "outside"]] = None,
     ) -> None:
-        """Define a complete reusable stroke; invalid metrics raise ValueError."""
+        """Define a complete reusable stroke; invalid metrics raise ValueError.
+
+        ``dashes`` alternate dash and gap lengths; a zero-length dash with a
+        ``"round"`` or ``"square"`` cap draws a dot or a square. ``align``
+        places the stroke on closed contours as ``Drawable.stroke(align=...)``
+        does; ``None`` keeps the drawable's own alignment.
+        """
         ...
 
 class Style:
@@ -755,7 +762,7 @@ class Theme:
         then in the calling script's ``assets`` folder, then beside the script.
 
         ``text_markup=False`` makes ``*`` and ``_`` literal by default in
-        ``scene.text``, ``scene.text.measure``, ``badge`` and ``chip``; a call
+        ``scene.text``, ``badge`` and ``chip``; a call
         that passes ``markup=`` keeps its own choice. ``None`` keeps the
         base theme's value (``True`` for a new theme).
 
@@ -868,7 +875,10 @@ Justify: TypeAlias = Literal["start", "center", "end", "between", "around", "eve
 Fit: TypeAlias = Literal["none", "contain", "cover", "stretch", "scale_down"]
 AnchorName: TypeAlias = Literal["center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"]
 Shadow: TypeAlias = bool | dict[str, Any]
-"""``True`` for a soft default shadow, or ``{"color", "x", "y", "blur"}`` with lengths."""
+"""``True`` for the theme's ``shadow`` color, or ``{"color", "x", "y", "blur"}`` with lengths (``color`` defaults to it too).
+
+The ``shadow`` color is a soft black on a light background and a nearly opaque
+one on a dark background, where a soft one would not show."""
 
 class LayoutExpression:
     """Linear drawable geometry expression used to build layout constraints.
@@ -885,15 +895,20 @@ class LayoutExpression:
     def __ge__(self, other: float | LayoutExpression) -> LayoutConstraint: ...
 
 class LayoutConstraint:
-    """Required or prioritized linear relation between drawable geometry."""
+    """Required or prioritized linear relation between drawable geometry.
+
+    An object keeps its own width and height against medium and weak
+    relations: only a strong or required one resizes it. Relations on
+    positions move objects and never shrink one to settle a conflict.
+    """
     def strong(self) -> LayoutConstraint:
-        """Return a strong-priority copy of this constraint."""
+        """Return a strong-priority copy of this constraint; it can resize the objects it names."""
         ...
     def medium(self) -> LayoutConstraint:
-        """Return a medium-priority copy of this constraint."""
+        """Return a medium-priority copy of this constraint; it moves objects but does not resize them."""
         ...
     def weak(self) -> LayoutConstraint:
-        """Return a weak-priority copy reported by layout diagnostics if violated."""
+        """Return a weak-priority copy, reported by layout diagnostics if violated; it does not resize objects."""
         ...
     def named(self, label: str) -> LayoutConstraint:
         """Return a copy carrying ``label`` in conflict diagnostics."""
@@ -938,11 +953,16 @@ class Box(Drawable):
     them, distributes the space and places them, so nothing needs coordinates.
     Strings become text with the box's typography. A Box is a Drawable:
     ``move_to``, ``animate.fade_in()``, ``place`` and friends act on the whole
-    box. Positional methods on a child it owns raise ``LayoutOwnershipError``.
+    box. Positional methods on a child it owns raise ``LayoutOwnershipError``;
+    ``scale_to``, ``rotate_to`` and the other shape setters work on a child
+    and, like its animations, keep its slot until ``reflow()``.
 
     Structural changes (``add``, ``remove``, ``replace``, ``set``, a child's
     ``item``) accept ``duration=`` to animate the reflow, and ``advance=False``
-    to start the next change at the same time.
+    to start the next change at the same time. The box's scale and rotation
+    apply to its children on top of their own, as a CSS transform does. A
+    box nested in another takes the room of the scale it was placed with,
+    like any child.
     """
     @property
     def children(self) -> list[Drawable]:
@@ -1086,14 +1106,20 @@ class Box(Drawable):
     def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True) -> Any:
         """Insert a child (at ``at`` or at the end) and return it.
 
-        With ``duration`` the others slide to make room while it fades in.
+        With ``duration`` the others slide to make room while it fades in. A
+        child that comes from another box (taken out with ``detach``) slides
+        from where it stands instead, and follows its former box until then.
         """
         ...
     def remove(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
         """Remove a child: it fades out while the others close the gap."""
         ...
     def detach(self, child: Drawable, *, duration: Optional[float] = None, advance: bool = True) -> None:
-        """Take a child out of the box without hiding it; it can move freely again."""
+        """Take a child out of the box without hiding it: it stays where it is and can move freely again.
+
+        From then on it no longer follows the box's moves, scale or opacity;
+        before, it still does. ``other.add(child)`` puts it in another box.
+        """
         ...
     def replace(self, old: Drawable, new: Drawable | str, *, duration: Optional[float] = None, advance: bool = True) -> Any:
         """Put ``new`` where ``old`` was (it inherits the old item rules unless it has its own)."""
@@ -1102,7 +1128,14 @@ class Box(Drawable):
         """Change box properties (the same names as when creating it)."""
         ...
     def reflow(self, *, duration: Optional[float] = None, advance: bool = True) -> None:
-        """Lay the tree out again after children changed their own size."""
+        """Lay the tree out again after children changed their own size.
+
+        Each child of this box, at any depth, is measured with the scale and
+        rotation it has now, so one scaled with ``scale_to`` or
+        ``animate.scale_to`` gets room for its new size. Other reflows
+        (``add``, ``set``…) keep the size a child was placed with, as a CSS
+        transform does.
+        """
         ...
     def diagnostics(self) -> list[str]:
         """Layout warnings for this box and the boxes nested in it.
@@ -1135,9 +1168,12 @@ class Zones:
     def names(self) -> list[str]: ...
 
 class ZoneSet:
-    """The zones of a template resolved in a region, by name or index."""
+    """The zones of a template resolved in a region, by name or index; a slice is another ``ZoneSet``."""
     def __len__(self) -> int: ...
+    @overload
     def __getitem__(self, key: int | str) -> Zone: ...
+    @overload
+    def __getitem__(self, key: slice) -> ZoneSet: ...
     def __iter__(self) -> Iterator[Zone]: ...
     @property
     def names(self) -> list[str]: ...
@@ -1163,8 +1199,12 @@ class Zone:
     def split(self, template: Zones) -> ZoneSet:
         """Apply a template inside this zone."""
         ...
-    def arrange(self, *objects: Drawable, direction: Literal["row", "column"] = "row", gap: Optional[Length] = None, align: Align = "center", justify: Justify = "center", padding: Optional[Padding] = None) -> None:
-        """Line up free objects in this zone, once, without owning them."""
+    def arrange(self, *objects: Drawable, direction: Literal["row", "column", "wrap"] = "row", gap: Optional[Length] = None, align: Align = "center", justify: Justify = "center", padding: Optional[Padding] = None) -> None:
+        """Line up free objects in this zone, once, without owning them.
+
+        ``direction="wrap"`` fills rows and breaks to a new one when the next
+        object does not fit.
+        """
         ...
 
 class LayoutOwnershipError(Exception):
@@ -1177,8 +1217,12 @@ class Transition:
     including springs, which may overshoot) and every transition accepts
     ``overlay=`` (an ``Overlay`` drawn above the cut). Neither changes a
     segment's duration. Without ``easing`` the original transitions run
-    linearly and the vector reveals (``wipe``, ``clock_wipe``, ``iris``,
-    ``blinds``, ``push``, ``slide``) use ``Easing.SMOOTH``. Vector reveals
+    linearly, the morphs (``morph``, ``magic_move``) move with
+    ``Easing.SMOOTH`` and fade linearly, and the vector reveals (``wipe``,
+    ``clock_wipe``, ``iris``, ``blinds``, ``push``, ``slide``) use
+    ``Easing.SMOOTH``. A spring or back easing carries motion past its
+    target and back, while fades follow it without going back: once past
+    its target a transition has finished fading. Vector reveals
     clip both segments with animated paths in the visible camera frame, so
     they stay sharp at any resolution and need no textures. Shader
     transitions (``shader``, ``preset``) render each segment alone and blend
@@ -1613,8 +1657,9 @@ class Anim:
         matching glyphs morph, the rest collapses or grows in, every glyph
         keeps its own (``part()``) color, and the target is shown at the end.
         Texts managed by different Layouts (e.g. cells of two matrices)
-        instead morph as one shape: the source keeps its identity and takes
-        the target's outline, color and typographic baseline.
+        instead morph as one shape: the source keeps its identity, travels
+        to where the target stands and takes the target's outline, color and
+        typographic baseline.
 
         Between groups or imported SVGs (an SVG ``<g>`` part too) the morph
         runs part by part in place: parts with the same name or SVG ``id``
@@ -1750,17 +1795,29 @@ class Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
     def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None, brush: Literal["pen", "chalk"] = "pen", seed: int = 0) -> Anim:
-        """Trace paths with a constant logical stroke, then smoothly fade their fills.
+        """Draw the outlines, then fill them in, as Manim's ``Write``.
+
+        Each piece (a glyph, a shape, a member of a group) runs over its share
+        of the animation, staggered by ``stagger``, and the easing (linear by
+        default) applies to each piece's own progress. In the first half of
+        its share a piece draws its outline, one Bézier segment after another
+        and its contours in order, centered on the contour and about 0.25% of
+        the frame height wide, in its stroke color (its fill color without a
+        stroke). In the second half the outline turns into the piece's own
+        look: the fill appears and the stroke takes its own width, or fades
+        out. Without a duration the animation lasts 1 s for fewer than 15
+        pieces and 2 s otherwise; ``Scene.play(duration=...)`` still sets it.
 
         On text, ``by`` starts the glyphs of each grapheme, word, explicit line,
         or innermost semantic part together, with the segmentation of
         ``text.words``, ``text.lines``, and ``text.parts``; punctuation joins the
         neighboring group. ``order`` starts groups ``"forward"``, ``"reverse"``,
-        from the ``"center"`` outward, or in a fixed ``"random"`` permutation.
+        from the ``"center"`` outward, or in a ``"random"`` permutation fixed
+        by ``seed``.
         ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
-        sequential staggering and a number overrides it. A missing outline is
-        synthesized at 0.03 logical units and removed as the authored fill
-        appears. ``brush="chalk"`` draws the drawable as chalk for the whole
+        sequential staggering (Manim's ``min(4 / pieces, 0.2)``; grouped
+        ``by`` word, line or part, ``min(4 / groups, 1)``, so up to four
+        groups are written one after another) and a number overrides it. ``brush="chalk"`` draws the drawable as chalk for the whole
         scene, like ``Drawable.chalk(seed)``: a trembling outline and a grain
         that follow ``seed``. Raises ``ValueError`` after a property target or
         another effect.
@@ -1776,7 +1833,13 @@ class Anim:
         scale-and-fade behavior.
         """
         ...
-    def unwrite(self) -> Anim: ...
+    def unwrite(self) -> Anim:
+        """Erase as Manim's ``Unwrite``: ``write`` backwards, from the last piece.
+
+        Each piece first turns back into its outline, then the outline
+        retracts to where it started. It lasts as long as ``write`` would.
+        """
+        ...
     def uncreate(self) -> Anim: ...
     def grow_from_center(self) -> Anim: ...
     def grow_from_point(self, x: float, y: float) -> Anim:
@@ -2249,7 +2312,11 @@ class Anim:
         """Cross-fade to a same-scene target at the animation's composed start time."""
         ...
     def replacement_transform_to(self, target: Drawable) -> Anim:
-        """Morph to and replace with a same-scene target, preserving absent fill and composed timing."""
+        """Morph to and replace with a same-scene target, preserving absent fill and composed timing.
+
+        The source travels to where the target stands, also from one layout
+        to another, and the target takes over when the morph ends.
+        """
         ...
     def indicate(self, *, color: Optional[ColorLike] = None, scale_factor: float = 1.2) -> Anim:
         """Swell the drawable by ``scale_factor`` and tint it, then return to rest.
@@ -3587,9 +3654,11 @@ class Drawable:
         glyph. By default the whole width stays inside the shape, so
         ``write`` draws a constant width; ``"center"`` straddles the contour
         and ``"outside"`` draws the whole width beyond it (a text halo). The
-        visible stroke is ``width`` wide in all three. Open paths always
-        center their stroke. The alignment is declaration state and is not
-        animated. Other values raise ``ValueError``.
+        visible stroke is ``width`` wide in all three, and dashes keep their
+        lengths. Open paths always center their stroke. The alignment is
+        declaration state and is not animated. Other values raise
+        ``ValueError``. Caps, joins and dashes set before with
+        ``stroke_style`` are kept: only the paint and width change.
 
         Example:
             result = drawable.stroke(BLUE, 1.0)
@@ -3597,7 +3666,12 @@ class Drawable:
         """
         ...
     def stroke_style(self, style: StrokeStyle) -> Self:
-        """Apply complete stroke geometry and return this drawable."""
+        """Apply complete stroke geometry and return this drawable.
+
+        The style's ``align``, when given, places the stroke as
+        ``stroke(align=...)`` does; a later ``stroke(paint, width)`` keeps its
+        caps, joins and dashes.
+        """
         ...
     def scale_stroke_with_object(self, enabled: bool = True) -> Self:
         """Let the stroke width follow the drawable's accumulated scale.
@@ -3973,6 +4047,21 @@ class Drawable:
             hud = scene.text("t = 0").move_to(-6, 4).motion_blur(False)
         """
         ...
+    def post_process(self, enabled: bool = True) -> Drawable:
+        """Whether the scene's post-process applies to this drawable (the default).
+
+        With ``False`` the drawable and its members stay out of
+        ``scene.canvas.post`` and of a segment's ``post``: they draw above the
+        processed frame, e.g. labels that pixelation, glitch or halftone would
+        make unreadable. They draw above every processed drawable, whatever
+        their ``z_index``, and still follow their segment's transitions; under
+        a shader transition they cross-fade with it. Echo copies inherit the
+        setting.
+
+        Example:
+            label = scene.text("Live").hud().move_to(-6, 4).post_process(False)
+        """
+        ...
     def echo(
         self,
         count: int = 5,
@@ -4145,7 +4234,8 @@ class Drawable:
     def item(self, *, duration: Optional[float] = None, advance: bool = True, **props: Any) -> Self:
         """Set how this object sits in the box that holds it, like CSS on the element.
 
-        Properties: ``grow``, ``shrink``, ``basis``, ``align_self``, ``row``,
+        Properties: ``grow``, ``shrink``, ``basis`` (a length, ``"N%"`` of the
+        parent, ``"hug"`` or ``"fill"``), ``align_self``, ``row``,
         ``column``, ``row_span``, ``column_span``, ``margin`` (``"auto"``
         takes the free space), ``fit``, ``anchor``, ``absolute``, ``offset``,
         and a layout ``width``/``height`` that replaces the object's own.
@@ -4491,7 +4581,9 @@ class Drawable:
         Without a pivot, shapes turn about their own origin; shapes declared
         in scene coordinates (``line``, ``polygon``, arcs, arrows, curves)
         turn about the center of their box instead. Once the drawable has
-        been shown, the pivot changes at the cursor without moving it.
+        been shown, the pivot changes at the cursor without moving it. The
+        point is in scene coordinates for the part of an SVG too, however the
+        SVG is scaled and placed.
 
         Example:
             result = drawable.with_pivot(1.0, 1.0)
@@ -4740,10 +4832,19 @@ class Drawable:
         """
         ...
     def bind_rotation_from(self, source: Drawable, *, ratio: float = 1.0, phase: float = 0.0) -> Self:
-        """Copy source world rotation using ``source * ratio + phase`` in radians."""
+        """Copy source world rotation using ``source * ratio + phase`` in radians.
+
+        The source turns by its own rotation and its parents', a spinning
+        ``Updater.rotate`` and a ``rotate_to(Parameter)`` included.
+        """
         ...
     def bind_translation_from_rotation(self, source: Drawable, *, axis: Optional[Direction] = None, scale: float = 1.0) -> Self:
-        """Translate along an axis by source rotation delta times ``scale``."""
+        """Translate along an axis by source rotation delta times ``scale``.
+
+        Whole turns count: a wheel turned by ``rotate_to(Parameter)`` or a
+        spinning ``Updater.rotate`` keeps pushing past half a turn. Other
+        rotations count up to two turns either way.
+        """
         ...
     def bind_position_from(self, source: Drawable, axes: str = "xy") -> None:
         """Bind position and defer this visual until its entry animation is played.
@@ -4924,9 +5025,20 @@ class TextStyle:
         raise ``ValueError``. Outer width, height, padding, fit, and growth are
         intentionally controlled by boxes.
 
+        As the root style of a text it covers every glyph, and in a ``part``
+        only the part's: ``stroke`` outlines the glyphs ``stroke_width`` wide
+        (0.02 when only ``stroke`` is given), ``letter_spacing`` and
+        ``word_spacing`` add space between glyphs and words, ``decorations``
+        underline or strike them, and a positive ``baseline`` raises them
+        within their line. ``opacity`` applies to the whole text.
+
         Example:
             body = TextStyle(font="Inter", size=0.32, color=WHITE)
         """
+        ...
+    @property
+    def size(self) -> Optional[float]:
+        """The size this style sets, in scene units, or ``None`` to keep the role's."""
         ...
 
 class TextFlow:
@@ -4957,6 +5069,11 @@ class TextFlow:
         font size, like CSS ``line-height``: 1.2 puts them 1.2 sizes apart.
         The default 1.0 puts them one size apart, tight but without overlap;
         raise it for long paragraphs.
+
+        ``max_lines`` limits the text to that many lines: ``overflow="clip"``
+        keeps the words that fit (a first word too long for the lines is cut
+        between characters), ``"ellipsis"`` ends them with ``…``, and
+        ``"visible"`` draws every line.
 
         ``text_box`` is the box a layout measures and places the text by, like
         CSS ``text-box``: ``"line"`` spans full lines (ascent to descent),
@@ -5079,9 +5196,10 @@ class TextSelectionAnimation:
     def reveal(self, style: Literal["fade", "wipe", "from_below"] = "fade") -> Anim:
         """Reveal the selected glyphs with a fade, a stroke wipe, or a short rise.
 
-        The rest of the text is unaffected, so a term can appear inside an
-        equation that is already on screen. Raises ``ValueError`` for an
-        unknown ``style``.
+        The selected glyphs stay hidden until the reveal, also while the
+        rest of the text is written, and the rest of the text is unaffected,
+        so a term can appear inside an equation that is already on screen.
+        Raises ``ValueError`` for an unknown ``style``.
 
         Example:
             scene.play(eq["rhs"].animate.reveal("from_below"))
@@ -5161,9 +5279,11 @@ class TextSelection:
     def fill(self, color: ColorLike) -> TextSelection:
         """Persistently color selected glyphs and invalidate metric state if needed.
 
-        In mathematics, the selected part remains inside the same Typst
-        equation, so changing its fill does not insert spacing or alter the
-        positions of neighboring unstyled terms.
+        Before the text is first shown this is the selection's declared
+        color; afterwards the glyphs change color at the cursor, like any
+        immediate setter. In mathematics, the selected part remains inside
+        the same Typst equation, so changing its fill does not insert spacing
+        or alter the positions of neighboring unstyled terms.
 
         Example:
             formula["mass"].fill(GOLD)
@@ -5333,6 +5453,15 @@ class Text(Drawable):
             title.motion_blur(False).move_to(0.0, 3.0)
         """
         ...
+    def post_process(self, enabled: bool = True) -> Self:
+        """Whether the scene's post-process applies to the text, preserving Text chaining.
+
+        See ``Drawable.post_process``.
+
+        Example:
+            caption.post_process(False).move_to(0.0, -3.5)
+        """
+        ...
     def echo(
         self,
         count: int = 5,
@@ -5475,8 +5604,11 @@ class Text(Drawable):
         """Replace structured content while retaining Text identity and reflowing owners.
 
         The text version and all owning Layout snapshots are incremented.
-        ``markup=None`` keeps the current markup mode. An invalid delimiter or
-        content tree raises ``ValueError``.
+        Once a free text has been shown, the new content replaces it at the
+        cursor, placed as the text was declared (``move_to``, ``place``), and
+        later animations of this Text act on it. ``markup=None`` keeps the
+        current markup mode. An invalid delimiter or content tree raises
+        ``ValueError``.
 
         Example:
             copy.become("Resultado: ", part("value", "$42$", color=GOLD))
@@ -5519,7 +5651,8 @@ class Canvas:
         follows the export frame rate (snapshots use 60 fps). ``None`` turns
         the blur off. The interactive preview stays sharp;
         rendering costs ``samples`` times as much. Keep a drawable sharp with
-        ``drawable.motion_blur(False)``.
+        ``drawable.motion_blur(False)``, and give a segment its own blur with
+        ``Segment.motion_blur``.
 
         Example:
             scene.canvas.motion_blur(180, samples=12)
@@ -5537,8 +5670,10 @@ class Canvas:
 
         A sequence chains the passes in order: each one samples, through
         ``gaanim_scene``, what the previous pass wrote. Segments that set
-        their own ``post`` keep their override. Uniforms that read values of
-        another Scene raise ``ValueError``; anything else raises ``TypeError``.
+        their own ``post`` keep their override, and
+        ``drawable.post_process(False)`` keeps a drawable out of every pass.
+        Uniforms that read values of another Scene raise ``ValueError``;
+        anything else raises ``TypeError``.
 
         Example:
             scene.canvas.post = [PostProcess.grain(0.06), PostProcess.vignette(0.35)]
@@ -5639,6 +5774,19 @@ class Segment:
 
         Missing or extra slots raise ``TypeError``; a segment without a
         template raises ``ValueError``.
+        """
+        ...
+    def motion_blur(self, shutter_angle: Optional[float] = 180.0, samples: int = 8, *, phase: Optional[float] = None) -> Segment:
+        """Blur this segment's motion in exported frames and snapshots, in place of the scene's.
+
+        The arguments work as in ``scene.canvas.motion_blur``; ``None`` keeps
+        the segment sharp. Segments without their own blur use the scene's,
+        so each segment can compare a shutter angle or phase. A frame on a
+        cut belongs to the segment it enters. Returns the segment; a value
+        out of range raises ``ValueError``.
+
+        Example:
+            scene.segment("wide").motion_blur(360, samples=16)
         """
         ...
 
@@ -8051,8 +8199,9 @@ class Geometry:
     def arrow(self, x1: float, y1: float, x2: float, y2: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
         """Create a solid arrow with optional dimensions in scene units.
 
-        Omitted dimensions use head length 0.18, head width 0.15 and body
-        width 0.036. max_head_ratio in (0, 1] caps head length relative to arrow
+        ``fill`` colors the whole arrow: unless ``stroke`` sets one, its
+        outline follows the fill. Omitted dimensions use head length 0.18,
+        head width 0.15 and body width 0.036. max_head_ratio in (0, 1] caps head length relative to arrow
         length and scales head width proportionally; None leaves it uncapped.
         Nonfinite endpoints or nonpositive/nonfinite dimensions raise
         ValueError. Coincident endpoints produce an empty path.
@@ -8225,8 +8374,8 @@ class Geometry:
     def cross(self, size: float) -> Drawable:
         """Create an X of two strokes spanning a ``size`` square centered at the origin.
 
-        It has no fill: color it with ``stroke``. A non-positive size raises
-        ``ValueError``.
+        It has no fill and takes the theme's line style, like ``line``;
+        restyle it with ``stroke``. A non-positive size raises ``ValueError``.
 
         Example:
             wrong = scene.geometry.cross(0.6).stroke(RED, 0.08)
@@ -8235,8 +8384,9 @@ class Geometry:
     def right_angle(self, arm_length: float) -> Drawable:
         """Create a right-angle mark: its corner at the origin, arms ``arm_length`` long along +x and +y.
 
-        Rotate and move it onto the corner it marks. It has no fill. A
-        non-positive length raises ``ValueError``.
+        Rotate and move it onto the corner it marks. It has no fill and takes
+        the theme's line style, like ``line``. A non-positive length raises
+        ``ValueError``.
 
         Example:
             mark = scene.geometry.right_angle(0.3).move_to(1.15, 1.15)
@@ -8389,14 +8539,22 @@ class Geometry:
         """Create a composed curve from ``move``, ``line``, ``quad``, ``cubic``, and close commands.
 
         Append ``_rel`` to a drawing command to use cursor-relative points.
-        Quadratic and cubic controls accept a point, ``None``, or ``"auto"``.
-        Use ``close`` or ``close_smooth`` with an empty argument sequence.
+        Quadratic and cubic controls accept a point, ``None`` (the handle sits
+        on its endpoint), or ``"auto"``. A ``quad``'s ``"auto"`` control
+        mirrors the previous ``quad``'s control through the cursor; a
+        ``cubic``'s first ``"auto"`` control mirrors the previous ``cubic``'s
+        second control. After another kind of segment, or as a ``cubic``'s
+        second control, ``"auto"`` acts as ``None``. Use ``close`` or
+        ``close_smooth`` with an empty argument sequence.
         """
         ...
     def transform_matching_shapes(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
         """Morph matching pieces of ``source`` into ``target`` and fade the rest.
 
         Plays at the cursor like ``scene.play`` and advances it by ``duration``.
+        ``target`` is hidden until then; at the end it is shown and
+        ``source`` hidden, so later animations of ``target`` move what is on
+        screen.
 
         Example:
             scene.geometry.transform_matching_shapes(source, target, duration=1.2)
@@ -8405,7 +8563,13 @@ class Geometry:
     def transform_matching(self, source: Drawable, target: Drawable, *, mode: str = "shapes", duration: float = 1.0) -> None:
         """Auto-matching morph; ``mode`` is ``"shapes"`` or ``"tex"``.
 
-        Plays at the cursor like ``scene.play`` and advances it by ``duration``.
+        ``"shapes"`` pairs pieces by shape, place and color, like
+        ``transform_matching_shapes``. ``"tex"`` (or ``"text"``) pairs the
+        glyphs of two texts or equations by character, in reading order, and
+        falls back to shapes when either has no glyphs. Plays at the cursor
+        like ``scene.play`` and advances it by ``duration``; at the end
+        ``target`` is shown and ``source`` hidden. Another ``mode`` raises
+        ``ValueError``.
 
         Example:
             scene.geometry.transform_matching(source, target, mode="tex")
@@ -8498,8 +8662,10 @@ class Geometry:
     def union(self, *operands: Drawable, live: bool = False, tolerance: float = 0.0025, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
         """Return the union of at least two vector drawables.
 
-        Sources remain available. With ``live=True`` the result follows source
-        path and transform changes. ``tolerance`` is the maximum error, in
+        Sources remain available. The result copies the look the first operand
+        has when it is made (fill, stroke, opacity and effects); later style
+        changes of the operands leave it as it is. With ``live=True`` the
+        result follows source path and transform changes. ``tolerance`` is the maximum error, in
         scene units, when curves are flattened; the default ``0.0025`` (about
         0.3 px at 1080p) keeps circles smooth. Invalid scenes, operands,
         rules, or tolerances raise ``ValueError``.
@@ -8524,29 +8690,43 @@ class Geometry:
         the mask as a visible outline when requested.
         """
         ...
-    def point_on_curve(self, curve: Drawable, tracker: Parameter) -> Drawable:
-        """Create a hidden point-on-curve drawable; reveal it in ``scene.play``.
+    def point_on_curve(self, curve: Drawable, tracker: _ReactiveScalar) -> Drawable:
+        """Create a hidden dot at the fraction ``tracker`` of ``curve``'s arc length; reveal it in ``scene.play``.
+
+        ``tracker`` is a number, Parameter, Variable or Computed, clamped to
+        [0, 1]. The curve is read as it is drawn: moved, turned, scaled or
+        animated, or inside a group such as axes, the dot stays on it.
 
         Example:
-            result = scene.point_on_curve(curve, None)
+            t = scene.viz.parameter(0.0)
+            dot = scene.geometry.point_on_curve(curve, t)
         """
         ...
-    def tangent_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 0.8) -> Drawable:
-        """Create a hidden tangent drawable; reveal it in ``scene.play``.
+    def tangent_on_curve(self, curve: Drawable, tracker: _ReactiveScalar, length: float = 0.8) -> Drawable:
+        """Create a hidden segment along ``curve``'s tangent at ``tracker``; reveal it in ``scene.play``.
+
+        It follows the curve as drawn, like ``point_on_curve``.
 
         Example:
-            result = scene.tangent_on_curve(curve, None)
+            tangent = scene.geometry.tangent_on_curve(curve, t, length=1.2)
         """
         ...
-    def normal_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 0.8) -> Drawable:
-        """Create a hidden normal drawable; reveal it in ``scene.play``.
+    def normal_on_curve(self, curve: Drawable, tracker: _ReactiveScalar, length: float = 0.8) -> Drawable:
+        """Create a hidden segment along ``curve``'s normal at ``tracker``; reveal it in ``scene.play``.
+
+        It follows the curve as drawn, like ``point_on_curve``.
 
         Example:
-            result = scene.normal_on_curve(curve, None)
+            normal = scene.geometry.normal_on_curve(curve, t)
         """
         ...
-    def curvature_on_curve(self, curve: Drawable, tracker: Parameter, window: float = 0.02) -> Drawable:
-        """Create a hidden osculating-circle drawable; reveal it in ``scene.play``.
+    def curvature_on_curve(self, curve: Drawable, tracker: _ReactiveScalar, window: float = 0.02) -> Drawable:
+        """Create a hidden osculating circle of ``curve`` at ``tracker``; reveal it in ``scene.play``.
+
+        The circle passes through three points ``window`` apart along the
+        arc length. At the ends of an open curve they slide inward, and on a
+        closed curve they wrap across its seam. On a straight stretch the
+        circle is not drawn.
 
         Example:
             t = scene.viz.parameter(0.0)
@@ -8555,7 +8735,7 @@ class Geometry:
         ...
     def always_redraw_arc(
         self,
-        tracker: Parameter,
+        tracker: _ReactiveScalar,
         cx: float,
         cy: float,
         radius: float,
@@ -8567,7 +8747,9 @@ class Geometry:
 
         The arc has ``radius`` around ``(cx, cy)`` and starts at
         ``start_angle``; every frame it sweeps ``tracker * sweep_scale +
-        sweep_offset`` radians, counterclockwise.
+        sweep_offset`` radians, counterclockwise. ``tracker`` is a number,
+        Parameter, Variable or Computed. Like any solid arrow, ``fill`` colors
+        it whole; ``stroke`` sets its outline.
 
         Example:
             turn = scene.viz.parameter(0.5)
@@ -8638,8 +8820,12 @@ class Geometry:
     def offset_point(self, origin: Endpoint, dx: _ReactiveScalar, dy: _ReactiveScalar) -> PointRef:
         """Create a point offset from a moving origin by reactive scene-space components."""
         ...
-    def point_between(self, from_: Endpoint, to: Endpoint, *, alpha: float = 0.5, offset: tuple[float, float] = (0.0, 0.0)) -> PointRef:
-        """Create an affine point between endpoints plus a world-space offset."""
+    def point_between(self, from_: Endpoint, to: Endpoint, *, alpha: _ReactiveScalar = 0.5, offset: tuple[float, float] = (0.0, 0.0)) -> PointRef:
+        """Create an affine point between endpoints plus a world-space offset.
+
+        ``alpha`` is a number, Parameter, Variable or Computed: 0 is ``from_``
+        and 1 is ``to``.
+        """
         ...
     def polar_point(self, origin: Endpoint, radius: _ReactiveScalar, angle: _ReactiveScalar) -> PointRef:
         """Create a reactive polar point; angle is measured in radians."""
@@ -8692,8 +8878,9 @@ class Typography:
         backslashes), for technical labels such as ``tb:dist_comp`` or
         ``X1_2``; ``$...$`` math still applies. ``markup=None`` uses the
         theme's ``text_markup`` (``True`` without a theme). With
-        ``role="code"`` every ``$`` is literal, so a terminal prompt such as
-        ``"$ gaanim init"`` needs no escaping.
+        ``role="code"`` the text is literal: every ``$``, ``*``, ``_`` and
+        backslash shows as written, so ``"$ gaanim init"`` or
+        ``"stagger(*grows)"`` need no escaping.
 
         Without ``flow`` or ``text_align``, the lines of a text with explicit
         line breaks take their horizontal alignment from the anchor of
@@ -8748,8 +8935,11 @@ class Typography:
         those delimiters are preserved to select Typst block math. Every
         content boundary becomes ordinary Typst whitespace, so ``"="`` does
         not need a written trailing space. Empty content and invalid
-        mathematics raise ``ValueError``. With no explicit role or size, a
-        display equation uses the 44-unit math default.
+        mathematics raise ``ValueError`` when the equation is created. With
+        no explicit role or size, a display equation uses the 44-unit math
+        default. The rows of an equation broken with ``\\`` keep Typst's
+        gap between rows at ``line_spacing=1``, and each extra unit widens it
+        by one em, as between text lines.
 
         Example:
             equation = scene.equation(
@@ -8772,9 +8962,20 @@ class Typography:
         ``#align(center)`` centers within the content and lines only break
         where the source breaks them. ``width`` is a Typst page width
         (``"16cm"``, ``"800pt"``; a number means points) measured before that
-        scaling, for paragraphs that wrap or ``1fr`` columns. Empty inline
-        source raises ``ValueError`` and an unreadable asset raises
-        ``RuntimeError``.
+        scaling, for paragraphs that wrap or ``1fr`` columns.
+
+        Its text takes the theme's ``body`` color, as ``scene.text`` does, and
+        so do the strokes Typst draws black by default (tables, ``rect``,
+        ``line``, CeTZ shapes). The document starts with ``theme``, a
+        dictionary of the theme's colors by token (``theme.accent``,
+        ``theme.foreground``, ``theme.panel``, ``theme.rule``…). Packages
+        made for white paper pick black and white themselves, so pass them
+        these colors through their options, such as
+        ``plot(style: (labels: (fill: theme.foreground, bg: none)))``.
+        Strokes that continue one another, such as a curve a plotting
+        package draws one sample at a time, are one piece for ``write``.
+        Empty inline source raises ``ValueError`` and an unreadable asset
+        raises ``RuntimeError``.
 
         Example:
             from pathlib import Path
@@ -8914,10 +9115,10 @@ class LayoutBuilder:
         is skipped and strings become text."""
         ...
     def row(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
-        """A box whose children flow left to right."""
+        """A box whose children flow left to right, whatever ``direction`` a ``style`` or class sets."""
         ...
     def column(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
-        """A box whose children flow top to bottom."""
+        """A box whose children flow top to bottom, whatever ``direction`` a ``style`` or class sets."""
         ...
     def grid(self, *children: Any, style: Optional[BoxStyle] = None, **props: Any) -> Box:
         """A box that places its children in grid cells (``columns``/``rows``:
@@ -9527,18 +9728,24 @@ class Visualization:
         label_style: Any | None = None,
         cell_factory: Callable[[Any, int, int], Drawable] | None = None,
         numeric_format: str = "g",
+        fractions: Literal["stacked", "inline"] = "stacked",
     ) -> Matrix:
         """Create a selectable Layout-backed matrix.
 
         ``data`` must be a non-empty rectangular sequence or a SymPy matrix.
         Entries remain individual drawables; rows, columns, blocks and
-        diagonals can therefore be animated independently. Invalid dimensions,
+        diagonals can therefore be animated independently.
         ``row_gap`` and ``column_gap`` control automatic tracks. Delimiters
-        accept a size and CSS-like weight from 100 through 900. Labels default
-        to Typst math; ``cell_mode``/``label_mode`` may select plain text.
+        accept a size and CSS-like weight from 100 through 900; without a
+        size they span the rows, following the size of ``entry_style`` and
+        the gap between rows. Labels default to Typst math;
+        ``cell_mode``/``label_mode`` may select plain text.
         ``cell_factory(value, row, column)`` can return a custom Drawable.
-        Invalid dimensions, labels, modes, weights, delimiters, or factories
-        raise ``ValueError``/``TypeError``. Returns :class:`gaanim.Matrix`.
+        Exact rationals are stacked fractions, or with ``fractions="inline"``
+        written ``3/2`` on one line, as tall as the other entries. Invalid
+        dimensions, labels, modes, weights, delimiters, fractions or
+        factories raise ``ValueError``/``TypeError``. Returns
+        :class:`gaanim.Matrix`.
         """
         ...
 
@@ -9976,9 +10183,11 @@ class Fx:
         whole cycle, and an easing such as ``Easing.SMOOTH`` keeps it dimmed at
         the end. The hole is a live frame around the target's bounds,
         ``padding`` away (0.2 by default) and rounded by ``corner_radius``; it
-        follows the target if it moves. The returned animation plays on the
-        overlay. A ``dim`` out of range or a target of another scene raises
-        ``ValueError``.
+        follows the target if it moves. A sequence of targets cuts one hole
+        around each, and holes that overlap merge: group the targets to light
+        their joint box instead. The returned animation plays on the
+        overlay. An empty sequence, a ``dim`` out of range or a target of
+        another scene raises ``ValueError``.
 
         Example:
             scene.play([scene.fx.spotlight(card, dim=0.7).duration(1.5)])
@@ -10188,7 +10397,7 @@ class Mechanics:
     def cam_profile(self, samples: Sequence[tuple[float, float]], *, bore_radius: float = 0.08, color: Optional[ColorLike] = None) -> Drawable:
         """Create a closed radial cam from ``(angle_radians, radius)`` samples."""
         ...
-    def contact_on_curve(self, curve: Drawable, tracker: Parameter | Variable, *, tangent_length: float = 0.8, normal_length: float = 0.8) -> Drawable:
+    def contact_on_curve(self, curve: Drawable, tracker: _ReactiveScalar, *, tangent_length: float = 0.8, normal_length: float = 0.8) -> Drawable:
         """Group a reactive contact point, tangent, and normal on a sampled curve."""
         ...
     def moment_about(self, center: Endpoint, radius: float, *, direction: Literal["cw", "ccw"] = "ccw", label: Optional[str] = None, color: Optional[ColorLike] = None) -> Drawable:
@@ -10452,6 +10661,12 @@ class Scene:
         ``z_index(-1)``), except during a shader transition, which composites
         it above the blend. An invisible drawable remains invisible until an
         explicit entry animation changes its opacity.
+
+        A drawable that was not on screen before the current segment and is
+        persisted at its start enters with that segment: its incoming
+        transition reveals it like the rest of the segment, and it becomes
+        global when the transition ends. To keep it out of that transition,
+        create and persist it before ``scene.segment(...)``.
 
         Raises:
             ValueError: If any drawable belongs to another ``Scene``.

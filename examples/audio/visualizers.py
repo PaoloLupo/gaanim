@@ -31,13 +31,13 @@ danger = scene.canvas.color("danger")
 def tiles(header, labels, columns=2):
     """A header row with the shared call, then one tile per label: a stage above its code."""
     page = scene.layout.zones(Zones.rows(["1fr", "11fr"], gap="24px", padding="page_padding"))
-    scene.text(header, role="code", markup=False).place(page[0], anchor="left")
+    scene.text(header, role="code").place(page[0], anchor="left")
     rows = len(labels) // columns
     grid = page[1].split(Zones.grid(rows=rows, columns=columns, row_gap="36px", column_gap="48px"))
     stages = []
     for cell, text in zip(grid, labels):
         stage, caption = cell.split(Zones.rows(["3fr", "1fr"], gap="36px"))
-        scene.text(text, role="code", markup=False).place(caption, anchor="top")
+        scene.text(text, role="code").place(caption, anchor="top")
         stages.append(stage)
     return stages
 

@@ -28,7 +28,7 @@ seeks = []
 
 def code(label, zone, anchor="left"):
     """A variant label: the code that builds it."""
-    return scene.text(label, role="code", markup=False).place(zone, anchor=anchor)
+    return scene.text(label, role="code").place(zone, anchor=anchor)
 
 
 # Each slot while the room fills: its nickname, joined (0 while empty, then

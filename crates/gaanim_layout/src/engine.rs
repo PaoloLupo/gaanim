@@ -222,9 +222,10 @@ impl LayoutStyle {
 pub struct LayoutItemStyle {
     pub grow: f64,
     pub shrink: f64,
-    /// Main-axis size before growing or shrinking; `None` uses the content
-    /// (or zero for a growing item).
-    pub basis: Option<f64>,
+    /// Main-axis size before growing or shrinking: a length, a percentage of
+    /// the parent, its content (`Hug`) or none while it grows by the weight
+    /// (`Fill`); `None` uses the content (or zero for a growing item).
+    pub basis: Option<SizeRule>,
     /// Space around the child inside its parent; may be negative.
     pub margin: Insets,
     /// Layout size set on the child from outside, replacing its own (for
@@ -549,6 +550,121 @@ pub fn resolve_layout(
     relations: &[LayoutConstraint],
 ) -> Result<ResolvedLayout, LayoutError> {
     validate_tree(root)?;
+    let resolved = resolve_tree(root, viewport, measurer, relations)?;
+    // A nested grid that hugs its content, and has room for it, keeps the
+    // columns it has alone (#466): given a definite width, Taffy shares it
+    // out over `auto` tracks again, evenly and wider than a root grid, sized
+    // under a max-content constraint, makes them; texts that can wrap then
+    // break in columns narrower than they need.
+    let mut natural = BTreeMap::new();
+    collect_natural_grid_columns(root, true, viewport, measurer, &resolved, &mut natural);
+    if natural.is_empty() {
+        return Ok(resolved);
+    }
+    let mut held = root.clone();
+    hold_grid_columns(&mut held, &natural);
+    resolve_tree(&held, viewport, measurer, relations)
+}
+
+/// The column widths of each grid below `node` that [`resolve_layout`]
+/// holds: one that hugs its content, of `auto` and fixed columns, as wide in
+/// `resolved` as its content takes alone.
+fn collect_natural_grid_columns(
+    node: &LayoutNode,
+    is_root: bool,
+    viewport: Bounds3D,
+    measurer: &impl IntrinsicMeasure,
+    resolved: &ResolvedLayout,
+    out: &mut BTreeMap<LayoutId, Vec<f64>>,
+) {
+    if !is_root
+        && let Some((columns, width)) = natural_grid_columns(node, viewport, measurer)
+        && resolved
+            .boxes
+            .get(&node.id)
+            .is_some_and(|box_| box_.bounds.width() >= width - 1.0e-4)
+    {
+        out.insert(node.id, columns);
+    }
+    for child in &node.children {
+        collect_natural_grid_columns(&child.node, false, viewport, measurer, resolved, out);
+    }
+}
+
+/// The width of each column of a grid laid out on its own, as a root, and
+/// its whole width; `None` for a grid [`resolve_layout`] leaves to Taffy.
+fn natural_grid_columns(
+    node: &LayoutNode,
+    viewport: Bounds3D,
+    measurer: &impl IntrinsicMeasure,
+) -> Option<(Vec<f64>, f64)> {
+    let LayoutNodeKind::Grid { columns, .. } = &node.kind else {
+        return None;
+    };
+    if node.style.width != SizeRule::Hug
+        || !columns
+            .iter()
+            .all(|track| matches!(track, Track::Auto | Track::Fixed(_)))
+        || !columns.iter().any(|track| matches!(track, Track::Auto))
+    {
+        return None;
+    }
+    // Stretched across their cells, the children show the columns.
+    let mut alone = node.clone();
+    for child in &mut alone.children {
+        if child.style.margin != Insets::default() || child.style.absolute {
+            return None;
+        }
+        child.style.align = Some(Align::Stretch);
+    }
+    let layout = resolve_tree(&alone, viewport, measurer, &[]).ok()?;
+    let edges = |pick: fn(&Bounds3D) -> f64| {
+        let mut values: Vec<f64> = alone
+            .children
+            .iter()
+            .filter_map(|child| layout.boxes.get(&child.node.id))
+            .map(|box_| pick(&box_.bounds))
+            .collect();
+        values.sort_by(f64::total_cmp);
+        values.dedup_by(|a, b| (*a - *b).abs() < 1.0e-4);
+        values
+    };
+    let (starts, ends) = (edges(|bounds| bounds.min.x), edges(|bounds| bounds.max.x));
+    // Every column starts and ends some child; an empty one is left alone.
+    if starts.len() != columns.len() || ends.len() != columns.len() {
+        return None;
+    }
+    let widths = starts
+        .iter()
+        .zip(&ends)
+        .map(|(start, end)| end - start)
+        .collect();
+    Some((widths, layout.boxes.get(&node.id)?.bounds.width()))
+}
+
+/// Replace the `auto` columns of the grids in `columns` with their widths.
+fn hold_grid_columns(node: &mut LayoutNode, held: &BTreeMap<LayoutId, Vec<f64>>) {
+    if let (Some(widths), LayoutNodeKind::Grid { columns, .. }) =
+        (held.get(&node.id), &mut node.kind)
+    {
+        for (track, width) in columns.iter_mut().zip(widths) {
+            if matches!(track, Track::Auto) {
+                *track = Track::Fixed(*width);
+            }
+        }
+    }
+    for child in &mut node.children {
+        hold_grid_columns(&mut child.node, held);
+    }
+}
+
+/// [`resolve_layout`] without holding nested grids' columns.
+fn resolve_tree(
+    root: &LayoutNode,
+    viewport: Bounds3D,
+    measurer: &impl IntrinsicMeasure,
+    relations: &[LayoutConstraint],
+) -> Result<ResolvedLayout, LayoutError> {
     let mut tree: TaffyTree<LayoutId> = TaffyTree::new();
     tree.disable_rounding();
     let available = DVec2::new(viewport.width(), viewport.height()).max(DVec2::ZERO);
@@ -971,8 +1087,8 @@ fn build_item(
             } else {
                 (style.height, style.width)
             };
-            let fill = match main {
-                SizeRule::Fill(weight) => weight,
+            let fill = match (item.basis, main) {
+                (Some(SizeRule::Fill(weight)), _) | (_, SizeRule::Fill(weight)) => weight,
                 _ => 0.0,
             };
             let grow = if item.grow > 0.0 { item.grow } else { fill };
@@ -992,11 +1108,13 @@ fn build_item(
                 // item's basis, so a paragraph with `basis=0` would break
                 // after every word.
                 _ if grow > 0.0 && parent_hugs => Dimension::auto(),
-                Some(basis) => Dimension::length(basis.max(0.0) as f32),
+                Some(SizeRule::Fixed(basis)) => Dimension::length(basis.max(0.0) as f32),
+                Some(SizeRule::Percent(percent)) => Dimension::percent((percent / 100.0) as f32),
+                Some(SizeRule::Hug) => Dimension::auto(),
                 // A growing item shares the free space by weight, ignoring
                 // its own content size.
-                None if grow > 0.0 => Dimension::length(0.0),
-                None => Dimension::auto(),
+                Some(SizeRule::Fill(_)) | None if grow > 0.0 => Dimension::length(0.0),
+                Some(SizeRule::Fill(_)) | None => Dimension::auto(),
             };
             // Then a growing item takes the slack both ways: when the parent
             // is narrower than its content, it shrinks and the others keep
@@ -1217,6 +1335,11 @@ fn apply_relations(
         variables.insert(*id, vars);
         let b = box_.bounds;
         let tie = Strength::new((Strength::WEAK.value() - order as f64 * EPSILON).max(EPSILON));
+        // A box keeps its own size against weak and medium relations, as
+        // content resists compression: only a strong or required relation
+        // resizes it. Otherwise the cheapest way to settle two relations on
+        // its edges is to shrink it, and a weak `width <= …` squashes text.
+        let size = Strength::new(SIZE_STRENGTH - order as f64 * EPSILON);
         for constraint in [
             SolverConstraint::new(
                 vars.width.into(),
@@ -1230,8 +1353,8 @@ fn apply_relations(
             ),
             solver_eq(vars.left.into(), b.min.x, tie),
             solver_eq(vars.bottom.into(), b.min.y, tie),
-            solver_eq(vars.width.into(), b.width(), tie),
-            solver_eq(vars.height.into(), b.height(), tie),
+            solver_eq(vars.width.into(), b.width(), size),
+            solver_eq(vars.height.into(), b.height(), size),
         ] {
             solver
                 .add_constraint(constraint)
@@ -1310,6 +1433,10 @@ fn apply_relations(
     }
     Ok(())
 }
+
+/// How firmly a box holds its own size in a relational solve: above
+/// `medium()` relations, below `strong()` ones.
+const SIZE_STRENGTH: f64 = 10_000.0;
 
 fn solver_eq(expression: SolverExpression, value: f64, strength: Strength) -> SolverConstraint {
     SolverConstraint::new(expression - value, RelationalOperator::Equal, strength)
@@ -1469,7 +1596,7 @@ mod tests {
             style: LayoutItemStyle {
                 grow: 1.0,
                 shrink: 1.0,
-                basis: Some(0.0),
+                basis: Some(SizeRule::Fixed(0.0)),
                 ..LayoutItemStyle::default()
             },
         };
@@ -1520,7 +1647,7 @@ mod tests {
             style: LayoutItemStyle {
                 grow: 1.0,
                 shrink: 1.0,
-                basis: Some(0.0),
+                basis: Some(SizeRule::Fixed(0.0)),
                 ..LayoutItemStyle::default()
             },
         };
@@ -2166,5 +2293,208 @@ mod tests {
             assert_eq!(repeated.boxes, first.boxes);
             assert_eq!(repeated.diagnostics, first.diagnostics);
         }
+    }
+
+    /// Two boxes side by side in a stack the size of the viewport.
+    fn two_boxes(a: DVec2, b: DVec2, relations: &[LayoutConstraint]) -> ResolvedLayout {
+        let (first, ma) = child(1, a);
+        let (second, mb) = child(2, b);
+        let mut root =
+            LayoutNode::container(LayoutId(0), LayoutNodeKind::Stack, vec![first, second]);
+        root.style.width = SizeRule::Fill(1.0);
+        root.style.height = SizeRule::Fill(1.0);
+        resolve_layout(
+            &root,
+            Bounds3D::new_2d(-100.0, -100.0, 100.0, 100.0),
+            &Measure(BTreeMap::from([ma, mb])),
+            relations,
+        )
+        .unwrap()
+    }
+
+    /// `(sq.center_x == box.left).weak()` against
+    /// `(sq.center_x == box.right).strong()`: the weak one is relaxed, rather
+    /// than the box shrunk to nothing so that both hold.
+    #[test]
+    fn relations_between_positions_keep_the_sizes() {
+        let center = LayoutExpression::variable(LayoutId(2), LayoutAttribute::CenterX);
+        let left = LayoutExpression::variable(LayoutId(1), LayoutAttribute::Left);
+        let right = LayoutExpression::variable(LayoutId(1), LayoutAttribute::Right);
+        for strength in [ConstraintStrength::Weak, ConstraintStrength::Medium] {
+            let layout = two_boxes(
+                DVec2::new(40.0, 20.0),
+                DVec2::new(10.0, 10.0),
+                &[
+                    LayoutConstraint::equal(center.clone(), left.clone()).with_strength(strength),
+                    LayoutConstraint::equal(center.clone(), right.clone())
+                        .with_strength(ConstraintStrength::Strong),
+                ],
+            );
+            let reference = layout.boxes[&LayoutId(1)].bounds;
+            let square = layout.boxes[&LayoutId(2)].bounds;
+            assert!((reference.width() - 40.0).abs() < EPSILON, "{reference:?}");
+            assert!((square.width() - 10.0).abs() < EPSILON, "{square:?}");
+            assert!((square.center().x - reference.max.x).abs() < EPSILON);
+            assert_eq!(layout.diagnostics.len(), 1);
+        }
+    }
+
+    /// `(text.width <= 5).weak()` leaves a 20-wide text whole and reports it;
+    /// `.strong()` and required relations resize it.
+    #[test]
+    fn only_strong_relations_resize_a_box() {
+        let width = LayoutExpression::variable(LayoutId(1), LayoutAttribute::Width);
+        let narrow = |strength| {
+            let layout = two_boxes(
+                DVec2::new(20.0, 10.0),
+                DVec2::new(10.0, 10.0),
+                &[LayoutConstraint {
+                    lhs: width.clone(),
+                    relation: ConstraintRelation::LessOrEqual,
+                    rhs: 5.0.into(),
+                    strength,
+                    label: None,
+                }],
+            );
+            (
+                layout.boxes[&LayoutId(1)].bounds.width(),
+                layout.diagnostics.len(),
+            )
+        };
+        let (weak, reported) = narrow(ConstraintStrength::Weak);
+        assert!((weak - 20.0).abs() < EPSILON, "{weak}");
+        assert_eq!(reported, 1);
+        let (medium, _) = narrow(ConstraintStrength::Medium);
+        assert!((medium - 20.0).abs() < EPSILON, "{medium}");
+        for strength in [ConstraintStrength::Strong, ConstraintStrength::Required] {
+            let (width, reported) = narrow(strength);
+            assert!((width - 5.0).abs() < EPSILON, "{strength:?}: {width}");
+            assert_eq!(reported, 0);
+        }
+    }
+
+    /// `item(basis="40%")` in a row 200 wide starts at 80; `"fill"` grows by
+    /// its weight from zero and `"hug"` starts at the content.
+    #[test]
+    fn a_basis_can_be_a_share_of_the_row_its_content_or_the_free_space() {
+        let row = |basis: SizeRule| {
+            let (mut first, ma) = child(1, DVec2::new(30.0, 10.0));
+            first.style.basis = Some(basis);
+            let (second, mb) = child(2, DVec2::new(30.0, 10.0));
+            let mut root = LayoutNode::container(
+                LayoutId(0),
+                LayoutNodeKind::Row { wrap: false },
+                vec![first, second],
+            );
+            root.style.width = SizeRule::Fixed(200.0);
+            let layout = resolve_layout(
+                &root,
+                Bounds3D::new_2d(-500.0, -500.0, 500.0, 500.0),
+                &Measure(BTreeMap::from([ma, mb])),
+                &[],
+            )
+            .unwrap();
+            layout.boxes[&LayoutId(1)].bounds.width()
+        };
+        assert!((row(SizeRule::Percent(40.0)) - 80.0).abs() < EPSILON);
+        assert!((row(SizeRule::Fill(1.0)) - 170.0).abs() < EPSILON);
+        assert!((row(SizeRule::Hug) - 30.0).abs() < EPSILON);
+        assert!((row(SizeRule::Fixed(50.0)) - 50.0).abs() < EPSILON);
+    }
+
+    /// Short texts, 6, 10 and 14 wide on one line by column, or two lines
+    /// two thirds as wide when offered less.
+    struct Words(bool);
+    impl IntrinsicMeasure for Words {
+        fn measure(&self, id: LayoutId, constraints: BoxConstraints) -> Result<DVec2, LayoutError> {
+            let width = [6.0, 10.0, 14.0][(id.0 as usize - 1) % 3];
+            Ok(if constraints.max.x >= width {
+                DVec2::new(width, 4.0)
+            } else {
+                DVec2::new(width * 2.0 / 3.0, 8.0)
+            })
+        }
+
+        fn is_width_sensitive(&self, _: LayoutId) -> bool {
+            self.0
+        }
+    }
+
+    /// A grid of `auto` columns measures the same as the root of its layout
+    /// and inside another box (#466), where Taffy alone gives it even
+    /// columns, wider than its content and, with texts that can wrap, too
+    /// narrow for the widest.
+    #[test]
+    fn a_nested_grid_keeps_its_columns() {
+        let grid = || {
+            let children = (1..=6)
+                .map(|id| LayoutChild {
+                    node: Box::new(LayoutNode::leaf(LayoutId(id))),
+                    style: LayoutItemStyle::default(),
+                })
+                .collect();
+            let mut grid = LayoutNode::container(
+                LayoutId(10),
+                LayoutNodeKind::Grid {
+                    rows: vec![Track::Auto; 2],
+                    columns: vec![Track::Auto; 3],
+                    auto_flow: AutoFlow::Row,
+                },
+                children,
+            );
+            grid.style.gap = DVec2::splat(2.0);
+            grid
+        };
+        let viewport = Bounds3D::new_2d(-80.0, -45.0, 80.0, 45.0);
+        for (words, kind) in [true, false].into_iter().flat_map(|wraps| {
+            [
+                LayoutNodeKind::Stack,
+                LayoutNodeKind::Column { wrap: false },
+                LayoutNodeKind::Row { wrap: false },
+            ]
+            .map(|kind| (Words(wraps), kind))
+        }) {
+            let root = resolve_layout(&grid(), viewport, &words, &[]).unwrap();
+            let outer = LayoutNode::container(
+                LayoutId(20),
+                kind.clone(),
+                vec![LayoutChild {
+                    node: Box::new(grid()),
+                    style: LayoutItemStyle::default(),
+                }],
+            );
+            let nested = resolve_layout(&outer, viewport, &words, &[]).unwrap();
+            let grid_box = nested.boxes[&LayoutId(10)].bounds;
+            assert!(
+                (grid_box.width() - 34.0).abs() < EPSILON,
+                "{kind:?}, wrapping {}: {grid_box:?}",
+                words.0
+            );
+            for id in 1..=6 {
+                let (a, b) = (
+                    root.boxes[&LayoutId(id)].bounds,
+                    nested.boxes[&LayoutId(id)].bounds,
+                );
+                let center = root.boxes[&LayoutId(10)].bounds.center().x;
+                assert!(
+                    (a.width() - b.width()).abs() < EPSILON
+                        && (a.height() - b.height()).abs() < EPSILON
+                        && ((a.min.x - center) - (b.min.x - grid_box.center().x)).abs() < EPSILON,
+                    "{kind:?} {id}: {a:?} vs {b:?}"
+                );
+            }
+        }
+        // A box narrower than the texts still wraps them in the grid.
+        let mut narrow = LayoutNode::container(
+            LayoutId(20),
+            LayoutNodeKind::Column { wrap: false },
+            vec![LayoutChild {
+                node: Box::new(grid()),
+                style: LayoutItemStyle::default(),
+            }],
+        );
+        narrow.style.width = SizeRule::Fixed(24.0);
+        let squeezed = resolve_layout(&narrow, viewport, &Words(true), &[]).unwrap();
+        assert!(squeezed.boxes[&LayoutId(10)].bounds.width() <= 24.0 + EPSILON);
     }
 }

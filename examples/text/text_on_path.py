@@ -61,7 +61,7 @@ def show(variants):
     """Label each (label, build) variant; ``build(stage)`` draws its path and text."""
     texts = []
     for (strip, stage), (code, build) in zip(cells(len(variants) // 2), variants):
-        scene.text(code, role="code", markup=False).place(strip, anchor="left")
+        scene.text(code, role="code").place(strip, anchor="left")
         texts.append(build(stage))
     return texts
 

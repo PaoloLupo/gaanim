@@ -48,6 +48,47 @@ struct DrawSchedule {
     stroke_width: Option<f64>,
     auto_stroke_width: f64,
     fill_rate_func: gaanim_math::RateFunc,
+    /// Draw each piece as Manim's `Write` does (see
+    /// `SceneBuilder::play_manim_draw`).
+    manim: bool,
+}
+
+/// Width of Manim's `Write` outline per unit of frame height: its stroke
+/// width 2, 0.02 scene units in Manim's frame 8 units tall.
+pub(crate) const WRITE_OUTLINE_PER_FRAME_HEIGHT: f64 = 0.0025;
+
+/// Samples of the easing table of a draw phase with a non-linear easing.
+const DRAW_PHASE_SAMPLES: usize = 129;
+
+/// Lens bounds and easing of one half of a Manim draw over a piece's whole
+/// window. The piece's eased progress `a` (`1 - a` when erasing) gives the
+/// outline `clamp(2a)` (`phase` 0) and the rest of its look `clamp(2a - 1)`
+/// (`phase` 1), as Manim's `DrawBorderThenFill` splits it.
+fn manim_draw_phase(rate: &RateFunc, phase: u8, reversed: bool) -> (f64, f64, RateFunc) {
+    let (first, second) = if phase == 0 { (0.0, 0.5) } else { (0.5, 1.0) };
+    if matches!(rate, RateFunc::Linear) {
+        // Exact halves: the phase runs over its half of the window, or over
+        // the mirrored half from 1 down to 0 when erasing.
+        let (from, to, start, end) = if reversed {
+            (1.0, 0.0, 1.0 - second, 1.0 - first)
+        } else {
+            (0.0, 1.0, first, second)
+        };
+        let squish = RateFunc::Squish {
+            inner: Box::new(RateFunc::Linear),
+            start,
+            end,
+        };
+        return (from, to, squish);
+    }
+    let samples: std::sync::Arc<[f64]> = (0..DRAW_PHASE_SAMPLES)
+        .map(|index| {
+            let eased = rate.evaluate(index as f64 / (DRAW_PHASE_SAMPLES - 1) as f64);
+            let progress = if reversed { 1.0 - eased } else { eased };
+            (2.0 * progress - f64::from(phase)).clamp(0.0, 1.0)
+        })
+        .collect();
+    (0.0, 1.0, RateFunc::Sampled(samples))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -378,6 +419,13 @@ pub(crate) fn adaptive_lag_ratio(item_count: usize) -> f64 {
     (4.0 / item_count.max(1) as f64).min(0.2)
 }
 
+/// The lag of a write grouped by word, line or part: up to four groups
+/// follow one another, and more overlap as Manim's glyphs do, so that
+/// writing by groups reads group after group.
+pub(crate) fn grouped_lag_ratio(group_count: usize) -> f64 {
+    (4.0 / group_count.max(1) as f64).min(1.0)
+}
+
 fn draw_config(anim_type: &AnimationType) -> Option<&crate::anim::DrawAnimationConfig> {
     match anim_type {
         AnimationType::Write { config }
@@ -397,6 +445,7 @@ fn draw_item_slots(
     config: Option<&crate::anim::DrawAnimationConfig>,
 ) -> (Vec<ObjectId>, Vec<usize>) {
     let order = config.map_or(crate::anim::DrawOrder::Forward, |config| config.order);
+    let seed = config.map_or(0, |config| config.seed);
     let groups: Vec<Vec<ObjectId>> = match config.and_then(|config| config.groups.as_ref()) {
         Some(groups) => {
             let drawn: HashSet<ObjectId> = items.iter().copied().collect();
@@ -422,7 +471,7 @@ fn draw_item_slots(
         }
         None => items.into_iter().map(|id| vec![id]).collect(),
     };
-    let group_slots = draw_group_slots(groups.len(), order);
+    let group_slots = draw_group_slots(groups.len(), order, seed);
     let mut by_slot: Vec<(usize, usize)> = group_slots
         .iter()
         .enumerate()
@@ -468,8 +517,13 @@ fn bounds_edge_point(
     bounds.center() + bounds.size() * 0.5 * unit
 }
 
-/// Stagger slot of each of `count` groups for `order`.
-pub(crate) fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> Vec<usize> {
+/// Stagger slot of each of `count` groups for `order`; `Random` is a
+/// permutation fixed by `seed` and `count`.
+pub(crate) fn draw_group_slots(
+    count: usize,
+    order: crate::anim::DrawOrder,
+    seed: u64,
+) -> Vec<usize> {
     use crate::anim::DrawOrder;
     match order {
         DrawOrder::Forward => (0..count).collect(),
@@ -490,8 +544,10 @@ pub(crate) fn draw_group_slots(count: usize, order: crate::anim::DrawOrder) -> V
                 .collect()
         }
         DrawOrder::Random => {
-            // Fisher-Yates driven by SplitMix64 seeded from the count only.
-            let mut state = 0x9E37_79B9_7F4A_7C15_u64 ^ count as u64;
+            // Fisher-Yates driven by SplitMix64; seed 0 keeps the
+            // permutation of the count alone.
+            let mut state =
+                0x9E37_79B9_7F4A_7C15_u64 ^ count as u64 ^ seed.wrapping_mul(0xD1B5_4A32_D192_ED03);
             let mut next = || {
                 state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
                 let mut value = state;
@@ -976,6 +1032,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Their tint for what already shows `emphasis_color`: the theme's
     /// foreground.
     pub(crate) emphasis_contrast: Color,
+    /// Width of the outline `write` draws, Manim's for the frame's height.
+    pub(crate) draw_outline_width: f64,
+    /// Typst source that Typst documents start with: the theme's colors.
+    pub(crate) typst_theme: String,
     /// The `look_at`s each compiled object follows: a compiled object or a
     /// point, and the radians added. `clear_drive` keeps their last turn.
     pub(crate) look_ats: HashMap<ObjectId, Vec<(gaanim_animation::FalloffTarget, f64)>>,
@@ -1038,6 +1098,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// reflow keeps the child's own offset from it, so a child animated
     /// inside its box stays where it was moved.
     pub(crate) layout_rests: HashMap<ObjectId, LayoutRest>,
+    /// The last pivot set on each object, as the scene point it was given
+    /// and the point of its parent's space it was then, which the pivot
+    /// keeps as the parent moves on.
+    declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     /// Opacity each object had before an animation took it to zero, which
     /// an entrance shows it at again.
     faded_opacities: HashMap<ObjectId, f32>,
@@ -1114,6 +1178,7 @@ pub(crate) struct SceneBuilderState {
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
     text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
     layout_rests: HashMap<ObjectId, LayoutRest>,
+    declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     faded_opacities: HashMap<ObjectId, f32>,
 }
 
@@ -1155,6 +1220,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: self.text_cancellation_marks.clone(),
             text_canceled_term_children: self.text_canceled_term_children.clone(),
             layout_rests: self.layout_rests.clone(),
+            declared_pivots: self.declared_pivots.clone(),
             faded_opacities: self.faded_opacities.clone(),
         }
     }
@@ -1203,6 +1269,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            declared_pivots,
             faded_opacities,
         } = state;
         Self {
@@ -1221,6 +1288,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             readout_baselines,
             readout_reserves: HashMap::new(),
             emphasis_color: DEFAULT_EMPHASIS_COLOR,
+            draw_outline_width: 9.0 * WRITE_OUTLINE_PER_FRAME_HEIGHT,
+            typst_theme: String::new(),
             emphasis_contrast: DEFAULT_EMPHASIS_CONTRAST,
             look_ats: HashMap::new(),
             pending_time_maps: Vec::new(),
@@ -1252,6 +1321,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            declared_pivots,
             faded_opacities,
         }
     }
@@ -1492,6 +1562,42 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Sets `id`'s pivot to the scene point `pivot` and returns it in the
+    /// space of its parent now. The pivot stays that point of its parent's
+    /// space, so it moves with the parent from then on.
+    pub(crate) fn declare_pivot(&mut self, id: ObjectId, pivot: DVec3) -> DVec3 {
+        let local = self.scene_to_parent(id, pivot);
+        self.declared_pivots.insert(id, (pivot, local));
+        local
+    }
+
+    /// `id`'s pivot `pivot` in the space of its parent: where it was when
+    /// set, if it is `id`'s pivot, or a scene point now.
+    fn pivot_in_parent(&self, id: ObjectId, pivot: DVec3) -> DVec3 {
+        match self.declared_pivots.get(&id) {
+            Some(&(scene, local)) if scene == pivot => local,
+            _ => self.scene_to_parent(id, pivot),
+        }
+    }
+
+    /// Maps a scene point into the space of `id`'s parent, where its
+    /// translation and anchor live; a root's is the scene's.
+    pub(crate) fn scene_to_parent(&self, id: ObjectId, point: DVec3) -> DVec3 {
+        let mut matrix = gaanim_core::glam::DMat4::IDENTITY;
+        let mut current = self.states.get(id).and_then(|state| state.parent);
+        while let Some(parent) = current {
+            let Some(state) = self.states.get(parent) else {
+                break;
+            };
+            matrix = state.transform.to_mat4() * matrix;
+            current = state.parent;
+        }
+        if matrix.determinant().abs() <= f64::EPSILON {
+            return point;
+        }
+        matrix.inverse().transform_point3(point)
+    }
+
     /// Computes the true world-space transform of a Mobject by walking up the parent chain.
     /// This is necessary during group creation to calculate accurate world bounds for nested children.
     pub fn get_world_transform(&self, id: ObjectId) -> SpatialTransform {
@@ -1538,6 +1644,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             readout_baselines: HashMap::new(),
             readout_reserves: HashMap::new(),
             emphasis_color: DEFAULT_EMPHASIS_COLOR,
+            draw_outline_width: 9.0 * WRITE_OUTLINE_PER_FRAME_HEIGHT,
+            typst_theme: String::new(),
             emphasis_contrast: DEFAULT_EMPHASIS_CONTRAST,
             look_ats: HashMap::new(),
             pending_time_maps: Vec::new(),
@@ -1571,6 +1679,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: HashMap::new(),
             text_canceled_term_children: HashMap::new(),
             layout_rests: HashMap::new(),
+            declared_pivots: HashMap::new(),
             faded_opacities: HashMap::new(),
         }
     }
@@ -2831,13 +2940,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         TextSelectionEffect::RevealFade => {
                             (AnimationType::FadeIn, RateFunc::Smooth, 0.0)
                         }
-                        TextSelectionEffect::RevealWipe => (
-                            AnimationType::Write {
-                                config: Default::default(),
-                            },
-                            RateFunc::Smooth,
-                            0.0,
-                        ),
+                        TextSelectionEffect::RevealWipe => {
+                            // Hidden until the wipe draws it, as a fading
+                            // reveal is, even while the rest is written.
+                            if let Some(state) = self.states.get_mut(target) {
+                                if state.opacity > 0.0 {
+                                    self.faded_opacities.insert(target, state.opacity);
+                                }
+                                state.opacity = 0.0;
+                                self.commands.entity(state.entity).insert(Opacity(0.0));
+                            }
+                            (
+                                AnimationType::Write {
+                                    config: Default::default(),
+                                },
+                                RateFunc::Smooth,
+                                0.0,
+                            )
+                        }
                         TextSelectionEffect::RevealFromBelow => (
                             AnimationType::FadeInFrom {
                                 offset: DVec3::new(0.0, -0.24, 0.0),
@@ -3318,6 +3438,14 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             let cursor = self.current_time;
             self.current_time += anim.delay.max(0.0);
             let start = self.current_time;
+            // Without a duration (`Text.become` on a shown text) the target
+            // simply takes the source's place.
+            if !copy && (anim.duration.is_nan() || anim.duration <= 0.0) {
+                self.schedule_hide_hierarchy(anim.target);
+                self.schedule_show_at(target, start);
+                self.current_time = cursor;
+                return;
+            }
             self.play_equation_transition_eased(
                 anim.target,
                 target,
@@ -4013,15 +4141,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         item_count: usize,
     ) -> Option<DrawSchedule> {
         let adaptive_lag = adaptive_lag_ratio(item_count);
+        let lag_for = |config: &crate::anim::DrawAnimationConfig| {
+            config.lag_ratio.unwrap_or(if config.groups.is_some() {
+                grouped_lag_ratio(item_count)
+            } else {
+                adaptive_lag
+            })
+        };
         match &anim.anim_type {
             AnimationType::Write { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
                 reversed: false,
                 staggered: true,
-                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                lag_ratio: lag_for(config),
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: true,
             }),
             AnimationType::Create { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
@@ -4031,15 +4167,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: false,
             }),
             AnimationType::Unwrite { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
                 reversed: true,
                 staggered: true,
-                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                lag_ratio: lag_for(config),
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: true,
             }),
             AnimationType::Uncreate { config } => Some(DrawSchedule {
                 mode: DrawMode::Grow,
@@ -4049,6 +4187,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: false,
             }),
             AnimationType::DrawBorderThenFill { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
@@ -4058,6 +4197,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.04,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: false,
             }),
             _ => None,
         }
@@ -4116,9 +4256,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     if child_state.exclude_from_parent_draw {
                         continue;
                     }
-                    // If this child itself has glyph spans, expand to glyphs
+                    // If this child itself has glyph spans, expand to glyphs,
+                    // backwards like everything else here: the final reverse
+                    // restores their reading order.
                     if !child_state.child_spans.is_empty() {
-                        leaves.extend(child_state.child_spans.iter().map(|c| c.id));
+                        leaves.extend(child_state.child_spans.iter().rev().map(|c| c.id));
                     } else if !child_state.children.is_empty() {
                         // Nested group – push its children to stack
                         stack.extend(child_state.children.iter().cloned());
@@ -4183,6 +4325,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     label: self.current_label.clone(),
                 }),
             );
+        }
+
+        if schedule.manim {
+            self.play_manim_draw(
+                &anim,
+                parent_track,
+                start_time,
+                &items,
+                &slots,
+                slot_count,
+                &schedule,
+            );
+            return;
         }
 
         let mut temporary_strokes = HashMap::new();
@@ -4468,6 +4623,152 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     }),
                 );
             }
+        }
+    }
+
+    /// Schedule `write`/`unwrite` as Manim's `Write`/`Unwrite` (its
+    /// `DrawBorderThenFill`) draws its pieces. Each piece runs over its
+    /// share of the animation, staggered by the lag ratio, with the easing
+    /// applied to its own progress. The first half draws its outline,
+    /// counted in Bézier segments, at the outline width in its stroke color
+    /// (its fill color when it has no stroke) and centered on the contour;
+    /// the second half turns the outline into the piece's own look: the fill
+    /// appears and the stroke takes its own width, none for a piece without
+    /// one. Erasing runs the same backwards, the last piece first.
+    #[allow(clippy::too_many_arguments)]
+    fn play_manim_draw(
+        &mut self,
+        anim: &AnimationBuilder,
+        parent_track: TrackId,
+        start_time: f64,
+        items: &[ObjectId],
+        slots: &[usize],
+        slot_count: usize,
+        schedule: &DrawSchedule,
+    ) {
+        let reversed = schedule.reversed;
+        let outline = schedule.stroke_width.unwrap_or(self.draw_outline_width);
+        let lag_ratio = schedule.lag_ratio;
+        let item_duration = anim.duration / (1.0 + (slot_count as f64 - 1.0).max(0.0) * lag_ratio);
+        let lag_step = item_duration * lag_ratio;
+        let window = item_duration.max(1e-6);
+        let min_step = 1e-6_f64.max(item_duration * 0.01);
+        let (path_from, path_to, path_rate) = manim_draw_phase(&anim.rate_func, 0, reversed);
+        let (style_from, style_to, style_rate) = manim_draw_phase(&anim.rate_func, 1, reversed);
+        let hold = if reversed { 1.0 } else { 0.0 };
+        let pen_tip = draw_config(&anim.anim_type).is_some_and(|config| config.pen_tip);
+        let mut pen_tips = Vec::new();
+        let label = self.current_label.clone();
+        for (item_id, slot) in items.iter().zip(slots) {
+            let Some(state) = self.states.get(*item_id) else {
+                continue;
+            };
+            let entity = state.entity;
+            let filled = state.fill.is_some();
+            // A piece without a stroke gets one only while it is drawn.
+            let own_width = state
+                .stroke
+                .brush
+                .as_ref()
+                .map(|_| state.stroke.style.width);
+            let fill_color = state
+                .fill
+                .as_ref()
+                .and_then(extract_brush_color)
+                .unwrap_or(Color::WHITE);
+            let mut commands = self.commands.entity(entity);
+            if own_width.is_none() {
+                commands
+                    .insert(StrokeBrush::new(fill_color, 0.0))
+                    .entry::<gaanim_renderer::effects::StrokeAlign>()
+                    .or_insert(gaanim_renderer::effects::StrokeAlign::Center);
+            }
+            if filled {
+                commands.insert(gaanim_animation::FillDrawProgress(hold as f32));
+            }
+            commands.insert(gaanim_animation::PathReveal(hold));
+            if !reversed {
+                commands.insert((
+                    gaanim_animation::WriteTipGlow::default(),
+                    gaanim_scene::components::Path2D(std::sync::Arc::new(
+                        gaanim_core::kurbo::BezPath::new(),
+                    )),
+                ));
+                if pen_tip {
+                    pen_tips.push(entity);
+                }
+            }
+
+            let mut clip = |start: f64, duration: f64, lens: PropertyLensSpec, rate_func| {
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens,
+                        rate_func,
+                        delay: 0.0,
+                        label: label.clone(),
+                    }),
+                );
+            };
+            // Hidden (shown, when erasing) until its turn.
+            clip(
+                start_time,
+                min_step,
+                PropertyLensSpec::PathPartial {
+                    from: hold,
+                    to: hold,
+                },
+                RateFunc::Linear,
+            );
+            if filled {
+                clip(
+                    start_time,
+                    min_step,
+                    PropertyLensSpec::FillDrawProgress {
+                        from: hold as f32,
+                        to: hold as f32,
+                    },
+                    RateFunc::Linear,
+                );
+            }
+            let item_start = start_time + *slot as f64 * lag_step;
+            clip(
+                item_start,
+                window,
+                PropertyLensSpec::PathPartial {
+                    from: path_from,
+                    to: path_to,
+                },
+                path_rate.clone(),
+            );
+            if filled {
+                clip(
+                    item_start,
+                    window,
+                    PropertyLensSpec::FillDrawProgress {
+                        from: style_from as f32,
+                        to: style_to as f32,
+                    },
+                    style_rate.clone(),
+                );
+            }
+            let own = own_width.unwrap_or(0.0);
+            let width = |style: f64| outline + (own - outline) * style;
+            clip(
+                item_start,
+                window,
+                PropertyLensSpec::StrokeWidth {
+                    from: width(style_from),
+                    to: width(style_to),
+                },
+                style_rate.clone(),
+            );
+        }
+        for path in pen_tips {
+            self.attach_pen_tip(path);
         }
     }
 
@@ -4813,7 +5114,39 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target_state.opacity = target_opacity;
             }
             self.commands.entity(target_entity).insert(Opacity(0.0));
+            // A transform target starts hidden down to its glyphs; the root's
+            // opacity fades in, so its descendants show when it starts.
+            self.schedule_show_descendants_at(target, transform_start_time);
         }
+    }
+
+    /// Where a morphing source ends: on the target, also when the two hang
+    /// from different parents (cells of two matrices), whose local
+    /// transforms then place them apart. The source keeps its own pivot.
+    fn landing_transform(
+        &self,
+        source: &MobjectState,
+        target: ObjectId,
+        target_state: &MobjectState,
+    ) -> SpatialTransform {
+        if source.parent == target_state.parent {
+            return target_state.transform;
+        }
+        let parent = source
+            .parent
+            .map_or(gaanim_core::kurbo::Affine::IDENTITY, |parent| {
+                self.get_world_transform(parent).to_affine_2d()
+            });
+        let local = parent.inverse() * self.get_world_transform(target).to_affine_2d();
+        let mut landing = SpatialTransform::from_affine_2d(&local);
+        landing.anchor = source.transform.anchor;
+        // The pivot shifts the placement; move the translation back by it.
+        let shift = landing.to_affine_2d().translation()
+            - gaanim_core::kurbo::Vec2::new(landing.translation.x, landing.translation.y);
+        landing.translation.x -= shift.x;
+        landing.translation.y -= shift.y;
+        landing.translation.z = target_state.transform.translation.z;
+        landing
     }
 
     fn play_transform_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
@@ -4998,6 +5331,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
 
         // Morph the translation, rotation, scale
+        let landing = self.landing_transform(&source_state, target, &target_state);
         self.timeline.add_clip(
             parent_track,
             morph_start_time,
@@ -5006,7 +5340,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::Translation {
                     from: source_state.transform.translation,
-                    to: target_state.transform.translation,
+                    to: landing.translation,
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -5021,7 +5355,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::Rotation {
                     from: source_state.transform.rotation,
-                    to: target_state.transform.rotation,
+                    to: landing.rotation,
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -5036,7 +5370,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale {
                     from: source_state.transform.scale,
-                    to: target_state.transform.scale,
+                    to: landing.scale,
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -5183,7 +5517,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Update hot state of source to match target
         if let Some(state) = self.states.get_mut(anim.target) {
-            state.transform = target_state.transform;
+            state.transform = landing;
             state.bounds = target_state.bounds;
             if is_replacement {
                 state.opacity = 0.0;
@@ -5355,26 +5689,111 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         duration: f64,
         rate_func: gaanim_math::RateFunc,
     ) {
-        if !duration.is_finite() || duration <= 0.0 {
+        self.play_transform_matching_grouped(source, target, mode, Vec::new(), duration, rate_func);
+    }
+
+    /// [`Self::play_transform_matching`] that pairs `semantic_groups` of
+    /// glyphs first in `Tex` mode.
+    ///
+    /// The target ends shown and the source hidden, so later animations of
+    /// the target move what is on screen. Its containers appear at the start,
+    /// so its new pieces fade in through them; its paired pieces appear when
+    /// their source pieces arrive. `Tex` mode falls back to shapes unless
+    /// both drawables have glyphs.
+    pub(crate) fn play_transform_matching_grouped(
+        &mut self,
+        source: ObjectId,
+        target: ObjectId,
+        mode: MatchingMode,
+        semantic_groups: Vec<(Vec<ObjectId>, Vec<ObjectId>)>,
+        duration: f64,
+        rate_func: gaanim_math::RateFunc,
+    ) {
+        if !duration.is_finite() || duration <= 0.0 || source == target {
             return;
         }
-        if self.states.get(source).is_none() || self.states.get(target).is_none() {
+        let (Some(source_state), Some(target_state)) = (
+            self.states.get(source).cloned(),
+            self.states.get(target).cloned(),
+        ) else {
             return;
+        };
+        let start = self.current_time;
+        let end = start + duration;
+        let track = self.ensure_track(target);
+        let source_ids = self.hierarchy_ids(source);
+        let target_ids = self.hierarchy_ids(target);
+        let (target_leaves, _) = self.collect_leaf_match_data(target);
+        for &id in &target_ids {
+            if target_leaves.contains(&id) {
+                continue;
+            }
+            if let Some(opacity) = self.states.get(id).map(|state| state.opacity) {
+                self.timeline.add_clip(
+                    track,
+                    start,
+                    0.0,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: id,
+                        lens: PropertyLensSpec::Opacity {
+                            from: 0.0,
+                            to: opacity,
+                        },
+                        rate_func: gaanim_math::RateFunc::Linear,
+                        delay: 0.0,
+                        label: Some("TransformMatchingHandoff".to_string()),
+                    }),
+                );
+            }
         }
-        if mode == MatchingMode::Tex {
-            self.play_equation_transition(
+
+        let by_glyph = mode == MatchingMode::Tex
+            && !source_state.child_spans.is_empty()
+            && !target_state.child_spans.is_empty();
+        if by_glyph {
+            self.play_equation_transition_eased(
                 source,
                 target,
-                Vec::new(),
+                semantic_groups,
                 duration,
                 EquationTransitionMode::Replace,
                 true,
+                rate_func,
             );
-            return;
+        } else {
+            self.schedule_leaf_matching(
+                source,
+                target,
+                MatchingMode::Shapes,
+                start,
+                duration,
+                rate_func,
+            );
         }
-        let start = self.current_time;
-        self.schedule_leaf_matching(source, target, mode, start, duration, rate_func);
-        self.current_time = start + duration;
+
+        // Handoff: the source hierarchy ends where the target begins.
+        for &id in &source_ids {
+            let Some(from) = self.states.get(id).map(|state| state.opacity) else {
+                continue;
+            };
+            self.timeline.add_clip(
+                track,
+                end,
+                0.0,
+                ClipPayload::Animation(AnimationSpec {
+                    target: id,
+                    lens: PropertyLensSpec::Opacity { from, to: 0.0 },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: Some("TransformMatchingHandoff".to_string()),
+                }),
+            );
+            if let Some(state) = self.states.get_mut(id) {
+                state.opacity = 0.0;
+            }
+        }
+        self.schedule_show_hierarchy(target, &target_state, track, end);
+        self.current_time = end;
     }
 
     /// Schedule the leaf morphs and fades of a matching between `source` and
@@ -6286,6 +6705,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let AnimationType::PivotTo { pivot } = anim.anim_type else {
             return;
         };
+        // The pivot is a scene point; the transform's anchor lives in its
+        // parent's space, such as an SVG part's document.
+        let pivot = self.declare_pivot(anim.target, pivot);
         let Some(state) = self.states.get_mut(anim.target) else {
             return;
         };
@@ -7068,6 +7490,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             } => (*angle_radians, *pivot),
             _ => unreachable!(),
         };
+        // A scene pivot, turned about in the parent's space, where the
+        // translation lives. The drawable's own pivot stays where it was
+        // set in that space, as a joint of a turning group does.
+        let pivot = pivot.map(|pivot| self.pivot_in_parent(anim.target, pivot));
 
         let state = match self.states.get_mut(anim.target) {
             Some(s) => s,
@@ -7553,6 +7979,61 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Layout reflow uses this when a versioned tree no longer contains a
     /// member. The child remains alive and visible, but subsequent transforms
     /// are evaluated in world space instead of the former group's local space.
+    /// Move `child` under `parent`, or out of every group with `None`, from
+    /// the current time on, where it stands in the scene. Unlike
+    /// [`Self::add_to_group`] and [`Self::remove_from_group`], which change
+    /// the hierarchy for the whole scene, this is a timeline clip: before it
+    /// the child still follows its former parent. Returns its new local
+    /// transform.
+    /// With `keep_own`, the child keeps its own scale and rotation under the
+    /// new parent, which then scales and turns it too, as a box does.
+    pub(crate) fn reparent_at_cursor(
+        &mut self,
+        child: ObjectId,
+        parent: Option<ObjectId>,
+        keep_own: bool,
+    ) -> Option<SpatialTransform> {
+        let child_world = self.get_world_transform(child);
+        let mut transform = match parent {
+            Some(parent) => {
+                let parent_world = self.get_world_transform(parent).to_affine_2d();
+                SpatialTransform::from_affine_2d(
+                    &(parent_world.inverse() * child_world.to_affine_2d()),
+                )
+            }
+            None => child_world,
+        };
+        let state = self.states.get_mut(child)?;
+        if keep_own {
+            transform.scale = state.transform.scale;
+            transform.rotation = state.transform.rotation;
+        }
+        let previous = std::mem::replace(&mut state.parent, parent);
+        state.transform = transform;
+        if let Some(previous) = previous
+            && let Some(group) = self.states.get_mut(previous)
+        {
+            group.children.retain(|id| *id != child);
+        }
+        if let Some(parent) = parent
+            && let Some(group) = self.states.get_mut(parent)
+            && !group.children.contains(&child)
+        {
+            group.children.push(child);
+        }
+        self.timeline.add_clip(
+            self.default_track,
+            self.current_time,
+            0.0,
+            ClipPayload::Reparent {
+                target: child,
+                parent,
+                transform,
+            },
+        );
+        Some(transform)
+    }
+
     pub fn remove_from_group(&mut self, group: MobjectRef, child: MobjectRef) {
         let is_direct_child = self
             .states
@@ -9578,15 +10059,16 @@ mod tests {
     #[test]
     fn draw_group_slots_follow_order() {
         use crate::anim::DrawOrder;
-        assert_eq!(draw_group_slots(4, DrawOrder::Forward), [0, 1, 2, 3]);
-        assert_eq!(draw_group_slots(4, DrawOrder::Reverse), [3, 2, 1, 0]);
-        assert_eq!(draw_group_slots(5, DrawOrder::Center), [2, 1, 0, 1, 2]);
-        assert_eq!(draw_group_slots(4, DrawOrder::Center), [1, 0, 0, 1]);
-        assert_eq!(draw_group_slots(1, DrawOrder::Center), [0]);
-        assert!(draw_group_slots(0, DrawOrder::Random).is_empty());
+        assert_eq!(draw_group_slots(4, DrawOrder::Forward, 0), [0, 1, 2, 3]);
+        assert_eq!(draw_group_slots(4, DrawOrder::Reverse, 0), [3, 2, 1, 0]);
+        assert_eq!(draw_group_slots(5, DrawOrder::Center, 0), [2, 1, 0, 1, 2]);
+        assert_eq!(draw_group_slots(4, DrawOrder::Center, 0), [1, 0, 0, 1]);
+        assert_eq!(draw_group_slots(1, DrawOrder::Center, 0), [0]);
+        assert!(draw_group_slots(0, DrawOrder::Random, 0).is_empty());
 
-        let random = draw_group_slots(12, DrawOrder::Random);
-        assert_eq!(random, draw_group_slots(12, DrawOrder::Random));
+        let random = draw_group_slots(12, DrawOrder::Random, 0);
+        assert_eq!(random, draw_group_slots(12, DrawOrder::Random, 0));
+        assert_ne!(random, draw_group_slots(12, DrawOrder::Random, 7));
         let mut sorted = random.clone();
         sorted.sort_unstable();
         assert_eq!(sorted, (0..12).collect::<Vec<_>>());
@@ -9633,6 +10115,9 @@ mod tests {
         assert!((adaptive_lag_ratio(1) - 0.2).abs() < f64::EPSILON);
         assert!((adaptive_lag_ratio(2) - 0.2).abs() < f64::EPSILON);
         assert!((adaptive_lag_ratio(40) - 0.1).abs() < 1e-9);
+        // Grouped writes: a few groups in turn, many overlapping.
+        assert!((grouped_lag_ratio(3) - 1.0).abs() < f64::EPSILON);
+        assert!((grouped_lag_ratio(8) - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]

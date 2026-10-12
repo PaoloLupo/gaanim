@@ -58,7 +58,7 @@ def table(entries):
     )
     moves = []
     for index, (label, change) in enumerate(entries):
-        scene.text(label, role="code", markup=False, text_align="right").place(grid[2 * index], anchor="right")
+        scene.text(label, role="code", text_align="right").place(grid[2 * index], anchor="right")
         zone = grid[2 * index + 1]
         moves.append(change(pose(zone), zone))
     play(moves)

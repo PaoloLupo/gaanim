@@ -31,7 +31,7 @@ def faded(color, alpha):
 
 def label(code):
     """A variant label: the code that builds it, without markup."""
-    return scene.text(code, role="code", markup=False)
+    return scene.text(code, role="code")
 
 
 def table(rows, columns=None, build=None, corner=None, labels="12fr"):

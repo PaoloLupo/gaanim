@@ -8,6 +8,7 @@ use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy::window::PrimaryWindow;
 use gaanim_core::kurbo;
+use std::sync::Arc;
 use vello::wgpu;
 
 use crate::canvas::{PreviewResolution, VelloCanvas, VelloView, scaled_canvas_size};
@@ -31,6 +32,47 @@ impl ExtractedPostProcess {
 
 #[derive(Resource, Default)]
 struct RenderPostProcess(GpuPostProcess);
+
+/// The drawables the post-process leaves out this frame, extracted from
+/// [`crate::pipeline::UnprocessedLayer`].
+#[derive(Resource, Default)]
+pub(crate) struct ExtractedUnprocessed(pub(crate) Option<Arc<vello::Scene>>);
+
+/// Render-world target of the drawables the post-process leaves out, the
+/// size of the canvas texture: `render_canvas` draws them there and the
+/// post-process composites them above its result.
+#[derive(Resource, Default)]
+pub(crate) struct CanvasOverlayTarget(Option<(wgpu::Texture, wgpu::TextureView)>);
+
+impl CanvasOverlayTarget {
+    /// The view of the target, if a post-process prepared it this frame.
+    pub(crate) fn view(&self) -> Option<&wgpu::TextureView> {
+        self.0.as_ref().map(|(_, view)| view)
+    }
+
+    /// The target matching `size`, created or resized as needed.
+    fn ensure(&mut self, device: &wgpu::Device, size: wgpu::Extent3d) -> &wgpu::Texture {
+        if !self
+            .0
+            .as_ref()
+            .is_some_and(|(texture, _)| texture.size() == size)
+        {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("gaanim-canvas-unprocessed"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&Default::default());
+            self.0 = Some((texture, view));
+        }
+        &self.0.as_ref().expect("the target was just created").0
+    }
+}
 
 /// Render-world targets of a shader transition's incoming segment and of the
 /// layer above its blend, the size of the canvas texture. `render_canvas`
@@ -91,6 +133,8 @@ pub(crate) fn build(app: &mut App) {
         .init_resource::<ExtractedPostProcess>()
         .init_resource::<RenderPostProcess>()
         .init_resource::<CanvasTransitionTargets>()
+        .init_resource::<ExtractedUnprocessed>()
+        .init_resource::<CanvasOverlayTarget>()
         .add_systems(ExtractSchedule, extract_post_process)
         .add_systems(
             Render,
@@ -178,18 +222,24 @@ fn update_post_process_frame(
 
 fn extract_post_process(
     frame: Extract<Option<Res<PostProcessFrame>>>,
+    unprocessed: Extract<Option<Res<crate::pipeline::UnprocessedLayer>>>,
     mut extracted: ResMut<ExtractedPostProcess>,
+    mut extracted_unprocessed: ResMut<ExtractedUnprocessed>,
 ) {
     extracted.0 = frame.as_ref().and_then(|frame| frame.0.clone());
+    extracted_unprocessed.0 = unprocessed.as_ref().and_then(|layer| layer.0.clone());
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_post_process(
     extracted: Res<ExtractedPostProcess>,
+    unprocessed: Res<ExtractedUnprocessed>,
     images: Res<RenderAssets<GpuImage>>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     mut state: ResMut<RenderPostProcess>,
     mut targets: ResMut<CanvasTransitionTargets>,
+    mut overlay: ResMut<CanvasOverlayTarget>,
 ) {
     let target = extracted
         .0
@@ -204,15 +254,28 @@ fn prepare_post_process(
                     above: &above.0,
                 }
             });
+            // Without the target, `render_canvas` draws the drawables the
+            // post-process leaves out into the canvas instead.
+            let overlay = match unprocessed.0 {
+                Some(_) => Some(overlay.ensure(device.wgpu_device(), image.texture.size())),
+                None => {
+                    overlay.0 = None;
+                    None
+                }
+            };
             state.0.prepare(
                 device.wgpu_device(),
                 &queue,
                 &image.texture,
                 Some(request),
                 inputs,
+                overlay,
             );
         }
-        None => state.0.clear(),
+        None => {
+            overlay.0 = None;
+            state.0.clear();
+        }
     }
 }
 

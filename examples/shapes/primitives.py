@@ -15,7 +15,6 @@ DRAW = 1.2
 HOLD = 0.6
 
 scene = Scene()
-accent = scene.canvas.color("accent")
 
 # Polygons and point clouds take their vertices in scene coordinates.
 TRIANGLE = [(-1.4, -1), (1.4, -1), (0.4, 1.2)]
@@ -98,14 +97,15 @@ table([
 ])
 
 # Marks for diagrams. A brace's tip points to the right of its direction, and
-# a negative height flips it; a cross and a right angle are strokes only.
+# a negative height flips it; a cross and a right angle are strokes only,
+# drawn with the theme's line style.
 scene.segment("marks")
 table([
     ("brace(0, 0, 3, 0, 0.5)", scene.geometry.brace(0, 0, 3, 0, 0.5)),
     ("brace(0, 0, 3, 0, -0.5)", scene.geometry.brace(0, 0, 3, 0, -0.5)),
     ("checkmark(1)", scene.geometry.checkmark(1)),
-    ("cross(0.9).stroke(accent, 0.08)", scene.geometry.cross(0.9).stroke(accent, 0.08)),
-    ("right_angle(0.9).stroke(accent, 0.08)", scene.geometry.right_angle(0.9).stroke(accent, 0.08)),
+    ("cross(0.9)", scene.geometry.cross(0.9)),
+    ("right_angle(0.9)", scene.geometry.right_angle(0.9)),
 ])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):

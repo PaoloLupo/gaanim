@@ -34,7 +34,7 @@ def table(rows, columns=("1fr", "1fr")):
         Zones.grid(rows=len(rows), columns=list(columns), column_gap="48px", padding="page_padding")
     )
     for index, (code, text, _) in enumerate(rows):
-        scene.text(code, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(code, role="code").place(grid[2 * index], anchor="right")
         text.place(grid[2 * index + 1], anchor="left")
     scene.play([build(text).duration(DURATION) for _, text, build in rows])
     scene.wait(HOLD)

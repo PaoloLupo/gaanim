@@ -98,6 +98,10 @@ const LIVE: &str = "live.json";
 /// The scene's rehearsal, as JSON: live zones replay it outside a
 /// presentation.
 const REHEARSAL: &str = "rehearsal.json";
+/// Keys of the drawables the post-process leaves out, when there are any.
+/// Optional, so that bundles without it stay readable and older readers
+/// draw those drawables processed.
+const UNPROCESSED: &str = "tables/unprocessed.bin";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
 
@@ -1199,6 +1203,14 @@ impl<W: Write + Seek> BundleWriter<W> {
             model::write_post_shader(&mut effects, shader);
         }
         self.write_entry("tables/effects.bin", &effects.into_bytes())?;
+        if !self.tables.post_exempt.is_empty() {
+            let mut unprocessed = Writer::new();
+            unprocessed.len(self.tables.post_exempt.len());
+            for key in &self.tables.post_exempt {
+                unprocessed.var(u64::from(*key));
+            }
+            self.write_entry(UNPROCESSED, &unprocessed.into_bytes())?;
+        }
         self.write_entry("scene.bin", &scene_bytes)?;
         let mut index = Writer::new();
         index.len(self.times.len());
@@ -1442,6 +1454,7 @@ impl Bundle {
             strings: Vec::new(),
             transition_shaders: Vec::new(),
             effect_shaders: Vec::new(),
+            post_exempt: Default::default(),
         };
         let paths = read_entry(&archive, Some(&manifest), "tables/paths.bin")?;
         let mut r = Reader::new(&paths);
@@ -1469,6 +1482,13 @@ impl Bundle {
         let mut r = Reader::new(&effects);
         for _ in 0..r.len()? {
             tables.effect_shaders.push(model::read_post_shader(&mut r)?);
+        }
+        if manifest.entries.contains_key(UNPROCESSED) {
+            let unprocessed = read_entry(&archive, Some(&manifest), UNPROCESSED)?;
+            let mut r = Reader::new(&unprocessed);
+            for _ in 0..r.len()? {
+                tables.post_exempt.insert(r.u32()?);
+            }
         }
         let recipes = read_entry(&archive, Some(&manifest), "tables/recipes.bin")?;
         let mut r = Reader::new(&recipes);
@@ -1841,6 +1861,73 @@ mod tests {
             post: Vec::new(),
             motion_blur: Vec::new(),
         }
+    }
+
+    #[test]
+    fn drawables_left_out_of_the_post_process_round_trip() {
+        let element = |raw: u32, post_exempt: bool| {
+            let entity = bevy::prelude::Entity::from_raw_u32(raw).unwrap();
+            CapturedElement {
+                entity,
+                recipe: Arc::new(gaanim_renderer::fragment::FragmentRecipe {
+                    path: Some(Arc::new(gaanim_core::kurbo::Shape::to_path(
+                        &gaanim_core::kurbo::Rect::new(0.0, 0.0, 1.0, 1.0),
+                        0.1,
+                    ))),
+                    ..Default::default()
+                }),
+                lottie: None,
+                transform: gaanim_core::kurbo::Affine::IDENTITY,
+                opacity: 1.0,
+                opacity_bounds: gaanim_core::kurbo::Rect::new(0.0, 0.0, 1.0, 1.0),
+                opacity_reach: None,
+                opacity_group: entity,
+                group_opacity: 1.0,
+                group_shadow: None,
+                render_order: Default::default(),
+                clip_mask: None,
+                blend: None,
+                transition_side: Default::default(),
+                post_exempt,
+                lineage: Vec::new(),
+                view_bounds: None,
+                in_views: true,
+                layer: None,
+                screen: None,
+                echo_rank: 0,
+                effect_root: None,
+                effect_extent: None,
+                matte_root: None,
+                matte_of: None,
+                glass_root: None,
+            }
+        };
+        let record = |elements: Vec<CapturedElement>| {
+            let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+            let mut first = frame(0.0);
+            first.capture.elements = elements;
+            writer.push_frame(&first, [0; 32]).unwrap();
+            let scene = SceneData {
+                fps: 60,
+                duration: 1.0 / 60.0,
+                ..Default::default()
+            };
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap()
+        };
+
+        let mut bundle = record(vec![element(1, false), element(2, true)]);
+        assert!(bundle.manifest.entries.contains_key(UNPROCESSED));
+        let decoded = bundle.frame(0).unwrap();
+        let flags: Vec<bool> = decoded
+            .capture
+            .elements
+            .iter()
+            .map(|element| element.post_exempt)
+            .collect();
+        assert_eq!(flags, [false, true]);
+        // Without such drawables the bundle has no entry for them.
+        let bundle = record(vec![element(1, false)]);
+        assert!(!bundle.manifest.entries.contains_key(UNPROCESSED));
     }
 
     #[test]

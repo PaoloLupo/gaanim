@@ -33,7 +33,7 @@ def rows(labels, tracks=("3fr", "2fr")):
         Zones.grid(rows=len(labels), columns=list(tracks), column_gap="48px", padding="page_padding")
     )
     for index, label in enumerate(labels):
-        scene.text(label, role="code", markup=False).place(grid[2 * index], anchor="right")
+        scene.text(label, role="code").place(grid[2 * index], anchor="right")
     return [grid[2 * index + 1] for index in range(len(labels))]
 
 
@@ -166,7 +166,7 @@ scene.wait(HOLD)
 
 # scene.fx.spotlight dims everything outside its target, to dim at most,
 # and lights it all again: padding and corner_radius shape the hole, which
-# can frame a text selection or the joint bounds of several targets. With
+# can frame a text selection, and several targets get a hole each. With
 # Easing.SMOOTH the dim stays at the end. Each card is labelled with the
 # call that lights it, abbreviating scene.fx.spotlight(...).
 scene.segment("spotlight")
@@ -183,7 +183,7 @@ cards = []
 for zone, call in zip(grid, CALLS):
     box = zone.inset("24px")
     cards.append(geometry.rounded_rect(box.width, box.height, 0.12).fill(panel).stroke(rule, 0.02).place(box))
-    scene.text(call, role="code", markup=False).place(box.inset("24px"), anchor="top_left")
+    scene.text(call, role="code").place(box.inset("24px"), anchor="top_left")
 gap_line = scene.text("Mind the gap", size=0.7).place(grid[3].inset("48px"), anchor="bottom_right")
 fx = scene.fx
 for light in [

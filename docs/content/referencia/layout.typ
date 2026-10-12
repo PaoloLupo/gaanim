@@ -87,7 +87,7 @@ pill = scene.layout.box("Nuevo", padding=("6px", "16px"), radius="full",
 #api-entry(
   name: "LayoutBuilder.row / column",
   kind: "factory",
-  desc: [Atajos de `box(direction="row")` y `box(direction="column")`. En una fila el eje principal es horizontal y `align` actúa en vertical; en una columna, al revés. Con `wrap=True` los hijos que no caben pasan a la línea siguiente.],
+  desc: [Atajos de `box(direction="row")` y `box(direction="column")`. Su nombre manda sobre el `direction` de un `style=` o de una clase; solo un `direction` escrito en la llamada lo cambia (igual en `grid` y `stack`). En una fila el eje principal es horizontal y `align` actúa en vertical; en una columna, al revés. Con `wrap=True` los hijos que no caben pasan a la línea siguiente.],
 )[
 ```python
 >>>from gaanim import *
@@ -163,14 +163,19 @@ Las mismas propiedades valen para `box`, `row`, `column`, `grid`, `stack`,
   vertical dentro de la celda).
 - `margin`: longitudes o `"auto"`, que se queda con el espacio libre.
 - `row`, `column`, `row_span`, `column_span`: celda en un grid.
-- `fit`: `none`, `contain`, `cover` (recorta), `stretch`, `scale_down`.
+- `fit`: `none`, `contain`, `cover`, `stretch`, `scale_down`. `cover` recorta
+  siempre lo que sale de la celda, sin `clip=True`, como `object-fit: cover`
+  en CSS, también si después se mueve la caja.
 - `anchor`, `offset`: posición en una capa o en su celda.
 - `absolute`: fuera del flujo; no ocupa espacio.
 
 *Decoración*
 
 - `background`, `border`, `border_width`, `radius` (`"full"`: píldora),
-  `shadow` (`True` o `{"color", "x", "y", "blur"}`), `clip`.
+  `shadow` (`True` o `{"color", "x", "y", "blur"}`), `clip`. `shadow=True`
+  usa el color `shadow` del tema, que también es el `color` por defecto del
+  diccionario: negro suave sobre fondos claros y casi opaco sobre fondos
+  oscuros, donde uno suave no se vería.
 
 *Tipografía* (la heredan las cadenas hijas)
 
@@ -245,7 +250,8 @@ row = scene.layout.row("Carga", bar.item(grow=1, height="12px"), "72%", gap="16p
 == Cajas vivas
 
 Una `Box` es un `Drawable`: `move_to`, `scale_by`, `animate.fade_in()` o
-`place` actúan sobre la caja entera. Decide la posición de reposo de sus
+`place` actúan sobre la caja entera, y su escala y su giro se aplican a los
+hijos sobre los suyos, como una transformación CSS. Decide la posición de reposo de sus
 hijos, que siguen aceptando cualquier animación de `.animate`: parten de ese
 sitio, no mueven a sus hermanos y conservan su desplazamiento cuando la caja
 se reorganiza.
@@ -257,7 +263,7 @@ Con `advance=False` el siguiente cambio empieza a la vez.
 #api-entry(
   name: "Box.add / remove / replace",
   kind: "method",
-  desc: [`add(hijo, at=None)` inserta un hijo (o una cadena) y lo devuelve; `remove(hijo)` lo quita con un fundido; `replace(viejo, nuevo)` pone `nuevo` en su lugar, heredando sus reglas de `item` si no trae las suyas. Un índice fuera de rango lanza `IndexError`.],
+  desc: [`add(hijo, at=None)` inserta un hijo (o una cadena) y lo devuelve; con `duration`, entra con un fundido, salvo un hijo que viene de otra caja (sacado con `detach`), que se desliza desde donde está. `remove(hijo)` lo quita con un fundido; `replace(viejo, nuevo)` pone `nuevo` en su lugar, heredando sus reglas de `item` si no trae las suyas. Un índice fuera de rango lanza `IndexError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -286,7 +292,7 @@ grid.set(columns=2, gap="30px", duration=0.8)
 #api-entry(
   name: "Box.detach",
   kind: "method",
-  desc: [Saca a un hijo de la caja sin ocultarlo: conserva su posición y vuelve a aceptar `move_to` y las animaciones de posición.],
+  desc: [Saca a un hijo de la caja sin ocultarlo: conserva su posición, deja de ocupar sitio y vuelve a aceptar `move_to` y las animaciones de posición. Desde ese instante ya no sigue a la caja si esta se mueve, escala o se desvanece; antes sí. `otra.add(hijo)` lo mete en otra caja.],
   none,
 )
 
@@ -421,14 +427,14 @@ scene.render()
 #api-entry(
   name: "Box.reflow",
   kind: "method",
-  desc: [Vuelve a calcular la disposición cuando un hijo cambió de tamaño por su cuenta (por ejemplo, al escalarlo). Los cambios de texto y de estructura ya reorganizan solos.],
+  desc: [Vuelve a calcular la disposición cuando un hijo cambió de tamaño por su cuenta. Mide cada hijo de la caja, a cualquier profundidad, con la escala y la rotación que tiene ahora: un hijo escalado con `scale_to` o `animate.scale_to` recibe sitio para su nuevo tamaño. Las demás reorganizaciones (`add`, `set`, un texto que cambia…) conservan el tamaño con el que se colocó, como un `transform` de CSS. Los cambios de texto y de estructura ya reorganizan solos.],
   none,
 )
 
 #api-entry(
   name: "LayoutOwnershipError",
   kind: "class",
-  desc: [Se lanza al colocar de forma inmediata (`move_to`, `shift_by`, `next_to`…, sin `.animate`) un hijo de una caja o al meter en una caja un objeto que ya pertenece a otra. Usa `item(offset=...)`, anima al hijo con `.animate`, mueve la caja entera o `detach` al hijo.],
+  desc: [Se lanza al colocar de forma inmediata (`move_to`, `shift_by`, `next_to`…, sin `.animate`) un hijo de una caja o al meter en una caja un objeto que ya pertenece a otra. Usa `item(offset=...)`, anima al hijo con `.animate`, mueve la caja entera o `detach` al hijo. `scale_to`, `rotate_to` y los demás ajustes de forma no lo colocan y sí funcionan sobre un hijo.],
   none,
 )
 
@@ -468,14 +474,14 @@ title = scene.text("Título", size=0.5).place(z["cabecera"], anchor="left")
 #api-entry(
   name: "ZoneSet.fill",
   kind: "method",
-  desc: [Un `ZoneSet` se indexa por nombre o posición, se recorre y tiene `names`. `fill(*objetos, anchor=..., fit=..., padding=...)` coloca un objeto en cada zona, en orden. Un nombre desconocido lanza `KeyError`.],
+  desc: [Un `ZoneSet` se indexa por nombre o posición, se recorre y tiene `names`; una porción como `zonas[1:]` es otro `ZoneSet`. `fill(*objetos, anchor=..., fit=..., padding=...)` coloca un objeto en cada zona, en orden. Un nombre desconocido lanza `KeyError`.],
   none,
 )
 
 #api-entry(
   name: "Zone.point / inset / split / arrange",
   kind: "method",
-  desc: [Una `Zone` expone `left`, `right`, `top`, `bottom`, `width`, `height` y `center` en unidades de escena. `point(anchor)` da uno de sus puntos; `inset(padding)` la encoge; `split(plantilla)` aplica otra plantilla dentro; `arrange(*objetos, direction="row", gap=..., align=..., justify=...)` alinea objetos libres sin adoptarlos.],
+  desc: [Una `Zone` expone `left`, `right`, `top`, `bottom`, `width`, `height` y `center` en unidades de escena. `point(anchor)` da uno de sus puntos; `inset(padding)` la encoge; `split(plantilla)` aplica otra plantilla dentro; `arrange(*objetos, direction="row", gap=..., align=..., justify=...)` alinea objetos libres sin adoptarlos; `direction` es `"row"`, `"column"` o `"wrap"` (filas que saltan a la siguiente cuando el objeto no cabe).],
 )[
 ```python
 >>>from gaanim import *
@@ -579,7 +585,7 @@ y `height`. Complementan a las cajas: para una cuadrícula, usa `grid`.
   name: "LayoutConstraint.strong / medium / weak / named",
   kind: "method",
   signature: "strong() · medium() · weak() · named(label) -> LayoutConstraint",
-  desc: [Las restricciones son obligatorias por defecto; estos métodos devuelven una copia con prioridad fuerte, media o débil, o con una etiqueta para los diagnósticos. Las débiles incumplidas aparecen en `check_layout`.],
+  desc: [Las restricciones son obligatorias por defecto; estos métodos devuelven una copia con prioridad fuerte, media o débil, o con una etiqueta para los diagnósticos. Las débiles incumplidas aparecen en `check_layout`. Un objeto conserva su ancho y su alto frente a las restricciones medias y débiles: solo una fuerte u obligatoria lo redimensiona. Las relaciones entre posiciones mueven objetos y nunca encogen uno para resolver un conflicto.],
   none,
 )
 

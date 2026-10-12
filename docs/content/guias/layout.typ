@@ -482,7 +482,9 @@ scene.render()
 `move_to(x, y)` usa coordenadas de la escena también para un hijo. Lo único
 reservado a la caja es colocar a un hijo _al declararlo_: `move_to`,
 `next_to` o `to_edge` inmediatos sobre un hijo lanzan
-`LayoutOwnershipError`. Para eso ajusta `item(offset=...)`, mueve la caja
+`LayoutOwnershipError`. `scale_to` o `rotate_to` inmediatos sí funcionan y,
+como las animaciones, no cambian el sitio del hijo; `box.reflow()` lo mide
+con su escala actual y le hace sitio. Para eso ajusta `item(offset=...)`, mueve la caja
 entera o saca al hijo con `box.detach(hijo)`. Si algo no encaja,
 `box.diagnostics()` y `scene.layout.check_layout()` explican qué restricción
 o texto no se pudo cumplir. En el editor, `O` y después `K` activan el

@@ -42,6 +42,16 @@ enteros, o usa `scene.text.code`.
   mal. El diálogo del editor suma MOV a sus formatos y una casilla
   *Conservar la transparencia* para MOV, WebM, WebP y PNG.
 
+== Animación
+
+- `write()` y `unwrite()` animan como el `Write` y el `Unwrite` de Manim:
+  cada pieza traza su contorno en la primera mitad de su parte, un tramo de
+  Bézier tras otro, fino y centrado, en el color de su trazo, y en la segunda
+  mitad aparece su relleno y el trazo toma su ancho. La curva se aplica al
+  avance de cada pieza, y sin duración duran 1 s con menos de 15 piezas y 2 s
+  con más. Se conservan `by`, `order`, `seed`, `stagger`, la tiza y la punta
+  de lápiz. Ver #link("/referencia/animations/#api-anim-write")[`Anim.write`].
+
 == Texto
 
 - `scene.text.code` resalta la sintaxis: las palabras clave, las cadenas, los
@@ -63,6 +73,23 @@ enteros, o usa `scene.text.code`.
   fuente) y los bloques de `scene.text.code` (antes DejaVu Sans Mono). Así el
   código se ve igual en Windows, macOS, Linux, el playground y los paquetes
   `.gaanim`. Un tema con `fonts={"code": ...}` sigue eligiendo la suya.
+
+== Matemáticas
+
+- `scene.viz.matrix(..., fractions="inline")` escribe los racionales exactos
+  en una línea (`3/2`), tan altos como las demás entradas; antes había que
+  rodearlo con un `cell_factory`. Ver
+  #link("/referencia/matrices/#api-visualization-matrix")[`Visualization.matrix`].
+- `TextStyle.size` devuelve el tamaño que fija el estilo.
+
+== Layout
+
+- Una porción de un `ZoneSet`, como `zonas[1:]`, es otro `ZoneSet`: se
+  recorre, se indexa y tiene `fill()`. Ver
+  #link("/referencia/layout/#api-zoneset-fill")[`ZoneSet`].
+- El tema tiene un color `shadow`, el de `shadow=True` en las cajas: negro
+  suave sobre fondos claros y casi opaco sobre fondos oscuros. Cámbialo con
+  `Theme(colors={"shadow": ...})`.
 
 == Ejemplos
 
@@ -178,6 +205,159 @@ enteros, o usa `scene.text.code`.
   la suya; antes duraban siempre un segundo.
 - `clear_drive()` deja el objeto girado como lo tenía su `look_at`; antes
   volvía a su rotación propia.
+- `scene.geometry.cross()` y `right_angle()` toman el estilo de línea del
+  tema y se ven sin `stroke`; antes eran invisibles con el tema por defecto.
+- Los trazos discontinuos de las formas cerradas conservan sus huecos con
+  remates `"round"` o `"square"` (el trazo interior por defecto los
+  agrandaba), y un guion de longitud cero con esos remates dibuja un punto.
+- `stroke(paint, width)` después de `stroke_style(...)` conserva los guiones,
+  remates y uniones, y `StrokeStyle` acepta `align`.
+- El estilo raíz de un texto subraya, tacha y contornea todo el texto, como ya
+  hacía en una parte, y `word_spacing` separa las palabras en la raíz. Un
+  `stroke` sin `stroke_width` contornea con 0,02. Una parte con `baseline`
+  sube o baja dentro de su línea; antes saltaba a otra o desaparecía.
+- `max_lines` limita las líneas: `overflow="clip"` corta el texto tras la
+  última palabra que cabe y `"ellipsis"` lo termina con «…». Antes no
+  recortaba nada y, en una caja, ponía una palabra por línea.
+- Un `wrap` numérico ajusta el texto dentro de una caja; antes lo dejaba en
+  una sola línea.
+- `text.tracking(...)` espacia bien los glifos que siguen a una coma.
+- `text["parte"].fill(...)` después de un `play` cambia el color de la parte
+  en el cursor, como una selección literal; antes no hacía nada.
+- `role="code"` muestra `*` y `_` tal cual (antes `"stagger(*grows)"` lanzaba
+  `ValueError`).
+- `write(order="random", seed=n)` cambia el orden con la semilla, y `write()`
+  sobre un grupo, como un bloque de `scene.text.code`, escribe cada texto en
+  orden de lectura en lugar de empezar por su última línea. Ya no deja
+  recuadros alrededor de las etiquetas `content(...)` de CeTZ.
+- `text.become(...)` después de un `play` cambia el texto en el cursor, y
+  `animate.fade_transform_to(otro_texto)` deja visible el texto de destino.
+- Los trazos negros de los documentos Typst (tablas, `rect`, `line`, CeTZ)
+  toman el color del texto del documento y se ven sobre fondos oscuros.
+- Los documentos Typst escriben su texto en el color del rol `body` del tema,
+  como `scene.text`, en lugar de blanco o negro puro, y empiezan con `theme`,
+  un diccionario con los colores del tema (`theme.accent`, `theme.rule`…)
+  para dárselos a sus paquetes, que piensan en papel blanco y eligen negro y
+  blanco por su cuenta. Ver
+  #link("/referencia/text/#colores-del-tema-en-typst")[Colores del tema en Typst].
+- `write()` traza de un tirón las curvas que un paquete de Typst dibuja muestra
+  a muestra (simple-plot, CeTZ); antes se veían punteadas.
+- Las ediciones de una matriz (`insert_row`, `remove_column`, `swap_rows`,
+  `reorder_columns`, `become`…) la dejan donde estaba, con su escala y sus
+  animaciones; antes la reconstruían en el origen.
+- `matrix.morph_to(destino)` termina en el destino: las entradas viajan hasta
+  las suyas, los delimitadores se transforman en los del destino y aparecen
+  sus entradas sin pareja. Antes se reordenaban dentro de la matriz de origen
+  y el destino se quedaba con los delimitadores vacíos.
+- `matrix.place(zona)` devuelve la matriz, no la caja de su layout.
+- `order="simultaneous"` empieza todas las entradas a la vez aunque haya
+  `stagger`; antes las escalonaba por filas. Sin `order`, un `stagger` las
+  sigue escalonando fila a fila.
+- `matrix.rank()` dibuja `rank = 2`; antes Typst no conocía `rank` y no se
+  veía nada.
+- Escalar una matriz, o cualquier caja, agranda también lo que contiene;
+  antes solo separaba las entradas. Los delimitadores automáticos abarcan las
+  filas según el tamaño de `entry_style`, y un `delimiter_size` explícito
+  sigue al número de filas tras `become()`.
+- Una ecuación con matemática inválida, como `a dot.circle b`, lanza
+  `ValueError` al crearla, como dice la documentación; antes solo escribía el
+  error de Typst y no dibujaba nada.
+- Las filas de una ecuación partida con `\` ya no se pisan: guardan la
+  separación de Typst entre filas.
+- Las selecciones de partes encuentran sus glifos: `eq["inertia"]` con partes
+  anidadas (antes no seleccionaba nada al animarla, y `highlight()` no se
+  veía) y una parte cuyo texto aparece antes en la ecuación (antes
+  seleccionaba la primera aparición). El color de `part(..., color=...)` tiñe
+  solo la parte, no cada aparición de su texto.
+- `write(by="part")` escribe las partes una tras otra; antes empezaban casi a
+  la vez.
+- `reveal("wipe")` deja el término oculto hasta su turno, como `"fade"`;
+  antes se veía mientras se escribía el resto y luego se barría.
+- `item(basis=...)` acepta `"N%"`, `"hug"` y `"fill"`, como dice la
+  documentación; antes solo aceptaba longitudes.
+- `fit="cover"` recorta la capa donde está su caja aunque la caja se haya
+  movido con `move_to` o `place`; antes recortaba en el sitio donde se
+  resolvió y la capa desaparecía.
+- `box.detach(hijo)` en una caja movida deja al hijo donde estaba; antes se
+  dibujaba en el sitio de la caja sin mover, desde el principio de la escena.
+  Cambiar de padre ocurre en la línea de tiempo: el hijo sigue a la caja
+  hasta el `detach` y desde ahí se mueve solo.
+- Pasar un hijo de una caja a otra (`a.detach(hijo)` y luego
+  `b.add(hijo, duration=...)`) lo desliza desde donde está; antes no se veía
+  desde el principio de la escena hasta entrar en la segunda caja, y su
+  posición anterior se leía respecto a ella.
+- `point_on_curve`, `tangent_on_curve`, `normal_on_curve` y
+  `curvature_on_curve` siguen la curva tal como se dibuja: movida, girada,
+  escalada, animada o dentro de unos ejes. Antes usaban los puntos declarados
+  y se quedaban atrás.
+- `curvature_on_curve` dibuja el círculo también en los extremos de una curva
+  abierta y en la costura de una cerrada; antes no dibujaba nada, o un
+  círculo de radio 1 en el origen.
+- `bind_rotation_from` ve el giro de `Updater.rotate`, y
+  `bind_translation_from_rotation` sigue a `Updater.rotate` y a
+  `rotate_to(Parameter)` más allá de media vuelta; antes la cremallera
+  retrocedía al pasar de media vuelta.
+- `fill` colorea entera una flecha sólida: su contorno sigue al relleno salvo
+  que `stroke` fije otro. Antes `always_redraw_arc(...).fill(color)` solo
+  coloreaba el interior de la punta.
+- Los trackers de curvas, `always_redraw_arc` y `point_between(alpha=...)`
+  aceptan un `Computed`.
+- El ejemplo de `Parameter.add_updater_fn` en la referencia calcula el valor a
+  partir del tiempo transcurrido; el anterior volvía a 0 al hacer seek.
+- `transform_matching(..., mode="tex")` y `mode="text"` terminan mostrando el
+  destino; antes dejaban ocultos el origen y el destino. Un `mode`
+  desconocido lanza `ValueError` en vez de usar `"shapes"`.
+- `transform_matching_shapes` y `transform_matching` muestran las piezas
+  nuevas del destino, que antes no aparecían, y al final muestran el destino y
+  ocultan el origen: las animaciones siguientes del destino mueven lo que se
+  ve.
+- `with_pivot(x, y)` en una parte de un SVG (`svg.part(...)`) lee el punto en
+  coordenadas de escena, también en `animate.rotate_by`, aunque el SVG esté
+  escalado o movido; antes lo leía en el marco del documento SVG.
+- `Transition.morph` y `Transition.magic_move` con un resorte
+  (`Easing.BOUNCY`, `Easing.SNAPPY`...) dejan que el movimiento se pase del
+  destino y vuelva, y no parpadean: antes el sobrepaso mostraba el estado
+  final de golpe y el rebote volvía a mostrar el contenido saliente. Con un
+  easing explícito, el morph ya no lo suaviza otra vez. `cross_fade` y
+  `fade_through` tampoco vuelven a mostrar el segmento saliente.
+- `fx.spotlight([a, b])` abre un hueco alrededor de cada objetivo; antes abría
+  uno solo alrededor de la caja conjunta.
+- `drawable.post_process(False)` deja un objeto, con sus miembros, fuera del
+  postprocesado de la escena y del de su segmento: se dibuja encima del cuadro
+  procesado, así que un HUD o una etiqueta se leen bajo `pixelate`, `glitch`
+  o `halftone`. Funciona en la vista previa, al exportar y en los `.gaanim`;
+  un reproductor anterior dibuja esos objetos procesados.
+- `segment.motion_blur(...)` da a un segmento su propio desenfoque de
+  movimiento, o ninguno con `None`, en lugar del de `scene.canvas.motion_blur`.
+- El mensaje de un `.cube` que `PostProcess.lut` no puede leer habla de una
+  LUT, no de un «WGSL asset».
+- Los ejemplos de `PostProcess.glitch` y de los pulsos con `Parameter` en la
+  referencia y en la guía de efectos usan `.repeat(2, yoyo=True)`, que sube y
+  vuelve; `.repeat(1, yoyo=True)` solo subía.
+- La referencia de `scene.persist` explica que un objeto nuevo persistido
+  justo después de `scene.segment(...)` entra con la transición de ese
+  segmento.
+- Una cuadrícula con columnas `"auto"` dentro de otra caja mide lo mismo que
+  sola. Antes sus columnas se repartían el ancho por igual: la cuadrícula
+  quedaba más ancha y, con textos que pueden partirse, el más ancho se partía
+  en dos líneas.
+- `box.reflow()` hace sitio a un hijo escalado o girado desde que se colocó,
+  como dice la documentación; antes lo medía con su tamaño original y se
+  solapaba con sus hermanos. `scale_to`, `rotate_to` y los demás ajustes de
+  forma inmediatos funcionan sobre un hijo de una caja; antes lanzaban
+  `LayoutOwnershipError`. Una caja anidada escalada ocupa el sitio de su
+  tamaño escalado, como cualquier otro hijo; antes ocupaba el de su tamaño
+  sin escalar.
+- `obj.animate.place(zona, fit="stretch")` estira el objeto a la zona; antes
+  lo escalaba como `"contain"`.
+- Las restricciones entre posiciones ya no encogen objetos: dos relaciones
+  en conflicto sobre los bordes de una caja, como `(sq.center_x ==
+  caja.left).weak()` y `(sq.center_x == caja.right).strong()`, dejan la caja
+  de su tamaño; antes la reducían a cero. `(texto.width <= 0.5).weak()` ya
+  no aplasta los glifos.
+- `L.column`, `L.row`, `L.grid` y `L.stack` mantienen su dirección aunque un
+  `style=` o una clase traigan otro `direction`.
+- El stub de `Zone.arrange` incluye `direction="wrap"`, que ya funcionaba.
 
 == Al actualizar
 
@@ -214,6 +394,70 @@ enteros, o usa `scene.text.code`.
   duración. Fija `.duration(1)` si contabas con el segundo de antes.
 - Los efectos que antes ignoraban su lugar en un `sequence` o `stagger` ahora
   esperan su turno, así que la escena puede durar más.
+- `fill_level(direction=...)` nombra siempre hacia dónde crece el relleno:
+  `"right"` crece desde el borde izquierdo y `"left"` desde el derecho, como
+  `"up"` crece desde abajo. Antes `"left"` y `"right"` nombraban el borde de
+  partida: cámbialos entre sí.
+- `cross()` y `right_angle()` se ven con el trazo del tema; si les dabas
+  un `stroke`, no cambia nada.
+- Con `role="code"`, un `\$` muestra la barra invertida y el dólar, como el
+  resto del código; antes mostraba solo el dólar. Quita la barra si la
+  escribías para escapar el dólar.
+- Un `word_spacing` en la raíz, que antes no tenía efecto, ahora separa las
+  palabras: quítalo si no lo querías.
+- Los textos con `max_lines` se cortan; con `overflow="visible"` se ven
+  todas las líneas.
+- `write()` sobre un grupo con textos (ejes, matrices, bloques de código)
+  escribe cada texto desde su primer carácter: los fotogramas intermedios
+  cambian, el resultado final no.
+- `write()` y `unwrite()` sin duración duran 2 s en textos y grupos de 15
+  piezas o más, así que la escena puede alargarse: fija `.duration(1)` si
+  contabas con el segundo de antes. Sus fotogramas intermedios cambian (la
+  mitad del tiempo de cada pieza traza el contorno y la otra mitad lo
+  rellena), y un objeto con trazo lo dibuja fino y luego lo engrosa.
+- Los documentos de `scene.text.typst` usan el color de texto del tema en
+  lugar de blanco o negro puro. Si querías blanco, ponlo en el documento con
+  `#set text(fill: white)`. Un documento que definía su propio `theme`
+  sigue usando el suyo.
+- Una caja escalada o girada escala y gira también a sus hijos. Si la
+  escalabas para separarlos, usa `gap` o `row_gap`/`column_gap`.
+- `write()` agrupado con `by="word"`, `"line"` o `"part"` escribe hasta
+  cuatro grupos uno tras otro y más con solape, así que sus fotogramas
+  intermedios cambian; `stagger=0.2` recupera el solape anterior.
+- Las ecuaciones con varias filas ocupan más alto; `line_spacing` por debajo
+  de 1 las vuelve a juntar.
+- `scene.text.equation` lanza `ValueError` con matemática inválida: corrige la
+  fuente que antes no se dibujaba.
+- `matrix.morph_to(destino)` muestra el destino y oculta el origen al
+  terminar; antes el origen tomaba el aspecto del destino y el destino seguía
+  oculto.
+- Un objeto conserva su ancho y su alto frente a las restricciones medias y
+  débiles: si una `.weak()` o `.medium()` tenía que redimensionarlo, ahora
+  aparece en `check_layout()` sin cumplirse. Hazla `.strong()` para que lo
+  redimensione.
+- `shadow=True` sobre un fondo oscuro dibuja una sombra casi opaca en lugar
+  de la suave que no se veía. Para la de antes, pasa
+  `shadow={"color": "#00000055"}`.
+- `box.reflow()` mide a los hijos con su escala actual: si escalabas un hijo
+  con `.animate` y luego llamabas a `reflow()`, sus hermanos se apartan. Una
+  caja escalada antes de meterla en otra también les hace sitio.
+- Un `L.column(..., style=estilo)` cuyo estilo trae `direction="row"` vuelve
+  a ser una columna: pasa `direction="row"` en la llamada o usa `L.row`.
+- Si construías una curva ya en su sitio para que `point_on_curve` y los
+  demás trackers coincidieran con ella, sigue funcionando; ahora también
+  puedes moverla después.
+- Una flecha con `fill(color)` y sin `stroke` tiene ahora el contorno del
+  mismo color; antes era el del tema. Si querías el contorno del tema, fíjalo
+  con `stroke(...)`.
+- Para iluminar la caja conjunta de varios objetivos con `fx.spotlight`,
+  pásale un grupo: `fx.spotlight(scene.geometry.group([a, b]))`.
+- Si compensabas `with_pivot` en las partes de un SVG pasando coordenadas del
+  documento, pasa ahora el punto de la escena. La fórmula de la guía
+  #link("/guias/personajes/")[Personajes] ya lo hacía.
+- `Transition.morph(..., easing=Easing.SMOOTH)` se ve algo más rápido al
+  principio y al final: el easing ya no se aplica dos veces.
+- Después de `transform_matching_shapes`, el origen queda oculto y el destino
+  visible: anima el destino para seguir moviendo lo que se ve.
 
 = 0.11.0
 

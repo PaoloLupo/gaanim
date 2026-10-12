@@ -46,7 +46,7 @@ def show(label, spec, style=None):
     ``style(marks)`` restyles the marks layer when given.
     """
     top, _ = scene.layout.zones(Zones.rows(["1fr", "8fr"], padding="page_padding"))
-    text = scene.text(label, role="code", markup=False).place(top, anchor="bottom")
+    text = scene.text(label, role="code").place(top, anchor="bottom")
     chart = scene.viz.chart(spec)
     if style:
         style(chart.layer("marks"))
