@@ -81,11 +81,13 @@ table([
 ])
 
 # Stroke entrances trace the outline, then fill it. stroke_width sets the
-# traced width, and lag_ratio staggers the members of a group.
+# traced width, with_pen_tip rides a dot on the drawing end, and lag_ratio
+# staggers the members of a group.
 scene.segment("strokes")
 table([
     ("create()", star, lambda a: a.create()),
     ("create().stroke_width(0.08)", star, lambda a: a.create().stroke_width(0.08)),
+    ("create().with_pen_tip()", star, lambda a: a.create().with_pen_tip()),
     ("draw_border_then_fill()", star, lambda a: a.draw_border_then_fill()),
     ("write()", word, lambda a: a.write()),
     ('write(brush="chalk", seed=3)', word, lambda a: a.write(brush="chalk", seed=3)),

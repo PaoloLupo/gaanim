@@ -7,7 +7,7 @@ one sequence, and the fourth staggers a grid of dots from every origin.
 
 import os
 
-from gaanim import Easing, Scene, Zones, distribute, parallel, sequence, stagger
+from gaanim import Direction, Easing, Scene, Zones, distribute, parallel, sequence, stagger
 
 CYCLE = 0.6
 GROW = 0.3
@@ -68,7 +68,7 @@ def bars(zone, count=5):
     width, (_, y) = zone.width / (2 * count - 1), zone.center
     shapes = [scene.geometry.rect(width, zone.height * 0.8).move_to(zone.left + width * (2 * index + 0.5), y)
               for index in range(count)]
-    return [shape.animate.grow_from_center() for shape in shapes]
+    return [shape.animate.grow_from_edge(Direction.DOWN) for shape in shapes]
 
 
 def compose(entries, label_share="5fr", stage_share="2fr"):

@@ -2,8 +2,9 @@
 
 Each cell or row plays one emphasis of ``drawable.animate`` and is labelled
 with the call; the drawable is back at rest when it ends. Segments cover
-pulses, blinks and passing flashes, ripples, flashing frames and underlines,
-and the emphasis of a word inside a text.
+pulses and shakes, blinks and passing flashes, bursts of rays and drawn
+frames, ripples, flashing frames and underlines, and the emphasis of a word
+inside a text.
 """
 
 import os
@@ -83,19 +84,40 @@ def word(stage, text="Notice", anchor="center"):
     return scene.text(text, size=0.9).place(stage, anchor=anchor)
 
 
-# indicate swells the drawable for a moment; wiggle shakes it sideways; blink switches it off and on, three times by default.
-# show_passing_flash sweeps a window along a stroke, which is hidden before
-# and after; time_width is the window's share of the path.
+# indicate swells the drawable for a moment and tints it: with the theme's
+# accent, its foreground for a drawable already in the accent, or color.
+# wiggle shakes it sideways, count times amplitude units each way.
 scene.segment("pulses")
 ENTRIES = [
     ("indicate()", circle, lambda a: a.indicate()),
+    ("indicate(color=success,\n         scale_factor=1.5)", circle, lambda a: a.indicate(color=success, scale_factor=1.5)),
     ("wiggle()", square, lambda a: a.wiggle()),
+    ("wiggle(amplitude=0.3, count=2)", square, lambda a: a.wiggle(amplitude=0.3, count=2)),
+]
+play(ENTRIES, cells([label for label, _, _ in ENTRIES], columns=2))
+
+# blink switches the drawable off and on, three times by default.
+# show_passing_flash sweeps a window along a stroke, which is hidden before
+# and after; time_width is the window's share of the path.
+scene.segment("blinks")
+ENTRIES = [
     ("blink()", card, lambda a: a.blink()),
     ("blink(6)", card, lambda a: a.blink(6)),
     ("show_passing_flash()", wave, lambda a: a.show_passing_flash()),
-    ("show_passing_flash(\n    time_width=0.6)", wave, lambda a: a.show_passing_flash(time_width=0.6)),
+    ("show_passing_flash(time_width=0.6)", wave, lambda a: a.show_passing_flash(time_width=0.6)),
 ]
-play(ENTRIES, cells([label for label, _, _ in ENTRIES]))
+play(ENTRIES, cells([label for label, _, _ in ENTRIES], columns=2))
+
+# flash bursts rays out of the drawable: lines of them, length long, gap
+# beyond it. circumscribe draws a frame around it and lets it go.
+scene.segment("flashes")
+ENTRIES = [
+    ("flash()", star, lambda a: a.flash()),
+    ("flash(lines=6, length=0.6,\n      gap=0.4, color=success)", star, lambda a: a.flash(lines=6, length=0.6, gap=0.4, color=success)),
+    ("circumscribe()", word, lambda a: a.circumscribe()),
+    ("circumscribe(padding=0.3,\n             corner_radius=0.3)", word, lambda a: a.circumscribe(padding=0.3, corner_radius=0.3)),
+]
+play(ENTRIES, cells([label for label, _, _ in ENTRIES], columns=2))
 
 # broadcast sends copies of the drawable out as ripples (stars, from a
 # star): count of them, growing to max_scale times its size, each lag of a
@@ -124,9 +146,10 @@ ENTRIES = [
 ]
 play(ENTRIES, lines([label for label, _, _ in ENTRIES], ("3fr", "2fr")))
 
-# A selection of a text takes indications of its own: indicate, pulse and
-# highlight swell its glyphs, wiggle shakes them, wave shakes them one after
-# another, and focus dims the rest of the text.
+# A selection of a text takes indications of its own: indicate swells and
+# tints its glyphs, pulse swells them twice, highlight tints them, wiggle
+# shakes them, wave lifts them one after another, and focus dims the rest of
+# the text.
 scene.segment("words")
 ENTRIES = [
     ('line["gap"].animate.indicate()', lambda a: a["gap"].animate.indicate()),
@@ -146,6 +169,6 @@ scene.wait(HOLD)
 SEGMENT = 2 * HOLD + DURATION
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # Every segment early, at its peak and late in the emphasis.
-    scene.snapshots(snapshots, [SEGMENT * index + HOLD + t for index in range(4) for t in (0.4, 0.8, 1.2)])
+    scene.snapshots(snapshots, [SEGMENT * index + HOLD + t for index in range(6) for t in (0.4, 0.8, 1.2)])
 else:
     scene.render()

@@ -1111,25 +1111,45 @@ impl PyCanvasAnim {
         })
     }
 
-    fn circumscribe(&self) -> PyResult<Self> {
+    #[pyo3(signature = (*, color=None, width=None, padding=None, corner_radius=0.08))]
+    fn circumscribe(
+        &self,
+        color: Option<PyColor>,
+        width: Option<f64>,
+        padding: Option<Bound<'_, PyAny>>,
+        corner_radius: f64,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_effect_slot("circumscribe")?;
-        Ok({
-            Self {
-                inner: self.inner.clone().circumscribe(),
-            }
+        let padding = crate::pycanvas::surrounding_padding(padding)?;
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .circumscribe(color.map(|color| color.0), width, padding, corner_radius)
+                .map_err(PyValueError::new_err)?,
         })
     }
 
-    fn flash(&self) -> PyResult<Self> {
+    #[pyo3(signature = (*, color=None, width=None, lines=12, length=0.3, gap=0.15))]
+    fn flash(
+        &self,
+        color: Option<PyColor>,
+        width: Option<f64>,
+        lines: u32,
+        length: f64,
+        gap: f64,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_effect_slot("flash")?;
-        Ok({
-            Self {
-                inner: self.inner.clone().flash(),
-            }
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .flash(color.map(|color| color.0), width, lines, length, gap)
+                .map_err(PyValueError::new_err)?,
         })
     }
 
@@ -1248,21 +1268,39 @@ impl PyCanvasAnim {
             .map_err(PyValueError::new_err)
     }
 
-    fn indicate(&self) -> PyResult<Self> {
+    #[pyo3(signature = (*, color=None, scale_factor=gaanim_api::anim::DEFAULT_INDICATE_SCALE))]
+    fn indicate(&self, color: Option<PyColor>, scale_factor: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_effect_slot("indicate")?;
+        if !scale_factor.is_finite() || scale_factor <= 0.0 {
+            return Err(PyValueError::new_err(
+                "scale_factor must be finite and positive",
+            ));
+        }
         Ok(Self {
-            inner: self.inner.clone().indicate(),
+            inner: self
+                .inner
+                .clone()
+                .indicate(color.map(|color| color.0), scale_factor),
         })
     }
 
-    fn wiggle(&self) -> PyResult<Self> {
+    #[pyo3(signature = (amplitude=gaanim_api::anim::DEFAULT_WIGGLE_AMPLITUDE, count=gaanim_api::anim::DEFAULT_WIGGLE_COUNT))]
+    fn wiggle(&self, amplitude: f64, count: u32) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
         self.require_effect_slot("wiggle")?;
+        if !amplitude.is_finite() || amplitude < 0.0 {
+            return Err(PyValueError::new_err(
+                "amplitude must be finite and non-negative",
+            ));
+        }
+        if count == 0 {
+            return Err(PyValueError::new_err("count must be at least 1"));
+        }
         Ok(Self {
-            inner: self.inner.clone().wiggle(),
+            inner: self.inner.clone().wiggle(amplitude, count),
         })
     }
 
@@ -1722,7 +1760,7 @@ mod tests {
             inner: selection.inner.clone().opacity(0.5),
         };
         assert!(error_is::<PyValueError>(colored.pulse()));
-        assert!(error_is::<PyValueError>(colored.indicate()));
+        assert!(error_is::<PyValueError>(colored.indicate(None, 1.2)));
         let pulsed = selection.pulse().unwrap();
         assert!(error_is::<PyValueError>(pulsed.wave()));
     }
@@ -1735,7 +1773,7 @@ mod tests {
             inner: circle.animate().opacity(0.5),
         };
         assert!(error_is::<PyValueError>(moved.fade_in()));
-        assert!(error_is::<PyValueError>(moved.indicate()));
+        assert!(error_is::<PyValueError>(moved.indicate(None, 1.2)));
         let faded = PyCanvasAnim {
             inner: circle.animate(),
         }
@@ -1776,7 +1814,7 @@ mod tests {
             let indicated = PyCanvasAnim {
                 inner: circle.animate(),
             }
-            .indicate()
+            .indicate(None, 1.2)
             .unwrap();
             assert!(is_value_error(indicated.opacity(&half)));
         });

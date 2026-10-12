@@ -2669,6 +2669,12 @@ def validate_emphasis_contract(module):
         ("flash_around on text", lambda: label.animate.flash_around()),
         ("flash_under on a selection", lambda: label["mundo"].animate.flash_under()),
         ("flash_around on a selection", lambda: label["hello"].animate.flash_around(time_width=0.6)),
+        ("flash", lambda: pin.animate.flash()),
+        ("flash styled", lambda: pin.animate.flash(color="#f59e0b", width=0.04, lines=6, length=0.5, gap=0.2)),
+        ("circumscribe", lambda: label.animate.circumscribe()),
+        ("circumscribe styled", lambda: pin.animate.circumscribe(color="#f59e0b", padding=0.2, corner_radius=0.1)),
+        ("indicate colored", lambda: pin.animate.indicate(color="#f59e0b", scale_factor=1.5)),
+        ("wiggle sized", lambda: pin.animate.wiggle(amplitude=0.3, count=2)),
         ("spotlight", lambda: scene.fx.spotlight(pin, dim=0.7)),
         ("spotlight selection", lambda: scene.fx.spotlight(label["mundo"], padding=0.3, corner_radius=0.2)),
         ("spotlight two targets", lambda: scene.fx.spotlight([pin, label], dim=1.0)),
@@ -2693,6 +2699,15 @@ def validate_emphasis_contract(module):
         ("flash_under time_width above 1", lambda: pin.animate.flash_under(time_width=1.5), ValueError),
         ("flash_under negative gap", lambda: pin.animate.flash_under(gap=-1), ValueError),
         ("flash_around a bad padding", lambda: pin.animate.flash_around(padding="x"), TypeError),
+        ("flash without lines", lambda: pin.animate.flash(lines=0), (OverflowError, ValueError)),
+        ("flash with 65 lines", lambda: pin.animate.flash(lines=65), ValueError),
+        ("flash zero length", lambda: pin.animate.flash(length=0), ValueError),
+        ("flash negative gap", lambda: pin.animate.flash(gap=-0.1), ValueError),
+        ("flash width without color", lambda: pin.animate.flash(width=0.1), ValueError),
+        ("circumscribe negative padding", lambda: pin.animate.circumscribe(padding=-1), ValueError),
+        ("indicate zero scale", lambda: pin.animate.indicate(scale_factor=0), ValueError),
+        ("wiggle negative amplitude", lambda: pin.animate.wiggle(amplitude=-0.1), ValueError),
+        ("wiggle zero count", lambda: pin.animate.wiggle(count=0), ValueError),
         ("spotlight zero dim", lambda: scene.fx.spotlight(pin, dim=0), ValueError),
         ("spotlight dim above 1", lambda: scene.fx.spotlight(pin, dim=1.5), ValueError),
         ("spotlight of another type", lambda: scene.fx.spotlight("pin"), TypeError),
@@ -2715,6 +2730,7 @@ def validate_emphasis_contract(module):
         ])
         scene.play([scene.fx.spotlight(label, dim=0.6).duration(0.8)])
         scene.play([pin.animate.broadcast(count=3).duration(1.0)])
+        scene.play([pin.animate.flash().duration(0.6), label.animate.circumscribe().duration(0.8)])
         scene.play([border.animate.fade_out()])
     except Exception as error:
         failures.append(f"playing the emphasis effects failed: {error}")

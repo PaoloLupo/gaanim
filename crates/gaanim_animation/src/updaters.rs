@@ -1541,6 +1541,36 @@ pub struct SurroundingRect {
     /// A hand-drawn notation drawn instead of `shape`.
     #[cfg_attr(feature = "serde", serde(default))]
     pub notation: Option<gaanim_math::RoughNotation>,
+    /// Radial lines drawn instead of `shape`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rays: Option<SurroundingRays>,
+}
+
+/// Radial lines around the targets of a [`SurroundingRect`], as a flash
+/// draws them: `count` lines `length` long, evenly spaced from the right and
+/// starting on the circle that holds the padded bounds' larger side.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct SurroundingRays {
+    pub count: u32,
+    pub length: f64,
+}
+
+impl SurroundingRays {
+    /// The lines around `bounds`, one sub-path each.
+    pub fn path(self, bounds: gaanim_math::Bounds3D) -> BezPath {
+        let center = bounds.center();
+        let inner = bounds.width().abs().max(bounds.height().abs()) * 0.5;
+        let mut path = BezPath::new();
+        for index in 0..self.count {
+            let angle = std::f64::consts::TAU * f64::from(index) / f64::from(self.count);
+            let (sin, cos) = angle.sin_cos();
+            let at = |radius: f64| (center.x + radius * cos, center.y + radius * sin);
+            path.move_to(at(inner));
+            path.line_to(at(inner + self.length));
+        }
+        path
+    }
 }
 
 /// What a [`SurroundingRect`] draws inside its padded bounds.
@@ -1565,6 +1595,15 @@ impl SurroundingRect {
             last_bounds: None,
             shape: SurroundingShape::Frame,
             notation: None,
+            rays: None,
+        }
+    }
+
+    /// `rays` around the targets, starting `gap` away from their bounds.
+    pub fn rays(targets: Vec<gaanim_core::ObjectId>, gap: f64, rays: SurroundingRays) -> Self {
+        Self {
+            rays: Some(rays),
+            ..Self::new(targets, [gap; 4], 0.0)
         }
     }
 
@@ -1656,6 +1695,13 @@ pub fn surrounding_rect_system(world: &mut World) {
             continue;
         };
 
+        if let Some(rays) = frame.rays {
+            write_path(world, entity, rays.path(bounds));
+            if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+                live.last_bounds = Some(bounds);
+            }
+            continue;
+        }
         if let Some(notation) = frame.notation {
             let path = notation.path(gaanim_core::kurbo::Rect::new(
                 bounds.min.x,
@@ -2813,6 +2859,7 @@ mod tests {
                     last_bounds: None,
                     shape: SurroundingShape::Frame,
                     notation: None,
+                    rays: None,
                 },
             ))
             .id();

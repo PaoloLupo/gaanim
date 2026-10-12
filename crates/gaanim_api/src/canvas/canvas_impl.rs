@@ -1622,7 +1622,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         | TranslateBy { .. }
         | MoveAlongPath { .. }
         | MoveAlongPath3D { .. }
-        | Wiggle => "translation",
+        | Wiggle { .. } => "translation",
         RotateTo { .. } | RotateBy { .. } | RotateBy3D { .. } => "rotation",
         ScaleTo { .. }
         | ScaleUniform { .. }
@@ -4951,6 +4951,8 @@ impl SceneModel {
             .collect()
     }
 
+    /// A camera animation lasting `duration`, unless `Scene.play` gives a
+    /// default duration and the animation sets none of its own.
     fn camera_anim(&self, ty: AnimationType, duration: f64) -> Anim {
         let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
         Anim::queued(
@@ -4959,7 +4961,7 @@ impl SceneModel {
             self.state.clone(),
             active_idx,
         )
-        .duration(duration.max(0.0))
+        .default_duration(duration)
     }
 
     fn camera_state_handle(
@@ -5206,6 +5208,7 @@ impl SceneModel {
     /// Trauma decays linearly in timeline seconds and the camera returns to
     /// rest by the end of `duration`; see [`gaanim_math::TraumaShake`].
     pub fn camera_trauma_shake(&mut self, shake: gaanim_math::TraumaShake, duration: f64) -> Anim {
+        // The shake decays over its own duration.
         self.camera_anim(
             AnimationType::CameraShake {
                 amplitude: shake.amplitude,
@@ -5214,6 +5217,7 @@ impl SceneModel {
             },
             duration,
         )
+        .duration(duration)
     }
 
     /// Set camera to look at `target` from `eye` with `up` (3D perspective).

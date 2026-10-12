@@ -501,7 +501,7 @@ scene.play([eq.animate.write().duration(0.8), eq["mass"].animate.fill(RED).opaci
   name: "TextSelectionAnimation.indicate / pulse / wiggle / wave / highlight / focus",
   kind: "method",
   signature: "indicate() · pulse() · wiggle() · wave() · highlight() · focus() -> Anim",
-  desc: [Énfasis transitorios sobre la selección. No cambian la medición del texto ni provocan reflow.],
+  desc: [Énfasis transitorios sobre la selección. `indicate` hace crecer los glifos 1,2 veces y los tiñe del `"accent"` del tema (o de su `"foreground"` si ya tienen el color del acento); `pulse` los hace crecer dos veces seguidas, como un latido, sin teñirlos; `wiggle` los sacude de lado a lado; `wave` levanta cada glifo un tercio de su altura y lo baja, uno tras otro; `highlight` los tiñe del acento y los devuelve a su color sin moverlos; `focus` atenúa el resto del texto. No cambian la medición del texto ni provocan reflow.],
 )[
 ```python
 >>>from gaanim import *

@@ -923,6 +923,12 @@ pub(crate) enum PendingCameraHoldKind {
     },
 }
 
+/// The tint of emphasis effects in a scene without a theme.
+pub(crate) const DEFAULT_EMPHASIS_COLOR: Color = Color::from_rgb8(255, 215, 0);
+/// The tint of emphasis effects, in a scene without a theme, for what
+/// already shows [`DEFAULT_EMPHASIS_COLOR`].
+pub(crate) const DEFAULT_EMPHASIS_CONTRAST: Color = Color::WHITE;
+
 /// The high-level fluent API builder for constructing gaanim scenes.
 ///
 /// Manages auto-incrementing ObjectId generation, relative layouts, active states,
@@ -964,6 +970,15 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Values whose text each reactive number inside a layout keeps room
     /// for, by authored id; see `SceneModel::layout_readout_reserves`.
     pub(crate) readout_reserves: HashMap<ObjectId, Vec<f64>>,
+    /// The color emphasis effects tint with when none is given: the
+    /// theme's accent.
+    pub(crate) emphasis_color: Color,
+    /// Their tint for what already shows `emphasis_color`: the theme's
+    /// foreground.
+    pub(crate) emphasis_contrast: Color,
+    /// The `look_at`s each compiled object follows: a compiled object or a
+    /// point, and the radians added. `clear_drive` keeps their last turn.
+    pub(crate) look_ats: HashMap<ObjectId, Vec<(gaanim_animation::FalloffTarget, f64)>>,
     pub default_track: TrackId,
     mobject_tracks: HashMap<ObjectId, TrackId>,
     mobject_names: HashMap<ObjectId, String>,
@@ -1205,6 +1220,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             procedural_signal_tracks,
             readout_baselines,
             readout_reserves: HashMap::new(),
+            emphasis_color: DEFAULT_EMPHASIS_COLOR,
+            emphasis_contrast: DEFAULT_EMPHASIS_CONTRAST,
+            look_ats: HashMap::new(),
             pending_time_maps: Vec::new(),
             pending_camera_holds: Vec::new(),
             camera_views: HashMap::new(),
@@ -1519,6 +1537,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             procedural_signal_tracks: Vec::new(),
             readout_baselines: HashMap::new(),
             readout_reserves: HashMap::new(),
+            emphasis_color: DEFAULT_EMPHASIS_COLOR,
+            emphasis_contrast: DEFAULT_EMPHASIS_CONTRAST,
+            look_ats: HashMap::new(),
             pending_time_maps: Vec::new(),
             pending_camera_holds: Vec::new(),
             camera_views: HashMap::new(),
@@ -1803,14 +1824,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Transform { .. }
             | AnimationType::ReplacementTransform { .. } => "Morph",
             AnimationType::MagicMove { .. } => "MagicMove",
-            AnimationType::Wiggle => "Wiggle",
+            AnimationType::Wiggle { .. } => "Wiggle",
             AnimationType::GrowFromPoint { .. } | AnimationType::GrowFromEdge { .. } => "Grow",
             AnimationType::CameraViewZoomTo { .. } => "ViewZoom",
             AnimationType::CameraViewPop { out: true, .. } => "PopOut",
             AnimationType::CameraViewPop { out: false, .. } => "PopIn",
             AnimationType::DrawBorderThenFill { .. } => "DrawFill",
-            AnimationType::Flash { .. } => "Flash",
-            AnimationType::Circumscribe { .. } => "Circum",
             AnimationType::MoveAlongPath { .. } | AnimationType::MoveAlongPath3D { .. } => "Follow",
             AnimationType::GrowArrow => "Arrow",
             AnimationType::SignalFloat { .. } => "Signal",
@@ -2728,39 +2747,85 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
             effect => {
                 let count = selected.len();
+                // How high a wave lifts each glyph: a third of the tallest.
+                let wave_lift = selected
+                    .iter()
+                    .filter_map(|id| self.states.get(*id))
+                    .map(|state| state.bounds.size().y * state.transform.scale.y.abs())
+                    .fold(0.0, f64::max)
+                    / 3.0;
                 for (index, target) in selected.into_iter().enumerate() {
                     let (anim_type, rate_func, extra_delay) = match &effect {
                         TextSelectionEffect::Indicate => (
                             AnimationType::Indicate {
-                                color: None,
-                                scale_factor: 1.1,
+                                color: Some(self.emphasis_tint(target)),
+                                scale_factor: crate::anim::DEFAULT_INDICATE_SCALE,
                             },
                             RateFunc::ThereAndBack,
                             0.0,
                         ),
-                        TextSelectionEffect::Pulse => (
-                            AnimationType::Indicate {
-                                color: None,
-                                scale_factor: 1.16,
-                            },
-                            RateFunc::ThereAndBack,
-                            0.0,
-                        ),
-                        TextSelectionEffect::Wiggle => {
-                            (AnimationType::Wiggle, RateFunc::ThereAndBack, 0.0)
+                        TextSelectionEffect::Pulse => {
+                            // Two beats, each half of the animation.
+                            let beat = anim.duration * 0.5;
+                            for offset in [0.0, beat] {
+                                self.play_internal(AnimationBuilder {
+                                    target,
+                                    anim_type: AnimationType::Indicate {
+                                        color: None,
+                                        scale_factor: crate::anim::DEFAULT_INDICATE_SCALE,
+                                    },
+                                    duration: beat,
+                                    rate_func: RateFunc::ThereAndBack,
+                                    delay: anim.delay + offset,
+                                });
+                            }
+                            continue;
                         }
-                        TextSelectionEffect::Wave => (
-                            AnimationType::Wiggle,
-                            RateFunc::ThereAndBack,
-                            if count > 1 {
-                                index as f64 * anim.duration * 0.35 / (count - 1) as f64
-                            } else {
-                                0.0
+                        TextSelectionEffect::Wiggle => (
+                            AnimationType::Wiggle {
+                                amplitude: crate::anim::DEFAULT_WIGGLE_AMPLITUDE,
+                                count: crate::anim::DEFAULT_WIGGLE_COUNT,
                             },
+                            RateFunc::Linear,
+                            0.0,
                         ),
+                        TextSelectionEffect::Wave => {
+                            // Each glyph rises and settles over half of the
+                            // animation, one after another across the other half.
+                            let Some(origin) = self
+                                .states
+                                .get(target)
+                                .map(|state| state.transform.translation)
+                            else {
+                                continue;
+                            };
+                            let bump = anim.duration * 0.25;
+                            let start = anim.delay
+                                + if count > 1 {
+                                    index as f64 * anim.duration * 0.5 / (count - 1) as f64
+                                } else {
+                                    anim.duration * 0.25
+                                };
+                            for (to, offset) in [
+                                (origin + DVec3::new(0.0, wave_lift, 0.0), 0.0),
+                                (origin, bump),
+                            ] {
+                                self.play_internal(AnimationBuilder {
+                                    target,
+                                    anim_type: AnimationType::TranslateTo { to },
+                                    duration: bump,
+                                    rate_func: RateFunc::Smooth,
+                                    delay: start + offset,
+                                });
+                            }
+                            continue;
+                        }
                         TextSelectionEffect::Highlight => (
-                            AnimationType::Circumscribe { color: None },
-                            RateFunc::Smooth,
+                            AnimationType::Indicate {
+                                color: Some(self.emphasis_tint(target)),
+                                scale_factor: 1.0,
+                            },
+                            RateFunc::ThereAndBack,
                             0.0,
                         ),
                         TextSelectionEffect::RevealFade => {
@@ -2858,6 +2923,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Internal method to resolve and schedule a single animation clip.
     fn play_clip(&mut self, mut anim: AnimationBuilder) {
+        if anim.delay > 0.0 && anim.anim_type.schedules_from_the_cursor() {
+            // These effects lay out their clips from the cursor, so a delay
+            // (a place in a sequence or stagger) moves the cursor instead.
+            let cursor = self.current_time;
+            self.current_time += anim.delay;
+            self.play_clip(AnimationBuilder { delay: 0.0, ..anim });
+            self.current_time = cursor;
+            return;
+        }
         if let AnimationType::CameraViewZoomTo { screen, zoom, fit } = anim.anim_type {
             // Resolved against both sizes at the cursor, then played as a scale.
             let Some(to) = self.camera_view_zoom_scale(anim.target, screen, zoom, fit) else {
@@ -3464,7 +3538,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_magic_move_internal(anim, track);
             return;
         }
-        if matches!(anim.anim_type, AnimationType::Wiggle) {
+        if matches!(anim.anim_type, AnimationType::Wiggle { .. }) {
             self.play_wiggle_internal(anim, track);
             return;
         }
@@ -3531,14 +3605,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
         if matches!(anim.anim_type, AnimationType::Spotlight { .. }) {
             self.play_spotlight_internal(anim, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::Flash { .. }) {
-            self.play_flash_internal(anim, track);
-            return;
-        }
-        if matches!(anim.anim_type, AnimationType::Circumscribe { .. }) {
-            self.play_circumscribe_internal(anim, track);
             return;
         }
         if matches!(anim.anim_type, AnimationType::MoveAlongPath { .. }) {
@@ -3848,7 +3914,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::TextSelectionProperties { .. }
             | AnimationType::TextSelectionTransform { .. }
             | AnimationType::FadeTransform { .. }
-            | AnimationType::Wiggle
+            | AnimationType::Wiggle { .. }
             | AnimationType::GrowFromPoint { .. }
             | AnimationType::GrowFromEdge { .. }
             | AnimationType::CameraViewZoomTo { .. }
@@ -3861,8 +3927,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::CountTo { .. }
             | AnimationType::ParticleBurst { .. }
             | AnimationType::DrawBorderThenFill { .. }
-            | AnimationType::Flash { .. }
-            | AnimationType::Circumscribe { .. }
             | AnimationType::MoveAlongPath { .. }
             | AnimationType::MoveAlongPath3D { .. }
             | AnimationType::Transform { .. }
@@ -4138,6 +4202,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
+        let pen_tip = draw_config(&anim.anim_type).is_some_and(|config| config.pen_tip);
+        let mut pen_tips = Vec::new();
         for item_id in &items {
             if let Some(state) = self.states.get(*item_id) {
                 if matches!(schedule.mode, DrawMode::BorderThenFill) && state.fill.is_some() {
@@ -4152,6 +4218,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     self.commands
                         .entity(state.entity)
                         .insert(gaanim_animation::WriteTipGlow::default());
+                    if pen_tip {
+                        pen_tips.push(state.entity);
+                    }
                 }
 
                 let initial_reveal = if schedule.reversed { 1.0 } else { 0.0 };
@@ -4167,6 +4236,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         )));
                 }
             }
+        }
+        for path in pen_tips {
+            self.attach_pen_tip(path);
         }
 
         let lag_ratio = if schedule.staggered {
@@ -6007,14 +6079,17 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     fn play_wiggle_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::Wiggle { amplitude, count } = anim.anim_type else {
+            return;
+        };
         let state = match self.states.get(anim.target) {
             Some(s) => s,
             None => return,
         };
         let origin = state.transform.translation;
-        let num_wiggles = 6;
+        // Each swing goes right, then left.
+        let num_wiggles = 2 * count.max(1);
         let step = anim.duration / num_wiggles as f64;
-        let amplitude = 0.05;
 
         for i in 0..num_wiggles {
             let dir = if i % 2 == 0 { 1.0_f64 } else { -1.0_f64 };
@@ -6776,96 +6851,77 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
-    fn play_flash_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        let state = match self.states.get(anim.target) {
-            Some(s) => s,
-            None => return,
-        };
-        let original_opacity = state.opacity;
-        let original_scale = state.transform.scale;
-
-        let n_lines = match &anim.anim_type {
-            AnimationType::Flash { n_lines, .. } => *n_lines,
-            _ => 12,
-        };
-        let radius = match &anim.anim_type {
-            AnimationType::Flash { radius, .. } => *radius,
-            _ => 100.0,
-        };
-        let half = anim.duration * 0.5;
-
-        // Fade out then back in (1.0 -> 0.0 -> 1.0)
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Opacity {
-                    from: original_opacity,
-                    to: 0.0,
-                },
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time + half,
-            half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Opacity {
-                    from: 0.0,
-                    to: original_opacity,
-                },
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-
-        // Quick scale pulse to amplify the "flash" effect.
-        // Pulse up to scale_factor proportional to the number of lines for visual feedback.
-        let scale_factor = 1.0 + (n_lines as f64 / 12.0) * 0.25;
-        let scale_to = original_scale * scale_factor;
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Scale {
-                    from: original_scale,
-                    to: scale_to,
-                },
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time + half,
-            half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Scale {
-                    from: scale_to,
-                    to: original_scale,
-                },
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-
-        if let Some(s) = self.states.get_mut(anim.target) {
-            s.opacity = original_opacity;
-            s.transform.scale = original_scale;
+    /// The tint an emphasis gives `target` without a color of its own: the
+    /// theme's accent, or its foreground when the first solid paint of
+    /// `target` or its descendants already is the accent.
+    pub(crate) fn emphasis_tint(&self, target: ObjectId) -> Color {
+        let mut pending = vec![target];
+        let mut paint = None;
+        while let Some(id) = pending.pop() {
+            let Some(state) = self.states.get(id) else {
+                continue;
+            };
+            paint = [state.fill.as_ref(), state.stroke.brush.as_ref()]
+                .into_iter()
+                .flatten()
+                .find_map(|brush| match brush {
+                    Brush::Solid(color) => Some(*color),
+                    _ => None,
+                });
+            if paint.is_some() {
+                break;
+            }
+            pending.extend(state.children.iter().rev());
+            pending.extend(state.child_spans.iter().rev().map(|child| child.id));
         }
-        let _ = radius; // reserved for future "radial line" geometry
+        let near = |left: Color, right: Color| {
+            let (left, right) = (left.to_rgba8(), right.to_rgba8());
+            [
+                left.r.abs_diff(right.r),
+                left.g.abs_diff(right.g),
+                left.b.abs_diff(right.b),
+            ]
+            .into_iter()
+            .map(u32::from)
+            .sum::<u32>()
+                < 48
+        };
+        match paint {
+            Some(paint) if near(paint, self.emphasis_color) => self.emphasis_contrast,
+            _ => self.emphasis_color,
+        }
+    }
+
+    /// Give `path` a pen tip: a dot on the end of its stroke while a draw
+    /// animation traces it. A path with tips of its own keeps them.
+    fn attach_pen_tip(&mut self, path: Entity) {
+        let tip_id = self.next_id();
+        let mut bundle = gaanim_objects::primitives::MobjectBundle::new(
+            tip_id,
+            kurbo::BezPath::new(),
+            Bounds3D::default(),
+        );
+        bundle.fill = FillBrush(None);
+        bundle.stroke = StrokeBrush::transparent();
+        let tip = self
+            .commands
+            .spawn((
+                bundle,
+                gaanim_animation::StrokeTip,
+                bevy::prelude::ChildOf(path),
+            ))
+            .id();
+        self.commands
+            .entity(path)
+            .queue(move |mut entity: bevy::prelude::EntityWorldMut| {
+                if entity.contains::<gaanim_animation::StrokeTips>() {
+                    entity.world_scope(|world| {
+                        world.despawn(tip);
+                    });
+                } else {
+                    entity.insert(gaanim_animation::StrokeTips::pen(tip));
+                }
+            });
     }
 
     /// Scale `target` about the center of what it draws from now on, unless
@@ -6903,99 +6959,6 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }
             },
         );
-    }
-
-    fn play_circumscribe_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
-        let color = match &anim.anim_type {
-            AnimationType::Circumscribe { color } => *color,
-            _ => None,
-        };
-        // Grow in place, as `indicate` does.
-        self.pivot_on_visual_center(anim.target);
-
-        let state = match self.states.get(anim.target) {
-            Some(s) => s,
-            None => return,
-        };
-        let original_opacity = state.opacity;
-        let original_scale = state.transform.scale;
-
-        let half = anim.duration * 0.5;
-
-        // Scale up then back down (1.0 -> 1.1 -> 1.0)
-        let scale_to = original_scale * 1.1;
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time,
-            half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Scale {
-                    from: original_scale,
-                    to: scale_to,
-                },
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-        self.timeline.add_clip(
-            parent_track,
-            self.current_time + half,
-            half,
-            ClipPayload::Animation(AnimationSpec {
-                target: anim.target,
-                lens: PropertyLensSpec::Scale {
-                    from: scale_to,
-                    to: original_scale,
-                },
-                rate_func: gaanim_math::RateFunc::Smooth,
-                delay: 0.0,
-                label: self.current_label.clone(),
-            }),
-        );
-
-        // Optional fill color highlight (like Indicate but without scale_factor difference).
-        if let Some(c) = color
-            && let Some(Brush::Solid(current)) = &state.fill
-        {
-            self.timeline.add_clip(
-                parent_track,
-                self.current_time,
-                half,
-                ClipPayload::Animation(AnimationSpec {
-                    target: anim.target,
-                    lens: PropertyLensSpec::FillColor {
-                        from: *current,
-                        to: c,
-                    },
-                    rate_func: gaanim_math::RateFunc::Linear,
-                    delay: 0.0,
-                    label: self.current_label.clone(),
-                }),
-            );
-            self.timeline.add_clip(
-                parent_track,
-                self.current_time + half,
-                half,
-                ClipPayload::Animation(AnimationSpec {
-                    target: anim.target,
-                    lens: PropertyLensSpec::FillColor {
-                        from: c,
-                        to: *current,
-                    },
-                    rate_func: gaanim_math::RateFunc::Linear,
-                    delay: 0.0,
-                    label: self.current_label.clone(),
-                }),
-            );
-        }
-
-        let _ = original_opacity; // reserved if we want to fade in/out later
-
-        if let Some(s) = self.states.get_mut(anim.target) {
-            s.transform.scale = original_scale;
-        }
     }
 
     /// Internal: schedule a `MoveAlongPath` animation. The target's
@@ -9942,20 +9905,14 @@ mod tests {
         assert_eq!(selected_text, "theta");
     }
 
-    /// `indicate` and `highlight` (circumscribe) pulse a glyph in place: a
-    /// highlighted term slid across its neighbors when it scaled about its
-    /// origin.
+    /// `indicate` pulses a glyph in place: a highlighted term slid across its
+    /// neighbors when it scaled about its origin.
     #[test]
     fn indicate_scales_in_place_around_visual_center() {
-        for anim_type in [
-            AnimationType::Indicate {
-                color: None,
-                scale_factor: 1.1,
-            },
-            AnimationType::Circumscribe { color: None },
-        ] {
-            assert_pulses_in_place(anim_type);
-        }
+        assert_pulses_in_place(AnimationType::Indicate {
+            color: None,
+            scale_factor: 1.1,
+        });
     }
 
     fn assert_pulses_in_place(anim_type: AnimationType) {

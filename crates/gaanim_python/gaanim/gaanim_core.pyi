@@ -1820,8 +1820,37 @@ class Anim:
     def shrink_to_center(self) -> Anim: ...
     def spin_in_from_nothing(self) -> Anim: ...
     def draw_border_then_fill(self) -> Anim: ...
-    def circumscribe(self) -> Anim: ...
-    def flash(self) -> Anim: ...
+    def circumscribe(self, *, color: Optional[ColorLike] = None, width: Optional[float] = None, padding: Optional[Padding] = None, corner_radius: float = 0.08) -> Anim:
+        """Draw a frame around the drawable, then let it leave from where it started.
+
+        The frame is a new live outline (see ``Geometry.surrounding_rect``),
+        ``padding`` away from the drawable's bounds (0.12 by default) and
+        invisible outside the animation; it traces the whole outline over the
+        first half and erases it from its start over the second, as Manim's
+        ``Circumscribe``. It is ``flash_around`` with ``time_width=1.0``.
+        ``color`` and ``width`` restyle it (a width needs a color). The
+        returned animation plays on the frame, not on the drawable.
+
+        Example:
+            scene.play(result.animate.circumscribe(color=GOLD).duration(1.2))
+        """
+        ...
+    def flash(self, *, color: Optional[ColorLike] = None, width: Optional[float] = None, lines: int = 12, length: float = 0.3, gap: float = 0.15) -> Anim:
+        """Burst ``lines`` rays out of the drawable.
+
+        The rays are a new live drawable: radial lines ``length`` scene units
+        long, evenly spaced from the right, that start ``gap`` beyond the
+        circle holding the drawable's bounds and follow it if it moves. Each
+        ray is drawn outward and then leaves from its inner end; the rays are
+        invisible outside the animation. ``color`` and ``width`` restyle them
+        (a width needs a color). ``lines`` outside 1 to 64, a non-positive
+        ``length`` or a negative ``gap`` raises ``ValueError``. The returned
+        animation plays on the rays, not on the drawable.
+
+        Example:
+            scene.play(star.animate.flash(color=GOLD).duration(0.6))
+        """
+        ...
     def blink(self, count: int = 3) -> Anim:
         """Switch the drawable off and on ``count`` times.
 
@@ -2222,8 +2251,29 @@ class Anim:
     def replacement_transform_to(self, target: Drawable) -> Anim:
         """Morph to and replace with a same-scene target, preserving absent fill and composed timing."""
         ...
-    def indicate(self) -> Anim: ...
-    def wiggle(self) -> Anim: ...
+    def indicate(self, *, color: Optional[ColorLike] = None, scale_factor: float = 1.2) -> Anim:
+        """Swell the drawable by ``scale_factor`` and tint it, then return to rest.
+
+        It grows about its visual center over the first half and shrinks back
+        over the second, while its solid fills and strokes turn to ``color``
+        and back. Without ``color`` the tint is the theme's ``"accent"``, or
+        its ``"foreground"`` for a drawable already painted in the accent. A
+        non-positive or non-finite ``scale_factor`` raises ``ValueError``.
+
+        Example:
+            scene.play(key.animate.indicate().duration(0.7))
+        """
+        ...
+    def wiggle(self, amplitude: float = 0.1, count: int = 3) -> Anim:
+        """Shake the drawable sideways ``count`` times, ``amplitude`` scene units each way.
+
+        It ends where it started. A negative ``amplitude`` or a ``count``
+        below 1 raises ``ValueError``.
+
+        Example:
+            scene.play(wrong.animate.wiggle(amplitude=0.2).duration(0.6))
+        """
+        ...
     def duration(self, seconds: float) -> Anim:
         """Return a copy configured to last finite, non-negative ``seconds``."""
         ...
@@ -2424,10 +2474,15 @@ class Anim:
         """
         ...
     def with_pen_tip(self) -> Anim:
-        """Configure this animation with with pen tip.
+        """Draw a pen tip on the end of each stroke while ``write``, ``create`` or ``draw_border_then_fill`` traces it.
+
+        The tip is a dot in the stroke's color (in the fill's color for a
+        shape drawn without a stroke) that rides the drawing end and is gone
+        when the stroke is complete. A path with tips of its own (``tip(...)``)
+        keeps them instead; other animations ignore it.
 
         Example:
-            result = animation.with_pen_tip()
+            scene.play(path.animate.write().with_pen_tip().duration(1.4))
         """
         ...
     def pivot(self, x: float, y: float) -> Anim:
@@ -2625,7 +2680,7 @@ def magic_move(
     *,
     key: Literal["name", "id"] | Callable[[Drawable], object] = "name",
     unmatched: Literal["fade", "cut"] = "fade",
-    duration: float = 1.0,
+    duration: Optional[float] = None,
 ) -> Anim:
     """Animate ``before`` into ``after``, morphing the members that share a key.
 
@@ -2643,6 +2698,8 @@ def magic_move(
     appear at its end. ``after`` stays hidden until the move and takes over
     at its end, so later animations continue from it. Returns an ``Anim`` to
     pass to ``scene.play``; chain ``.duration()`` or an easing as usual.
+    Without ``duration`` it lasts a second, or the ``duration`` given to
+    ``scene.play``.
     Raises ``ValueError`` for drawables of different scenes, the same
     drawable twice, a non-positive duration, or an unknown ``key`` or
     ``unmatched``; an exception raised by a key callable propagates.
@@ -4537,7 +4594,13 @@ class Drawable:
         """
         ...
     def clear_drive(self) -> None:
-        """End every ``drive`` and ``look_at`` of this drawable, or of the members of this group, at the cursor."""
+        """End every ``drive`` and ``look_at`` of this drawable, or of the members of this group, at the cursor.
+
+        A ``drive`` stops adding its offset, so the drawable returns to its own
+        state. A ``look_at`` leaves the drawable turned as it was at the
+        cursor: the turn, measured on the authored positions, joins its
+        rotation (a target moved only by an updater may end slightly off).
+        """
         ...
     def add_updater(self, updater: Updater) -> None:
         """Use add updater on this Drawable or create the requested value.
@@ -4990,17 +5053,27 @@ class TextSelectionAnimation:
     """Pure typed proxy for one text selection."""
     def fill(self, color: ColorLike) -> Anim: ...
     def opacity(self, value: float) -> Anim: ...
-    def indicate(self) -> Anim: ...
-    def wiggle(self) -> Anim: ...
+    def indicate(self) -> Anim:
+        """Swell the selected glyphs by 1.2 and tint them with the theme's ``"accent"`` (its ``"foreground"`` for glyphs in the accent), then return to rest."""
+        ...
+    def wiggle(self) -> Anim:
+        """Shake the selected glyphs sideways together, as ``Anim.wiggle()``."""
+        ...
     def flash_around(self, *, color: Optional[ColorLike] = None, width: Optional[float] = None, padding: Optional[Padding] = None, corner_radius: float = 0.08, time_width: float = 0.4) -> Anim:
         """Sweep a bright window around a frame drawn around the selected glyphs (see ``Anim.flash_around``)."""
         ...
     def flash_under(self, *, color: Optional[ColorLike] = None, width: Optional[float] = None, gap: float = 0.06, overhang: float = 0.04, time_width: float = 0.5) -> Anim:
         """Sweep a bright window along a line under the selected glyphs (see ``Anim.flash_under``)."""
         ...
-    def pulse(self) -> Anim: ...
-    def wave(self) -> Anim: ...
-    def highlight(self) -> Anim: ...
+    def pulse(self) -> Anim:
+        """Swell the selected glyphs twice, like a heartbeat, without tinting them."""
+        ...
+    def wave(self) -> Anim:
+        """Lift the selected glyphs a third of their height and settle them, one after another."""
+        ...
+    def highlight(self) -> Anim:
+        """Tint the selected glyphs with the theme's ``"accent"`` (its ``"foreground"`` for glyphs in the accent) and back, without moving them."""
+        ...
     def focus(self) -> Anim: ...
     def cancel(self) -> Anim: ...
     def reveal(self, style: Literal["fade", "wipe", "from_below"] = "fade") -> Anim:
@@ -5959,6 +6032,15 @@ class CameraViewAnimation:
         ...
 
 class CameraAnimation:
+    """Camera moves on ``scene.camera.animate``, each a composable ``Anim``.
+
+    A move lasts one second unless ``.duration()`` sets its length; the
+    ``duration`` given to ``scene.play`` replaces that default, as it does
+    for other animations. ``shake`` (half a second for the sine shake) and
+    ``whip_pan`` (0.4 s) have their own defaults that ``scene.play`` replaces
+    the same way; a trauma shake lasts until it decays and ``orthographic``
+    switches at once, unless ``.duration()`` says otherwise.
+    """
     def to(self, state: CameraState) -> Anim:
         """Animate to a reusable camera state and return a composable Anim.
 

@@ -411,13 +411,14 @@ impl DrawableHandle {
     /// Keyed "magic move" into `target`: members of both drawables that
     /// share a key morph position, size, color and shape (a pair of groups
     /// also morphs their parts), the other members appear or disappear as
-    /// `unmatched` says, and `target` takes over at the end.
+    /// `unmatched` says, and `target` takes over at the end. Without a
+    /// `duration` it lasts a second, or `Scene.play`'s default duration.
     pub fn magic_move_to(
         &self,
         target: &DrawableHandle,
         key: super::MagicMoveKey,
         unmatched: super::MagicMoveUnmatched,
-        duration: f64,
+        duration: Option<f64>,
     ) -> Result<Anim, super::MagicMoveError> {
         self.magic_move_to_by(
             target,
@@ -440,7 +441,7 @@ impl DrawableHandle {
         target: &DrawableHandle,
         mut key: impl FnMut(&Self) -> Result<Option<String>, E>,
         unmatched: super::MagicMoveUnmatched,
-        duration: f64,
+        duration: Option<f64>,
     ) -> Result<Anim, super::MagicMoveFailure<E>> {
         if !self.same_canvas(target) {
             return Err(super::MagicMoveError::ForeignScene.into());
@@ -448,7 +449,7 @@ impl DrawableHandle {
         if self.id == target.id {
             return Err(super::MagicMoveError::SameDrawable.into());
         }
-        if !duration.is_finite() || duration <= 0.0 {
+        if duration.is_some_and(|duration| !duration.is_finite() || duration <= 0.0) {
             return Err(super::MagicMoveError::InvalidDuration.into());
         }
         let sources = self
@@ -464,7 +465,7 @@ impl DrawableHandle {
                 pairs,
                 unmatched,
             },
-            Some(duration),
+            duration,
         ))
     }
 
@@ -2385,29 +2386,20 @@ impl DrawableHandle {
         self.anim_dur(
             AnimationType::Indicate {
                 color: None,
-                scale_factor: 1.1,
-            },
-            dur.into_opt(),
-        )
-    }
-
-    pub(crate) fn circumscribe(&self, dur: impl OptDuration) -> Anim {
-        self.anim_dur(AnimationType::Circumscribe { color: None }, dur.into_opt())
-    }
-
-    pub(crate) fn flash(&self, dur: impl OptDuration) -> Anim {
-        self.anim_dur(
-            AnimationType::Flash {
-                color: None,
-                n_lines: 16,
-                radius: 1.0,
+                scale_factor: crate::anim::DEFAULT_INDICATE_SCALE,
             },
             dur.into_opt(),
         )
     }
 
     pub(crate) fn wiggle(&self, dur: impl OptDuration) -> Anim {
-        self.anim_dur(AnimationType::Wiggle, dur.into_opt())
+        self.anim_dur(
+            AnimationType::Wiggle {
+                amplitude: crate::anim::DEFAULT_WIGGLE_AMPLITUDE,
+                count: crate::anim::DEFAULT_WIGGLE_COUNT,
+            },
+            dur.into_opt(),
+        )
     }
 
     /// Reveal a sliding window along this path over a finite timeline clip.
