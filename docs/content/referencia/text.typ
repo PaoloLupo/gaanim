@@ -770,7 +770,7 @@ código. Para medir cualquier objeto, texto incluido, usa `bounds()` (ver
     (name: "source", type: "str | os.PathLike", default: none, desc: [Marcado Typst en línea o la ruta de un archivo `.typ` (relativa a la carpeta de assets).]),
     (name: "width", type: "str | float | int | None", default: "None", desc: [Ancho de página Typst antes de escalar: `"16cm"`, `"800pt"` o un número en puntos. Sin él, la página se ajusta al contenido: `#align(center)` centra dentro del contenido y los párrafos solo cortan línea donde la fuente lo indica. Pásalo para que un párrafo se ajuste o para columnas `1fr`.]),
   ),
-  desc: [Compila un documento Typst arbitrario (tablas con celdas combinadas, estructuras matemáticas propias, paquetes `@preview/…`) como un `Drawable`. Conserva sus proporciones y se escala para que su texto de 11 pt mida lo mismo que el rol `body`. No ofrece las selecciones de `Text`. Los trazos negros, los que Typst da por defecto a tablas, `rect`, `line` y dibujos de CeTZ, toman el color del texto del documento, así que se ven sobre un fondo oscuro. Una fuente vacía lanza `ValueError` y un archivo ilegible, `RuntimeError`.],
+  desc: [Compila un documento Typst arbitrario (tablas con celdas combinadas, estructuras matemáticas propias, paquetes `@preview/…`) como un `Drawable`. Conserva sus proporciones y se escala para que su texto de 11 pt mida lo mismo que el rol `body`. No ofrece las selecciones de `Text`. Su texto toma el color del rol `body` del tema, como `scene.text`, y también los trazos que Typst dibuja en negro por defecto (tablas, `rect`, `line`, formas de CeTZ). El documento empieza con `theme`, un diccionario con los colores del tema por nombre (`theme.accent`, `theme.foreground`, `theme.panel`, `theme.rule`…): los paquetes pensados para papel blanco eligen ellos mismos el negro y el blanco, así que pásales estos colores por sus opciones (ver #link("/referencia/text/#colores-del-tema-en-typst")[Colores del tema en Typst]). Los trazos que continúan uno a otro, como una curva que un paquete de gráficas dibuja muestra a muestra, son una sola pieza para `write`. Una fuente vacía lanza `ValueError` y un archivo ilegible, `RuntimeError`.],
 )[
 ```python
 # show-code: true
@@ -791,6 +791,47 @@ from pathlib import Path
 title = scene.text.typst(Path("assets/title.typ"))
 ```
 ]
+
+=== Colores del tema en Typst
+
+Cada documento empieza con `theme`, los colores del tema por nombre, los mismos
+que `scene.canvas.color(...)`. El texto ya toma el color del tema; úsalos para
+lo que el documento pinta por su cuenta:
+
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene()
+table = scene.text.typst("""
+#table(
+  columns: 3,
+  stroke: 0.6pt + theme.rule,
+  fill: (x, y) => if y == 0 { theme.panel },
+  [*x*], [*y*], [*x + y*],
+  [1], [2], [#text(fill: theme.accent)[3]],
+)
+""")
+scene.play([table.animate.write()])
+# output: preview.webp
+scene.render()
+```
+
+Los paquetes de Typst Universe están pensados para papel blanco y eligen ellos
+mismos el negro y el blanco de ejes, marcas y fondos de etiqueta. Dales los
+colores del tema por sus opciones de estilo, como en
+`examples/text/typst_packages.py`:
+
+```typst
+#import "@preview/simple-plot:1.0.0": plot
+#plot(
+  style: (
+    axis: (stroke: theme.rule + 0.8pt, arrow: (symbol: "stealth", fill: theme.rule)),
+    ticks: (stroke: theme.rule + 0.6pt, label-fill: theme.muted, label-bg: none),
+    labels: (fill: theme.foreground, bg: none),
+  ),
+  (fn: x => x * x, stroke: theme.accent + 1.2pt),
+)
+```
 
 #api-entry(
   name: "Typography.code",

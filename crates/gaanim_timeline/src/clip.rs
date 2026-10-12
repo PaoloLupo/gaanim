@@ -210,6 +210,13 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    /// Draw progress counted in Bézier segments, sub-paths one after
+    /// another, as Manim draws a `Write`; see
+    /// [`gaanim_math::get_subpath_by_curves`].
+    PathPartial {
+        from: f64,
+        to: f64,
+    },
     /// Trim window `[start, end, offset]` interpolated between two states;
     /// see [`gaanim_math::trim_path`].
     PathTrim {
@@ -522,6 +529,10 @@ impl PropertyLensSpec {
                 to: *to,
             },
             Self::PathCompletion { from, to } => PropertyLens::PathCompletion {
+                from: *from,
+                to: *to,
+            },
+            Self::PathPartial { from, to } => PropertyLens::PathPartial {
                 from: *from,
                 to: *to,
             },

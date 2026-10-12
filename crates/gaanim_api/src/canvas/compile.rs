@@ -1065,14 +1065,6 @@ fn escape_typst_string(text: &str) -> String {
         .replace('\r', "")
 }
 
-fn typst_foreground_for_background(background: gaanim_core::peniko::Color) -> &'static str {
-    let rgba = background.to_rgba8();
-    let luminance =
-        (0.2126 * f64::from(rgba.r) + 0.7152 * f64::from(rgba.g) + 0.0722 * f64::from(rgba.b))
-            / 255.0;
-    if luminance > 0.5 { "000000" } else { "ffffff" }
-}
-
 /// Opacity layers of a fading plexus: links split into this many length ranges.
 const CONNECT_FADE_LAYERS: usize = 6;
 
@@ -2994,6 +2986,11 @@ impl SceneModel {
         let mut checkpoint = None;
         // Raw bounds for the canvas background (visual, no margin).
         let raw_bounds = self.frame.bounds();
+        builder.draw_outline_width =
+            raw_bounds.height() * crate::builder::WRITE_OUTLINE_PER_FRAME_HEIGHT;
+        builder.typst_theme = self.typst_theme_prelude(
+            text_config.roles[&gaanim_text::prelude::TextRole::Body].fill_color,
+        );
         // Inset bounds for layout operations (to_edge, to_corner respect margin).
         let m = &self.margin;
         let frame_bounds = Bounds3D::new_2d(
@@ -3079,7 +3076,6 @@ impl SceneModel {
                 raw_bounds,
                 text_config,
                 self.theme_style.as_ref(),
-                bg_color,
                 &mut camera_position,
                 &mut camera_zoom,
                 &mut camera_rotation,
@@ -3739,7 +3735,6 @@ impl SceneModel {
         raw_frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
         theme: Option<&crate::canvas::CanvasTheme>,
-        scene_background: gaanim_core::peniko::Color,
         camera_position: &mut DVec3,
         camera_zoom: &mut f64,
         camera_rotation: &mut gaanim_core::glam::DQuat,
@@ -3830,14 +3825,7 @@ impl SceneModel {
                     if spec.defer_visibility_until_play {
                         deferred_visibility.insert(spec.id);
                     }
-                    let actual = Self::spawn_one(
-                        builder,
-                        &spec,
-                        id_map,
-                        frame_bounds,
-                        text_config,
-                        scene_background,
-                    );
+                    let actual = Self::spawn_one(builder, &spec, id_map, frame_bounds, text_config);
                     if spec.hud {
                         Self::apply_hud(builder, actual.id);
                     }
@@ -5221,7 +5209,6 @@ impl SceneModel {
                             id_map,
                             frame_bounds,
                             text_config,
-                            scene_background,
                         );
                         let entering_ancestor = entering.is_some_and(|entering| {
                             let mut current = Some(*layout_id);
@@ -9518,7 +9505,6 @@ impl SceneModel {
         id_map: &HashMap<ObjectId, ObjectId>,
         frame_bounds: Bounds3D,
         text_config: &gaanim_text::prelude::TextConfig,
-        scene_background: gaanim_core::peniko::Color,
     ) -> MobjectRef {
         let mref = match &spec.kind {
             SpawnKind::FillLevelOutline { mask } => {
@@ -10984,8 +10970,10 @@ impl SceneModel {
                 page_width,
                 scene_units,
             } => {
+                // A document's text takes the body role's color, as the
+                // theme's text does.
                 let body = &text_config.roles[&gaanim_text::prelude::TextRole::Body];
-                let foreground = typst_foreground_for_background(scene_background);
+                let foreground = color_to_hex(body.fill_color);
                 let page_directive = if let Some(w) = page_width {
                     // ponytail: raw interpolation into Typst source — reject control chars to avoid injection
                     if w.trim().is_empty() || w.contains(['\n', '\r', ';', '"', '\'']) {
@@ -10997,8 +10985,10 @@ impl SceneModel {
                     // within it instead of widening the drawable to a page.
                     "#set page(width: auto, height: auto, margin: 0pt)\n".to_string()
                 };
-                let source =
-                    format!("{page_directive}#set text(fill: rgb(\"{foreground}\"))\n{source}");
+                let source = format!(
+                    "{page_directive}{}#set text(fill: rgb(\"{foreground}\"))\n{source}",
+                    builder.typst_theme
+                );
                 // A document keeps Typst's own proportions (11pt text, table
                 // insets, rule widths) and is scaled so its default text is
                 // as large as the body role.
@@ -11017,11 +11007,10 @@ impl SceneModel {
                     scale,
                 );
                 // Typst strokes tables, rules and shapes black unless told
-                // otherwise, and so do CeTZ drawings: draw those strokes in
-                // the document's text color, as its text.
-                if foreground == "ffffff" {
-                    Self::recolor_black_strokes(builder, mr.id, PenikoColor::WHITE);
-                }
+                // otherwise: those strokes take the body color, as the
+                // document's text does. Packages that pick their own colors
+                // take the theme's from `theme`.
+                Self::recolor_black_strokes(builder, mr.id, body.fill_color);
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
                 Self::apply_fragment_fills(builder, mr, spec);
                 mr
@@ -11645,8 +11634,6 @@ impl SceneModel {
         b.spawn_with_effects(spec.glow.clone(), spec.blur, spec.shadow.clone())
     }
 
-    /// Applies deferred glyph-level color overrides after the normal object
-    /// style has been propagated to the compiled text hierarchy.
     /// Stroke in `color` the pieces of a compiled Typst hierarchy stroked in
     /// opaque black.
     fn recolor_black_strokes(builder: &mut SceneBuilder, id: ObjectId, color: PenikoColor) {
@@ -11675,6 +11662,8 @@ impl SceneModel {
         }
     }
 
+    /// Applies deferred glyph-level color overrides after the normal object
+    /// style has been propagated to the compiled text hierarchy.
     fn apply_fragment_fills(builder: &mut SceneBuilder, target: MobjectRef, spec: &ObjectSpec) {
         for (fragment, color) in &spec.fragment_fills {
             builder.select(target, fragment).set_fill(*color);
@@ -19071,6 +19060,9 @@ mod tests {
                             lens: gaanim_timeline::clip::PropertyLensSpec::PathCompletion {
                                 from,
                                 to,
+                            } | gaanim_timeline::clip::PropertyLensSpec::PathPartial {
+                                from,
+                                to,
                             },
                             ..
                         }
@@ -19093,6 +19085,54 @@ mod tests {
             }
         }
         counts
+    }
+
+    #[test]
+    fn write_lasts_and_draws_each_piece_as_manim_does() {
+        use gaanim_timeline::clip::{AnimationSpec, ClipPayload, PropertyLensSpec};
+        let mut canvas = SceneModel::new(640, 360);
+        let short = canvas.text("I");
+        let long = canvas.text("Sphinx of black quartz");
+        // 1 s for fewer than 15 pieces, 2 s from 15, unless a duration is set.
+        assert_eq!(short.animate().write().into_builder().duration, 1.0);
+        assert_eq!(long.animate().write().into_builder().duration, 2.0);
+        assert_eq!(long.animate().unwrite().into_builder().duration, 2.0);
+        assert_eq!(
+            long.animate().write().duration(0.5).into_builder().duration,
+            0.5
+        );
+        canvas.play(vec![short.animate().write()]);
+
+        let timeline = compiled_timeline(&canvas);
+        let clips: Vec<(f64, f64, PropertyLensSpec, RateFunc)> = timeline
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                ClipPayload::Animation(AnimationSpec {
+                    lens, rate_func, ..
+                }) if clip.duration > 0.5 => {
+                    Some((clip.start, clip.duration, lens.clone(), rate_func.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let half = |rate: &RateFunc, from: f64, to: f64| matches!(rate, RateFunc::Squish { start, end, .. } if *start == from && *end == to);
+        // The one piece spans the second: its outline over the first half...
+        assert!(clips.iter().any(|(start, duration, lens, rate)| {
+            *start == 0.0
+                && *duration == 1.0
+                && matches!(lens, PropertyLensSpec::PathPartial { from, to } if *from == 0.0 && *to == 1.0)
+                && half(rate, 0.0, 0.5)
+        }));
+        // ...then its fill, while the outline thins out to its own (none).
+        assert!(clips.iter().any(|(_, _, lens, rate)| {
+            matches!(lens, PropertyLensSpec::FillDrawProgress { from, to } if *from == 0.0 && *to == 1.0)
+                && half(rate, 0.5, 1.0)
+        }));
+        assert!(clips.iter().any(|(_, _, lens, rate)| {
+            matches!(lens, PropertyLensSpec::StrokeWidth { from, to } if *from > 0.0 && *to == 0.0)
+                && half(rate, 0.5, 1.0)
+        }));
     }
 
     #[test]

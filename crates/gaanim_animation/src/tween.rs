@@ -186,6 +186,11 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
+    /// Draw progress counted in Bézier segments, as Manim's `Write`.
+    PathPartial {
+        from: f64,
+        to: f64,
+    },
     /// Trim window `[start, end, offset]` interpolated between two states.
     PathTrim {
         from: [f64; 3],
@@ -381,6 +386,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::Material3D { from, to } => write!(f, "Material3D({from:?} -> {to:?})"),
             Self::PathMorph { .. } => write!(f, "PathMorph"),
             Self::PathCompletion { from, to } => write!(f, "PathCompletion({} -> {})", from, to),
+            Self::PathPartial { from, to } => write!(f, "PathPartial({from} -> {to})"),
             Self::PathTrim { from, to, .. } => write!(f, "PathTrim({from:?} -> {to:?})"),
             Self::ArrowGrow { from, to, .. } => write!(f, "ArrowGrow({from} -> {to})"),
             Self::ConnectorGrow { from, to } => write!(f, "ConnectorGrow({from} -> {to})"),
@@ -628,7 +634,7 @@ pub fn evaluate_tweens_system(
                     ));
                 }
             }
-            PropertyLens::PathCompletion { from, to } => {
+            PropertyLens::PathCompletion { from, to } | PropertyLens::PathPartial { from, to } => {
                 // Trim the entity's `Path2D` directly from the cached
                 // `PathSource`. The `PathCompletion` component is no
                 // longer needed because the lens already carries
@@ -638,8 +644,15 @@ pub fn evaluate_tweens_system(
                 if let Ok((source, order)) = sources.get(tween.target)
                     && let Ok(mut path) = paths.get_mut(tween.target)
                 {
-                    let order = order.copied().unwrap_or_default();
-                    path.0 = std::sync::Arc::new(order.trim(&source.0, completion));
+                    let trimmed = if matches!(lens, PropertyLens::PathPartial { .. }) {
+                        gaanim_math::get_subpath_by_curves(&source.0, completion)
+                    } else {
+                        order
+                            .copied()
+                            .unwrap_or_default()
+                            .trim(&source.0, completion)
+                    };
+                    path.0 = std::sync::Arc::new(trimmed);
                 }
                 // Update the pen-tip glow position if the entity has one.
                 if let Ok(mut tip) = tip_glows.get_mut(tween.target) {

@@ -1757,7 +1757,18 @@ class Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
     def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None, brush: Literal["pen", "chalk"] = "pen", seed: int = 0) -> Anim:
-        """Trace paths with a constant logical stroke, then smoothly fade their fills.
+        """Draw the outlines, then fill them in, as Manim's ``Write``.
+
+        Each piece (a glyph, a shape, a member of a group) runs over its share
+        of the animation, staggered by ``stagger``, and the easing (linear by
+        default) applies to each piece's own progress. In the first half of
+        its share a piece draws its outline, one Bézier segment after another
+        and its contours in order, centered on the contour and about 0.25% of
+        the frame height wide, in its stroke color (its fill color without a
+        stroke). In the second half the outline turns into the piece's own
+        look: the fill appears and the stroke takes its own width, or fades
+        out. Without a duration the animation lasts 1 s for fewer than 15
+        pieces and 2 s otherwise; ``Scene.play(duration=...)`` still sets it.
 
         On text, ``by`` starts the glyphs of each grapheme, word, explicit line,
         or innermost semantic part together, with the segmentation of
@@ -1766,9 +1777,8 @@ class Anim:
         from the ``"center"`` outward, or in a ``"random"`` permutation fixed
         by ``seed``.
         ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
-        sequential staggering and a number overrides it. A missing outline is
-        synthesized at 0.03 logical units and removed as the authored fill
-        appears. ``brush="chalk"`` draws the drawable as chalk for the whole
+        sequential staggering (Manim's ``min(4 / pieces, 0.2)``) and a number
+        overrides it. ``brush="chalk"`` draws the drawable as chalk for the whole
         scene, like ``Drawable.chalk(seed)``: a trembling outline and a grain
         that follow ``seed``. Raises ``ValueError`` after a property target or
         another effect.
@@ -1784,7 +1794,13 @@ class Anim:
         scale-and-fade behavior.
         """
         ...
-    def unwrite(self) -> Anim: ...
+    def unwrite(self) -> Anim:
+        """Erase as Manim's ``Unwrite``: ``write`` backwards, from the last piece.
+
+        Each piece first turns back into its outline, then the outline
+        retracts to where it started. It lasts as long as ``write`` would.
+        """
+        ...
     def uncreate(self) -> Anim: ...
     def grow_from_center(self) -> Anim: ...
     def grow_from_point(self, x: float, y: float) -> Anim:
@@ -8813,11 +8829,20 @@ class Typography:
         ``#align(center)`` centers within the content and lines only break
         where the source breaks them. ``width`` is a Typst page width
         (``"16cm"``, ``"800pt"``; a number means points) measured before that
-        scaling, for paragraphs that wrap or ``1fr`` columns. Black strokes,
-        Typst's default for tables, ``rect``, ``line`` and CeTZ drawings, are
-        drawn in the document's text color, so they show over a dark
-        background. Empty inline source raises ``ValueError`` and an
-        unreadable asset raises ``RuntimeError``.
+        scaling, for paragraphs that wrap or ``1fr`` columns.
+
+        Its text takes the theme's ``body`` color, as ``scene.text`` does, and
+        so do the strokes Typst draws black by default (tables, ``rect``,
+        ``line``, CeTZ shapes). The document starts with ``theme``, a
+        dictionary of the theme's colors by token (``theme.accent``,
+        ``theme.foreground``, ``theme.panel``, ``theme.rule``…). Packages
+        made for white paper pick black and white themselves, so pass them
+        these colors through their options, such as
+        ``plot(style: (labels: (fill: theme.foreground, bg: none)))``.
+        Strokes that continue one another, such as a curve a plotting
+        package draws one sample at a time, are one piece for ``write``.
+        Empty inline source raises ``ValueError`` and an unreadable asset
+        raises ``RuntimeError``.
 
         Example:
             from pathlib import Path

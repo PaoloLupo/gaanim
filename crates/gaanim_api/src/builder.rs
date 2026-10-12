@@ -48,6 +48,47 @@ struct DrawSchedule {
     stroke_width: Option<f64>,
     auto_stroke_width: f64,
     fill_rate_func: gaanim_math::RateFunc,
+    /// Draw each piece as Manim's `Write` does (see
+    /// `SceneBuilder::play_manim_draw`).
+    manim: bool,
+}
+
+/// Width of Manim's `Write` outline per unit of frame height: its stroke
+/// width 2, 0.02 scene units in Manim's frame 8 units tall.
+pub(crate) const WRITE_OUTLINE_PER_FRAME_HEIGHT: f64 = 0.0025;
+
+/// Samples of the easing table of a draw phase with a non-linear easing.
+const DRAW_PHASE_SAMPLES: usize = 129;
+
+/// Lens bounds and easing of one half of a Manim draw over a piece's whole
+/// window. The piece's eased progress `a` (`1 - a` when erasing) gives the
+/// outline `clamp(2a)` (`phase` 0) and the rest of its look `clamp(2a - 1)`
+/// (`phase` 1), as Manim's `DrawBorderThenFill` splits it.
+fn manim_draw_phase(rate: &RateFunc, phase: u8, reversed: bool) -> (f64, f64, RateFunc) {
+    let (first, second) = if phase == 0 { (0.0, 0.5) } else { (0.5, 1.0) };
+    if matches!(rate, RateFunc::Linear) {
+        // Exact halves: the phase runs over its half of the window, or over
+        // the mirrored half from 1 down to 0 when erasing.
+        let (from, to, start, end) = if reversed {
+            (1.0, 0.0, 1.0 - second, 1.0 - first)
+        } else {
+            (0.0, 1.0, first, second)
+        };
+        let squish = RateFunc::Squish {
+            inner: Box::new(RateFunc::Linear),
+            start,
+            end,
+        };
+        return (from, to, squish);
+    }
+    let samples: std::sync::Arc<[f64]> = (0..DRAW_PHASE_SAMPLES)
+        .map(|index| {
+            let eased = rate.evaluate(index as f64 / (DRAW_PHASE_SAMPLES - 1) as f64);
+            let progress = if reversed { 1.0 - eased } else { eased };
+            (2.0 * progress - f64::from(phase)).clamp(0.0, 1.0)
+        })
+        .collect();
+    (0.0, 1.0, RateFunc::Sampled(samples))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -984,6 +1025,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Their tint for what already shows `emphasis_color`: the theme's
     /// foreground.
     pub(crate) emphasis_contrast: Color,
+    /// Width of the outline `write` draws, Manim's for the frame's height.
+    pub(crate) draw_outline_width: f64,
+    /// Typst source that Typst documents start with: the theme's colors.
+    pub(crate) typst_theme: String,
     /// The `look_at`s each compiled object follows: a compiled object or a
     /// point, and the radians added. `clear_drive` keeps their last turn.
     pub(crate) look_ats: HashMap<ObjectId, Vec<(gaanim_animation::FalloffTarget, f64)>>,
@@ -1229,6 +1274,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             readout_baselines,
             readout_reserves: HashMap::new(),
             emphasis_color: DEFAULT_EMPHASIS_COLOR,
+            draw_outline_width: 9.0 * WRITE_OUTLINE_PER_FRAME_HEIGHT,
+            typst_theme: String::new(),
             emphasis_contrast: DEFAULT_EMPHASIS_CONTRAST,
             look_ats: HashMap::new(),
             pending_time_maps: Vec::new(),
@@ -1546,6 +1593,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             readout_baselines: HashMap::new(),
             readout_reserves: HashMap::new(),
             emphasis_color: DEFAULT_EMPHASIS_COLOR,
+            draw_outline_width: 9.0 * WRITE_OUTLINE_PER_FRAME_HEIGHT,
+            typst_theme: String::new(),
             emphasis_contrast: DEFAULT_EMPHASIS_CONTRAST,
             look_ats: HashMap::new(),
             pending_time_maps: Vec::new(),
@@ -4038,6 +4087,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: true,
             }),
             AnimationType::Create { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
@@ -4047,6 +4097,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: false,
             }),
             AnimationType::Unwrite { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
@@ -4056,6 +4107,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: true,
             }),
             AnimationType::Uncreate { config } => Some(DrawSchedule {
                 mode: DrawMode::Grow,
@@ -4065,6 +4117,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: false,
             }),
             AnimationType::DrawBorderThenFill { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
@@ -4074,6 +4127,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.04,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
+                manim: false,
             }),
             _ => None,
         }
@@ -4201,6 +4255,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     label: self.current_label.clone(),
                 }),
             );
+        }
+
+        if schedule.manim {
+            self.play_manim_draw(
+                &anim,
+                parent_track,
+                start_time,
+                &items,
+                &slots,
+                slot_count,
+                &schedule,
+            );
+            return;
         }
 
         let mut temporary_strokes = HashMap::new();
@@ -4486,6 +4553,152 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     }),
                 );
             }
+        }
+    }
+
+    /// Schedule `write`/`unwrite` as Manim's `Write`/`Unwrite` (its
+    /// `DrawBorderThenFill`) draws its pieces. Each piece runs over its
+    /// share of the animation, staggered by the lag ratio, with the easing
+    /// applied to its own progress. The first half draws its outline,
+    /// counted in Bézier segments, at the outline width in its stroke color
+    /// (its fill color when it has no stroke) and centered on the contour;
+    /// the second half turns the outline into the piece's own look: the fill
+    /// appears and the stroke takes its own width, none for a piece without
+    /// one. Erasing runs the same backwards, the last piece first.
+    #[allow(clippy::too_many_arguments)]
+    fn play_manim_draw(
+        &mut self,
+        anim: &AnimationBuilder,
+        parent_track: TrackId,
+        start_time: f64,
+        items: &[ObjectId],
+        slots: &[usize],
+        slot_count: usize,
+        schedule: &DrawSchedule,
+    ) {
+        let reversed = schedule.reversed;
+        let outline = schedule.stroke_width.unwrap_or(self.draw_outline_width);
+        let lag_ratio = schedule.lag_ratio;
+        let item_duration = anim.duration / (1.0 + (slot_count as f64 - 1.0).max(0.0) * lag_ratio);
+        let lag_step = item_duration * lag_ratio;
+        let window = item_duration.max(1e-6);
+        let min_step = 1e-6_f64.max(item_duration * 0.01);
+        let (path_from, path_to, path_rate) = manim_draw_phase(&anim.rate_func, 0, reversed);
+        let (style_from, style_to, style_rate) = manim_draw_phase(&anim.rate_func, 1, reversed);
+        let hold = if reversed { 1.0 } else { 0.0 };
+        let pen_tip = draw_config(&anim.anim_type).is_some_and(|config| config.pen_tip);
+        let mut pen_tips = Vec::new();
+        let label = self.current_label.clone();
+        for (item_id, slot) in items.iter().zip(slots) {
+            let Some(state) = self.states.get(*item_id) else {
+                continue;
+            };
+            let entity = state.entity;
+            let filled = state.fill.is_some();
+            // A piece without a stroke gets one only while it is drawn.
+            let own_width = state
+                .stroke
+                .brush
+                .as_ref()
+                .map(|_| state.stroke.style.width);
+            let fill_color = state
+                .fill
+                .as_ref()
+                .and_then(extract_brush_color)
+                .unwrap_or(Color::WHITE);
+            let mut commands = self.commands.entity(entity);
+            if own_width.is_none() {
+                commands
+                    .insert(StrokeBrush::new(fill_color, 0.0))
+                    .entry::<gaanim_renderer::effects::StrokeAlign>()
+                    .or_insert(gaanim_renderer::effects::StrokeAlign::Center);
+            }
+            if filled {
+                commands.insert(gaanim_animation::FillDrawProgress(hold as f32));
+            }
+            commands.insert(gaanim_animation::PathReveal(hold));
+            if !reversed {
+                commands.insert((
+                    gaanim_animation::WriteTipGlow::default(),
+                    gaanim_scene::components::Path2D(std::sync::Arc::new(
+                        gaanim_core::kurbo::BezPath::new(),
+                    )),
+                ));
+                if pen_tip {
+                    pen_tips.push(entity);
+                }
+            }
+
+            let mut clip = |start: f64, duration: f64, lens: PropertyLensSpec, rate_func| {
+                self.timeline.add_clip(
+                    parent_track,
+                    start,
+                    duration,
+                    ClipPayload::Animation(AnimationSpec {
+                        target: *item_id,
+                        lens,
+                        rate_func,
+                        delay: 0.0,
+                        label: label.clone(),
+                    }),
+                );
+            };
+            // Hidden (shown, when erasing) until its turn.
+            clip(
+                start_time,
+                min_step,
+                PropertyLensSpec::PathPartial {
+                    from: hold,
+                    to: hold,
+                },
+                RateFunc::Linear,
+            );
+            if filled {
+                clip(
+                    start_time,
+                    min_step,
+                    PropertyLensSpec::FillDrawProgress {
+                        from: hold as f32,
+                        to: hold as f32,
+                    },
+                    RateFunc::Linear,
+                );
+            }
+            let item_start = start_time + *slot as f64 * lag_step;
+            clip(
+                item_start,
+                window,
+                PropertyLensSpec::PathPartial {
+                    from: path_from,
+                    to: path_to,
+                },
+                path_rate.clone(),
+            );
+            if filled {
+                clip(
+                    item_start,
+                    window,
+                    PropertyLensSpec::FillDrawProgress {
+                        from: style_from as f32,
+                        to: style_to as f32,
+                    },
+                    style_rate.clone(),
+                );
+            }
+            let own = own_width.unwrap_or(0.0);
+            let width = |style: f64| outline + (own - outline) * style;
+            clip(
+                item_start,
+                window,
+                PropertyLensSpec::StrokeWidth {
+                    from: width(style_from),
+                    to: width(style_to),
+                },
+                style_rate.clone(),
+            );
+        }
+        for path in pen_tips {
+            self.attach_pen_tip(path);
         }
     }
 

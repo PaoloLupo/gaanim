@@ -42,6 +42,16 @@ enteros, o usa `scene.text.code`.
   mal. El diálogo del editor suma MOV a sus formatos y una casilla
   *Conservar la transparencia* para MOV, WebM, WebP y PNG.
 
+== Animación
+
+- `write()` y `unwrite()` animan como el `Write` y el `Unwrite` de Manim:
+  cada pieza traza su contorno en la primera mitad de su parte, un tramo de
+  Bézier tras otro, fino y centrado, en el color de su trazo, y en la segunda
+  mitad aparece su relleno y el trazo toma su ancho. La curva se aplica al
+  avance de cada pieza, y sin duración duran 1 s con menos de 15 piezas y 2 s
+  con más. Se conservan `by`, `order`, `seed`, `stagger`, la tiza y la punta
+  de lápiz. Ver #link("/referencia/animations/#api-anim-write")[`Anim.write`].
+
 == Texto
 
 - `scene.text.code` resalta la sintaxis: las palabras clave, las cadenas, los
@@ -207,6 +217,14 @@ enteros, o usa `scene.text.code`.
   `animate.fade_transform_to(otro_texto)` deja visible el texto de destino.
 - Los trazos negros de los documentos Typst (tablas, `rect`, `line`, CeTZ)
   toman el color del texto del documento y se ven sobre fondos oscuros.
+- Los documentos Typst escriben su texto en el color del rol `body` del tema,
+  como `scene.text`, en lugar de blanco o negro puro, y empiezan con `theme`,
+  un diccionario con los colores del tema (`theme.accent`, `theme.rule`…)
+  para dárselos a sus paquetes, que piensan en papel blanco y eligen negro y
+  blanco por su cuenta. Ver
+  #link("/referencia/text/#colores-del-tema-en-typst")[Colores del tema en Typst].
+- `write()` traza de un tirón las curvas que un paquete de Typst dibuja muestra
+  a muestra (simple-plot, CeTZ); antes se veían punteadas.
 
 == Al actualizar
 
@@ -259,6 +277,15 @@ enteros, o usa `scene.text.code`.
 - `write()` sobre un grupo con textos (ejes, matrices, bloques de código)
   escribe cada texto desde su primer carácter: los fotogramas intermedios
   cambian, el resultado final no.
+- `write()` y `unwrite()` sin duración duran 2 s en textos y grupos de 15
+  piezas o más, así que la escena puede alargarse: fija `.duration(1)` si
+  contabas con el segundo de antes. Sus fotogramas intermedios cambian (la
+  mitad del tiempo de cada pieza traza el contorno y la otra mitad lo
+  rellena), y un objeto con trazo lo dibuja fino y luego lo engrosa.
+- Los documentos de `scene.text.typst` usan el color de texto del tema en
+  lugar de blanco o negro puro. Si querías blanco, ponlo en el documento con
+  `#set text(fill: white)`. Un documento que definía su propio `theme`
+  sigue usando el suyo.
 
 = 0.11.0
 

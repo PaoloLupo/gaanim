@@ -2635,6 +2635,52 @@ impl SceneModel {
         Ok(())
     }
 
+    /// Typst source defining `theme`, a dictionary of the active theme's
+    /// colors by token (`theme.accent`, `theme.foreground`…), that Typst
+    /// documents and the packages they import can be styled with. Without a
+    /// theme it holds the background and the body text color.
+    pub(crate) fn typst_theme_prelude(&self, body: Color) -> String {
+        fn typst_rgb(color: Color) -> String {
+            let rgba = color.to_rgba8();
+            if rgba.a == u8::MAX {
+                format!("rgb(\"#{:02x}{:02x}{:02x}\")", rgba.r, rgba.g, rgba.b)
+            } else {
+                format!(
+                    "rgb(\"#{:02x}{:02x}{:02x}{:02x}\")",
+                    rgba.r, rgba.g, rgba.b, rgba.a
+                )
+            }
+        }
+        let mut colors: Vec<(String, Color)> = match &self.theme_style {
+            Some(theme) => theme
+                .colors
+                .iter()
+                .map(|(token, color)| (token.clone(), *color))
+                .collect(),
+            None => vec![
+                ("background".to_owned(), self.background.unwrap_or(Color::WHITE)),
+                ("foreground".to_owned(), body),
+            ],
+        };
+        // Tokens that are Typst identifiers, in a fixed order.
+        colors.retain(|(token, _)| {
+            token.starts_with(|c: char| c.is_ascii_alphabetic())
+                && token
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        });
+        colors.sort_by(|a, b| a.0.cmp(&b.0));
+        let entries = colors
+            .iter()
+            .map(|(token, color)| format!("{token}: {}", typst_rgb(*color)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if entries.is_empty() {
+            return "#let theme = (:)\n".to_owned();
+        }
+        format!("#let theme = ({entries},)\n")
+    }
+
     /// Resolve a semantic token from the active theme.
     pub fn theme_color(&self, role: &str) -> Result<Color, String> {
         self.theme_style

@@ -1347,6 +1347,18 @@ pub(crate) fn cropped_frame(
     Ok(frame)
 }
 
+/// Pieces from which Manim's `Write` lasts 2 s instead of 1 s.
+const MANIM_WRITE_LONG_PIECES: usize = 15;
+
+/// Manim's default `Write` duration for `pieces` pieces.
+fn manim_write_duration(pieces: usize) -> f64 {
+    if pieces < MANIM_WRITE_LONG_PIECES {
+        1.0
+    } else {
+        2.0
+    }
+}
+
 impl Anim {
     /// Animate source crop in pixels, or fractions of the original image dimensions.
     pub fn crop(
@@ -2484,10 +2496,50 @@ impl Anim {
         self.effect(AnimationType::FadeOut)
     }
 
+    /// Manim's `Write`: without a duration it lasts 1 s for fewer than 15
+    /// pieces and 2 s otherwise; see [`Self::draw_pieces`].
     pub fn write(self) -> Self {
+        let duration = manim_write_duration(self.draw_pieces());
         self.effect(AnimationType::Write {
             config: DrawAnimationConfig::default(),
         })
+        .default_duration(duration)
+    }
+
+    /// Pieces a `write` draws, as Manim counts the members with points: the
+    /// visible characters of a text or a Typst document, the pieces of a
+    /// group's members, many for axes, and one for anything else.
+    fn draw_pieces(&self) -> usize {
+        fn pieces(
+            state: &crate::canvas::ops::CanvasState,
+            spec: &ObjectSpec,
+            depth: usize,
+        ) -> usize {
+            let visible = |text: &str| text.chars().filter(|c| !c.is_whitespace()).count();
+            match &spec.kind {
+                SpawnKind::Text(text) => text
+                    .visible_char_units(gaanim_text::prelude::TextRevealUnit::Grapheme)
+                    .len(),
+                SpawnKind::Typst { source, .. } => visible(source),
+                SpawnKind::Axes { .. } | SpawnKind::Axes3D { .. } => MANIM_WRITE_LONG_PIECES,
+                SpawnKind::Group(ids) | SpawnKind::GroupNoCenter(ids) if depth < 32 => ids
+                    .iter()
+                    .filter_map(|id| state.object_specs.get(id))
+                    .map(|member| {
+                        let member = member.lock().expect("object spec poisoned").clone();
+                        pieces(state, &member, depth + 1)
+                    })
+                    .sum(),
+                _ => 1,
+            }
+            .max(1)
+        }
+        let (Some(spec), Some(state)) = (&self.property_spec, &self.owner) else {
+            return 1;
+        };
+        let spec = spec.lock().expect("object spec poisoned").clone();
+        let state = state.lock().expect("canvas state poisoned");
+        pieces(&state, &spec, 0)
     }
 
     /// Draw the animated drawable as chalk for the whole scene, as
@@ -2517,10 +2569,13 @@ impl Anim {
         }
     }
 
+    /// Manim's `Unwrite`, timed as [`Self::write`].
     pub fn unwrite(self) -> Self {
+        let duration = manim_write_duration(self.draw_pieces());
         self.effect(AnimationType::Unwrite {
             config: DrawAnimationConfig::default(),
         })
+        .default_duration(duration)
     }
 
     pub fn uncreate(self) -> Self {

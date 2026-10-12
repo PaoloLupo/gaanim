@@ -688,6 +688,42 @@ fn extract_frame_items(
                     continue;
                 }
 
+                if let Some(tb) = total_bounds {
+                    *tb = tb.union(&local_bounds);
+                } else {
+                    *total_bounds = Some(local_bounds);
+                }
+                let fill = FillBrush(
+                    shape
+                        .fill
+                        .as_ref()
+                        .and_then(|p| typst_paint_to_brush(p, default_fill)),
+                );
+                let stroke = shape
+                    .stroke
+                    .as_ref()
+                    .map(|stroke| StrokeBrush {
+                        brush: typst_paint_to_brush(&stroke.paint, default_fill),
+                        style: typst_stroke_to_kurbo(stroke),
+                    })
+                    .unwrap_or_else(StrokeBrush::transparent);
+                // Strokes that continue one another are one piece, drawn as
+                // one stroke: plotting packages draw a sampled curve as one
+                // `line` per sample.
+                if fill.0.is_none()
+                    && let Some(previous) = extracted_children.last_mut()
+                    && previous.tag.0 == "TypstShape"
+                    && previous.fill.0.is_none()
+                    && previous.stroke == stroke
+                    && continues_stroke(&previous.path, &path)
+                {
+                    previous
+                        .path
+                        .extend(path.elements().iter().skip(1).copied());
+                    previous.bounds = previous.bounds.union(&local_bounds);
+                    continue;
+                }
+
                 let span_range = world.range(*_span).unwrap_or(0..0);
                 let span = gaanim_scene::components::TextSpan {
                     character: '_', // Marker for drawing shapes
@@ -700,35 +736,34 @@ fn extract_frame_items(
                 extracted_children.push(PendingTypstChild {
                     path,
                     bounds: local_bounds,
-                    fill: FillBrush(
-                        shape
-                            .fill
-                            .as_ref()
-                            .and_then(|p| typst_paint_to_brush(p, default_fill)),
-                    ),
-                    stroke: shape
-                        .stroke
-                        .as_ref()
-                        .map(|stroke| StrokeBrush {
-                            brush: typst_paint_to_brush(&stroke.paint, default_fill),
-                            style: typst_stroke_to_kurbo(stroke),
-                        })
-                        .unwrap_or_else(StrokeBrush::transparent),
+                    fill,
+                    stroke,
                     tag: ObjectTag("TypstShape".into()),
                     span,
                     ligature: None,
                 });
                 *char_index_counter += 1;
-
-                if let Some(tb) = total_bounds {
-                    *tb = tb.union(&local_bounds);
-                } else {
-                    *total_bounds = Some(local_bounds);
-                }
             }
             _ => {}
         }
     }
+}
+
+/// Whether `next` starts where the open `previous` ends, as the next segment
+/// of one stroke.
+fn continues_stroke(previous: &kurbo::BezPath, next: &kurbo::BezPath) -> bool {
+    let end = match previous.elements().last() {
+        Some(
+            kurbo::PathEl::LineTo(end)
+            | kurbo::PathEl::QuadTo(_, end)
+            | kurbo::PathEl::CurveTo(_, _, end),
+        ) => *end,
+        _ => return false,
+    };
+    let Some(kurbo::PathEl::MoveTo(start)) = next.elements().first() else {
+        return false;
+    };
+    end.distance(*start) <= 1.0e-6 * (1.0 + end.to_vec2().hypot())
 }
 
 /// Collect the baselines of visual lines without mistaking the numerator,
@@ -1567,6 +1602,36 @@ mod tests {
             "a subscripted formula baseline must not collapse to its visual center"
         );
         assert_eq!(compiled.metrics.line_count, 1);
+    }
+
+    #[test]
+    fn strokes_that_continue_one_another_are_one_piece() {
+        let registry = FontRegistry::new();
+        let compiled = compile_typst_source(
+            &registry,
+            "#set page(width: 40pt, height: 40pt, margin: 0pt)\n\
+             #place(line(start: (0pt, 0pt), end: (10pt, 0pt)))\
+             #place(line(start: (10pt, 0pt), end: (20pt, 10pt)))\
+             #place(line(start: (20pt, 10pt), end: (30pt, 10pt)))\
+             #place(line(start: (0pt, 30pt), end: (10pt, 30pt)))\
+             #place(line(start: (10pt, 30pt), end: (20pt, 30pt), stroke: 2pt))",
+            false,
+            None,
+            None,
+            None,
+            None,
+            &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+            &StrokeBrush::transparent(),
+        )
+        .expect("lines should compile");
+        // The first three lines draw one stroke; the fourth starts elsewhere
+        // and the fifth has another width.
+        let segments: Vec<usize> = compiled
+            .children
+            .iter()
+            .map(|child| child.path.segments().count())
+            .collect();
+        assert_eq!(segments, [3, 1, 1]);
     }
 
     #[test]

@@ -288,6 +288,7 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
         PropertyLensSpec::StrokeColor { .. } => AbsoluteLensChannel::StrokeColor,
         PropertyLensSpec::StrokeWidth { .. } => AbsoluteLensChannel::StrokeWidth,
         PropertyLensSpec::PathCompletion { .. }
+        | PropertyLensSpec::PathPartial { .. }
         | PropertyLensSpec::PathTrim { .. }
         | PropertyLensSpec::PathRange { .. } => AbsoluteLensChannel::PathCompletion,
         PropertyLensSpec::PathMorph { .. } | PropertyLensSpec::ArrowGrow { .. } => {
@@ -307,6 +308,7 @@ fn restored_future_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChanne
         // A future passing flash starts from an empty window, so
         // the drawable stays hidden until it passes, like Create.
         PropertyLensSpec::PathCompletion { .. }
+        | PropertyLensSpec::PathPartial { .. }
         | PropertyLensSpec::PathTrim { .. }
         | PropertyLensSpec::PathRange { .. } => Some(AbsoluteLensChannel::PathCompletion),
         PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
@@ -4494,8 +4496,10 @@ fn apply_lens_spec(
                 *material = value;
             }
         }
-        PropertyLensSpec::PathCompletion { from, to } => {
+        PropertyLensSpec::PathCompletion { from, to }
+        | PropertyLensSpec::PathPartial { from, to } => {
             let completion = *from + (*to - *from) * t;
+            let by_curves = matches!(lens, PropertyLensSpec::PathPartial { .. });
 
             // Safety net: if the `PathSource` seed system didn't run
             // (timing race between Startup and the first Update frame,
@@ -4523,11 +4527,15 @@ fn apply_lens_spec(
                     }
                 }
             } else if let Some(source) = world.get::<gaanim_animation::PathSource>(target) {
-                let order = world
-                    .get::<gaanim_scene::PathRevealOrder>(target)
-                    .copied()
-                    .unwrap_or_default();
-                let trimmed = order.trim(&source.0, completion);
+                let trimmed = if by_curves {
+                    gaanim_math::get_subpath_by_curves(&source.0, completion)
+                } else {
+                    world
+                        .get::<gaanim_scene::PathRevealOrder>(target)
+                        .copied()
+                        .unwrap_or_default()
+                        .trim(&source.0, completion)
+                };
                 if let Some(mut path) = world.get_mut::<Path2D>(target)
                     && path.0.elements() != trimmed.elements()
                 {

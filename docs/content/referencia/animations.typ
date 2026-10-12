@@ -480,7 +480,7 @@ scene.render()
     (name: "seed", type: "int", default: "0", desc: [Semilla del orden `"random"` y del temblor y el grano de la tiza.]),
   ),
   returns: (type: "Anim", desc: [Escritura trazo a trazo.]),
-  desc: [Traza los contornos con un grosor lógico constante y luego funde los rellenos. Si el objeto no tiene contorno, usa uno temporal de 0.03 unidades que desaparece al entrar el relleno. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
+  desc: [Dibuja los contornos y luego los rellena, como el `Write` de Manim. Cada pieza (un glifo, una forma, un miembro de un grupo) ocupa su parte de la animación, escalonada por `stagger`, y la curva (lineal por defecto) se aplica al avance de cada pieza. En la primera mitad de su parte la pieza traza su contorno, un tramo de Bézier tras otro y sus contornos en orden, centrado y de un 0,25 % del alto del cuadro, en el color de su trazo (el de su relleno si no tiene). En la segunda mitad el contorno pasa a su aspecto propio: aparece el relleno y el trazo toma su ancho, o desaparece. Sin duración, dura 1 s con menos de 15 piezas y 2 s con más; `scene.play(duration=...)` la sigue fijando. Sin `stagger`, el retardo entre piezas es el de Manim, `min(4 / piezas, 0.2)`. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -510,6 +510,7 @@ scene.render()
   name: "Anim.unwrite",
   kind: "method",
   returns: (type: "Anim", desc: [La escritura al revés.]),
+  desc: [Borra como el `Unwrite` de Manim: `write` al revés, desde la última pieza. Cada pieza vuelve primero a su contorno y luego el contorno se recoge hasta su inicio. Dura lo que duraría `write`.],
 )[
 ```python
 # show-code: true

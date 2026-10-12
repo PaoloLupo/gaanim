@@ -19,27 +19,19 @@ GAP = 0.3
 scene = Scene()
 
 
-def typst_color(role):
-    """A theme color as a Typst ``rgb(...)`` expression."""
-    color = scene.canvas.color(role)
-    return f"rgb({color.r}, {color.g}, {color.b})"
-
-
-THEME = "\n".join(
-    f"#let {role} = {typst_color(role)}"
-    for role in ["background", "foreground", "muted", "accent", "success", "rule", "panel"]
-)
-
-# zebraw's colors, from the theme; each listing adds its own options.
-ZEBRAW = THEME + """
+# Packages are made for white paper and pick black and white themselves:
+# their options take the theme's colors from `theme`, the dictionary every
+# Typst document starts with. zebraw's colors; each listing adds its own
+# options.
+ZEBRAW = """
 #import "@preview/zebraw:0.6.3": *
 #let listing = zebraw.with(
-  background-color: panel,
-  highlight-color: accent.transparentize(75%),
-  comment-color: panel.lighten(6%),
-  lang-color: accent,
-  lang-font-args: (fill: background),
-  numbering-font-args: (fill: muted),
+  background-color: theme.panel,
+  highlight-color: theme.accent.transparentize(75%),
+  comment-color: theme.panel.lighten(6%),
+  lang-color: theme.accent,
+  lang-font-args: (fill: theme.background),
+  numbering-font-args: (fill: theme.muted),
 )
 """
 CODE = """```python
@@ -49,13 +41,13 @@ def area(r):
 ```"""
 
 # simple-plot's axes, grid, ticks and labels, from the theme.
-PLOT = THEME + """
+PLOT = """
 #import "@preview/simple-plot:1.0.0": plot
 #let themed = (
-  axis: (stroke: rule + 0.8pt, arrow: (symbol: "stealth", fill: rule, scale: 0.55)),
-  grid: (major: (stroke: panel.lighten(8%) + 0.5pt), minor: (stroke: panel + 0.3pt)),
-  ticks: (stroke: rule + 0.6pt, label-fill: muted, label-bg: none),
-  labels: (fill: foreground, bg: none),
+  axis: (stroke: theme.rule + 0.8pt, arrow: (symbol: "stealth", fill: theme.rule, scale: 0.55)),
+  grid: (major: (stroke: theme.panel.lighten(8%) + 0.5pt), minor: (stroke: theme.panel + 0.3pt)),
+  ticks: (stroke: theme.rule + 0.6pt, label-fill: theme.muted, label-bg: none),
+  labels: (fill: theme.foreground, bg: none),
 )
 """
 
@@ -111,8 +103,8 @@ pages([
   xlabel: $x$, ylabel: $y$,
   show-grid: "major",
   show-origin: false,
-  (fn: x => x * x, stroke: accent + 1.2pt, label: $x^2$),
-  (fn: x => calc.exp(x) / 4, stroke: success + 1.2pt, label: $e^x / 4$),
+  (fn: x => x * x, stroke: theme.accent + 1.2pt, label: $x^2$),
+  (fn: x => calc.exp(x) / 4, stroke: theme.success + 1.2pt, label: $e^x / 4$),
 )
 """)),
     ("xtick-labels: ($-pi$, $pi$)", scene.text.typst(PLOT + """
@@ -125,8 +117,8 @@ pages([
   show-origin: false,
   xtick: (-calc.pi, calc.pi),
   xtick-labels: ($-pi$, $pi$),
-  (fn: x => calc.sin(x), stroke: accent + 1.2pt, samples: 200, label: $sin(x)$),
-  (fn: x => calc.cos(x), stroke: success + 1.2pt, samples: 200, label: $cos(x)$),
+  (fn: x => calc.sin(x), stroke: theme.accent + 1.2pt, samples: 200, label: $sin(x)$),
+  (fn: x => calc.cos(x), stroke: theme.success + 1.2pt, samples: 200, label: $cos(x)$),
 )
 """)),
 ], write=False)

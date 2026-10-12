@@ -142,6 +142,88 @@ pub fn get_subpath_sequential(path: &BezPath, alpha: f64) -> BezPath {
     result
 }
 
+/// The first `alpha` of `path` counted in Bézier segments, its sub-paths one
+/// after another, as Manim's `pointwise_become_partial` draws a stroke for
+/// `Write`: every segment takes the same share of `alpha` whatever its
+/// length, and the segment being drawn is split at the parameter of its
+/// share. A closing segment counts when it is not degenerate, as in
+/// [`BezPath::segments`].
+pub fn get_subpath_by_curves(path: &BezPath, alpha: f64) -> BezPath {
+    if alpha >= 1.0 {
+        return path.clone();
+    }
+    if alpha <= 0.0 {
+        return BezPath::new();
+    }
+    let count = path.segments().count();
+    if count == 0 {
+        return BezPath::new();
+    }
+    let position = alpha * count as f64;
+    let whole = (position.floor() as usize).min(count);
+    let residue = position - whole as f64;
+
+    let mut result = BezPath::new();
+    let mut index = 0;
+    let mut start = Point::ORIGIN;
+    let mut current = Point::ORIGIN;
+    // A sub-path's `MoveTo` is written with its first drawn segment.
+    let mut pending_move = None;
+    for el in path.elements() {
+        let segment = match *el {
+            PathEl::MoveTo(p) => {
+                start = p;
+                current = p;
+                pending_move = Some(p);
+                continue;
+            }
+            PathEl::LineTo(p) => PathSeg::Line(kurbo::Line::new(current, p)),
+            PathEl::QuadTo(p1, p2) => PathSeg::Quad(kurbo::QuadBez::new(current, p1, p2)),
+            PathEl::CurveTo(p1, p2, p3) => {
+                PathSeg::Cubic(kurbo::CubicBez::new(current, p1, p2, p3))
+            }
+            PathEl::ClosePath if current != start => {
+                PathSeg::Line(kurbo::Line::new(current, start))
+            }
+            PathEl::ClosePath => {
+                // A degenerate close draws nothing but ends the contour.
+                if index < whole && pending_move.is_none() {
+                    result.close_path();
+                }
+                continue;
+            }
+        };
+        if index >= whole {
+            if residue > 0.0 {
+                let part = segment.subsegment(0.0..residue);
+                if part.arclen(0.1) >= MIN_VISIBLE_LENGTH {
+                    if let Some(p) = pending_move.take() {
+                        result.move_to(p);
+                    }
+                    match part {
+                        PathSeg::Line(line) => result.line_to(line.p1),
+                        PathSeg::Quad(quad) => result.quad_to(quad.p1, quad.p2),
+                        PathSeg::Cubic(cubic) => result.curve_to(cubic.p1, cubic.p2, cubic.p3),
+                    }
+                }
+            }
+            break;
+        }
+        if let Some(p) = pending_move.take() {
+            result.move_to(p);
+        }
+        if matches!(el, PathEl::ClosePath) {
+            result.close_path();
+            current = start;
+        } else {
+            result.push(*el);
+            current = segment.end();
+        }
+        index += 1;
+    }
+    drop_if_empty(result)
+}
+
 /// Trims a single contiguous sub-path (no `MoveTo` boundary) to `alpha`
 /// of its own arc length. This is the building block of the
 /// per-subpath proportional trimming used by `get_subpath`.
@@ -1111,6 +1193,56 @@ fn travel_angle(segment: &CubicBez, t: f64) -> f64 {
         b - a
     };
     tangent.y.atan2(tangent.x)
+}
+
+#[cfg(test)]
+mod curve_partial_tests {
+    use super::*;
+
+    /// A long line, a short line and, as a second contour, a closed
+    /// triangle: five segments, its closing one included.
+    fn two_contours() -> BezPath {
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((10.0, 0.0));
+        path.line_to((10.0, 1.0));
+        path.move_to((20.0, 0.0));
+        path.line_to((21.0, 0.0));
+        path.line_to((21.0, 1.0));
+        path.close_path();
+        path
+    }
+
+    #[test]
+    fn every_segment_takes_the_same_share_and_contours_follow_each_other() {
+        let path = two_contours();
+        assert!(get_subpath_by_curves(&path, 0.0).elements().is_empty());
+        assert_eq!(get_subpath_by_curves(&path, 1.0), path);
+        // Half of the first, long segment after a tenth, however long it is.
+        let tenth = get_subpath_by_curves(&path, 0.1);
+        assert_eq!(
+            tenth.elements(),
+            [
+                PathEl::MoveTo((0.0, 0.0).into()),
+                PathEl::LineTo((5.0, 0.0).into())
+            ]
+        );
+        // The first contour whole, and nothing of the second, at two fifths.
+        let first = get_subpath_by_curves(&path, 0.4);
+        assert_eq!(first.elements().len(), 3);
+        assert!(
+            first
+                .elements()
+                .iter()
+                .all(|el| !matches!(el, PathEl::MoveTo(p) if p.x == 20.0))
+        );
+        // The closing segment is the last fifth.
+        let almost = get_subpath_by_curves(&path, 0.9);
+        assert_eq!(
+            almost.elements().last(),
+            Some(&PathEl::LineTo((20.5, 0.5).into()))
+        );
+    }
 }
 
 #[cfg(test)]
