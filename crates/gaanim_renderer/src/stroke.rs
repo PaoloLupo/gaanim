@@ -1,9 +1,78 @@
 //! Stroke geometry in scene units, independent of a drawable's scale.
 
+use std::borrow::Cow;
+
 use gaanim_core::{
-    kurbo::{Affine, BezPath, Stroke},
+    kurbo::{Affine, BezPath, Cap, Stroke},
     peniko::Brush,
 };
+
+/// Whether either end of `style`'s dashes has a cap that reaches past it.
+fn capped(style: &Stroke) -> bool {
+    style.start_cap != Cap::Butt || style.end_cap != Cap::Butt
+}
+
+/// `style`'s dash pattern with an even length: an odd one repeats, as
+/// SVG and kurbo read it, so even indices are dashes and odd ones gaps.
+fn even_dashes(style: &Stroke) -> Vec<f64> {
+    let mut pattern = style.dash_pattern.to_vec();
+    if pattern.len() % 2 == 1 {
+        pattern.extend_from_within(..);
+    }
+    pattern
+}
+
+/// `style` with zero-length dashes lengthened to a sliver, so round and
+/// square caps draw a dot or a square on them, as other renderers do: a
+/// dash of no length has no direction, and the stroker drops it.
+pub(crate) fn drawable_pen(style: &Stroke) -> Cow<'_, Stroke> {
+    if !capped(style) || style.dash_pattern.iter().step_by(2).all(|dash| *dash > 0.0) {
+        return Cow::Borrowed(style);
+    }
+    let mut pattern = even_dashes(style);
+    if pattern.iter().step_by(2).all(|dash| *dash > 0.0) {
+        return Cow::Borrowed(style);
+    }
+    let sliver = (style.width * 1.0e-3).max(1.0e-6);
+    for dash in pattern.iter_mut().step_by(2) {
+        if *dash <= 0.0 {
+            *dash = sliver;
+        }
+    }
+    let mut pen = style.clone();
+    pen.dash_pattern = pattern.into_iter().collect();
+    Cow::Owned(pen)
+}
+
+/// The dashes of an aligned stroke's doubled pen: its caps reach twice as
+/// far past each dash, so each dash is shortened and each gap lengthened by
+/// that extra reach, keeping every dash centered where it was. The half
+/// the contour keeps then shows the authored dash and gap lengths.
+pub(crate) fn doubled_pen_dashes(style: &Stroke, pen: &mut Stroke) {
+    if !capped(style) || style.dash_pattern.is_empty() {
+        return;
+    }
+    let pattern = even_dashes(style);
+    let cut: Vec<f64> = pattern
+        .iter()
+        .step_by(2)
+        .map(|dash| dash.min(style.width.max(0.0)))
+        .collect();
+    let count = cut.len();
+    pen.dash_pattern = pattern
+        .iter()
+        .enumerate()
+        .map(|(index, length)| {
+            let dash = index / 2;
+            if index % 2 == 0 {
+                length - cut[dash]
+            } else {
+                length + (cut[dash] + cut[(dash + 1) % count]) / 2.0
+            }
+        })
+        .collect();
+    pen.dash_offset = style.dash_offset - cut[0] / 2.0;
+}
 
 /// Correction that keeps a stroke pen in scene units under `world`, the
 /// transform that places the drawable's fragment.
@@ -51,6 +120,8 @@ pub(crate) fn draw_stroke(
     view: Option<Affine>,
     path: &BezPath,
 ) {
+    let style = drawable_pen(style).into_owned();
+    let style = &style;
     if let Some(view) = view {
         // Stroke the zoomed centerline, then return to fragment-local space.
         // The outer object transform still controls fills, clips and placement.

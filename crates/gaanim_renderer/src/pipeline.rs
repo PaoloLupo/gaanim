@@ -1669,10 +1669,12 @@ fn aligned_pen(style: &kurbo::Stroke, align: StrokeAlign) -> std::borrow::Cow<'_
 }
 
 /// Pen an inside or outside stroke draws before the contour clips it: twice
-/// the authored width, so the half it keeps is the whole authored width.
+/// the authored width, so the half it keeps is the whole authored width,
+/// with dashes that keep their authored lengths in that half.
 fn clipped_pen(style: &kurbo::Stroke) -> kurbo::Stroke {
     let mut pen = style.clone();
     pen.width *= 2.0;
+    crate::stroke::doubled_pen_dashes(style, &mut pen);
     pen
 }
 
@@ -1904,10 +1906,10 @@ pub fn resolve_fill_level_system(
                     kurbo::Rect::new(bbox.x0, bbox.y1 - bbox.height() * level, bbox.x1, bbox.y1)
                 }
                 FillDirection::Left => {
-                    kurbo::Rect::new(bbox.x0, bbox.y0, bbox.x0 + bbox.width() * level, bbox.y1)
+                    kurbo::Rect::new(bbox.x1 - bbox.width() * level, bbox.y0, bbox.x1, bbox.y1)
                 }
                 FillDirection::Right => {
-                    kurbo::Rect::new(bbox.x1 - bbox.width() * level, bbox.y0, bbox.x1, bbox.y1)
+                    kurbo::Rect::new(bbox.x0, bbox.y0, bbox.x0 + bbox.width() * level, bbox.y1)
                 }
             }
             .to_path(0.1);
@@ -6809,6 +6811,57 @@ mod tests {
         assert!(rect.x1 >= 18.0 && rect.y1 >= 14.0);
         assert!(rect.width() < 64.0);
         assert!(rect.height() < 64.0);
+    }
+
+    #[test]
+    fn aligned_dashes_keep_their_gaps_under_the_doubled_pen() {
+        let mut style = kurbo::Stroke::new(0.1).with_dashes(0.2, [0.3, 0.2]);
+        style.start_cap = kurbo::Cap::Round;
+        style.end_cap = kurbo::Cap::Round;
+        let pen = clipped_pen(&style);
+        // Each cap of the doubled pen reaches 0.05 further: dashes lose 0.1,
+        // gaps gain it, and the pattern starts 0.05 later.
+        assert_eq!(pen.dash_pattern.to_vec(), vec![0.3 - 0.1, 0.2 + 0.1]);
+        assert!((pen.dash_offset - 0.15).abs() < 1e-12);
+        // A dash shorter than the width shrinks to a dot; odd patterns repeat.
+        let mut dots = kurbo::Stroke::new(0.1).with_dashes(0.0, [0.04, 0.2, 0.3]);
+        dots.start_cap = kurbo::Cap::Square;
+        let pen = clipped_pen(&dots);
+        let lengths: Vec<f64> = pen
+            .dash_pattern
+            .iter()
+            .map(|v| (v * 1e6).round() / 1e6)
+            .collect();
+        assert_eq!(lengths, vec![0.0, 0.27, 0.2, 0.14, 0.1, 0.37]);
+        // Butt caps reach no further: the pattern is kept.
+        let butt = kurbo::Stroke::new(0.1)
+            .with_caps(kurbo::Cap::Butt)
+            .with_dashes(0.0, [0.3, 0.2]);
+        assert_eq!(clipped_pen(&butt).dash_pattern.to_vec(), vec![0.3, 0.2]);
+    }
+
+    #[test]
+    fn zero_length_dashes_with_caps_become_slivers_that_draw_dots() {
+        let mut dotted = kurbo::Stroke::new(0.1).with_dashes(0.0, [0.0, 0.3]);
+        dotted.start_cap = kurbo::Cap::Round;
+        dotted.end_cap = kurbo::Cap::Round;
+        let pen = crate::stroke::drawable_pen(&dotted);
+        assert!(pen.dash_pattern[0] > 0.0 && pen.dash_pattern[0] < 1e-3);
+        assert_eq!(pen.dash_pattern[1], 0.3);
+        // Without caps a zero dash stays empty; positive dashes are kept.
+        let butt = kurbo::Stroke::new(0.1)
+            .with_caps(kurbo::Cap::Butt)
+            .with_dashes(0.0, [0.0, 0.3]);
+        assert!(matches!(
+            crate::stroke::drawable_pen(&butt),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        let mut dashed = kurbo::Stroke::new(0.1).with_dashes(0.0, [0.2, 0.3]);
+        dashed.end_cap = kurbo::Cap::Round;
+        assert!(matches!(
+            crate::stroke::drawable_pen(&dashed),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     #[test]

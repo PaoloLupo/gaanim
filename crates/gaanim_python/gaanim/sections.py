@@ -518,8 +518,8 @@ class ProgressRail:
                 shape,
                 fill_color if fill_color is not None else color("accent"),
                 self._segment_levels(level, spans)[index],
-                # Fills grow from the named edge: left to right, bottom to top.
-                direction="left" if horizontal else "up",
+                # Fills grow toward the named side: left to right, bottom to top.
+                direction="right" if horizontal else "up",
                 keep_outline=False,
             ))
         self._tracks = tuple(tracks)

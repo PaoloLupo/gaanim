@@ -70,7 +70,7 @@ badge = scene.geometry.square(1).fill("#f97316").move_to(3, 0)
   name: "Drawable.stroke",
   kind: "method",
   params: ((name: "paint", type: "Paint", default: none, desc: [`Color` o `Brush`.]), (name: "width", type: "float", default: none, desc: [Ancho en unidades lógicas de escena. No sigue la escala de la figura: `scale_to`, `scale_to_3d`, `matrix_to`, las inclinaciones, la escala de sus grupos y sus animaciones cambian la forma, no el pincel, que queda redondo e igual de ancho en todos los lados. También en SVG escalados.]), (name: "align", type: "str | None", default: "None", desc: [`"inside"`, `"center"` u `"outside"` respecto a los contornos cerrados; `None` deja el trazo dentro. En los tres casos el trazo visible mide `width`.]), (name: "scale_with_object", type: "bool | None", default: "None", desc: [`True` hace que el ancho siga la escala de la figura, como `scale_stroke_with_object`.])),
-  desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda entero dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`.],
+  desc: [En contornos cerrados, incluidos los glifos de un texto, el trazo queda entero dentro por defecto, así `write` dibuja un ancho constante. `"center"` lo reparte a ambos lados y `"outside"` lo dibuja entero por fuera, por ejemplo como halo bajo una etiqueta que tapa líneas. Los caminos abiertos siempre centran su trazo. La alineación es estado de declaración y no se anima; otros valores lanzan `ValueError`. Los guiones conservan su longitud con cualquier alineación, y los remates, uniones y guiones fijados antes con `stroke_style` se conservan: `stroke` solo cambia la pintura y el ancho.],
 )[
 ```python
 # show-code: true
@@ -128,8 +128,8 @@ scene.play([box.animate.write().duration(1)])
 #api-entry(
   name: "Drawable.stroke_style",
   kind: "method",
-  params: ((name: "style", type: "StrokeStyle", default: none, desc: [Pintura, ancho, extremo, unión, límite de inglete, guiones y desfase de guiones.]),),
-  desc: [Aplica la geometría completa del trazo. En una llamada directa, la pintura debe ser un color CSS literal o un `Brush`; los nombres de token se resuelven cuando el `StrokeStyle` va dentro de `Theme.styles`. Métricas inválidas lanzan `ValueError`.],
+  params: ((name: "style", type: "StrokeStyle", default: none, desc: [Pintura, ancho, extremo, unión, límite de inglete, guiones, desfase de guiones y alineación.]),),
+  desc: [Aplica la geometría completa del trazo; el `align` del estilo, si lo tiene, coloca el trazo como `stroke(align=...)`. En una llamada directa, la pintura debe ser un color CSS literal o un `Brush`; los nombres de token se resuelven cuando el `StrokeStyle` va dentro de `Theme.styles`. Métricas inválidas lanzan `ValueError`.],
 )[
 ```python
 # show-code: true

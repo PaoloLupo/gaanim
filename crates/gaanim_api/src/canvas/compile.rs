@@ -15922,6 +15922,38 @@ mod tests {
     }
 
     #[test]
+    fn a_boolean_keeps_the_look_its_first_operand_had_when_it_was_made() {
+        use gaanim_core::peniko::{Brush, Color};
+        let mut canvas = SceneModel::new(640, 360);
+        let red = Color::from_rgb8(255, 0, 0);
+        let a = canvas.circle(1.0).fill(red);
+        let b = canvas.square(1.5).move_to_default(0.5, 0.0);
+        let union = canvas
+            .boolean(
+                &[&a, &b],
+                crate::canvas::BooleanOperation::Union,
+                false,
+                0.0025,
+                crate::canvas::BooleanRule::NonZero,
+            )
+            .unwrap();
+        let _ = a
+            .fill(Color::from_rgb8(0, 0, 255))
+            .stroke(Color::WHITE, 0.1);
+        canvas.wait(1.0);
+        let (mut world, _) = compiled_world(&canvas);
+        let id = ObjectId::from_raw(union.id.as_raw() - 1);
+        let (fill, stroke) = world
+            .query::<(&MobjectId, &FillBrush, &StrokeBrush)>()
+            .iter(&world)
+            .find(|(object, ..)| object.0 == id)
+            .map(|(_, fill, stroke)| (fill.0.clone(), stroke.brush.clone()))
+            .unwrap();
+        assert_eq!(fill, Some(Brush::Solid(red)));
+        assert_eq!(stroke, None, "{stroke:?}");
+    }
+
+    #[test]
     fn squash_stretch_deforms_along_velocity_only_while_moving() {
         let mut canvas = SceneModel::new(640, 360);
         let ball = canvas

@@ -178,6 +178,13 @@ enteros, o usa `scene.text.code`.
   la suya; antes duraban siempre un segundo.
 - `clear_drive()` deja el objeto girado como lo tenía su `look_at`; antes
   volvía a su rotación propia.
+- `scene.geometry.cross()` y `right_angle()` toman el estilo de línea del
+  tema y se ven sin `stroke`; antes eran invisibles con el tema por defecto.
+- Los trazos discontinuos de las formas cerradas conservan sus huecos con
+  remates `"round"` o `"square"` (el trazo interior por defecto los
+  agrandaba), y un guion de longitud cero con esos remates dibuja un punto.
+- `stroke(paint, width)` después de `stroke_style(...)` conserva los guiones,
+  remates y uniones, y `StrokeStyle` acepta `align`.
 
 == Al actualizar
 
@@ -214,6 +221,12 @@ enteros, o usa `scene.text.code`.
   duración. Fija `.duration(1)` si contabas con el segundo de antes.
 - Los efectos que antes ignoraban su lugar en un `sequence` o `stagger` ahora
   esperan su turno, así que la escena puede durar más.
+- `fill_level(direction=...)` nombra siempre hacia dónde crece el relleno:
+  `"right"` crece desde el borde izquierdo y `"left"` desde el derecho, como
+  `"up"` crece desde abajo. Antes `"left"` y `"right"` nombraban el borde de
+  partida: cámbialos entre sí.
+- `cross()` y `right_angle()` se ven con el trazo del tema; si les dabas
+  un `stroke`, no cambia nada.
 
 = 0.11.0
 

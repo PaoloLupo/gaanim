@@ -279,15 +279,16 @@ o dentro de un tema.
 #api-entry(
   name: "StrokeStyle",
   kind: "class",
-  signature: "StrokeStyle(paint: Paint, width: float = 0.02, *, cap: str = \"round\", join: str = \"round\", miter_limit: float = 4.0, dashes: Sequence[float] = (), dash_offset: float = 0.0)",
+  signature: "StrokeStyle(paint: Paint, width: float = 0.02, *, cap: str = \"round\", join: str = \"round\", miter_limit: float = 4.0, dashes: Sequence[float] = (), dash_offset: float = 0.0, align: str | None = None)",
   params: (
     (name: "paint", type: "Paint", default: none, desc: [Color, `Brush` o nombre de un token del tema.]),
     (name: "width", type: "float", default: "0.02", desc: [Ancho en unidades lógicas.]),
     (name: "cap", type: "\"butt\" | \"round\" | \"square\"", default: "\"round\"", desc: [Remate de los extremos.]),
     (name: "join", type: "\"bevel\" | \"miter\" | \"round\"", default: "\"round\"", desc: [Unión entre segmentos.]),
     (name: "miter_limit", type: "float", default: "4.0", desc: [Límite de inglete.]),
-    (name: "dashes", type: "Sequence[float]", default: "()", desc: [Longitudes alternas de trazo y hueco; vacío es continuo.]),
+    (name: "dashes", type: "Sequence[float]", default: "()", desc: [Longitudes alternas de trazo y hueco; vacío es continuo. Un trazo de longitud cero con remate `"round"` o `"square"` dibuja un punto o un cuadrado.]),
     (name: "dash_offset", type: "float", default: "0.0", desc: [Desplazamiento del patrón.]),
+    (name: "align", type: "\"inside\" | \"center\" | \"outside\" | None", default: "None", desc: [Posición del trazo en los contornos cerrados, como en `Drawable.stroke`; `None` conserva la del objeto.]),
   ),
   returns: (type: "StrokeStyle"),
   desc: [Métricas inválidas lanzan `ValueError`.],

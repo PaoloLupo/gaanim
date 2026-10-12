@@ -173,7 +173,7 @@ level.drive_from_samples(times, values)
 number, gauge = stages[3].split(Zones.columns(["2fr", "3fr"], gap="24px"))
 scene.viz.readout(level, font_size=0.7).place(number, anchor="center")
 mask = scene.geometry.rect(gauge.width, 0.6).no_fill().stroke(rule, 0.03).move_to(*gauge.center)
-scene.geometry.fill_level(mask, accent, level, direction="left")
+scene.geometry.fill_level(mask, accent, level, direction="right")
 scene.wait(times[-1] + HOLD)
 
 # Presets stack on one drawable, and wiggle and oscillate add to its own

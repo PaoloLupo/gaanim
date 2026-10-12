@@ -46,6 +46,9 @@ impl From<&str> for ThemePaint {
 pub struct ThemeStrokeStyle {
     pub paint: ThemePaint,
     pub style: Stroke,
+    /// Where the stroke sits on closed contours; `None` keeps the
+    /// drawable's own alignment.
+    pub align: Option<gaanim_renderer::effects::StrokeAlign>,
 }
 
 impl ThemeStrokeStyle {
@@ -53,6 +56,7 @@ impl ThemeStrokeStyle {
         Self {
             paint: paint.into(),
             style: Stroke::new(width),
+            align: None,
         }
     }
 
@@ -747,6 +751,9 @@ impl CanvasTheme {
             resolved.stroke = Some((self.resolve_paint(&stroke.paint)?, stroke.style.width));
             resolved.stroke_style = Some(stroke.style.clone());
             resolved.stroke_overridden = true;
+            if spec.stroke_align.is_none() {
+                resolved.stroke_align = stroke.align;
+            }
         }
         if !spec.opacity_overridden
             && let Some(opacity) = style.opacity
@@ -1025,10 +1032,11 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::RegularPolygon { .. }
         | SpawnKind::Sector { .. }
         | SpawnKind::Annulus { .. }
-        | SpawnKind::Checkmark(_)
-        | SpawnKind::Cross(_)
-        | SpawnKind::RightAngle(_) => "shape",
-        SpawnKind::Line(_, _, _, _)
+        | SpawnKind::Checkmark(_) => "shape",
+        // Marks drawn with a pen: they have no area to fill.
+        SpawnKind::Cross(_)
+        | SpawnKind::RightAngle(_)
+        | SpawnKind::Line(_, _, _, _)
         | SpawnKind::Arrow(_, _, _, _)
         | SpawnKind::SizedArrow { .. }
         | SpawnKind::DashedLine { .. }

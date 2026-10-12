@@ -56,7 +56,8 @@ pub struct PyStrokeStyle(pub ThemeStrokeStyle);
 #[pymethods]
 impl PyStrokeStyle {
     #[new]
-    #[pyo3(signature = (paint, width=0.02, *, cap="round", join="round", miter_limit=4.0, dashes=Vec::new(), dash_offset=0.0))]
+    #[pyo3(signature = (paint, width=0.02, *, cap="round", join="round", miter_limit=4.0, dashes=Vec::new(), dash_offset=0.0, align=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         paint: &Bound<'_, PyAny>,
         width: f64,
@@ -65,6 +66,7 @@ impl PyStrokeStyle {
         miter_limit: f64,
         dashes: Vec<f64>,
         dash_offset: f64,
+        align: Option<&str>,
     ) -> PyResult<Self> {
         let cap = parse_cap(cap)?;
         let mut stroke = Stroke::new(width);
@@ -77,6 +79,9 @@ impl PyStrokeStyle {
         let result = ThemeStrokeStyle {
             paint: paint_from_python(paint)?,
             style: stroke,
+            align: align
+                .map(crate::pydrawable::parse_stroke_align)
+                .transpose()?,
         };
         result.validate().map_err(PyValueError::new_err)?;
         Ok(Self(result))

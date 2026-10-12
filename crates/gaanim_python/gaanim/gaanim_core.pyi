@@ -690,8 +690,15 @@ class StrokeStyle:
         miter_limit: float = 4.0,
         dashes: Sequence[float] = (),
         dash_offset: float = 0.0,
+        align: Optional[Literal["inside", "center", "outside"]] = None,
     ) -> None:
-        """Define a complete reusable stroke; invalid metrics raise ValueError."""
+        """Define a complete reusable stroke; invalid metrics raise ValueError.
+
+        ``dashes`` alternate dash and gap lengths; a zero-length dash with a
+        ``"round"`` or ``"square"`` cap draws a dot or a square. ``align``
+        places the stroke on closed contours as ``Drawable.stroke(align=...)``
+        does; ``None`` keeps the drawable's own alignment.
+        """
         ...
 
 class Style:
@@ -3587,9 +3594,11 @@ class Drawable:
         glyph. By default the whole width stays inside the shape, so
         ``write`` draws a constant width; ``"center"`` straddles the contour
         and ``"outside"`` draws the whole width beyond it (a text halo). The
-        visible stroke is ``width`` wide in all three. Open paths always
-        center their stroke. The alignment is declaration state and is not
-        animated. Other values raise ``ValueError``.
+        visible stroke is ``width`` wide in all three, and dashes keep their
+        lengths. Open paths always center their stroke. The alignment is
+        declaration state and is not animated. Other values raise
+        ``ValueError``. Caps, joins and dashes set before with
+        ``stroke_style`` are kept: only the paint and width change.
 
         Example:
             result = drawable.stroke(BLUE, 1.0)
@@ -3597,7 +3606,12 @@ class Drawable:
         """
         ...
     def stroke_style(self, style: StrokeStyle) -> Self:
-        """Apply complete stroke geometry and return this drawable."""
+        """Apply complete stroke geometry and return this drawable.
+
+        The style's ``align``, when given, places the stroke as
+        ``stroke(align=...)`` does; a later ``stroke(paint, width)`` keeps its
+        caps, joins and dashes.
+        """
         ...
     def scale_stroke_with_object(self, enabled: bool = True) -> Self:
         """Let the stroke width follow the drawable's accumulated scale.
@@ -8225,8 +8239,8 @@ class Geometry:
     def cross(self, size: float) -> Drawable:
         """Create an X of two strokes spanning a ``size`` square centered at the origin.
 
-        It has no fill: color it with ``stroke``. A non-positive size raises
-        ``ValueError``.
+        It has no fill and takes the theme's line style, like ``line``;
+        restyle it with ``stroke``. A non-positive size raises ``ValueError``.
 
         Example:
             wrong = scene.geometry.cross(0.6).stroke(RED, 0.08)
@@ -8235,8 +8249,9 @@ class Geometry:
     def right_angle(self, arm_length: float) -> Drawable:
         """Create a right-angle mark: its corner at the origin, arms ``arm_length`` long along +x and +y.
 
-        Rotate and move it onto the corner it marks. It has no fill. A
-        non-positive length raises ``ValueError``.
+        Rotate and move it onto the corner it marks. It has no fill and takes
+        the theme's line style, like ``line``. A non-positive length raises
+        ``ValueError``.
 
         Example:
             mark = scene.geometry.right_angle(0.3).move_to(1.15, 1.15)
@@ -8389,8 +8404,13 @@ class Geometry:
         """Create a composed curve from ``move``, ``line``, ``quad``, ``cubic``, and close commands.
 
         Append ``_rel`` to a drawing command to use cursor-relative points.
-        Quadratic and cubic controls accept a point, ``None``, or ``"auto"``.
-        Use ``close`` or ``close_smooth`` with an empty argument sequence.
+        Quadratic and cubic controls accept a point, ``None`` (the handle sits
+        on its endpoint), or ``"auto"``. A ``quad``'s ``"auto"`` control
+        mirrors the previous ``quad``'s control through the cursor; a
+        ``cubic``'s first ``"auto"`` control mirrors the previous ``cubic``'s
+        second control. After another kind of segment, or as a ``cubic``'s
+        second control, ``"auto"`` acts as ``None``. Use ``close`` or
+        ``close_smooth`` with an empty argument sequence.
         """
         ...
     def transform_matching_shapes(self, source: Drawable, target: Drawable, *, duration: float = 1.0) -> None:
@@ -8498,8 +8518,10 @@ class Geometry:
     def union(self, *operands: Drawable, live: bool = False, tolerance: float = 0.0025, rule: Literal["nonzero", "evenodd"] = "nonzero") -> Drawable:
         """Return the union of at least two vector drawables.
 
-        Sources remain available. With ``live=True`` the result follows source
-        path and transform changes. ``tolerance`` is the maximum error, in
+        Sources remain available. The result copies the look the first operand
+        has when it is made (fill, stroke, opacity and effects); later style
+        changes of the operands leave it as it is. With ``live=True`` the
+        result follows source path and transform changes. ``tolerance`` is the maximum error, in
         scene units, when curves are flattened; the default ``0.0025`` (about
         0.3 px at 1080p) keeps circles smooth. Invalid scenes, operands,
         rules, or tolerances raise ``ValueError``.

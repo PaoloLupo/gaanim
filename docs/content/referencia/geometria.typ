@@ -432,7 +432,7 @@ ok = scene.geometry.checkmark(0.425).fill(GREEN)
 #api-entry(
   name: "Geometry.cross",
   kind: "factory",
-  desc: [Aspa de tamaño `size` para errores, rechazos o botones de cierre.],
+  desc: [Aspa de tamaño `size` para errores, rechazos o botones de cierre. No tiene relleno y toma el estilo de línea del tema, como `line`.],
 )[
 ```python
 >>>from gaanim import *
@@ -444,7 +444,7 @@ no = scene.geometry.cross(0.425).stroke(WHITE, 0.05)
 #api-entry(
   name: "Geometry.right_angle",
   kind: "factory",
-  desc: [Marca de ángulo recto con brazos de `arm_length`. Colócala en la esquina de un triángulo.],
+  desc: [Marca de ángulo recto con brazos de `arm_length`. Colócala en la esquina de un triángulo. No tiene relleno y toma el estilo de línea del tema, como `line`.],
 )[
 ```python
 >>>from gaanim import *
@@ -537,7 +537,7 @@ scene.render()
   name: "Geometry.curve",
   kind: "factory",
   params: ((name: "commands", type: "Sequence[CurveCommand]", default: none, desc: [Pares `(nombre, puntos)`: `move`, `line`, `quad`, `cubic`, `close` y `close_smooth`. Añade `_rel` a un comando de dibujo para usar puntos relativos al cursor.]),),
-  desc: [Curva compuesta con comandos de cursor, al estilo de Typst. Los controles de `quad` y `cubic` aceptan un punto, `None` o `"auto"` para tangentes automáticas. `close` y `close_smooth` llevan una lista vacía.],
+  desc: [Curva compuesta con comandos de cursor, al estilo de Typst. Los controles de `quad` y `cubic` aceptan un punto, `None` (el control cae sobre su extremo) o `"auto"`: en un `quad` refleja respecto al cursor el control del `quad` anterior, y en el primer control de un `cubic`, el segundo control del `cubic` anterior. Tras otro tipo de tramo, o como segundo control de un `cubic`, `"auto"` equivale a `None`. `close` y `close_smooth` llevan una lista vacía.],
 )[
 ```python
 >>>from gaanim import *
@@ -691,8 +691,10 @@ scene.render()
 Unión, intersección, diferencia y diferencia simétrica de áreas vectoriales
 cerradas.
 
-Los operandos se conservan como objetos independientes y el resultado hereda el
-estilo del primero. Con `live=True`, el resultado se reconstruye cuando cambian
+Los operandos se conservan como objetos independientes y el resultado copia el
+estilo que tiene el primero al crearlo (relleno, trazo, opacidad y efectos); los
+cambios de estilo posteriores de los operandos no lo cambian, ni siquiera con
+`live=True`. Con `live=True`, el resultado se reconstruye cuando cambian
 los caminos o las transformaciones de sus fuentes. `tolerance` es el error
 máximo, en unidades de escena, al aproximar las curvas; el valor predeterminado
 (`0.0025`, unos 0.3 px a 1080p) mantiene suaves los círculos. Súbelo solo para
@@ -775,7 +777,7 @@ progreso con forma.
 #api-entry(
   name: "Geometry.fill_level",
   kind: "factory",
-  params: ((name: "mask", type: "Drawable", default: none, desc: [Silueta que recorta el relleno; conserva su visibilidad propia.]), (name: "paint", type: "Paint", default: none, desc: [Color o pincel del interior.]), (name: "level", type: "float | Parameter | Variable | Computed | TimeInput | None", default: "None", desc: [Nivel en `[0, 1]`; `None` empieza vacío.]), (name: "direction", type: "str", default: "\"up\"", desc: [`up`, `down`, `left` o `right`.]), (name: "keep_outline", type: "bool", default: "True", desc: [Añade una copia reactiva que solo usa el trazo de la máscara.])),
+  params: ((name: "mask", type: "Drawable", default: none, desc: [Silueta que recorta el relleno; conserva su visibilidad propia.]), (name: "paint", type: "Paint", default: none, desc: [Color o pincel del interior.]), (name: "level", type: "float | Parameter | Variable | Computed | TimeInput | None", default: "None", desc: [Nivel en `[0, 1]`; `None` empieza vacío.]), (name: "direction", type: "str", default: "\"up\"", desc: [Hacia dónde crece el relleno: `up` (desde abajo), `down`, `left` (desde la derecha) o `right` (desde la izquierda).]), (name: "keep_outline", type: "bool", default: "True", desc: [Añade una copia reactiva que solo usa el trazo de la máscara.])),
   desc: [Genera un interior vectorial que se intersecta con la silueta en cada fotograma. Oculta la máscara original si su relleno no debe tapar el nivel. Con una fuente reactiva, las muestras finitas se limitan a `[0, 1]`; una muestra no finita genera un diagnóstico y usa el valor de respaldo. Anima el nivel con `animate.fill_level(...)`; los saltos en la línea de tiempo restauran vínculos, valores y cortes.],
 )[
 ```python

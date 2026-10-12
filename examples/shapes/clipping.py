@@ -101,10 +101,10 @@ gallery([
     ("bars.clip(word)", word_mask),
 ])
 
-# fill_level fills a mask from one side up to a level in [0, 1], here animated
-# with animate.fill_level(0.7). The mask stays hidden; keep_outline draws its
-# stroke. A level can also follow a Parameter or a Computed, and
-# set_fill_level() rebinds or fixes it later.
+# fill_level fills a mask up to a level in [0, 1], growing in its direction
+# (up by default), here animated with animate.fill_level(0.7). The mask stays
+# hidden; keep_outline draws its stroke. A level can also follow a Parameter
+# or a Computed, and set_fill_level() rebinds or fixes it later.
 scene.segment("fill_level")
 wave = computed(lambda t: 0.5 + 0.35 * math.sin(3 * t), inputs=[scene.time])
 LEVELS = [

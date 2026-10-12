@@ -1191,10 +1191,17 @@ impl DrawableHandle {
         self.stroke_brush(Brush::Solid(color), width)
     }
 
+    /// Stroke with `brush` at `width`, keeping the caps, joins and dashes
+    /// of a stroke style set before.
     pub fn stroke_brush(self, brush: Brush, width: f64) -> Self {
         self.update_style(|spec| {
             spec.stroke = Some((brush.clone(), width));
-            spec.stroke_style = Some(gaanim_core::kurbo::Stroke::new(width));
+            let mut style = spec
+                .stroke_style
+                .take()
+                .unwrap_or_else(|| gaanim_core::kurbo::Stroke::new(width));
+            style.width = width;
+            spec.stroke_style = Some(style);
             spec.stroke_overridden = true;
         })
     }

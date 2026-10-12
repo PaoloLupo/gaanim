@@ -2247,7 +2247,11 @@ impl PyDrawable {
                     })?
             }
         };
-        Ok(Self(self.0.clone().stroke_with_style(brush, style.0.style)))
+        let mut handle = self.0.clone().stroke_with_style(brush, style.0.style);
+        if let Some(align) = style.0.align {
+            handle = handle.stroke_align(align);
+        }
+        Ok(Self(handle))
     }
 
     pub(crate) fn no_stroke_impl(&self) -> PyResult<Self> {

@@ -154,7 +154,8 @@ impl PathRevealOrder {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FillLevel(pub f64);
 
-/// Direction in which a vector silhouette is filled.
+/// Direction in which a vector silhouette's fill grows: `Up` starts at the
+/// bottom, `Right` at the left edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FillDirection {

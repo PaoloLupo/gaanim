@@ -2737,6 +2737,25 @@ def validate_emphasis_contract(module):
     return failures
 
 
+def validate_stroke_contract(module):
+    """Stroke styles keep their dashes under stroke() and take an alignment."""
+    failures = []
+    scene = module.Scene(frame=(16, 9))
+    try:
+        dotted = module.StrokeStyle("#f59e0b", 0.08, dashes=[0, 0.2], align="outside")
+        box = scene.geometry.rect(2, 1).stroke_style(dotted).stroke("#ffffff", 0.05)
+        if not isinstance(box, module.Drawable):
+            failures.append("stroke after stroke_style did not return a Drawable")
+        scene.geometry.cross(0.5)
+        scene.geometry.right_angle(0.5)
+        scene.geometry.fill_level(scene.geometry.rect(2, 0.4), "#f59e0b", 0.5, direction="right")
+    except Exception as error:
+        failures.append(f"stroke styles failed: {error}")
+    if not raises_error(ValueError, lambda: module.StrokeStyle("#ffffff", 0.1, align="middle")):
+        failures.append("an unknown StrokeStyle align did not raise ValueError")
+    return failures
+
+
 def validate_layout_box_contract(module):
     """Boxes, styles, classes, zones and item rules keep their contracts."""
     failures = []
@@ -3349,6 +3368,7 @@ def main() -> int:
     missing.extend(validate_layout_box_contract(module))
     missing.extend(validate_falloff_contract(module))
     missing.extend(validate_emphasis_contract(module))
+    missing.extend(validate_stroke_contract(module))
     missing.extend(validate_fluent_setters_keep_their_class(module))
     missing.extend(validate_readout_number_formats(module))
     missing.extend(validate_editorial_contract(module))
