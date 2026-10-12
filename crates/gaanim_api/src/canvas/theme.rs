@@ -756,7 +756,16 @@ impl CanvasTheme {
         if !spec.stroke_overridden
             && let Some(stroke) = &style.stroke
         {
-            resolved.stroke = Some((self.resolve_paint(&stroke.paint)?, stroke.style.width));
+            // A solid arrow is one color: its outline follows a fill set on
+            // it, or `fill` would recolor only the inside of its head.
+            let paint = match (
+                &spec.fill,
+                spec.fill_overridden && is_solid_arrow(&spec.kind),
+            ) {
+                (Some(fill), true) => fill.clone(),
+                _ => self.resolve_paint(&stroke.paint)?,
+            };
+            resolved.stroke = Some((paint, stroke.style.width));
             resolved.stroke_style = Some(stroke.style.clone());
             resolved.stroke_overridden = true;
             if spec.stroke_align.is_none() {
@@ -1020,6 +1029,18 @@ fn merge_text_style(base: &TextStyle, overlay: &TextStyle) -> TextStyle {
         },
         baseline: overlay.baseline.or(base.baseline),
     }
+}
+
+/// Arrows drawn as a closed outline around a body and a head.
+fn is_solid_arrow(kind: &SpawnKind) -> bool {
+    matches!(
+        kind,
+        SpawnKind::Arrow(_, _, _, _)
+            | SpawnKind::SizedArrow { .. }
+            | SpawnKind::DoubleArrow { .. }
+            | SpawnKind::CurvedArrow { .. }
+            | SpawnKind::CurvedArrowArc { .. }
+    )
 }
 
 fn spawn_family(kind: &SpawnKind) -> &'static str {
@@ -1454,6 +1475,43 @@ mod tests {
         spec.fill_overridden = true;
         let resolved = theme.resolve_object(&spec).unwrap();
         assert_eq!(resolved.fill, Some(Brush::Solid(Color::BLACK)));
+    }
+
+    /// `curved_arrow_arc(...).fill(color)` colors the whole arrow: its theme
+    /// outline follows the fill; a stroke set on it still wins, and a line
+    /// keeps the theme's.
+    #[test]
+    fn a_filled_arrow_is_outlined_in_its_fill() {
+        let theme = CanvasTheme::builtin("technical").unwrap();
+        let foreground = theme.color("foreground").unwrap();
+        let accent = Brush::Solid(theme.color("accent").unwrap());
+        let mut arrow = ObjectSpec::new(
+            gaanim_core::ObjectId::from_parts(3, 1),
+            SpawnKind::CurvedArrowArc {
+                center: (0.0, 0.0),
+                radius: 1.0,
+                start_angle: 0.0,
+                sweep_angle: 2.0,
+                head_length: 0.18,
+                head_width: 0.15,
+                body_width: 0.036,
+            },
+        );
+        let stroke = |spec: &ObjectSpec| theme.resolve_object(spec).unwrap().stroke.unwrap().0;
+        assert_eq!(stroke(&arrow), Brush::Solid(foreground));
+        arrow.fill = Some(accent.clone());
+        arrow.fill_overridden = true;
+        assert_eq!(stroke(&arrow), accent);
+        arrow.stroke = Some((Brush::Solid(Color::WHITE), 0.02));
+        arrow.stroke_overridden = true;
+        assert_eq!(stroke(&arrow), Brush::Solid(Color::WHITE));
+        let mut line = ObjectSpec::new(
+            gaanim_core::ObjectId::from_parts(3, 2),
+            SpawnKind::Line(0.0, 0.0, 1.0, 0.0),
+        );
+        line.fill = Some(accent);
+        line.fill_overridden = true;
+        assert_eq!(stroke(&line), Brush::Solid(foreground));
     }
 
     #[test]

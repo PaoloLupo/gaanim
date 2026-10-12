@@ -1021,6 +1021,23 @@ def validate_reactive_connector_contract(module: object) -> list[str]:
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
     frame = scene.geometry.rect(240.0, 120.0)
+    # Trackers, arcs and point_between take any reactive scalar.
+    base = scene.viz.parameter(0.2)
+    doubled = module.computed(lambda value: 2 * value, inputs=[base])
+    curve = scene.geometry.polyline([(-2, 0), (2, 0)])
+    for name, make in (
+        ("point_on_curve", lambda tracker: scene.geometry.point_on_curve(curve, tracker)),
+        ("tangent_on_curve", lambda tracker: scene.geometry.tangent_on_curve(curve, tracker)),
+        ("normal_on_curve", lambda tracker: scene.geometry.normal_on_curve(curve, tracker)),
+        ("curvature_on_curve", lambda tracker: scene.geometry.curvature_on_curve(curve, tracker)),
+        ("always_redraw_arc", lambda tracker: scene.geometry.always_redraw_arc(tracker, 0, 0, 1, 0)),
+        ("point_between", lambda tracker: scene.geometry.point_between((0, 0), (1, 0), alpha=tracker)),
+    ):
+        for tracker in (doubled, base, 0.5):
+            try:
+                make(tracker)
+            except (TypeError, ValueError) as error:
+                failures.append(f"{name} refused {type(tracker).__name__}: {error}")
     for line in [
         scene.geometry.line(length=3.0).next_to(frame, module.Direction.DOWN, spacing=0.2),
         scene.geometry.line(length=2.0, direction=module.Direction.UP),

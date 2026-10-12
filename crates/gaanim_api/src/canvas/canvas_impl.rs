@@ -6684,7 +6684,7 @@ impl SceneModel {
     pub fn point_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
     ) -> DrawableHandle {
         let handle = self.dot(0.08);
         handle.defer_visibility_until_play();
@@ -6696,7 +6696,7 @@ impl SceneModel {
             .push(Op::AttachPointOnCurve {
                 target: handle.id,
                 curve: curve.id,
-                tracker: tracker.id,
+                tracker: tracker.into(),
             });
         handle
     }
@@ -6705,7 +6705,7 @@ impl SceneModel {
     pub fn tangent_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         length: f64,
     ) -> DrawableHandle {
         let half_length = length.max(0.0) / 2.0;
@@ -6719,7 +6719,7 @@ impl SceneModel {
             .push(Op::AttachTangentOnCurve {
                 target: handle.id,
                 curve: curve.id,
-                tracker: tracker.id,
+                tracker: tracker.into(),
             });
         handle
     }
@@ -6728,7 +6728,7 @@ impl SceneModel {
     pub fn normal_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         length: f64,
     ) -> DrawableHandle {
         let half_length = length.max(0.0) / 2.0;
@@ -6742,7 +6742,7 @@ impl SceneModel {
             .push(Op::AttachNormalOnCurve {
                 target: handle.id,
                 curve: curve.id,
-                tracker: tracker.id,
+                tracker: tracker.into(),
             });
         handle
     }
@@ -6751,7 +6751,7 @@ impl SceneModel {
     pub fn curvature_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         window: f64,
     ) -> DrawableHandle {
         let handle = self.circle(1.0);
@@ -6764,7 +6764,7 @@ impl SceneModel {
             .push(Op::AttachCurvatureOnCurve {
                 target: handle.id,
                 curve: curve.id,
-                tracker: tracker.id,
+                tracker: tracker.into(),
                 window,
             });
         handle
@@ -6775,7 +6775,7 @@ impl SceneModel {
     #[allow(clippy::too_many_arguments)]
     pub fn always_redraw_arc(
         &mut self,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         cx: f64,
         cy: f64,
         radius: f64,
@@ -6800,7 +6800,7 @@ impl SceneModel {
             .ops
             .push(Op::AttachTrackerArc {
                 target,
-                tracker: tracker.id,
+                tracker: tracker.into(),
                 center: (cx, cy),
                 radius,
                 start_angle,
@@ -6928,13 +6928,13 @@ impl SceneModel {
         &self,
         from: CanvasEndpoint,
         to: CanvasEndpoint,
-        alpha: f64,
+        alpha: impl Into<ScalarSource>,
         offset: DVec3,
     ) -> PointRef {
         PointRef(CanvasEndpoint::Between {
             from: Box::new(from),
             to: Box::new(to),
-            alpha,
+            alpha: alpha.into(),
             offset,
         })
     }
@@ -7748,12 +7748,13 @@ impl SceneModel {
     pub fn contact_on_curve(
         &mut self,
         curve: &DrawableHandle,
-        tracker: &DrawableHandle,
+        tracker: impl Into<ScalarSource>,
         tangent_length: f64,
         normal_length: f64,
     ) -> DrawableHandle {
-        let point = self.point_on_curve(curve, tracker);
-        let tangent = self.tangent_on_curve(curve, tracker, tangent_length);
+        let tracker = tracker.into();
+        let point = self.point_on_curve(curve, tracker.clone());
+        let tangent = self.tangent_on_curve(curve, tracker.clone(), tangent_length);
         let normal = self.normal_on_curve(curve, tracker, normal_length);
         self.group_no_center(&[&tangent, &normal, &point])
     }
@@ -7808,13 +7809,13 @@ impl SceneModel {
         let x_tip = PointRef(CanvasEndpoint::Between {
             from: Box::new(origin.clone()),
             to: Box::new(origin.clone()),
-            alpha: 0.0,
+            alpha: 0.0.into(),
             offset: DVec3::new(x.x * length, x.y * length, 0.0),
         });
         let y_tip = PointRef(CanvasEndpoint::Between {
             from: Box::new(origin.clone()),
             to: Box::new(origin.clone()),
-            alpha: 0.0,
+            alpha: 0.0.into(),
             offset: DVec3::new(y.x * length, y.y * length, 0.0),
         });
         let x_arrow = self.vector_between(
@@ -7944,7 +7945,7 @@ impl SceneModel {
                     } => {
                         valid(from, state)
                             && valid(to, state)
-                            && alpha.is_finite()
+                            && scalar(alpha)
                             && offset.is_finite()
                     }
                     CanvasEndpoint::Polar {
@@ -11106,7 +11107,16 @@ mod tests {
     fn tracker_arc_compiles_with_signal_and_regenerator() {
         let mut canvas = SceneModel::new(1280, 720);
         let tracker = canvas.value_tracker(0.4);
-        let _arrow = canvas.always_redraw_arc(&tracker, 0.0, 0.0, 120.0, 0.0, 0.4, 1.0, 0.0);
+        let _arrow = canvas.always_redraw_arc(
+            ScalarSource::signal(tracker.id),
+            0.0,
+            0.0,
+            120.0,
+            0.0,
+            0.4,
+            1.0,
+            0.0,
+        );
         canvas.play(vec![tracker.animate_value_to(1.2).duration(1.0)]);
 
         let mut world = World::new();
@@ -13371,7 +13381,7 @@ mod scene_unit_default_tests {
         let mut canvas = SceneModel::new(320, 180);
         let curve = canvas.line(-2.0, 0.0, 2.0, 0.0);
         let tracker = canvas.value_tracker(0.0);
-        let marker = canvas.point_on_curve(&curve, &tracker);
+        let marker = canvas.point_on_curve(&curve, ScalarSource::signal(tracker.id));
         let spec = marker.spec.lock().expect("object spec poisoned");
         assert!(matches!(spec.kind, SpawnKind::Dot(radius) if radius == 0.08));
     }

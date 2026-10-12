@@ -192,7 +192,7 @@ scene.render()
   name: "Geometry.arrow",
   kind: "factory",
   params: ((name: "x1, y1", type: "float", default: none, desc: [Cola.]), (name: "x2, y2", type: "float", default: none, desc: [Punta.]), (name: "head_length / head_width / body_width", type: "float | None", default: "None", desc: [Medidas en unidades de escena; por defecto 0.18, 0.15 y 0.036.]), (name: "max_head_ratio", type: "float | None", default: "None", desc: [En `(0, 1]`, limita la punta respecto a la longitud total y escala su ancho en proporción.])),
-  desc: [Flecha sólida de `(x1, y1)` a `(x2, y2)`. Para flechas cortas añade `max_head_ratio=0.3`, y `.no_stroke()` para una silueta limpia. Extremos no finitos o medidas no positivas lanzan `ValueError`; extremos coincidentes dan un camino vacío.],
+  desc: [Flecha sólida de `(x1, y1)` a `(x2, y2)`. `fill` la colorea entera: salvo que `stroke` fije otro, su contorno sigue al relleno (igual en `double_arrow`, `curved_arrow` y `curved_arrow_arc`). Para flechas cortas añade `max_head_ratio=0.3`, y `.no_stroke()` para una silueta limpia. Extremos no finitos o medidas no positivas lanzan `ValueError`; extremos coincidentes dan un camino vacío.],
 )[
 ```python
 # show-code: true
@@ -863,7 +863,7 @@ tag = scene.text("m", role="label").follow(above)
 #api-entry(
   name: "Geometry.point_between",
   kind: "factory",
-  desc: [Punto afín entre dos extremos (`alpha=0` en el primero, `1` en el segundo) más un desplazamiento en el mundo.],
+  desc: [Punto afín entre dos extremos (`alpha=0` en el primero, `1` en el segundo) más un desplazamiento en el mundo. `alpha` puede ser un número, un `Parameter`, una `Variable` o un `Computed`.],
 )[
 ```python
 >>>from gaanim import *
@@ -913,8 +913,8 @@ scene.render()
 #api-entry(
   name: "Geometry.point_on_curve",
   kind: "factory",
-  params: ((name: "curve", type: "Drawable", default: none, desc: [Polilínea o Bézier muestreada.]), (name: "tracker", type: "Parameter", default: none, desc: [Posición de 0 a 1 por longitud de arco; se limita a ese rango.])),
-  desc: [Punto oculto que recorre la curva por longitud de arco, sin callbacks de Python durante la reproducción.],
+  params: ((name: "curve", type: "Drawable", default: none, desc: [Polilínea, Bézier, arco, círculo o polígono.]), (name: "tracker", type: "float | Parameter | Variable | Computed", default: none, desc: [Posición de 0 a 1 por longitud de arco; se limita a ese rango.])),
+  desc: [Punto oculto que recorre la curva por longitud de arco, sin callbacks de Python durante la reproducción. Lee la curva tal como se dibuja: si se mueve, gira, escala o anima, o está dentro de un grupo como unos ejes, el punto sigue sobre ella. Lo mismo vale para `tangent_on_curve`, `normal_on_curve` y `curvature_on_curve`.],
 )[
 ```python
 # show-code: true
@@ -967,7 +967,7 @@ normal = scene.geometry.normal_on_curve(curve, t, length=0.6).stroke(RED, 0.04)
 #api-entry(
   name: "Geometry.curvature_on_curve",
   kind: "factory",
-  desc: [Círculo osculador oculto, estimado a partir de muestras vecinas por longitud de arco (`window` es la fracción de la curva usada). Dale estilo con `no_fill().stroke(...)`.],
+  desc: [Círculo osculador oculto, estimado a partir de tres muestras separadas `window` (una fracción de la longitud de arco). En los extremos de una curva abierta las muestras se desplazan hacia dentro, y en una curva cerrada pasan por la costura, así que el círculo existe también en 0 y en 1. En un tramo recto no se dibuja. Dale estilo con `no_fill().stroke(...)`.],
 )[
 ```python
 # show-code: true
@@ -986,8 +986,8 @@ scene.render()
 #api-entry(
   name: "Geometry.always_redraw_arc",
   kind: "factory",
-  params: ((name: "tracker", type: "Parameter", default: none, desc: [Conduce el ángulo de barrido.]), (name: "cx, cy, radius, start_angle", type: "float", default: none, desc: [Centro, radio y ángulo inicial en radianes.]), (name: "sweep_scale / sweep_offset", type: "float", default: "1.0 / 0.0", desc: [El barrido es `tracker * sweep_scale + sweep_offset`.])),
-  desc: [Arco oculto que se regenera en cada fotograma a partir de un `Parameter`, sin callbacks de Python. Ideal para marcar un ángulo que cambia.],
+  params: ((name: "tracker", type: "float | Parameter | Variable | Computed", default: none, desc: [Conduce el ángulo de barrido.]), (name: "cx, cy, radius, start_angle", type: "float", default: none, desc: [Centro, radio y ángulo inicial en radianes.]), (name: "sweep_scale / sweep_offset", type: "float", default: "1.0 / 0.0", desc: [El barrido es `tracker * sweep_scale + sweep_offset`.])),
+  desc: [Flecha en arco oculta que se regenera en cada fotograma a partir de un escalar, sin callbacks de Python. Ideal para marcar un ángulo que cambia. Como toda flecha sólida, `fill` la colorea entera; `stroke` fija su contorno.],
 )[
 ```python
 # show-code: true

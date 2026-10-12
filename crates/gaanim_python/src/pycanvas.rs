@@ -7553,12 +7553,12 @@ impl PyGeometry {
         tracker: Bound<'_, PyAny>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .point_on_curve(&curve.0, &tracker),
+                .point_on_curve(&curve.0, tracker),
         ))
     }
 
@@ -7570,12 +7570,12 @@ impl PyGeometry {
         length: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .tangent_on_curve(&curve.0, &tracker, length),
+                .tangent_on_curve(&curve.0, tracker, length),
         ))
     }
 
@@ -7587,12 +7587,12 @@ impl PyGeometry {
         length: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .normal_on_curve(&curve.0, &tracker, length),
+                .normal_on_curve(&curve.0, tracker, length),
         ))
     }
 
@@ -7604,12 +7604,12 @@ impl PyGeometry {
         window: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .curvature_on_curve(&curve.0, &tracker, window),
+                .curvature_on_curve(&curve.0, tracker, window),
         ))
     }
 
@@ -7626,13 +7626,18 @@ impl PyGeometry {
         sweep_offset: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, current) = reactive_scalar(tracker)?;
+        // The arc's first shape; the source redraws it from its first frame.
+        let current = reactive_scalar(tracker.clone())
+            .map(|(_, current)| current)
+            .ok();
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
+        let current = current.or(tracker.constant_value()).unwrap_or(0.0);
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
                 .always_redraw_arc(
-                    &tracker,
+                    tracker,
                     cx,
                     cy,
                     radius,
@@ -7766,20 +7771,24 @@ impl PyGeometry {
         Ok(PyPointRef(point))
     }
 
-    #[pyo3(signature = (from, to, *, alpha=0.5, offset=(0.0, 0.0)))]
+    #[pyo3(signature = (from, to, *, alpha=None, offset=(0.0, 0.0)))]
     fn point_between(
         &self,
         from: Bound<'_, PyAny>,
         to: Bound<'_, PyAny>,
-        alpha: f64,
+        alpha: Option<Bound<'_, PyAny>>,
         offset: (f64, f64),
     ) -> PyResult<PyPointRef> {
         crate::custom::ensure_authoring_allowed()?;
-        if !alpha.is_finite() || !offset.0.is_finite() || !offset.1.is_finite() {
+        if !offset.0.is_finite() || !offset.1.is_finite() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "alpha and offset must be finite",
             ));
         }
+        let alpha = match alpha {
+            Some(alpha) => extract_scalar_source(alpha, &self.inner)?,
+            None => 0.5.into(),
+        };
         let point = self
             .inner
             .lock()
@@ -8458,12 +8467,12 @@ impl PyMechanics {
         normal_length: f64,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let (tracker, _) = reactive_scalar(tracker)?;
+        let tracker = extract_scalar_source(tracker, &self.inner)?;
         Ok(PyDrawable(
             self.inner
                 .lock()
                 .expect("scene canvas poisoned")
-                .contact_on_curve(&curve.0, &tracker, tangent_length, normal_length),
+                .contact_on_curve(&curve.0, tracker, tangent_length, normal_length),
         ))
     }
 

@@ -596,7 +596,7 @@ fn compile_tracking_endpoint(
         } => TrackingEndpoint::Between {
             from: Box::new(compile_tracking_endpoint(from, id_map, states)),
             to: Box::new(compile_tracking_endpoint(to, id_map, states)),
-            alpha: *alpha,
+            alpha: compile_tracking_scalar(alpha, id_map, states),
             offset: *offset,
         },
         CanvasEndpoint::Polar {
@@ -7605,21 +7605,16 @@ impl SceneModel {
                     sweep_offset,
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
-                        let tracker_entity = tracker_st.entity;
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         let center = Point::new(center.0, center.1);
                         let radius = *radius;
                         let start_angle = *start_angle;
                         let sweep_scale = *sweep_scale;
                         let sweep_offset = *sweep_offset;
                         let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |world| {
-                            let value = world
-                                .get::<gaanim_animation::FloatSignal>(tracker_entity)
-                                .map(|signal| signal.value)
-                                .unwrap_or(0.0);
+                            let value = tracker.evaluate(world).unwrap_or(0.0);
                             gaanim_objects::primitives::curved_arrow_arc(
                                 gaanim_core::ObjectId::from_raw(0),
                                 center,
@@ -7642,15 +7637,14 @@ impl SceneModel {
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(curve_id) = id_map.get(curve).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(curve_st) = builder.states.get(curve_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         builder
                             .commands
                             .entity(target_st.entity)
-                            .insert(PointOnCurve::new(curve_st.entity, tracker_st.entity));
+                            .insert(PointOnCurve::new(curve_st.entity, tracker));
                     }
                 }
                 Op::AttachTangentOnCurve {
@@ -7660,15 +7654,14 @@ impl SceneModel {
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(curve_id) = id_map.get(curve).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(curve_st) = builder.states.get(curve_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         builder
                             .commands
                             .entity(target_st.entity)
-                            .insert(TangentOnCurve::new(curve_st.entity, tracker_st.entity));
+                            .insert(TangentOnCurve::new(curve_st.entity, tracker));
                     }
                 }
                 Op::AttachNormalOnCurve {
@@ -7678,15 +7671,14 @@ impl SceneModel {
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(curve_id) = id_map.get(curve).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(curve_st) = builder.states.get(curve_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         builder
                             .commands
                             .entity(target_st.entity)
-                            .insert(NormalOnCurve::new(curve_st.entity, tracker_st.entity));
+                            .insert(NormalOnCurve::new(curve_st.entity, tracker));
                     }
                 }
                 Op::AttachCurvatureOnCurve {
@@ -7697,19 +7689,14 @@ impl SceneModel {
                 } => {
                     if let Some(target_id) = id_map.get(target).copied()
                         && let Some(curve_id) = id_map.get(curve).copied()
-                        && let Some(tracker_id) = id_map.get(tracker).copied()
                         && let Some(target_st) = builder.states.get(target_id)
                         && let Some(curve_st) = builder.states.get(curve_id)
-                        && let Some(tracker_st) = builder.states.get(tracker_id)
                     {
+                        let tracker = compile_tracking_scalar(tracker, id_map, &builder.states);
                         builder
                             .commands
                             .entity(target_st.entity)
-                            .insert(CurvatureOnCurve::new(
-                                curve_st.entity,
-                                tracker_st.entity,
-                                *window,
-                            ));
+                            .insert(CurvatureOnCurve::new(curve_st.entity, tracker, *window));
                     }
                 }
                 Op::AttachCustomUpdater { target, updater } => {

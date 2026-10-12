@@ -286,6 +286,24 @@ enteros, o usa `scene.text.code`.
   `b.add(hijo, duration=...)`) lo desliza desde donde está; antes no se veía
   desde el principio de la escena hasta entrar en la segunda caja, y su
   posición anterior se leía respecto a ella.
+- `point_on_curve`, `tangent_on_curve`, `normal_on_curve` y
+  `curvature_on_curve` siguen la curva tal como se dibuja: movida, girada,
+  escalada, animada o dentro de unos ejes. Antes usaban los puntos declarados
+  y se quedaban atrás.
+- `curvature_on_curve` dibuja el círculo también en los extremos de una curva
+  abierta y en la costura de una cerrada; antes no dibujaba nada, o un
+  círculo de radio 1 en el origen.
+- `bind_rotation_from` ve el giro de `Updater.rotate`, y
+  `bind_translation_from_rotation` sigue a `Updater.rotate` y a
+  `rotate_to(Parameter)` más allá de media vuelta; antes la cremallera
+  retrocedía al pasar de media vuelta.
+- `fill` colorea entera una flecha sólida: su contorno sigue al relleno salvo
+  que `stroke` fije otro. Antes `always_redraw_arc(...).fill(color)` solo
+  coloreaba el interior de la punta.
+- Los trackers de curvas, `always_redraw_arc` y `point_between(alpha=...)`
+  aceptan un `Computed`.
+- El ejemplo de `Parameter.add_updater_fn` en la referencia calcula el valor a
+  partir del tiempo transcurrido; el anterior volvía a 0 al hacer seek.
 - Una cuadrícula con columnas `"auto"` dentro de otra caja mide lo mismo que
   sola. Antes sus columnas se repartían el ancho por igual: la cuadrícula
   quedaba más ancha y, con textos que pueden partirse, el más ancho se partía
@@ -392,6 +410,12 @@ enteros, o usa `scene.text.code`.
   caja escalada antes de meterla en otra también les hace sitio.
 - Un `L.column(..., style=estilo)` cuyo estilo trae `direction="row"` vuelve
   a ser una columna: pasa `direction="row"` en la llamada o usa `L.row`.
+- Si construías una curva ya en su sitio para que `point_on_curve` y los
+  demás trackers coincidieran con ella, sigue funcionando; ahora también
+  puedes moverla después.
+- Una flecha con `fill(color)` y sin `stroke` tiene ahora el contorno del
+  mismo color; antes era el del tema. Si querías el contorno del tema, fíjalo
+  con `stroke(...)`.
 
 = 0.11.0
 

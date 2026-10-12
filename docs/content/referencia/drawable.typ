@@ -1249,7 +1249,7 @@ scene.play([shadow.animate.fade_in(), point.animate.shift_by(4, 0.5)])
 #api-entry(
   name: "Drawable.bind_rotation_from",
   kind: "method",
-  desc: [Copia la rotación mundial de `source` como `rotación * ratio + phase`, en radianes. Es la base del acoplamiento de engranajes.],
+  desc: [Copia la rotación mundial de `source` como `rotación * ratio + phase`, en radianes. Es la base del acoplamiento de engranajes. Cuenta la rotación de `source` y de sus padres, también la de un `Updater.rotate` y la de un `rotate_to(Parameter)`.],
 )[
 ```python
 >>>from gaanim import *
@@ -1263,7 +1263,7 @@ scene.play([driven.animate.fade_in(), driver.animate.rotate_by(2.0)])
 #api-entry(
   name: "Drawable.bind_translation_from_rotation",
   kind: "method",
-  desc: [Traslada el objeto a lo largo de `axis` según el giro acumulado de `source` multiplicado por `scale`, como una cremallera movida por un piñón. Es una relación visual, no un solver de contacto.],
+  desc: [Traslada el objeto a lo largo de `axis` según el giro acumulado de `source` multiplicado por `scale`, como una cremallera movida por un piñón. Cuenta las vueltas completas de un `rotate_to(Parameter)` y de un `Updater.rotate`; las demás rotaciones, hasta dos vueltas en cada sentido. Es una relación visual, no un solver de contacto.],
 )[
 ```python
 >>>from gaanim import *

@@ -6,7 +6,7 @@ use gaanim_core::kurbo::{BezPath, Shape};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::prelude::{ChildOf, Entity, World};
 use gaanim_scene::{LocalBounds, Path2D, PathSource, WorldBounds};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -895,7 +895,7 @@ pub enum TrackingEndpoint {
     Between {
         from: Box<TrackingEndpoint>,
         to: Box<TrackingEndpoint>,
-        alpha: f64,
+        alpha: TrackingScalar,
         offset: DVec3,
     },
     /// Polar point around another reactive endpoint.
@@ -914,12 +914,29 @@ pub struct TrackingScalar {
 }
 
 impl TrackingScalar {
+    /// The value of the `FloatSignal` on `entity`, known to expressions as `id`.
+    pub fn signal(id: ObjectId, entity: Entity) -> Self {
+        Self {
+            source: crate::reactive::ScalarSource::signal(id),
+            parameters: vec![(id, entity)],
+        }
+    }
+
     pub fn evaluate(&self, world: &World) -> Option<f64> {
         crate::reactive::ResolvedScalarSource {
             source: self.source.clone(),
             parameters: self.parameters.clone(),
         }
         .evaluate(world)
+    }
+}
+
+impl From<f64> for TrackingScalar {
+    fn from(value: f64) -> Self {
+        Self {
+            source: crate::reactive::ScalarSource::constant(value),
+            parameters: Vec::new(),
+        }
     }
 }
 
@@ -1938,7 +1955,7 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
         } => {
             let from = resolve_tracking_endpoint(from, world)?;
             let to = resolve_tracking_endpoint(to, world)?;
-            Some(from.lerp(to, *alpha) + *offset)
+            Some(from.lerp(to, alpha.evaluate(world)?) + *offset)
         }
         TrackingEndpoint::Polar {
             origin,
@@ -2515,9 +2532,61 @@ pub fn tracking_vector_head_system(world: &mut World) {
     }
 }
 
-fn world_z_angle(entity: Entity, world: &World) -> Option<f64> {
-    let matrix = entity_world_matrix(entity, world)?;
-    Some(matrix.x_axis.y.atan2(matrix.x_axis.x))
+/// The turn of `entity` about Z in the scene: its own and its parents'.
+///
+/// Each one counts the angle a `rotate_to(Parameter)` sets it to, whole turns
+/// included, else its rotation (up to two turns either way), plus the turns
+/// procedural layers such as a spinning `Updater.rotate` add, which only the
+/// propagated world state carries.
+fn turned_angle(
+    entity: Entity,
+    world: &World,
+    time: f64,
+    bound: &HashMap<Entity, f64>,
+) -> Option<f64> {
+    world.get::<SpatialTransform>(entity)?;
+    let live = |signal: Entity| {
+        world
+            .get::<crate::signals::FloatSignal>(signal)
+            .map(|signal| signal.value)
+    };
+    let mut angle = 0.0;
+    let mut current = entity;
+    for _ in 0..256 {
+        let Some(transform) = world.get::<SpatialTransform>(current) else {
+            break;
+        };
+        angle += bound.get(&current).copied().unwrap_or_else(|| {
+            let rotation = transform.rotation;
+            2.0 * rotation.z.atan2(rotation.w)
+        });
+        if let Some(motion) = world.get::<crate::procedural::ProceduralMotion>(current) {
+            angle += motion.offset_with(time, &live).rotation;
+        }
+        let Some(parent) = world
+            .get::<ChildOf>(current)
+            .map(|relation| relation.parent())
+        else {
+            break;
+        };
+        current = parent;
+    }
+    Some(angle)
+}
+
+/// The angle each `rotate_to(Parameter)` sets its target to at `time`.
+fn bound_rotations(world: &mut World, time: f64) -> HashMap<Entity, f64> {
+    let mut query = world.query::<&crate::PropertyBinding>();
+    query
+        .iter(world)
+        .filter(|binding| time >= binding.start && binding.end.is_none_or(|end| time < end))
+        .filter_map(|binding| {
+            binding
+                .source
+                .rotation_z(world, time)
+                .map(|angle| (binding.target, angle))
+        })
+        .collect()
 }
 
 /// Bound targets whose rotation `entity`'s world angle reads: the entity itself
@@ -2542,6 +2611,10 @@ fn bound_in_chain(mut entity: Entity, bound: &HashSet<Entity>, world: &World) ->
 
 /// Apply rotation and rotation-to-translation bindings in the connector phase.
 pub fn mechanism_binding_system(world: &mut World) {
+    let time = world
+        .get_resource::<PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    let mut turns = bound_rotations(world, time);
     let mut rotation_query = world.query::<(Entity, &RotationBinding)>();
     let mut pending: Vec<(Entity, RotationBinding)> = rotation_query
         .iter(world)
@@ -2565,25 +2638,28 @@ pub fn mechanism_binding_system(world: &mut World) {
         });
         let (entity, binding) = pending.remove(ready.unwrap_or(0));
         done.insert(entity);
-        let Some(source_angle) = world_z_angle(binding.source, world) else {
+        let Some(source_angle) = turned_angle(binding.source, world, time, &turns) else {
             continue;
         };
         let world_angle = source_angle * binding.ratio + binding.phase;
         let parent_angle = world
             .get::<ChildOf>(entity)
             .map(|relation| relation.parent())
-            .and_then(|parent| world_z_angle(parent, world))
+            .and_then(|parent| turned_angle(parent, world, time, &turns))
             .unwrap_or(0.0);
+        let local = world_angle - parent_angle;
         if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
-            transform.rotation = DQuat::from_rotation_z(world_angle - parent_angle);
+            transform.rotation = DQuat::from_rotation_z(local);
         }
+        // A bound rotation drives the next link with its whole turns.
+        turns.insert(entity, local);
     }
 
     let mut translations = Vec::new();
     let mut initialized = Vec::new();
     let mut query = world.query::<(Entity, &RotationTranslationBinding)>();
     for (entity, binding) in query.iter(world) {
-        let Some(angle) = world_z_angle(binding.source, world) else {
+        let Some(angle) = turned_angle(binding.source, world, time, &turns) else {
             continue;
         };
         let Some(position) =
@@ -3510,7 +3586,7 @@ mod tests {
         let midpoint = TrackingEndpoint::Between {
             from: Box::new(TrackingEndpoint::Static(DVec3::ZERO)),
             to: Box::new(polar),
-            alpha: 0.5,
+            alpha: 0.5.into(),
             offset: DVec3::new(1.0, -1.0, 0.0),
         };
         let point = resolve_tracking_endpoint(&midpoint, &world).unwrap();
@@ -3628,9 +3704,84 @@ mod tests {
         let mut expected = 0.3;
         for &wheel in wheels.iter().rev() {
             expected = expected * -0.5 + 0.1;
-            let angle = world_z_angle(wheel, &world).unwrap();
+            let angle = turned_angle(wheel, &world, 0.0, &HashMap::new()).unwrap();
             assert!((angle - expected).abs() < 1e-9, "{angle} != {expected}");
         }
+    }
+
+    /// A spinning `Updater.rotate` turns what copies its rotation, and a
+    /// rack follows a Parameter-driven wheel past half a turn.
+    #[test]
+    fn rotation_bindings_read_spins_and_whole_turns() {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState {
+            current_time: 2.0,
+            ..Default::default()
+        });
+        let mut motion = crate::procedural::ProceduralMotion::default();
+        motion.push(
+            crate::procedural::ProceduralLayer::Spin { speed: 0.5.into() },
+            0.0,
+        );
+        let spinner = world.spawn((SpatialTransform::default(), motion)).id();
+        let copy = world
+            .spawn((
+                SpatialTransform::default(),
+                RotationBinding {
+                    source: spinner,
+                    ratio: 1.0,
+                    phase: 0.0,
+                },
+            ))
+            .id();
+        mechanism_binding_system(&mut world);
+        let rotation = world.get::<SpatialTransform>(copy).unwrap().rotation;
+        assert!((2.0 * rotation.z.atan2(rotation.w) - 1.0).abs() < 1e-9);
+
+        let wheel = world.spawn(crate::signals::FloatSignal::new(0.0)).id();
+        let turned = world.spawn(SpatialTransform::default()).id();
+        let parameter = gaanim_core::ObjectId::from_raw(7);
+        world.spawn(crate::PropertyBinding {
+            target: turned,
+            source: crate::ResolvedPropertySources {
+                sources: crate::PropertySources::Rotation([
+                    0.0.into(),
+                    0.0.into(),
+                    crate::reactive::ScalarSource::signal(parameter),
+                ]),
+                parameters: vec![crate::PropertyParameter {
+                    logical: parameter,
+                    native: parameter,
+                    entity: wheel,
+                    initial: 0.0,
+                }],
+                anchor_offset: DVec3::ZERO,
+                local_anchor: None,
+            },
+            start: 0.0,
+            end: None,
+            fallback: crate::PropertyValue::Rotation(DQuat::IDENTITY),
+        });
+        let rack = world
+            .spawn((
+                SpatialTransform::default(),
+                RotationTranslationBinding {
+                    source: turned,
+                    axis: DVec3::X,
+                    scale: 1.0,
+                    base_position: None,
+                    base_angle: None,
+                },
+            ))
+            .id();
+        mechanism_binding_system(&mut world);
+        world
+            .get_mut::<crate::signals::FloatSignal>(wheel)
+            .unwrap()
+            .value = 3.0 * std::f64::consts::PI;
+        mechanism_binding_system(&mut world);
+        let x = world.get::<SpatialTransform>(rack).unwrap().translation.x;
+        assert!((x - 3.0 * std::f64::consts::PI).abs() < 1e-9, "{x}");
     }
 
     #[test]

@@ -1027,7 +1027,7 @@ pub(crate) enum Op {
     /// Regenerate a curved arrow arc from a float signal every frame.
     AttachTrackerArc {
         target: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
         center: (f64, f64),
         radius: f64,
         start_angle: f64,
@@ -1038,24 +1038,24 @@ pub(crate) enum Op {
     AttachPointOnCurve {
         target: ObjectId,
         curve: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
     },
     /// Keep a line centered and tangent to a sampled curve.
     AttachTangentOnCurve {
         target: ObjectId,
         curve: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
     },
     /// Keep a line centered and normal to a sampled curve.
     AttachNormalOnCurve {
         target: ObjectId,
         curve: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
     },
     AttachCurvatureOnCurve {
         target: ObjectId,
         curve: ObjectId,
-        tracker: ObjectId,
+        tracker: ScalarSource,
         window: f64,
     },
     /// Custom callback updater retained by the deferred canvas operation.
@@ -1150,7 +1150,7 @@ pub enum CanvasEndpoint {
     Between {
         from: Box<CanvasEndpoint>,
         to: Box<CanvasEndpoint>,
-        alpha: f64,
+        alpha: ScalarSource,
         offset: DVec3,
     },
     /// Polar point around another endpoint.

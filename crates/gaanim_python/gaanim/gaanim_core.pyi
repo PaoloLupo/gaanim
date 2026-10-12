@@ -4811,10 +4811,19 @@ class Drawable:
         """
         ...
     def bind_rotation_from(self, source: Drawable, *, ratio: float = 1.0, phase: float = 0.0) -> Self:
-        """Copy source world rotation using ``source * ratio + phase`` in radians."""
+        """Copy source world rotation using ``source * ratio + phase`` in radians.
+
+        The source turns by its own rotation and its parents', a spinning
+        ``Updater.rotate`` and a ``rotate_to(Parameter)`` included.
+        """
         ...
     def bind_translation_from_rotation(self, source: Drawable, *, axis: Optional[Direction] = None, scale: float = 1.0) -> Self:
-        """Translate along an axis by source rotation delta times ``scale``."""
+        """Translate along an axis by source rotation delta times ``scale``.
+
+        Whole turns count: a wheel turned by ``rotate_to(Parameter)`` or a
+        spinning ``Updater.rotate`` keeps pushing past half a turn. Other
+        rotations count up to two turns either way.
+        """
         ...
     def bind_position_from(self, source: Drawable, axes: str = "xy") -> None:
         """Bind position and defer this visual until its entry animation is played.
@@ -8144,8 +8153,9 @@ class Geometry:
     def arrow(self, x1: float, y1: float, x2: float, y2: float, *, head_length: Optional[float] = None, head_width: Optional[float] = None, body_width: Optional[float] = None, max_head_ratio: Optional[float] = None) -> Drawable:
         """Create a solid arrow with optional dimensions in scene units.
 
-        Omitted dimensions use head length 0.18, head width 0.15 and body
-        width 0.036. max_head_ratio in (0, 1] caps head length relative to arrow
+        ``fill`` colors the whole arrow: unless ``stroke`` sets one, its
+        outline follows the fill. Omitted dimensions use head length 0.18,
+        head width 0.15 and body width 0.036. max_head_ratio in (0, 1] caps head length relative to arrow
         length and scales head width proportionally; None leaves it uncapped.
         Nonfinite endpoints or nonpositive/nonfinite dimensions raise
         ValueError. Coincident endpoints produce an empty path.
@@ -8625,29 +8635,43 @@ class Geometry:
         the mask as a visible outline when requested.
         """
         ...
-    def point_on_curve(self, curve: Drawable, tracker: Parameter) -> Drawable:
-        """Create a hidden point-on-curve drawable; reveal it in ``scene.play``.
+    def point_on_curve(self, curve: Drawable, tracker: _ReactiveScalar) -> Drawable:
+        """Create a hidden dot at the fraction ``tracker`` of ``curve``'s arc length; reveal it in ``scene.play``.
+
+        ``tracker`` is a number, Parameter, Variable or Computed, clamped to
+        [0, 1]. The curve is read as it is drawn: moved, turned, scaled or
+        animated, or inside a group such as axes, the dot stays on it.
 
         Example:
-            result = scene.point_on_curve(curve, None)
+            t = scene.viz.parameter(0.0)
+            dot = scene.geometry.point_on_curve(curve, t)
         """
         ...
-    def tangent_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 0.8) -> Drawable:
-        """Create a hidden tangent drawable; reveal it in ``scene.play``.
+    def tangent_on_curve(self, curve: Drawable, tracker: _ReactiveScalar, length: float = 0.8) -> Drawable:
+        """Create a hidden segment along ``curve``'s tangent at ``tracker``; reveal it in ``scene.play``.
+
+        It follows the curve as drawn, like ``point_on_curve``.
 
         Example:
-            result = scene.tangent_on_curve(curve, None)
+            tangent = scene.geometry.tangent_on_curve(curve, t, length=1.2)
         """
         ...
-    def normal_on_curve(self, curve: Drawable, tracker: Parameter, length: float = 0.8) -> Drawable:
-        """Create a hidden normal drawable; reveal it in ``scene.play``.
+    def normal_on_curve(self, curve: Drawable, tracker: _ReactiveScalar, length: float = 0.8) -> Drawable:
+        """Create a hidden segment along ``curve``'s normal at ``tracker``; reveal it in ``scene.play``.
+
+        It follows the curve as drawn, like ``point_on_curve``.
 
         Example:
-            result = scene.normal_on_curve(curve, None)
+            normal = scene.geometry.normal_on_curve(curve, t)
         """
         ...
-    def curvature_on_curve(self, curve: Drawable, tracker: Parameter, window: float = 0.02) -> Drawable:
-        """Create a hidden osculating-circle drawable; reveal it in ``scene.play``.
+    def curvature_on_curve(self, curve: Drawable, tracker: _ReactiveScalar, window: float = 0.02) -> Drawable:
+        """Create a hidden osculating circle of ``curve`` at ``tracker``; reveal it in ``scene.play``.
+
+        The circle passes through three points ``window`` apart along the
+        arc length. At the ends of an open curve they slide inward, and on a
+        closed curve they wrap across its seam. On a straight stretch the
+        circle is not drawn.
 
         Example:
             t = scene.viz.parameter(0.0)
@@ -8656,7 +8680,7 @@ class Geometry:
         ...
     def always_redraw_arc(
         self,
-        tracker: Parameter,
+        tracker: _ReactiveScalar,
         cx: float,
         cy: float,
         radius: float,
@@ -8668,7 +8692,9 @@ class Geometry:
 
         The arc has ``radius`` around ``(cx, cy)`` and starts at
         ``start_angle``; every frame it sweeps ``tracker * sweep_scale +
-        sweep_offset`` radians, counterclockwise.
+        sweep_offset`` radians, counterclockwise. ``tracker`` is a number,
+        Parameter, Variable or Computed. Like any solid arrow, ``fill`` colors
+        it whole; ``stroke`` sets its outline.
 
         Example:
             turn = scene.viz.parameter(0.5)
@@ -8739,8 +8765,12 @@ class Geometry:
     def offset_point(self, origin: Endpoint, dx: _ReactiveScalar, dy: _ReactiveScalar) -> PointRef:
         """Create a point offset from a moving origin by reactive scene-space components."""
         ...
-    def point_between(self, from_: Endpoint, to: Endpoint, *, alpha: float = 0.5, offset: tuple[float, float] = (0.0, 0.0)) -> PointRef:
-        """Create an affine point between endpoints plus a world-space offset."""
+    def point_between(self, from_: Endpoint, to: Endpoint, *, alpha: _ReactiveScalar = 0.5, offset: tuple[float, float] = (0.0, 0.0)) -> PointRef:
+        """Create an affine point between endpoints plus a world-space offset.
+
+        ``alpha`` is a number, Parameter, Variable or Computed: 0 is ``from_``
+        and 1 is ``to``.
+        """
         ...
     def polar_point(self, origin: Endpoint, radius: _ReactiveScalar, angle: _ReactiveScalar) -> PointRef:
         """Create a reactive polar point; angle is measured in radians."""
@@ -10310,7 +10340,7 @@ class Mechanics:
     def cam_profile(self, samples: Sequence[tuple[float, float]], *, bore_radius: float = 0.08, color: Optional[ColorLike] = None) -> Drawable:
         """Create a closed radial cam from ``(angle_radians, radius)`` samples."""
         ...
-    def contact_on_curve(self, curve: Drawable, tracker: Parameter | Variable, *, tangent_length: float = 0.8, normal_length: float = 0.8) -> Drawable:
+    def contact_on_curve(self, curve: Drawable, tracker: _ReactiveScalar, *, tangent_length: float = 0.8, normal_length: float = 0.8) -> Drawable:
         """Group a reactive contact point, tangent, and normal on a sampled curve."""
         ...
     def moment_about(self, center: Endpoint, radius: float, *, direction: Literal["cw", "ccw"] = "ccw", label: Optional[str] = None, color: Optional[ColorLike] = None) -> Drawable:
