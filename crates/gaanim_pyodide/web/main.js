@@ -353,8 +353,9 @@ function consoleEmpty() {
   ui.console.innerHTML = '<p class="empty">La salida de <code>print</code> y los errores aparecen aquí.</p>';
 }
 
-// The fonts the browser has without uploading any (typst-assets).
-const BUILTIN_FONTS = "New Computer Modern, Libertinus Serif y DejaVu Sans Mono";
+// The fonts the browser has without uploading any: typst-assets plus the
+// code face Gaanim embeds.
+const BUILTIN_FONTS = "New Computer Modern, Libertinus Serif, DejaVu Sans Mono y JetBrains Mono";
 // Whether this run already said how to add a font.
 let fontHinted = false;
 

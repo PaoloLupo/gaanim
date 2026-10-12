@@ -197,7 +197,7 @@ title = scene.text("Fuente propia")
 scene.play([title.animate.write().duration(0.5)])
 scene.render()
 `,
-  { files: { "assets/fonts/VictorMono.ttf": readFileSync(join(dist, "fonts", "VictorMono-VariableFont.ttf")) } },
+  { files: { "assets/fonts/VictorMono.ttf": readFileSync(resolve("docs/fixtures/assets/fonts/VictorMono-VariableFont.ttf")) } },
 );
 
 // The packages a project asks for: its pyproject.toml (gaanim left out) and

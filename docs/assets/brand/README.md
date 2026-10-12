@@ -87,7 +87,8 @@ La web aplica el símbolo a sus propios controles (`docs/assets/base.css`):
 - **Cabezal.** Bajo la cabecera, una línea con un cabezal cuadrado muestra el
   progreso de lectura.
 - **Etiquetas.** Botones, insignias, cabeceras de tabla y rótulos usan la fuente
-  de código (VictorMono).
+  de código (JetBrains Mono, la misma que Gaanim usa para el código en las
+  escenas).
 - **Movimiento reducido.** Con `prefers-reduced-motion` los cambios son
   instantáneos y la animación del hero queda en un fotograma fijo.
 

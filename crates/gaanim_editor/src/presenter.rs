@@ -2565,7 +2565,7 @@ mod tests {
         }
     }
 
-    /// Two slides, each ending on a terminal stop, like `presentation_demo.py`.
+    /// Two slides, each ending on a terminal stop, like `examples/slides/slides.py`.
     fn deck() -> Timeline {
         let mut timeline = Timeline::new();
         timeline.cached_duration = 4.0;

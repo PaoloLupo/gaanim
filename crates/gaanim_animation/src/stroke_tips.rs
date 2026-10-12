@@ -132,9 +132,10 @@ impl StrokeTips {
                 .collect(),
             None => BezPath::new(),
         };
-        // Each base is measured on its own: two heads may cover the whole path.
-        let start_base = first_point(&gaanim_math::trim_path(path, start_cut, 1.0, 0.0, true));
-        let end_base = last_point(&gaanim_math::trim_path(path, 0.0, 1.0 - end_cut, 0.0, true));
+        // Each base is measured on its own: two heads may cover the whole path,
+        // and a lone head's base may sit a sliver from its apex.
+        let start_base = Some(gaanim_math::get_point_at_alpha(path, start_cut));
+        let end_base = Some(gaanim_math::get_point_at_alpha(path, 1.0 - end_cut));
         let start = shape(self.start, first, start_base);
         let end = shape(self.end, last, end_base);
         (shortened, start, end)

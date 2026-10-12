@@ -111,7 +111,7 @@ Regression checks:
   for even, uneven, repeated and single stops, and for 4000 random ones
   (opaque, transparent, out-of-range channels); many ramps survive between
   renders; changing ramps add no rows; unused ramps free their rows.
-- Exported PNG frames of `examples/performance_3d.py` equal those of the
+- Exported PNG frames of `tests/performance/scenes/performance_3d.py` equal those of the
   unpatched build.
 
 ## Lint expectation on `encode_brush`

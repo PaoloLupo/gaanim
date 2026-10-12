@@ -16,23 +16,14 @@ if (-not (Test-Path -LiteralPath $Runner -PathType Leaf)) {
 # encoder rather than the interactive host, and examples that capture
 # snapshots are compared against their baselines instead.
 $examples = @(
-    "03_anchors.py",
-    "advanced_animations_demo.py",
-    "group_demo.py",
-    "math_animation.py",
-    "number_plane_tangent.py",
-    "reactive_features_demo.py",
-    "scenes.py",
-    "sine_curve.py",
-    "sprint1_demo.py",
-    "test_slides.py",
-    "write_smoke.py"
+    "tests/scenes/smoke/test_slides.py",
+    "tests/scenes/smoke/write_smoke.py"
 )
 
 foreach ($example in $examples) {
     $previousErrorAction = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $output = & $Runner --diff --example "examples/$example" 2>&1 | Out-String
+    $output = & $Runner --diff --example $example 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousErrorAction
     if ($exitCode -ne 2 -or $output -notmatch "did not call scene\.snapshots") {

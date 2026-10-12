@@ -433,6 +433,6 @@ despedida.
   diapositiva (el logo, el marcador de equipos) con `.named()` y usa
   `Transition.magic_move` en `scene.segment` para que se muevan en lugar de
   aparecer de nuevo.
-- *Partidas de verdad*: el ejemplo `examples/la_gran_trivia/` del repositorio
+- *Partidas de verdad*: el ejemplo `examples/showcase/trivia/` del repositorio
   junta todas estas recetas en una trivia completa con preguntas en Markdown,
   sonidos e imágenes.

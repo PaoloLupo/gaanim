@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "width": 960,
+  "height": 540,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_0_700000",
+      "time_seconds": 0.7,
+      "file": "seek_0000_t_0_700000.png"
+    },
+    {
+      "id": "seek_0001_t_1_900000",
+      "time_seconds": 1.9,
+      "file": "seek_0001_t_1_900000.png"
+    },
+    {
+      "id": "seek_0002_t_2_700000",
+      "time_seconds": 2.7,
+      "file": "seek_0002_t_2_700000.png"
+    },
+    {
+      "id": "seek_0003_t_3_900000",
+      "time_seconds": 3.9,
+      "file": "seek_0003_t_3_900000.png"
+    },
+    {
+      "id": "seek_0004_t_4_700000",
+      "time_seconds": 4.7,
+      "file": "seek_0004_t_4_700000.png"
+    },
+    {
+      "id": "seek_0005_t_5_900000",
+      "time_seconds": 5.9,
+      "file": "seek_0005_t_5_900000.png"
+    },
+    {
+      "id": "seek_0006_t_6_700000",
+      "time_seconds": 6.7,
+      "file": "seek_0006_t_6_700000.png"
+    },
+    {
+      "id": "seek_0007_t_7_900000",
+      "time_seconds": 7.9,
+      "file": "seek_0007_t_7_900000.png"
+    },
+    {
+      "id": "seek_0008_t_8_700000",
+      "time_seconds": 8.7,
+      "file": "seek_0008_t_8_700000.png"
+    },
+    {
+      "id": "seek_0009_t_9_800000",
+      "time_seconds": 9.8,
+      "file": "seek_0009_t_9_800000.png"
+    },
+    {
+      "id": "seek_0010_t_10_700000",
+      "time_seconds": 10.7,
+      "file": "seek_0010_t_10_700000.png"
+    },
+    {
+      "id": "seek_0011_t_11_500000",
+      "time_seconds": 11.5,
+      "file": "seek_0011_t_11_500000.png"
+    },
+    {
+      "id": "seek_0012_t_12_700000",
+      "time_seconds": 12.700000000000001,
+      "file": "seek_0012_t_12_700000.png"
+    },
+    {
+      "id": "seek_0013_t_13_500000",
+      "time_seconds": 13.5,
+      "file": "seek_0013_t_13_500000.png"
+    },
+    {
+      "id": "seek_0014_t_14_700000",
+      "time_seconds": 14.700000000000001,
+      "file": "seek_0014_t_14_700000.png"
+    },
+    {
+      "id": "seek_0015_t_15_500000",
+      "time_seconds": 15.5,
+      "file": "seek_0015_t_15_500000.png"
+    },
+    {
+      "id": "seek_0016_t_16_700000",
+      "time_seconds": 16.7,
+      "file": "seek_0016_t_16_700000.png"
+    }
+  ]
+}

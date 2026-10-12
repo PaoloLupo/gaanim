@@ -155,9 +155,9 @@ class ImpactTests(unittest.TestCase):
     def test_scene_binding_requires_python_docs_and_visual(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
-            (repo / "examples").mkdir()
-            (repo / "tests" / "visual" / "transform_demo" / "baseline").mkdir(parents=True)
-            (repo / "examples" / "transform_demo.py").touch()
+            (repo / "examples" / "transforms").mkdir(parents=True)
+            (repo / "tests" / "visual" / "transforms" / "transform_to" / "baseline").mkdir(parents=True)
+            (repo / "examples" / "transforms" / "transform_to.py").touch()
             result = impact.analyze_paths(
                 repo,
                 ["crates/gaanim_python/src/pycanvas.rs"],
@@ -165,7 +165,7 @@ class ImpactTests(unittest.TestCase):
         self.assertIn("python-api", result.categories)
         self.assertIn("docs/content/referencia/scene.typ", result.documentation)
         self.assertIn("just validate-python-api", result.commands)
-        self.assertIn("transform_demo", result.visual_examples)
+        self.assertIn("transforms/transform_to", result.visual_examples)
 
     def test_cli_and_manifest_changes_select_their_reference_pages(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -415,7 +415,7 @@ const DIFF: Page = Page {
                 ),
                 (
                     "--height <PX>",
-                    "Capture frames this tall (default 1920 on the long edge)",
+                    "Capture frames this tall (default: the baseline's height, else 960 on the long edge)",
                 ),
             ],
         ),

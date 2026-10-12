@@ -52,7 +52,7 @@ the current worktree.
 Read `../../references/visual-testing.md` before visual work. Compare with:
 
 ```text
-python <PLUGIN_ROOT>/scripts/verify.py visual --example camera_demo
+python <PLUGIN_ROOT>/scripts/verify.py visual --example camera/camera_moves
 ```
 
 If comparison fails, inspect the printed `report/index.html` path and explain
@@ -60,7 +60,7 @@ the difference. Never use `--bless` to remove a failure. Only after the user
 explicitly approves the exact visual change, run both interlock flags:
 
 ```text
-python <PLUGIN_ROOT>/scripts/verify.py visual --example camera_demo --bless --allow-bless
+python <PLUGIN_ROOT>/scripts/verify.py visual --example camera/camera_moves --bless --allow-bless
 ```
 
 Do not describe unavailable visual execution as passing. Finish with each

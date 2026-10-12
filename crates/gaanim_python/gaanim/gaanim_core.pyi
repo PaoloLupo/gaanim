@@ -349,7 +349,8 @@ class Background:
         """Create a timeline-driven WGSL scene background.
 
         A string is inline WGSL. An ``os.PathLike`` value loads a WGSL asset
-        immediately. ``source`` must define ``gaanim_background(uv, resolution,
+        immediately. A relative path is found in the working directory, then in
+        the calling script's ``assets`` folder, then beside the script. ``source`` must define ``gaanim_background(uv, resolution,
         time)`` returning ``vec4<f32>``. ``time`` is the absolute timeline
         position in seconds, so preview, seeks, snapshots, and exports are deterministic.
         UV coordinates are normalized from the top-left and the shader covers
@@ -542,7 +543,8 @@ class PostProcess:
         """Create a WGSL post-process applied to the rendered 2D scene.
 
         A string is inline WGSL; an ``os.PathLike`` value loads a WGSL asset
-        immediately. ``source`` must define ``gaanim_post(uv: vec2<f32>,
+        immediately. A relative path is found in the working directory, then in
+        the calling script's ``assets`` folder, then beside the script. ``source`` must define ``gaanim_post(uv: vec2<f32>,
         resolution: vec2<f32>, time: f32) -> vec4<f32>`` and may call
         ``gaanim_scene(uv)`` to sample everything drawn in 2D: background,
         text, shapes, images, and Lottie. ``uv`` is ``(0, 0)`` at the top-left
@@ -616,8 +618,9 @@ class PostProcess:
         """Grade through the 3D lookup table of a ``.cube`` file, blended by ``strength`` (0..1).
 
         The table (``LUT_3D_SIZE`` 2..65, optional ``DOMAIN_MIN``/``DOMAIN_MAX``)
-        is read immediately. An unreadable file raises ``RuntimeError`` and an
-        invalid table raises ``ValueError``.
+        is read immediately. A relative path is found in the working directory, then in
+        the calling script's ``assets`` folder, then beside the script. An unreadable file raises ``RuntimeError``
+        and an invalid table raises ``ValueError``.
         """
         ...
     @staticmethod
@@ -747,7 +750,9 @@ class Theme:
         file directly inside the directory (not subdirectories). Each face is
         resolved by the family, weight and style its file declares, so
         ``fonts={"text": "Inter"}`` with ``weight=700`` finds the bold file
-        without naming it. ``font_files`` still registers single files.
+        without naming it. ``font_files`` still registers single files. A
+        relative ``font_dir`` or font file is found in the working directory,
+        then in the calling script's ``assets`` folder, then beside the script.
 
         ``text_markup=False`` makes ``*`` and ``_`` literal by default in
         ``scene.text``, ``scene.text.measure``, ``badge`` and ``chip``; a call
@@ -1434,8 +1439,9 @@ class Transition:
     ) -> Transition:
         """Blend the two segments with a WGSL function, like gl-transitions.
 
-        ``source`` (inline WGSL or an ``os.PathLike`` ``.wgsl`` file, used as
-        given) defines ``fn transition(uv: vec2<f32>) -> vec4<f32>``. Each
+        ``source`` (inline WGSL or an ``os.PathLike`` ``.wgsl`` file) defines
+        ``fn transition(uv: vec2<f32>) -> vec4<f32>``. A relative path is found in the working directory, then in
+        the calling script's ``assets`` folder, then beside the script. Each
         segment is rendered alone, over its own background: ``gaanim_from(uv)``
         samples the outgoing one and ``gaanim_to(uv)`` the incoming one, and
         ``progress`` goes from 0 to 1 (linear unless ``easing`` is given).
@@ -1485,8 +1491,10 @@ class Transition:
         - ``glitch_displace``: ``strength=0.5``, ``bands=24`` and ``seed=0``
           (whole numbers); bands slip sideways with split channels and cut at the middle.
         - ``luma``: ``softness=0.1``; the incoming segment appears first where
-          the grayscale ``image`` (a path used as given, scaled to at most
-          256 px) is darkest, or brightest with ``invert=True``.
+          the grayscale ``image`` (scaled to at most 256 px) is darkest, or
+          brightest with ``invert=True``. A relative ``image`` path is found in
+          the working directory, then in the calling script's ``assets``
+          folder, then beside the script.
 
         An unknown name or setting, ``image`` on another preset or ``luma``
         without it raise ``ValueError``.
@@ -8745,7 +8753,7 @@ class Typography:
         assets, and its own text and background colors unless ``color`` or
         ``background`` are given. ``highlight=False`` draws every token in
         ``color``. ``font`` picks the monospaced family; without it, or when it
-        is missing, the block uses DejaVu Sans Mono, bundled with Gaanim.
+        is missing, the block uses JetBrains Mono, bundled with Gaanim.
 
         Over a ``background`` the theme's colors do not read on, such as a
         dark panel in a light theme, the default text takes the theme's
@@ -9732,8 +9740,10 @@ class SlideKit:
         """Create a bullet list ``width`` wide, centered at the origin, one item every ``gap``.
 
         Bullets of ``bullet_radius`` take the theme accent and the text its
-        foreground unless ``bullet_color`` and ``color`` say otherwise. An
-        empty list or non-positive sizes raise ``ValueError``.
+        foreground unless ``bullet_color`` and ``color`` say otherwise. Each
+        item is left-aligned, starting just after its bullet, and wraps to
+        the rest of ``width``. An empty list or non-positive sizes raise
+        ``ValueError``.
 
         Example:
             steps = scene.slides.bullets(["Measure", "Model", "Verify"], width=6)

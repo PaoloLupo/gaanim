@@ -57,7 +57,7 @@ PAGE_FILES = (
 )
 ICONS = ("favicon.ico", "gaanim-icon-512.png", "gaanim-icon.svg")
 # The documentation's code face, with its license (SIL OFL 1.1).
-FONTS = ("VictorMono-VariableFont.ttf", "OFL-1.1.txt")
+FONTS = ("JetBrainsMono-Variable.ttf", "OFL-1.1.txt")
 EXAMPLES = ROOT / "docs" / "content" / "ejemplos"
 
 

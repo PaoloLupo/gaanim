@@ -191,7 +191,7 @@ Agendas con viñetas y tablas técnicas compactas.
 #api-entry(
   name: "SlideKit.bullets",
   kind: "factory",
-  desc: [Lista con viñetas como un solo objeto. Ajusta `width`, `gap`, `bullet_radius` y `bullet_color`.],
+  desc: [Lista con viñetas como un solo objeto. Cada punto se alinea a la izquierda, justo después de su viñeta, y se ajusta al resto de `width`. Ajusta `width`, `gap`, `bullet_radius` y `bullet_color`.],
 )[
 ```python
 # show-code: true

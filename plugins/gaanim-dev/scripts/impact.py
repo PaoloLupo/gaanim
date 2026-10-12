@@ -26,16 +26,16 @@ VISUAL_CRATES = {
 }
 
 VISUAL_CANDIDATES = {
-    "gaanim_animation": ["transform_demo"],
-    "gaanim_api": ["transform_demo"],
-    "gaanim_layout": ["layout_flex", "layout_grid", "layout_reflow"],
-    "gaanim_math": ["camera_demo", "transform_demo"],
-    "gaanim_objects": ["svg_demo", "image_demo"],
-    "gaanim_python": ["transform_demo"],
-    "gaanim_renderer": ["visual_effects_demo", "transform_demo"],
-    "gaanim_scene": ["camera_demo", "transform_demo"],
-    "gaanim_text": ["typst_layout_demo", "math_animation"],
-    "gaanim_timeline": ["transform_demo"],
+    "gaanim_animation": ["animation/easings", "transforms/transform_to"],
+    "gaanim_api": ["transforms/transform_to"],
+    "gaanim_layout": ["layout/flex", "layout/grids", "layout/reflow"],
+    "gaanim_math": ["camera/camera_moves", "transforms/transform_to"],
+    "gaanim_objects": ["media/svg", "media/images"],
+    "gaanim_python": ["transforms/transform_to"],
+    "gaanim_renderer": ["effects/glow_blur_shadow", "transforms/transform_to"],
+    "gaanim_scene": ["camera/camera_moves", "transforms/transform_to"],
+    "gaanim_text": ["text/typst_layouts", "math/derivations"],
+    "gaanim_timeline": ["transforms/transform_to"],
 }
 
 PERFORMANCE_CRATES = {
@@ -50,7 +50,7 @@ PERFORMANCE_CRATES = {
 
 PLUGIN_PREFIXES = ("plugins/gaanim-dev/", "plugins/gaanim/")
 PERFORMANCE_PATHS = {
-    "examples/performance_benchmark.py",
+    "tests/performance/scenes/performance_benchmark.py",
     "tests/benchmark_runtime.py",
     "tests/performance/budgets.json",
     "tests/test_benchmark_runtime.py",

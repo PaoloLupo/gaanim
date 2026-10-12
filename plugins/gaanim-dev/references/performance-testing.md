@@ -52,7 +52,7 @@ GPU is hidden behind the CPU work.
 
 | Suite | Scenes |
 |---|---|
-| `core` | `examples/performance_benchmark.py`, the scene the profile budgets were calibrated on |
+| `core` | `tests/performance/scenes/performance_benchmark.py`, the scene the profile budgets were calibrated on |
 | `gpu` | Heavy scenes: `performance_objects`, `performance_object_effects`, `performance_post`, `performance_heavy`, `performance_held`, `performance_3d`, `performance_particles`, `performance_repeater` |
 | `scaling` | Selected scenes at growing `GAANIM_BENCHMARK_SCALE`, to expose superlinear growth |
 
@@ -60,7 +60,7 @@ GPU is hidden behind the CPU work.
 python tests/benchmark_runtime.py --suite gpu --profile standard
 python tests/benchmark_runtime.py --suite scaling --scales 1 2 4
 python tests/benchmark_runtime.py --suite gpu --scenarios export --export-format webm
-python tests/benchmark_runtime.py --scene examples/performance_repeater.py --scenarios playback
+python tests/benchmark_runtime.py --scene tests/performance/scenes/performance_repeater.py --scenarios playback
 python tests/benchmark_runtime.py --suite gpu --compare before.json --max-regression 0.10
 ```
 

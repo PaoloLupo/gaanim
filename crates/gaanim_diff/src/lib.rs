@@ -67,8 +67,13 @@ pub fn capture_canvas(
     capture_canvas_sized(canvas, output_dir, times, None)
 }
 
+/// The long edge of a capture without an explicit height: half the
+/// preview's 1920, enough to review a frame and about a quarter of the bytes
+/// to keep as a baseline.
+pub const SNAPSHOT_LONG_EDGE: u32 = 960;
+
 /// [`capture_canvas`] at `height` pixels, the width following the scene's
-/// aspect; `None` captures at the preview size (1920 on the long edge).
+/// aspect; `None` captures at [`SNAPSHOT_LONG_EDGE`] on the long edge.
 pub fn capture_canvas_sized(
     canvas: SceneModel,
     output_dir: impl AsRef<Path>,
@@ -116,7 +121,7 @@ pub(crate) fn capture_canvas_as(
                 .max(1.0) as u32,
             height,
         ),
-        None => canvas.frame.preview_pixel_size(),
+        None => snapshot_pixel_size(canvas.frame.preview_pixel_size()),
     };
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.headless = true;
@@ -232,15 +237,44 @@ pub(crate) fn write_snapshots(
 /// Threads encoding snapshot PNGs at most; each holds a frame in memory.
 const MAX_PNG_WORKERS: usize = 8;
 
-/// Write one snapshot as an RGBA PNG.
+/// The default capture size: the preview size scaled to
+/// [`SNAPSHOT_LONG_EDGE`] on its long edge.
+fn snapshot_pixel_size((width, height): (u32, u32)) -> (u32, u32) {
+    let scale = f64::from(SNAPSHOT_LONG_EDGE) / f64::from(width.max(height).max(1));
+    let side = |pixels: u32| (f64::from(pixels) * scale).round().max(1.0) as u32;
+    (side(width), side(height))
+}
+
+/// Write one snapshot as a PNG at the best compression. Baselines are kept in
+/// the repository, so an opaque frame drops its alpha channel and is written
+/// as RGB; a frame with any transparency stays RGBA.
 fn write_snapshot_png(path: &Path, frame: &CapturedFrame) -> Result<()> {
-    let encoder = image::codecs::png::PngEncoder::new(fs::File::create(path)?);
-    encoder.write_image(
-        &frame.rgba,
-        frame.width,
-        frame.height,
-        image::ExtendedColorType::Rgba8,
-    )?;
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    let encoder = PngEncoder::new_with_quality(
+        fs::File::create(path)?,
+        CompressionType::Best,
+        FilterType::Adaptive,
+    );
+    let (pixels, _) = frame.rgba.as_chunks::<4>();
+    if pixels.iter().all(|&[_, _, _, alpha]| alpha == u8::MAX) {
+        let rgb: Vec<u8> = pixels
+            .iter()
+            .flat_map(|&[red, green, blue, _]| [red, green, blue])
+            .collect();
+        encoder.write_image(
+            &rgb,
+            frame.width,
+            frame.height,
+            image::ExtendedColorType::Rgb8,
+        )?;
+    } else {
+        encoder.write_image(
+            &frame.rgba,
+            frame.width,
+            frame.height,
+            image::ExtendedColorType::Rgba8,
+        )?;
+    }
     Ok(())
 }
 
@@ -593,6 +627,37 @@ const REPORT_HTML: &str = include_str!("report.html");
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_size_halves_the_preview_on_its_long_edge() {
+        assert_eq!(super::snapshot_pixel_size((1920, 1080)), (960, 540));
+        assert_eq!(super::snapshot_pixel_size((1080, 1920)), (540, 960));
+        assert_eq!(super::snapshot_pixel_size((1920, 1920)), (960, 960));
+    }
+
+    #[test]
+    fn opaque_snapshots_are_written_as_rgb_and_translucent_ones_keep_alpha() {
+        let directory =
+            std::env::temp_dir().join(format!("gaanim-diff-png-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let frame = |alpha: u8| super::CapturedFrame {
+            time: 0.0,
+            width: 2,
+            height: 1,
+            rgba: vec![10, 20, 30, 255, 40, 50, 60, alpha],
+        };
+        for (alpha, color) in [
+            (255, image::ColorType::Rgb8),
+            (128, image::ColorType::Rgba8),
+        ] {
+            let path = directory.join(format!("frame_{alpha}.png"));
+            super::write_snapshot_png(&path, &frame(alpha)).unwrap();
+            let decoded = image::open(&path).unwrap();
+            assert_eq!(decoded.color(), color);
+            assert_eq!(decoded.to_rgba8().get_pixel(1, 0).0, [40, 50, 60, alpha]);
+        }
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
 
     #[test]
     fn one_changed_pixel_is_measured_and_bounded() {

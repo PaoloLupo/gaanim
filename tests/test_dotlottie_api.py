@@ -3,7 +3,7 @@ from pathlib import Path
 from gaanim import Scene
 
 ROOT = Path(__file__).resolve().parents[1]
-PATH = str(ROOT / "examples/assets/dotlottie_demo.lottie")
+PATH = str(ROOT / "tests/assets/dotlottie_demo.lottie")
 
 
 def fails(error_type, operation):

@@ -122,7 +122,8 @@ All commands assume `just` is installed. Do not run `cargo build` at the workspa
 | Build distributed binaries (`dist` profile) | `just build-dist` |
 | Install authoring wheel in `.venv` | `just python-develop` |
 | Build wheel | `just wheel` → outputs to `target/wheels/` |
-| Run example by name | `just run <name>` (e.g., `just run math_animation`) |
+| Run example by name | `just run <name>` (e.g., `just run easings`; file names are unique under `examples/`) |
+| Check examples against their contract | `just check-examples` |
 | Validate installed Python API | `just validate-python-api` |
 | Validate all export formats | `just test-exports` |
 | Measure runtime budgets | `just benchmark smoke` (or `standard`) |
@@ -226,20 +227,53 @@ all use the application host, which owns the native runtime.
 - Audit warnings are heuristic by default. Objective invariant failures return
   a nonzero status; pass `--strict` only when warnings should also fail.
 
+## Examples
+
+`examples/` is organized into topic folders, as in Bevy's examples
+(`examples/animation/easings.py`). `examples/examples.toml` is the catalog: the
+topics in reading order and every example, with its description, its `web`
+flag and the contract rules it is exempt from (`allow`). `README.md` is
+generated from it. Only `quickstart.py` sits at the top of `examples/`; add new
+examples to a topic folder and to the catalog.
+
+The contract, checked by `just check-examples` (`scripts/examples.py`):
+
+- `scene = Scene()` with no `background`, `frame`, `margin`, `theme` or `post`,
+  and no segment backgrounds or post-processing, unless that is the topic (list
+  the rule in `allow`). Every example shares the default theme.
+- Colors come from the theme (`scene.canvas.color("accent")`, `"muted"`,
+  `"rule"`, `"success"`…, or the theme's default styles), never color
+  constants, hex strings or `Color(...)`.
+- No title, subtitle or kicker naming the demo. Text in the frame is content or
+  a variant label, and a label is the code that builds the variant, with
+  `role="code"`.
+- Place things with layout (`scene.layout.zones`, `Zones.grid`, boxes) padded
+  with the theme's `"page_padding"`, not hand-tuned coordinates.
+- One topic per example, showing the variants the API offers for it; split a
+  long list into segments. English text, comments and docstrings; the docstring
+  starts with one sentence.
+- Assets load by relative name from an `assets/` folder next to the script; no
+  `__file__`, `tests/` or `docs/` paths. No asserts, `print`, ticket ids or
+  engine names: validation belongs in `tests/`.
+- The script ends with
+  `if snapshots := os.environ.get("GAANIM_SNAPSHOTS"): scene.snapshots(snapshots, [...])`
+  `else: scene.render()`, and has a baseline under `tests/visual/<topic>/<name>/`.
+
 ## Visual regression diffs
 
 - `gaanim_diff` provides exact timeline-seek snapshots, PNG comparison, and JSON/HTML reports; the HTML report is the visual review UI. The main `gaanim` binary exposes it through `--diff`.
-- Snapshot fixtures are organized globally per example: `tests/visual/<example-relative-path-without-.py>/{baseline,current,report}`. For example, `examples/visual_diff_demo.py` maps to `tests/visual/visual_diff_demo/`.
+- Snapshot fixtures are organized globally per script: `tests/visual/<path-below-examples-without-.py>/{baseline,current,report}`. For example, `examples/animation/easings.py` maps to `tests/visual/animation/easings/`, and test scenes under `tests/scenes/` map below `tests/visual/scenes/` (`tests/scenes/stress/stress_sfx.py` → `tests/visual/scenes/stress/stress_sfx/`).
   - `baseline/` is the approved fixture and should be versioned when intentionally changed.
   - `current/` and `report/` are generated local artifacts and are gitignored.
 - Examples intended for visual regression must conditionally call `scene.snapshots(os.environ["GAANIM_SNAPSHOTS"], seeks)` when `GAANIM_SNAPSHOTS` is set. The diff CLI injects that environment variable and runs this capture headlessly.
+- Captures are 960 pixels on the long edge, or the height of the existing baseline, and opaque frames are written as RGB at the best PNG compression, so baselines stay small in the repository. `--height` overrides the size.
 - `--capture-stops [--stops 3-7,12]` instead captures the frame shown at every `scene.stop()` (as `stop_NNNN.png`, 1-based) plus `stops.json`, without script cooperation; the script only needs `scene.render()`.
 - Windows workflow (activate `.venv` first so the editor binary can load Python):
 
   ```powershell
   . .\.venv\Scripts\Activate.ps1
-  just dev-exec target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py --bless
-  just dev-exec target/debug/gaanim.exe --diff --example examples/visual_diff_demo.py
+  just dev-exec target/debug/gaanim.exe --diff --example examples/animation/easings.py --bless
+  just dev-exec target/debug/gaanim.exe --diff --example examples/animation/easings.py
   ```
 
   `--bless` overwrites the example baseline, so use it only after intentionally approving a visual change. The normal command captures `current/`, compares it with `baseline/`, and writes `report/index.html` (open it in a browser). Use `--pixel-threshold` and `--max-changed-ratio` to tolerate controlled raster differences.

@@ -4,10 +4,10 @@
    frame, square corners (everything is a frame), controls that step forward
    leaving two ghost frames, and labels in the code face. */
 @font-face {
-  font-family: "VictorMono";
-  font-weight: 100 700;
+  font-family: "JetBrains Mono";
+  font-weight: 100 800;
   font-display: swap;
-  src: url("fonts/VictorMono-VariableFont.ttf") format("truetype");
+  src: url("fonts/JetBrainsMono-Variable.ttf") format("truetype");
 }
 
 :root {
@@ -43,7 +43,7 @@
   --error-line: rgba(248, 113, 113, 0.12);
   --show-dark: block;
   --show-light: none;
-  --mono: "VictorMono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
   --frame-1: color-mix(in srgb, var(--primary) 45%, transparent);
   --frame-2: color-mix(in srgb, var(--primary) 20%, transparent);
   --frames: -3px 0 0 var(--frame-1), -6px 0 0 var(--frame-2);

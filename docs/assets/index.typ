@@ -22,8 +22,8 @@
 #let fonts = (
   "Aleo-Italic-VariableFont.ttf",
   "Aleo-VariableFont.ttf",
-  "VictorMono-Italic-VariableFont.ttf",
-  "VictorMono-VariableFont.ttf",
+  "JetBrainsMono-Italic-Variable.ttf",
+  "JetBrainsMono-Variable.ttf",
   "NewCMMath-Regular.otf",
 )
 

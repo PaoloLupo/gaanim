@@ -343,7 +343,7 @@ fn lottie_package_paths_cannot_escape_or_read_host_files() {
 fn lottie_packaged_images_and_manifest_initial_machine() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for path in [
-        root.join("examples/assets/dotlottie_demo.lottie"),
+        root.join("tests/assets/dotlottie_demo.lottie"),
         root.join("tests/assets/dotlottie_v1.lottie"),
     ] {
         let asset = LottieAsset::load(&path).unwrap();

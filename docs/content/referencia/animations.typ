@@ -2395,7 +2395,7 @@ scene.wait(4.0)
 ]
 
 Para un ejemplo con varilla, cota y estela, consulta
-`examples/pendulum_simulation.py` en el repositorio de Gaanim.
+`examples/mechanics/simulations.py` en el repositorio de Gaanim.
 
 == Partículas <particulas>
 
@@ -2951,7 +2951,7 @@ scene.wait(1)
   name: "Transition.shader",
   kind: "factory",
   params: (
-    (name: "source", type: "str | os.PathLike", default: none, desc: [WGSL en línea o un archivo `.wgsl` (ruta tal cual) que define `fn transition(uv: vec2<f32>) -> vec4<f32>`.]),
+    (name: "source", type: "str | os.PathLike", default: none, desc: [WGSL en línea o un archivo `.wgsl` (una ruta relativa se busca en el directorio de trabajo, luego en la carpeta `assets` del script y luego junto a él) que define `fn transition(uv: vec2<f32>) -> vec4<f32>`.]),
     (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
     (name: "uniforms", type: "Mapping[str, float | Parameter | Computed] | None", default: "None", desc: [Campos de `gaanim_uniforms`: los números son fijos; un `Parameter`, `Variable`, `Computed`, `scene.time` o una señal de audio de la misma escena se evalúa en cada fotograma de la transición, así que puede latir con el bombo. Los paquetes `.gaanim` guardan los valores.]),
   ),
@@ -2978,7 +2978,7 @@ scene.wait(1)
   params: (
     (name: "name", type: "str", default: none, desc: [`"cross_zoom"`, `"directional_warp"`, `"ripple"`, `"glitch_displace"` o `"luma"`.]),
     (name: "duration", type: "float", default: none, desc: [Segundos, positivo.]),
-    (name: "image / invert", type: "str | os.PathLike | None / bool", default: "None / False", desc: [Solo `luma`: mapa en escala de grises (ruta tal cual, reducido a 256 px como mucho); el segmento entrante aparece primero donde es más oscuro, o más claro con `invert=True`.]),
+    (name: "image / invert", type: "str | os.PathLike | None / bool", default: "None / False", desc: [Solo `luma`: mapa en escala de grises (reducido a 256 px como mucho; una ruta relativa se busca como en `source`); el segmento entrante aparece primero donde es más oscuro, o más claro con `invert=True`.]),
     (name: "**settings", type: "float | int", default: none, desc: [`bands` y `seed` son enteros; los demás, números reales. `cross_zoom`: `strength=0.4`. `directional_warp`: `dx=1`, `dy=0` (y hacia arriba), `smoothness=0.5`. `ripple`: `amplitude=100`, `speed=50`. `glitch_displace`: `strength=0.5`, `bands=24`, `seed=0`. `luma`: `softness=0.1`.]),
   ),
   returns: (type: "Transition", desc: [Transición por shader incorporada.]),

@@ -3,6 +3,7 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 python_dir := if os_family() == "windows" { "./.venv/Scripts" } else { "./.venv/bin" }
 python := python_dir + if os_family() == "windows" { "/python.exe" } else { "/python3" }
 system_python := if os_family() == "windows" { "py.exe" } else { "python" }
+debug_runtime := if os_family() == "windows" { "./target/debug/gaanim.exe" } else { "./target/debug/gaanim" }
 release_runtime := if os_family() == "windows" { "./target/release/gaanim.exe" } else { "./target/release/gaanim" }
 
 # All development Cargo commands select the same opt-in dynamic-linking feature.
@@ -118,14 +119,14 @@ benchmark profile="smoke" encoder="libx264":
 
 # ---- Run --------------------------------------------------------------------
 
-# Run an example script inside the Gaanim application. Usage: just run my_example
-[windows]
+# Run an example inside the Gaanim application, by file name or by path under
+# examples/. Usage: just run easings (or just run animation/easings)
 run EX: build
-    {{ system_python }} scripts/dev.py exec ./target/debug/gaanim.exe examples/{{ EX }}.py
+    {{ system_python }} scripts/examples.py run "{{ EX }}" --binary {{ debug_runtime }}
 
-[unix]
-run EX: build
-    {{ system_python }} scripts/dev.py exec ./target/debug/gaanim examples/{{ EX }}.py
+# Check the examples against their style contract, catalog and README.
+check-examples:
+    {{ system_python }} scripts/examples.py check
 
 # Build the web player (.gaanim in the browser) into dist/web.
 web:

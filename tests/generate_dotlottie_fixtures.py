@@ -54,7 +54,7 @@ def main():
             {"name": "done", "type": "PlaybackState", "animation": "idle", "autoplay": False, "final": True}
         ]
     }
-    archive(ROOT / "examples/assets/dotlottie_demo.lottie", {
+    archive(ROOT / "tests/assets/dotlottie_demo.lottie", {
         "manifest.json": {"version": "2", "animations": [{"id": "idle"}, {"id": "active"}], "themes": [{"id": "gold"}], "stateMachines": [{"id": "main"}], "initial": {"animation": "idle"}},
         "a/idle.json": idle, "a/active.json": active, "i/pixel.png": pixel_png(), "s/main.json": machine,
         "t/gold.json": {"rules": [{"id": "accent", "type": "Color", "value": [1, 0.75, 0.15]}]}

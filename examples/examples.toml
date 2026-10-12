@@ -1,0 +1,736 @@
+# The example catalog. Every script listed here follows the style contract
+# that `python scripts/examples.py check` enforces (see AGENTS.md, "Examples"),
+# and README.md is generated from this file with `python scripts/examples.py readme`.
+#
+# A topic is a folder under examples/; topics are listed in reading order.
+# An example's topic is the first folder of its `path`. Its fields:
+#
+#   path         Script path relative to examples/.
+#   description  One sentence for the README, the docs gallery and the playground.
+#   title        Display name; defaults to the file name in sentence case.
+#   web          false when the example cannot run in the web playground
+#                (video, Typst Universe packages, system fonts). Default true.
+#   allow        Contract rules the example is exempt from because they are its
+#                subject: "background", "frame", "margin", "theme", "post",
+#                "colors" or "titles".
+
+[[topic]]
+id = "basics"
+title = "Basics"
+description = "Scenes, objects, play and wait, groups and segments: the first things to learn."
+
+[[topic]]
+id = "shapes"
+title = "Shapes"
+description = "Geometry primitives, curves, arrows, strokes, boolean operations and clipping."
+
+[[topic]]
+id = "style"
+title = "Style"
+description = "Colors, gradients, blend modes, themes and backgrounds."
+
+[[topic]]
+id = "text"
+title = "Text"
+description = "Typography, code blocks, Typst layouts and animated text."
+
+[[topic]]
+id = "math"
+title = "Math"
+description = "Equations, step-by-step derivations, annotations and matrices."
+
+[[topic]]
+id = "layout"
+title = "Layout"
+description = "Boxes, rows, grids, zones and animated reflow."
+
+[[topic]]
+id = "animation"
+title = "Animation"
+description = "Easing, keyframes, timing, motion paths and procedural motion."
+
+[[topic]]
+id = "transforms"
+title = "Transforms"
+description = "Morphing one object into another, matching parts and pivots."
+
+[[topic]]
+id = "emphasis"
+title = "Emphasis"
+description = "Drawing attention: indications, highlights and hand-drawn notes."
+
+[[topic]]
+id = "effects"
+title = "Effects"
+description = "Per-object glow, blur, shadow, echo, mattes, shaders and particles."
+
+[[topic]]
+id = "post_processing"
+title = "Post-processing"
+description = "Full-frame passes: color grading, bloom, motion blur and finishes."
+
+[[topic]]
+id = "transitions"
+title = "Transitions"
+description = "Transitions between segments and content reused across them."
+
+[[topic]]
+id = "camera"
+title = "Camera"
+description = "Pan, zoom and rotation, camera paths, insets and parallax."
+
+[[topic]]
+id = "3d"
+title = "3D"
+description = "Primitives, extrusion, axonometric drawings and 3D axes."
+
+[[topic]]
+id = "visualization"
+title = "Visualization"
+description = "Axes, plots, charts, vector fields and live readouts."
+
+[[topic]]
+id = "reactivity"
+title = "Reactivity"
+description = "Parameters, computed values, updaters and objects that follow each other."
+
+[[topic]]
+id = "mechanics"
+title = "Mechanics"
+description = "Mechanisms, transmissions, supports, forces and simulations."
+
+[[topic]]
+id = "audio"
+title = "Audio"
+description = "Sound effects, music-reactive animation and narration."
+
+[[topic]]
+id = "media"
+title = "Media"
+description = "Images, SVG, video and Lottie animations."
+
+[[topic]]
+id = "slides"
+title = "Slides"
+description = "Presentations: slides, editorial components, sections and tables."
+
+[[topic]]
+id = "live"
+title = "Live audience"
+description = "Polls, quizzes and live zones the audience joins from their phones."
+
+[[topic]]
+id = "showcase"
+title = "Showcase"
+description = "Complete pieces that combine many topics, each with its own look."
+
+[[example]]
+path = "basics/first_scene.py"
+description = "A first scene: objects on a stage, and play, wait and immediate changes moving the timeline cursor, drawn as a timeline."
+
+[[example]]
+path = "basics/scene_tour.py"
+description = "A tour of the scene: the factories that make shapes, text, equations, code, layouts, plots, SVGs and readouts, and the animations that change them."
+
+[[example]]
+path = "basics/groups.py"
+description = "Groups that move, turn and animate as one, nested arms that turn about their joints, and groups lined up or repeated."
+
+[[example]]
+path = "basics/segments.py"
+description = "Segments as chapters of a scene: notes, reuse, persistent objects, release, stops and markers."
+
+[[example]]
+path = "shapes/primitives.py"
+description = "Every closed shape, line, arc, polyline and diagram mark that scene.geometry draws."
+
+[[example]]
+path = "shapes/curves.py"
+description = "Quadratic and cubic Bézier curves with their handles, composed curve commands and parametric polylines, one redrawn every frame."
+
+[[example]]
+path = "shapes/arrows.py"
+description = "Straight, double and curved arrows with their sizes, grow_arrow against create, tips on any stroke and connectors that follow moving boxes."
+
+[[example]]
+path = "shapes/strokes.py"
+description = "Stroke width and alignment, caps, joins and miter limits, dash patterns that march, tapered width profiles and trim paths."
+
+[[example]]
+path = "shapes/boolean_operations.py"
+description = "Union, intersection, difference and xor of overlapping shapes, live results that follow their operands, fill rules and tolerance."
+
+[[example]]
+path = "shapes/clipping.py"
+description = "Shapes, groups and text clipped to moving vector masks, inverted or with the even-odd rule, and fills that rise to a level from every side."
+
+[[example]]
+path = "shapes/path_modifiers.py"
+description = "Zig zag, round corners, pucker and bloat, twist, wiggle and offset modifiers, animated, stacked and applied to text and trims."
+
+[[example]]
+path = "style/colors.py"
+description = "CSS color strings, Color constructors, named constants, the theme's color roles and the Tailwind palette."
+allow = ["colors"]
+
+[[example]]
+path = "style/brushes.py"
+description = "Solid, linear, radial and sweep brushes, their extend modes, gradient text and strokes, and gradients that animate."
+
+[[example]]
+path = "style/color_maps.py"
+description = "Built-in continuous and categorical color maps, sampling, custom, reversed and translucent maps, and data colored by value."
+
+[[example]]
+path = "style/blend_modes.py"
+description = "Every blend mode of a drawable over the same backdrop, and blended groups, member overrides and text."
+
+[[example]]
+path = "style/themes.py"
+description = "The palette of every built-in theme and its aliases, side by side on the same small composition."
+
+[[example]]
+path = "style/custom_themes.py"
+description = "A Theme derived from a built-in one with its own colors, fonts, text roles, style classes, spacing tokens and validation."
+allow = ["theme"]
+
+[[example]]
+path = "style/backgrounds.py"
+description = "The scene background, solid and gradient segment backgrounds, dot grids, mesh gradients, auroras and WGSL shader backgrounds."
+allow = ["background"]
+
+[[example]]
+path = "text/typography.py"
+description = "Text roles, style keywords, spacing, styled parts, inline markup and math, paragraph alignment and wrapping, anchors and selections."
+
+[[example]]
+path = "text/code_blocks.py"
+description = "Code panels in several languages, with highlighting off, a .tmTheme, theme color options, another monospaced font and different sizes."
+
+[[example]]
+path = "text/text_writing.py"
+description = "write() by grapheme, word, line and part, in every order and stagger, and the chalk brush with its seed and roughness."
+
+[[example]]
+path = "text/text_reveals.py"
+description = "Masked slide, fade, scale and blur reveals by unit, blur-in and tracking, selection reveals, and the matching conceal and unwrite exits."
+
+[[example]]
+path = "text/text_animator.py"
+description = "The text range animator: every selector shape, unit order, animated channel, unit type and sweep range."
+
+[[example]]
+path = "text/typewriter.py"
+description = "Typewriter speed, jitter, cursors, blinking and kept cursor, then backspace and retype edits of a terminal command."
+
+[[example]]
+path = "text/scramble.py"
+description = "Scramble decoding with every charset, reveal delay, speed and seed, and scramble_to into new text."
+
+[[example]]
+path = "text/text_on_path.py"
+description = "Text along closed and open paths with align, orient, reverse and offset, and path_offset animations that spin and slide it."
+
+[[example]]
+path = "text/typst_layouts.py"
+description = "Typst documents as drawables: tables with merged cells and computed fills, grids and columns, aligned math, page widths and a .typ file."
+
+[[example]]
+path = "text/typst_packages.py"
+description = "Typst Universe packages in a scene: zebraw code listings and simple-plot function plots, styled with the theme's colors."
+web = false
+
+[[example]]
+path = "math/equations.py"
+description = "Typst math notation, display and inline equations, quantities with units, sizes and aligned multi-line equations."
+
+[[example]]
+path = "math/equation_parts.py"
+description = "Named and nested equation parts, selections by name or fragment, per-term style and writing an equation part by part."
+
+[[example]]
+path = "math/equation_annotations.py"
+description = "Emphasis, braces, leader-line notes and hand-drawn marks on single terms of an equation."
+
+[[example]]
+path = "math/derivations.py"
+description = "Step-by-step derivations: structural transforms between equations, cancelled, revealed, copied and moved terms, and a worked solution."
+
+[[example]]
+path = "math/matrices.py"
+description = "Matrix delimiters, row and column labels, spacing, cell content and entry and label styles."
+
+[[example]]
+path = "math/matrix_selections.py"
+description = "Matrix row, column, block, diagonal and predicate selections, traversal orders and cell animations."
+
+[[example]]
+path = "math/matrix_edits.py"
+description = "Inserting, removing, swapping and reordering matrix rows and columns, setting entries, and morphing one matrix into another."
+
+[[example]]
+path = "math/matrix_operations.py"
+description = "Exact matrix sums, products, inverses, determinants and LU, QR and eigen decompositions computed with SymPy."
+web = false
+
+[[example]]
+path = "layout/boxes.py"
+description = "The box model: padding in every CSS shorthand, backgrounds, borders, radii, shadows, clipping and size rules."
+
+[[example]]
+path = "layout/box_styles.py"
+description = "Reusable styles with BoxStyle, .but() and classes, typography inherited by box text, text_box and components."
+
+[[example]]
+path = "layout/flex.py"
+description = "Rows and columns with every justify and align value, gaps, wrapping, grow, shrink, basis, margins and absolute children."
+
+[[example]]
+path = "layout/grids.py"
+description = "Grid tracks in px, %, fr, auto and scene units, gaps, spans, explicit cells, column flow and alignment in cells."
+
+[[example]]
+path = "layout/stacks.py"
+description = "Stacked layers placed by the nine anchors and offsets, every fit mode, and draw order with z_index."
+
+[[example]]
+path = "layout/zones.py"
+description = "Zones templates, nesting and inset, place() with anchor, padding, offset and fit, arrange(), fill() and animated moves between zones."
+
+[[example]]
+path = "layout/positioning.py"
+description = "Free objects placed with to_edge, to_corner, next_to, align_to, move_to and linear layout constraints with priorities."
+
+[[example]]
+path = "layout/reflow.py"
+description = "Animated structure changes: add, remove, replace, set, item, move_child, swap, reverse and detach."
+
+[[example]]
+path = "layout/box_reveal.py"
+description = "Revealing a box piece by piece with reveal, cascade and stagger, and changing pieces with find, find_all and each."
+
+[[example]]
+path = "layout/scatter.py"
+description = "Seeded scatter of formulas around a character's parts, with seeds, gaps, avoided zones and object regions."
+
+[[example]]
+path = "animation/easings.py"
+description = "Every Easing preset, curve family, overshoot mode, spring and shaping factory, racing side by side."
+
+[[example]]
+path = "animation/entrances_exits.py"
+description = "Every built-in entrance and exit: fades from each direction, stroke drawing, growth from a center, point or edge, and the exits that hide a drawable."
+
+[[example]]
+path = "animation/properties.py"
+description = "Every property target of drawable.animate: position, transforms, style, polygon points and custom animations computed by your own function."
+
+[[example]]
+path = "animation/keyframes.py"
+description = "Keyframes on every channel, an easing per segment between stops, and linear versus Catmull-Rom paths through the stops."
+
+[[example]]
+path = "animation/timing.py"
+description = "Repeats and loops, parallel, sequence and stagger, reshaping a composition's time, and staggered waves and distributed values from every origin."
+
+[[example]]
+path = "animation/choreography.py"
+description = "Labels and relative inserts drawn as a timeline from Composition.schedule(), and animations cued on beats and bars of a tempo under a launched sweep."
+
+[[example]]
+path = "animation/motion_paths.py"
+description = "Travelling along circles, waves and arrows with move_along and its options, and straight moves bent into arcs with path_arc."
+
+[[example]]
+path = "animation/secondary_motion.py"
+description = "Follow-through with settle, trailing followers, squash and stretch, and exact light physics with throw and inertia."
+
+[[example]]
+path = "animation/procedural_motion.py"
+description = "Oscillators on every channel and waveform, wiggle, the other Updater presets, seeded randomness and smooth noise."
+
+[[example]]
+path = "transforms/transform_to.py"
+description = "Morphs between shapes and their mirror images, open strokes, solid and gradient fills, transform_to against replacement and fade transforms, fading while morphing, and text to text, equation and shape."
+
+[[example]]
+path = "transforms/matching.py"
+description = "Matching transforms that pair pieces by shape, place and color, glyph matching between words and equations, and group and SVG morphs that pair parts by name or id."
+
+[[example]]
+path = "transforms/magic_move.py"
+description = "magic_move by name, by SVG id and by a key function, fading or cutting unmatched members, and a leaderboard reordered and carried across a cut with Transition.magic_move."
+
+[[example]]
+path = "transforms/pivots.py"
+description = "Rotations, scales and skews about a drawable's center, a scene point or a moved pivot, hinged groups and orbits, and shapes that aim at a moving target with look_at."
+
+[[example]]
+path = "emphasis/indications.py"
+description = "Indicate, wiggle, blink, passing flashes, broadcast ripples, flashing frames and underlines, and the emphasis of one word inside a text."
+
+[[example]]
+path = "emphasis/highlights.py"
+description = "Live surrounding frames that follow and retarget, color-cycling boundaries, highlighter marker bands and spotlights that dim everything else."
+
+[[example]]
+path = "emphasis/hand_drawn.py"
+description = "Hand-drawn underlines, boxes, circles, strikes and brackets with every roughness, pass count, seed and style, marks that follow moving targets, and chalk shapes."
+
+[[example]]
+path = "effects/glow_blur_shadow.py"
+description = "Glow, blur and drop shadow: their parameters, the drawables they apply to, and how they animate."
+
+[[example]]
+path = "effects/echo.py"
+description = "Trails of delayed copies with their count, delay and decay, what they replay, held trails and onion skins."
+
+[[example]]
+path = "effects/mattes.py"
+description = "Track mattes in alpha and luma modes, inverted, animated and removed, and metaballs whose drops melt together."
+
+[[example]]
+path = "effects/glass.py"
+description = "Frosted and liquid glass over what is drawn behind, every refraction, bevel, twist and dispersion setting, and backdrop blur."
+
+[[example]]
+path = "effects/object_shaders.py"
+description = "WGSL passes on single drawables with uniforms, every PostProcess preset as an effect, chains and margins."
+
+[[example]]
+path = "effects/audio_shaders.py"
+description = "Per-object shader effects driven by a music track's bands, level, pulses and spectrogram."
+
+[[example]]
+path = "effects/falloff.py"
+description = "Falloffs that give each member of a group its own scale, turn, opacity, position or color: index, distance, noise, sources and their combinations."
+
+[[example]]
+path = "effects/repeaters.py"
+description = "Copies stepped by a transform with repeat, copies placed by a grid, circle, path or random distribution, and animated copy counts."
+
+[[example]]
+path = "effects/particles.py"
+description = "Particle emitter shapes, motion, looks, bursts and confetti, exact at any seek."
+
+[[example]]
+path = "effects/plexus.py"
+description = "Live lines between drifting points, by range, nearest neighbors or sequence, with and without distance fading."
+
+[[example]]
+path = "post_processing/color_grading.py"
+description = "Exposure, contrast, saturation and temperature grades and a 3D lookup table, applied to the whole frame."
+allow = ["post"]
+
+[[example]]
+path = "post_processing/finishes.py"
+description = "Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch passes, each ramped in through a Parameter."
+allow = ["post"]
+
+[[example]]
+path = "post_processing/bloom.py"
+description = "Bloom threshold, intensity and radius on neon outlines, and a glow that pulses with a Parameter."
+allow = ["post"]
+
+[[example]]
+path = "post_processing/motion_blur.py"
+description = "Film-shutter motion blur that smears dots by speed, spinning, scaling and orbiting shapes, with one dot kept sharp."
+
+[[example]]
+path = "post_processing/post_chains.py"
+description = "Chained passes in both orders, the scene post-process with segment overrides, and a custom WGSL pass whose uniform is a number, a Parameter or noise."
+allow = ["post"]
+
+[[example]]
+path = "transitions/cuts_and_fades.py"
+description = "Cuts, cross-fades, fade-through and zoom-through, with flash and light-leak overlays and a transition sound."
+
+[[example]]
+path = "transitions/reveals.py"
+description = "Vector reveals: wipes, clock wipes, iris shapes, blinds, push and slide, with their directions and a spring easing."
+
+[[example]]
+path = "transitions/morph_transitions.py"
+description = "Drawables that travel across the cut with Transition.morph pairs declared through scene.link, and Transition.magic_move by name."
+
+[[example]]
+path = "transitions/shader_blends.py"
+description = "Shader transition presets with their settings, a luma reveal from a grayscale image, and a custom WGSL swirl with uniforms."
+
+[[example]]
+path = "transitions/segment_reuse.py"
+description = "Content across segments: reuse through a cross-fade, a persistent badge, release, and a transition added later with scene.link."
+
+[[example]]
+path = "camera/camera_moves.py"
+description = "Pan, zoom and rotate the camera, frame objects with margins, and follow a moving target."
+
+[[example]]
+path = "camera/camera_states.py"
+description = "Reusable camera poses: state_2d, capture, to, and named save and restore."
+
+[[example]]
+path = "camera/camera_shots.py"
+description = "Drive the camera along a path, whip pan with motion blur, and shake it with the trauma model."
+
+[[example]]
+path = "camera/camera_bindings.py"
+description = "Bind the camera's center, zoom and rotation to drawables and reactive values, blended by influence and switched on and off."
+
+[[example]]
+path = "camera/camera_insets.py"
+description = "Insets that enlarge a detail in a screen joined to it: placement, shapes, view moves, following and fixed screens."
+
+[[example]]
+path = "camera/camera_views.py"
+description = "Shapes that show what a second camera sees: frames, fit modes, lenses and X-ray view layers."
+
+[[example]]
+path = "camera/parallax.py"
+description = "Parallax layers at several depths under pan, zoom and rotation, and depth of field with a rack focus."
+
+[[example]]
+path = "3d/primitives_3d.py"
+description = "Cubes, spheres, cylinders, cones and planes as lit meshes, with their segments, rings and caps."
+
+[[example]]
+path = "3d/materials_3d.py"
+description = "Matte, metal and emissive materials, roughness, metallic and emission settings, and animated materials and fills."
+
+[[example]]
+path = "3d/transforms_3d.py"
+description = "Turning, moving and scaling drawables in depth with the _3d methods, about their center or a pivot."
+
+[[example]]
+path = "3d/extrusion.py"
+description = "Text, equations, SVGs, shapes with holes and groups extruded into lit solids, with depth, bevel, tolerance and materials."
+
+[[example]]
+path = "3d/lines_3d.py"
+description = "Polylines through 3D points with solid colors and color maps, and paths traced behind moving objects that fade, cap or thin."
+
+[[example]]
+path = "3d/axes_3d.py"
+description = "3D axes with their grid planes, box sizes, linear, log, symlog and power scales, and layers that animate apart."
+
+[[example]]
+path = "3d/plots_3d.py"
+description = "Surfaces, parametric curves and vector fields in a 3D space, static and driven by parameters."
+
+[[example]]
+path = "3d/axonometric.py"
+description = "A 3D model drawn as flat shapes from isometric, dimetric, plan, front and side views, turned and morphed between views."
+
+[[example]]
+path = "3d/camera_3d.py"
+description = "The 3D camera: look_at, orbit, dolly and dolly zoom, perspective and orthographic lenses, saved poses, state_3d and bind_3d."
+
+[[example]]
+path = "visualization/axes.py"
+description = "Linear, log, symlog, power, category and time axes, tick steps, number formats, styles, titles and crossings."
+
+[[example]]
+path = "visualization/coordinate_spaces.py"
+description = "Cartesian, polar and complex planes, number lines, grids and numbers, coordinates that place objects and animated views."
+
+[[example]]
+path = "visualization/plots.py"
+description = "Function, parametric and implicit curves, log axes, Riemann sums and other calculus constructions, and curves that follow parameters."
+
+[[example]]
+path = "visualization/chart_marks.py"
+description = "Every chart mark: points, lines, steps, areas, bars, histograms, box plots, violins, error bars and heatmaps."
+
+[[example]]
+path = "visualization/chart_encodings.py"
+description = "Color, size, opacity and label channels, scales, legends and color bars, and explicit axes."
+
+[[example]]
+path = "visualization/chart_transitions.py"
+description = "Charts that morph between specs by key or index, change mark family or data, and grow from 2D into 3D."
+
+[[example]]
+path = "visualization/bar_race.py"
+description = "Ranked bars that grow, overtake each other and leave the top, with value formats, colors and a rolling ticker."
+
+[[example]]
+path = "visualization/vector_fields.py"
+description = "Vector fields as arrows and streamlines with their options, flowing highlights, particles, advection and color maps."
+
+[[example]]
+path = "visualization/readouts.py"
+description = "Rolling counters in every format and mode, live readouts of parameters, functions and time, progress rings and countdowns."
+
+[[example]]
+path = "reactivity/parameters.py"
+description = "Parameters animated, cut and keyframed, a Variable that shows itself, computed values and chains, every setter that follows a source, and what ends a binding."
+
+[[example]]
+path = "reactivity/updaters.py"
+description = "Per-frame Python updaters, stateless and simulated, sampled series on every channel, stacked and removed presets, and arcs redrawn from a Parameter."
+
+[[example]]
+path = "reactivity/connectors.py"
+description = "Reference points, followers, coordinate and rotation bindings, look_at, and lines, labels and frames that keep up with moving objects."
+
+[[example]]
+path = "reactivity/curve_trackers.py"
+description = "A point, tangent, normal and osculating circle riding polylines, Bézier curves, arcs and polygons, and traced paths that fade, cap or thin their samples."
+
+[[example]]
+path = "reactivity/circle_to_sine.py"
+description = "One angle turns a point on a circle while traced paths draw its sine and cosine waves, with live readouts."
+
+[[example]]
+path = "mechanics/supports.py"
+description = "Every support kind, the directions they face, their sizes and their styleable parts."
+
+[[example]]
+path = "mechanics/dimensions.py"
+description = "Linear dimensions with symbols and readouts, the side they sit on, their units, formats, style and parts."
+
+[[example]]
+path = "mechanics/angle_dimensions.py"
+description = "Angles between rays with symbols and readouts, in every sweep, with their arrowheads, extensions and labels."
+
+[[example]]
+path = "mechanics/forces.py"
+description = "Force vectors with readouts, forces from a magnitude or from components, moments, coordinate frames and a free body diagram."
+
+[[example]]
+path = "mechanics/mechanisms.py"
+description = "Bars and joints between moving points, a slider-crank and a four-bar linkage with a traced coupler point."
+
+[[example]]
+path = "mechanics/springs.py"
+description = "Helical springs between moving endpoints, with their coils, amplitude, crossings and straight ends, in chains and on levers."
+
+[[example]]
+path = "mechanics/transmissions.py"
+description = "Gears and their options, gear trains, racks and pinions, cams with followers and contact on curves."
+
+[[example]]
+path = "mechanics/simulations.py"
+description = "A damped pendulum, a double pendulum and a mass on a spring, stepped at a fixed rate and exact at any seek."
+
+[[example]]
+path = "audio/music.py"
+description = "Audio clips played at the cursor with their length, volume and fades, and animations cut on the beats and bars of a track's tempo."
+
+[[example]]
+path = "audio/sound_effects.py"
+description = "Sounds anchored to an animation with volume, delay and offset, sounds placed at a second, and sounds played by transitions and staggers."
+
+[[example]]
+path = "audio/signals.py"
+description = "A track's loudness, bands, hits and beats as signals, and the sizes, opacities, updaters, falloffs and readouts they drive."
+
+[[example]]
+path = "audio/visualizers.py"
+description = "Equalizer shapes, layouts and fills, and the spectrum, waveform and samples of a track they draw."
+
+[[example]]
+path = "audio/narration.py"
+description = "Voiceover blocks timed by their takes, markers in the text, a narration script and a live take recorded while presenting."
+
+[[example]]
+path = "media/images.py"
+description = "Raster images fitted to a frame in every mode, cropped by pixels or fractions, panned and zoomed by animating the crop, and sampled at every quality."
+
+[[example]]
+path = "media/svg.py"
+description = "SVG files imported with their gradients, clip paths and filters, drawn in with write, create and fade_in, and parts addressed by id, restyled and animated."
+
+[[example]]
+path = "media/video.py"
+description = "MP4 clips synchronized with the timeline: fitted and cropped, trimmed, looped, sped up and slowed down, and cut into segments."
+web = false
+
+[[example]]
+path = "media/lottie.py"
+description = "Lottie JSON clips trimmed, looped and sped up, drawn in before they play, and a dotLottie state machine driven by inputs, events and themes."
+
+[[example]]
+path = "slides/slides.py"
+description = "A short deck of segments with slide templates, steps that stop, speaker notes, transitions and a looping stop."
+allow = ["titles"]
+
+[[example]]
+path = "slides/sections.py"
+description = "Agendas in every layout and marker, progress rails in rows and columns with captions, and sections of slides that move them."
+
+[[example]]
+path = "slides/editorial_titles.py"
+description = "Title cards, section headers, banners and lower thirds with their alignments, widths, variants and appearances."
+allow = ["titles"]
+
+[[example]]
+path = "slides/editorial_components.py"
+description = "Badges and chips in every appearance and variant, cards, bullet lists and callouts that point at objects."
+
+[[example]]
+path = "slides/tables.py"
+description = "Slide tables with their widths, row heights and alignment, and data tables built from layout rows whose cells, rows and columns animate."
+
+[[example]]
+path = "slides/branding.py"
+description = "A deck theme derived from presentation, with a logo, footer and slide number placed on every slide but the cover."
+allow = ["theme", "margin", "colors", "titles"]
+
+[[example]]
+path = "live/lobby.py"
+description = "The room the audience joins before the first question: its QR code and room code, slots that fill as people join, names and join times."
+
+[[example]]
+path = "live/polls.py"
+description = "A poll for the audience's phones and its live data: bars in every direction and scale, votes, shares, icons and colors, and rehearsal votes."
+
+[[example]]
+path = "live/quizzes.py"
+description = "Quizzes with a right answer, a countdown and a reveal, rehearsed answers, scoring, timing and questions loaded from Markdown with images."
+
+[[example]]
+path = "live/leaderboards.py"
+description = "Players ranked by points with their names, bars, points, correct answers, streaks and a podium."
+
+[[example]]
+path = "live/teams.py"
+description = "The audience split into teams whose points add up, with team scores, averages, bars, leaders and a tug of war."
+
+[[example]]
+path = "live/characters.py"
+description = "The characters the audience builds on their phones: every body, eyes, mouth, color and extra, expressions and named characters."
+
+[[example]]
+path = "live/live_zones.py"
+description = "Live zones that pose the audience's characters every frame: position, rotation, scale, squash, lean, looks, expressions and names."
+
+[[example]]
+path = "live/zone_behaviors.py"
+description = "The motion helpers of gaanim.live, from lerp and easings to springs, wobbles, impacts and ballistic arcs, and state a zone keeps per player."
+
+[[example]]
+path = "live/zone_games.py"
+description = "Characters that move with the game: grouped by the answer each player chose, racing by score, and standing on a podium by rank."
+
+[[example]]
+path = "showcase/dashboard.py"
+description = "An analytics dashboard built only from boxes, revealed piece by piece and updated live."
+allow = ["theme", "colors"]
+
+[[example]]
+path = "showcase/lower_third.py"
+description = "A broadcast lower third, a live badge and a news ticker over drifting footage."
+allow = ["background", "colors"]
+
+[[example]]
+path = "showcase/mobile_app.py"
+description = "A phone chat app built from boxes: a clipped device, bubbles that wrap and a composer that types."
+allow = ["theme", "background", "colors"]
+
+[[example]]
+path = "showcase/trivia/main.py"
+title = "Quiz night"
+description = "A live trivia played in teams: a room the audience smashes into, polls and quizzes from Markdown, reveals with confetti, a tug of war, a score race and a podium."
+web = false
+allow = ["background", "theme", "post", "colors", "titles"]

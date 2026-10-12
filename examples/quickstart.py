@@ -1,15 +1,26 @@
-"""Minimal reproducible scene used by the repository quickstart."""
+"""A first scene: a circle bounces in, steps aside and a greeting is written beside it.
 
-from gaanim import Easing, BLACK, BLUE, GOLD, WHITE, Scene
+The frame is 16 by 9 units with the origin at its center. Unstyled shapes take
+the theme's accent and text its foreground. Each ``play`` runs its animations
+together and moves the timeline cursor to their end; ``render`` opens the result.
+"""
 
-scene = Scene(frame=(16, 9), background=BLACK, margin=0.6)
+import os
 
-circle = scene.geometry.circle(1.2).fill(BLUE).stroke(WHITE, 0.05)
-title = scene.text("Hola, Gaanim", role="title").fill(GOLD).move_to(0, 2.25)
+from gaanim import Easing, Scene
 
-scene.play([
-    circle.animate.create().duration(0.8),
-    title.animate.write().duration(0.6),
-])
-scene.play([circle.animate.shift_by(3, 0).duration(1.0).easing(Easing.SMOOTH)])
-scene.render()
+scene = Scene()
+
+circle = scene.geometry.circle(1.5)
+greeting = scene.text("Hello, Gaanim", size=1.2).move_to(1.8, 0)
+
+scene.play(circle.animate.grow_from_center().easing(Easing.BOUNCY))
+scene.play(circle.animate.move_to(-4.5, 0))
+scene.play(greeting.animate.write())
+scene.play(circle.animate.indicate())
+scene.wait(1)
+
+if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
+    scene.snapshots(snapshots, [0.4, 1.5, 2.5, 3.4, 4.5])
+else:
+    scene.render()

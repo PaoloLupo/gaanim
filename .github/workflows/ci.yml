@@ -47,6 +47,9 @@ jobs:
           python -m unittest discover -s plugins/gaanim-dev/tests -v
           python -m unittest discover -s plugins/gaanim/tests -v
 
+      - name: Check examples against their style contract
+        run: python scripts/examples.py check
+
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
@@ -109,35 +112,43 @@ jobs:
       - name: Compare representative subsystem snapshots
         shell: xvfb-run -a bash -e {0}
         run: |
-          examples=(
-            transform_demo
-            image_demo
-            svg_demo
-            camera_demo
-            matrix_showcase
-            chart_marks_gallery
-            layout_reflow
-            ui_dashboard
-            equation_step
-            primitives_3d_demo
-            vector_field_streamlines
-            presentation_demo
-            stress_bar_race
-            stress_magic_move
-            stress_sfx
-            stress_particles
-            stress_follow_through
+          scripts=(
+            examples/transforms/transform_to.py
+            examples/media/images.py
+            examples/media/svg.py
+            examples/camera/camera_moves.py
+            examples/math/matrices.py
+            examples/visualization/chart_marks.py
+            examples/layout/reflow.py
+            examples/showcase/dashboard.py
+            examples/math/derivations.py
+            examples/3d/primitives_3d.py
+            examples/visualization/vector_fields.py
+            examples/slides/slides.py
+            tests/scenes/stress/stress_bar_race.py
+            tests/scenes/stress/stress_magic_move.py
+            tests/scenes/stress/stress_sfx.py
+            tests/scenes/stress/stress_particles.py
+            tests/scenes/stress/stress_follow_through.py
           )
-          hybrid=" chart_marks_gallery primitives_3d_demo "
-          for example in "${examples[@]}"; do
-            if [[ "$hybrid" == *" $example "* ]]; then
+          hybrid=" chart_marks primitives_3d "
+          # Every script is compared before failing, so one run reports and
+          # uploads all the changes.
+          failed=()
+          for script in "${scripts[@]}"; do
+            name=$(basename "$script" .py)
+            if [[ "$hybrid" == *" $name "* ]]; then
               threshold=2 ratio=0.001
             else
               threshold=16 ratio=0.00001
             fi
-            ./target/debug/gaanim --diff --example "examples/$example.py" \
-              --pixel-threshold "$threshold" --max-changed-ratio "$ratio"
+            ./target/debug/gaanim --diff --example "$script" \
+              --pixel-threshold "$threshold" --max-changed-ratio "$ratio" || failed+=("$script")
           done
+          if (( ${#failed[@]} )); then
+            printf 'Changed: %s\n' "${failed[@]}"
+            exit 1
+          fi
 
       - name: Upload visual diff report
         if: failure()

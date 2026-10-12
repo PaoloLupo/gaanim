@@ -93,6 +93,24 @@ fn default_project_manifest(py: Python<'_>) -> PyResult<PathBuf> {
 /// `gaanim_project::resolve_project` and the `gaanim init` scaffold.
 const DEFAULT_ASSETS_DIR: &str = "assets";
 
+/// A relative file read outside a scene (a post-process, transition,
+/// shader background or theme font) is found where a scene without an asset folder finds
+/// its assets: in the working directory, then in the calling script's
+/// `assets` folder, then beside the script.
+pub(crate) fn script_asset_path(py: Python<'_>, path: PathBuf) -> PathBuf {
+    if path.is_absolute() || path.exists() {
+        return path;
+    }
+    let Ok(directory) = caller_directory(py) else {
+        return path;
+    };
+    [directory.join(DEFAULT_ASSETS_DIR), directory]
+        .into_iter()
+        .map(|folder| folder.join(&path))
+        .find(|candidate| candidate.exists())
+        .unwrap_or(path)
+}
+
 /// Read the top-level `assets_dir` string from a project manifest, falling
 /// back to [`DEFAULT_ASSETS_DIR`] when the key is absent. A present key whose
 /// value is not a single- or double-quoted string is an error rather than a
@@ -830,6 +848,7 @@ impl PyTheme {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
+        py: Python<'_>,
         base: Option<&Bound<'_, PyAny>>,
         name: Option<String>,
         colors: Option<HashMap<String, PyColor>>,
@@ -952,11 +971,12 @@ impl PyTheme {
         }
         if let Some(font_files) = font_files {
             for (family, path) in font_files {
-                let bytes = std::fs::read(&path).map_err(|error| {
-                    pyo3::exceptions::PyIOError::new_err(format!(
-                        "could not read font file '{path}' for '{family}': {error}"
-                    ))
-                })?;
+                let bytes =
+                    std::fs::read(script_asset_path(py, path.clone().into())).map_err(|error| {
+                        pyo3::exceptions::PyIOError::new_err(format!(
+                            "could not read font file '{path}' for '{family}': {error}"
+                        ))
+                    })?;
                 theme.fonts.push(ThemeFont {
                     family,
                     bytes: bytes.into(),
@@ -964,15 +984,18 @@ impl PyTheme {
             }
         }
         if let Some(font_dir) = font_dir {
-            theme.add_font_dir(&font_dir).map_err(|error| {
-                let message = format!("could not load font_dir '{}': {error}", font_dir.display());
-                match error.kind() {
-                    std::io::ErrorKind::InvalidData | std::io::ErrorKind::InvalidInput => {
-                        pyo3::exceptions::PyValueError::new_err(message)
+            theme
+                .add_font_dir(script_asset_path(py, font_dir.clone()))
+                .map_err(|error| {
+                    let message =
+                        format!("could not load font_dir '{}': {error}", font_dir.display());
+                    match error.kind() {
+                        std::io::ErrorKind::InvalidData | std::io::ErrorKind::InvalidInput => {
+                            pyo3::exceptions::PyValueError::new_err(message)
+                        }
+                        _ => pyo3::exceptions::PyIOError::new_err(message),
                     }
-                    _ => pyo3::exceptions::PyIOError::new_err(message),
-                }
-            })?;
+                })?;
         }
         if let Some(text_markup) = text_markup {
             theme.text_markup = text_markup;
@@ -6399,7 +6422,6 @@ impl PySlideKit {
         let bullet_x = -width * 0.5;
         let text_left = bullet_x + bullet_radius * 4.0;
         let text_width = (width - bullet_radius * 4.0).max(1.0e-6);
-        let label_x = text_left + text_width * 0.5;
         let mut members = Vec::with_capacity(items.len() * 2);
         for (index, item) in items.iter().enumerate() {
             let y = start_y - index as f64 * gap;
@@ -6419,7 +6441,12 @@ impl PySlideKit {
                 },
             )
             .expect("bullet text is validated by its public arguments");
-            members.push(scene.text_spec(label_spec).fill(color).move_to(label_x, y));
+            // Each item starts right after its bullet, however short it is.
+            members.push(scene.text_spec(label_spec).fill(color).at_anchor(
+                text_left,
+                y,
+                gaanim_api::canvas::Anchor::Left,
+            ));
         }
         let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().collect();
         Ok(PyDrawable(scene.group(&refs)))

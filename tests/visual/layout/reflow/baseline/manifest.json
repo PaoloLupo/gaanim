@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "width": 960,
+  "height": 540,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_1_100000",
+      "time_seconds": 1.1,
+      "file": "seek_0000_t_1_100000.png"
+    },
+    {
+      "id": "seek_0001_t_1_800000",
+      "time_seconds": 1.7999999999999998,
+      "file": "seek_0001_t_1_800000.png"
+    },
+    {
+      "id": "seek_0002_t_3_200000",
+      "time_seconds": 3.1999999999999997,
+      "file": "seek_0002_t_3_200000.png"
+    },
+    {
+      "id": "seek_0003_t_4_600000",
+      "time_seconds": 4.6,
+      "file": "seek_0003_t_4_600000.png"
+    },
+    {
+      "id": "seek_0004_t_6_000000",
+      "time_seconds": 5.999999999999999,
+      "file": "seek_0004_t_6_000000.png"
+    },
+    {
+      "id": "seek_0005_t_7_300000",
+      "time_seconds": 7.299999999999999,
+      "file": "seek_0005_t_7_300000.png"
+    },
+    {
+      "id": "seek_0006_t_8_100000",
+      "time_seconds": 8.1,
+      "file": "seek_0006_t_8_100000.png"
+    },
+    {
+      "id": "seek_0007_t_9_700000",
+      "time_seconds": 9.7,
+      "file": "seek_0007_t_9_700000.png"
+    },
+    {
+      "id": "seek_0008_t_11_300000",
+      "time_seconds": 11.299999999999999,
+      "file": "seek_0008_t_11_300000.png"
+    },
+    {
+      "id": "seek_0009_t_12_900000",
+      "time_seconds": 12.899999999999999,
+      "file": "seek_0009_t_12_900000.png"
+    },
+    {
+      "id": "seek_0010_t_14_100000",
+      "time_seconds": 14.099999999999998,
+      "file": "seek_0010_t_14_100000.png"
+    },
+    {
+      "id": "seek_0011_t_14_800000",
+      "time_seconds": 14.799999999999999,
+      "file": "seek_0011_t_14_800000.png"
+    },
+    {
+      "id": "seek_0012_t_16_200000",
+      "time_seconds": 16.199999999999996,
+      "file": "seek_0012_t_16_200000.png"
+    },
+    {
+      "id": "seek_0013_t_17_600000",
+      "time_seconds": 17.599999999999994,
+      "file": "seek_0013_t_17_600000.png"
+    },
+    {
+      "id": "seek_0014_t_19_000000",
+      "time_seconds": 18.999999999999996,
+      "file": "seek_0014_t_19_000000.png"
+    },
+    {
+      "id": "seek_0015_t_19_900000",
+      "time_seconds": 19.899999999999995,
+      "file": "seek_0015_t_19_900000.png"
+    },
+    {
+      "id": "seek_0016_t_21_300000",
+      "time_seconds": 21.299999999999994,
+      "file": "seek_0016_t_21_300000.png"
+    },
+    {
+      "id": "seek_0017_t_22_700000",
+      "time_seconds": 22.699999999999996,
+      "file": "seek_0017_t_22_700000.png"
+    },
+    {
+      "id": "seek_0018_t_24_500000",
+      "time_seconds": 24.499999999999993,
+      "file": "seek_0018_t_24_500000.png"
+    }
+  ]
+}

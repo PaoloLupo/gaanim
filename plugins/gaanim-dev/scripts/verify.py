@@ -65,6 +65,8 @@ def _fast_commands(repo: Path, change: impact_tool.Impact) -> list[list[str]]:
             _append_unique(commands, ["just", "dev", "test", *[
                 arg for crate in crates for arg in ("-p", crate)
             ]])
+    if any(path.startswith("examples/") or path == "scripts/examples.py" for path in change.changed_files):
+        _append_unique(commands, [sys.executable, "scripts/examples.py", "check"])
     if plugin_changed:
         for prefix in impact_tool.PLUGIN_PREFIXES:
             _append_unique(
