@@ -5366,6 +5366,7 @@ impl SceneModel {
                             frame_bounds,
                             text_config,
                         );
+                        Self::carry_text_fill(builder, member, replacement.id);
                         let entering_ancestor = entering.is_some_and(|entering| {
                             let mut current = Some(*layout_id);
                             while let Some(id) = current {
@@ -5511,14 +5512,20 @@ impl SceneModel {
                         }
                         // The background shares the order of the box's first
                         // content and draws just before it: under that content,
-                        // over whatever was created before the box.
+                        // over whatever was created before the box. A child
+                        // created before the others and removed or replaced
+                        // later still counts (see `backdrop_orders`).
                         if let Some(background) = background {
                             let first = children
                                 .iter()
                                 .filter(|child| **child != background)
                                 .flat_map(|child| builder.hierarchy_ids(*child))
-                                .map(|id| id.index())
+                                .map(|id| id.index() as u64)
+                                .chain(builder.backdrop_orders.get(&background).copied())
                                 .min();
+                            if let Some(first) = first {
+                                builder.backdrop_orders.insert(background, first);
+                            }
                             let z_index = background_source
                                 .and_then(|source| object_specs.get(&source))
                                 .map_or(0, |spec| spec.z_index);
@@ -5535,7 +5542,7 @@ impl SceneModel {
                                     gaanim_scene::LayoutBackdrop { depth },
                                     RenderOrder {
                                         z_index,
-                                        creation_order: first as u64,
+                                        creation_order: first,
                                     },
                                 ));
                             }
@@ -5891,6 +5898,22 @@ impl SceneModel {
                         }
                     }
                     for (old, new, entry_pending, instant, own_entry) in text_crossfades {
+                        // The copy shows the text as it is now: one hidden
+                        // with `opacity(0)` or faded out stays hidden, and a
+                        // later fade-in brings it back as the text would.
+                        let shown = builder.states.get(old).map_or(1.0, |state| state.opacity);
+                        if let Some(faded) = builder.faded_opacities.get(&old).copied() {
+                            builder.faded_opacities.insert(new, faded);
+                        }
+                        if let Some(state) = builder.states.get_mut(new) {
+                            state.opacity = shown;
+                        }
+                        if shown <= 0.0 && !entry_pending {
+                            if let Some(state) = builder.states.get(new) {
+                                builder.commands.entity(state.entity).insert(Opacity(0.0));
+                            }
+                            continue;
+                        }
                         if entry_pending {
                             // The text has not entered yet and its fade-in now
                             // targets the replacement: a crossfade here would
@@ -11912,6 +11935,44 @@ impl SceneModel {
                 z_index: 1000,
                 creation_order: id.index() as u64,
             });
+    }
+
+    /// Give `copy`, a text a layout composed anew from the declaration of
+    /// `text`, the fill `text` shows now. Both start from the same
+    /// declaration, so they differ only when a cut or an animation (such as
+    /// a box's `set(color=)`) recolored the text since; then every glyph
+    /// takes the new fill, as `post_apply` paints a declared one. A text
+    /// never recolored keeps its own glyph colors (markup, highlighting).
+    fn carry_text_fill(builder: &mut SceneBuilder, text: ObjectId, copy: ObjectId) {
+        let Some(fill) = builder.states.get(text).map(|state| state.fill.clone()) else {
+            return;
+        };
+        let spans = match builder.states.get_mut(copy) {
+            Some(state) if state.fill != fill => {
+                state.fill = fill.clone();
+                state.child_spans.clone()
+            }
+            _ => return,
+        };
+        for span in &spans {
+            if let Some(span_state) = builder.states.get_mut(span.id) {
+                let previous = std::mem::replace(&mut span_state.fill, fill.clone());
+                if let Some(ref paint) = fill
+                    && span_state.stroke.brush.is_some()
+                    && span_state.stroke.brush == previous
+                {
+                    span_state.stroke.brush = Some(paint.clone());
+                    builder
+                        .commands
+                        .entity(span.entity)
+                        .insert(span_state.stroke.clone());
+                }
+            }
+            builder.commands.entity(span.entity).insert(match fill {
+                Some(ref paint) => FillBrush(Some(paint.clone())),
+                None => FillBrush::transparent(),
+            });
+        }
     }
 
     fn post_apply(
@@ -21318,6 +21379,125 @@ mod tests {
         );
     }
 
+    /// A text its box composes anew at another width keeps the fill it was
+    /// recolored with after its declaration.
+    #[test]
+    fn responsive_layout_text_keeps_the_fill_it_was_recolored_with() {
+        use gaanim_layout::{LayoutItemStyle, LayoutNodeKind, LayoutStyle, SizeRule};
+        let red = PenikoColor::from_rgb8(255, 0, 0);
+        let mut canvas = SceneModel::new(640, 360);
+        let text = canvas.configured_text(
+            "Wraps at the width its box offers",
+            gaanim_text::prelude::TextStyle::default(),
+            gaanim_text::prelude::TextFlow::default(),
+        );
+        let container = canvas.group(&[&text]);
+        text.claim_layout(&container).unwrap();
+        let reflow = |canvas: &mut SceneModel, width: f64, version: u64| {
+            canvas.reflow_layout(
+                &container,
+                vec![crate::canvas::LayoutMemberSpec {
+                    id: text.id,
+                    style: LayoutItemStyle::default(),
+                }],
+                crate::canvas::LayoutSpec {
+                    kind: LayoutNodeKind::Column { wrap: false },
+                    style: LayoutStyle {
+                        width: SizeRule::Fixed(width),
+                        ..Default::default()
+                    },
+                    within: LayoutWithin::Safe,
+                },
+                version,
+                None,
+                None,
+                None,
+            );
+        };
+        reflow(&mut canvas, 2.0, 1);
+        canvas.play(vec![text.animate().fill(red).duration(0.5)]);
+        reflow(&mut canvas, 6.0, 2);
+        canvas.wait(0.5);
+
+        let (mut world, _) = compiled_world(&canvas);
+        let recolored = world
+            .query::<&FillBrush>()
+            .iter(&world)
+            .filter(|fill| fill.0 == Some(Brush::Solid(red)))
+            .count();
+        assert!(recolored > 0, "the copy at the new width lost its red fill");
+    }
+
+    /// The copy a layout composes a text into shows the text as it was: one
+    /// hidden with `opacity(0)`, or faded out before it is placed, stays
+    /// hidden until it fades in.
+    #[test]
+    fn responsive_layout_text_keeps_the_opacity_it_was_hidden_with() {
+        let mut canvas = SceneModel::new(640, 360);
+        let text = |canvas: &mut SceneModel, content: &str| {
+            canvas.configured_text(
+                content,
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+        };
+        let hidden = text(&mut canvas, "Hidden with opacity").opacity(0.0);
+        let faded = text(&mut canvas, "Faded out before it is placed");
+        canvas.play(vec![faded.animate().fade_out().duration(0.5)]);
+        let container = canvas.group(&[&hidden, &faded]);
+        hidden.claim_layout(&container).unwrap();
+        faded.claim_layout(&container).unwrap();
+        canvas.reflow_layout(
+            &container,
+            [&hidden, &faded]
+                .into_iter()
+                .map(|member| crate::canvas::LayoutMemberSpec {
+                    id: member.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                })
+                .collect(),
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Stack,
+                style: gaanim_layout::LayoutStyle::default(),
+                within: LayoutWithin::Safe,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(0.5);
+        canvas.play(vec![faded.animate().fade_in().duration(0.5)]);
+
+        let (_, timeline) = compiled_world(&canvas);
+        let reveal_starts: Vec<_> = timeline
+            .clips
+            .values()
+            .filter(|clip| {
+                matches!(
+                    &clip.payload,
+                    gaanim_timeline::clip::ClipPayload::Animation(
+                        gaanim_timeline::clip::AnimationSpec {
+                            lens: gaanim_timeline::clip::PropertyLensSpec::Opacity { to, .. },
+                            ..
+                        }
+                    ) if *to > 0.0
+                )
+            })
+            .map(|clip| clip.start)
+            .collect();
+        assert!(
+            reveal_starts
+                .iter()
+                .any(|start| (start - 1.0).abs() < 1.0e-9),
+            "the authored fade-in must remain: {reveal_starts:?}"
+        );
+        assert!(
+            reveal_starts.iter().all(|start| *start >= 1.0 - 1.0e-9),
+            "a hidden text showed when it was placed: {reveal_starts:?}"
+        );
+    }
+
     #[test]
     fn a_falloff_scales_group_members_by_their_distance_to_a_moving_target() {
         use gaanim_animation::{
@@ -22047,6 +22227,78 @@ mod tests {
             [0, 1]
         );
         assert_eq!(backdrops[0].1, backdrops[1].1);
+    }
+
+    /// The render order holds for the whole timeline: a child created before
+    /// the rest of its decorated box and replaced later stays above the
+    /// box's background until it leaves.
+    #[test]
+    fn box_background_stays_beneath_a_child_replaced_later() {
+        use crate::canvas::{LayoutMemberSpec, LayoutSpec, LayoutWithin};
+        use gaanim_layout::LayoutNodeKind;
+
+        fn snapshot(members: &[&DrawableHandle]) -> Vec<LayoutMemberSpec> {
+            members
+                .iter()
+                .map(|member| LayoutMemberSpec {
+                    id: member.id,
+                    style: member.layout_item(),
+                })
+                .collect()
+        }
+
+        let mut canvas = SceneModel::new(640, 360);
+        let old = canvas.rect(1.0, 0.5);
+        let first = canvas.rect(2.0, 0.5);
+        let root = canvas.group(&[&first, &old]);
+        first.claim_layout(&root).unwrap();
+        old.claim_layout(&root).unwrap();
+        // A Python box puts its background on its content's lowest layer.
+        let background = canvas
+            .decorate_layout(&root, Some(PenikoColor::WHITE.into()), None, 0.0)
+            .unwrap()
+            .z_index(0);
+        let spec = LayoutSpec {
+            kind: LayoutNodeKind::Column { wrap: false },
+            style: Default::default(),
+            within: LayoutWithin::Intrinsic,
+        };
+        canvas.reflow_layout(
+            &root,
+            snapshot(&[&first, &old]),
+            spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        canvas.wait(1.0);
+        let new = canvas.rect(1.5, 0.5);
+        new.claim_layout(&root).unwrap();
+        old.release_layout(&root);
+        canvas.set_group_members(&root, &[&first, &new]);
+        canvas.reflow_layout(
+            &root,
+            snapshot(&[&first, &new]),
+            spec,
+            2,
+            Some(0.5),
+            Some(&new),
+            Some(&old),
+        );
+        canvas.wait(0.5);
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let mut order = |handle: &DrawableHandle| {
+            let entity = entity_of(&mut world, handle);
+            *world.get::<RenderOrder>(entity).unwrap()
+        };
+        let (background, old) = (order(&background), order(&old));
+        assert_eq!(background.z_index, old.z_index);
+        assert!(
+            background.creation_order <= old.creation_order,
+            "the background draws over the replaced child: {background:?} vs {old:?}"
+        );
     }
 
     /// A readout inside a layout keeps room for the widest value its

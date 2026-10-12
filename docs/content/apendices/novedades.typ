@@ -362,6 +362,20 @@ enteros, o usa `scene.text.code`.
   columnas negras sobre un degradado gris: ciertos niveles de gris salían
   negros en toda la caja del objeto mezclado, también fuera de él, en la vista
   previa, al exportar y en los reproductores web.
+- `box.set(color=…)` recolorea los textos que la caja creó a partir de
+  cadenas, como al crearla, y con `duration` lo anima; antes solo valía para
+  las cadenas añadidas después. Un texto de una caja recoloreado (con `set` o
+  con `fill`) conserva el color cuando la caja cambia de ancho y lo vuelve a
+  partir; antes recuperaba el de su declaración.
+- `box.replace(viejo, nuevo)` y `box.remove(viejo)` en una caja con fondo
+  dejan ver al hijo viejo hasta el cambio; antes, si se creó antes que sus
+  hermanos, el fondo lo tapaba desde el principio de la escena.
+- Un texto oculto con `opacity(0)`, o que salió con un fundido, sigue oculto
+  al colocarlo en una caja; antes la caja lo mostraba opaco hasta que se
+  animaba su opacidad.
+- `box.reveal()` y `box.cascade(…)` hacen aparecer un `rolling_number` o un
+  `progress_ring` de la caja como cualquier otra pieza; antes pasaban por el
+  `animate` de su valor y el contador se veía desde el principio.
 
 == Al actualizar
 

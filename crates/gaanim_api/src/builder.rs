@@ -1098,13 +1098,18 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// reflow keeps the child's own offset from it, so a child animated
     /// inside its box stays where it was moved.
     pub(crate) layout_rests: HashMap<ObjectId, LayoutRest>,
+    /// The lowest creation order each box background has been drawn
+    /// before, keyed by compiled background. The order holds for the whole
+    /// timeline, so it never rises: the background stays beneath every
+    /// child its box has held, also one removed or replaced later.
+    pub(crate) backdrop_orders: HashMap<ObjectId, u64>,
     /// The last pivot set on each object, as the scene point it was given
     /// and the point of its parent's space it was then, which the pivot
     /// keeps as the parent moves on.
     declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     /// Opacity each object had before an animation took it to zero, which
     /// an entrance shows it at again.
-    faded_opacities: HashMap<ObjectId, f32>,
+    pub(crate) faded_opacities: HashMap<ObjectId, f32>,
 }
 
 /// The opacity an entrance shows `target` at: its `current` one, or the one
@@ -1180,6 +1185,7 @@ pub(crate) struct SceneBuilderState {
     layout_rests: HashMap<ObjectId, LayoutRest>,
     declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     faded_opacities: HashMap<ObjectId, f32>,
+    backdrop_orders: HashMap<ObjectId, u64>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -1222,6 +1228,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests: self.layout_rests.clone(),
             declared_pivots: self.declared_pivots.clone(),
             faded_opacities: self.faded_opacities.clone(),
+            backdrop_orders: self.backdrop_orders.clone(),
         }
     }
 
@@ -1271,6 +1278,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests,
             declared_pivots,
             faded_opacities,
+            backdrop_orders,
         } = state;
         Self {
             property_source_cursors,
@@ -1323,6 +1331,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests,
             declared_pivots,
             faded_opacities,
+            backdrop_orders,
         }
     }
 
@@ -1681,6 +1690,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests: HashMap::new(),
             declared_pivots: HashMap::new(),
             faded_opacities: HashMap::new(),
+            backdrop_orders: HashMap::new(),
         }
     }
 

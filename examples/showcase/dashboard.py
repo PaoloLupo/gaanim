@@ -99,13 +99,9 @@ content = L.column(header, kpis, L.row(chart, orders, gap="24px", width="fill", 
                    gap="26px", grow=1, height="fill")
 app = L.row(sidebar, content, gap="30px", padding="36px", width="fill", height="fill")
 
-# reveal() shows every piece in draw order: backgrounds fade and texts rise.
-# Rolling numbers show from their declaration, so they start transparent.
-counters = [revenue_number.visual, orders_number.visual]
-for counter in counters:
-    counter.opacity(0)
-scene.play([app.reveal(each=0.015, duration=0.35, rules="fade")]
-           + [counter.animate.opacity(1).duration(0.4).delay(0.5) for counter in counters])
+# reveal() shows every piece in draw order: backgrounds and counters fade and
+# texts rise.
+scene.play(app.reveal(each=0.015, duration=0.35, rules="fade"))
 # set() with a duration animates the reflow: the row grows and its bars with it.
 bars.set(height="100%", duration=0.9)
 scene.wait(0.6)
