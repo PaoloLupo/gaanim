@@ -7,7 +7,7 @@ import runpy
 from gaanim import Drawable, Image, Scene, Video, VideoSegment, parallel, sequence
 
 ROOT = Path(__file__).resolve().parents[1]
-make_assets = runpy.run_path(str(ROOT / "examples/media_segments_demo.py"))["make_assets"]
+make_assets = runpy.run_path(str(ROOT / "tests/scenes/smoke/media_segments_demo.py"))["make_assets"]
 image_path, video_path = make_assets(ROOT / "target/media-demo")
 
 

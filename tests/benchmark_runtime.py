@@ -723,7 +723,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path)
     parser.add_argument(
-        "--scene", type=Path, default=Path("examples/performance_benchmark.py")
+        "--scene", type=Path, default=Path("tests/performance/scenes/performance_benchmark.py")
     )
     parser.add_argument(
         "--suite",

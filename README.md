@@ -47,19 +47,24 @@ abre la escena de ejemplo en el visor.
 El ejemplo ejecutado es [`examples/quickstart.py`](examples/quickstart.py):
 
 ```python
-from gaanim import BLACK, BLUE, GOLD, WHITE, Scene
+from gaanim import Easing, Scene
 
-scene = Scene(frame=(16, 9), background=BLACK, margin=0.6)
-circle = scene.geometry.circle(1.2).fill(BLUE).stroke(WHITE, 0.05)
-title = scene.text("Hola, Gaanim", role="title").fill(GOLD).move_to(0, 2.25)
+scene = Scene()
 
-scene.play([circle.animate.create().duration(0.8), title.animate.write().duration(0.6)])
-scene.play([circle.animate.shift_by(3, 0).duration(1.0).smooth()])
+circle = scene.geometry.circle(1.5)
+greeting = scene.text("Hello, Gaanim", size=1.2).move_to(1.8, 0)
+
+scene.play(circle.animate.grow_from_center().easing(Easing.BOUNCY))
+scene.play(circle.animate.move_to(-4.5, 0))
+scene.play(greeting.animate.write())
+scene.play(circle.animate.indicate())
+scene.wait(1)
 scene.render()
 ```
 
-Para crear una escena nueva, guarde un script en `examples/` y ejecútelo con
-`just run nombre_del_script` (sin `.py`). Durante la previsualización, guardar
+Los demás ejemplos están ordenados por tema en `examples/` (ver
+[`examples/README.md`](examples/README.md)); `just run nombre_del_script`
+(sin `.py`) ejecuta cualquiera de ellos. Durante la previsualización, guardar
 el archivo recarga la escena.
 
 ### Composición sin coordenadas
@@ -193,7 +198,7 @@ animables, con `Material3D.matte`, `Material3D.metal` y
 `Material3D.emissive`. `scene.geometry.lighting_3d("studio")` las ilumina con el
 estilo de Gaanim: luz de cielo y suelo, una luz principal suave y un brillo leve
 en los bordes, conservando el color de cada material. Consulta
-`examples/primitives_3d_demo.py` para una escena completa.
+`examples/3d/primitives_3d.py` y `examples/3d/materials_3d.py` para verlas con todas sus opciones.
 
 Vello dibuja el 3D como el resto de la escena: proyecta las mallas y las líneas
 3D con la cámara, las ordena de atrás hacia delante y calcula la luz en la CPU.

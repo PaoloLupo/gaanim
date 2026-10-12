@@ -41,5 +41,5 @@ introduce a dependency cycle to match this simplified map.
 - User documentation: `docs/content/**/*.typ`.
 - Executable examples: `examples/*.py` and `docs/content/ejemplos/*.py`.
 - Performance contract: `tests/benchmark_runtime.py`,
-  `tests/performance/budgets.json`, `examples/performance_benchmark.py`, and the
+  `tests/performance/budgets.json`, `tests/performance/scenes/performance_benchmark.py`, and the
   scheduled informational CI job.

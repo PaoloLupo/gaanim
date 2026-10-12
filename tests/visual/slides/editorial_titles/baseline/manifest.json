@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "width": 960,
+  "height": 540,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_0_300000",
+      "time_seconds": 0.3,
+      "file": "seek_0000_t_0_300000.png"
+    },
+    {
+      "id": "seek_0001_t_1_720000",
+      "time_seconds": 1.72,
+      "file": "seek_0001_t_1_720000.png"
+    },
+    {
+      "id": "seek_0002_t_2_120000",
+      "time_seconds": 2.12,
+      "file": "seek_0002_t_2_120000.png"
+    },
+    {
+      "id": "seek_0003_t_3_420000",
+      "time_seconds": 3.42,
+      "file": "seek_0003_t_3_420000.png"
+    },
+    {
+      "id": "seek_0004_t_3_820000",
+      "time_seconds": 3.82,
+      "file": "seek_0004_t_3_820000.png"
+    },
+    {
+      "id": "seek_0005_t_5_120000",
+      "time_seconds": 5.12,
+      "file": "seek_0005_t_5_120000.png"
+    },
+    {
+      "id": "seek_0006_t_5_520000",
+      "time_seconds": 5.52,
+      "file": "seek_0006_t_5_520000.png"
+    },
+    {
+      "id": "seek_0007_t_6_820000",
+      "time_seconds": 6.82,
+      "file": "seek_0007_t_6_820000.png"
+    },
+    {
+      "id": "seek_0008_t_7_220000",
+      "time_seconds": 7.22,
+      "file": "seek_0008_t_7_220000.png"
+    },
+    {
+      "id": "seek_0009_t_8_400000",
+      "time_seconds": 8.4,
+      "file": "seek_0009_t_8_400000.png"
+    },
+    {
+      "id": "seek_0010_t_8_800000",
+      "time_seconds": 8.8,
+      "file": "seek_0010_t_8_800000.png"
+    },
+    {
+      "id": "seek_0011_t_9_980000",
+      "time_seconds": 9.98,
+      "file": "seek_0011_t_9_980000.png"
+    },
+    {
+      "id": "seek_0012_t_10_380000",
+      "time_seconds": 10.38,
+      "file": "seek_0012_t_10_380000.png"
+    },
+    {
+      "id": "seek_0013_t_11_560000",
+      "time_seconds": 11.56,
+      "file": "seek_0013_t_11_560000.png"
+    },
+    {
+      "id": "seek_0014_t_11_960000",
+      "time_seconds": 11.96,
+      "file": "seek_0014_t_11_960000.png"
+    },
+    {
+      "id": "seek_0015_t_13_140000",
+      "time_seconds": 13.14,
+      "file": "seek_0015_t_13_140000.png"
+    }
+  ]
+}

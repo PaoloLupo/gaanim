@@ -1081,7 +1081,7 @@ fn build_item(
     } else {
         // A grid's auto tracks already take their content's width; held at
         // that width, Taffy shares it out again and moves the tracks
-        // (matrix_showcase's brackets and labels).
+        // (the brackets and labels of examples/math/matrices.py).
         let hugs_width =
             style.width == SizeRule::Hug && !matches!(node.kind, LayoutNodeKind::Grid { .. });
         let horizontal = matches!(node.kind, LayoutNodeKind::Row { .. });

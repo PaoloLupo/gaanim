@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "width": 960,
+  "height": 540,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_2_200000",
+      "time_seconds": 2.2,
+      "file": "seek_0000_t_2_200000.png"
+    },
+    {
+      "id": "seek_0001_t_5_000000",
+      "time_seconds": 5.0,
+      "file": "seek_0001_t_5_000000.png"
+    },
+    {
+      "id": "seek_0002_t_7_400000",
+      "time_seconds": 7.4,
+      "file": "seek_0002_t_7_400000.png"
+    },
+    {
+      "id": "seek_0003_t_10_200000",
+      "time_seconds": 10.2,
+      "file": "seek_0003_t_10_200000.png"
+    },
+    {
+      "id": "seek_0004_t_12_600000",
+      "time_seconds": 12.600000000000001,
+      "file": "seek_0004_t_12_600000.png"
+    },
+    {
+      "id": "seek_0005_t_15_400000",
+      "time_seconds": 15.4,
+      "file": "seek_0005_t_15_400000.png"
+    },
+    {
+      "id": "seek_0006_t_17_800000",
+      "time_seconds": 17.8,
+      "file": "seek_0006_t_17_800000.png"
+    },
+    {
+      "id": "seek_0007_t_20_600000",
+      "time_seconds": 20.6,
+      "file": "seek_0007_t_20_600000.png"
+    },
+    {
+      "id": "seek_0008_t_23_000000",
+      "time_seconds": 23.0,
+      "file": "seek_0008_t_23_000000.png"
+    },
+    {
+      "id": "seek_0009_t_25_800000",
+      "time_seconds": 25.8,
+      "file": "seek_0009_t_25_800000.png"
+    },
+    {
+      "id": "seek_0010_t_28_200000",
+      "time_seconds": 28.2,
+      "file": "seek_0010_t_28_200000.png"
+    },
+    {
+      "id": "seek_0011_t_31_000000",
+      "time_seconds": 31.0,
+      "file": "seek_0011_t_31_000000.png"
+    },
+    {
+      "id": "seek_0012_t_33_400000",
+      "time_seconds": 33.400000000000006,
+      "file": "seek_0012_t_33_400000.png"
+    },
+    {
+      "id": "seek_0013_t_36_200000",
+      "time_seconds": 36.2,
+      "file": "seek_0013_t_36_200000.png"
+    },
+    {
+      "id": "seek_0014_t_29_600000",
+      "time_seconds": 29.6,
+      "file": "seek_0014_t_29_600000.png"
+    },
+    {
+      "id": "seek_0015_t_34_800000",
+      "time_seconds": 34.800000000000004,
+      "file": "seek_0015_t_34_800000.png"
+    }
+  ]
+}

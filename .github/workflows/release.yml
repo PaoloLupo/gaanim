@@ -58,7 +58,7 @@ jobs:
           # toolchain or Python on PATH.
           & "$stage/gaanim.exe" --help 2>&1 | Out-Host
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "$stage/gaanim.exe" check examples/theme_demo.py 2>&1 | Out-Host
+          & "$stage/gaanim.exe" check examples/style/themes.py 2>&1 | Out-Host
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item target/dist/gaanim_thumbnail_handler.dll "$stage/gaanim_thumbnail_handler.dll"
           Copy-Item target/wheels/gaanim-*-py3-none-any.whl "$stage/"
@@ -162,7 +162,7 @@ jobs:
       - name: Smoke test Python through the plugin
         # Drop the loader path setup-python exports so gaanim's own runtime
         # discovery (libpython and PYTHONHOME) is what gets tested.
-        run: env -u LD_LIBRARY_PATH -u PYTHONHOME dist/stage/gaanim check examples/theme_demo.py
+        run: env -u LD_LIBRARY_PATH -u PYTHONHOME dist/stage/gaanim check examples/style/themes.py
 
       - name: Package tarball
         run: |

@@ -39,7 +39,7 @@ PERFORMANCE_SCENARIOS = {"reload", "seek", "preview", "export"}
 # Scenarios a profile may also configure; the harness runs them only on request.
 OPTIONAL_PERFORMANCE_SCENARIOS = {"playback"}
 PERFORMANCE_FILES = {
-    "examples/performance_benchmark.py",
+    "tests/performance/scenes/performance_benchmark.py",
     "tests/benchmark_runtime.py",
     "tests/performance/budgets.json",
     "tests/test_benchmark_runtime.py",

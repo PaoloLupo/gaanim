@@ -11967,7 +11967,7 @@ mod tests {
             LottieInput, LottiePackageOptions, LottiePlayer, sample_lottie_system,
         };
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/assets/dotlottie_demo.lottie");
+            .join("../../tests/assets/dotlottie_demo.lottie");
         let mut canvas = SceneModel::new(200, 160);
         canvas.preload(std::slice::from_ref(&path)).unwrap();
         let clip = canvas

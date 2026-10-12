@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "width": 960,
+  "height": 540,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_0_300000",
+      "time_seconds": 0.3,
+      "file": "seek_0000_t_0_300000.png"
+    },
+    {
+      "id": "seek_0001_t_2_220000",
+      "time_seconds": 2.22,
+      "file": "seek_0001_t_2_220000.png"
+    },
+    {
+      "id": "seek_0002_t_2_620000",
+      "time_seconds": 2.62,
+      "file": "seek_0002_t_2_620000.png"
+    },
+    {
+      "id": "seek_0003_t_4_780000",
+      "time_seconds": 4.780000000000001,
+      "file": "seek_0003_t_4_780000.png"
+    },
+    {
+      "id": "seek_0004_t_5_180000",
+      "time_seconds": 5.180000000000001,
+      "file": "seek_0004_t_5_180000.png"
+    },
+    {
+      "id": "seek_0005_t_6_620000",
+      "time_seconds": 6.620000000000001,
+      "file": "seek_0005_t_6_620000.png"
+    },
+    {
+      "id": "seek_0006_t_7_020000",
+      "time_seconds": 7.0200000000000005,
+      "file": "seek_0006_t_7_020000.png"
+    },
+    {
+      "id": "seek_0007_t_8_460000",
+      "time_seconds": 8.46,
+      "file": "seek_0007_t_8_460000.png"
+    },
+    {
+      "id": "seek_0008_t_8_860000",
+      "time_seconds": 8.860000000000001,
+      "file": "seek_0008_t_8_860000.png"
+    },
+    {
+      "id": "seek_0009_t_10_060000",
+      "time_seconds": 10.06,
+      "file": "seek_0009_t_10_060000.png"
+    },
+    {
+      "id": "seek_0010_t_10_460000",
+      "time_seconds": 10.46,
+      "file": "seek_0010_t_10_460000.png"
+    },
+    {
+      "id": "seek_0011_t_11_660000",
+      "time_seconds": 11.66,
+      "file": "seek_0011_t_11_660000.png"
+    },
+    {
+      "id": "seek_0012_t_12_060000",
+      "time_seconds": 12.06,
+      "file": "seek_0012_t_12_060000.png"
+    },
+    {
+      "id": "seek_0013_t_13_260000",
+      "time_seconds": 13.26,
+      "file": "seek_0013_t_13_260000.png"
+    },
+    {
+      "id": "seek_0014_t_13_660000",
+      "time_seconds": 13.66,
+      "file": "seek_0014_t_13_660000.png"
+    },
+    {
+      "id": "seek_0015_t_14_940000",
+      "time_seconds": 14.94,
+      "file": "seek_0015_t_14_940000.png"
+    },
+    {
+      "id": "seek_0016_t_15_640000",
+      "time_seconds": 15.639999999999999,
+      "file": "seek_0016_t_15_640000.png"
+    },
+    {
+      "id": "seek_0017_t_16_680000",
+      "time_seconds": 16.68,
+      "file": "seek_0017_t_16_680000.png"
+    },
+    {
+      "id": "seek_0018_t_17_780000",
+      "time_seconds": 17.779999999999998,
+      "file": "seek_0018_t_17_780000.png"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <g id="body">
+    <rect id="torso" x="70" y="70" width="60" height="80" rx="8" fill="#94a3b8"/>
+    <rect id="head" x="80" y="30" width="40" height="34" rx="6" fill="#cbd5e1"/>
+  </g>
+  <g id="left-arm">
+    <rect id="upper-arm" x="40" y="78" width="28" height="12" rx="6" fill="#64748b"/>
+    <circle id="elbow" cx="40" cy="84" r="8" fill="#f59e0b"/>
+    <rect id="forearm" x="16" y="78" width="26" height="12" rx="6" fill="#64748b"/>
+  </g>
+</svg>

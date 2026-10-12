@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "width": 960,
+  "height": 540,
+  "snapshots": [
+    {
+      "id": "seek_0000_t_1_600000",
+      "time_seconds": 1.6,
+      "file": "seek_0000_t_1_600000.png"
+    },
+    {
+      "id": "seek_0001_t_3_400000",
+      "time_seconds": 3.4,
+      "file": "seek_0001_t_3_400000.png"
+    },
+    {
+      "id": "seek_0002_t_5_600000",
+      "time_seconds": 5.6,
+      "file": "seek_0002_t_5_600000.png"
+    },
+    {
+      "id": "seek_0003_t_7_700000",
+      "time_seconds": 7.7,
+      "file": "seek_0003_t_7_700000.png"
+    },
+    {
+      "id": "seek_0004_t_9_400000",
+      "time_seconds": 9.4,
+      "file": "seek_0004_t_9_400000.png"
+    },
+    {
+      "id": "seek_0005_t_10_900000",
+      "time_seconds": 10.9,
+      "file": "seek_0005_t_10_900000.png"
+    },
+    {
+      "id": "seek_0006_t_15_500000",
+      "time_seconds": 15.5,
+      "file": "seek_0006_t_15_500000.png"
+    },
+    {
+      "id": "seek_0007_t_16_900000",
+      "time_seconds": 16.9,
+      "file": "seek_0007_t_16_900000.png"
+    },
+    {
+      "id": "seek_0008_t_18_200000",
+      "time_seconds": 18.2,
+      "file": "seek_0008_t_18_200000.png"
+    },
+    {
+      "id": "seek_0009_t_21_600000",
+      "time_seconds": 21.6,
+      "file": "seek_0009_t_21_600000.png"
+    },
+    {
+      "id": "seek_0010_t_23_800000",
+      "time_seconds": 23.8,
+      "file": "seek_0010_t_23_800000.png"
+    },
+    {
+      "id": "seek_0011_t_25_600000",
+      "time_seconds": 25.6,
+      "file": "seek_0011_t_25_600000.png"
+    },
+    {
+      "id": "seek_0012_t_27_400000",
+      "time_seconds": 27.4,
+      "file": "seek_0012_t_27_400000.png"
+    },
+    {
+      "id": "seek_0013_t_29_300000",
+      "time_seconds": 29.3,
+      "file": "seek_0013_t_29_300000.png"
+    },
+    {
+      "id": "seek_0014_t_30_800000",
+      "time_seconds": 30.8,
+      "file": "seek_0014_t_30_800000.png"
+    },
+    {
+      "id": "seek_0015_t_32_600000",
+      "time_seconds": 32.6,
+      "file": "seek_0015_t_32_600000.png"
+    }
+  ]
+}

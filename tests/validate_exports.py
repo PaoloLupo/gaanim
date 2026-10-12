@@ -542,12 +542,12 @@ def export_three_d_worker(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path)
-    parser.add_argument("--scene", type=Path, default=Path("examples/export_smoke.py"))
+    parser.add_argument("--scene", type=Path, default=Path("tests/scenes/smoke/export_smoke.py"))
     parser.add_argument(
-        "--alpha-scene", type=Path, default=Path("examples/export_alpha_smoke.py")
+        "--alpha-scene", type=Path, default=Path("tests/scenes/smoke/export_alpha_smoke.py")
     )
     parser.add_argument(
-        "--three-d-scene", type=Path, default=Path("examples/export_3d_smoke.py")
+        "--three-d-scene", type=Path, default=Path("tests/scenes/smoke/export_3d_smoke.py")
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--formats", nargs="+", choices=ALL_FORMATS, default=ALL_FORMATS)
