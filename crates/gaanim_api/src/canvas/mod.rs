@@ -100,11 +100,12 @@ pub use crate::export::{AudioTrack, AudioTrackError};
 pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
-    CodeThemeError, Composition, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle, DimensionHandle,
-    DimensionOptions, ForceVectorHandle, ImageLoadError, LottieClip, LottieLoadError, PlayError,
-    PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry, StaggerLayout, StaggerOrigin,
-    StopLoopError, SupportHandle, SurroundingRectError, SurroundingRectHandle, ThemeError,
-    TypstAssetError, VideoClip, VideoLoadError, VideoSegment, stagger_weights,
+    CodeThemeError, Composition, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle,
+    DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError, LottieClip,
+    LottieLoadError, PlayError, PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry,
+    StaggerLayout, StaggerOrigin, StopLoopError, SupportHandle, SurroundingRectError,
+    SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip, VideoLoadError, VideoSegment,
+    stagger_weights,
 };
 pub use canvas_impl::{InsertPosition, ScheduleLabel};
 pub use canvas_impl::{clear_asset_caches, forget_assets};
