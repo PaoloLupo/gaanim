@@ -13,6 +13,25 @@ use kurbo::{
     BezPath, CubicBez, ParamCurve, ParamCurveArclen, ParamCurveDeriv, PathEl, PathSeg, Point, Shape,
 };
 
+/// Trimmed pieces shorter than this, in path units, are left out. They are
+/// far below a pixel, and Vello's GPU stroker turns segments whose ends meet
+/// in `f32` into horizontal streaks and bars, which flashed over plots and
+/// many-piece curves during the first frames of `create` and `write`.
+const MIN_VISIBLE_LENGTH: f64 = 1e-4;
+
+/// `path`, or an empty path when it holds nothing to draw (only `MoveTo`s).
+fn drop_if_empty(path: BezPath) -> BezPath {
+    if path
+        .elements()
+        .iter()
+        .all(|el| matches!(el, PathEl::MoveTo(_)))
+    {
+        BezPath::new()
+    } else {
+        path
+    }
+}
+
 /// Total arc length of a Bézier path, computed segment-by-segment.
 ///
 /// Uses `arclen(0.1)` accuracy which is the kurbo default. The
@@ -160,10 +179,11 @@ fn get_subpath_proportional(path: &BezPath, alpha: f64) -> BezPath {
                     current_pos = p;
                 } else {
                     let remaining = target_length - current_length;
-                    let t = segment.inv_arclen(remaining, 0.1);
-                    let trimmed = segment.subsegment(0.0..t);
-                    if let PathSeg::Line(l) = trimmed {
-                        result.line_to(l.p1);
+                    if remaining >= MIN_VISIBLE_LENGTH {
+                        let t = segment.inv_arclen(remaining, 0.1);
+                        if let PathSeg::Line(l) = segment.subsegment(0.0..t) {
+                            result.line_to(l.p1);
+                        }
                     }
                     break;
                 }
@@ -178,10 +198,11 @@ fn get_subpath_proportional(path: &BezPath, alpha: f64) -> BezPath {
                     current_pos = p2;
                 } else {
                     let remaining = target_length - current_length;
-                    let t = segment.inv_arclen(remaining, 0.1);
-                    let trimmed = segment.subsegment(0.0..t);
-                    if let PathSeg::Quad(q) = trimmed {
-                        result.quad_to(q.p1, q.p2);
+                    if remaining >= MIN_VISIBLE_LENGTH {
+                        let t = segment.inv_arclen(remaining, 0.1);
+                        if let PathSeg::Quad(q) = segment.subsegment(0.0..t) {
+                            result.quad_to(q.p1, q.p2);
+                        }
                     }
                     break;
                 }
@@ -196,10 +217,11 @@ fn get_subpath_proportional(path: &BezPath, alpha: f64) -> BezPath {
                     current_pos = p3;
                 } else {
                     let remaining = target_length - current_length;
-                    let t = segment.inv_arclen(remaining, 0.1);
-                    let trimmed = segment.subsegment(0.0..t);
-                    if let PathSeg::Cubic(c) = trimmed {
-                        result.curve_to(c.p1, c.p2, c.p3);
+                    if remaining >= MIN_VISIBLE_LENGTH {
+                        let t = segment.inv_arclen(remaining, 0.1);
+                        if let PathSeg::Cubic(c) = segment.subsegment(0.0..t) {
+                            result.curve_to(c.p1, c.p2, c.p3);
+                        }
                     }
                     break;
                 }
@@ -214,10 +236,11 @@ fn get_subpath_proportional(path: &BezPath, alpha: f64) -> BezPath {
                     current_pos = start_of_subpath;
                 } else {
                     let remaining = target_length - current_length;
-                    let t = segment.inv_arclen(remaining, 0.1);
-                    let trimmed = segment.subsegment(0.0..t);
-                    if let PathSeg::Line(l) = trimmed {
-                        result.line_to(l.p1);
+                    if remaining >= MIN_VISIBLE_LENGTH {
+                        let t = segment.inv_arclen(remaining, 0.1);
+                        if let PathSeg::Line(l) = segment.subsegment(0.0..t) {
+                            result.line_to(l.p1);
+                        }
                     }
                     break;
                 }
@@ -225,7 +248,7 @@ fn get_subpath_proportional(path: &BezPath, alpha: f64) -> BezPath {
         }
     }
 
-    result
+    drop_if_empty(result)
 }
 
 /// Point at `alpha` in `[0.0, 1.0]` of the arc length of `path`, its
@@ -456,6 +479,11 @@ fn get_subpath_proportional_range(path: &BezPath, from_alpha: f64, to_alpha: f64
                 if next_length <= target_start {
                     // Completamente antes
                 } else if current_length <= target_start && next_length <= target_end {
+                    if next_length - target_start < MIN_VISIBLE_LENGTH {
+                        current_length = next_length;
+                        current_pos = next_pos;
+                        continue;
+                    }
                     let start_rem = target_start - current_length;
                     let t0 = segment.inv_arclen(start_rem, 0.1);
                     let trimmed = segment.subsegment(t0..1.0);
@@ -475,21 +503,25 @@ fn get_subpath_proportional_range(path: &BezPath, from_alpha: f64, to_alpha: f64
                     && next_length >= target_end
                 {
                     let end_rem = target_end - current_length;
-                    let t1 = segment.inv_arclen(end_rem, 0.1);
-                    let trimmed = segment.subsegment(0.0..t1);
-                    if !started {
-                        result.move_to(trimmed.start());
+                    if end_rem >= MIN_VISIBLE_LENGTH {
+                        let t1 = segment.inv_arclen(end_rem, 0.1);
+                        let trimmed = segment.subsegment(0.0..t1);
+                        if !started {
+                            result.move_to(trimmed.start());
+                        }
+                        push_segment_to_path(&mut result, &trimmed);
                     }
-                    push_segment_to_path(&mut result, &trimmed);
                     break;
                 } else if current_length <= target_start && next_length >= target_end {
                     let start_rem = target_start - current_length;
                     let end_rem = target_end - current_length;
-                    let t0 = segment.inv_arclen(start_rem, 0.1);
-                    let t1 = segment.inv_arclen(end_rem, 0.1);
-                    let trimmed = segment.subsegment(t0..t1);
-                    result.move_to(trimmed.start());
-                    push_segment_to_path(&mut result, &trimmed);
+                    if end_rem - start_rem >= MIN_VISIBLE_LENGTH {
+                        let t0 = segment.inv_arclen(start_rem, 0.1);
+                        let t1 = segment.inv_arclen(end_rem, 0.1);
+                        let trimmed = segment.subsegment(t0..t1);
+                        result.move_to(trimmed.start());
+                        push_segment_to_path(&mut result, &trimmed);
+                    }
                     break;
                 }
 
@@ -499,7 +531,7 @@ fn get_subpath_proportional_range(path: &BezPath, from_alpha: f64, to_alpha: f64
         }
     }
 
-    result
+    drop_if_empty(result)
 }
 
 fn push_segment_to_path(path: &mut BezPath, seg: &PathSeg) {
@@ -1436,7 +1468,7 @@ mod motion_tests {
         assert!(get_point_at_alpha(&straight, 0.5).y.abs() < 1e-12);
     }
 
-    /// The road of `examples/camera_path_demo.py` (#404).
+    /// The road of `examples/camera/camera_shots.py` (#404).
     fn winding_road() -> BezPath {
         let mut path = BezPath::new();
         path.move_to((-8.0, -2.0));
@@ -1536,5 +1568,59 @@ mod arc_length_tests {
                 .unwrap();
             assert!((wrapped - point).hypot() < 1e-6);
         }
+    }
+}
+
+#[cfg(test)]
+mod trim_tests {
+    use super::*;
+
+    fn line(length: f64) -> BezPath {
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((length, 0.0));
+        path
+    }
+
+    /// Twenty short pieces, like the cells of an implicit plot's contour.
+    fn pieces() -> BezPath {
+        let mut path = BezPath::new();
+        for index in 0..20 {
+            let x = f64::from(index);
+            path.move_to((x, 0.0));
+            path.line_to((x + 0.01, 0.0));
+        }
+        path
+    }
+
+    #[test]
+    fn trims_leave_out_pieces_too_short_to_stroke() {
+        // Early in a draw every piece is far below a pixel; Vello would
+        // stroke those near-zero segments as streaks across the frame.
+        assert!(get_subpath(&pieces(), 1e-3).elements().is_empty());
+        assert!(get_subpath(&line(10.0), 1e-8).elements().is_empty());
+        assert!(
+            get_subpath_sequential(&pieces(), 1e-4)
+                .elements()
+                .is_empty()
+        );
+        assert!(
+            get_subpath_range(&line(10.0), 0.5, 0.5 + 1e-8)
+                .elements()
+                .is_empty()
+        );
+
+        // Once a piece is long enough it is drawn, at its exact length.
+        let half = get_subpath(&line(10.0), 0.5);
+        assert!((get_path_length(&half) - 5.0).abs() < 1e-9);
+        let drawn = get_subpath(&pieces(), 0.5);
+        assert_eq!(drawn.segments().count(), 20);
+        assert!(
+            drawn
+                .segments()
+                .all(|segment| segment.arclen(1e-9) >= MIN_VISIBLE_LENGTH)
+        );
+        let middle = get_subpath_range(&line(10.0), 0.25, 0.75);
+        assert!((get_path_length(&middle) - 5.0).abs() < 1e-9);
     }
 }
