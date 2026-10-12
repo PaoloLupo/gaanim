@@ -58,12 +58,13 @@ table([
     ('eq["rhs"].animate.wave()', lambda eq: eq["rhs"].animate.wave()),
 ])
 
-# ...or light passes around or under it. focus keeps the rest of the
-# equation dimmed, and the marker band stays.
+# ...or light passes around or under it. highlight tints it and back, focus
+# keeps the rest of the equation dimmed, and the marker band stays.
 scene.segment("highlights")
 table([
     ('eq["rhs"].animate.flash_around()', lambda eq: eq["rhs"].animate.flash_around()),
     ('eq["rhs"].animate.flash_under()', lambda eq: eq["rhs"].animate.flash_under()),
+    ('eq["rhs"].animate.highlight()', lambda eq: eq["rhs"].animate.highlight()),
     ('eq["rhs"].animate.focus()', lambda eq: eq["rhs"].animate.focus()),
     ('eq["rhs"].animate.marker(accent)', lambda eq: eq["rhs"].animate.marker(accent)),
 ])

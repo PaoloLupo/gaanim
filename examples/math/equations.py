@@ -163,14 +163,14 @@ table(
 )
 
 # A backslash breaks the line and & marks the column the lines align on;
-# line_spacing sets the distance between baselines.
+# line_spacing widens the gap between the lines, Typst's own at 1.
 scene.segment("aligned")
 table(
     sources(
         "f &= x^2 \\ f' &= 2 x",
         "x &= 2 + 3 \\ &= 5",
     ),
-    [("line_spacing=1.4", 1.4), ("line_spacing=2.0", 2.0)],
+    [("line_spacing=1.0", 1.0), ("line_spacing=1.6", 1.6)],
     lambda source, spacing: equation(source, size=SIZE, line_spacing=spacing),
     tracks=("5fr", "4fr"),
 )

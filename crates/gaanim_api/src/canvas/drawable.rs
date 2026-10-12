@@ -552,7 +552,8 @@ impl DrawableHandle {
             spec.fragment_fills.clear();
             for part in parts {
                 if let Some(color) = part.style.color {
-                    spec.fragment_fills.push((part.text.clone(), color));
+                    spec.fragment_fills
+                        .push((part.text.clone(), Some(part.occurrence), color));
                 }
                 spec.fragment_tags
                     .push((part.path.join("."), part.text, Some(part.occurrence)));
@@ -1657,10 +1658,19 @@ impl DrawableHandle {
     /// no literal match exists. Later calls take precedence when selections
     /// overlap.
     pub fn color_by(self, fragment: impl Into<String>, color: Color) -> Self {
-        let fragment = fragment.into();
+        self.color_fragment(fragment.into(), None, color)
+    }
+
+    /// Colors only the `occurrence`-th match of `fragment`, counted as
+    /// [`Self::select_nth`] counts them.
+    pub fn color_nth(self, fragment: impl Into<String>, occurrence: usize, color: Color) -> Self {
+        self.color_fragment(fragment.into(), Some(occurrence), color)
+    }
+
+    fn color_fragment(self, fragment: String, occurrence: Option<usize>, color: Color) -> Self {
         self.update_spec(|spec| {
             if !fragment.is_empty() {
-                spec.fragment_fills.push((fragment, color));
+                spec.fragment_fills.push((fragment, occurrence, color));
             }
         })
     }

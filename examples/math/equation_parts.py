@@ -87,6 +87,7 @@ selections([
 scene.segment("fragments")
 selections([
     ('eq["m"]', lambda eq: eq["m"]),
+    ('eq["theta"]', lambda eq: eq["theta"]),
     ('eq["sin(theta)"]', lambda eq: eq["sin(theta)"]),
     ('eq["theta\'\'"]', lambda eq: eq["theta''"]),
 ])

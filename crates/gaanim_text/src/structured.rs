@@ -4,7 +4,7 @@
 //! describes typographic composition; `gaanim_layout::BoxConstraints` remains
 //! the authority for the outer size offered to a text leaf.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use gaanim_core::peniko::Color;
 use unicode_segmentation::UnicodeSegmentation;
@@ -317,6 +317,13 @@ impl TextSpec {
         flatten_content(&self.content)
     }
 
+    /// [`Self::plain_text`] with a space at every content boundary, as
+    /// mathematics separates contents in the Typst source: `"m",
+    /// part("g")` reads `m g`, not the identifier `mg`.
+    pub fn spaced_text(&self) -> String {
+        spaced_content(&self.content)
+    }
+
     /// Visible text after removing markup delimiters and math dollars.
     pub fn rendered_text(&self) -> String {
         rendered_text_with_markup(&self.plain_text(), self.markup)
@@ -381,23 +388,17 @@ impl TextSpec {
             .is_ok_and(|segments| segments.iter().any(|segment| segment.math))
     }
 
+    /// Every semantic part, outermost first. A part's `occurrence` counts the
+    /// matches of its text before it, as selections count matching glyphs,
+    /// so it picks the part itself when its text also appears elsewhere.
     pub fn parts(&self) -> Vec<TextPartInfo> {
         let mut raw = Vec::new();
-        collect_parts(&self.content, &mut Vec::new(), &mut raw);
-        let rendered = self.rendered_text();
-        let mut seen: HashMap<String, usize> = HashMap::new();
+        collect_parts(&self.content, &mut Vec::new(), &mut String::new(), &mut raw);
+        let plain = self.plain_text();
         raw.into_iter()
-            .map(|(path, text, style)| {
+            .map(|(path, text, style, start)| {
                 let text = rendered_text_with_markup(&text, self.markup);
-                let occurrence = *seen.entry(text.clone()).or_insert(0);
-                *seen.get_mut(&text).expect("part occurrence inserted") += 1;
-                // Keep occurrence deterministic even if the part's exact text is
-                // repeated elsewhere outside semantic parts.
-                let occurrence = rendered
-                    .match_indices(&text)
-                    .nth(occurrence)
-                    .map(|(offset, _)| rendered[..offset].matches(&text).count())
-                    .unwrap_or(occurrence);
+                let occurrence = loose_matches(&plain[..start], &text).len();
                 TextPartInfo {
                     path,
                     text,
@@ -439,10 +440,9 @@ impl TextSpec {
                 .parts()
                 .into_iter()
                 .map(|part| {
-                    rendered
-                        .match_indices(&part.text)
+                    loose_matches(&rendered, &part.text)
+                        .into_iter()
                         .nth(part.occurrence)
-                        .map(|(start, text)| start..start + text.len())
                 })
                 .collect(),
         };
@@ -569,23 +569,92 @@ pub fn flatten_content(content: &[TextContent]) -> String {
     out
 }
 
+/// Collects `(path, text, style, start)` for every part, outermost first,
+/// `start` being its byte offset in `flattened`, the text flattened so far.
+/// Inside mathematics a part's text keeps a space at each content boundary,
+/// as the Typst source does, so `"m", "L"` reads `m L`, not the identifier
+/// `mL`.
 fn collect_parts(
     content: &[TextContent],
     path: &mut Vec<String>,
-    out: &mut Vec<(Vec<String>, String, TextStyle)>,
+    flattened: &mut String,
+    out: &mut Vec<(Vec<String>, String, TextStyle, usize)>,
 ) {
     for node in content {
-        if let TextContent::Part(part) = node {
-            path.push(part.name.clone());
-            out.push((
-                path.clone(),
-                flatten_content(&part.content),
-                part.style.clone(),
-            ));
-            collect_parts(&part.content, path, out);
-            path.pop();
+        match node {
+            TextContent::Literal(text) => flattened.push_str(text),
+            TextContent::Part(part) => {
+                path.push(part.name.clone());
+                let start = flattened.len();
+                let index = out.len();
+                out.push((path.clone(), String::new(), part.style.clone(), start));
+                collect_parts(&part.content, path, flattened, out);
+                out[index].1 = if inside_math(&flattened[..start]) {
+                    spaced_content(&part.content)
+                } else {
+                    flattened[start..].to_string()
+                };
+                path.pop();
+            }
         }
     }
+}
+
+/// Whether text that follows `prefix` is inside `$...$`; a backslash
+/// escapes a `$`, as in [`parse_inline_math`].
+fn inside_math(prefix: &str) -> bool {
+    let mut inside = false;
+    let mut escaped = false;
+    for character in prefix.chars() {
+        if character == '$' && !escaped {
+            inside = !inside;
+        }
+        escaped = character == '\\' && !escaped;
+    }
+    inside
+}
+
+/// `content` flattened with a space between its nodes, as mathematics
+/// separates them in the Typst source.
+fn spaced_content(content: &[TextContent]) -> String {
+    content
+        .iter()
+        .map(|node| match node {
+            TextContent::Literal(text) => text.clone(),
+            TextContent::Part(part) => spaced_content(&part.content),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Byte ranges in `text` of the non-overlapping matches of `fragment`,
+/// compared as selections compare glyphs: ignoring case, whitespace and the
+/// `^`/`_` of scripts.
+fn loose_matches(text: &str, fragment: &str) -> Vec<std::ops::Range<usize>> {
+    let significant =
+        |character: &char| !character.is_whitespace() && *character != '^' && *character != '_';
+    let same = |a: char, b: char| a == b || a.to_lowercase().eq(b.to_lowercase());
+    let fragment: Vec<char> = fragment.chars().filter(significant).collect();
+    let characters: Vec<(usize, char)> = text
+        .char_indices()
+        .filter(|(_, character)| significant(character))
+        .collect();
+    let mut matches = Vec::new();
+    if fragment.is_empty() {
+        return matches;
+    }
+    let mut index = 0;
+    while index + fragment.len() <= characters.len() {
+        let window = &characters[index..index + fragment.len()];
+        if window.iter().zip(&fragment).all(|((_, a), b)| same(*a, *b)) {
+            let (last, character) = window[window.len() - 1];
+            matches.push(window[0].0..last + character.len_utf8());
+            index += fragment.len();
+        } else {
+            index += 1;
+        }
+    }
+    matches
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -937,6 +1006,49 @@ mod tests {
         assert_eq!(
             units(&parts, TextRevealUnit::Part),
             [None, Some(0), Some(0), Some(1)]
+        );
+    }
+
+    #[test]
+    fn parts_select_themselves_where_their_text_repeats() {
+        let part = |name: &str, content: Vec<TextContent>| {
+            TextContent::from(TextPart::new(name, content, TextStyle::default()))
+        };
+        // $ x + x = m L theta'' $, the second x and the product as parts.
+        let spec = TextSpec::new(
+            vec![
+                "$ x +".into(),
+                part("a", vec!["x".into()]),
+                "=".into(),
+                part(
+                    "inertia",
+                    vec![
+                        part("mass", vec!["m".into()]),
+                        part("length", vec!["L".into()]),
+                        part("angle", vec!["theta''".into()]),
+                    ],
+                ),
+                " $".into(),
+            ],
+            None,
+            TextStyle::default(),
+            TextFlow::default(),
+        )
+        .unwrap();
+        let parts: Vec<_> = spec
+            .parts()
+            .into_iter()
+            .map(|part| (part.path.join("."), part.text, part.occurrence))
+            .collect();
+        assert_eq!(
+            parts,
+            [
+                ("a".to_string(), "x".to_string(), 1),
+                ("inertia".to_string(), "m L theta''".to_string(), 0),
+                ("inertia.mass".to_string(), "m".to_string(), 0),
+                ("inertia.length".to_string(), "L".to_string(), 0),
+                ("inertia.angle".to_string(), "theta''".to_string(), 0),
+            ]
         );
     }
 

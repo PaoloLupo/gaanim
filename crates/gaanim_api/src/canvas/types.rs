@@ -1043,8 +1043,9 @@ pub struct ObjectSpec {
     /// Axis, generation and shared view anchors of a fading tick generation.
     pub(crate) coordinate_tick_level: Option<(u8, u32, super::view_ticks::TickAnchors)>,
     /// Fill overrides applied to matching glyph fragments after textual objects
-    /// have been compiled into their vector hierarchy.
-    pub fragment_fills: Vec<(String, Color)>,
+    /// have been compiled into their vector hierarchy: every match, or only
+    /// the given occurrence (a part's own glyphs).
+    pub fragment_fills: Vec<(String, Option<usize>, Color)>,
     /// Named fragment queries attached by the high-level equation API.
     pub fragment_tags: Vec<(String, String, Option<usize>)>,
     /// Author-given name used as a magic-move key (`Drawable.named`).

@@ -949,7 +949,8 @@ class Box(Drawable):
 
     Structural changes (``add``, ``remove``, ``replace``, ``set``, a child's
     ``item``) accept ``duration=`` to animate the reflow, and ``advance=False``
-    to start the next change at the same time.
+    to start the next change at the same time. The box's scale and rotation
+    apply to its children on top of their own, as a CSS transform does.
     """
     @property
     def children(self) -> list[Drawable]:
@@ -1620,8 +1621,9 @@ class Anim:
         matching glyphs morph, the rest collapses or grows in, every glyph
         keeps its own (``part()``) color, and the target is shown at the end.
         Texts managed by different Layouts (e.g. cells of two matrices)
-        instead morph as one shape: the source keeps its identity and takes
-        the target's outline, color and typographic baseline.
+        instead morph as one shape: the source keeps its identity, travels
+        to where the target stands and takes the target's outline, color and
+        typographic baseline.
 
         Between groups or imported SVGs (an SVG ``<g>`` part too) the morph
         runs part by part in place: parts with the same name or SVG ``id``
@@ -1777,8 +1779,9 @@ class Anim:
         from the ``"center"`` outward, or in a ``"random"`` permutation fixed
         by ``seed``.
         ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
-        sequential staggering (Manim's ``min(4 / pieces, 0.2)``) and a number
-        overrides it. ``brush="chalk"`` draws the drawable as chalk for the whole
+        sequential staggering (Manim's ``min(4 / pieces, 0.2)``; grouped
+        ``by`` word, line or part, ``min(4 / groups, 1)``, so up to four
+        groups are written one after another) and a number overrides it. ``brush="chalk"`` draws the drawable as chalk for the whole
         scene, like ``Drawable.chalk(seed)``: a trembling outline and a grain
         that follow ``seed``. Raises ``ValueError`` after a property target or
         another effect.
@@ -2273,7 +2276,11 @@ class Anim:
         """Cross-fade to a same-scene target at the animation's composed start time."""
         ...
     def replacement_transform_to(self, target: Drawable) -> Anim:
-        """Morph to and replace with a same-scene target, preserving absent fill and composed timing."""
+        """Morph to and replace with a same-scene target, preserving absent fill and composed timing.
+
+        The source travels to where the target stands, also from one layout
+        to another, and the target takes over when the morph ends.
+        """
         ...
     def indicate(self, *, color: Optional[ColorLike] = None, scale_factor: float = 1.2) -> Anim:
         """Swell the drawable by ``scale_factor`` and tint it, then return to rest.
@@ -4966,6 +4973,10 @@ class TextStyle:
             body = TextStyle(font="Inter", size=0.32, color=WHITE)
         """
         ...
+    @property
+    def size(self) -> Optional[float]:
+        """The size this style sets, in scene units, or ``None`` to keep the role's."""
+        ...
 
 class TextFlow:
     """Reusable internal line-composition options for Text."""
@@ -5122,9 +5133,10 @@ class TextSelectionAnimation:
     def reveal(self, style: Literal["fade", "wipe", "from_below"] = "fade") -> Anim:
         """Reveal the selected glyphs with a fade, a stroke wipe, or a short rise.
 
-        The rest of the text is unaffected, so a term can appear inside an
-        equation that is already on screen. Raises ``ValueError`` for an
-        unknown ``style``.
+        The selected glyphs stay hidden until the reveal, also while the
+        rest of the text is written, and the rest of the text is unaffected,
+        so a term can appear inside an equation that is already on screen.
+        Raises ``ValueError`` for an unknown ``style``.
 
         Example:
             scene.play(eq["rhs"].animate.reveal("from_below"))
@@ -8805,8 +8817,11 @@ class Typography:
         those delimiters are preserved to select Typst block math. Every
         content boundary becomes ordinary Typst whitespace, so ``"="`` does
         not need a written trailing space. Empty content and invalid
-        mathematics raise ``ValueError``. With no explicit role or size, a
-        display equation uses the 44-unit math default.
+        mathematics raise ``ValueError`` when the equation is created. With
+        no explicit role or size, a display equation uses the 44-unit math
+        default. The rows of an equation broken with ``\\`` keep Typst's
+        gap between rows at ``line_spacing=1``, and each extra unit widens it
+        by one em, as between text lines.
 
         Example:
             equation = scene.equation(
@@ -9595,18 +9610,24 @@ class Visualization:
         label_style: Any | None = None,
         cell_factory: Callable[[Any, int, int], Drawable] | None = None,
         numeric_format: str = "g",
+        fractions: Literal["stacked", "inline"] = "stacked",
     ) -> Matrix:
         """Create a selectable Layout-backed matrix.
 
         ``data`` must be a non-empty rectangular sequence or a SymPy matrix.
         Entries remain individual drawables; rows, columns, blocks and
-        diagonals can therefore be animated independently. Invalid dimensions,
+        diagonals can therefore be animated independently.
         ``row_gap`` and ``column_gap`` control automatic tracks. Delimiters
-        accept a size and CSS-like weight from 100 through 900. Labels default
-        to Typst math; ``cell_mode``/``label_mode`` may select plain text.
+        accept a size and CSS-like weight from 100 through 900; without a
+        size they span the rows, following the size of ``entry_style`` and
+        the gap between rows. Labels default to Typst math;
+        ``cell_mode``/``label_mode`` may select plain text.
         ``cell_factory(value, row, column)`` can return a custom Drawable.
-        Invalid dimensions, labels, modes, weights, delimiters, or factories
-        raise ``ValueError``/``TypeError``. Returns :class:`gaanim.Matrix`.
+        Exact rationals are stacked fractions, or with ``fractions="inline"``
+        written ``3/2`` on one line, as tall as the other entries. Invalid
+        dimensions, labels, modes, weights, delimiters, fractions or
+        factories raise ``ValueError``/``TypeError``. Returns
+        :class:`gaanim.Matrix`.
         """
         ...
 

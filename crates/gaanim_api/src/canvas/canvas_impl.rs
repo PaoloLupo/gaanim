@@ -2658,7 +2658,10 @@ impl SceneModel {
                 .map(|(token, color)| (token.clone(), *color))
                 .collect(),
             None => vec![
-                ("background".to_owned(), self.background.unwrap_or(Color::WHITE)),
+                (
+                    "background".to_owned(),
+                    self.background.unwrap_or(Color::WHITE),
+                ),
                 ("foreground".to_owned(), body),
             ],
         };
@@ -4158,7 +4161,7 @@ impl SceneModel {
         let mut handle = self.spawn(SpawnKind::Text(spec.clone()));
         for part in spec.parts() {
             if let Some(color) = part.style.color {
-                handle = handle.color_by(part.text.clone(), color);
+                handle = handle.color_nth(part.text.clone(), part.occurrence, color);
             }
             handle = handle.define_tag(part.path.join("."), part.text, Some(part.occurrence));
         }

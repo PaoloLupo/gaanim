@@ -1717,6 +1717,9 @@ pub(crate) fn fitted_text_typst_source(
     cut(keep)
 }
 
+/// Typst's default gap between the rows of an equation, in ems.
+const MATH_ROW_GAP_EM: f64 = 0.65;
+
 fn text_typst_source(
     spec: &StructuredTextSpec,
     offered_width: Option<f64>,
@@ -1743,6 +1746,10 @@ fn text_typst_source(
     // the baseline) would put them a cap height closer, overlapping lines in
     // fonts with tall ascenders.
     let leading = font_size * (spec.flow.line_spacing.max(0.1) - 1.0);
+    // The rows of an equation broken with `\` stack by their ink instead,
+    // so they keep Typst's own gap between rows at `line_spacing` 1, and
+    // each extra em of spacing widens it as it does between text lines.
+    let math_leading = font_size * (spec.flow.line_spacing.max(0.1) - 1.0 + MATH_ROW_GAP_EM);
     let (alignment, justify) = match spec.flow.align {
         gaanim_text::prelude::TextAlign::Left => ("left", false),
         gaanim_text::prelude::TextAlign::Center => ("center", false),
@@ -1797,6 +1804,7 @@ fn text_typst_source(
         "#set page(width: {page_width}, height: auto, margin: 0pt)\n\
          #set text({font}fill: rgb(\"{hex}\"), dir: {direction}, hyphenate: {}{lang}{weight}{italic}{tracking}{spacing}, top-edge: 0.8em, bottom-edge: -0.2em)\n\
          #set par(justify: {justify}, leading: {leading}pt)\n\
+         #show math.equation.where(block: true): set par(leading: {math_leading}pt)\n\
          #align({alignment})[{content}]",
         spec.flow.hyphenate,
     )
@@ -5297,10 +5305,25 @@ impl SceneModel {
                             let current_parent =
                                 builder.states.get(*child).and_then(|state| state.parent);
                             if current_parent != Some(parent) {
+                                // A child keeps its own scale and rotation in
+                                // the box, as an element does in a CSS
+                                // container: a scaled box scales it too.
+                                let own = builder
+                                    .states
+                                    .get(*child)
+                                    .map(|state| (state.transform.scale, state.transform.rotation));
                                 builder.add_to_group(
                                     MobjectRef { id: parent },
                                     MobjectRef { id: *child },
                                 );
+                                if let Some((scale, rotation)) = own
+                                    && let Some(state) = builder.states.get_mut(*child)
+                                {
+                                    state.transform.scale = scale;
+                                    state.transform.rotation = rotation;
+                                    let (entity, transform) = (state.entity, state.transform);
+                                    Self::insert_transform_keeping_grow(builder, entity, transform);
+                                }
                             }
                         }
                         if let Some(background) = background
@@ -11665,8 +11688,10 @@ impl SceneModel {
     /// Applies deferred glyph-level color overrides after the normal object
     /// style has been propagated to the compiled text hierarchy.
     fn apply_fragment_fills(builder: &mut SceneBuilder, target: MobjectRef, spec: &ObjectSpec) {
-        for (fragment, color) in &spec.fragment_fills {
-            builder.select(target, fragment).set_fill(*color);
+        for (fragment, occurrence, color) in &spec.fragment_fills {
+            builder
+                .select_occurrence(target, fragment, *occurrence)
+                .set_fill(*color);
         }
     }
 
@@ -20169,6 +20194,49 @@ mod tests {
             .single(&world)
             .expect("one root layout group");
         assert_point_close(transform.translation, DVec3::new(400.0, 200.0, 0.0));
+    }
+
+    /// A scaled box scales its children with it, as a CSS transform does:
+    /// they keep their own scale under it instead of undoing the box's.
+    #[test]
+    fn a_scaled_box_keeps_its_children_at_their_own_scale() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let first = canvas.rect(160.0, 60.0);
+        let second = canvas.rect(120.0, 40.0);
+        let root = canvas.group(&[&first, &second]);
+        first.claim_layout(&root).unwrap();
+        second.claim_layout(&root).unwrap();
+        let root = root.scale_to(2.0);
+        canvas.reflow_layout(
+            &root,
+            [&first, &second]
+                .iter()
+                .map(|member| crate::canvas::LayoutMemberSpec {
+                    id: member.id,
+                    style: gaanim_layout::LayoutItemStyle::default(),
+                })
+                .collect(),
+            crate::canvas::LayoutSpec {
+                kind: gaanim_layout::LayoutNodeKind::Column { wrap: false },
+                style: gaanim_layout::LayoutStyle::default(),
+                within: LayoutWithin::Intrinsic,
+            },
+            1,
+            None,
+            None,
+            None,
+        );
+
+        let mut world = compile_canvas_for_layout(canvas);
+        let scales: Vec<DVec3> = world
+            .query_filtered::<&SpatialTransform, bevy::prelude::With<bevy::prelude::ChildOf>>()
+            .iter(&world)
+            .map(|transform| transform.scale)
+            .collect();
+        assert_eq!(scales.len(), 2);
+        for scale in scales {
+            assert_point_close(scale, DVec3::ONE);
+        }
     }
 
     #[test]

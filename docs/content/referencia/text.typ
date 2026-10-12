@@ -72,7 +72,7 @@ note = scene.text("Radio $r = 1.5$", size=0.36, color="#94a3b8").move_to(0, -1)
     (name: "content", type: "str | TextPart | TextParts", default: none, desc: [Ecuación sin los delimitadores `$`.]),
     (name: "opciones", type: "igual que scene.text", default: "None", desc: [Comparte todo el estilo y el flujo de `scene.text` (salvo `lang` y `markup`).]),
   ),
-  desc: [Envuelve el contenido como `$ … $`: esos espacios hacen que Typst componga una ecuación en bloque. Cada frontera entre piezas es un espacio normal de Typst, así que Typst decide el espaciado de operadores e identificadores. Sin rol ni tamaño explícitos usa el tamaño matemático de 0.44 unidades. Contenido vacío lanza `ValueError`.],
+  desc: [Envuelve el contenido como `$ … $`: esos espacios hacen que Typst componga una ecuación en bloque. Cada frontera entre piezas es un espacio normal de Typst, así que Typst decide el espaciado de operadores e identificadores. Sin rol ni tamaño explícitos usa el tamaño matemático de 0.44 unidades. Las filas de una ecuación partida con `\` guardan la separación de Typst entre filas con `line_spacing=1` y cada unidad de más la ensancha un tamaño de letra, como entre líneas de texto. Contenido vacío o matemática inválida lanzan `ValueError` al crear la ecuación.],
 )[
 ```python
 # show-code: true
@@ -522,7 +522,7 @@ scene.play([eq["mass"].animate.wave().duration(0.8)])
 #api-entry(
   name: "TextSelectionAnimation.reveal",
   kind: "method",
-  desc: [Hace aparecer solo los glifos seleccionados con `"fade"`, `"wipe"` (traza y luego rellena) o `"from_below"` (fundido con una subida corta), para que un término entre en una ecuación ya visible. Un estilo desconocido lanza `ValueError`. Para revelar un texto completo por líneas o palabras, usa `Anim.reveal` (ver #link("/referencia/animations/")[Animaciones]).],
+  desc: [Hace aparecer solo los glifos seleccionados con `"fade"`, `"wipe"` (traza y luego rellena) o `"from_below"` (fundido con una subida corta), para que un término entre en una ecuación ya visible. Los glifos seleccionados siguen ocultos hasta el `reveal`, también mientras se escribe el resto. Un estilo desconocido lanza `ValueError`. Para revelar un texto completo por líneas o palabras, usa `Anim.reveal` (ver #link("/referencia/animations/")[Animaciones]).],
 )[
 ```python
 >>>from gaanim import *

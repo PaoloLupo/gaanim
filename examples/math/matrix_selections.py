@@ -20,7 +20,7 @@ ORDER = 8 * 0.12 + CELL + HOLD
 ANIMATE = WRITE + 2 * 0.2 + CELL + HOLD
 # Entries are set larger than the theme's math size (0.44) so that each
 # matrix reads at a glance (larger still when a segment has one row of
-# cells); gaps and delimiters grow to match.
+# cells); gaps grow to match, and the delimiters follow the entries.
 SIZE = 0.72
 
 scene = Scene()
@@ -29,7 +29,7 @@ DIGITS = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 
 
 def matrix(size):
-    """A 3 x 3 scene.viz.matrix with entries of ``size`` and its gaps and delimiters scaled to them."""
+    """A 3 x 3 scene.viz.matrix with entries of ``size`` and its gaps scaled to them."""
     growth = size / 0.44
     return scene.viz.matrix(
         DIGITS,
@@ -37,7 +37,6 @@ def matrix(size):
         row_gap=0.24 * growth,
         column_gap=0.24 * growth,
         delimiter_gap=0.12 * growth,
-        delimiter_size=1.8 * growth,
     )
 
 
@@ -50,10 +49,7 @@ def gallery(labels, rows=2):
         # The label and the matrix (about 4.7 sizes tall) sit together, centered in the cell.
         _, top, body, _ = zone.split(Zones.rows(["1fr", "48px", 4.7 * size, "1fr"]))
         scene.text(label, role="code", text_align="center").place(top, anchor="bottom")
-        shown = matrix(size)
-        # place() returns the matrix's layout box, so keep the matrix itself.
-        shown.place(body)
-        matrices.append(shown)
+        matrices.append(matrix(size).place(body))
     return matrices
 
 

@@ -30,7 +30,8 @@ scene.render()
 desde `gaanim` y se definen en su módulo Python, por eso las fichas de esta
 página los nombran por la variable (`matrix.row`) y no por la clase. `Matrix`
 es un `Drawable`: se coloca, escala y anima como cualquier objeto, y los métodos
-heredados devuelven la propia matriz.
+heredados, `place` incluido, devuelven la propia matriz. Al escalarla crecen
+también las entradas y los delimitadores.
 
 == Crear una matriz
 
@@ -44,12 +45,13 @@ La fábrica y los datos que acepta.
     (name: "row_gap / column_gap", type: "float", default: "0.24 / 0.24", desc: [Separación entre filas y columnas, en unidades de escena.]),
     (name: "delimiter_gap", type: "float", default: "0.12", desc: [Espacio entre las entradas y los delimitadores.]),
     (name: "delimiters", type: "str", default: "\"brackets\"", desc: [`brackets`, `parentheses`, `braces`, `bars`, `double_bars` o `none`.]),
-    (name: "delimiter_size / delimiter_weight", type: "float | None / int", default: "None / 300", desc: [Tamaño (automático) y grosor tipográfico, de 100 a 900.]),
+    (name: "delimiter_size / delimiter_weight", type: "float | None / int", default: "None / 300", desc: [Tamaño y grosor tipográfico, de 100 a 900. Sin tamaño, los delimitadores abarcan las filas: siguen el tamaño de `entry_style` y la separación entre filas.]),
     (name: "row_labels / column_labels", type: "Sequence | None", default: "None", desc: [Etiquetas externas alineadas con filas o columnas.]),
     (name: "cell_mode / label_mode", type: "\"math\" | \"text\"", default: "\"math\"", desc: [Entradas y etiquetas como matemática Typst o texto plano.]),
     (name: "entry_style / label_style", type: "TextStyle | None", default: "None", desc: [Estilo de entradas y etiquetas.]),
     (name: "cell_factory", type: "Callable[[valor, fila, columna], Drawable] | None", default: "None", desc: [Crea un objeto propio para cada celda.]),
     (name: "numeric_format", type: "str", default: "\"g\"", desc: [Formato de Python para los números decimales.]),
+    (name: "fractions", type: "\"stacked\" | \"inline\"", default: "\"stacked\"", desc: [Los racionales exactos como fracciones apiladas o, con `"inline"`, en una línea (`3/2`), tan altas como las demás entradas.]),
   ),
   desc: [Los escalares se convierten en ecuaciones Typst; un `Drawable` se conserva tal cual. Filas desiguales, etiquetas incompatibles, modos, grosores o delimitadores inválidos lanzan `ValueError` o `TypeError` antes del render.],
 )[
@@ -153,7 +155,7 @@ m.where(lambda entry, row, column: entry.value % 2 == 0).fill(GOLD)
   name: "MatrixSelectionAnimation",
   kind: "class",
   signature: "write · create · fade_in · fade_out · indicate · wiggle · fill · opacity · scale_by · rotate_by (order=…, stagger=…, seed=0) · duration · easing",
-  desc: [Animación de todas las celdas de una selección. `order` recorre las celdas en `simultaneous`, `row_major`, `column_major`, `main_diagonal`, `anti_diagonal`, `spiral_in`, `spiral_out` o `random` (reproducible con `seed`), o en el orden de una lista de coordenadas o de una función `(fila, columna) -> clave`. `stagger` es el retraso entre celdas. Se pasa directamente a `scene.play`.],
+  desc: [Animación de todas las celdas de una selección. `order` recorre las celdas en `simultaneous`, `row_major`, `column_major`, `main_diagonal`, `anti_diagonal`, `spiral_in`, `spiral_out` o `random` (reproducible con `seed`), o en el orden de una lista de coordenadas o de una función `(fila, columna) -> clave`. `stagger` es el retraso entre celdas; con `simultaneous` todas empiezan juntas. Sin `order`, empiezan juntas o, si das un `stagger`, fila a fila. Se pasa directamente a `scene.play`.],
 )[
 ```python
 >>>from gaanim import *
@@ -166,7 +168,9 @@ scene.play(m.diagonal().animate.fill(GOLD).duration(0.4))
 
 == Cambiar la estructura
 
-Cambios de valores, filas y columnas que recomponen la matriz en el cursor.
+Cambios de valores, filas y columnas que recomponen la matriz en el cursor. La
+matriz conserva su lugar, su transformación y sus animaciones: cambian los
+hijos de su cuadrícula, no la cuadrícula.
 
 #api-entry(
   name: "matrix.set",
@@ -216,7 +220,7 @@ m.reorder_columns([2, 0, 1])
   name: "matrix.become",
   kind: "method",
   signature: "become(data) -> Matrix",
-  desc: [Sustituye todos los datos, incluso con otra forma.],
+  desc: [Sustituye todos los datos, incluso con otra forma. Un `delimiter_size` explícito crece o se encoge con el número de filas, como el automático.],
   none,
 )
 
@@ -224,7 +228,7 @@ m.reorder_columns([2, 0, 1])
   name: "matrix.morph_to",
   kind: "method",
   signature: "morph_to(target: Matrix, *, match=\"auto\", stagger=0.0) -> MatrixSelectionAnimation",
-  desc: [Transforma la matriz en otra. Con `match="auto"` empareja primero por las claves de `MatrixEntry`, después por valores y por último por posiciones. Configura el tiempo con `.duration(...)` y `.easing(...)`.],
+  desc: [Transforma la matriz en `target`, que es la que queda al final. Con `match="auto"` empareja primero por las claves de `MatrixEntry`, después por valores y por último por posiciones. Cada entrada emparejada viaja hasta la suya y le cede el lugar; las que no tienen pareja se desvanecen, las del destino sin pareja aparecen y los delimitadores y etiquetas se transforman en los del destino. El destino se muestra al empezar, aunque estuviera oculto con `hidden()`. Configura el tiempo con `.duration(...)` y `.easing(...)`.],
 )[
 ```python
 # show-code: true
@@ -250,7 +254,9 @@ devuelven una `MatrixDerivation[T]`: `T` es `Matrix` para resultados
 matriciales, `Drawable` para escalares y `tuple[Matrix, Matrix]` para
 descomposiciones. Los fallos exactos no se aproximan en silencio: pasa
 `exact=False, precision=N` de forma explícita. `to_sympy()` devuelve la matriz
-de SymPy.
+de SymPy. Una matriz resultado toma las opciones de la matriz de origen
+(separaciones, delimitadores, `entry_style`, `cell_factory`, `numeric_format`,
+`fractions`), no sus etiquetas; un escalar es una ecuación como `rank = 2`.
 
 #api-entry(
   name: "MatrixDerivation",

@@ -74,6 +74,14 @@ enteros, o usa `scene.text.code`.
   código se ve igual en Windows, macOS, Linux, el playground y los paquetes
   `.gaanim`. Un tema con `fonts={"code": ...}` sigue eligiendo la suya.
 
+== Matemáticas
+
+- `scene.viz.matrix(..., fractions="inline")` escribe los racionales exactos
+  en una línea (`3/2`), tan altos como las demás entradas; antes había que
+  rodearlo con un `cell_factory`. Ver
+  #link("/referencia/matrices/#api-visualization-matrix")[`Visualization.matrix`].
+- `TextStyle.size` devuelve el tamaño que fija el estilo.
+
 == Ejemplos
 
 - Los ejemplos del repositorio se ordenan por temas, como los de Bevy:
@@ -225,6 +233,37 @@ enteros, o usa `scene.text.code`.
   #link("/referencia/text/#colores-del-tema-en-typst")[Colores del tema en Typst].
 - `write()` traza de un tirón las curvas que un paquete de Typst dibuja muestra
   a muestra (simple-plot, CeTZ); antes se veían punteadas.
+- Las ediciones de una matriz (`insert_row`, `remove_column`, `swap_rows`,
+  `reorder_columns`, `become`…) la dejan donde estaba, con su escala y sus
+  animaciones; antes la reconstruían en el origen.
+- `matrix.morph_to(destino)` termina en el destino: las entradas viajan hasta
+  las suyas, los delimitadores se transforman en los del destino y aparecen
+  sus entradas sin pareja. Antes se reordenaban dentro de la matriz de origen
+  y el destino se quedaba con los delimitadores vacíos.
+- `matrix.place(zona)` devuelve la matriz, no la caja de su layout.
+- `order="simultaneous"` empieza todas las entradas a la vez aunque haya
+  `stagger`; antes las escalonaba por filas. Sin `order`, un `stagger` las
+  sigue escalonando fila a fila.
+- `matrix.rank()` dibuja `rank = 2`; antes Typst no conocía `rank` y no se
+  veía nada.
+- Escalar una matriz, o cualquier caja, agranda también lo que contiene;
+  antes solo separaba las entradas. Los delimitadores automáticos abarcan las
+  filas según el tamaño de `entry_style`, y un `delimiter_size` explícito
+  sigue al número de filas tras `become()`.
+- Una ecuación con matemática inválida, como `a dot.circle b`, lanza
+  `ValueError` al crearla, como dice la documentación; antes solo escribía el
+  error de Typst y no dibujaba nada.
+- Las filas de una ecuación partida con `\` ya no se pisan: guardan la
+  separación de Typst entre filas.
+- Las selecciones de partes encuentran sus glifos: `eq["inertia"]` con partes
+  anidadas (antes no seleccionaba nada al animarla, y `highlight()` no se
+  veía) y una parte cuyo texto aparece antes en la ecuación (antes
+  seleccionaba la primera aparición). El color de `part(..., color=...)` tiñe
+  solo la parte, no cada aparición de su texto.
+- `write(by="part")` escribe las partes una tras otra; antes empezaban casi a
+  la vez.
+- `reveal("wipe")` deja el término oculto hasta su turno, como `"fade"`;
+  antes se veía mientras se escribía el resto y luego se barría.
 
 == Al actualizar
 
@@ -286,6 +325,18 @@ enteros, o usa `scene.text.code`.
   lugar de blanco o negro puro. Si querías blanco, ponlo en el documento con
   `#set text(fill: white)`. Un documento que definía su propio `theme`
   sigue usando el suyo.
+- Una caja escalada o girada escala y gira también a sus hijos. Si la
+  escalabas para separarlos, usa `gap` o `row_gap`/`column_gap`.
+- `write()` agrupado con `by="word"`, `"line"` o `"part"` escribe hasta
+  cuatro grupos uno tras otro y más con solape, así que sus fotogramas
+  intermedios cambian; `stagger=0.2` recupera el solape anterior.
+- Las ecuaciones con varias filas ocupan más alto; `line_spacing` por debajo
+  de 1 las vuelve a juntar.
+- `scene.text.equation` lanza `ValueError` con matemática inválida: corrige la
+  fuente que antes no se dibujaba.
+- `matrix.morph_to(destino)` muestra el destino y oculta el origen al
+  terminar; antes el origen tomaba el aspecto del destino y el destino seguía
+  oculto.
 
 = 0.11.0
 

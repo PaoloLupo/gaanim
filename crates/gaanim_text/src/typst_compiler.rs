@@ -277,6 +277,38 @@ pub fn clear_typst_layout_cache() {
     }
 }
 
+/// The errors Typst reports compiling `source` as markup with Gaanim's
+/// embedded fonts, empty when it compiles. Results are remembered per
+/// source, so a scene that creates the same equation again, or runs again,
+/// does not compile it twice.
+pub fn typst_source_errors(source: &str) -> Vec<String> {
+    static CHECKED: OnceLock<Mutex<RecentlyUsed<String, Arc<Vec<String>>>>> = OnceLock::new();
+    let checked =
+        CHECKED.get_or_init(|| Mutex::new(RecentlyUsed::new(TYPST_HIERARCHY_CACHE_ENTRIES)));
+    let key = source.to_string();
+    if let Some(errors) = checked
+        .lock()
+        .expect("Typst check cache poisoned")
+        .get(&key)
+    {
+        return errors.as_ref().clone();
+    }
+    let (_, resources) = typst_resources_for(&FontRegistry::without_system_fonts());
+    let world = GaanimTypstWorld::with_resources(source, resources);
+    let errors = match typst::compile::<PagedDocument>(&world).output {
+        Ok(_) => Vec::new(),
+        Err(errors) => errors
+            .iter()
+            .map(|error| error.message.to_string())
+            .collect(),
+    };
+    checked
+        .lock()
+        .expect("Typst check cache poisoned")
+        .insert(key, Arc::new(errors.clone()));
+    errors
+}
+
 /// Combining accent that Typst lays out for a math symbol called as a
 /// function, such as `⋅` in `dot(x)`, using Typst's own accent table.
 pub fn math_accent_for_symbol(symbol: &str) -> Option<char> {
@@ -1408,6 +1440,14 @@ pub(crate) fn compiled_glyph_fills(source: &str) -> Vec<(char, Option<peniko::Co
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_errors_report_invalid_mathematics_only() {
+        assert!(typst_source_errors("$ a + b^2 $").is_empty());
+        assert!(!typst_source_errors("$ a dot.circle b $").is_empty());
+        assert!(!typst_source_errors("$ rank = 2 $").is_empty());
+        assert!(typst_source_errors("$ op(\"rank\") = 2 $").is_empty());
+    }
 
     #[test]
     fn layout_cache_forgets_the_least_recently_used_half_when_full() {

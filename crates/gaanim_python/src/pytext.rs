@@ -210,6 +210,12 @@ impl PyTextStyle {
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Self(style))
     }
+
+    /// The size this style sets, in scene units; `None` keeps the role's.
+    #[getter]
+    fn size(&self) -> Option<f64> {
+        self.0.size
+    }
 }
 
 #[pyclass(name = "TextFlow", module = "gaanim_core", frozen, from_py_object)]

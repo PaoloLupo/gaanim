@@ -419,6 +419,13 @@ pub(crate) fn adaptive_lag_ratio(item_count: usize) -> f64 {
     (4.0 / item_count.max(1) as f64).min(0.2)
 }
 
+/// The lag of a write grouped by word, line or part: up to four groups
+/// follow one another, and more overlap as Manim's glyphs do, so that
+/// writing by groups reads group after group.
+pub(crate) fn grouped_lag_ratio(group_count: usize) -> f64 {
+    (4.0 / group_count.max(1) as f64).min(1.0)
+}
+
 fn draw_config(anim_type: &AnimationType) -> Option<&crate::anim::DrawAnimationConfig> {
     match anim_type {
         AnimationType::Write { config }
@@ -2888,13 +2895,24 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                         TextSelectionEffect::RevealFade => {
                             (AnimationType::FadeIn, RateFunc::Smooth, 0.0)
                         }
-                        TextSelectionEffect::RevealWipe => (
-                            AnimationType::Write {
-                                config: Default::default(),
-                            },
-                            RateFunc::Smooth,
-                            0.0,
-                        ),
+                        TextSelectionEffect::RevealWipe => {
+                            // Hidden until the wipe draws it, as a fading
+                            // reveal is, even while the rest is written.
+                            if let Some(state) = self.states.get_mut(target) {
+                                if state.opacity > 0.0 {
+                                    self.faded_opacities.insert(target, state.opacity);
+                                }
+                                state.opacity = 0.0;
+                                self.commands.entity(state.entity).insert(Opacity(0.0));
+                            }
+                            (
+                                AnimationType::Write {
+                                    config: Default::default(),
+                                },
+                                RateFunc::Smooth,
+                                0.0,
+                            )
+                        }
                         TextSelectionEffect::RevealFromBelow => (
                             AnimationType::FadeInFrom {
                                 offset: DVec3::new(0.0, -0.24, 0.0),
@@ -4078,12 +4096,19 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         item_count: usize,
     ) -> Option<DrawSchedule> {
         let adaptive_lag = adaptive_lag_ratio(item_count);
+        let lag_for = |config: &crate::anim::DrawAnimationConfig| {
+            config.lag_ratio.unwrap_or(if config.groups.is_some() {
+                grouped_lag_ratio(item_count)
+            } else {
+                adaptive_lag
+            })
+        };
         match &anim.anim_type {
             AnimationType::Write { config } => Some(DrawSchedule {
                 mode: DrawMode::BorderThenFill,
                 reversed: false,
                 staggered: true,
-                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                lag_ratio: lag_for(config),
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
@@ -4103,7 +4128,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 mode: DrawMode::BorderThenFill,
                 reversed: true,
                 staggered: true,
-                lag_ratio: config.lag_ratio.unwrap_or(adaptive_lag),
+                lag_ratio: lag_for(config),
                 stroke_width: config.stroke_width,
                 auto_stroke_width: 0.03,
                 fill_rate_func: gaanim_math::RateFunc::Smooth,
@@ -5050,6 +5075,35 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// Where a morphing source ends: on the target, also when the two hang
+    /// from different parents (cells of two matrices), whose local
+    /// transforms then place them apart. The source keeps its own pivot.
+    fn landing_transform(
+        &self,
+        source: &MobjectState,
+        target: ObjectId,
+        target_state: &MobjectState,
+    ) -> SpatialTransform {
+        if source.parent == target_state.parent {
+            return target_state.transform;
+        }
+        let parent = source
+            .parent
+            .map_or(gaanim_core::kurbo::Affine::IDENTITY, |parent| {
+                self.get_world_transform(parent).to_affine_2d()
+            });
+        let local = parent.inverse() * self.get_world_transform(target).to_affine_2d();
+        let mut landing = SpatialTransform::from_affine_2d(&local);
+        landing.anchor = source.transform.anchor;
+        // The pivot shifts the placement; move the translation back by it.
+        let shift = landing.to_affine_2d().translation()
+            - gaanim_core::kurbo::Vec2::new(landing.translation.x, landing.translation.y);
+        landing.translation.x -= shift.x;
+        landing.translation.y -= shift.y;
+        landing.translation.z = target_state.transform.translation.z;
+        landing
+    }
+
     fn play_transform_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let (target, is_replacement, pairs) = match &anim.anim_type {
             AnimationType::Transform { target, pairs } => (*target, false, pairs.clone()),
@@ -5232,6 +5286,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         );
 
         // Morph the translation, rotation, scale
+        let landing = self.landing_transform(&source_state, target, &target_state);
         self.timeline.add_clip(
             parent_track,
             morph_start_time,
@@ -5240,7 +5295,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::Translation {
                     from: source_state.transform.translation,
-                    to: target_state.transform.translation,
+                    to: landing.translation,
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -5255,7 +5310,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::Rotation {
                     from: source_state.transform.rotation,
-                    to: target_state.transform.rotation,
+                    to: landing.rotation,
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -5270,7 +5325,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 target: anim.target,
                 lens: PropertyLensSpec::Scale {
                     from: source_state.transform.scale,
-                    to: target_state.transform.scale,
+                    to: landing.scale,
                 },
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
@@ -5417,7 +5472,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
         // Update hot state of source to match target
         if let Some(state) = self.states.get_mut(anim.target) {
-            state.transform = target_state.transform;
+            state.transform = landing;
             state.bounds = target_state.bounds;
             if is_replacement {
                 state.opacity = 0.0;
@@ -9868,6 +9923,9 @@ mod tests {
         assert!((adaptive_lag_ratio(1) - 0.2).abs() < f64::EPSILON);
         assert!((adaptive_lag_ratio(2) - 0.2).abs() < f64::EPSILON);
         assert!((adaptive_lag_ratio(40) - 0.1).abs() < 1e-9);
+        // Grouped writes: a few groups in turn, many overlapping.
+        assert!((grouped_lag_ratio(3) - 1.0).abs() < f64::EPSILON);
+        assert!((grouped_lag_ratio(8) - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]

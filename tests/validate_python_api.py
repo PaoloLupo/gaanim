@@ -823,6 +823,12 @@ def validate_visualization_contract(module: object) -> list[str]:
         pass
     else:
         failures.append("Scene.equation accepted empty content")
+    try:
+        scene.text.equation("a dot.circle b")
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.equation accepted invalid mathematics")
 
     for invalid_parts in (
         lambda: module.parts(),
@@ -1480,6 +1486,12 @@ def validate_matrix_contract(module: object) -> list[str]:
     replacement = matrix.set(0, 1, "x")
     if not isinstance(replacement, module.Drawable):
         failures.append("Matrix.set did not return the replacement Drawable")
+    if matrix.place(scene.layout.safe) is not matrix:
+        failures.append("Matrix.place returned its layout box instead of the Matrix")
+    root = matrix.drawable
+    matrix.insert_row(0, [0, 0, 0]).become([[1, 2], [3, 4]])
+    if matrix.drawable is not root or matrix.shape != (2, 2):
+        failures.append("Matrix edits replaced the root that keeps its place")
     try:
         scene.viz.matrix([[1, 2], [3]])
     except ValueError:
@@ -1532,7 +1544,7 @@ def validate_matrix_logical_units(module: object) -> list[str]:
                 return bounds.width, bounds.height
 
             delimiter_width, delimiter_height = measure(
-                scene.text(glyph, size=matrix_module._default_delimiter_size(size))
+                scene.text(glyph, size=matrix_module._auto_delimiter_size(size, options))
             )
             cells = [measure(scene.text(f"${value}$")) for row in data for value in row]
             cell_width = max(width for width, _ in cells)

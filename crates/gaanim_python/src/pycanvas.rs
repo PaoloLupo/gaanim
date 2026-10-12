@@ -4967,6 +4967,13 @@ impl PyTypography {
             None,
             true,
         )?;
+        let errors = gaanim_text::typst_compiler::typst_source_errors(&spec.spaced_text());
+        if !errors.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "invalid equation: {}",
+                errors.join("; ")
+            )));
+        }
         let handle = self
             .inner
             .lock()

@@ -245,7 +245,8 @@ row = scene.layout.row("Carga", bar.item(grow=1, height="12px"), "72%", gap="16p
 == Cajas vivas
 
 Una `Box` es un `Drawable`: `move_to`, `scale_by`, `animate.fade_in()` o
-`place` actúan sobre la caja entera. Decide la posición de reposo de sus
+`place` actúan sobre la caja entera, y su escala y su giro se aplican a los
+hijos sobre los suyos, como una transformación CSS. Decide la posición de reposo de sus
 hijos, que siguen aceptando cualquier animación de `.animate`: parten de ese
 sitio, no mueven a sus hermanos y conservan su desplazamiento cuando la caja
 se reorganiza.
