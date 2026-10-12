@@ -5962,8 +5962,11 @@ class CameraAnimation:
     def to(self, state: CameraState) -> Anim:
         """Animate to a reusable camera state and return a composable Anim.
 
-        A state owned by another Scene raises ``ValueError``. Configure timing
-        on the returned animation.
+        Between an orthographic and a perspective state the move stays in
+        perspective, from or to the view that matches the orthographic pose,
+        and turns orthographic only at its orthographic end, so 3D content
+        stays in front of the eye. A state owned by another Scene raises
+        ``ValueError``. Configure timing on the returned animation.
         """
         ...
     def restore(self, name: str) -> Anim:
@@ -6239,7 +6242,11 @@ class CameraAnimation:
         ...
 
     def reset(self) -> Anim:
-        """Restore the default 2D pose, up vector, target, and projection."""
+        """Restore the default 2D pose, up vector, target, and projection.
+
+        From a perspective camera the move stays in perspective, toward the
+        view that matches the 2D pose, and turns orthographic at its end.
+        """
         ...
 
 class Axis:

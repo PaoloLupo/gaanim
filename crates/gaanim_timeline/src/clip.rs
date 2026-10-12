@@ -292,6 +292,9 @@ pub enum PropertyLensSpec {
         to: f64,
     },
     /// Restore the complete authored camera rig to its 2D defaults.
+    ///
+    /// `from_lens` is the perspective lens (`fov_y`, `near`, `far`) the
+    /// camera had, if any: the move then stays in perspective until its end.
     CameraReset {
         from_position: gaanim_core::glam::DVec3,
         from_rotation: gaanim_core::glam::DQuat,
@@ -299,6 +302,7 @@ pub enum PropertyLensSpec {
         from_up: gaanim_core::glam::DVec3,
         from_zoom: f64,
         to_zoom: f64,
+        from_lens: Option<(f64, f64, f64)>,
     },
     /// Center the camera on a moving mobject for the lifetime of the clip.
     CameraFollow {
@@ -620,6 +624,7 @@ impl PropertyLensSpec {
                 from_up,
                 from_zoom,
                 to_zoom,
+                ..
             } => PropertyLens::CameraReset {
                 from_position: *from_position,
                 from_rotation: *from_rotation,

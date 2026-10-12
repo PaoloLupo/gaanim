@@ -150,6 +150,13 @@ enteros, o usa `scene.text.code`.
   después de `view.animate.pan_to(...)` se aplicaba desde la creación de la
   vista y anulaba ese movimiento, y `no_camera_view()` al final de un segmento
   quitaba la vista en todo el segmento.
+- `camera.animate.to(state)` entre una pose 2D y una en perspectiva, y
+  `camera.animate.reset()` desde una en perspectiva, se mueven en perspectiva
+  desde o hacia la vista equivalente a la 2D, y solo pasan a ortográfica en su
+  extremo 2D. Antes la cámara salía del plano de la escena, así que las
+  primitivas 3D desaparecían la primera mitad del movimiento, y un `reset`
+  pasaba a ortográfica de golpe con la cámara aún inclinada, de modo que el
+  contenido 2D se salía de la vista.
 
 == Al actualizar
 

@@ -8724,6 +8724,7 @@ impl SceneModel {
                         from_up: *camera_up,
                         from_zoom: *camera_zoom,
                         to_zoom: 1.0,
+                        from_lens: *camera_fov,
                     },
                 );
                 *camera_position = DVec3::ZERO;

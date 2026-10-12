@@ -1280,7 +1280,7 @@ scene.camera.reset()
   kind: "method",
   params: ((name: "state", type: "CameraState", default: none, desc: [Pose de esta escena.]),),
   returns: (type: "Anim", desc: [Movimiento hasta la pose.]),
-  desc: [Una pose de otra escena lanza `ValueError`.],
+  desc: [Entre una pose ortográfica y una en perspectiva, el movimiento va en perspectiva desde o hacia la vista equivalente a la ortográfica, y solo es ortográfico en su extremo ortográfico: el contenido 3D queda siempre delante del ojo. Una pose de otra escena lanza `ValueError`.],
   none,
 )
 
@@ -1462,7 +1462,7 @@ scene.play([scene.camera.animate.whip_pan(0, 0, blur=False).duration(0.3)])
 #api-entry(
   name: "CameraAnimation.reset",
   kind: "method",
-  returns: (type: "Anim", desc: [Vuelta animada a la pose y proyección predeterminadas.]),
+  returns: (type: "Anim", desc: [Vuelta animada a la pose y proyección predeterminadas. Desde una cámara en perspectiva, el movimiento sigue en perspectiva hacia la vista equivalente a la 2D y pasa a ortográfica al terminar.]),
 )[
 ```python
 >>>from gaanim import *

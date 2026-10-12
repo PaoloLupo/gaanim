@@ -159,10 +159,63 @@ impl CameraPose {
         Ok(())
     }
 
+    /// The perspective pose with lens `fov_y`, `near` and `far` that shows
+    /// what this orthographic pose shows on the plane through its position:
+    /// the same turn, with the eye backed away along the view axis until a
+    /// frame `frame_height` units tall (at zoom 1) fills the view.
+    /// Perspective poses are returned unchanged.
+    pub fn perspective_equivalent(
+        self,
+        fov_y: f64,
+        near: f64,
+        far: f64,
+        frame_height: f64,
+    ) -> Self {
+        let Projection::Orthographic { zoom } = self.projection else {
+            return self;
+        };
+        let half_height = frame_height / (2.0 * zoom.max(f64::EPSILON));
+        let distance = half_height / (fov_y * 0.5).tan().max(f64::EPSILON);
+        Self {
+            position: self.position + self.rotation * DVec3::Z * distance,
+            rotation: self.rotation,
+            target: self.position,
+            up: self.rotation * DVec3::Y,
+            projection: Projection::Perspective { fov_y, near, far },
+        }
+    }
+
+    /// [`Self::interpolate`] for a camera whose frame is `frame_height`
+    /// units tall. Between an orthographic and a perspective pose the
+    /// transition stays in perspective, from or to the orthographic pose's
+    /// [`Self::perspective_equivalent`] with the other pose's lens, and is
+    /// orthographic only at its orthographic end. The eye never sits on the
+    /// scene plane, which hid 3D content behind it, and 2D content never
+    /// turns with an orthographic camera that is still tilted in 3D.
+    pub fn interpolate_in_frame(self, to: Self, t: f64, frame_height: f64) -> Self {
+        match (self.projection, to.projection) {
+            (Projection::Orthographic { .. }, Projection::Perspective { fov_y, near, far }) => {
+                if t <= 0.0 {
+                    return self;
+                }
+                self.perspective_equivalent(fov_y, near, far, frame_height)
+                    .interpolate(to, t)
+            }
+            (Projection::Perspective { fov_y, near, far }, Projection::Orthographic { .. }) => {
+                if t >= 1.0 {
+                    return to;
+                }
+                self.interpolate(to.perspective_equivalent(fov_y, near, far, frame_height), t)
+            }
+            _ => self.interpolate(to, t),
+        }
+    }
+
     /// Interpolate complete authored state using the destination projection.
     ///
     /// Cross-projection transitions select the destination projection at the
-    /// start and interpolate from its conventional default parameters.
+    /// start and interpolate from its conventional default parameters; see
+    /// [`Self::interpolate_in_frame`] for transitions that keep the view.
     pub fn interpolate(self, to: Self, t: f64) -> Self {
         let t = t.clamp(0.0, 1.0);
         let up = self.up.lerp(to.up, t).normalize_or(to.up);
@@ -722,6 +775,46 @@ mod tests {
         let middle = from.interpolate(to, 0.5);
         assert!(matches!(middle.projection, Projection::Perspective { .. }));
         assert_eq!(from.interpolate(to, 1.0), to);
+    }
+
+    #[test]
+    fn cross_projection_moves_stay_in_perspective_until_the_orthographic_end() {
+        let flat = CameraPose::orthographic_2d(DVec2::new(1.0, 2.0), 2.0, 0.0).unwrap();
+        let fov_y = 0.8;
+        let high = CameraPose::perspective_3d(
+            DVec3::new(0.0, -12.0, 9.0),
+            DVec3::ZERO,
+            DVec3::Z,
+            fov_y,
+            0.1,
+            1000.0,
+        )
+        .unwrap();
+        let frame_height = 9.0;
+        // At zoom 2 the view is 4.5 units tall; this eye shows that much.
+        let distance = 2.25 / (fov_y / 2.0).tan();
+        let equivalent = flat.perspective_equivalent(fov_y, 0.1, 1000.0, frame_height);
+        assert!((equivalent.position - DVec3::new(1.0, 2.0, distance)).length() < 1e-9);
+        assert_eq!(equivalent.target, flat.position);
+
+        assert_eq!(flat.interpolate_in_frame(high, 0.0, frame_height), flat);
+        assert_eq!(high.interpolate_in_frame(flat, 1.0, frame_height), flat);
+        for step in 1..20 {
+            let t = f64::from(step) / 20.0;
+            for pose in [
+                flat.interpolate_in_frame(high, t, frame_height),
+                high.interpolate_in_frame(flat, t, frame_height),
+            ] {
+                assert!(
+                    matches!(pose.projection, Projection::Perspective { .. }),
+                    "{t}"
+                );
+                assert!(pose.position.z > 5.0, "the eye nears the plane at {t}");
+                assert!(pose.validate().is_ok(), "{t}");
+            }
+        }
+        let almost = flat.interpolate_in_frame(high, 1e-6, frame_height);
+        assert!((almost.position - equivalent.position).length() < 1e-4);
     }
 
     #[test]
