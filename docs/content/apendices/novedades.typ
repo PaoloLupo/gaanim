@@ -358,6 +358,10 @@ enteros, o usa `scene.text.code`.
 - `L.column`, `L.row`, `L.grid` y `L.stack` mantienen su dirección aunque un
   `style=` o una clase traigan otro `direction`.
 - El stub de `Zone.arrange` incluye `direction="wrap"`, que ya funcionaba.
+- `blend("hue")`, `"saturation"`, `"color"` y `"luminosity"` ya no pintan
+  columnas negras sobre un degradado gris: ciertos niveles de gris salían
+  negros en toda la caja del objeto mezclado, también fuera de él, en la vista
+  previa, al exportar y en los reproductores web.
 
 == Al actualizar
 

@@ -1046,6 +1046,57 @@ mod tests {
     }
 
     #[test]
+    fn non_separable_blends_leave_every_gray_beneath_a_clear_source() {
+        use vello::{Scene, kurbo, peniko};
+
+        let Ok(mut gpu) = GpuContext::new(256, 4) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let frame = kurbo::Rect::new(0.0, 0.0, 256.0, 4.0);
+        for mix in [
+            peniko::Mix::Hue,
+            peniko::Mix::Saturation,
+            peniko::Mix::Color,
+            peniko::Mix::Luminosity,
+        ] {
+            // One column per gray level, and a blended layer over all of them
+            // that draws nothing: where its source is clear, the backdrop shows.
+            let mut scene = Scene::new();
+            for level in 0..=255u8 {
+                scene.fill(
+                    peniko::Fill::NonZero,
+                    kurbo::Affine::IDENTITY,
+                    peniko::Color::from_rgb8(level, level, level),
+                    None,
+                    &kurbo::Rect::new(f64::from(level), 0.0, f64::from(level) + 1.0, 4.0),
+                );
+            }
+            scene.push_layer(
+                peniko::Fill::NonZero,
+                peniko::BlendMode::from(mix),
+                1.0,
+                kurbo::Affine::IDENTITY,
+                &frame,
+            );
+            scene.pop_layer();
+            let pixels = gpu
+                .render_frame(&scene, peniko::Color::BLACK, None)
+                .unwrap();
+            for level in 0..=255u8 {
+                let [red, green, blue, _] = pixel(&pixels, 256, u32::from(level), 2);
+                assert!(
+                    [red, green, blue]
+                        .iter()
+                        .all(|&channel| channel.abs_diff(level) <= 1),
+                    "{mix:?} turned gray {level} into {:?}",
+                    [red, green, blue]
+                );
+            }
+        }
+    }
+
+    #[test]
     fn post_process_changes_only_the_camera_frame() {
         use gaanim_renderer::post_process::{CanvasPostProcess, PostProcessShader};
         use vello::{Scene, kurbo, peniko};
