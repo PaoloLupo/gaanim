@@ -52,6 +52,7 @@ impl PyBackground {
                     "source must be inline WGSL text or an os.PathLike .wgsl asset",
                 )
             })?;
+            let path = crate::pycanvas::script_asset_path(py, path);
             std::fs::read_to_string(&path).map_err(|error| {
                 pyo3::exceptions::PyRuntimeError::new_err(
                     gaanim_api::canvas::ShaderBackgroundError::ReadSource {
@@ -261,6 +262,7 @@ impl PyPostProcess {
                             "source must be inline WGSL text or an os.PathLike .wgsl asset",
                         )
                     })?;
+                    let path = crate::pycanvas::script_asset_path(py, path);
                     std::fs::read_to_string(&path).map_err(|error| {
                         pyo3::exceptions::PyRuntimeError::new_err(format!(
                             "could not read {}: {error}",
@@ -285,6 +287,7 @@ impl PyPostProcess {
                     "source must be inline WGSL text or an os.PathLike .wgsl asset",
                 )
             })?;
+            let path = crate::pycanvas::script_asset_path(py, path);
             gaanim_api::canvas::PostProcessShader::from_file_with_uniforms(path, &names)
         };
         shader
@@ -361,7 +364,8 @@ impl PyPostProcess {
     /// Grade through a 3D lookup table from a `.cube` file.
     #[staticmethod]
     #[pyo3(signature = (path, strength=None))]
-    fn lut(path: PathBuf, strength: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+    fn lut(py: Python<'_>, path: PathBuf, strength: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        let path = crate::pycanvas::script_asset_path(py, path);
         let lut = gaanim_api::canvas::CubeLut::from_file(path).map_err(post_process_error)?;
         let shader = lut.shader().map_err(post_process_error)?;
         Ok(Self::new(

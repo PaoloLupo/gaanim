@@ -411,6 +411,7 @@ impl PyTransitionType {
     #[staticmethod]
     #[pyo3(signature = (source, duration, *, uniforms=None, easing=None, overlay=None, sound=None))]
     fn shader(
+        py: Python<'_>,
         source: &Bound<'_, PyAny>,
         duration: f64,
         uniforms: Option<&Bound<'_, pyo3::types::PyMapping>>,
@@ -427,6 +428,7 @@ impl PyTransitionType {
                     "source must be inline WGSL text or an os.PathLike .wgsl file",
                 )
             })?;
+            let path = crate::pycanvas::script_asset_path(py, path);
             std::fs::read_to_string(&path).map_err(|error| {
                 PyValueError::new_err(format!(
                     "could not read the transition WGSL {}: {error}",
@@ -497,6 +499,7 @@ impl PyTransitionType {
     #[pyo3(signature = (name, duration, *, image=None, invert=false, easing=None, overlay=None, sound=None, **settings))]
     #[allow(clippy::too_many_arguments)]
     fn preset(
+        py: Python<'_>,
         name: &str,
         duration: f64,
         image: Option<std::path::PathBuf>,
@@ -528,8 +531,11 @@ impl PyTransitionType {
         }
         let map = match (preset, image) {
             (TransitionPreset::Luma, Some(path)) => Some(
-                gaanim_api::canvas::luma_map_from_file(&path, invert)
-                    .map_err(PyValueError::new_err)?,
+                gaanim_api::canvas::luma_map_from_file(
+                    crate::pycanvas::script_asset_path(py, path),
+                    invert,
+                )
+                .map_err(PyValueError::new_err)?,
             ),
             (TransitionPreset::Luma, None) => {
                 return Err(PyValueError::new_err(

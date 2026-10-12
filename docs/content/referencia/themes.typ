@@ -337,7 +337,7 @@ scene.canvas.background = Brush.linear(["#071022", "#164E8A", "#7DD3FC"], start=
   name: "Background.shader",
   kind: "factory",
   params: (
-    (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` (con `pathlib.Path`), que se lee al crear el fondo.]),
+    (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` (con `pathlib.Path`), que se lee al crear el fondo. Una ruta relativa se busca en el directorio de trabajo, luego en la carpeta `assets` del script y luego junto a él.]),
     (name: "fallback", type: "ColorLike | None", default: "None", desc: [Color fuera del marco, para calcular el contraste automático y si falla la rasterización; negro si se omite.]),
     (name: "uniforms", type: "Mapping[str, float | Parameter | Computed] | None", default: "None", desc: [Campos `f32` de `gaanim_uniforms`, como en `PostProcess.shader`: números fijos o un `Parameter`, `Variable`, `Computed`, `scene.time` o una señal de audio, evaluados en cada fotograma, así que el fondo reacciona a la música. Como máximo 32, con nombres que sean identificadores WGSL.]),
     (name: "audio", type: "Audio | None", default: "None", desc: [Da al fondo el espectrograma de la pista con `gaanim_audio_spectrum(x, ago)` y las demás funciones `gaanim_audio_*` (ver #link("/referencia/audio/")[Audio]); reserva el uniform `gaanim_audio_time`.]),
@@ -461,7 +461,7 @@ exacto de la línea de tiempo.
   name: "PostProcess.shader",
   kind: "factory",
   params: (
-    (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` que se lee al crear el objeto.]),
+    (name: "source", type: "str | os.PathLike[str]", default: none, desc: [WGSL en línea, o la ruta de un asset `.wgsl` que se lee al crear el objeto. Una ruta relativa se busca en el directorio de trabajo, luego en la carpeta `assets` del script y luego junto a él.]),
     (name: "uniforms", type: "Mapping[str, float | Parameter | Computed] | None", default: "None", desc: [Valores que el shader lee como campos `f32` de `gaanim_uniforms` (`gaanim_uniforms.amount`). Un `Parameter`, `Variable`, `Computed` o `scene.time` se evalúa en cada fotograma, así que animarlo anima el efecto. Como máximo 32 por pasada, con nombres que sean identificadores WGSL.]),
     (name: "audio", type: "Audio | None", default: "None", desc: [Da al shader el espectrograma de la pista: `gaanim_audio_spectrum(x, ago)`, `gaanim_audio_level(ago)`, `gaanim_audio_band(low, high, ago)` y `gaanim_audio_x(hz)`. Reserva el uniform `gaanim_audio_time`. Ver #link("/referencia/audio/")[Audio].]),
   ),
@@ -581,7 +581,7 @@ siempre el mismo. Un número fuera de rango lanza `ValueError`.
   name: "PostProcess.lut",
   kind: "factory",
   signature: "lut(path, strength=1.0) -> PostProcess",
-  desc: [Aplica la tabla 3D de un archivo `.cube` (`LUT_3D_SIZE` de 2 a 65, con `DOMAIN_MIN`/`DOMAIN_MAX` opcionales), mezclada según `strength`. El archivo se lee al crear el objeto: si no se puede leer lanza `RuntimeError` y una tabla inválida, `ValueError`.],
+  desc: [Aplica la tabla 3D de un archivo `.cube` (`LUT_3D_SIZE` de 2 a 65, con `DOMAIN_MIN`/`DOMAIN_MAX` opcionales), mezclada según `strength`. El archivo se lee al crear el objeto (una ruta relativa se busca en el directorio de trabajo, luego en la carpeta `assets` del script y luego junto a él): si no se puede leer lanza `RuntimeError` y una tabla inválida, `ValueError`.],
   none,
 )
 
