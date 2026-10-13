@@ -357,6 +357,10 @@ enteros, o usa `scene.text.code`.
   sin escalar.
 - `obj.animate.place(zona, fit="stretch")` estira el objeto a la zona; antes
   lo escalaba como `"contain"`.
+- El botón de descarga de la portada baja el paquete más reciente que exista
+  para tu sistema y, si GitHub no responde, abre la página de la última
+  release. Antes podía apuntar al de una versión aún sin publicar y dar un
+  404. Las releases se publican cuando ya tienen sus paquetes.
 - Las restricciones entre posiciones ya no encogen objetos: dos relaciones
   en conflicto sobre los bordes de una caja, como `(sq.center_x ==
   caja.left).weak()` y `(sq.center_x == caja.right).strong()`, dejan la caja

@@ -51,12 +51,26 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ============================================================================
-// Home download button: the latest release's package for this system
+// Home download button: the newest package for this system
 // ============================================================================
-const RELEASES = "https://github.com/PaoloLupo/gaanim/releases";
 const PACKAGES = {
     windows: { system: "Windows", suffix: "-windows-x64.zip", format: ".zip" },
     linux: { system: "Ubuntu", suffix: "-linux-x64.tar.gz", format: ".tar.gz" },
+};
+
+// How many recent releases to look through for a package.
+const RELEASES_SEARCHED = 10;
+
+// The newest published release with an asset ending in `suffix`, and that
+// asset, or null. GitHub lists releases newest first; one still uploading
+// its packages, or a prerelease, is skipped, as `releases/latest` skips them.
+const newestPackage = (releases, suffix) => {
+    for (const release of releases) {
+        if (release.draft || release.prerelease) continue;
+        const asset = (release.assets || []).find((a) => a.name.endsWith(suffix));
+        if (asset) return { release, asset };
+    }
+    return null;
 };
 
 const detectOs = () => {
@@ -86,22 +100,22 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const target = PACKAGES[os];
-    const version = button.dataset.version;
-    button.href = `${RELEASES}/download/v${version}/gaanim-v${version}${target.suffix}`;
     label.textContent = `Descargar para ${target.system}`;
     format.textContent = `x64 · ${target.format}`;
 
-    // Point at the newest release; without an answer the build's version stays.
-    fetch("https://api.github.com/repos/PaoloLupo/gaanim/releases/latest", {
+    // Download the newest package GitHub has for this system. Until it
+    // answers, or if it cannot (offline, rate limited), the button opens the
+    // latest release's page, which always exists.
+    fetch(`https://api.github.com/repos/PaoloLupo/gaanim/releases?per_page=${RELEASES_SEARCHED}`, {
         headers: { Accept: "application/vnd.github+json" },
     })
         .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-        .then((release) => {
-            const asset = (release.assets || []).find((a) => a.name.endsWith(target.suffix));
-            if (!asset) return;
-            button.href = asset.browser_download_url;
+        .then((releases) => {
+            const found = newestPackage(releases, target.suffix);
+            if (!found) return;
+            button.href = found.asset.browser_download_url;
             const info = document.querySelector(".home-download-info");
-            if (info) info.textContent = `${release.tag_name} · ${Math.round(asset.size / 1048576)} MB`;
+            if (info) info.textContent = `${found.release.tag_name} · ${Math.round(found.asset.size / 1048576)} MB`;
         })
         .catch(() => {});
 });
