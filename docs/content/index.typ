@@ -46,6 +46,7 @@
 
 #book-part("V", "Ejemplos", description: "Escenas completas listas para copiar y ejecutar")
 #include "ejemplos/index.typ"
+#include "ejemplos/temas.typ"
 #include "ejemplos/basicos.typ"
 #include "ejemplos/avanzados.typ"
 

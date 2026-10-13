@@ -895,3 +895,28 @@ window.addEventListener("message", (event) => {
         else if (data.kind === "error") frame.parentElement.classList.remove("ready");
     }
 });
+
+// ============================================================================
+// Examples index: filter the topic and showcase cards as you type
+// ============================================================================
+document.addEventListener("DOMContentLoaded", () => {
+    const input = document.getElementById("examples-filter");
+    if (!input) return;
+    const count = document.getElementById("examples-filter-count");
+    const cards = [...document.querySelectorAll(".topic-card[data-search]")];
+    const blocks = [...document.querySelectorAll(".examples-block")];
+    const filter = () => {
+        const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+        let shown = 0;
+        for (const card of cards) {
+            const text = card.dataset.search;
+            card.hidden = !words.every((word) => text.includes(word));
+            if (!card.hidden) shown += 1;
+        }
+        for (const block of blocks) {
+            block.hidden = !block.querySelector(".topic-card:not([hidden])");
+        }
+        count.textContent = words.length === 0 ? "" : shown === 1 ? "1 match" : `${shown} matches`;
+    };
+    input.addEventListener("input", filter);
+});

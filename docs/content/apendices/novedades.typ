@@ -121,6 +121,11 @@ enteros, o usa `scene.text.code`.
   `just run easings` abre uno por su nombre. Los scripts sueltos de antes se
   reescribieron en inglés dentro de su tema, o pasaron a `tests/` los que
   eran pruebas.
+- La documentación tiene una sección #link("/ejemplos/")[Examples] con todos
+  los ejemplos por tema: una portada con los temas en cinco bloques, Showcase
+  destacado y un filtro, y una página por tema con cada ejemplo, su captura,
+  su código y su enlace al repositorio. Sale del catálogo al compilar la
+  documentación, así que un ejemplo nuevo aparece sin tocarla.
 
 == Editor
 
