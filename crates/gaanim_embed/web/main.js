@@ -9,14 +9,17 @@
 // `controls=0` hides the bar (a click plays or pauses), `autoplay=0` waits for
 // a click and `#t=12.5` starts there. A stop (`scene.stop()`) pauses it until
 // a click; one with an ambient loop (`scene.stop(loop=…)`) repeats the loop
-// meanwhile, and the click plays on from its end, as a presentation does.
+// meanwhile, and the click plays on from its end, as a presentation does. The
+// bar marks each stop on its track.
 //
 // The wasm module (`gaanim_embed`) only decodes the file and draws the frame
 // at a time; this page keeps the clock, downloads the file (in pieces when
 // its host serves byte ranges, as the web player does), shows the controls and
 // plays the audio with WebAudio. A file that needs the GPU passes this player
-// leaves out (post-processing, shader backgrounds) opens in the web player
-// with the same options instead.
+// leaves out (post-processing, shader backgrounds, glass) opens in the web
+// player with the same options instead; with `full=click` it waits for a
+// click first, since the web player downloads far more, and a parent page
+// hears `full` with the web player's address to offer that click itself.
 import init, { Player } from "./pkg/gaanim_embed.js";
 
 const params = new URLSearchParams(location.search);
@@ -44,6 +47,7 @@ const bar = $("bar");
 const toggle = $("toggle");
 const toggleIcon = $("toggle-icon");
 const seek = $("seek");
+const stopMarks = $("stops");
 const clock = $("clock");
 const loopButton = $("loop");
 const mute = $("mute");
@@ -111,6 +115,14 @@ function opened(json) {
   info = JSON.parse(json);
   if (info.full.length && fullPlayer) {
     // The web player draws what this one leaves out.
+    if (params.get("full") === "click") {
+      tellParent("full", info.title, { full: info.full, url: fullPlayer });
+      say("Esta animación usa efectos que solo dibuja el reproductor completo. Haz clic para abrirlo.");
+      message.querySelector(".loader").hidden = true;
+      message.classList.add("action");
+      message.addEventListener("click", () => location.replace(fullPlayer), { once: true });
+      return;
+    }
     location.replace(fullPlayer);
     return;
   }
@@ -131,6 +143,7 @@ function opened(json) {
   message.hidden = true;
   bar.hidden = !options.controls;
   seek.max = String(info.duration || 1);
+  markStops();
   setAudioTracks(info.audio);
   // `full` names the GPU passes the file uses that this player leaves out.
   tellParent("opened", info.title, { full: info.full });
@@ -258,6 +271,21 @@ function formatTime(seconds) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
+// A tick on the track for each stop inside the file, at its time.
+function markStops() {
+  const duration = info.duration || 1;
+  stopMarks.replaceChildren(
+    ...info.stops
+      .filter((time) => time > 1e-6 && time < duration - 1e-6)
+      .map((time) => {
+        const tick = document.createElement("i");
+        tick.dataset.time = String(time);
+        tick.style.setProperty("--at", String(time / duration));
+        return tick;
+      }),
+  );
+}
+
 let shownClock = "";
 function showClock() {
   const text = `${formatTime(state.time)} / ${formatTime(info.duration)}`;
@@ -267,6 +295,9 @@ function showClock() {
   }
   if (!seeking) seek.value = String(state.time);
   seek.style.setProperty("--progress", `${(100 * state.time) / (info.duration || 1)}%`);
+  for (const tick of stopMarks.children) {
+    tick.classList.toggle("passed", Number(tick.dataset.time) <= state.time + 1e-6);
+  }
 }
 
 let revealTimer = 0;
@@ -763,6 +794,10 @@ const fullPlayer = src
   ? (() => {
       const full = new URL("../", location.href);
       full.search = location.search;
+      // The web player lives a folder up: hand it the file's address as
+      // resolved here, or a relative one would point past the site's base.
+      full.searchParams.set("src", new URL(src, location.href).href);
+      full.searchParams.delete("full");
       full.searchParams.set("embed", "");
       full.hash = location.hash;
       return full.href;
