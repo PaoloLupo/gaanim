@@ -79,6 +79,46 @@
   ))
 }
 
+// Bundles up to this size play as soon as their example is on screen; a
+// bigger one waits for a click before it downloads.
+#let autoplay-limit = 2000000
+
+// The example's poster with its bundle playing over it in the embed player,
+// or only the poster when the build recorded no bundle.
+#let preview(entry, image) = context {
+  let bundle = stdx.example-bundle(entry.path)
+  if bundle == none {
+    return html.figure(class: "example-preview", poster-image(entry, image: image))
+  }
+  let base = stdx.config.asset-base
+  let root = base.slice(0, base.len() - "assets/".len())
+  let site = "bundles/examples/" + bundle.path.split("/").last()
+  [#metadata((base + site, read("../" + bundle.path, encoding: none))) <metadata-asset>]
+  // The player resolves the bundle from its own page, /reproductor/insertar/.
+  let src = root + "reproductor/insertar/?src=../../assets/" + site + "&loop"
+  html.figure(class: "example-preview", if bundle.bytes <= autoplay-limit {
+    html.div(class: "anim-stage example-stage", {
+      poster-image(entry, image: image)
+      html.elem("iframe", attrs: (
+        src: src,
+        title: example-title(entry),
+        loading: "lazy",
+        allow: "fullscreen",
+      ))
+    })
+  } else {
+    let megabytes = str(calc.round(bundle.bytes / 1000000, digits: 1))
+    html.elem("div", attrs: (class: "anim-stage example-stage", "data-player": src), {
+      poster-image(entry, image: image)
+      html.elem(
+        "button",
+        attrs: (type: "button", class: "example-play", "data-size": megabytes + " MB"),
+        "Play · " + megabytes + " MB",
+      )
+    })
+  })
+}
+
 #let count-label(n) = if n == 1 { "1 example" } else { str(n) + " examples" }
 
 // Words the index filter matches a topic card against.
@@ -165,7 +205,7 @@
   let source = str(stdx.repo-file("examples/" + entry.path))
   [#heading(level: 2, numbering: none, example-title(entry)) #label(example-anchor(entry))]
   html.p(class: "example-description", entry.description)
-  html.figure(class: "example-preview", poster-image(entry, image: image))
+  preview(entry, image)
   context [#metadata((stdx.config.asset-base + image.path, image.data)) <metadata-asset>]
   html.div(class: "example-actions", {
     html.a(href: repository + "/blob/main/examples/" + entry.path, class: "example-action", "View on GitHub")

@@ -1,4 +1,5 @@
 mod args;
+mod examples;
 mod execution;
 mod pyapi;
 mod world;
@@ -158,7 +159,13 @@ fn out() -> termcolor::StandardStream {
     termcolor::StandardStream::stderr(termcolor::ColorChoice::Auto)
 }
 
-struct Report(Warned<typst::diag::SourceResult<()>>, execution::RunStats);
+/// A compilation's result, the code cells it ran, and how many cataloged
+/// examples could not be recorded for their pages.
+struct Report(
+    Warned<typst::diag::SourceResult<()>>,
+    execution::RunStats,
+    usize,
+);
 
 impl Report {
     fn print(&self, world: &DocWorld) {
@@ -205,12 +212,22 @@ impl Report {
             )
             .unwrap();
         }
-        failed
+        if self.2 > 0 {
+            writeln!(
+                out,
+                "{} cataloged examples could not be recorded; see \"Example bundle of\" above.",
+                self.2
+            )
+            .unwrap();
+        }
+        failed + self.2
     }
 }
 
 fn compile_once(world: &DocWorld, config: &mut Config) -> Report {
     execution::reset_stats();
+    // The examples pages play every cataloged example's bundle.
+    let bundle_failures = examples::prepare(config.jobs);
 
     // First pass: queue every example that is not cached, run the queue in
     // parallel, then compile again so the pages show the results. When nothing
@@ -259,7 +276,7 @@ fn compile_once(world: &DocWorld, config: &mut Config) -> Report {
             && !diag.message.ends_with("was ignored during HTML export")
     });
 
-    Report(warned, stats)
+    Report(warned, stats, bundle_failures)
 }
 
 fn export_website(bundle: Bundle, config: &Config) -> typst::diag::SourceResult<()> {

@@ -920,3 +920,21 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     input.addEventListener("input", filter);
 });
+
+// ============================================================================
+// Examples pages: a big example's bundle loads only when asked for
+// ============================================================================
+document.addEventListener("DOMContentLoaded", () => {
+    for (const stage of document.querySelectorAll(".example-stage[data-player]")) {
+        const button = stage.querySelector(".example-play");
+        button?.addEventListener("click", () => {
+            const frame = document.createElement("iframe");
+            frame.src = stage.dataset.player;
+            frame.title = stage.querySelector("img")?.alt ?? "";
+            frame.allow = "fullscreen";
+            stage.append(frame);
+            button.disabled = true;
+            button.textContent = `Loading ${button.dataset.size}…`;
+        });
+    }
+});

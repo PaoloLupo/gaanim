@@ -9,6 +9,9 @@ on:
     paths:
       - "docs/**"
       - "crates/**"
+      # The examples pages show the cataloged examples and their snapshots.
+      - "examples/**"
+      - "tests/visual/**/baseline/**"
       - "Cargo.toml"
       - "scripts/build_web.py"
       - "scripts/build_playground.py"
@@ -20,6 +23,9 @@ on:
     paths:
       - "docs/**"
       - "crates/**"
+      # The examples pages show the cataloged examples and their snapshots.
+      - "examples/**"
+      - "tests/visual/**/baseline/**"
       - "Cargo.toml"
       - "scripts/build_web.py"
       - "scripts/build_playground.py"
@@ -69,14 +75,15 @@ jobs:
 
       # Previews are keyed by each example's source hash, so a stale cache
       # only re-renders the examples that changed. Results cached against
-      # another stub or runtime version are re-checked before reuse.
+      # another stub or runtime version are re-checked before reuse. The
+      # bundles of the cataloged examples are keyed the same way.
       - name: Restore rendered previews
         uses: actions/cache@v4
         with:
           path: |
             docs/target/code_cache
             docs/assets/generated
-          key: docs-previews-${{ hashFiles('docs/content/**', 'crates/**/*.rs') }}
+          key: docs-previews-${{ hashFiles('docs/content/**', 'examples/**', 'crates/**/*.rs') }}
           restore-keys: docs-previews-
 
       - name: Build preview runtime

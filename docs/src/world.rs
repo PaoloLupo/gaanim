@@ -195,6 +195,7 @@ fn stdx_module() -> Module {
     scope.define_func::<read_font>();
     scope.define_func::<python_api>();
     scope.define_func::<repo_file>();
+    scope.define_func::<crate::examples::example_bundle>();
     // The workspace version the documentation describes.
     scope.define("version", env!("CARGO_PKG_VERSION"));
     Module::new("stdx", scope)
