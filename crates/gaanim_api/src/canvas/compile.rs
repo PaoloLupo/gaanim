@@ -4152,8 +4152,19 @@ impl SceneModel {
                                     anim.target,
                                     &mut remapped,
                                 );
-                                Some((remapped, time_maps.get(index).cloned().flatten()))
+                                let map = time_maps.get(index).cloned().flatten();
+                                Some(
+                                    Self::split_group_paints(
+                                        object_specs,
+                                        id_map,
+                                        anim.target,
+                                        remapped,
+                                    )
+                                    .into_iter()
+                                    .map(move |piece| (piece, map.clone())),
+                                )
                             })
+                            .flatten()
                             .collect();
                     let start = builder.current_time;
                     let max_duration = remapped
@@ -9659,6 +9670,88 @@ impl SceneModel {
             .map(|child| (child.id, child.span.character))
             .collect();
         config.groups = reveal_groups(&glyphs, &text.visible_char_units(config.reveal_unit));
+    }
+
+    /// Split the fill and stroke of a property animation on a group into one
+    /// animation per member, the members the group's immediate `fill` and
+    /// `stroke` restyle: a group draws nothing of its own, so on the group
+    /// these channels changed nothing. The group keeps its other channels.
+    fn split_group_paints(
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        authored_target: ObjectId,
+        anim: AnimationBuilder,
+    ) -> Vec<AnimationBuilder> {
+        let AnimationType::Properties(properties) = &anim.anim_type else {
+            return vec![anim];
+        };
+        let paints = properties.fill.is_some()
+            || properties.stroke_color.is_some()
+            || properties.stroke_width.is_some()
+            || properties.visible_color.is_some();
+        let is_group = matches!(
+            object_specs.get(&authored_target).map(|spec| &spec.kind),
+            Some(SpawnKind::Group(_) | SpawnKind::GroupNoCenter(_))
+        );
+        if !paints || !is_group {
+            return vec![anim];
+        }
+        let members: Vec<ObjectId> = Self::group_paint_members(object_specs, authored_target)
+            .into_iter()
+            .filter_map(|member| id_map.get(&member).copied())
+            .collect();
+        if members.is_empty() {
+            return vec![anim];
+        }
+        let mut rest = properties.clone();
+        let paint = crate::anim::PropertyAnimation {
+            fill: rest.fill.take(),
+            stroke_color: rest.stroke_color.take(),
+            stroke_width: rest.stroke_width.take(),
+            visible_color: rest.visible_color.take(),
+            ..Default::default()
+        };
+        let mut split = Vec::with_capacity(members.len() + 1);
+        if !rest.is_empty() {
+            split.push(AnimationBuilder {
+                anim_type: AnimationType::Properties(rest),
+                ..anim.clone()
+            });
+        }
+        split.extend(members.into_iter().map(|target| AnimationBuilder {
+            target,
+            anim_type: AnimationType::Properties(paint.clone()),
+            ..anim.clone()
+        }));
+        split
+    }
+
+    /// The drawn members of a group at any depth, in order: what its fill
+    /// and stroke reach. A box's background and a clip mask stay out, as
+    /// they do from the group's immediate `fill`.
+    fn group_paint_members(
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
+        group: ObjectId,
+    ) -> Vec<ObjectId> {
+        let mut members = Vec::new();
+        let mut pending = vec![group];
+        while let Some(id) = pending.pop() {
+            let Some(spec) = object_specs.get(&id) else {
+                continue;
+            };
+            let (SpawnKind::Group(children) | SpawnKind::GroupNoCenter(children)) = &spec.kind
+            else {
+                members.push(id);
+                continue;
+            };
+            pending.extend(children.iter().rev().copied().filter(|child| {
+                Some(*child) != spec.layout_background
+                    && object_specs
+                        .get(child)
+                        .is_none_or(|child| !child.exclude_from_parent_draw)
+            }));
+        }
+        members
     }
 
     fn fragment_child_ids(
@@ -16655,6 +16748,66 @@ mod tests {
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
+    }
+
+    /// A group's fill and stroke animations recolor every member, also in a
+    /// nested group, as its immediate `fill` and `stroke` do.
+    #[test]
+    fn group_paint_animations_reach_every_member() {
+        let red = PenikoColor::from_rgb8(255, 0, 0);
+        let mut canvas = SceneModel::new(640, 360);
+        let square = canvas.rect(1.0, 1.0);
+        let circle = canvas.circle(0.5);
+        let dot = canvas.circle(0.2);
+        let inner = canvas.group(&[&circle]);
+        let outer = canvas.group(&[&square, &inner, &dot]);
+        canvas.play(vec![outer.animate().fill(red).duration(1.0)]);
+        canvas.play(vec![outer.animate().stroke(red, 0.1).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 2.0);
+        for member in [&square, &circle, &dot] {
+            let entity = entity_of(&mut world, member);
+            assert_eq!(
+                world.get::<FillBrush>(entity).unwrap().0,
+                Some(Brush::Solid(red))
+            );
+            assert_eq!(
+                world.get::<StrokeBrush>(entity).unwrap().brush,
+                Some(Brush::Solid(red))
+            );
+        }
+    }
+
+    /// Effects set after the first play are cuts at the cursor, as paints
+    /// are: before it the declared effects show, after it the new ones.
+    #[test]
+    fn effects_set_after_the_first_play_cut_at_the_cursor() {
+        use gaanim_renderer::effects::{DropShadow, GaussianBlur, Glow};
+        let mut canvas = SceneModel::new(640, 360);
+        let glowing = canvas
+            .circle(0.5)
+            .glow(PenikoColor::WHITE, 0.3, 2.0)
+            .blur(0.2);
+        let plain = canvas.circle(0.5).move_to_default(2.0, 0.0);
+        canvas.play(vec![plain.animate().shift_by(0.5, 0.0).duration(1.0)]);
+        glowing.clone().no_effects();
+        plain
+            .clone()
+            .shadow(PenikoColor::BLACK, DVec2::new(0.1, -0.1), 0.05);
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let (glowing, plain) = (
+            entity_of(&mut world, &glowing),
+            entity_of(&mut world, &plain),
+        );
+        timeline.seek(&mut world, 0.5);
+        assert!(world.get::<Glow>(glowing).is_some());
+        assert!(world.get::<GaussianBlur>(glowing).is_some());
+        assert!(world.get::<DropShadow>(plain).is_none());
+        timeline.seek(&mut world, 1.5);
+        assert!(world.get::<Glow>(glowing).is_none());
+        assert!(world.get::<GaussianBlur>(glowing).is_none());
+        assert!(world.get::<DropShadow>(plain).is_some());
     }
 
     fn transform_of(world: &mut World, handle: &DrawableHandle) -> SpatialTransform {

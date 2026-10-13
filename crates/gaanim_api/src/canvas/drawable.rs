@@ -829,6 +829,17 @@ impl DrawableHandle {
                 properties.stroke_color = Some(paint.clone());
                 properties.stroke_width = Some(*width);
             }
+            // Effects cut like paints once the declaration is frozen; `None`
+            // removes one.
+            if before.glow != after.glow {
+                properties.glow = Some(after.glow.clone());
+            }
+            if before.blur != after.blur {
+                properties.blur = Some(after.blur);
+            }
+            if before.shadow != after.shadow {
+                properties.shadow = Some(after.shadow.clone());
+            }
             if !properties.is_empty() {
                 self.push_immediate(
                     target.lock().expect("object spec poisoned").id,
@@ -1465,10 +1476,11 @@ impl DrawableHandle {
         self
     }
 
-    /// Apply a soft vector blur to this drawable.
+    /// Apply a soft vector blur to this drawable; a `sigma` of zero (or
+    /// less) removes the blur, as `animate().blur(None)` does.
     pub fn blur(self, sigma: f64) -> Self {
         self.update_style(|spec| {
-            spec.blur = Some(gaanim_renderer::effects::GaussianBlur { sigma });
+            spec.blur = (sigma > 0.0).then_some(gaanim_renderer::effects::GaussianBlur { sigma });
         })
     }
 

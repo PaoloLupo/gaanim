@@ -2317,8 +2317,10 @@ impl PyDrawable {
 
     pub(crate) fn blur_impl(&self, sigma: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        if !sigma.is_finite() || sigma <= 0.0 {
-            return Err(PyValueError::new_err("sigma must be finite and positive"));
+        if !sigma.is_finite() || sigma < 0.0 {
+            return Err(PyValueError::new_err(
+                "sigma must be finite and non-negative",
+            ));
         }
         Ok(Self(self.0.clone().blur(sigma)))
     }

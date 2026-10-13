@@ -3884,7 +3884,12 @@ class Drawable:
         """
         ...
     def blur(self, sigma: float = 0.04) -> Drawable:
-        """Apply blur to this drawable and return the result.
+        """Blur this drawable by ``sigma`` scene units; ``0`` removes the blur.
+
+        After the first ``play`` or ``wait`` the change is a cut at the
+        cursor, like ``fill``. ``blur(0)`` also gives a sharp start for
+        ``animate.blur``. A negative or non-finite ``sigma`` raises
+        ``ValueError``.
 
         Example:
             result = drawable.blur()
@@ -3912,7 +3917,10 @@ class Drawable:
         """
         ...
     def no_effects(self) -> Drawable:
-        """Apply no effects to this drawable and return the result.
+        """Remove this drawable's glow, blur and shadow and return it.
+
+        Like ``glow``, ``blur`` and ``shadow``, after the first ``play`` or
+        ``wait`` it is a cut at the cursor: the effects show until then.
 
         Example:
             result = drawable.no_effects()
@@ -5420,7 +5428,7 @@ class Text(Drawable):
         """
         ...
     def blur(self, sigma: float = 0.04) -> Self:
-        """Apply blur while preserving Text chaining and typographic placement.
+        """Blur the text by ``sigma``, keeping Text chaining and placement; ``0`` removes the blur.
 
         Example:
             label.blur(0.04).move_to(0.0, 0.0)

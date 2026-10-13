@@ -362,6 +362,13 @@ enteros, o usa `scene.text.code`.
   caja.left).weak()` y `(sq.center_x == caja.right).strong()`, dejan la caja
   de su tamaño; antes la reducían a cero. `(texto.width <= 0.5).weak()` ya
   no aplasta los glifos.
+- `group.animate.fill(color)` y `group.animate.stroke(color, ancho)` animan a
+  todos los miembros del grupo, también en grupos anidados, como ya hacían
+  `group.fill()` y `group.stroke()`; antes no cambiaban nada.
+- `glow`, `blur`, `shadow` y `no_effects` después del primer `play` o `wait`
+  son cortes en el cursor, como `fill`; antes se ignoraban y el objeto seguía
+  con los efectos de su declaración. `blur(0)` quita el desenfoque y sirve de
+  inicio nítido para `animate.blur`; antes lanzaba `ValueError`.
 - `L.column`, `L.row`, `L.grid` y `L.stack` mantienen su dirección aunque un
   `style=` o una clase traigan otro `direction`.
 - El stub de `Zone.arrange` incluye `direction="wrap"`, que ya funcionaba.
