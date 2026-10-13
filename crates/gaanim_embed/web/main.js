@@ -763,6 +763,9 @@ const fullPlayer = src
   ? (() => {
       const full = new URL("../", location.href);
       full.search = location.search;
+      // The web player lives a folder up: hand it the file's address as
+      // resolved here, or a relative one would point past the site's base.
+      full.searchParams.set("src", new URL(src, location.href).href);
       full.searchParams.set("embed", "");
       full.hash = location.hash;
       return full.href;
