@@ -40,8 +40,7 @@ stage = page([
     "bar_between(hinge, bob)",
     "angle_between(hinge,",
     "    Direction.DOWN, bob)",
-    "pen = dot(0.05).follow(bob)",
-    "traced_path(pen,",
+    "traced_path(bob,",
     "    dissipating_time=1.5)",
 ])
 LENGTH, GRAVITY, DAMPING, START = 3.2, 9.81, 0.25, 1.1
@@ -67,14 +66,11 @@ def step_pendulum(_position, dt, _elapsed):
 
 
 bob = scene.geometry.circle(0.3).fill(accent).move_to(*bob_at(START)[:2])
-# The trail records a marker that follows the bob.
-pen = scene.geometry.dot(0.05).fill(accent).follow(bob)
 parts = [
     M.pin_support(hinge, direction=Direction.DOWN, size=0.9, ground_length=1.8),
     M.bar_between(hinge, bob).stroke(fg, 0.08),
     M.angle_between(hinge, Direction.DOWN, bob, radius=1.2, label="$theta$", label_gap=0.25),
-    pen,
-    scene.geometry.traced_path(pen, dissipating_time=1.5).no_fill().stroke(accent, 0.04),
+    scene.geometry.traced_path(bob, dissipating_time=1.5).no_fill().stroke(accent, 0.04),
 ]
 bob.add_updater_fn(step_pendulum, reset=reset_pendulum, fixed_dt=STEP)
 scene.play([part.animate.fade_in() for part in parts] + [bob.animate.fade_in()], duration=0.3)

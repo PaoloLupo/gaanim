@@ -104,7 +104,7 @@ enteros, o usa `scene.text.code`.
 
 == Ejemplos
 
-- Los ejemplos del repositorio se ordenan por temas, como los de Bevy:
+- Los ejemplos del repositorio se ordenan por temas:
   `examples/animation/easings.py`, `examples/camera/camera_moves.py`,
   `examples/3d/primitives_3d.py`… Cada uno recorre las variantes que ofrece
   la API de su tema, con el tema por defecto y una etiqueta con el código que
@@ -418,6 +418,18 @@ enteros, o usa `scene.text.code`.
 - `box.reveal()` y `box.cascade(…)` hacen aparecer un `rolling_number` o un
   `progress_ring` de la caja como cualquier otra pieza; antes pasaban por el
   `animate` de su valor y el contador se veía desde el principio.
+- `scene.geometry.traced_path(objeto)` de un objeto simulado con
+  `add_updater_fn(…, fixed_dt=…)` que además tiene animaciones propias, como
+  un `fade_in`, sigue la simulación al buscar un instante (en el editor y en
+  las capturas). Antes el objeto volvía a su posición inicial en la mayoría de
+  los cuadros y el rastro acababa con una recta hacia ella; había que trazar
+  un punto con `follow(objeto)`.
+- `race.bar(nombre).animate.opacity(…)` atenúa una fila de una carrera de
+  barras, y el desvanecimiento de las filas que salen del top sigue
+  funcionando encima. Antes lanzaba un error sobre un `Parameter` inaccesible.
+- `chart.layer(nombre)` con una capa que el gráfico no tiene (`grid`,
+  `guides` o `labels`) dice por qué falta y qué capas tiene. Antes respondía
+  con la lista de nombres válidos, que incluía el pedido.
 
 == Al actualizar
 

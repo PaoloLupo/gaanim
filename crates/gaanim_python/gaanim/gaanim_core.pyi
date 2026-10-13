@@ -7483,7 +7483,9 @@ class BarRace(Drawable):
     def bar(self, name: str) -> Drawable:
         """The row of bar ``name``: its bar, name and value, moving between slots.
 
-        Raise KeyError for an unknown name.
+        The race moves the row and fades it out below the last shown rank;
+        its own opacity stays free, so ``race.bar(name).animate.opacity(0.3)``
+        dims it on top of that fade. Raise KeyError for an unknown name.
         """
         ...
     def set(self, position: float) -> BarRace:
@@ -7562,7 +7564,13 @@ class Chart:
         """Return the root drawable used by layout and generic transforms."""
         ...
     def layer(self, name: Literal["marks", "axes", "grid", "guides", "labels"]) -> Drawable:
-        """Return one semantic layer; ``axes`` includes grid, axes, ticks, numbers, and axis labels."""
+        """Return one semantic layer; ``axes`` includes grid, axes, ticks, numbers, and axis labels.
+
+        ``grid`` exists when the axes draw one, ``guides`` when the spec has a
+        legend or a guide title, and ``labels`` for bar charts with a ``label``
+        encoding. Raise ValueError naming the chart's layers when it lacks the
+        requested one.
+        """
         ...
     @property
     def animate(self) -> ChartAnimation: ...

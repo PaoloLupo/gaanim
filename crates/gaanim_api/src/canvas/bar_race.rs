@@ -406,8 +406,19 @@ impl SceneModel {
                 anchor: None,
             })?;
 
-            let row = self.group_no_center(&[&bar, &label, &value]);
-            let row = row
+            // Leaving the top fades an inner group, so the row's own opacity
+            // stays free to animate; opacities multiply down the hierarchy.
+            let shown = self
+                .group_no_center(&[&bar, &label, &value])
+                .bind_property(PropertySources::Opacity({
+                    let cache = cache.clone();
+                    let model = model.clone();
+                    position_source(&parameter, recipe("opacity", index), move |position| {
+                        model.visibility(cache.state(position).ranks[index])
+                    })
+                }))?;
+            let row = self
+                .group_no_center(&[&shown])
                 .bind_property(PropertySources::Translation {
                     values: [
                         0.0.into(),
@@ -420,14 +431,7 @@ impl SceneModel {
                         0.0.into(),
                     ],
                     anchor: None,
-                })?
-                .bind_property(PropertySources::Opacity({
-                    let cache = cache.clone();
-                    let model = model.clone();
-                    position_source(&parameter, recipe("opacity", index), move |position| {
-                        model.visibility(cache.state(position).ranks[index])
-                    })
-                }))?;
+                })?;
             bars.push(BarRaceBar {
                 name: name.clone(),
                 row,
@@ -643,6 +647,34 @@ mod tests {
         let _ = race.play();
     }
 
+    /// A row's opacity animates as any drawable's does, on top of the race
+    /// fading the bars that leave the top.
+    #[test]
+    fn rows_animate_their_own_opacity() {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let race = race(&mut canvas);
+        let row = race.bars[0].row.clone();
+        canvas
+            .play_items(vec![row.animate().opacity(0.3).duration(1.0).into()])
+            .unwrap();
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world.remove_resource::<Timeline>().unwrap();
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 1.0);
+        let opacity = world
+            .query::<(&gaanim_scene::MobjectId, &gaanim_scene::Opacity)>()
+            .iter(&world)
+            .find(|(object, _)| object.0 == row.id)
+            .map(|(_, opacity)| opacity.0)
+            .unwrap();
+        assert!((opacity - 0.3).abs() < 1e-6, "{opacity}");
+    }
+
     #[test]
     fn seeking_matches_the_pure_model_at_every_time() {
         let mut canvas = SceneModel::new(16.0, 9.0);
@@ -678,7 +710,13 @@ mod tests {
             matches[0]
         };
         let rows = (0..race.bars.len())
-            .map(|index| (target("slot", index), target("length", index)))
+            .map(|index| {
+                (
+                    target("slot", index),
+                    target("length", index),
+                    target("opacity", index),
+                )
+            })
             .collect::<Vec<_>>();
         let mut timeline = world.remove_resource::<Timeline>().unwrap();
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
@@ -691,7 +729,7 @@ mod tests {
         for time in [1.5, 0.0, 2.0, 0.4, 1.0, 1.5] {
             timeline.seek(&mut world, time);
             let state = race.model.state(time);
-            for (index, (row, bar)) in rows.iter().enumerate() {
+            for (index, (row, bar, shown)) in rows.iter().enumerate() {
                 let row_y = world.get::<SpatialTransform>(*row).unwrap().translation.y;
                 assert!(
                     (row_y - slots.center_y(state.ranks[index])).abs() < 1e-9,
@@ -702,7 +740,7 @@ mod tests {
                     (scale - state.fraction(index).max(MIN_BAR_SCALE)).abs() < 1e-9,
                     "length of bar {index} at {time}"
                 );
-                let opacity = world.get::<gaanim_scene::Opacity>(*row).unwrap().0 as f64;
+                let opacity = world.get::<gaanim_scene::Opacity>(*shown).unwrap().0 as f64;
                 assert!(
                     (opacity - race.model.visibility(state.ranks[index])).abs() < 1e-6,
                     "opacity of bar {index} at {time}"

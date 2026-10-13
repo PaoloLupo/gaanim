@@ -174,6 +174,12 @@ impl Updater {
         };
         self
     }
+
+    /// Whether this is a fixed-step simulation, which owns its entity's
+    /// translation: a seek restores the starting translation and replays it.
+    pub fn is_simulation(&self) -> bool {
+        self.fixed_dt.is_some()
+    }
 }
 
 #[derive(Clone)]
