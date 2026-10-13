@@ -14,8 +14,9 @@
   (..topic, examples: examples)
 })
 
-// The index groups the topics; showcase leads it on its own.
-#let featured = "showcase"
+// The index groups the topics; the gallery and the showcase lead it, each
+// with a card per example.
+#let featured = ("gallery", "showcase")
 #let blocks = (
   (title: "Foundations", topics: ("basics", "shapes", "style", "text", "math", "layout")),
   (title: "Motion", topics: ("animation", "transforms", "emphasis", "transitions", "camera")),
@@ -26,7 +27,7 @@
 
 #for topic in topics {
   assert(
-    topic.id == featured or blocks.any(block => topic.id in block.topics),
+    topic.id in featured or blocks.any(block => topic.id in block.topics),
     message: "examples.toml topic " + topic.id + " has no block in docs/components/examples.typ",
   )
 }
@@ -151,7 +152,6 @@
 // of topics as cards, with a filter. The book lists them instead.
 #let examples-index() = context {
   if target() in ("bundle", "html") {
-    let showcase = topics.find(topic => topic.id == featured)
     html.div(class: "examples-filter", {
       html.elem("input", attrs: (
         id: "examples-filter",
@@ -162,9 +162,9 @@
       ))
       html.span(class: "examples-filter-count", id: "examples-filter-count", "")
     })
-    if showcase != none {
+    for showcase in topics.filter(topic => topic.id in featured) {
       html.section(class: "examples-block examples-featured", {
-        heading(level: 2, numbering: none, showcase.title)
+        heading(level: 2, numbering: none, html.a(href: showcase.id + "/", showcase.title))
         html.p(class: "examples-block-body", showcase.description)
         html.div(class: "home-cards showcase-cards", {
           for entry in showcase.examples {
@@ -201,10 +201,10 @@
 }
 
 // One example on its topic page: title, description, poster, links and code.
-#let example-section(entry) = {
+#let example-section(entry, level: 2) = {
   let image = poster(entry)
   let source = str(stdx.repo-file("examples/" + entry.path))
-  [#heading(level: 2, numbering: none, example-title(entry)) #label(example-anchor(entry))]
+  [#heading(level: level, numbering: none, example-title(entry)) #label(example-anchor(entry))]
   html.p(class: "example-description", entry.description)
   preview(entry, image)
   context [#metadata((stdx.config.asset-base + image.path, image.data)) <metadata-asset>]
@@ -225,10 +225,23 @@
   })
 }
 
-// A topic's page body.
+// A topic's page body. Examples with a `group` are listed under a heading
+// per group, in the order the groups first appear.
 #let topic-page(topic) = {
   set heading(numbering: none)
+  let groups = ()
   for entry in topic.examples {
-    example-section(entry)
+    let group = entry.at("group", default: none)
+    if group not in groups { groups.push(group) }
+  }
+  if groups == (none,) {
+    for entry in topic.examples { example-section(entry) }
+  } else {
+    for group in groups {
+      if group != none { heading(level: 2, group) }
+      for entry in topic.examples.filter(entry => entry.at("group", default: none) == group) {
+        example-section(entry, level: if group == none { 2 } else { 3 })
+      }
+    }
   }
 }
