@@ -73,6 +73,11 @@ const GENERAL: Page = Page {
                     "Write the cover image of a .gaanim file, at most SIZE\npixels on its longest edge (default 512)",
                 ),
                 (
+                    "update [--check]",
+                    "Install the newest Gaanim release over this one; --check
+only says whether there is one",
+                ),
+                (
                     "register",
                     "Open .gaanim files with Gaanim on double click, with a\nPresent action and cover images; unregister undoes it",
                 ),

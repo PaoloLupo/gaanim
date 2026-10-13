@@ -24,13 +24,14 @@ gaanim export mi-charla --output mi-charla.gaanim   # graba un paquete
 gaanim --present --monitor 1 mi-charla   # presenta a pantalla completa
 gaanim --present mi-charla.gaanim        # presenta un paquete, sin Python
 gaanim --diff --example mi-video         # compara capturas con un baseline
+gaanim update                            # instala la versión más reciente
 gaanim --version
 ```
 
 `gaanim --help` resume el uso y `gaanim <comando> --help` lista las opciones de
-`init`, `check`, `export` y `--diff`. `--help` y `--version` funcionan aunque
-no haya un Python compatible instalado, igual que reproducir, presentar y
-exportar un paquete `.gaanim` (ver
+`init`, `check`, `export` y `--diff`. `--help`, `--version` y `update`
+funcionan aunque no haya un Python compatible instalado, igual que reproducir,
+presentar y exportar un paquete `.gaanim` (ver
 #link("/guias/compartir/")[Compartir sin Python]); el resto de comandos
 necesita el entorno de Python que Gaanim detecta junto al proyecto (ver
 #link("/guias/proyectos/")[Proyectos]).
@@ -42,7 +43,7 @@ necesita el entorno de Python que Gaanim detecta junto al proyecto (ver
   inset: 7pt,
   [*Código*], [*Significado*],
   [`0`], [El comando terminó bien.],
-  [`1`], [`check` encontró errores (o advertencias con `--strict`), o la exportación falló.],
+  [`1`], [`check` encontró errores (o advertencias con `--strict`), la exportación falló o `update` no pudo actualizar.],
   [`2`], [Argumentos inválidos, proyecto o manifiesto inválido, entorno de Python no disponible, o un script que falla o no llama a `scene.render()`.],
 )
 
@@ -353,6 +354,33 @@ de esta computadora. Con `--src` imprime el enlace completo al reproductor,
 terminado en `#clave=…`. Ver
 #link("/publico/presentar/#web")[En el reproductor web].
 
+= `gaanim update` <gaanim-update>
+
+Instala la versión más reciente de Gaanim sobre la carpeta del `gaanim` que
+lo ejecuta. No necesita Python.
+
+```bash
+gaanim update --check   # dice si hay una versión nueva y dónde están sus novedades
+gaanim update           # la descarga y la instala
+```
+
+Busca entre las releases de GitHub la más reciente con el paquete de tu
+sistema (Windows o Ubuntu x64) y, si es más nueva que la que usas, descarga el
+paquete, comprueba su suma SHA-256, lo descomprime en `.gaanim-update/` dentro
+de la instalación y comprueba que el `gaanim` nuevo arranca. Solo entonces
+cambia los archivos: los que reemplaza pasan a `.gaanim-update/old/`, porque
+Windows no deja sobrescribir un programa abierto pero sí moverlo, y se borran
+la próxima vez que se abre Gaanim. Si un paso falla, la instalación queda como
+estaba. Cada proyecto recibe el paquete de autoría nuevo la próxima vez que se
+abre.
+
+Un `gaanim` compilado desde el código (en la carpeta `target/` de Cargo) no se
+actualiza así: actualízalo con `git pull` y vuelve a compilar.
+
+La pantalla de inicio consulta GitHub como mucho una vez al día y, si hay una
+versión nueva, ofrece instalarla con el mismo proceso. Desactiva esa consulta
+con la variable `GAANIM_NO_UPDATE_CHECK=1`.
+
 = `gaanim --diff`
 
 ```bash
@@ -411,5 +439,6 @@ gaanim --diff --example mi-charla --capture-stops --stops 3-7 --capture-only
   [`GAANIM_SEGMENT_CHECKPOINTS=0`], [Desactiva los puntos de control por segmento. Por defecto, al reproducir o recorrer un segmento, Gaanim guarda el estado de la escena en su inicio y cada fotograma parte de ahí, así que el coste de un fotograma no crece a lo largo de la presentación. Con `0`, cada fotograma se reconstruye desde el principio de la escena. El resultado es idéntico en ambos casos.],
   [`GAANIM_CHECKPOINT_TIMINGS=1`], [Escribe en la terminal cuánto tarda cada punto de control por segmento en guardarse.],
   [`GAANIM_POLL_RELAY`], [Dirección del relay de las encuestas. Tiene prioridad sobre `[polls] relay` y `gaanim relay use`.],
+  [`GAANIM_NO_UPDATE_CHECK=1`], [La pantalla de inicio no consulta GitHub para avisar de versiones nuevas. `gaanim update` sigue funcionando.],
   [`GAANIM_POLL_SESSION`], [Código de seis caracteres que usan las encuestas en lugar del que Gaanim guarda para el proyecto, por ejemplo para que varias personas presenten el mismo proyecto o para capturas reproducibles.],
 )

@@ -201,10 +201,25 @@ Python 3.12 produce un error aunque tengas 3.14 instalado.
 
 = Actualiza
 
-Descarga la release nueva y reemplaza todos los archivos de la carpeta: el
-ejecutable y sus bibliotecas deben venir de la misma versión. No hace
-falta recrear los proyectos: al abrir uno, Gaanim reinstala su paquete de
-autoría si no coincide con la versión del ejecutable.
+Cuando sale una versión nueva, la pantalla de inicio lo avisa: *Novedades*
+abre su página y *Actualizar* la instala sobre la carpeta de Gaanim; al
+terminar, *Reiniciar* abre la versión nueva. Desde la terminal hace lo mismo:
+
+```bash
+gaanim update --check   # solo dice si hay una versión nueva
+gaanim update           # la descarga y la instala
+```
+
+Gaanim descarga el paquete de tu sistema, comprueba su suma SHA-256, lo
+descomprime junto a la instalación, verifica que arranca y solo entonces
+reemplaza los archivos; si algo falla, deja los anteriores. Ver
+#link("/referencia/cli/#gaanim-update")[`gaanim update`].
+
+A mano también se puede: descarga la release nueva y reemplaza todos los
+archivos de la carpeta, porque el ejecutable y sus bibliotecas deben venir de
+la misma versión. En ningún caso hace falta recrear los proyectos: al abrir
+uno, Gaanim reinstala su paquete de autoría si no coincide con la versión del
+ejecutable.
 
 = Solución de problemas <problemas>
 

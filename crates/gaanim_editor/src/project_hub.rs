@@ -90,6 +90,118 @@ struct Preparation {
     result: Receiver<Result<(), String>>,
 }
 
+/// The Home's offer of a newer Gaanim: the daily check and the install run on
+/// worker threads (see [`crate::update`]).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct UpdateOffer {
+    checking: Option<Receiver<Option<crate::update::Release>>>,
+    checked: bool,
+    /// A newer release with a package for this system.
+    available: Option<crate::update::Release>,
+    installing: Option<Receiver<InstallEvent>>,
+    step: Option<crate::update::Step>,
+    /// The new `gaanim`, once installed.
+    installed: Option<PathBuf>,
+    error: Option<String>,
+    /// Closed for this session.
+    dismissed: bool,
+    /// Start this executable and close; set by *Reiniciar*.
+    restart: Option<PathBuf>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+enum InstallEvent {
+    Step(crate::update::Step),
+    Done(Result<PathBuf, String>),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl UpdateOffer {
+    /// Ask GitHub once per session; [`crate::update::check`] reuses a check
+    /// made less than a day ago. A failed check stays silent.
+    fn check(&mut self) {
+        if self.checked || crate::update::check_disabled() {
+            return;
+        }
+        self.checked = true;
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let spawned = std::thread::Builder::new()
+            .name("gaanim-update-check".into())
+            .spawn(move || {
+                let _ = tx.send(crate::update::check(false).ok().flatten());
+            });
+        if spawned.is_ok() {
+            self.checking = Some(rx);
+        }
+    }
+
+    fn install(&mut self) {
+        let Some(release) = self.available.clone() else {
+            return;
+        };
+        if self.installing.is_some() {
+            return;
+        }
+        self.error = None;
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let spawned = std::thread::Builder::new()
+            .name("gaanim-update-install".into())
+            .spawn(move || {
+                let result = crate::update::install(&release, |step| {
+                    let _ = tx.send(InstallEvent::Step(step));
+                });
+                let _ = tx.send(InstallEvent::Done(result));
+            });
+        match spawned {
+            Ok(_) => self.installing = Some(rx),
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    fn poll(&mut self) {
+        if let Some(rx) = &self.checking {
+            match rx.try_recv() {
+                Ok(release) => {
+                    self.available = release;
+                    self.checking = None;
+                }
+                Err(TryRecvError::Disconnected) => self.checking = None,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        let mut finished = None;
+        if let Some(rx) = &self.installing {
+            loop {
+                match rx.try_recv() {
+                    Ok(InstallEvent::Step(step)) => self.step = Some(step),
+                    Ok(InstallEvent::Done(result)) => {
+                        finished = Some(result);
+                        break;
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        finished = Some(Err("la actualización terminó sin respuesta".into()));
+                        break;
+                    }
+                    Err(TryRecvError::Empty) => break,
+                }
+            }
+        }
+        if let Some(result) = finished {
+            self.installing = None;
+            self.step = None;
+            match result {
+                Ok(executable) => self.installed = Some(executable),
+                Err(error) => self.error = Some(error),
+            }
+        }
+    }
+
+    fn working(&self) -> bool {
+        self.checking.is_some() || self.installing.is_some()
+    }
+}
+
 enum Notice {
     Error(String),
     Info(String),
@@ -118,6 +230,8 @@ pub struct ProjectHubState {
     /// Whether `.gaanim` files open with Gaanim; read when the environment
     /// page first shows it.
     associated: Option<bool>,
+    #[cfg(not(target_arch = "wasm32"))]
+    update: UpdateOffer,
 }
 
 impl Default for ProjectHubState {
@@ -138,6 +252,8 @@ impl Default for ProjectHubState {
             was_focused: true,
             bundle_request: None,
             associated: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            update: UpdateOffer::default(),
         }
     }
 }
@@ -146,6 +262,8 @@ impl ProjectHubState {
     pub fn show(&mut self) {
         self.active = true;
         self.check_tools();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.update.check();
     }
 
     pub fn report_open_error(&mut self, error: String) {
@@ -178,6 +296,8 @@ impl ProjectHubState {
     }
 
     fn poll_workers(&mut self, pending: &mut PendingProjectOpen) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.update.poll();
         if let Some(rx) = &self.checking {
             match rx.try_recv() {
                 Ok(tools) => {
@@ -294,7 +414,11 @@ impl ProjectHubState {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn working(&self) -> bool {
         self.bundle_request.is_some()
-            || (self.active && (self.checking.is_some() || self.busy() || self.dropped.is_some()))
+            || (self.active
+                && (self.checking.is_some()
+                    || self.busy()
+                    || self.dropped.is_some()
+                    || self.update.working()))
     }
 
     /// Ask for a playback bundle with the native picker and open it.
@@ -638,6 +762,7 @@ fn project_hub_ui_system(
     mut contexts: bevy_egui::EguiContexts,
     mut state: ResMut<ProjectHubState>,
     mut pending: ResMut<PendingProjectOpen>,
+    #[cfg(not(target_arch = "wasm32"))] mut exit: MessageWriter<AppExit>,
 ) {
     if !state.active {
         return;
@@ -693,6 +818,23 @@ fn project_hub_ui_system(
         ctx.request_repaint();
     }
     state.opening_shown = state.opening.is_some();
+
+    // The new version starts before this one closes, so the window
+    // seems to restart.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(executable) = state.update.restart.take() {
+        match std::process::Command::new(&executable).spawn() {
+            Ok(_) => {
+                exit.write(AppExit::Success);
+            }
+            Err(error) => {
+                state.notice = Some(Notice::Error(format!(
+                    "No se pudo abrir la versión nueva ({}): {error}. Ábrela tú.",
+                    executable.display()
+                )));
+            }
+        }
+    }
 }
 
 fn handle_shortcuts(ctx: &egui::Context, state: &mut ProjectHubState) {
@@ -925,6 +1067,8 @@ fn content_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                 ui.vertical(|ui| {
                     ui.set_width(width);
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    update_ui(ui, state);
                     notice_ui(ui, state);
                     match state.section {
                         Section::Projects => projects_ui(ui, state),
@@ -948,6 +1092,113 @@ fn page_header(ui: &mut Ui, eyebrow: &str, title: &str, subtitle: &str) {
             .color(palette::TEXT_MUTED),
     );
     ui.add_space(26.0);
+}
+
+/// The offer of a newer Gaanim, above the page: the version and its notes,
+/// the install's progress, then the restart into it.
+#[cfg(not(target_arch = "wasm32"))]
+fn update_ui(ui: &mut Ui, state: &mut ProjectHubState) {
+    let offer = &mut state.update;
+    let Some(release) = offer.available.clone() else {
+        return;
+    };
+    if offer.dismissed {
+        return;
+    }
+    let installing = offer.installing.is_some();
+    let (color, icon, text) = if let Some(error) = &offer.error {
+        (
+            palette::DANGER,
+            Icon::Warning,
+            format!(
+                "No se pudo actualizar a Gaanim {}: {error}",
+                release.version
+            ),
+        )
+    } else if offer.installed.is_some() {
+        (
+            palette::LOOP,
+            Icon::Check,
+            format!(
+                "Gaanim {} está instalado. Reinicia para usarlo.",
+                release.version
+            ),
+        )
+    } else {
+        let doing = match offer.step {
+            Some(crate::update::Step::Downloading { done, total }) if total > 0 => format!(
+                "Descargando Gaanim {}… {} %",
+                release.version,
+                done * 100 / total
+            ),
+            Some(crate::update::Step::Downloading { .. }) => {
+                format!("Descargando Gaanim {}…", release.version)
+            }
+            Some(crate::update::Step::Verifying) => "Comprobando la descarga…".to_owned(),
+            Some(crate::update::Step::Unpacking) => "Descomprimiendo…".to_owned(),
+            Some(crate::update::Step::Installing) => "Instalando…".to_owned(),
+            None => format!(
+                "Gaanim {} está disponible; tienes la {}.",
+                release.version,
+                env!("CARGO_PKG_VERSION")
+            ),
+        };
+        (palette::ACCENT, Icon::Package, doing)
+    };
+    let (mut notes, mut install, mut restart, mut dismiss) = (false, false, false, false);
+    egui::Frame::new()
+        .fill(color.gamma_multiply(0.12))
+        .stroke(Stroke::new(1.0, color.gamma_multiply(0.35)))
+        .inner_margin(egui::Margin::symmetric(14, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                // As tall as the buttons, so the text centers beside them.
+                ui.set_min_height(34.0);
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                ui_kit::paint_icon(ui.painter(), icon_rect, icon, color);
+                ui.label(egui::RichText::new(text).size(13.0).color(palette::TEXT));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if !installing
+                        && icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
+                            .on_hover_text("Cerrar")
+                            .clicked()
+                    {
+                        dismiss = true;
+                    }
+                    if offer.installed.is_some() {
+                        restart = primary_button(ui, "Reiniciar", None, true).clicked();
+                    } else if !installing {
+                        let label = if offer.error.is_some() {
+                            "Reintentar"
+                        } else {
+                            "Actualizar"
+                        };
+                        install = primary_button(ui, label, None, true).clicked();
+                    }
+                    if !release.page.is_empty() {
+                        notes = secondary_button(ui, "Novedades", true).clicked();
+                    }
+                });
+            });
+        });
+    if installing {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+    }
+    if notes {
+        let _ = crate::platform::open_detached(&release.page);
+    }
+    if install {
+        offer.install();
+    }
+    if restart {
+        offer.restart = offer.installed.clone();
+    }
+    if dismiss {
+        offer.dismissed = true;
+    }
+    ui.add_space(20.0);
 }
 
 fn notice_ui(ui: &mut Ui, state: &mut ProjectHubState) {

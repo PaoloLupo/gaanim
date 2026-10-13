@@ -42,6 +42,17 @@ enteros, o usa `scene.text.code`.
   mal. El diálogo del editor suma MOV a sus formatos y una casilla
   *Conservar la transparencia* para MOV, WebM, WebP y PNG.
 
+== Actualizaciones
+
+- La pantalla de inicio avisa cuando hay una versión nueva de Gaanim (consulta
+  GitHub como mucho una vez al día) y la instala con *Actualizar*; *Reiniciar*
+  abre la versión nueva. `gaanim update` hace lo mismo desde la terminal y
+  `gaanim update --check` solo lo comprueba. Gaanim verifica la suma SHA-256
+  del paquete y que el programa nuevo arranca antes de reemplazar nada, y deja
+  la instalación como estaba si algo falla. `GAANIM_NO_UPDATE_CHECK=1`
+  desactiva el aviso. Ver
+  #link("/referencia/cli/#gaanim-update")[`gaanim update`].
+
 == Animación
 
 - `write()` y `unwrite()` animan como el `Write` y el `Unwrite` de Manim:
