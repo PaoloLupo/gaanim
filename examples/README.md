@@ -32,6 +32,7 @@ or open it with `gaanim examples/<topic>/<name>.py`.
 - [Media](#media)
 - [Slides](#slides)
 - [Live audience](#live-audience)
+- [Gallery](#gallery)
 - [Showcase](#showcase)
 
 ## Basics
@@ -324,6 +325,35 @@ Polls, quizzes and live zones the audience joins from their phones.
 | [Live zones](live/live_zones.py) | Live zones that pose the audience's characters every frame: position, rotation, scale, squash, lean, looks, expressions and names. |
 | [Zone behaviors](live/zone_behaviors.py) | The motion helpers of gaanim.live, from lerp and easings to springs, wobbles, impacts and ballistic arcs, and state a zone keeps per player. |
 | [Zone games](live/zone_games.py) | Characters that move with the game: grouped by the answer each player chose, racing by score, and standing on a podium by rank. |
+
+## Gallery
+
+Short scenes in the brand's colors, from a logo built of primitives to Fourier epicycles, each one a classic of animation galleries made with the whole API.
+
+| Example | Description |
+| --- | --- |
+| [Logo](gallery/logo.py) | The logo built from primitives: a square that turns into a circle as it moves, and a wordmark cut from ellipses and bars. |
+| [Measured segment](gallery/measured_segment.py) | A segment between two points whose run, rise and length are measured live while the points move. |
+| [Vector arrow](gallery/vector_arrow.py) | A vector on a plane whose components, angle and coordinates follow it as it sweeps around, leaving a fading trail. |
+| [Boolean shapes](gallery/boolean_shapes.py) | Two ellipses and their union, intersection, exclusion and difference, which reshape live as one ellipse turns and slides. |
+| [Point on shapes](gallery/point_on_shapes.py) | Points that travel along a circle, a square and a star with a trail of echoes, and an arm that turns about its end. |
+| [Moving around](gallery/moving_around.py) | A square that slides, recolors, shrinks and turns, one call at a time and then all at once, squashing as it speeds. |
+| [Moving angle](gallery/moving_angle.py) | An angle that opens and closes while its arc, its value in degrees and a fading trail follow the moving ray. |
+| [Sliding ladder](gallery/sliding_ladder.py) | A ladder whose feet slide along a wall and the floor, its midpoint tracing a quarter circle and its past positions outlining an astroid. |
+| [Group to destination](gallery/group_to_destination.py) | A cluster of points that travels so its gold leader lands on each target, the others trailing it on delayed followers. |
+| [Moving frame box](gallery/moving_frame_box.py) | The product rule written term by term, with a frame and a band that glide from one term to the next. |
+| [Point with trace](gallery/point_with_trace.py) | A pen on the end of two turning arms that traces a rose, the second arm turning four times faster the other way. |
+| [Sine cosine plot](gallery/sine_cosine_plot.py) | The sine and the cosine over two turns, with a scanning line that reads both curves until it stops at two pi. |
+| [Gradient descent](gallery/gradient_descent.py) | Gradient descent from two starts on the same curve: one ball settles in a shallow valley, the other finds the deepest one. |
+| [Riemann area](gallery/riemann_area.py) | Riemann sums that refine from four rectangles to sixty-four under a curve, their total closing in on the area. |
+| [Hyperbola rectangle](gallery/hyperbola_rectangle.py) | A rectangle from the origin to a point that slides along the hyperbola y = 6/x, changing shape while its area stays six. |
+| [Heating curve](gallery/heating_curve.py) | The heating curve of water, traced as a thermometer fills, through melting and boiling. |
+| [Following camera](gallery/following_camera.py) | A camera that zooms in on a point riding a sine wave, follows it along two turns and pulls back out. |
+| [Zoomed inset](gallery/zoomed_inset.py) | A Koch snowflake explored through a round magnifier that follows a point along its edge and zooms deeper. |
+| [Surface plot](gallery/surface_plot.py) | A Gaussian hill on 3D axes that the camera circles while the hill narrows into a peak and spreads back out. |
+| [Camera orbit](gallery/camera_orbit.py) | Lit solids on 3D axes seen by a camera that circles them, tilts up and down, and keeps a readout fixed on the screen. |
+| [Warped grid](gallery/warped_grid.py) | A sentence and an equation that write themselves and transform, then a grid bent by a nonlinear function. |
+| [Fourier epicycles](gallery/fourier_epicycles.py) | Five turning circles stacked on each other, the odd harmonics of a square wave, whose tip draws the wave as they spin. |
 
 ## Showcase
 
