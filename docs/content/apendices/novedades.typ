@@ -42,6 +42,17 @@ enteros, o usa `scene.text.code`.
   mal. El diálogo del editor suma MOV a sus formatos y una casilla
   *Conservar la transparencia* para MOV, WebM, WebP y PNG.
 
+== Actualizaciones
+
+- La pantalla de inicio avisa cuando hay una versión nueva de Gaanim (consulta
+  GitHub como mucho una vez al día) y la instala con *Actualizar*; *Reiniciar*
+  abre la versión nueva. `gaanim update` hace lo mismo desde la terminal y
+  `gaanim update --check` solo lo comprueba. Gaanim verifica la suma SHA-256
+  del paquete y que el programa nuevo arranca antes de reemplazar nada, y deja
+  la instalación como estaba si algo falla. `GAANIM_NO_UPDATE_CHECK=1`
+  desactiva el aviso. Ver
+  #link("/referencia/cli/#gaanim-update")[`gaanim update`].
+
 == Animación
 
 - `write()` y `unwrite()` animan como el `Write` y el `Unwrite` de Manim:
@@ -366,11 +377,22 @@ enteros, o usa `scene.text.code`.
   sin escalar.
 - `obj.animate.place(zona, fit="stretch")` estira el objeto a la zona; antes
   lo escalaba como `"contain"`.
+- El botón de descarga de la portada baja el paquete más reciente que exista
+  para tu sistema y, si GitHub no responde, abre la página de la última
+  release. Antes podía apuntar al de una versión aún sin publicar y dar un
+  404. Las releases se publican cuando ya tienen sus paquetes.
 - Las restricciones entre posiciones ya no encogen objetos: dos relaciones
   en conflicto sobre los bordes de una caja, como `(sq.center_x ==
   caja.left).weak()` y `(sq.center_x == caja.right).strong()`, dejan la caja
   de su tamaño; antes la reducían a cero. `(texto.width <= 0.5).weak()` ya
   no aplasta los glifos.
+- `group.animate.fill(color)` y `group.animate.stroke(color, ancho)` animan a
+  todos los miembros del grupo, también en grupos anidados, como ya hacían
+  `group.fill()` y `group.stroke()`; antes no cambiaban nada.
+- `glow`, `blur`, `shadow` y `no_effects` después del primer `play` o `wait`
+  son cortes en el cursor, como `fill`; antes se ignoraban y el objeto seguía
+  con los efectos de su declaración. `blur(0)` quita el desenfoque y sirve de
+  inicio nítido para `animate.blur`; antes lanzaba `ValueError`.
 - `L.column`, `L.row`, `L.grid` y `L.stack` mantienen su dirección aunque un
   `style=` o una clase traigan otro `direction`.
 - El stub de `Zone.arrange` incluye `direction="wrap"`, que ya funcionaba.

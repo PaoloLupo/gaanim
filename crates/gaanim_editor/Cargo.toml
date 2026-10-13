@@ -59,6 +59,17 @@ native-tls = "0.2"
 # The presentation's socket on the relay, which pushes the results; blocking,
 # like the rest of the relay client, over the same native TLS.
 tungstenite = { version = "0.30", default-features = false, features = ["handshake", "native-tls"] }
+# Updates: release versions are compared as SemVer (the semver already in the
+# dependency tree), and a downloaded package is checked against its SHA-256
+# (the RustCrypto generation of the sha1 tungstenite uses).
+semver = "1.0"
+sha2 = "0.11"
+
+# Updates unpack the Linux package, a gzipped tar (the tar and flate2 builds
+# typst-kit already uses).
+[target.'cfg(target_os = "linux")'.dependencies]
+tar = "0.4"
+flate2 = "1"
 
 # The presenter's clock reads the browser's local time on the web.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

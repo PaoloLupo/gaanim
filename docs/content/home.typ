@@ -28,17 +28,14 @@
       #html.div(class: "home-hero-desc", [Gaanim describe escenas en Python, las
         muestra en vivo mientras escribes y las renderiza con trazos vectoriales en la
         GPU, listas para exportar a video.])
-      // The button downloads this version's Windows zip; assets/script.js
-      // switches it to the visitor's system and to the latest release's package
-      // when GitHub answers.
-      #let windows-zip = (
-        "https://github.com/PaoloLupo/gaanim/releases/download/v" + stdx.version
-          + "/gaanim-v" + stdx.version + "-windows-x64.zip"
-      )
+      // The button opens the latest release's page, which always exists: this
+      // version may not be released yet. assets/script.js switches it to the
+      // visitor's system and, when GitHub answers, to the newest package.
+      #let latest-release = "https://github.com/PaoloLupo/gaanim/releases/latest"
       #html.div(class: "home-hero-cta", [
         #html.elem(
           "a",
-          attrs: (id: "home-download", href: windows-zip, class: "primary os-windows", "data-version": stdx.version),
+          attrs: (id: "home-download", href: latest-release, class: "primary os-windows"),
           {
             html.elem("span", attrs: (class: "home-download-icon", "aria-hidden": "true"))
             html.span(class: "home-download-label", [Descargar para Windows])

@@ -42,11 +42,15 @@ Los tres son setters fluidos de cualquier drawable, texto incluido:
 - `glow(color, radius=0.16, intensity=1.0)`: un halo del color indicado.
   Sirve para destacar un elemento activo o dar aspecto de luz.
 - `blur(sigma=0.04)`: desenfoque gaussiano. Aleja un fondo o suaviza una
-  forma decorativa.
+  forma decorativa. `blur(0)` lo quita, y sirve de punto de partida nítido
+  para `animate.blur`.
 - `shadow(color, x=0.08, y=-0.08, blur=0.06)`: sombra desplazada y
   desenfocada. El alfa del color regula su opacidad; una sombra sutil separa
   una tarjeta del fondo.
 - `no_effects()` quita los tres sin tocar relleno ni trazo.
+
+Como `fill`, después del primer `play` o `wait` estos setters son cortes en
+el cursor: el efecto cambia en ese instante y lo anterior se ve como estaba.
 - `blend(mode)` cambia cómo se funde el objeto con lo que hay debajo:
   `"screen"` o `"add"` para luces y destellos, `"multiply"` para
   resaltadores. No es un efecto, así que `no_effects()` no lo quita.

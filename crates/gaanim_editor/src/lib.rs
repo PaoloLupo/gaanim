@@ -49,6 +49,8 @@ pub mod share_link;
 pub mod source_link;
 mod touch;
 mod ui_kit;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod update;
 pub mod volume;
 
 /// Whether the timeline ignores its keys and its advancing click. The
