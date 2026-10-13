@@ -104,7 +104,7 @@ enteros, o usa `scene.text.code`.
 
 == Ejemplos
 
-- Los ejemplos del repositorio se ordenan por temas, como los de Bevy:
+- Los ejemplos del repositorio se ordenan por temas:
   `examples/animation/easings.py`, `examples/camera/camera_moves.py`,
   `examples/3d/primitives_3d.py`… Cada uno recorre las variantes que ofrece
   la API de su tema, con el tema por defecto y una etiqueta con el código que
