@@ -929,12 +929,35 @@ document.addEventListener("DOMContentLoaded", () => {
         const button = stage.querySelector(".example-play");
         button?.addEventListener("click", () => {
             const frame = document.createElement("iframe");
-            frame.src = stage.dataset.player;
+            // Asked to play: no second click for the full player.
+            frame.src = stage.dataset.player.replace("&full=click", "");
             frame.title = stage.querySelector("img")?.alt ?? "";
             frame.allow = "fullscreen";
             stage.append(frame);
             button.disabled = true;
             button.textContent = `Loading ${button.dataset.size}…`;
         });
+    }
+});
+
+// An example that needs the full web player (GPU effects, post-processing)
+// offers it on its poster instead of downloading it unasked.
+window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (event.origin !== location.origin || data?.type !== "gaanim:status" || data.kind !== "full") return;
+    for (const stage of document.querySelectorAll(".example-stage")) {
+        const frame = stage.querySelector("iframe");
+        if (frame?.contentWindow !== event.source || stage.querySelector(".example-play")) continue;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "example-play";
+        button.textContent = "Play · full player";
+        button.title = "Uses GPU effects that only the full web player draws";
+        button.addEventListener("click", () => {
+            frame.src = data.url;
+            button.disabled = true;
+            button.textContent = "Loading the full player…";
+        });
+        stage.append(button);
     }
 });

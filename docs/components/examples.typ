@@ -95,7 +95,8 @@
   let site = "bundles/examples/" + bundle.path.split("/").last()
   [#metadata((base + site, read("../" + bundle.path, encoding: none))) <metadata-asset>]
   // The player resolves the bundle from its own page, /reproductor/insertar/.
-  let src = root + "reproductor/insertar/?src=../../assets/" + site + "&loop"
+  // A bundle that needs the full web player waits for a click (script.js).
+  let src = root + "reproductor/insertar/?src=../../assets/" + site + "&loop&full=click"
   html.figure(class: "example-preview", if bundle.bytes <= autoplay-limit {
     html.div(class: "anim-stage example-stage", {
       poster-image(entry, image: image)
