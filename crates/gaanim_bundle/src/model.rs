@@ -1239,6 +1239,12 @@ impl FrameRecord {
     }
 }
 
+/// Whether no two `elements` belong to the same drawable.
+fn unique_keys(elements: &[ElementRecord]) -> bool {
+    let mut seen = std::collections::HashSet::with_capacity(elements.len());
+    elements.iter().all(|element| seen.insert(element.key))
+}
+
 /// Encodes a run of frames, each against the one before it. The first frame
 /// of a chunk is written whole so a chunk decodes on its own.
 #[derive(Default)]
@@ -1309,7 +1315,14 @@ impl DeltaEncoder {
                 w.f64(value);
             }
         }
-        match &self.previous {
+        // A delta matches elements by their drawable's key, so a frame where
+        // one drawable draws several elements (the runs of a 3D mesh, echo
+        // copies) is written whole, as is the frame after it.
+        let previous = self
+            .previous
+            .as_ref()
+            .filter(|previous| unique_keys(&previous.elements) && unique_keys(&frame.elements));
+        match previous {
             None => {
                 w.u8(FRAME_FULL);
                 w.len(frame.elements.len());

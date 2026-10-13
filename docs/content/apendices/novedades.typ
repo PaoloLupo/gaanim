@@ -131,6 +131,11 @@ enteros, o usa `scene.text.code`.
 
 == Correcciones
 
+- Un paquete `.gaanim` guarda bien las escenas 3D. Antes, en cada fotograma
+  salvo el primero de cada bloque, todas las piezas de una malla se dibujaban
+  como la última (un cubo quedaba en una cara, una esfera en un triángulo) y
+  las rejillas de unos ejes 3D en una sola línea, al reproducir, presentar o
+  exportar el paquete. Hay que volver a grabar los paquetes con 3D.
 - Los temas `solarized-light` y `catppuccin-latte` pasan su propio
   `validate()`. El título de `solarized-light` (`#B08500`) y el color atenuado
   de `catppuccin-latte` (Overlay2, `#7C7F93`) son algo más oscuros y llegan al
