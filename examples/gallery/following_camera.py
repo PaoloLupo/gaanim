@@ -1,10 +1,10 @@
 """A camera that zooms in on a point riding a sine wave, follows it along two turns and pulls back out.
 
 The point sits on the curve at a Parameter x, with a tangent line that turns
-with the slope and a trail of echoes. The camera zooms in onto it,
-follows it with a little lag while x runs across the plane, and resets; the
-readouts are pinned to the screen with hud(), so they stay put while the
-camera moves.
+with the slope and a trail of echoes. The camera zooms in and pans onto it,
+follows it with a little lag while x runs across the plane, and pulls back
+out from it; the readouts are pinned to the screen with hud(), so they stay
+put while the camera moves.
 """
 
 import math
@@ -60,8 +60,8 @@ scene.play(plane.animate.create(), duration=0.8)
 scene.play(curve.animate.create(), duration=1.0)
 scene.play([rider.animate.grow_from_center(), tangent.animate.create(), *(r.animate.fade_in() for r in readouts)],
            duration=0.5)
-# follow tracks where the rider is drawn, which its declared position is not.
-scene.play([scene.camera.animate.zoom_to(3.0), scene.camera.animate.follow(rider)], duration=1.2,
+# pan_to eases onto the rider where it is drawn; follow then keeps it in view.
+scene.play([scene.camera.animate.zoom_to(3.0), scene.camera.animate.pan_to(rider)], duration=1.2,
            easing=Easing.SMOOTH)
 scene.play([x.animate.set(X1), scene.camera.animate.follow(rider, lag=0.15)], duration=6.0, easing=Easing.SMOOTH)
 scene.play(scene.camera.animate.reset(), duration=1.4, easing=Easing.SMOOTH)

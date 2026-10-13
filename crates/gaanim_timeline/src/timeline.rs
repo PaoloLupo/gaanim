@@ -3461,14 +3461,7 @@ fn restore_reactive_state(world: &mut World, reactive_state: &ReactiveStates) {
                 }
             }
             if let Some(mut path_comp) = world.get_mut::<Path2D>(entity) {
-                let mut path = gaanim_core::kurbo::BezPath::new();
-                if let Some(first) = points.first() {
-                    path.move_to(gaanim_core::kurbo::Point::new(first.x, first.y));
-                    for pt in &points[1..] {
-                        path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
-                    }
-                }
-                path_comp.0 = std::sync::Arc::new(path);
+                path_comp.0 = std::sync::Arc::new(gaanim_animation::traced_path_geometry(points));
             }
             // 3D traced path restore (generic)
             let colormap_clone = world
@@ -3590,7 +3583,7 @@ fn sample_traces(
     }
 }
 
-/// Drop the points older than the dissipating time, then add `position`
+/// Drop the points older than the dissipating time (as playback does), then add `position`
 /// when it is at least the minimum distance from the last point, keeping at
 /// most the maximum number of points.
 fn push_trace_sample(
@@ -3600,12 +3593,7 @@ fn push_trace_sample(
     sample_time: f64,
     (min_distance, max_points, dissipating_time): (f64, Option<usize>, Option<f64>),
 ) {
-    if let Some(duration) = dissipating_time {
-        let cutoff = sample_time - duration;
-        let expired = sample_times.partition_point(|time| *time < cutoff);
-        points.drain(0..expired);
-        sample_times.drain(0..expired);
-    }
+    gaanim_animation::expire_trace_samples(points, sample_times, sample_time, dissipating_time);
     let should_add = match points.last() {
         Some(last) => last.distance(position) >= min_distance,
         None => true,
@@ -4152,7 +4140,7 @@ fn truncate_traced_paths(world: &mut World, time: f64) {
     write_traced_geometry(world);
 }
 
-/// Draw every traced path from its points: a polyline in 2D, a coloured
+/// Draw every traced path from its points: a smooth curve in 2D, a coloured
 /// line list with its bounds in 3D.
 fn write_traced_geometry(world: &mut World) {
     let traces: Vec<(Entity, Vec<gaanim_core::glam::DVec3>)> = world
@@ -4162,14 +4150,7 @@ fn write_traced_geometry(world: &mut World) {
         .collect();
     for (trace_entity, points) in traces {
         if let Some(mut path_comp) = world.get_mut::<Path2D>(trace_entity) {
-            let mut path = gaanim_core::kurbo::BezPath::new();
-            if let Some(first) = points.first() {
-                path.move_to(gaanim_core::kurbo::Point::new(first.x, first.y));
-                for pt in &points[1..] {
-                    path.line_to(gaanim_core::kurbo::Point::new(pt.x, pt.y));
-                }
-            }
-            path_comp.0 = std::sync::Arc::new(path);
+            path_comp.0 = std::sync::Arc::new(gaanim_animation::traced_path_geometry(&points));
         }
     }
     let traces_3d: Vec<(
@@ -4816,8 +4797,16 @@ fn apply_lens_spec(
                 };
             }
         }
-        PropertyLensSpec::CameraPositionSource { from, to } => {
-            if let Some(target) = gaanim_animation::resolve_tracking_endpoint(to, world)
+        PropertyLensSpec::CameraPositionSource { from, to, hold } => {
+            // A finished pan keeps the pose it reached as authored; while it
+            // plays the camera phase resolves the endpoint again after bindings.
+            if completed
+                && let Some(hold) = hold
+                && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
+            {
+                camera.position.x = hold.x;
+                camera.position.y = hold.y;
+            } else if let Some(target) = gaanim_animation::resolve_tracking_endpoint(to, world)
                 && target.is_finite()
                 && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
             {

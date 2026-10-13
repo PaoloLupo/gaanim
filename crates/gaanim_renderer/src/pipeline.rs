@@ -3345,6 +3345,38 @@ type ThreeDData = (
 type ThreeDFilter = (With<Visible>, With<gaanim_scene::Mesh3DMarker>);
 /// Query of the drawables with 3D content.
 type ThreeDQuery<'w, 's> = Query<'w, 's, ThreeDData, ThreeDFilter>;
+/// The lights shown, where they are and how opaque.
+type LightData = (
+    &'static gaanim_scene::Light3D,
+    &'static GlobalSpatialTransform,
+    &'static GlobalOpacity,
+);
+/// Query of the [`LightData`] of the lights shown.
+type LightQuery<'w, 's> = Query<'w, 's, LightData, With<Visible>>;
+
+/// The lighting of lit 3D content: the scene's preset and the lights shown.
+fn illumination<'a>(
+    lighting: Option<&gaanim_scene::Lighting3D>,
+    lights: impl Iterator<
+        Item = (
+            &'a gaanim_scene::Light3D,
+            &'a GlobalSpatialTransform,
+            &'a GlobalOpacity,
+        ),
+    >,
+) -> crate::three_d::Illumination {
+    crate::three_d::Illumination {
+        lighting: lighting.copied().unwrap_or_default(),
+        lights: lights
+            .filter_map(|(light, transform, opacity)| {
+                let position = transform
+                    .mat4
+                    .transform_point3(gaanim_core::glam::DVec3::ZERO);
+                crate::three_d::Light::new(light, position, opacity.0)
+            })
+            .collect(),
+    }
+}
 /// Query of the tips drawn on strokes.
 type TipQuery<'w, 's> = Query<'w, 's, (), With<gaanim_animation::StrokeTip>>;
 
@@ -3388,10 +3420,11 @@ fn extract_three_d(
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
 ) {
-    let lighting = world
-        .get_resource::<gaanim_scene::Lighting3D>()
-        .copied()
-        .unwrap_or_default();
+    let mut lights = world.query_filtered::<LightData, With<Visible>>();
+    let lighting = illumination(
+        world.get_resource::<gaanim_scene::Lighting3D>(),
+        lights.iter(world),
+    );
     let mut content = world.query_filtered::<ThreeDData, ThreeDFilter>();
     let mut parents = world.query::<&ChildOf>();
     let world: &World = world;
@@ -3413,7 +3446,7 @@ fn extract_three_d(
 #[allow(clippy::too_many_arguments)]
 fn three_d_elements<'a>(
     camera: &gaanim_math::Camera,
-    lighting: &gaanim_scene::Lighting3D,
+    lighting: &crate::three_d::Illumination,
     sources: impl Iterator<Item = ThreeDSource<'a>>,
     mut parent_of: impl FnMut(Entity) -> Option<Entity>,
     transition_frame: Option<&gaanim_scene::SceneTransitionFrame>,
@@ -5249,7 +5282,7 @@ pub fn gaanim_render_system(
         tip_query,
         backdrop_query,
         three_d_query,
-        lighting,
+        (lighting, light_query),
         opacity_query,
         effect_query,
         signal_query,
@@ -5263,7 +5296,7 @@ pub fn gaanim_render_system(
         TipQuery,
         Query<&gaanim_scene::LayoutBackdrop>,
         ThreeDQuery,
-        Option<Res<gaanim_scene::Lighting3D>>,
+        (Option<Res<gaanim_scene::Lighting3D>>, LightQuery),
         Query<&GlobalOpacity>,
         Query<&crate::object_effects::ShaderEffect>,
         Query<&gaanim_animation::FloatSignal>,
@@ -5805,7 +5838,7 @@ pub fn gaanim_render_system(
     if let Some(camera) = gaanim_camera.as_deref() {
         three_d_elements(
             &camera.camera,
-            &lighting.as_deref().copied().unwrap_or_default(),
+            &illumination(lighting.as_deref(), light_query.iter()),
             three_d_query.iter().map(three_d_source),
             |entity| child_query.get(entity).ok().map(ChildOf::parent),
             transition_frame.as_deref(),
@@ -5996,6 +6029,35 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    /// A light shades from where its entity is, dimmed by its opacity.
+    #[test]
+    fn illumination_places_lights_and_dims_them_by_opacity() {
+        let light = gaanim_scene::Light3D {
+            kind: gaanim_scene::LightKind3D::Point,
+            color: peniko::Color::WHITE,
+            intensity: 2.0,
+        };
+        let at = gaanim_math::SpatialTransform::new_2d(3.0, -1.0);
+        let transform = GlobalSpatialTransform::from_local(&at);
+        let lit = illumination(
+            None,
+            [(&light, &transform, &GlobalOpacity(0.5))].into_iter(),
+        );
+        assert_eq!(lit.lights.len(), 1);
+        let shown = lit.lights[0];
+        assert_eq!(
+            shown.position,
+            gaanim_core::glam::DVec3::new(3.0, -1.0, 0.0)
+        );
+        assert!(!shown.directional);
+        assert!((shown.color[0] - 1.0).abs() < 1e-6, "{shown:?}");
+        let hidden = illumination(
+            None,
+            [(&light, &transform, &GlobalOpacity(0.0))].into_iter(),
+        );
+        assert!(hidden.lights.is_empty());
     }
 
     #[test]

@@ -6255,10 +6255,14 @@ class CameraAnimation:
         ...
     @overload
     def pan_to(self, x: float, y: float) -> Anim:
-        """Configure the camera with pan to.
+        """Pan the view so ``(x, y)``, or ``target``, ends at its center.
+
+        A drawable target is centered where it is drawn while the pan plays,
+        also when it follows a reactive point, and the camera then stays
+        where the target is drawn as authored at the end of the ``play``.
 
         Example:
-            scene.camera.pan_to(1.0, 1.0)
+            scene.camera.animate.pan_to(1.0, 1.0)
         """
         ...
     @overload
@@ -8182,10 +8186,37 @@ class Geometry:
         sky and ground light, a soft key light from the upper left, and a
         faint rim along silhouettes, keeping each material's color readable.
         ``"none"`` leaves only their emission. ``shadows`` is accepted for existing scripts; 3D content
-        casts no shadows.
+        casts no shadows. Lights from ``light_3d`` replace the key light.
 
         Example:
             scene.geometry.lighting_3d("studio", intensity=1.2)
+        """
+        ...
+    def light_3d(
+        self,
+        kind: Literal["point", "directional"] = "point",
+        *,
+        color: Optional[ColorLike] = None,
+        intensity: float = 1.0,
+    ) -> Drawable:
+        """Create a light for lit 3D primitives at the origin and return it.
+
+        The light draws nothing; it is a drawable, so ``move_to_3d`` places it
+        and ``animate``, groups and ``follow`` move it. A ``"point"`` light
+        shines from its position in every direction; a ``"directional"`` one
+        shines along parallel rays from the direction of its position seen
+        from the origin, as the sun does. While the scene shows lights they
+        replace the fixed key light of ``lighting_3d``, whose sky and ground
+        light stays, and each shines in ``color`` (white by default) at
+        ``intensity``, dimmed by the light's opacity: ``fade_in`` and
+        ``fade_out`` switch it on and off. With ``lighting_3d("none")`` only
+        the lights light the scene. Surfaces, 3D plots and lines are unlit.
+        A negative or non-finite ``intensity`` or another ``kind`` raises
+        ``ValueError``.
+
+        Example:
+            lamp = scene.geometry.light_3d(color=GOLD, intensity=1.5).move_to_3d(3, 2, 4)
+            scene.play([lamp.animate.move_to_3d(-3, 2, 4).duration(2.0)])
         """
         ...
     def rect(self, width: float, height: float) -> Drawable:

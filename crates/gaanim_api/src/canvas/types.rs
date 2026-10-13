@@ -773,6 +773,8 @@ pub enum SpawnKind {
     },
     /// Lit 3D primitive with complete geometry attributes.
     Primitive3D(gaanim_scene::TriangleMeshData),
+    /// A light for lit 3D content, which draws nothing itself.
+    Light3D(gaanim_scene::Light3D),
     /// 3D polyline (e.g., curve) defined by world-space points.
     /// If `colors` is Some and length matches `points`, per-vertex colors are used (colormap).
     Polyline3D {

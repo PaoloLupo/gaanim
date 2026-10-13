@@ -6949,6 +6949,14 @@ impl SceneModel {
                                 *offset,
                             ),
                         );
+                        builder.authored_follows.insert(
+                            target_id,
+                            crate::builder::AuthoredFollow {
+                                endpoint: CanvasEndpoint::Entity(*source),
+                                offset: *offset,
+                                offset_space: gaanim_animation::FollowOffsetSpace::World,
+                            },
+                        );
                     }
                 }
 
@@ -6974,6 +6982,14 @@ impl SceneModel {
                                 offset_space: *offset_space,
                                 since: builder.current_time,
                             });
+                        builder.authored_follows.insert(
+                            target_id,
+                            crate::builder::AuthoredFollow {
+                                endpoint: endpoint.clone(),
+                                offset: *offset,
+                                offset_space: *offset_space,
+                            },
+                        );
                     }
                 }
 
@@ -8715,6 +8731,12 @@ impl SceneModel {
                     };
                     (from.lerp(point + offset, reached), None)
                 }
+                PendingCameraHoldKind::Pan { target } => {
+                    let Some((point, _)) = Self::authored_endpoint(builder, id_map, target) else {
+                        continue;
+                    };
+                    (point, None)
+                }
                 PendingCameraHoldKind::Frame {
                     targets,
                     margins,
@@ -8749,7 +8771,8 @@ impl SceneModel {
                 && let ClipPayload::Animation(animation) = &mut clip.payload
             {
                 match &mut animation.lens {
-                    PropertyLensSpec::CameraFollowEndpoint { hold, .. } => *hold = Some(position),
+                    PropertyLensSpec::CameraFollowEndpoint { hold, .. }
+                    | PropertyLensSpec::CameraPositionSource { hold, .. } => *hold = Some(position),
                     PropertyLensSpec::CameraFrameDynamic { hold, .. } => {
                         *hold = zoom.map(|zoom| (position, zoom));
                     }
@@ -8764,22 +8787,109 @@ impl SceneModel {
         }
     }
 
+    /// The value of `source` as authored at the cursor: Parameters at the
+    /// value their animations last reached and the time at the cursor.
+    fn authored_scalar(
+        builder: &SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        source: &ScalarSource,
+    ) -> Option<f64> {
+        match source {
+            ScalarSource::Constant(value) => Some(*value),
+            ScalarSource::Signal(id) => builder.float_signals.get(id_map.get(id)?).copied(),
+            ScalarSource::Time => Some(builder.current_time),
+            ScalarSource::Function(function) => function
+                .evaluate(&[], builder.current_time, |logical| {
+                    builder.float_signals.get(id_map.get(&logical)?).copied()
+                })
+                .ok()?
+                .first()
+                .copied(),
+        }
+    }
+
     /// Where `endpoint` is as authored, with the world matrix its local
-    /// offsets turn with; `None` for endpoints only the run time resolves
-    /// (expressions, number lines).
+    /// offsets turn with: a drawable that follows an endpoint is where that
+    /// endpoint is, and reactive points take the authored values of their
+    /// sources. `None` for endpoints only the run time resolves (number
+    /// lines, sources driven by updaters).
     fn authored_endpoint(
         builder: &SceneBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
         endpoint: &CanvasEndpoint,
     ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
+        Self::authored_endpoint_at_depth(builder, id_map, endpoint, 0)
+    }
+
+    fn authored_endpoint_at_depth(
+        builder: &SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        endpoint: &CanvasEndpoint,
+        depth: usize,
+    ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
         use gaanim_core::glam::DMat4;
+        // Follows can chain; a cycle has no authored position.
+        if depth > 16 {
+            return None;
+        }
+        let scalar = |source: &ScalarSource| Self::authored_scalar(builder, id_map, source);
+        let point = |endpoint: &CanvasEndpoint| {
+            Self::authored_endpoint_at_depth(builder, id_map, endpoint, depth + 1)
+        };
         match endpoint {
             CanvasEndpoint::Static(position) => Some((*position, DMat4::IDENTITY)),
             CanvasEndpoint::Entity(id) => {
                 let runtime = *id_map.get(id)?;
                 builder.states.get(runtime)?;
+                if let Some(follow) = builder.authored_follows.get(&runtime) {
+                    let (origin, basis) = point(&follow.endpoint)?;
+                    let offset = match follow.offset_space {
+                        gaanim_animation::FollowOffsetSpace::World => follow.offset,
+                        gaanim_animation::FollowOffsetSpace::Local => {
+                            basis.transform_vector3(follow.offset)
+                        }
+                    };
+                    return Some((origin + offset, basis));
+                }
                 let matrix = builder.get_world_transform(runtime).to_mat4();
                 Some((matrix.transform_point3(DVec3::ZERO), matrix))
+            }
+            CanvasEndpoint::Expression { x, y } => {
+                Some((DVec3::new(scalar(x)?, scalar(y)?, 0.0), DMat4::IDENTITY))
+            }
+            CanvasEndpoint::LocalExpression { space, x, y, z } => {
+                let runtime = *id_map.get(space)?;
+                builder.states.get(runtime)?;
+                let matrix = builder.get_world_transform(runtime).to_mat4();
+                let local = DVec3::new(scalar(x)?, scalar(y)?, scalar(z)?);
+                Some((matrix.transform_point3(local), matrix))
+            }
+            CanvasEndpoint::Offset { origin, dx, dy } => {
+                let (origin, _) = point(origin)?;
+                Some((
+                    origin + DVec3::new(scalar(dx)?, scalar(dy)?, 0.0),
+                    DMat4::IDENTITY,
+                ))
+            }
+            CanvasEndpoint::Between {
+                from,
+                to,
+                alpha,
+                offset,
+            } => {
+                let (from, _) = point(from)?;
+                let (to, _) = point(to)?;
+                Some((from.lerp(to, scalar(alpha)?) + *offset, DMat4::IDENTITY))
+            }
+            CanvasEndpoint::Polar {
+                origin,
+                radius,
+                angle,
+            } => {
+                let (origin, _) = point(origin)?;
+                let (radius, angle) = (scalar(radius)?, scalar(angle)?);
+                let offset = DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0);
+                Some((origin + offset, DMat4::IDENTITY))
             }
             CanvasEndpoint::Anchor(anchor) => {
                 let runtime = *id_map.get(&anchor.object)?;
@@ -8857,15 +8967,24 @@ impl SceneModel {
                 *camera_position = *to;
             }
             AnimationType::CameraPositionSource { target } => {
-                Self::add_camera_lens(
+                let clip = Self::add_camera_clip(
                     builder,
                     start,
                     anim,
                     PropertyLensSpec::CameraPositionSource {
                         from: *camera_position,
                         to: compile_tracking_endpoint(target, id_map, &builder.states),
+                        hold: None,
                     },
                 );
+                builder
+                    .pending_camera_holds
+                    .push(crate::builder::PendingCameraHold {
+                        clip,
+                        kind: crate::builder::PendingCameraHoldKind::Pan {
+                            target: Box::new(target.clone()),
+                        },
+                    });
             }
             AnimationType::CameraZoom { to, interpolation } => {
                 Self::add_camera_lens(
@@ -9317,6 +9436,7 @@ impl SceneModel {
                         PropertyLensSpec::CameraPositionSource {
                             from: *camera_position,
                             to,
+                            hold: None,
                         },
                     ),
                 }
@@ -11209,6 +11329,23 @@ impl SceneModel {
                 }
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
+            }
+            SpawnKind::Light3D(light) => {
+                // An empty path: the light is a position, shaded with.
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "Light3D".to_owned(),
+                    path: gaanim_core::kurbo::BezPath::new(),
+                    bounds: Bounds3D::default(),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder.commands.entity(state.entity).insert(*light);
+                }
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Polyline3D { points, colors } => {
                 let base_color = spec
@@ -13994,6 +14131,38 @@ mod tests {
         queue.apply(&mut world);
         timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
         (world, timeline)
+    }
+
+    /// pan_to a drawable that follows a reactive point ends on the point,
+    /// where the drawable is drawn, not where it was declared, and the next
+    /// camera move starts from there.
+    #[test]
+    fn pan_to_a_follower_ends_where_it_is_drawn() {
+        let mut canvas = SceneModel::new(960, 540);
+        let x = canvas.parameter(0.0).unwrap();
+        let rider = canvas.circle(10.0).follow_endpoint(
+            CanvasEndpoint::Expression {
+                x: x.source(),
+                y: ScalarSource::Constant(40.0),
+            },
+            DVec3::ZERO,
+            gaanim_animation::FollowOffsetSpace::World,
+        );
+        canvas.play(vec![x.animate().set(120.0).duration(1.0)]);
+        let pan = canvas.camera_pan_to_endpoint(CanvasEndpoint::Entity(rider.id), 1.0);
+        canvas.play(vec![pan]);
+        let zoom = canvas.camera_zoom_to(2.0, 1.0);
+        canvas.play(vec![zoom]);
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        for time in [2.0, 2.5, 3.0] {
+            timeline.seek(&mut world, time);
+            let position = world.resource::<gaanim_math::Camera>().position;
+            assert!(
+                (position.x - 120.0).abs() < 1e-6 && (position.y - 40.0).abs() < 1e-6,
+                "camera at {position:?} at {time}"
+            );
+        }
     }
 
     /// Orbits of a camera with z up chain: the second turn starts where the

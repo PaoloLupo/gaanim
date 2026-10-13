@@ -5227,6 +5227,32 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
+    #[pyo3(signature = (kind="point", *, color=None, intensity=1.0))]
+    fn light_3d(&self, kind: &str, color: Option<PyColor>, intensity: f32) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !intensity.is_finite() || intensity < 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "intensity must be finite and non-negative",
+            ));
+        }
+        let kind = match kind {
+            "point" => gaanim_scene::LightKind3D::Point,
+            "directional" => gaanim_scene::LightKind3D::Directional,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "kind must be 'point' or 'directional'",
+                ));
+            }
+        };
+        let color = color.map_or(gaanim_core::peniko::Color::WHITE, |color| color.0);
+        Ok(PyDrawable(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .light_3d(kind, color, intensity),
+        ))
+    }
+
     #[pyo3(signature = (preset="studio", intensity=1.0, shadows=true))]
     fn lighting_3d(&self, preset: &str, intensity: f32, shadows: bool) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;

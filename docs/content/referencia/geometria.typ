@@ -1280,9 +1280,23 @@ scene.render()
 #api-entry(
   name: "Geometry.lighting_3d",
   kind: "method",
-  desc: [Configura el único equipo automático de luces 3D de la escena. `"studio"` ilumina las primitivas con material al estilo de Gaanim (luz del cielo y del suelo, una luz principal suave desde arriba a la izquierda y un brillo leve en los bordes), escalada por `intensity`; `"none"` deja solo la emisión. `shadows` se acepta por compatibilidad, pero el contenido 3D no proyecta sombras. Las superficies, los gráficos 3D y las líneas no reciben luz.],
+  desc: [Configura el único equipo automático de luces 3D de la escena. `"studio"` ilumina las primitivas con material al estilo de Gaanim (luz del cielo y del suelo, una luz principal suave desde arriba a la izquierda y un brillo leve en los bordes), escalada por `intensity`; `"none"` deja solo la emisión. `shadows` se acepta por compatibilidad, pero el contenido 3D no proyecta sombras. Las superficies, los gráficos 3D y las líneas no reciben luz. Las luces de `light_3d` sustituyen a la luz principal.],
   none,
 )
+
+#api-entry(
+  name: "Geometry.light_3d",
+  kind: "factory",
+  signature: "light_3d(kind=\"point\", *, color=None, intensity=1.0) -> Drawable",
+  desc: [Una luz para las primitivas con material, en el origen. No dibuja nada; es un dibujable, así que `move_to_3d` la coloca y `animate`, los grupos y `follow` la mueven. Una luz `"point"` alumbra desde su posición en todas direcciones; una `"directional"`, con rayos paralelos desde la dirección de su posición vista desde el origen, como el sol. Mientras la escena muestra luces, sustituyen a la luz principal fija de `lighting_3d`, cuya luz del cielo y del suelo se mantiene, y cada una alumbra en su `color` (blanco por defecto) con su `intensity`, atenuada por su opacidad: `fade_in` y `fade_out` la encienden y la apagan. Con `lighting_3d("none")` solo alumbran las luces. Las superficies, los gráficos 3D y las líneas no reciben luz. Una `intensity` negativa o no finita, u otro `kind`, lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+lamp = scene.geometry.light_3d(color=GOLD, intensity=1.5).move_to_3d(3, 2, 4)
+scene.play([lamp.animate.move_to_3d(-3, 2, 4).duration(2.0)])
+```
+]
 
 #api-entry(
   name: "Material3D.matte / metal / emissive / color / roughness / metallic / emissive_color / emissive_strength",

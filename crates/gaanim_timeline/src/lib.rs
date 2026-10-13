@@ -306,6 +306,7 @@ pub(crate) fn camera_clip_ids(timeline: &Timeline, world: &mut World) -> Vec<cli
                         anim.lens,
                         clip::PropertyLensSpec::CameraFollow { .. }
                             | clip::PropertyLensSpec::CameraFollowEndpoint { .. }
+                            | clip::PropertyLensSpec::CameraPositionSource { .. }
                             | clip::PropertyLensSpec::CameraFrameDynamic { .. }
                             | clip::PropertyLensSpec::CameraShake { .. }
                             | clip::PropertyLensSpec::CameraPosition { .. }
@@ -339,9 +340,18 @@ pub fn camera_rig_system(world: &mut World) {
         .filter(|clip| clip.start <= current_time && current_time < clip.end())
         .filter_map(|clip| match &clip.payload {
             clip::ClipPayload::Animation(anim) => match &anim.lens {
+                // A pan eases toward where its endpoint is drawn now, with
+                // the clip's easing at its progress.
                 clip::PropertyLensSpec::CameraFollow { .. }
-                | clip::PropertyLensSpec::CameraFollowEndpoint { .. } => {
-                    Some((clip.start, clip.duration, anim.lens.clone()))
+                | clip::PropertyLensSpec::CameraFollowEndpoint { .. }
+                | clip::PropertyLensSpec::CameraPositionSource { .. } => {
+                    let progress = if clip.duration > 0.0 {
+                        ((current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let eased = anim.rate_func.evaluate(progress);
+                    Some((clip.start, eased, anim.lens.clone()))
                 }
                 _ => None,
             },
@@ -406,7 +416,7 @@ pub fn camera_rig_system(world: &mut World) {
         );
     }
 
-    let follow_position = follow.and_then(|(start, _duration, lens)| match lens {
+    let follow_position = follow.and_then(|(start, eased, lens)| match lens {
         clip::PropertyLensSpec::CameraFollow { target } => {
             let mut query =
                 world.query::<(&gaanim_scene::MobjectId, &gaanim_math::SpatialTransform)>();
@@ -435,6 +445,11 @@ pub fn camera_rig_system(world: &mut World) {
                 1.0 - (-(current_time - start).max(0.0) / lag).exp()
             };
             Some((start, from.lerp(desired, influence)))
+        }
+        clip::PropertyLensSpec::CameraPositionSource { from, to, .. } => {
+            let target = gaanim_animation::resolve_tracking_endpoint(&to, world)?;
+            let destination = gaanim_core::glam::DVec3::new(target.x, target.y, from.z);
+            Some((start, from.lerp(destination, eased)))
         }
         _ => None,
     });

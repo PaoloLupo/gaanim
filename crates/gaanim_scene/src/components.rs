@@ -670,6 +670,27 @@ impl Default for Lighting3D {
     }
 }
 
+/// Where a [`Light3D`] shines from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LightKind3D {
+    /// From the entity's position, in every direction.
+    Point,
+    /// Along parallel rays, from the direction of the entity's position seen
+    /// from the origin, as the sun does.
+    Directional,
+}
+
+/// A light for lit 3D content, at the position of the entity that carries
+/// it. While a scene shows lights they replace the fixed key light of
+/// [`Lighting3D`], whose sky and ground light stays; the entity's opacity
+/// dims its light.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct Light3D {
+    pub kind: LightKind3D,
+    pub color: gaanim_core::peniko::Color,
+    pub intensity: f32,
+}
+
 /// A triangle mesh in local 3D coordinates, projected and shaded by the renderer.
 #[derive(Component, Debug, Clone)]
 pub struct TriangleMeshData {

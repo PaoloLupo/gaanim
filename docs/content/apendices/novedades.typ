@@ -117,6 +117,12 @@ enteros, o usa `scene.text.code`.
   acentos violeta, títulos en oro y reglas en bruma. Sus series empiezan por
   el violeta y el oro, y su mapa de calor va del grafito al oro pasando por
   la bruma y el violeta. Ver #link("/referencia/themes/")[Temas].
+- `scene.geometry.light_3d()` crea luces puntuales o direccionales para las
+  primitivas con material: se colocan con `move_to_3d`, se animan y siguen a
+  otros objetos como cualquier dibujable, y alumbran en su color. Mientras la
+  escena muestra luces, sustituyen a la luz principal fija; `fade_in` y
+  `fade_out` las encienden y las apagan. Ver
+  #link("/referencia/geometria/")[Geometría].
 - `space.surface(..., color_map=...)` colorea la superficie por altura con un
   `ColorMap` o con cualquier mapa integrado por su nombre (`"viridis"`,
   `"plasma"`…). Sin él conserva la rampa de siempre.
@@ -164,6 +170,10 @@ enteros, o usa `scene.text.code`.
 - `transform_to` entre marcas de un plano (`riemann_sum`, `plot_data`,
   `scatter_data`…) transforma su forma; antes solo cambiaba el color, porque
   la marca se redibujaba desde sus datos en cada fotograma.
+- `scene.camera.animate.pan_to(dibujable)` centra el dibujable donde se
+  dibuja, también cuando sigue a un punto reactivo, y al terminar la cámara
+  se queda allí; antes iba a la posición con la que se declaró y la
+  siguiente animación de cámara partía de la pose anterior a la panorámica.
 - `scene.camera.animate.orbit` gira alrededor del eje `up` de la cámara: con
   `look_at(..., up=(0, 0, 1))`, como en los ejes 3D, rodea la escena en vez de
   pasar por encima. Una órbita tras otra parte de donde terminó la anterior.

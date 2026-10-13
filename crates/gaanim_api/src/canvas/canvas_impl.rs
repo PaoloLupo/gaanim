@@ -4111,6 +4111,21 @@ impl SceneModel {
         )?)))
     }
 
+    /// A light at the origin for lit 3D content: move it like any drawable.
+    /// While the scene shows lights they replace the fixed key light.
+    pub fn light_3d(
+        &mut self,
+        kind: gaanim_scene::LightKind3D,
+        color: Color,
+        intensity: f32,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::Light3D(gaanim_scene::Light3D {
+            kind,
+            color,
+            intensity,
+        }))
+    }
+
     pub fn lighting_3d(&mut self, enabled: bool, intensity: f32, shadows: bool) {
         self.lighting_3d = gaanim_scene::Lighting3D {
             enabled,

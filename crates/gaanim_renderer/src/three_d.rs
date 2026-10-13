@@ -18,7 +18,41 @@
 use gaanim_core::glam::{DMat4, DVec3, DVec4};
 use gaanim_core::{kurbo, peniko};
 use gaanim_math::{Camera, GlobalSpatialTransform, Projection};
-use gaanim_scene::{GlobalOpacity, Lighting3D, LineListData, Material3D, TriangleMeshData};
+use gaanim_scene::{
+    GlobalOpacity, Light3D, LightKind3D, Lighting3D, LineListData, Material3D, TriangleMeshData,
+};
+
+/// A light as shading uses it: where it is in the world and its linear
+/// color, scaled by its intensity and its entity's opacity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Light {
+    pub position: DVec3,
+    pub directional: bool,
+    pub color: [f32; 3],
+}
+
+impl Light {
+    /// The light `light` gives from `position`, dimmed to `opacity`; `None`
+    /// when it gives none.
+    pub fn new(light: &Light3D, position: DVec3, opacity: f32) -> Option<Self> {
+        let strength = light.intensity.max(0.0) * opacity.clamp(0.0, 1.0);
+        let [r, g, b, a] = to_linear(light.color);
+        let color = [r, g, b].map(|channel| channel * a * strength);
+        (strength > 0.0 && position.is_finite()).then_some(Self {
+            position,
+            directional: light.kind == LightKind3D::Directional,
+            color,
+        })
+    }
+}
+
+/// How lit 3D content is lit in a frame: the scene's [`Lighting3D`] and the
+/// lights it shows.
+#[derive(Debug, Clone, Default)]
+pub struct Illumination {
+    pub lighting: Lighting3D,
+    pub lights: Vec<Light>,
+}
 
 /// Width of 3D lines, in output pixels.
 const LINE_WIDTH_PX: f64 = 1.5;
@@ -310,7 +344,7 @@ impl Projector {
         &self,
         key: K,
         content: &Content<'_>,
-        lighting: &Lighting3D,
+        lighting: &Illumination,
         items: &mut Vec<Item<K>>,
     ) {
         let opacity = content.opacity.0.clamp(0.0, 1.0);
@@ -334,7 +368,7 @@ impl Projector {
         material: Option<&Material3D>,
         model: DMat4,
         opacity: f32,
-        lighting: &Lighting3D,
+        lighting: &Illumination,
         items: &mut Vec<Item<K>>,
     ) {
         let count = mesh.vertices.len();
@@ -397,6 +431,7 @@ impl Projector {
                             linear,
                             normal,
                             self.toward_viewer(world[index]),
+                            world[index],
                             material,
                             lighting,
                         );
@@ -409,8 +444,18 @@ impl Projector {
             let flat = match (lit.as_ref(), normals.as_ref()) {
                 (Some(material), Some(normals)) if colors_of_mesh.is_none() => {
                     let [a, b, c] = corners_index.map(|index| normals[index]);
-                    (a != DVec3::ZERO && a.abs_diff_eq(b, 1e-9) && a.abs_diff_eq(c, 1e-9))
-                        .then(|| shade(to_linear(base), a, -self.forward, material, lighting))
+                    (a != DVec3::ZERO && a.abs_diff_eq(b, 1e-9) && a.abs_diff_eq(c, 1e-9)).then(
+                        || {
+                            shade(
+                                to_linear(base),
+                                a,
+                                -self.forward,
+                                centroid,
+                                material,
+                                lighting,
+                            )
+                        },
+                    )
                 }
                 _ => None,
             };
@@ -597,13 +642,20 @@ const RIM: f32 = 0.22;
 /// light from the upper left gives form, a faint rim light separates
 /// silhouettes from the background, and polished materials catch a clean
 /// highlight. Metals reflect the sky above instead of scattering light.
+///
+/// The scene's lights, when it shows any, take the key light's place, each
+/// from where it is relative to `point` (the surface point, in the world)
+/// and in its own color; the sky and ground light and the rim keep the
+/// scene's intensity.
 fn shade(
     base: [f32; 4],
     normal: DVec3,
     toward_viewer: DVec3,
+    point: DVec3,
     material: &Material3D,
-    lighting: &Lighting3D,
+    illumination: &Illumination,
 ) -> [f32; 4] {
+    let lighting = &illumination.lighting;
     let metallic = material.metallic.clamp(0.0, 1.0);
     let polish = (1.0 - material.roughness.clamp(0.0, 1.0)).powi(2);
     let intensity = if lighting.enabled {
@@ -611,24 +663,62 @@ fn shade(
     } else {
         0.0
     };
-    let light = DVec3::from_array(KEY_LIGHT).normalize();
     let facing_up = (0.5 + 0.5 * normal.y) as f32;
     let sky = GROUND + (SKY - GROUND) * facing_up;
-    let key = (((normal.dot(light) as f32) + KEY_WRAP) / (1.0 + KEY_WRAP)).max(0.0);
-    let diffuse = (sky + KEY_STRENGTH * key) * intensity;
+    let shininess = 8.0 + 248.0 * polish;
+    // The fixed key light is white and scaled with the rest by the scene's
+    // intensity; the scene's own lights carry theirs.
+    let key_light = [Light {
+        position: DVec3::from_array(KEY_LIGHT),
+        directional: true,
+        color: [1.0; 3],
+    }];
+    let fixed = illumination.lights.is_empty();
+    let lights = if fixed {
+        &key_light[..]
+    } else {
+        &illumination.lights[..]
+    };
+    let mut keyed = [0.0f32; 3];
+    let mut highlight = [0.0f32; 3];
+    for light in lights {
+        let toward_light = if light.directional {
+            light.position
+        } else {
+            light.position - point
+        }
+        .normalize_or_zero();
+        let key = (((normal.dot(toward_light) as f32) + KEY_WRAP) / (1.0 + KEY_WRAP)).max(0.0);
+        let half = (toward_light + toward_viewer).normalize_or_zero();
+        let shine = (normal.dot(half).max(0.0) as f32).powf(shininess) * polish * key.min(1.0);
+        for i in 0..3 {
+            keyed[i] += KEY_STRENGTH * key * light.color[i];
+            highlight[i] += shine * light.color[i];
+        }
+    }
+    let diffuse = keyed.map(|keyed| {
+        if fixed {
+            (sky + keyed) * intensity
+        } else {
+            sky * intensity + keyed
+        }
+    });
+    let highlight = highlight.map(|highlight| {
+        if fixed {
+            highlight * intensity
+        } else {
+            highlight
+        }
+    });
     // A metal shows the sky it reflects, bright above and dark below.
     let reflection = (0.25 + 0.95 * facing_up * facing_up) * intensity;
     let facing = normal.dot(toward_viewer).clamp(0.0, 1.0) as f32;
     let rim = RIM * (1.0 - facing).powi(3) * intensity;
-    let half = (light + toward_viewer).normalize_or_zero();
-    let shininess = 8.0 + 248.0 * polish;
-    let highlight =
-        (normal.dot(half).max(0.0) as f32).powf(shininess) * polish * key.min(1.0) * intensity;
     let emissive = to_linear(material.emissive);
     let mut rgb = [0.0f32; 3];
     for i in 0..3 {
-        let dielectric = base[i] * diffuse + highlight * 0.9;
-        let metal = base[i] * reflection * SKY_TINT[i] + highlight * (0.35 + 0.65 * base[i]);
+        let dielectric = base[i] * diffuse[i] + highlight[i] * 0.9;
+        let metal = base[i] * reflection * SKY_TINT[i] + highlight[i] * (0.35 + 0.65 * base[i]);
         rgb[i] = dielectric
             + (metal - dielectric) * metallic
             + rim * SKY_TINT[i] * (0.4 + 0.6 * base[i])
@@ -764,12 +854,49 @@ mod tests {
                     lines: None,
                     material: material.as_ref(),
                 },
-                &Lighting3D::default(),
+                &Illumination::default(),
                 &mut items,
             );
         }
         sort_back_to_front(&mut items);
         items
+    }
+
+    /// A light takes the key light's place: it lights a face it shines on in
+    /// its own color, from where it is, and leaves a face turned away from
+    /// it dark, with the scene's ambient light off.
+    #[test]
+    fn lights_shine_in_their_color_from_where_they_are() {
+        let dark = Lighting3D {
+            enabled: false,
+            ..Lighting3D::default()
+        };
+        let red = Light3D {
+            kind: LightKind3D::Point,
+            color: peniko::Color::from_rgb8(255, 0, 0),
+            intensity: 1.0,
+        };
+        let shaded = |position: DVec3| {
+            let illumination = Illumination {
+                lighting: dark,
+                lights: Light::new(&red, position, 1.0).into_iter().collect(),
+            };
+            shade(
+                [1.0; 4],
+                DVec3::Z,
+                DVec3::Z,
+                DVec3::ZERO,
+                &Material3D::default(),
+                &illumination,
+            )
+        };
+        let front = shaded(DVec3::new(0.0, 0.0, 5.0));
+        assert!(front[0] > 0.5, "{front:?}");
+        assert_eq!((front[1], front[2]), (0.0, 0.0));
+        let behind = shaded(DVec3::new(0.0, 0.0, -5.0));
+        assert_eq!(&behind[..3], &[0.0; 3]);
+        // A light at no strength gives no light at all.
+        assert!(Light::new(&red, DVec3::Z, 0.0).is_none());
     }
 
     #[test]
@@ -825,7 +952,7 @@ mod tests {
                 lines: Some(&lines),
                 material: None,
             },
-            &Lighting3D::default(),
+            &Illumination::default(),
             &mut items,
         );
         assert_eq!(items.len(), 2);

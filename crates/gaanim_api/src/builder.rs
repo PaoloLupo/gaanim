@@ -1035,6 +1035,15 @@ impl<'a, 'w, 's, 'b> CoordinatedAnimationBuilder<'a, 'w, 's, 'b> {
     }
 }
 
+/// What a drawable follows: an endpoint and an offset in world or
+/// endpoint-local axes.
+#[derive(Clone, Debug)]
+pub(crate) struct AuthoredFollow {
+    pub endpoint: crate::canvas::CanvasEndpoint,
+    pub offset: DVec3,
+    pub offset_space: gaanim_animation::FollowOffsetSpace,
+}
+
 /// A dynamic camera clip waiting for the rest of its `play`: once every
 /// animation in it is scheduled, the targets' authored state gives the pose
 /// the camera keeps after the clip ends.
@@ -1053,6 +1062,10 @@ pub(crate) enum PendingCameraHoldKind {
         offset_space: gaanim_animation::FollowOffsetSpace,
         lag: f64,
         duration: f64,
+    },
+    /// `pan_to(endpoint)`: where the endpoint is drawn as authored.
+    Pan {
+        target: Box<crate::canvas::CanvasEndpoint>,
     },
     /// `frame_to(..., dynamic=True)`: the union of the targets' bounds with
     /// `margins` (CSS order), fitted to a `frame` of that width and height.
@@ -1194,6 +1207,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Opacity each object had before an animation took it to zero, which
     /// an entrance shows it at again.
     pub(crate) faded_opacities: HashMap<ObjectId, f32>,
+    /// The endpoint each drawable follows (`follow`), with its offset, so
+    /// camera moves can find where a follower is drawn as authored.
+    pub(crate) authored_follows: HashMap<ObjectId, AuthoredFollow>,
 }
 
 /// The opacity an entrance shows `target` at: its `current` one, or the one
@@ -1270,6 +1286,7 @@ pub(crate) struct SceneBuilderState {
     declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     faded_opacities: HashMap<ObjectId, f32>,
     backdrop_orders: HashMap<ObjectId, u64>,
+    authored_follows: HashMap<ObjectId, AuthoredFollow>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -1312,6 +1329,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests: self.layout_rests.clone(),
             declared_pivots: self.declared_pivots.clone(),
             faded_opacities: self.faded_opacities.clone(),
+            authored_follows: self.authored_follows.clone(),
             backdrop_orders: self.backdrop_orders.clone(),
         }
     }
@@ -1363,6 +1381,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             declared_pivots,
             faded_opacities,
             backdrop_orders,
+            authored_follows,
         } = state;
         Self {
             property_source_cursors,
@@ -1416,6 +1435,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             declared_pivots,
             faded_opacities,
             backdrop_orders,
+            authored_follows,
         }
     }
 
@@ -1870,6 +1890,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests: HashMap::new(),
             declared_pivots: HashMap::new(),
             faded_opacities: HashMap::new(),
+            authored_follows: HashMap::new(),
             backdrop_orders: HashMap::new(),
         }
     }
