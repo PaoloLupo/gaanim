@@ -577,7 +577,7 @@ scene.render()
 #api-entry(
   name: "Drawable.blur",
   kind: "method",
-  desc: [Desenfoque gaussiano de `sigma` unidades de escena.],
+  desc: [Desenfoque gaussiano de `sigma` unidades de escena; `blur(0)` lo quita. Después del primer `play` o `wait` es un corte en el cursor, como `fill`. Un `sigma` negativo o no finito lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -685,7 +685,7 @@ card = scene.geometry.rounded_rect(4, 2, 0.2).fill("#18202E").shadow("#00000080"
 #api-entry(
   name: "Drawable.no_effects",
   kind: "method",
-  desc: [Quita `glow`, `blur` y `shadow` sin tocar el relleno ni el trazo.],
+  desc: [Quita `glow`, `blur` y `shadow` sin tocar el relleno ni el trazo. Después del primer `play` o `wait` es un corte en el cursor: hasta ahí los efectos se ven.],
   none,
 )
 

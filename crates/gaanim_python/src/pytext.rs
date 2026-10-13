@@ -1280,8 +1280,10 @@ impl PyText {
     #[pyo3(signature = (sigma=0.04))]
     fn blur(slf: PyRef<'_, Self>, sigma: f64) -> PyResult<PyRef<'_, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        if !sigma.is_finite() || sigma <= 0.0 {
-            return Err(PyValueError::new_err("sigma must be finite and positive"));
+        if !sigma.is_finite() || sigma < 0.0 {
+            return Err(PyValueError::new_err(
+                "sigma must be finite and non-negative",
+            ));
         }
         slf.handle.clone().blur(sigma);
         Ok(slf)

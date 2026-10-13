@@ -191,13 +191,10 @@ def glowing(build, start=None):
 
 
 def blurred(sigma, target):
-    """A row whose pill starts blurred by ``sigma`` (or sharp) and animates to ``target``."""
+    """A row whose pill starts blurred by ``sigma`` (``0`` is sharp) and animates to ``target``."""
 
     def row(zone):
-        orb = pill(zone, 0.7, 0.45)
-        if sigma:
-            orb.blur(sigma)
-        return orb.animate.blur(target)
+        return pill(zone, 0.7, 0.45).blur(sigma).animate.blur(target)
     return row
 
 
