@@ -54,6 +54,18 @@ impl DisableOnWeb for bevy::app::PluginGroupBuilder {
 #[cfg(target_arch = "wasm32")]
 pub const WEB_CANVAS: &str = "#gaanim-canvas";
 
+/// The title of a Gaanim window: the version that runs, marked `(dev)` in a
+/// development build so it differs from an installed release, then what the
+/// window shows, if anything.
+pub fn window_title(detail: Option<&str>) -> String {
+    let build = if cfg!(debug_assertions) { " (dev)" } else { "" };
+    let version = format!("Gaanim {}{build}", env!("CARGO_PKG_VERSION"));
+    match detail {
+        Some(detail) => format!("{version} — {detail}"),
+        None => version,
+    }
+}
+
 /// The editor application, without a scene: callers load a script session,
 /// a playback bundle, or show the project hub.
 pub fn host_app(options: &HostOptions) -> App {
@@ -72,13 +84,13 @@ pub fn host_app(options: &HostOptions) -> App {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: if options.presenter_page {
-                        "Gaanim — Presenter View".to_string()
+                    title: window_title(if options.presenter_page {
+                        Some("Presenter View")
                     } else if options.present {
-                        "Gaanim — Presentation".to_string()
+                        Some("Presentation")
                     } else {
-                        "Gaanim".to_string()
-                    },
+                        None
+                    }),
                     resolution: (1280, 720).into(),
                     present_mode: bevy::window::PresentMode::AutoVsync,
                     // One frame in flight: a scrubbed or dragged frame shows
@@ -226,6 +238,17 @@ fn spawn_clear_camera(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_titles_name_the_running_version() {
+        let version = env!("CARGO_PKG_VERSION");
+        let build = if cfg!(debug_assertions) { " (dev)" } else { "" };
+        assert_eq!(window_title(None), format!("Gaanim {version}{build}"));
+        assert_eq!(
+            window_title(Some("Charla")),
+            format!("Gaanim {version}{build} — Charla")
+        );
+    }
 
     #[test]
     fn host_installs_a_primary_2d_camera_for_egui_before_scene_replay() {
