@@ -39,7 +39,7 @@ se comparte entre objetos que usan la misma ruta.
 #api-entry(
   name: "MediaLibrary.image",
   kind: "factory",
-  params: ((name: "path", type: "str", default: none, desc: [Archivo PNG, JPEG o WebP.]), (name: "width / height", type: "float | None", default: "None", desc: [Tamaño de destino en unidades de escena; sin ellos, la imagen cabe en el área segura.]), (name: "fit", type: "str", default: "\"contain\"", desc: [`contain`, `cover` o `stretch`.]), (name: "crop", type: "(x, y, w, h) | None", default: "None", desc: [Recorte de la fuente en píxeles, con origen arriba a la izquierda.]), (name: "quality", type: "str", default: "\"medium\"", desc: [Muestreo: `low` (vecino más cercano), `medium` (bilineal) o `high` (bicúbico).])),
+  params: ((name: "path", type: "str", default: none, desc: [Archivo PNG, JPEG o WebP.]), (name: "width / height", type: "float | None", default: "None", desc: [Tamaño de destino en unidades de escena; sin ellos, la imagen cabe en el área segura.]), (name: "fit", type: "str", default: "\"contain\"", desc: [Con `width` y `height`, como en `Image.frame`: `contain` conserva la imagen entera, `cover` llena el marco recortando el sobrante por igual a ambos lados y `stretch` la deforma.]), (name: "crop", type: "(x, y, w, h) | None", default: "None", desc: [Recorte de la fuente en píxeles, con origen arriba a la izquierda.]), (name: "quality", type: "str", default: "\"medium\"", desc: [Muestreo: `low` (vecino más cercano), `medium` (bilineal) o `high` (bicúbico).])),
   desc: [Crea una `Image` que conserva su tipo al encadenar setters. Ajustes, recortes, medidas o calidades inválidos lanzan `ValueError`.],
 )[
 ```python

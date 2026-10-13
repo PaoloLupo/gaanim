@@ -89,7 +89,7 @@ scene.play(dot.animate.move_to(other).opacity(0.5))
   signature: "move_to(x: ScalarSource, y: ScalarSource, anchor: Anchor | None = None) -> Anim | move_to(reference: Drawable) -> Anim | move_to(point: AnchorPoint) -> Anim",
   params: (
     (name: "x, y", type: "ScalarSource", default: none, desc: [Posición de destino.]),
-    (name: "anchor", type: "Anchor | str | None", default: "None", desc: [Punto del objeto que llega a `(x, y)`; `None` usa el centro. Un `Anchor` o su nombre, como `"top_left"`.]),
+    (name: "anchor", type: "Anchor | str | None", default: "None", desc: [Punto del objeto que llega a `(x, y)`; `None` usa el centro, salvo en un `Text`, que llega donde lo pondría `Text.move_to(x, y)`: su primera línea base centrada en el punto, o su centro visual si tiene varias líneas. Un `Anchor` o su nombre, como `"top_left"`.]),
     (name: "reference / point", type: "Drawable | AnchorPoint", default: none, desc: [Objeto o punto de anclaje de la misma escena, resuelto al inicio del clip; no lo sigue después.]),
   ),
   returns: (type: "Anim", desc: [Movimiento a una posición absoluta.]),

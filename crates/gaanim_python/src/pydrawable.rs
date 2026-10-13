@@ -595,17 +595,34 @@ impl PyCanvasAnim {
         self.require_native_animation()?;
         self.require_transformable()?;
         self.require_property_slot("move_to")?;
+        // A text without an anchor lands where `Text.move_to` puts it: by
+        // its baseline, not its visual center.
+        let text_default = anchor.is_none() && self.inner.property_target_is_text();
         if let Some(y) = y {
             let sx = scalar_for_anim(x, self)?;
             let sy = scalar_for_anim(y, self)?;
             if let (Some(x), Some(y)) = (sx.constant_value(), sy.constant_value()) {
                 return Ok(Self {
-                    inner: self.inner.clone().move_to_anchor(
-                        x,
-                        y,
-                        anchor.map(|anchor| anchor.0).unwrap_or_default(),
-                    ),
+                    inner: if text_default {
+                        self.inner.clone().move_to_text(x, y)
+                    } else {
+                        self.inner.clone().move_to_anchor(
+                            x,
+                            y,
+                            anchor.map(|anchor| anchor.0).unwrap_or_default(),
+                        )
+                    },
                 });
+            }
+            if text_default {
+                return source_anim(
+                    self,
+                    PropertySources::TextTranslation {
+                        values: [sx, sy, 0.0.into()],
+                        horizontal: 0.0,
+                        center_multiline: true,
+                    },
+                );
             }
             let anchor = anchor
                 .map(|anchor| anchor.0)
@@ -622,6 +639,9 @@ impl PyCanvasAnim {
         let inner = match resolve_at_target("move_to", x, None, anchor.is_some())? {
             PyAtTarget::Drawable(reference) => self.inner.clone().move_to_drawable(&reference),
             PyAtTarget::AnchorPoint(point) => self.inner.clone().move_to_anchor_point(point),
+            PyAtTarget::Coordinates { x, y } if text_default => {
+                Ok(self.inner.clone().move_to_text(x, y))
+            }
             PyAtTarget::Coordinates { x, y } => Ok(self.inner.clone().move_to(x, y)),
         }
         .map_err(PyValueError::new_err)?;

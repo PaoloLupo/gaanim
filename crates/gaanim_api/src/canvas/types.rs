@@ -453,7 +453,8 @@ impl ImageOptions {
             height: view.display_height,
             fit: self.fit,
             quality: self.quality,
-            alignment: 0.0,
+            // A `cover` frame crops the overflow evenly, as `frame()` does.
+            alignment: 0.5,
         }
     }
 
@@ -1922,6 +1923,20 @@ impl Anim {
             .unwrap_or(true)
     }
 
+    /// Whether this animates a structured text, which `move_to` places by
+    /// its baseline as `Text.move_to` does.
+    #[doc(hidden)]
+    pub fn property_target_is_text(&self) -> bool {
+        self.property_spec
+            .as_ref()
+            .and_then(|spec| {
+                spec.lock()
+                    .ok()
+                    .map(|spec| matches!(spec.kind, SpawnKind::Text(_)))
+            })
+            .unwrap_or(false)
+    }
+
     /// Whether live derived geometry (a live boolean) rewrites this
     /// drawable's transform every frame. Unlike a layout owner, it leaves no
     /// resting position for an entrance effect to return to.
@@ -2326,6 +2341,20 @@ impl Anim {
             properties.translation = Some(PropertyTranslation::ToAnchor {
                 to: DVec3::new(x, y, 0.0),
                 anchor,
+            })
+        })
+    }
+
+    /// Animate a text to `(x, y)` as `Text.move_to` places it: its first
+    /// baseline centered on the point, or the visual center of a multiline
+    /// block.
+    pub fn move_to_text(self, x: f64, y: f64) -> Self {
+        self.assert_free_position();
+        self.update_properties(|properties| {
+            properties.translation = Some(PropertyTranslation::ToTextAnchor {
+                to: DVec3::new(x, y, 0.0),
+                horizontal: 0.0,
+                center_multiline: true,
             })
         })
     }
@@ -3300,6 +3329,25 @@ mod tests {
         .unwrap();
         assert_eq!((crop.source_x, crop.source_y), (50.0, 20.0));
         assert_eq!((crop.display_width, crop.display_height), (120.0, 60.0));
+    }
+
+    /// `image(path, width=, height=, fit="cover")` crops the overflow evenly,
+    /// as `image(path).frame(width, height, fit="cover")` does: the source's
+    /// center lands on the frame's.
+    #[test]
+    fn cover_options_center_the_crop_as_frame_does() {
+        let options = ImageOptions {
+            width: Some(3.0),
+            height: Some(3.0),
+            fit: ImageFit::Cover,
+            crop: None,
+            quality: ImageQuality::Medium,
+        };
+        let frame = options.media_frame(options.resolve(600, 300).unwrap());
+        let (visible, transform) = frame.geometry();
+        assert_eq!(visible, gaanim_core::kurbo::Rect::new(-1.5, -1.5, 1.5, 1.5));
+        let center = transform * gaanim_core::kurbo::Point::new(300.0, 150.0);
+        assert!(center.x.abs() < 1e-9 && center.y.abs() < 1e-9, "{center:?}");
     }
 
     #[test]
