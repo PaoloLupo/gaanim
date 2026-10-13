@@ -282,10 +282,10 @@ ColorMapLike: TypeAlias = ColorMap | str
 class Brush:
     @staticmethod
     def solid(color: ColorLike) -> Brush:
-        """Use solid on this Brush or create the requested value.
+        """A brush of one color, the same as passing ``color`` to ``fill`` or ``stroke``.
 
         Example:
-            result = Brush.solid(BLUE)
+            card.fill(Brush.solid(BLUE))
         """
         ...
     @staticmethod
@@ -296,10 +296,23 @@ class Brush:
         end: tuple[float, float],
         extend: Literal["pad", "repeat", "reflect"] = "pad",
     ) -> Brush:
-        """Use linear on this Brush or create the requested value.
+        """A linear gradient from ``start`` to ``end``, with ``colors`` spread evenly.
+
+        ``start`` and ``end`` are in the local units of the object painted,
+        whose origin is usually its center, so the gradient moves, turns and
+        scales with it. At least two colors are needed. ``extend`` sets what
+        lies past the ends: ``"pad"`` holds the end colors, ``"repeat"``
+        repeats the ramp and ``"reflect"`` mirrors it.
+
+        A group passes the brush to each member, which paints it in its own
+        local units: a gradient does not run across the group. For one
+        gradient over several shapes, join them with
+        ``scene.geometry.union(...)`` or give each member a brush shifted by
+        its position.
 
         Example:
-            result = Brush.linear([BLUE], start=(0.0, 0.0), end=(0.0, 0.0))
+            card = scene.geometry.rounded_rect(6, 2.75, 0.35)
+            card.fill(Brush.linear([BLUE, GOLD], start=(-3, 0), end=(3, 0)))
         """
         ...
     @staticmethod
@@ -310,10 +323,16 @@ class Brush:
         radius: float,
         extend: Literal["pad", "repeat", "reflect"] = "pad",
     ) -> Brush:
-        """Use radial on this Brush or create the requested value.
+        """A radial gradient from ``center`` out to ``radius``, with ``colors`` spread evenly.
+
+        ``center`` and ``radius`` are in the local units of the object
+        painted, whose origin is usually its center. At least two colors are
+        needed; ``extend`` works as in ``linear``. A group passes the brush to
+        each member, which paints it around its own origin.
 
         Example:
-            result = Brush.radial([BLUE], radius=40.0)
+            orb = scene.geometry.circle(1.5)
+            orb.fill(Brush.radial(["white", BLUE], center=(-0.4, 0.4), radius=1.9))
         """
         ...
     @staticmethod
@@ -325,10 +344,17 @@ class Brush:
         end_angle: float = 360.0,
         extend: Literal["pad", "repeat", "reflect"] = "pad",
     ) -> Brush:
-        """Use sweep on this Brush or create the requested value.
+        """An angular gradient around ``center``, from ``start_angle`` to ``end_angle`` in degrees.
+
+        ``center`` is in the local units of the object painted, whose origin
+        is usually its center. At least two colors are needed; repeat the
+        first one last for a seamless ring. ``extend`` works as in
+        ``linear``. A group passes the brush to each member, which sweeps it
+        around its own origin.
 
         Example:
-            result = Brush.sweep([BLUE])
+            ring = scene.geometry.circle(1.4).no_fill()
+            ring.stroke(Brush.sweep([BLUE, GOLD, RED, BLUE]), 0.25)
         """
         ...
 
@@ -6489,7 +6515,13 @@ class CameraAnimation:
         ...
 
     def orthographic(self, zoom: float = 1.0) -> Anim:
-        """Select orthographic projection; ``zoom`` must be positive."""
+        """Animate to orthographic projection at ``zoom``, which must be positive.
+
+        From a perspective camera the eye backs away along its view axis
+        while the lens narrows, so the target stays centered and depth
+        flattens until the projection turns orthographic at the end, with
+        the same pose. From an orthographic camera it eases the zoom.
+        """
         ...
 
     def reset(self) -> Anim:

@@ -211,6 +211,44 @@ impl CameraPose {
         }
     }
 
+    /// This pose turned orthographic at `zoom` by the fraction `t`, for a
+    /// camera whose frame is `frame_height` units tall. From a perspective
+    /// pose the eye backs away along the view axis while the lens narrows,
+    /// so the target stays centered, what lies on its plane eases from this
+    /// view's size to the orthographic one's, and depth flattens until the
+    /// projection turns orthographic at `t = 1`, keeping this pose. An
+    /// orthographic pose eases its zoom.
+    pub fn flatten_to_orthographic(self, zoom: f64, t: f64, frame_height: f64) -> Self {
+        let orthographic = Self {
+            projection: Projection::Orthographic { zoom },
+            ..self
+        };
+        let Projection::Perspective { fov_y, near, far } = self.projection else {
+            return self.interpolate(orthographic, t);
+        };
+        let back = self.rotation * DVec3::Z;
+        let depth = (self.position - self.target).dot(back);
+        if t >= 1.0 || depth <= f64::EPSILON {
+            return orthographic;
+        }
+        // The target's plane shows a frame `frame_height / from_zoom` tall.
+        let pivot = self.position - back * depth;
+        let from_zoom = frame_height / (2.0 * depth * (fov_y * 0.5).tan());
+        let half_height = frame_height / (2.0 * (from_zoom + (zoom - from_zoom) * t));
+        let distance = depth / (1.0 - t);
+        Self {
+            position: pivot + back * distance,
+            rotation: self.rotation,
+            target: pivot,
+            up: self.up,
+            projection: Projection::Perspective {
+                fov_y: 2.0 * (half_height / distance).atan(),
+                near,
+                far: far + distance - depth,
+            },
+        }
+    }
+
     /// Interpolate complete authored state using the destination projection.
     ///
     /// Cross-projection transitions select the destination projection at the
@@ -815,6 +853,45 @@ mod tests {
         }
         let almost = flat.interpolate_in_frame(high, 1e-6, frame_height);
         assert!((almost.position - equivalent.position).length() < 1e-4);
+    }
+
+    #[test]
+    fn flattening_to_orthographic_keeps_the_target_and_ends_on_the_orthographic_view() {
+        let mut camera = Camera::ortho_2d_frame(16.0, 9.0, 960, 540);
+        let frame_height = camera.frame_height;
+        let target = DVec3::new(0.0, 0.5, 0.0);
+        let start = CameraPose::perspective_3d(
+            DVec3::new(7.0, 5.0, 10.0),
+            target,
+            DVec3::Y,
+            0.7,
+            0.1,
+            1000.0,
+        )
+        .unwrap();
+        let end = CameraPose {
+            projection: Projection::Orthographic { zoom: 1.5 },
+            ..start
+        };
+        assert_eq!(start.flatten_to_orthographic(1.5, 1.0, frame_height), end);
+        let mut screen = |pose: CameraPose, point: DVec3| {
+            camera.apply_pose(pose).unwrap();
+            camera.world_to_screen(point)
+        };
+        // Off the target's plane, where perspective and orthographic differ.
+        let corner = DVec3::new(1.0, 1.5, -1.0);
+        let first = start.flatten_to_orthographic(1.5, 0.0, frame_height);
+        assert!((screen(first, corner) - screen(start, corner)).length() < 1e-6);
+        let center = DVec2::new(480.0, 270.0);
+        for step in 0..20 {
+            let t = f64::from(step) / 20.0;
+            let pose = start.flatten_to_orthographic(1.5, t, frame_height);
+            assert!(pose.validate().is_ok(), "{t}");
+            assert!((screen(pose, target) - center).length() < 1e-6, "{t}");
+        }
+        let almost = start.flatten_to_orthographic(1.5, 0.9999, frame_height);
+        let gap = (screen(almost, corner) - screen(end, corner)).length();
+        assert!(gap < 0.5, "{gap} px from the orthographic view");
     }
 
     #[test]

@@ -2722,7 +2722,7 @@ impl PyCameraAnimation {
         Ok(PyCanvasAnim { inner })
     }
 
-    /// Select orthographic projection. Values above one zoom in.
+    /// Animate to orthographic projection. Values above one zoom in.
     #[pyo3(signature = (zoom=1.0))]
     fn orthographic(&self, zoom: f64) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
@@ -2735,8 +2735,7 @@ impl PyCameraAnimation {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_orthographic(zoom, 0.0)
-            .duration(0.0);
+            .camera_orthographic(zoom, 1.0);
         Ok(PyCanvasAnim { inner })
     }
 

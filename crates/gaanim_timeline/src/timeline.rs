@@ -4871,11 +4871,24 @@ fn apply_lens_spec(
                 camera.rotation = gaanim_core::glam::DQuat::from_rotation_z(angle);
             }
         }
-        PropertyLensSpec::CameraOrthographic { from, to } => {
+        PropertyLensSpec::CameraOrthographic {
+            from,
+            to,
+            from_pose,
+        } => {
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
-                camera.projection = gaanim_math::Projection::Orthographic {
-                    zoom: *from + (*to - *from) * t,
-                };
+                if let Some(pose) = from_pose {
+                    let pose = pose.flatten_to_orthographic(*to, t, camera.frame_height);
+                    camera.position = pose.position;
+                    camera.rotation = pose.rotation;
+                    camera.target = pose.target;
+                    camera.up = pose.up;
+                    camera.projection = pose.projection;
+                } else {
+                    camera.projection = gaanim_math::Projection::Orthographic {
+                        zoom: *from + (*to - *from) * t,
+                    };
+                }
             }
         }
         PropertyLensSpec::CameraReset {

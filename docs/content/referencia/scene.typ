@@ -1292,7 +1292,7 @@ scene.camera.reset()
   name: "Camera.animate",
   kind: "property",
   returns: (type: "CameraAnimation", desc: [El vocabulario animado de la cámara.]),
-  desc: [Cada método devuelve un `Anim` nuevo; construirlo no cambia nada hasta pasarlo a `scene.play`. Un movimiento dura un segundo salvo que `.duration()` fije otra; la `duration` de `scene.play` sustituye ese valor por defecto, como en las demás animaciones. `shake` (medio segundo la sacudida senoidal) y `whip_pan` (0,4 s) tienen sus propios valores por defecto, que `scene.play` también sustituye; una sacudida con trauma dura hasta apagarse y `orthographic` cambia al instante, salvo que `.duration()` diga otra cosa.],
+  desc: [Cada método devuelve un `Anim` nuevo; construirlo no cambia nada hasta pasarlo a `scene.play`. Un movimiento dura un segundo salvo que `.duration()` fije otra; la `duration` de `scene.play` sustituye ese valor por defecto, como en las demás animaciones. `shake` (medio segundo la sacudida senoidal) y `whip_pan` (0,4 s) tienen sus propios valores por defecto, que `scene.play` también sustituye; una sacudida con trauma dura hasta apagarse.],
   none,
 )
 
@@ -1478,9 +1478,16 @@ scene.play([scene.camera.animate.whip_pan(0, 0, blur=False).duration(0.3)])
   name: "CameraAnimation.orthographic",
   kind: "method",
   params: ((name: "zoom", type: "float", default: "1.0", desc: [Zoom positivo.]),),
-  returns: (type: "Anim", desc: [Paso animado a la proyección ortográfica.]),
-  none,
-)
+  returns: (type: "Anim", desc: [Paso animado a la proyección ortográfica. Desde una cámara en perspectiva, el ojo se aleja por su eje de visión mientras el campo de visión se cierra: el objetivo sigue centrado, la profundidad se aplana y la proyección pasa a ortográfica al terminar, con la misma pose. Desde una cámara ortográfica, anima el zoom.]),
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+cube = scene.geometry.cube(2.0)
+scene.camera.look_at(eye=(7, 5, 10), target=(0, 0, 0)).perspective(0.7)
+scene.play([scene.camera.animate.orthographic(1.5)], duration=1.0)
+```
+]
 
 #api-entry(
   name: "CameraAnimation.reset",

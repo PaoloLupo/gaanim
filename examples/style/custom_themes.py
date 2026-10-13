@@ -245,14 +245,17 @@ table(
 
 # validate() lists the colors that do not stand out enough from the
 # background, for the active theme or any other; it never rejects a theme.
-# DIM derives FIELD_NOTES with darker title and muted colors.
+# DIM derives FIELD_NOTES with darker title and muted colors; every
+# built-in theme passes.
 scene.segment("validate")
 DIM = Theme(FIELD_NOTES, name="field-notes-dim", colors={"muted": palette.slate[600], "title": palette.slate[500]})
 stacked([
     ("scene.canvas.validate_theme()", readout(repr(scene.canvas.validate_theme()))),
     ("DIM.validate()", readout("\n".join(DIM.validate()))),
-    ('Theme("solarized-light").validate()', readout("\n".join(Theme("solarized-light").validate()))),
-    ('Theme("catppuccin-latte").validate()', readout("\n".join(Theme("catppuccin-latte").validate()))),
+    (
+        "[name for name in Theme.schemes() if Theme(name).validate()]",
+        readout(repr([name for name in Theme.schemes() if Theme(name).validate()])),
+    ),
 ])
 
 STEP = GROW + HOLD

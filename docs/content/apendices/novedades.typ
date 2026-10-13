@@ -122,6 +122,20 @@ enteros, o usa `scene.text.code`.
 
 == Correcciones
 
+- Los temas `solarized-light` y `catppuccin-latte` pasan su propio
+  `validate()`. El título de `solarized-light` (`#B08500`) y el color atenuado
+  de `catppuccin-latte` (Overlay2, `#7C7F93`) son algo más oscuros y llegan al
+  contraste de 3:1 sobre el fondo; antes se quedaban en 2,98:1 y 2,83:1.
+- `scene.camera.animate.orthographic()` desde una cámara en perspectiva dura
+  lo que pide `scene.play` (un segundo por defecto): el ojo se aleja por su eje
+  de visión mientras el campo de visión se cierra, el objetivo sigue centrado y
+  la proyección pasa a ortográfica al terminar. Antes cambiaba de golpe y no
+  avanzaba el cursor. Desde una cámara ortográfica anima el zoom.
+- Los docstrings de `Brush.solid`, `linear`, `radial` y `sweep` explican sus
+  parámetros: las coordenadas están en unidades locales del objeto, y un grupo
+  pasa el pincel a cada miembro, así que un gradiente no cruza el grupo. La
+  referencia de los pinceles lo explica también, con cómo hacer que un
+  gradiente recorra varias formas.
 - El nombre del lenguaje de `scene.text.code` va en monoespaciada dentro de la
   cabecera, y el código empieza bajo la regla, desde el margen izquierdo del
   panel. Antes el nombre, con la letra del cuerpo, se salía por la esquina, y
@@ -421,6 +435,11 @@ enteros, o usa `scene.text.code`.
 
 == Al actualizar
 
+- `scene.camera.animate.orthographic()` ya no es instantáneo: dura un
+  segundo, o la `duration` de `scene.play`, y avanza el cursor. Para el salto
+  de antes, usa `scene.camera.orthographic()` o `.duration(0)`.
+- El título de `solarized-light` y el color `muted` de `catppuccin-latte` son
+  un poco más oscuros.
 - `text.animate.move_to(x, y)` sin `anchor` lleva el texto a su línea base,
   como `text.move_to`. Un texto que se animaba a un punto pensando en su
   centro queda más arriba; pasa `anchor="center"` para conservar la posición
