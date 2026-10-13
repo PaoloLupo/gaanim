@@ -22,6 +22,10 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     startup::begin();
+    // The files an update replaced, kept while the old Gaanim ran.
+    if let Ok(install) = gaanim_editor::update::install_dir() {
+        gaanim_editor::update::clean_previous(&install);
+    }
     let args: Vec<String> = std::env::args().collect();
     if handle_no_python_commands(&args) {
         return;
@@ -53,6 +57,7 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         Some("register") => run_association(true),
         Some("unregister") => run_association(false),
         Some("relay") => run_relay(&args[2..]),
+        Some("update") => run_update(&args[2..]),
         Some("init") => {}
         _ => return false,
     }
@@ -99,6 +104,87 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         ),
     }
     true
+}
+
+/// `gaanim update [--check]`: install the newest Gaanim release for this
+/// system over this installation, or with `--check` only say whether there
+/// is one. Needs no Python.
+fn run_update(args: &[String]) -> ! {
+    use gaanim_editor::update::{self, Step};
+    let check_only = match args {
+        [] => false,
+        [flag] if flag == "--check" => true,
+        _ => {
+            console::error("update", "usage: gaanim update [--check]");
+            std::process::exit(2);
+        }
+    };
+    if update::package_suffix().is_none() {
+        console::error(
+            "update",
+            "Gaanim has no package for this system yet; build it from source",
+        );
+        std::process::exit(1);
+    }
+    let release = match update::check(true) {
+        Ok(Some(release)) => release,
+        Ok(None) => {
+            console::success(
+                "update",
+                format!("Gaanim {} is the newest version", env!("CARGO_PKG_VERSION")),
+            );
+            std::process::exit(0);
+        }
+        Err(error) => {
+            console::error("update", error);
+            std::process::exit(1);
+        }
+    };
+    console::info(
+        "update",
+        format!(
+            "Gaanim {} is available (this is {})",
+            release.version,
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
+    console::detail("Notes", &release.page);
+    if check_only {
+        console::hint("Run `gaanim update` to install it.");
+        std::process::exit(0);
+    }
+    let mut shown = None;
+    let installed = update::install(&release, |step| match step {
+        Step::Downloading { done, total } if total > 0 => {
+            // A line at each quarter.
+            let quarter = done * 4 / total;
+            if shown != Some(quarter) {
+                shown = Some(quarter);
+                console::info(
+                    "download",
+                    format!("{} % of {} MB", quarter * 25, total.div_ceil(1 << 20)),
+                );
+            }
+        }
+        Step::Downloading { .. } => {}
+        Step::Verifying => console::info("verify", "Checking the download's SHA-256"),
+        Step::Unpacking => console::info("unpack", "Unpacking the package"),
+        Step::Installing => console::info("install", "Replacing this installation's files"),
+    });
+    match installed {
+        Ok(executable) => {
+            console::success("update", format!("Installed Gaanim {}", release.version));
+            console::detail("Program", executable.display());
+            console::hint(
+                "Each project installs the new authoring package the next time it opens.",
+            );
+            std::process::exit(0);
+        }
+        Err(error) => {
+            console::error("update", error);
+            std::process::exit(1);
+        }
+    }
 }
 
 /// `gaanim thumbnail <BUNDLE> <OUTPUT.png> [SIZE]`: write the cover image of
