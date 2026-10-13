@@ -221,7 +221,8 @@
   })
   html.details(class: "example-code", {
     html.summary("Code · " + str(source.split("\n").len()) + " lines")
-    [#raw(source.trim(), lang: "python", block: true) <_stop>]
+    // In a code-source, as code cells are, so it gets their copy button.
+    html.div(class: "code-source", [#raw(source.trim(), lang: "python", block: true) <_stop>])
   })
 }
 
