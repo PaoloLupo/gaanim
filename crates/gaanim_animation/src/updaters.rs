@@ -550,7 +550,10 @@ impl TracedPath {
 pub fn traced_path_geometry(points: &[DVec3]) -> BezPath {
     use gaanim_core::kurbo::{Point, Vec2};
     let mut path = BezPath::new();
-    let points: Vec<Point> = points.iter().map(|point| Point::new(point.x, point.y)).collect();
+    let points: Vec<Point> = points
+        .iter()
+        .map(|point| Point::new(point.x, point.y))
+        .collect();
     let Some(first) = points.first() else {
         return path;
     };
@@ -565,7 +568,9 @@ pub fn traced_path_geometry(points: &[DVec3]) -> BezPath {
     // three samples, so it keeps bending there.
     let at = |index: isize| -> Point {
         let last = points.len() - 1;
-        let extend = |a: Point, b: Point, c: Point| (a.to_vec2() * 3.0 - b.to_vec2() * 3.0 + c.to_vec2()).to_point();
+        let extend = |a: Point, b: Point, c: Point| {
+            (a.to_vec2() * 3.0 - b.to_vec2() * 3.0 + c.to_vec2()).to_point()
+        };
         if index < 0 {
             extend(points[0], points[1], points[2])
         } else if index as usize > last {
@@ -860,7 +865,7 @@ pub fn traced_path_3d_system(world: &mut World) {
                         (&mut tp.points, &mut tp.sample_times)
                     };
                     changed |=
-                    expire_trace_samples(points, sample_times, current_time, dissipating_time);
+                        expire_trace_samples(points, sample_times, current_time, dissipating_time);
                     let should_push = source_pos.is_some_and(|pos| match tp.points.last() {
                         Some(last) => last.distance(pos) >= min_distance,
                         None => true,
