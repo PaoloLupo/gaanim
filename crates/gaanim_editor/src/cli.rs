@@ -1,7 +1,8 @@
 //! `gaanim export` arguments.
 //!
 //! Scripts and projects export through the Python plugin; playback bundles
-//! (`.gaanim`) export through [`export_bundle_video`] without Python.
+//! (`.gaanim`) export through [`export_bundle_video`] and
+//! [`export_bundle_pdf`] without Python.
 
 use std::path::{Path, PathBuf};
 
@@ -109,7 +110,11 @@ pub fn resolve_export_range(
 }
 
 /// Output formats `gaanim export` writes, by file extension.
-pub const EXPORT_EXTENSIONS: [&str; 7] = ["mp4", "webm", "mov", "webp", "gif", "png", "gaanim"];
+pub const EXPORT_EXTENSIONS: [&str; 8] =
+    ["mp4", "webm", "mov", "webp", "gif", "png", "gaanim", "pdf"];
+
+/// The extension of a slide deck exported to PDF.
+pub const PDF_EXTENSION: &str = "pdf";
 
 /// Video formats that keep the alpha channel with `--transparent`.
 pub const TRANSPARENT_EXTENSIONS: [&str; 4] = ["webm", "mov", "webp", "png"];
@@ -133,6 +138,8 @@ pub struct ExportCommand {
     pub fps: Option<FrameRate>,
     /// `--frame`: instants written as single PNGs instead of a range.
     pub frames: Vec<ExportBound>,
+    /// `--notes`: a PDF deck prints each slide's speaker notes.
+    pub notes: bool,
 }
 
 impl Default for ExportCommand {
@@ -150,6 +157,7 @@ impl Default for ExportCommand {
             to: None,
             fps: None,
             frames: Vec::new(),
+            notes: false,
         }
     }
 }
@@ -209,6 +217,7 @@ impl ExportCommand {
                         })?;
                 }
                 "--transparent" => command.transparent = true,
+                "--notes" => command.notes = true,
                 flag @ ("--width" | "--height") => {
                     index += 1;
                     let value = args
@@ -260,7 +269,8 @@ impl ExportCommand {
             .map(str::to_ascii_lowercase)
             .filter(|format| EXPORT_EXTENSIONS.contains(&format.as_str()))
             .ok_or_else(|| {
-                "output extension must be mp4, webm, mov, webp, gif, png, or gaanim".to_string()
+                "output extension must be mp4, webm, mov, webp, gif, png, gaanim, or pdf"
+                    .to_string()
             })?;
         Ok((output, format))
     }
@@ -281,6 +291,11 @@ impl ExportCommand {
 
     /// Check the options that apply to a video `format`.
     pub fn validate_video(&self, format: &str) -> Result<(), String> {
+        if self.notes {
+            return Err(
+                "--notes prints speaker notes in a PDF; use an output ending in .pdf".to_string(),
+            );
+        }
         if self.transparent && !TRANSPARENT_EXTENSIONS.contains(&format) {
             return Err("--transparent requires WebM, MOV, WebP, or PNG output".to_string());
         }
@@ -299,6 +314,24 @@ impl ExportCommand {
             }
         }
         validate_export_range(self.from.as_ref(), self.to.as_ref())
+    }
+
+    /// Check the options that apply to a PDF deck: a page for each point
+    /// where the presentation rests, so no range, rate or encoding.
+    pub fn validate_pdf(&self) -> Result<(), String> {
+        let ignored = [
+            (self.from.is_some() || self.to.is_some(), "--from and --to"),
+            (!self.frames.is_empty(), "--frame"),
+            (self.fps.is_some(), "--fps"),
+            (self.transparent, "--transparent"),
+            (self.encoder != VideoEncoder::Auto, "--encoder"),
+        ];
+        match ignored.iter().find(|(given, _)| *given) {
+            Some((_, flags)) => Err(format!(
+                "a PDF has a page for each point where the presentation rests; drop {flags}"
+            )),
+            None => Ok(()),
+        }
     }
 
     /// The PNG each `--frame` instant is written to: `output` itself for one
@@ -435,6 +468,194 @@ pub fn export_frames(
     )
     .map_err(|error| error.to_string())?;
     result.map(|()| written)
+}
+
+/// The slides of a deck: each segment's name, speaker notes and stop times.
+pub fn deck_slides<'a>(
+    segments: impl IntoIterator<Item = (&'a str, Option<&'a str>, Vec<f64>)>,
+) -> Vec<gaanim_export::deck::DeckSlide> {
+    segments
+        .into_iter()
+        .map(|(name, notes, stops)| gaanim_export::deck::DeckSlide {
+            name: name.to_owned(),
+            notes: notes.map(str::to_owned),
+            stops,
+        })
+        .collect()
+}
+
+/// The times of the frames among `pages`, in order.
+#[cfg(not(target_arch = "wasm32"))]
+fn frame_times(pages: &[gaanim_export::deck::DeckPage]) -> Vec<f64> {
+    pages
+        .iter()
+        .filter_map(|page| match page {
+            gaanim_export::deck::DeckPage::Frame { time, .. } => Some(*time),
+            gaanim_export::deck::DeckPage::Notes { .. } => None,
+        })
+        .collect()
+}
+
+/// Keep a captured `frame` as a deck page and count it among `total`.
+#[cfg(not(target_arch = "wasm32"))]
+fn capture_page(
+    frames: &mut Vec<Vec<u8>>,
+    frame: &gaanim_export::prelude::CapturedFrame,
+    total: usize,
+    telemetry: &Option<gaanim_export::prelude::ExportTelemetry>,
+) -> std::ops::ControlFlow<()> {
+    frames.push(gaanim_export::pdf::frame_pdf(
+        &frame.rgba,
+        frame.width,
+        frame.height,
+    ));
+    gaanim_export::pdf::report_frames(telemetry, frames.len() as u64, total as u64);
+    std::ops::ControlFlow::Continue(())
+}
+
+/// Lay out `pages` around the captured `frames` and write the PDF to
+/// `output`; returns the number of pages.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_deck(
+    output: &str,
+    pages: &[gaanim_export::deck::DeckPage],
+    slides: &[gaanim_export::deck::DeckSlide],
+    frames: Vec<Vec<u8>>,
+    size: (u32, u32),
+    title: &str,
+) -> Result<usize, String> {
+    use gaanim_export::deck::DeckPage;
+    use gaanim_export::pdf::PdfPage;
+    let mut frames = frames.into_iter();
+    let pages = pages
+        .iter()
+        .map(|page| match *page {
+            DeckPage::Frame { .. } => frames.next().map(PdfPage::Frame),
+            DeckPage::Notes { slide } => Some(PdfPage::Notes {
+                title: slides[slide].name.clone(),
+                notes: slides[slide]
+                    .notes
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned(),
+            }),
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| "the renderer produced fewer frames than the deck has pages".to_owned())?;
+    let count = pages.len();
+    let pdf =
+        gaanim_export::pdf::deck_pdf(pages, size, title).map_err(|error| error.to_string())?;
+    if let Some(parent) = Path::new(output)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(output, pdf).map_err(|error| format!("{output}: {error}"))?;
+    Ok(count)
+}
+
+/// Export `canvas` as a PDF deck at `output`, titled after the project
+/// `script` belongs to (or the script): a page at the export size for every
+/// point where its presentation rests, and with `--notes` each slide's
+/// speaker notes after its last page. Captured frames count in `telemetry`.
+/// Returns the number of pages.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn export_slides_pdf(
+    canvas: gaanim_api::canvas::SceneModel,
+    command: &ExportCommand,
+    output: &str,
+    script: Option<&Path>,
+    telemetry: Option<gaanim_export::prelude::ExportTelemetry>,
+) -> Result<usize, String> {
+    let manifest = canvas.segment_manifest();
+    let slides = deck_slides(manifest.segments.iter().map(|segment| {
+        (
+            segment.name.as_str(),
+            segment.notes.as_deref(),
+            segment.stops.iter().map(|stop| stop.time).collect(),
+        )
+    }));
+    let pages = gaanim_export::deck::deck_pages(&slides, manifest.duration(), command.notes);
+    let mut config = ExportConfig::new(output).with_quality(quality_preset(&command.quality));
+    config.width = command.width;
+    config.height = command.height;
+    config.fit = command.fit;
+    config.aspect_ratio = AspectRatioPreset::Custom;
+    config.headless = true;
+    let times = frame_times(&pages);
+    let mut frames = Vec::with_capacity(times.len());
+    gaanim_export::prelude::capture_scene_direct_streaming(
+        config,
+        &times,
+        move |world| gaanim_api::runtime::replay_canvas_into(world, canvas),
+        |frame| capture_page(&mut frames, &frame, times.len(), &telemetry),
+    )
+    .map_err(|error| error.to_string())?;
+    let title = script.and_then(bundle_title).unwrap_or_default();
+    write_deck(
+        output,
+        &pages,
+        &slides,
+        frames,
+        (command.width, command.height),
+        &title,
+    )
+}
+
+/// Export a playback bundle as a PDF deck, without Python: every page is
+/// the frame the bundle recorded where its presentation rests, as
+/// [`export_slides_pdf`] lays out a script's. Returns the number of pages.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn export_bundle_pdf(
+    command: &ExportCommand,
+    telemetry: Option<gaanim_export::prelude::ExportTelemetry>,
+) -> Result<usize, CommandError> {
+    let input = command
+        .input
+        .as_deref()
+        .ok_or_else(|| CommandError::Usage("a bundle to export is required".to_string()))?;
+    let (output, _) = command.output_format().map_err(CommandError::Usage)?;
+    command.validate_pdf().map_err(CommandError::Usage)?;
+    let bundle = gaanim_bundle::Bundle::open(input)
+        .map_err(|error| CommandError::Failed(format!("{}: {error}", input.display())))?;
+    gaanim_export::prelude::check_bundle_fit(
+        bundle.scene.output_size,
+        (command.width, command.height),
+        command.fit,
+    )
+    .map_err(|error| CommandError::Usage(error.to_string()))?;
+    let slides = deck_slides(bundle.scene.segments.iter().map(|segment| {
+        (
+            segment.name.as_str(),
+            segment.notes.as_deref(),
+            segment.stops.iter().map(|stop| stop.time).collect(),
+        )
+    }));
+    let pages = gaanim_export::deck::deck_pages(&slides, bundle.scene.duration, command.notes);
+    let title = bundle.scene.title.clone();
+    drop(bundle);
+    let times = frame_times(&pages);
+    let mut frames = Vec::with_capacity(times.len());
+    gaanim_export::prelude::capture_bundle_streaming(
+        input,
+        command.width,
+        command.height,
+        command.fit,
+        &times,
+        |frame| capture_page(&mut frames, &frame, times.len(), &telemetry),
+    )
+    .map_err(|error| CommandError::Failed(error.to_string()))?;
+    write_deck(
+        &output,
+        &pages,
+        &slides,
+        frames,
+        (command.width, command.height),
+        &title,
+    )
+    .map_err(CommandError::Failed)
 }
 
 /// Frames per second a bundle records for an export `quality`: the rate a
@@ -705,6 +926,33 @@ mod tests {
         assert!(transparent.validate_video("mp4").is_err());
         for format in ["webm", "mov", "webp", "png"] {
             assert!(transparent.validate_video(format).is_ok(), "{format}");
+        }
+    }
+
+    #[test]
+    fn decks_export_to_pdf_with_or_without_notes() {
+        let deck = ExportCommand::parse(&args(&["talk.py", "-o", "talk.pdf", "--notes"])).unwrap();
+        assert!(deck.notes);
+        assert_eq!(
+            deck.output_format().unwrap(),
+            ("talk.pdf".to_string(), PDF_EXTENSION.to_string())
+        );
+        assert!(deck.validate_pdf().is_ok());
+        // Notes print only in a PDF.
+        assert!(deck.validate_video("mp4").is_err());
+        // A PDF rests where the presentation does: no range, rate or encoding.
+        for flags in [
+            &["--from", "2"][..],
+            &["--to", "intro"],
+            &["--frame", "3"],
+            &["--fps", "24"],
+            &["--transparent"],
+            &["--encoder", "libx264"],
+        ] {
+            let mut arguments = vec!["talk.py", "-o", "talk.pdf"];
+            arguments.extend_from_slice(flags);
+            let command = ExportCommand::parse(&args(&arguments)).unwrap();
+            assert!(command.validate_pdf().is_err(), "{flags:?}");
         }
     }
 

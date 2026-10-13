@@ -176,9 +176,24 @@ público dentro de la escena. Todo eso está en
 #link("/publico/")[Público en vivo]: empieza por
 #link("/publico/primera-encuesta/")[Tu primera encuesta].
 
+= Repartir las diapositivas en PDF
+
+Para repartir la presentación, subirla a una plataforma de cursos o tener una
+copia que no necesite Gaanim, expórtala a PDF: una página por cada pausa, tal
+como la muestra el Presenter, y otra para el final. Con `--notes`, tras cada
+diapositiva va una página con sus notas.
+
+```bash
+gaanim export mi-charla --output mi-charla.pdf --notes
+```
+
+También funciona con un paquete `.gaanim` y desde el diálogo *Exportar* del
+editor; la #link("/referencia/cli/#diapositivas-pdf")[referencia de la línea
+de comandos] explica las opciones.
+
 = Revisar sin pausas
 
 Para revisar una animación de corrido en el editor, activa *Continuous* junto
 a los controles de reproducción. El ajuste dura toda la sesión y sobrevive a
 las recargas, pero el modo presentación sigue respetando `scene.stop(...)`.
-Los saltos, las capturas y la exportación también ignoran las pausas.
+Los saltos, las capturas y la exportación a vídeo también ignoran las pausas.

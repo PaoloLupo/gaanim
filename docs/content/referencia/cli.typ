@@ -169,12 +169,13 @@ gaanim check mi-charla --strict
 
 ```bash
 gaanim export <SCRIPT_O_PROYECTO> --output <ARCHIVO> [OPCIONES]
-gaanim export <PAQUETE.gaanim> --output <VÍDEO> [OPCIONES]
+gaanim export <PAQUETE.gaanim> --output <VÍDEO_O_PDF> [OPCIONES]
 ```
 
 Renderiza la escena completa, o un tramo, a un archivo. El script no cambia:
 la resolución y la calidad se eligen aquí, no en `Scene`. Las pausas
-(`scene.stop()`) no detienen la exportación.
+(`scene.stop()`) no detienen la exportación de un vídeo; un PDF tiene una
+página por pausa (ver #link(<diapositivas-pdf>)[Diapositivas en PDF]).
 
 == Formatos
 
@@ -190,6 +191,7 @@ La extensión de `--output` elige el formato.
   [`.webp`], [WebP animado. Necesita FFmpeg.], [Sí],
   [`.gif`], [GIF. Necesita FFmpeg.], [No],
   [`.png`], [Secuencia de PNG, un archivo por fotograma. No necesita FFmpeg.], [Sí],
+  [`.pdf`], [Diapositivas: una página por cada pausa de la presentación y otra para el final, con las notas del orador si se piden con `--notes`. No necesita FFmpeg.], [No],
   [`.gaanim`], [Paquete de reproducción: todos los fotogramas que dibuja la escena, con sus segmentos, pausas, marcadores y audio, en un archivo que se reproduce, presenta y exporta sin Python.], [No],
 )
 
@@ -215,6 +217,7 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--from <SEGUNDOS|MARCADOR>`], [`0`], [Inicio del tramo exportado.],
   [`--to <SEGUNDOS|MARCADOR>`], [fin de la escena], [Fin del tramo exportado.],
   [`--frame <SEGUNDOS|MARCADOR>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
+  [`--notes`], [desactivado], [Solo PDF: añade tras la última página de cada diapositiva una página con sus notas (`scene.segment(notes=...)`).],
 )
 
 La composición se define en unidades lógicas, así que `--width` y `--height`
@@ -296,12 +299,37 @@ gaanim export mi-video --output revision.png --frame 11.4
 gaanim export mi-video --output fotos/f.png --frame 3,11.4,climax
 ```
 
+== Diapositivas en PDF <diapositivas-pdf>
+
+Con `--output` terminado en `.pdf`, `export` escribe una página por cada punto
+en el que se detiene una presentación: cada `scene.stop()`, en orden, y el
+final de la escena si la última pausa no está ahí. Cada página es el
+fotograma que muestra el Presenter en esa pausa, al tamaño de `--width` y
+`--height` (con `--fit` si la proporción no coincide), sin pérdida. Las páginas
+miden 960 puntos de ancho, como una diapositiva panorámica, con la proporción
+de la escena.
+
+Con `--notes`, tras la última página de cada diapositiva (cada
+`scene.segment(...)`) va una página con su nombre y sus notas, en texto que se
+puede buscar y copiar. Una diapositiva sin notas no añade página. `--from`,
+`--to`, `--frame`, `--fps`, `--transparent` y `--encoder` no se aplican.
+
+```bash
+gaanim export mi-charla --output mi-charla.pdf
+gaanim export mi-charla --output material.pdf --notes
+gaanim export mi-charla.gaanim --output mi-charla.pdf   # sin Python
+```
+
+Un paquete se exporta a PDF igual, sin ejecutar Python. El diálogo
+*Exportar* del editor también ofrece el formato PDF, con una casilla para las
+notas.
+
 == Paquetes
 
 Con `--output` terminado en `.gaanim`, `export` graba un paquete de la escena
-completa; `--from`, `--to`, `--transparent` y `--encoder` no se aplican, y
+completa; `--from`, `--to`, `--transparent`, `--notes` y `--encoder` no se aplican, y
 `--fps` (60 por defecto) debe ser un entero. Con un paquete como entrada,
-`export` lo renderiza a vídeo sin ejecutar Python: acepta los demás formatos y
+`export` lo renderiza a vídeo o a PDF sin ejecutar Python: acepta los demás formatos y
 opciones, incluidos los tramos con marcadores, y el vídeo tiene la frecuencia
 con la que se grabó el paquete; un `--fps` distinto es un error. El resultado
 es idéntico, píxel a píxel, a exportar el script con esa frecuencia y el mismo

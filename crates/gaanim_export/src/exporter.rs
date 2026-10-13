@@ -937,20 +937,11 @@ pub fn export_bundle(bundle_path: &std::path::Path, config: ExportConfig) -> Res
     // Every output frame is a recorded frame: the video runs at the rate
     // the bundle was recorded at, whatever the quality preset.
     config.fps = bundle.scene.fps.into();
-    let (frame_width, frame_height) = bundle.scene.output_size;
-    if config.fit == crate::config::OutputFit::Error && frame_width > 0 && frame_height > 0 {
-        let aspect = f64::from(frame_width) / f64::from(frame_height);
-        let expected_height = f64::from(config.width) / aspect;
-        let expected_width = f64::from(config.height) * aspect;
-        if (expected_height - f64::from(config.height)).abs() > 1.0
-            && (expected_width - f64::from(config.width)).abs() > 1.0
-        {
-            return Err(ExportError::General(format!(
-                "output {}x{} does not match the bundle's {frame_width}x{frame_height} frame; choose a matching resolution or set fit to contain/cover",
-                config.width, config.height
-            )));
-        }
-    }
+    check_bundle_fit(
+        bundle.scene.output_size,
+        (config.width, config.height),
+        config.fit,
+    )?;
     config.video_encoder = resolve_video_encoder(config.format, config.video_encoder);
     if let Some(telemetry) = &telemetry {
         telemetry.set_encoder(encoder_label(&config));
@@ -1312,6 +1303,7 @@ pub fn capture_bundle_streaming<C>(
     bundle_path: &std::path::Path,
     width: u32,
     height: u32,
+    fit: crate::config::OutputFit,
     times: &[f64],
     mut on_frame: C,
 ) -> Result<()>
@@ -1320,8 +1312,7 @@ where
 {
     let bundle = gaanim_bundle::Bundle::open(bundle_path)
         .map_err(|error| ExportError::General(error.to_string()))?;
-    let mut renderer =
-        BundleRenderer::new(bundle, width, height, crate::config::OutputFit::Contain)?;
+    let mut renderer = BundleRenderer::new(bundle, width, height, fit)?;
     for &time in times {
         let rgba = renderer.render(time)?;
         if on_frame(CapturedFrame {
@@ -1334,6 +1325,29 @@ where
         {
             break;
         }
+    }
+    Ok(())
+}
+
+/// Reject an `output` size whose aspect differs from a bundle's recorded
+/// `frame` when `fit` is [`OutputFit::Error`](crate::config::OutputFit::Error).
+pub fn check_bundle_fit(
+    (frame_width, frame_height): (u32, u32),
+    (width, height): (u32, u32),
+    fit: crate::config::OutputFit,
+) -> Result<()> {
+    if fit != crate::config::OutputFit::Error || frame_width == 0 || frame_height == 0 {
+        return Ok(());
+    }
+    let aspect = f64::from(frame_width) / f64::from(frame_height);
+    let expected_height = f64::from(width) / aspect;
+    let expected_width = f64::from(height) * aspect;
+    if (expected_height - f64::from(height)).abs() > 1.0
+        && (expected_width - f64::from(width)).abs() > 1.0
+    {
+        return Err(ExportError::General(format!(
+            "output {width}x{height} does not match the bundle's {frame_width}x{frame_height} frame; choose a matching resolution or set fit to contain/cover"
+        )));
     }
     Ok(())
 }

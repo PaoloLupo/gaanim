@@ -185,9 +185,14 @@ fn render_frame(source: Source, at: f64, path: &Path) -> Result<(), String> {
                 on_frame,
             )
         }
-        Source::Bundle(bundle, (width, height)) => {
-            capture_bundle_streaming(&bundle, width, height, &times, on_frame)
-        }
+        Source::Bundle(bundle, (width, height)) => capture_bundle_streaming(
+            &bundle,
+            width,
+            height,
+            gaanim_export::prelude::OutputFit::Contain,
+            &times,
+            on_frame,
+        ),
     }
     .map_err(|error| error.to_string())?;
     written.unwrap_or_else(|| Err("the renderer produced no frame".to_owned()))

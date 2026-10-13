@@ -267,6 +267,7 @@ pub fn capture_bundle_stops(
             bundle_path,
             size.0,
             size.1,
+            gaanim_export::prelude::OutputFit::Contain,
             &times,
             on_frame,
         )
