@@ -1287,6 +1287,46 @@ mod tests {
     use bevy::prelude::{App, Update};
     use std::sync::Arc;
 
+    /// A versioned regeneration rebuilds the path only when its version
+    /// changes, so a path written in between (a morph) is kept.
+    #[test]
+    fn versioned_regeneration_keeps_paths_written_while_the_version_holds() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let line = |x: f64| {
+            let mut path = BezPath::new();
+            path.move_to((0.0, 0.0));
+            path.line_to((x, 0.0));
+            path
+        };
+        let version = Arc::new(AtomicU64::new(1));
+        let (for_version, for_path) = (version.clone(), version.clone());
+        let mut world = World::new();
+        let entity = world
+            .spawn((
+                gaanim_scene::Path2D(Arc::new(BezPath::new())),
+                gaanim_scene::PathSource(Arc::new(BezPath::new())),
+                AlwaysRedrawRegen::versioned(
+                    move || for_version.load(Ordering::Acquire),
+                    move |_| line(1.0 + for_path.load(Ordering::Acquire) as f64),
+                ),
+            ))
+            .id();
+        let drawn = |world: &World| world.get::<gaanim_scene::Path2D>(entity).unwrap().0.clone();
+
+        always_redraw_regen_system(&mut world);
+        assert_eq!(*drawn(&world), line(2.0));
+        world.get_mut::<gaanim_scene::Path2D>(entity).unwrap().0 = Arc::new(line(9.0));
+        always_redraw_regen_system(&mut world);
+        assert_eq!(
+            *drawn(&world),
+            line(9.0),
+            "the same version keeps the written path"
+        );
+        version.store(2, Ordering::Release);
+        always_redraw_regen_system(&mut world);
+        assert_eq!(*drawn(&world), line(3.0), "a new version rebuilds it");
+    }
+
     #[test]
     fn reactive_readout_keeps_create_hidden_when_its_value_changes() {
         let parameter_id = gaanim_core::ObjectId::from_raw(11);
@@ -1790,7 +1830,16 @@ mod tests {
 pub struct AlwaysRedrawRegen {
     /// Closure that reads world state and returns a new BezPath.
     pub regen: Arc<dyn Fn(&World) -> gaanim_core::kurbo::BezPath + Send + Sync>,
+    /// The version of what the path is drawn from, when it is known. The
+    /// path is then rebuilt only when the version changes, so animations of
+    /// the path itself, such as a morph, are not overwritten every frame
+    /// while the source stays the same.
+    pub version: Option<Arc<dyn Fn() -> u64 + Send + Sync>>,
 }
+
+/// The source version an [`AlwaysRedrawRegen`] with a version last drew.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RegenDrawnVersion(pub u64);
 
 /// Component that deterministically regenerates a 3D line list from the world snapshot.
 #[derive(Component)]
@@ -1830,6 +1879,18 @@ impl AlwaysRedrawRegen {
     ) -> Self {
         Self {
             regen: Arc::new(regen),
+            version: None,
+        }
+    }
+
+    /// Rebuild the path only when `version` returns a new value.
+    pub fn versioned(
+        version: impl Fn() -> u64 + Send + Sync + 'static,
+        regen: impl Fn(&World) -> gaanim_core::kurbo::BezPath + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            regen: Arc::new(regen),
+            version: Some(Arc::new(version)),
         }
     }
 }
@@ -1838,8 +1899,12 @@ impl AlwaysRedrawRegen {
 pub fn always_redraw_regen_system(world: &mut World) {
     let mut updates = Vec::new();
 
-    let mut query = world.query::<(Entity, &AlwaysRedrawRegen)>();
-    for (entity, regen) in query.iter(world) {
+    let mut query = world.query::<(Entity, &AlwaysRedrawRegen, Option<&RegenDrawnVersion>)>();
+    for (entity, regen, drawn) in query.iter(world) {
+        let version = regen.version.as_ref().map(|version| version());
+        if version.is_some() && version == drawn.map(|drawn| drawn.0) {
+            continue;
+        }
         let path = (regen.regen)(world);
         let bounds = if path.elements().is_empty() {
             Bounds3D::default()
@@ -1862,10 +1927,13 @@ pub fn always_redraw_regen_system(world: &mut World) {
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
         let trim = world.get::<crate::writing::PathTrimWindow>(entity).copied();
-        updates.push((entity, path, bounds, reveal, trim));
+        updates.push((entity, path, bounds, reveal, trim, version));
     }
 
-    for (entity, path, bounds, reveal, trim) in updates {
+    for (entity, path, bounds, reveal, trim, version) in updates {
+        if let Some(version) = version {
+            world.entity_mut(entity).insert(RegenDrawnVersion(version));
+        }
         let path = Arc::new(path);
         let visible = crate::writing::visible_path(&path, reveal, trim.as_ref());
         if let Some(mut path_comp) = world.get_mut::<gaanim_scene::Path2D>(entity) {

@@ -717,6 +717,8 @@ pub enum SpawnKind {
         map: gaanim_visualization::CoordinateMap3D,
         function: gaanim_animation::ReactiveFunction,
         resolution: [usize; 2],
+        /// Colors by height, lowest to highest; `None` keeps the default ramp.
+        color_map: Option<gaanim_core::ColorMap>,
     },
     /// Numeric text evaluated from a deterministic scalar source.
     ReactiveReadout {
@@ -1021,6 +1023,10 @@ pub struct ObjectSpec {
     pub theme_selector: Option<String>,
     /// If true, keep this reactive visual hidden until an animation targets it.
     pub defer_visibility_until_play: bool,
+    /// Hidden by the author with `hidden()`: only an animation of this
+    /// drawable shows it, not the entry of a container that holds it, such
+    /// as the `create` of the coordinate space a mark belongs to.
+    pub hidden_by_author: bool,
     pub z_index: i32,
     /// Named draw layer (`SceneModel::z_layers`) and its rank.
     pub z_layer: Option<(String, i32)>,
@@ -1210,6 +1216,7 @@ impl ObjectSpec {
             style_classes: Vec::new(),
             theme_selector: None,
             defer_visibility_until_play: false,
+            hidden_by_author: false,
             z_index: 0,
             z_layer: None,
             covers_on_purpose: false,

@@ -56,6 +56,7 @@ ThemeName: TypeAlias = Literal[
     "tokyo-night",
     "catppuccin-mocha",
     "catppuccin-latte",
+    "gaanim",
     "scientific",
     "deck",
     "light",
@@ -7938,7 +7939,26 @@ class CoordinateSpace3D:
     def scale_to(self, factor: float) -> CoordinateSpace3D: ...
     def data_to_local(self, x: float, y: float, z: float) -> tuple[float, float, float]: ...
     def local_to_data(self, x: float, y: float, z: float) -> tuple[float, float, float]: ...
-    def surface(self, function: Callable[..., float], *, resolution: tuple[int, int] = (64, 48), inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
+    def surface(
+        self,
+        function: Callable[..., float],
+        *,
+        resolution: tuple[int, int] = (64, 48),
+        inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
+        color_map: Optional[ColorMapLike] = None,
+    ) -> Drawable:
+        """Sample ``z = f(x, y)`` on a grid of ``resolution`` points and draw it as a lit mesh.
+
+        ``function`` takes x, y and the current values of ``inputs`` (reactive,
+        as in ``plot``) and returns z. Vertices are colored by height, lowest to
+        highest, with ``color_map``: a ``ColorMap`` or the name of a built-in
+        map such as ``"viridis"`` or ``"plasma"``. Without one, a blue, green
+        and red ramp.
+
+        Example:
+            hill = space.surface(lambda x, y: math.exp(-(x * x + y * y)), color_map="magma")
+        """
+        ...
     def parametric(self, function: Callable[..., tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
     def field(self, function: Callable[..., tuple[float, float, float]], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> VectorField: ...
 

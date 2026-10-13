@@ -23,7 +23,7 @@ pub struct MediaFrame {
     pub fit: ImageFit,
     pub quality: ImageQuality,
     /// Where a `cover` frame takes its crop from the overflowing source: 0
-    /// keeps the top-left (bundles recorded before 0.11.1), 0.5 centers it.
+    /// keeps the top-left (bundles recorded before 0.12.0), 0.5 centers it.
     pub alignment: f64,
 }
 impl MediaFrame {

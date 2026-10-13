@@ -231,6 +231,7 @@ fn sampled_reactive_surface_3d(
     map: &gaanim_visualization::CoordinateMap3D,
     function: &ReactiveFunction,
     resolution: [usize; 2],
+    color_map: Option<&gaanim_core::ColorMap>,
     time: f64,
     values: &[(ObjectId, f64)],
 ) -> TriangleMeshData {
@@ -267,6 +268,10 @@ fn sampled_reactive_surface_3d(
             } else {
                 0.0
             };
+            if let Some(color) = color_map.and_then(|color_map| color_map.sample(t).ok()) {
+                let [r, g, b, a] = color.components;
+                return [r, g, b, if value.is_finite() { a } else { 0.0 }];
+            }
             [
                 (0x20 as f64 + t * 0xD0 as f64) as f32 / 255.0,
                 (0x60 as f64 + (1.0 - (2.0 * t - 1.0).abs()) * 0x90 as f64) as f32 / 255.0,
@@ -4020,6 +4025,7 @@ impl SceneModel {
                             revealed_deferred,
                             anim,
                             id_map,
+                            object_specs,
                         );
                         if let Some(mut remapped) = Self::remap_anim(anim, id_map, object_specs) {
                             Self::resolve_emphasis_color(builder, &mut remapped);
@@ -4130,6 +4136,7 @@ impl SceneModel {
                             revealed_deferred,
                             anim,
                             id_map,
+                            object_specs,
                         );
                     }
                     let remapped: Vec<(AnimationBuilder, Option<Arc<gaanim_math::TimeMap>>)> =
@@ -8411,6 +8418,7 @@ impl SceneModel {
         revealed_deferred: &mut HashSet<ObjectId>,
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
     ) {
         if !Self::animation_reveals_deferred(&anim.anim_type) {
             return;
@@ -8421,7 +8429,7 @@ impl SceneModel {
         };
 
         let hierarchy: HashSet<ObjectId> = builder.hierarchy_ids(actual).into_iter().collect();
-        let pending: Vec<ObjectId> = deferred_visibility
+        let (kept_logical, pending): (Vec<ObjectId>, Vec<ObjectId>) = deferred_visibility
             .iter()
             .filter(|logical| {
                 !revealed_deferred.contains(logical)
@@ -8430,6 +8438,16 @@ impl SceneModel {
                         .is_some_and(|runtime| hierarchy.contains(runtime))
             })
             .copied()
+            .partition(|logical| {
+                // A descendant the author hid waits for its own entry.
+                *logical != anim.target
+                    && object_specs
+                        .get(logical)
+                        .is_some_and(|spec| spec.hidden_by_author)
+            });
+        let kept: HashSet<ObjectId> = kept_logical
+            .iter()
+            .filter_map(|logical| id_map.get(logical).copied())
             .collect();
         if pending.is_empty() {
             return;
@@ -8461,12 +8479,15 @@ impl SceneModel {
             &anim.anim_type,
             AnimationType::FadeIn | AnimationType::FadeInFrom { .. }
         ) {
-            builder
-                .schedule_show_descendants_at(actual, builder.current_time + anim.delay.max(0.0));
+            builder.schedule_show_descendants_at_except(
+                actual,
+                builder.current_time + anim.delay.max(0.0),
+                &kept,
+            );
             return;
         }
 
-        builder.schedule_show_at(actual, builder.current_time + anim.delay.max(0.0));
+        builder.schedule_show_at_except(actual, builder.current_time + anim.delay.max(0.0), &kept);
     }
 
     /// A replacing text transition hands the scene over to its target text.
@@ -9158,7 +9179,9 @@ impl SceneModel {
                 camera.position = *camera_position;
                 camera.target = *camera_target;
                 camera.rotation = *camera_rotation;
-                camera.up = DVec3::Y;
+                // The pose the next camera move starts from, orbited about the
+                // same up axis as the lens orbits during playback.
+                camera.up = *camera_up;
                 camera.projection = if let Some((fov_y, near, far)) = *camera_fov {
                     gaanim_math::Projection::Perspective { fov_y, near, far }
                 } else {
@@ -10798,6 +10821,7 @@ impl SceneModel {
                 map,
                 function,
                 resolution,
+                color_map,
             } => {
                 let parameter_entities =
                     compile_function_parameters(function, id_map, &builder.states);
@@ -10816,6 +10840,7 @@ impl SceneModel {
                     map,
                     function,
                     *resolution,
+                    color_map.as_ref(),
                     builder.current_time,
                     &values,
                 );
@@ -10827,9 +10852,17 @@ impl SceneModel {
                     let map = map.clone();
                     let function = function.clone();
                     let resolution = *resolution;
+                    let color_map = color_map.clone();
                     let regen = ReactiveMeshRegen::new(move |world| {
                         let (time, values) = reactive_values(world, &parameter_entities);
-                        sampled_reactive_surface_3d(&map, &function, resolution, time, &values)
+                        sampled_reactive_surface_3d(
+                            &map,
+                            &function,
+                            resolution,
+                            color_map.as_ref(),
+                            time,
+                            &values,
+                        )
                     });
                     builder.commands.entity(state.entity).insert(regen);
                 }
@@ -11072,20 +11105,26 @@ impl SceneModel {
                     let kind = kind.clone();
                     let initial_version = source.version();
                     let cache = Arc::new(Mutex::new((initial_version, path)));
-                    let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |_world| {
-                        let version = source.version();
-                        let mut cached = cache.lock().expect("data mark cache poisoned");
-                        if cached.0 != version {
-                            cached.1 = gaanim_visualization::data_mark_path(
-                                &map,
-                                &source.snapshot(),
-                                &kind,
-                            )
-                            .unwrap_or_default();
-                            cached.0 = version;
-                        }
-                        cached.1.clone()
-                    });
+                    // Redrawn only when its data changes, so a morph of the
+                    // mark (transform_to) keeps the shape it animates.
+                    let versioned = source.clone();
+                    let redraw = gaanim_animation::AlwaysRedrawRegen::versioned(
+                        move || versioned.version(),
+                        move |_world| {
+                            let version = source.version();
+                            let mut cached = cache.lock().expect("data mark cache poisoned");
+                            if cached.0 != version {
+                                cached.1 = gaanim_visualization::data_mark_path(
+                                    &map,
+                                    &source.snapshot(),
+                                    &kind,
+                                )
+                                .unwrap_or_default();
+                                cached.0 = version;
+                            }
+                            cached.1.clone()
+                        },
+                    );
                     builder.commands.entity(state.entity).insert(redraw);
                 }
                 mr
@@ -13957,6 +13996,44 @@ mod tests {
         (world, timeline)
     }
 
+    /// Orbits of a camera with z up chain: the second turn starts where the
+    /// first ended, so two half turns with opposite tilts end at the pose
+    /// they started from.
+    #[test]
+    fn chained_orbits_of_a_z_up_camera_return_to_their_start() {
+        let mut canvas = SceneModel::new(960, 540);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let aim = canvas.camera_look_at_endpoints(
+            CanvasEndpoint::Static(DVec3::new(12.0, -7.0, 3.0)),
+            CanvasEndpoint::Static(DVec3::new(0.0, 0.0, 0.5)),
+            DVec3::Z,
+            0.5,
+        );
+        canvas.play(vec![aim]);
+        let rise = canvas.camera_orbit(std::f64::consts::PI, 0.35, 1.0);
+        canvas.play(vec![rise]);
+        let fall = canvas.camera_orbit(std::f64::consts::PI, -0.35, 1.0);
+        canvas.play(vec![fall]);
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        timeline.seek(&mut world, 0.5);
+        let start = world.resource::<gaanim_math::Camera>().position;
+        assert!(
+            (start - DVec3::new(12.0, -7.0, 3.0)).length() < 1e-6,
+            "start {start:?}"
+        );
+        timeline.seek(&mut world, 1.5);
+        let middle = world.resource::<gaanim_math::Camera>().position;
+        timeline.seek(&mut world, 2.5);
+        let end = world.resource::<gaanim_math::Camera>().position;
+        assert!(
+            (end - start).length() < 1e-6,
+            "start {start:?}, middle {middle:?}, end {end:?}"
+        );
+    }
+
     #[test]
     fn depth_of_field_clips_set_the_resource_and_seeks_restore_it() {
         let mut canvas = SceneModel::new(960, 540);
@@ -14327,6 +14404,49 @@ mod tests {
             assert!(
                 delta.abs() < 1e-9,
                 "{actual:?} vs {expected:?}, baseline {baseline}"
+            );
+        }
+    }
+
+    /// A member the author hid is not shown by the entry of the group that
+    /// holds it, as the marks of a coordinate space are not by its create:
+    /// its own animation shows it.
+    #[test]
+    fn author_hidden_members_wait_for_their_own_entry() {
+        let mut canvas = SceneModel::new(640, 360);
+        let shown = canvas.circle(10.0);
+        let kept = canvas.circle(10.0).hidden().unwrap();
+        let group = canvas.group(&[&shown, &kept]);
+        canvas.play(vec![group.animate().create().duration(1.0)]);
+        canvas.play(vec![kept.fade_in(1.0)]);
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        let opacity = |world: &mut World, handle: &DrawableHandle| {
+            let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+            world
+                .query::<(&MobjectId, &Opacity)>()
+                .iter(world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+        };
+        for (time, expected) in [(0.5, 0.0), (1.0, 0.0), (2.0, 1.0), (0.5, 0.0)] {
+            timeline.seek(&mut world, time);
+            assert!((opacity(&mut world, &shown) - 1.0).abs() < 1e-5 || time < 1.0);
+            let kept_opacity = opacity(&mut world, &kept);
+            assert!(
+                (kept_opacity - expected).abs() < 1e-5,
+                "kept {kept_opacity} at {time}"
             );
         }
     }

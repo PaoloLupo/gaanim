@@ -60,6 +60,7 @@ ThemeName: TypeAlias = Literal[
     "tokyo-night",
     "catppuccin-mocha",
     "catppuccin-latte",
+    "gaanim",
     "scientific",
     "deck",
     "light",
