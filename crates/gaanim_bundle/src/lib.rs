@@ -102,6 +102,10 @@ const REHEARSAL: &str = "rehearsal.json";
 /// Optional, so that bundles without it stay readable and older readers
 /// draw those drawables processed.
 const UNPROCESSED: &str = "tables/unprocessed.bin";
+
+/// Present when a frame draws glass: players that compose frames without
+/// GPU passes cannot show it. Optional, so files without it still open.
+const GLASS: &str = "tables/glass.bin";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
 
@@ -1211,6 +1215,9 @@ impl<W: Write + Seek> BundleWriter<W> {
             }
             self.write_entry(UNPROCESSED, &unprocessed.into_bytes())?;
         }
+        if self.tables.glass {
+            self.write_entry(GLASS, &[1])?;
+        }
         self.write_entry("scene.bin", &scene_bytes)?;
         let mut index = Writer::new();
         index.len(self.times.len());
@@ -1590,6 +1597,11 @@ impl Bundle {
         !self.tables.effect_shaders.is_empty()
     }
 
+    /// Whether a frame draws glass, which a GPU pass of its own composes.
+    pub fn has_glass(&self) -> bool {
+        self.manifest.entries.contains_key(GLASS)
+    }
+
     /// Time of every recorded frame, by frame index, in recording order: a
     /// recording in two passes stores the frame grid first, then the instants
     /// between grid frames.
@@ -1966,6 +1978,7 @@ mod tests {
 
         let mut bundle = record(vec![element(1, false), element(2, true)]);
         assert!(bundle.manifest.entries.contains_key(UNPROCESSED));
+        assert!(!bundle.has_glass());
         let decoded = bundle.frame(0).unwrap();
         let flags: Vec<bool> = decoded
             .capture
@@ -1977,6 +1990,32 @@ mod tests {
         // Without such drawables the bundle has no entry for them.
         let bundle = record(vec![element(1, false)]);
         assert!(!bundle.manifest.entries.contains_key(UNPROCESSED));
+    }
+
+    /// A bundle says when its frames draw glass, which players without GPU
+    /// passes hand to the web player.
+    #[test]
+    fn bundles_say_when_they_draw_glass() {
+        let record = |glass: bool| {
+            let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+            let mut first = frame(0.0);
+            first.capture.elements = vec![square(1, 0.0, false)];
+            if glass {
+                first.capture.glasses = vec![gaanim_renderer::pipeline::CapturedGlass {
+                    root: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
+                    glass: Default::default(),
+                }];
+            }
+            writer.push_frame(&first, [0; 32]).unwrap();
+            let scene = SceneData {
+                fps: 60,
+                duration: 1.0 / 60.0,
+                ..Default::default()
+            };
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap()
+        };
+        assert!(record(true).has_glass());
+        assert!(!record(false).has_glass());
     }
 
     #[test]

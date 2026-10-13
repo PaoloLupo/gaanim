@@ -106,6 +106,8 @@ pub struct Tables {
     pub(crate) effect_shaders: Vec<PostProcessShader>,
     /// Keys of the drawables the post-process leaves out.
     pub(crate) post_exempt: BTreeSet<u32>,
+    /// Whether a frame draws glass, which only a GPU pass composes.
+    pub(crate) glass: bool,
 }
 
 impl Interner for Tables {
@@ -1107,6 +1109,9 @@ impl FrameRecord {
         keys: &mut EntityKeys,
         lottie: &dyn Fn(&CapturedElement) -> Option<u32>,
     ) -> Self {
+        if !frame.capture.glasses.is_empty() {
+            tables.glass = true;
+        }
         Self {
             time: frame.time,
             background_time: frame.capture.background_time,
