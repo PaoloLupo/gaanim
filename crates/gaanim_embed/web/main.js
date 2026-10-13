@@ -15,8 +15,10 @@
 // at a time; this page keeps the clock, downloads the file (in pieces when
 // its host serves byte ranges, as the web player does), shows the controls and
 // plays the audio with WebAudio. A file that needs the GPU passes this player
-// leaves out (post-processing, shader backgrounds) opens in the web player
-// with the same options instead.
+// leaves out (post-processing, shader backgrounds, glass) opens in the web
+// player with the same options instead; with `full=click` it waits for a
+// click first, since the web player downloads far more, and a parent page
+// hears `full` with the web player's address to offer that click itself.
 import init, { Player } from "./pkg/gaanim_embed.js";
 
 const params = new URLSearchParams(location.search);
@@ -111,6 +113,14 @@ function opened(json) {
   info = JSON.parse(json);
   if (info.full.length && fullPlayer) {
     // The web player draws what this one leaves out.
+    if (params.get("full") === "click") {
+      tellParent("full", info.title, { full: info.full, url: fullPlayer });
+      say("Esta animación usa efectos que solo dibuja el reproductor completo. Haz clic para abrirlo.");
+      message.querySelector(".loader").hidden = true;
+      message.classList.add("action");
+      message.addEventListener("click", () => location.replace(fullPlayer), { once: true });
+      return;
+    }
     location.replace(fullPlayer);
     return;
   }
@@ -766,6 +776,7 @@ const fullPlayer = src
       // The web player lives a folder up: hand it the file's address as
       // resolved here, or a relative one would point past the site's base.
       full.searchParams.set("src", new URL(src, location.href).href);
+      full.searchParams.delete("full");
       full.searchParams.set("embed", "");
       full.hash = location.hash;
       return full.href;

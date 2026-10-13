@@ -136,6 +136,12 @@ enteros, o usa `scene.text.code`.
   como la última (un cubo quedaba en una cara, una esfera en un triángulo) y
   las rejillas de unos ejes 3D en una sola línea, al reproducir, presentar o
   exportar el paquete. Hay que volver a grabar los paquetes con 3D.
+- El reproductor ligero (`reproductor/insertar/`) abre en el reproductor
+  completo las escenas con cristal; antes las dibujaba sin el efecto. Al
+  pasarle una escena le da la dirección completa del archivo, que antes se
+  perdía en un sitio bajo una ruta base, como GitHub Pages. La opción nueva
+  `full=click` espera a un clic antes de abrir el reproductor completo (ver
+  #link("/guias/compartir/#insertar")[Insertar en un blog o sitio web]).
 - Los temas `solarized-light` y `catppuccin-latte` pasan su propio
   `validate()`. El título de `solarized-light` (`#B08500`) y el color atenuado
   de `catppuccin-latte` (Overlay2, `#7C7F93`) son algo más oscuros y llegan al
