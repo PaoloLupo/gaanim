@@ -13,16 +13,20 @@ instalar una versión nueva, sigue
 
 = 0.12.0
 
-Sin publicar. Los vídeos se exportan a cualquier frecuencia (24, 25, 50 o las
-fracciones NTSC como 23,976) y a MOV con Apple ProRes, con canal alfa, para
-montarlos en un editor de vídeo, y los bloques de `scene.text.code` resaltan
-la sintaxis con los colores del tema. Corrige además cuatro fallos de
-`animate.transform_to` que aparecen al pasar un personaje de un SVG de una
-pose a otra: los degradados se volvían un color liso, un SVG entero o un grupo
-desaparecía, una forma y su espejo se reducían a una astilla a mitad del morph
-y no había forma de fundir el objeto mientras se transformaba. Lee «Al
-actualizar» si alguna escena transforma formas con degradado, grupos o SVG
-enteros, o usa `scene.text.code`.
+Publicada el 13 de octubre de 2026. Los ejemplos se ordenan por temas, con
+una sección en la web donde cada uno se reproduce sobre su captura, y una
+galería de escenas cortas en los colores de la marca sustituye a los ejemplos
+básicos y avanzados. Las diapositivas se exportan a PDF con las notas del
+orador, y los vídeos a cualquier frecuencia y a MOV con Apple ProRes, con
+canal alfa, para montarlos en un editor de vídeo. Llegan luces 3D que se
+colocan y se animan, el tema `gaanim`, el resaltado de sintaxis de
+`scene.text.code` con JetBrains Mono y un reproductor ligero que marca las
+pausas en su barra. Corrige los paquetes `.gaanim` de escenas 3D, cuatro
+fallos de `animate.transform_to` con SVG y degradados, la cámara que sigue o
+se acerca a un objeto reactivo y la selección de fracciones en las
+ecuaciones, y los rastros se dibujan como curvas suaves. Lee «Al actualizar»:
+varios cambios alteran cómo se ven escenas existentes (énfasis, `write`,
+bloques de código, cajas escaladas, ecuaciones de varias filas).
 
 == Exportación
 
