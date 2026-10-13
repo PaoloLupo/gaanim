@@ -129,6 +129,16 @@ enteros, o usa `scene.text.code`.
   distinguirla del release instalado. También en la Presenter View y al
   reproducir un paquete.
 
+== Reproductor web
+
+- La barra del reproductor ligero (`reproductor/insertar/`) marca cada pausa
+  de la escena (`scene.stop()`) en su línea de tiempo; las ya pasadas se ven
+  en violeta, como el progreso.
+- La opción `full=click` del reproductor ligero espera a un clic antes de
+  abrir el reproductor completo para una escena que lo necesita, y avisa a la
+  página que lo contiene para que ofrezca su propio botón (ver
+  #link("/guias/compartir/#insertar")[Insertar en un blog o sitio web]).
+
 == Correcciones
 
 - Un paquete `.gaanim` guarda bien las escenas 3D. Antes, en cada fotograma
@@ -139,12 +149,7 @@ enteros, o usa `scene.text.code`.
 - El reproductor ligero (`reproductor/insertar/`) abre en el reproductor
   completo las escenas con cristal; antes las dibujaba sin el efecto. Al
   pasarle una escena le da la dirección completa del archivo, que antes se
-  perdía en un sitio bajo una ruta base, como GitHub Pages. La opción nueva
-  `full=click` espera a un clic antes de abrir el reproductor completo (ver
-  #link("/guias/compartir/#insertar")[Insertar en un blog o sitio web]).
-- La barra del reproductor ligero marca cada pausa de la escena
-  (`scene.stop()`) en su línea de tiempo; las ya pasadas se ven en violeta,
-  como el progreso.
+  perdía en un sitio bajo una ruta base, como GitHub Pages.
 - Los temas `solarized-light` y `catppuccin-latte` pasan su propio
   `validate()`. El título de `solarized-light` (`#B08500`) y el color atenuado
   de `catppuccin-latte` (Overlay2, `#7C7F93`) son algo más oscuros y llegan al
