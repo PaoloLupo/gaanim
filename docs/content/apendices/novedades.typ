@@ -102,6 +102,13 @@ enteros, o usa `scene.text.code`.
   reescribieron en inglés dentro de su tema, o pasaron a `tests/` los que
   eran pruebas.
 
+== Editor
+
+- El título de la ventana dice qué versión de Gaanim se está ejecutando:
+  «Gaanim 0.11.1 — proyecto», con «(dev)» en una build de desarrollo, para
+  distinguirla del release instalado. También en la Presenter View y al
+  reproducir un paquete.
+
 == Correcciones
 
 - El nombre del lenguaje de `scene.text.code` va en monoespaciada dentro de la
@@ -358,6 +365,10 @@ enteros, o usa `scene.text.code`.
 - `L.column`, `L.row`, `L.grid` y `L.stack` mantienen su dirección aunque un
   `style=` o una clase traigan otro `direction`.
 - El stub de `Zone.arrange` incluye `direction="wrap"`, que ya funcionaba.
+- Exportar a MP4, WebM, GIF, WebP o MOV crea la carpeta de salida si no
+  existe, como ya hacían la secuencia PNG y el paquete. Antes fallaba con
+  «FFmpeg stopped accepting frames»: por ejemplo al exportar desde el editor
+  un script suelto, cuya carpeta por defecto es `exports/` junto al script.
 - `blend("hue")`, `"saturation"`, `"color"` y `"luminosity"` ya no pintan
   columnas negras sobre un degradado gris: ciertos niveles de gris salían
   negros en toda la caja del objeto mezclado, también fuera de él, en la vista

@@ -236,7 +236,7 @@ pub fn open_bundle_source(
         .iter_mut(world)
         .next()
     {
-        window.title = format!("Gaanim — {}", bundle.scene.title);
+        window.title = crate::host::window_title(Some(&bundle.scene.title));
     }
     let live = gaanim_export::live_polls::LiveElements::from_scene(&bundle.scene);
     world.insert_resource(BundlePlayback {

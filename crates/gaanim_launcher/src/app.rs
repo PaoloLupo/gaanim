@@ -539,7 +539,7 @@ fn attach_script_session(
             .iter_mut(world)
             .next()
         {
-            window.title = format!("Gaanim — {}", project.manifest.name);
+            window.title = gaanim_editor::host::window_title(Some(&project.manifest.name));
         }
     }
     world

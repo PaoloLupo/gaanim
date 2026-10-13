@@ -508,7 +508,7 @@ pub(crate) fn spawn_presenter_window(commands: &mut Commands) {
     }
     commands.spawn((
         Window {
-            title: "Gaanim — Presenter View".to_string(),
+            title: crate::host::window_title(Some("Presenter View")),
             resolution: WindowResolution::new(1180, 760),
             resizable: true,
             ..default()

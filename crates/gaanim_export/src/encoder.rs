@@ -680,8 +680,16 @@ impl ParallelEncoder {
         Ok(Some("[audio_out]".to_string()))
     }
 
-    /// Build and start the FFmpeg process that encodes this export.
+    /// Build and start the FFmpeg process that encodes this export. FFmpeg
+    /// does not create folders, so the output's folder is made first, as a
+    /// PNG sequence or a bundle makes its own.
     fn spawn_ffmpeg(config: &EncoderConfig, program: &str) -> Result<Child> {
+        if let Some(folder) = std::path::Path::new(&config.output_path)
+            .parent()
+            .filter(|folder| !folder.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(folder)?;
+        }
         Self::ffmpeg_command(config, program)?
             .spawn()
             .map_err(|error| ffmpeg_spawn_error(config.format, program, &error))
@@ -1095,6 +1103,30 @@ mod tests {
             assert!(message.contains("PNG sequence"), "{message}");
             assert!(!message.contains("closed channel"), "{message}");
         }
+    }
+
+    #[test]
+    fn video_exports_create_their_output_folder() {
+        let folder =
+            std::env::temp_dir().join(format!("gaanim-output-folder-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let output = folder.join("exports").join("scene.mp4");
+        let mut config = encoder_config(ExportFormat::Mp4, "");
+        config.output_path = output.to_string_lossy().into_owned();
+        let mut encoder = match ParallelEncoder::with_ffmpeg_program(config, "ffmpeg") {
+            Ok(encoder) => encoder,
+            Err(error) if error.to_string().contains("was not found on PATH") => {
+                eprintln!("skipped: FFmpeg is not on PATH");
+                return;
+            }
+            Err(error) => panic!("{error}"),
+        };
+        for _ in 0..5 {
+            encoder.push_frame(vec![0; 16 * 16 * 4]).unwrap();
+        }
+        encoder.finalize().unwrap();
+        assert!(output.is_file(), "{} was not written", output.display());
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     #[test]
