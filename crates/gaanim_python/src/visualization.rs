@@ -1952,11 +1952,27 @@ impl PyChart {
 
     fn layer(&self, name: &str) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        self.inner
-            .layer(name)
-            .cloned()
-            .map(PyDrawable)
-            .ok_or_else(|| value_error("layer must be marks, axes, grid, guides, or labels"))
+        if let Some(layer) = self.inner.layer(name) {
+            return Ok(PyDrawable(layer.clone()));
+        }
+        let missing = match name {
+            "grid" => "its axes draw no grid",
+            "guides" => "it has no legend or guide title; add one with ChartSpec.guides(...)",
+            "labels" => "only bar charts with a label encoding have value labels",
+            _ => {
+                return Err(value_error(format!(
+                    "layer must be marks, axes, grid, guides, or labels, not {name:?}"
+                )));
+            }
+        };
+        let layers = ["marks", "axes", "grid", "guides", "labels"]
+            .into_iter()
+            .filter(|layer| self.inner.layer(layer).is_some())
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(value_error(format!(
+            "this chart has no {name:?} layer: {missing}. Its layers are {layers}"
+        )))
     }
 
     fn move_to(&self, x: f64, y: f64) -> PyResult<Self> {

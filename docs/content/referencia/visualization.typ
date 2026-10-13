@@ -802,7 +802,7 @@ scene.render()
   name: "BarRace.parameter / position / frame_count / names / ticker / bar / set / visual",
   kind: "property",
   signature: "parameter: Parameter · position: float · frame_count: int · names: list[str] · ticker: Drawable | None · bar(name) -> Drawable · set(position) · visual: Drawable",
-  desc: [`parameter` es la posición de fotograma clave, reutilizable en `computed` o lecturas. `bar(name)` devuelve la fila de una barra (barra, nombre y valor), que se mueve entre puestos; un nombre desconocido lanza `KeyError`. `set` salta a una posición (un corte reversible tras la declaración). `visual` es el grupo de todas las filas y el ticker; `move_to`, `shift_by` y `opacity` devuelven la carrera.],
+  desc: [`parameter` es la posición de fotograma clave, reutilizable en `computed` o lecturas. `bar(name)` devuelve la fila de una barra (barra, nombre y valor), que se mueve entre puestos y se desvanece al salir del top; su propia opacidad queda libre, así que `race.bar(name).animate.opacity(0.3)` la atenúa además de ese desvanecimiento. Un nombre desconocido lanza `KeyError`. `set` salta a una posición (un corte reversible tras la declaración). `visual` es el grupo de todas las filas y el ticker; `move_to`, `shift_by` y `opacity` devuelven la carrera.],
   none,
 )
 
@@ -1072,7 +1072,7 @@ after = ChartSpec(source).mark("line").encode(x="x", y="y")
 #api-entry(
   name: "Chart.layer",
   kind: "method",
-  desc: [Capa estable como `Drawable`: `marks`, `axes`, `grid`, `guides` o la opcional `labels`. La capa `axes` reúne rejilla, ejes, marcas, números y títulos, así que `chart.layer("axes").animate.create()` la mantiene oculta hasta su entrada.],
+  desc: [Capa estable como `Drawable`: `marks`, `axes`, `grid`, `guides` o `labels`. La capa `axes` reúne rejilla, ejes, marcas, números y títulos, así que `chart.layer("axes").animate.create()` la mantiene oculta hasta su entrada. Las tres últimas son opcionales: `grid` existe si los ejes dibujan rejilla, `guides` si la especificación tiene leyenda o título de guía (`ChartSpec.guides`) y `labels` en gráficos de barras con el canal `label`. Pedir una que el gráfico no tiene lanza `ValueError` con las capas que sí tiene.],
 )[
 ```python
 >>>from gaanim import *

@@ -3979,10 +3979,19 @@ impl Timeline {
             let signal = world
                 .get::<gaanim_animation::FloatSignal>(driver.probe)
                 .map(|signal| signal.value);
+            // A simulation keeps the translation it stepped to, as in a seek,
+            // which replays it after the clips; its clips set the rest.
+            let simulated = world
+                .get::<gaanim_animation::Updater>(driver.entity)
+                .is_some_and(gaanim_animation::Updater::is_simulation);
             if let Some(transform) = transform
                 && let Some(mut target) = world.get_mut::<SpatialTransform>(driver.entity)
             {
+                let translation = target.translation;
                 *target = transform;
+                if simulated {
+                    target.translation = translation;
+                }
             }
             if let Some(value) = signal
                 && let Some(mut target) =
@@ -7006,6 +7015,75 @@ mod tests {
                 .sample_times,
             at_two_and_a_half
         );
+    }
+
+    /// A simulated source with clips of its own, such as a fade in, is
+    /// traced where it steps to: replaying its clips leaves its translation
+    /// to the simulation, also when a sample falls between two steps.
+    #[test]
+    fn traced_path_seek_keeps_simulated_sources_where_they_step() {
+        let mut world = World::new();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        let source_id = ObjectId::from_raw(0);
+        let updater = gaanim_animation::Updater::new_simulation(
+            |dt, _elapsed, entity, world| {
+                if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+                    transform.translation.x += dt;
+                }
+                true
+            },
+            |_entity, _world| true,
+            0.1,
+        )
+        .unwrap();
+        let source = world
+            .spawn((
+                MobjectId(source_id),
+                SpatialTransform::default(),
+                gaanim_scene::Opacity(0.0),
+                updater,
+            ))
+            .id();
+        let trace = world
+            .spawn((
+                MobjectId(ObjectId::from_raw(1)),
+                SpatialTransform::default(),
+                Path2D(Arc::new(BezPath::new())),
+                gaanim_animation::TracedPath::new(source, 0.0, None),
+            ))
+            .id();
+        let snapshot = WorldSnapshot::capture(&mut world);
+        let mut timeline = Timeline {
+            cached_duration: 2.0,
+            ..Timeline::default()
+        };
+        let track = timeline.add_track("fade", 0);
+        timeline.add_keyframe(0.0, snapshot);
+        timeline.add_clip(
+            track,
+            0.0,
+            0.3,
+            ClipPayload::Animation(AnimationSpec {
+                target: source_id,
+                lens: PropertyLensSpec::Opacity { from: 0.0, to: 1.0 },
+                rate_func: RateFunc::Linear,
+                delay: 0.0,
+                label: None,
+            }),
+        );
+
+        timeline.seek(&mut world, 1.05);
+        let source_at = world.get::<SpatialTransform>(source).unwrap().translation;
+        assert!((source_at.x - 1.0).abs() < 1e-9, "{source_at:?}");
+        let points = &world
+            .get::<gaanim_animation::TracedPath>(trace)
+            .unwrap()
+            .points;
+        assert!(
+            points.windows(2).all(|pair| pair[1].x >= pair[0].x - 1e-9),
+            "the trail never jumps back to the start: {points:?}"
+        );
+        assert!((points.last().unwrap().x - 1.0).abs() < 1e-9);
     }
 
     #[test]
