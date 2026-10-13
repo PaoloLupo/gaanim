@@ -279,7 +279,7 @@ board.replace(board[0], scene.layout.box("Otra", style=chip), duration=0.6)
 #api-entry(
   name: "Box.set",
   kind: "method",
-  desc: [Cambia cualquier propiedad de la caja (las mismas que al crearla, también `style=`) y la reorganiza. Los cambios de decoración y de tipografía se aplican también.],
+  desc: [Cambia cualquier propiedad de la caja (las mismas que al crearla, también `style=`) y la reorganiza; con `duration`, los hijos se mueven a su sitio nuevo en ese tiempo. Los cambios de decoración se aplican también. `color` recolorea los textos que la caja creó a partir de cadenas, como al crearla, y con `duration` lo anima; los textos y cajas que le pasaste como hijos conservan su color. El resto de la tipografía (`font_size`, `weight`…) vale para las cadenas que se añadan después.],
 )[
 ```python
 >>>from gaanim import *
@@ -379,7 +379,7 @@ scene.render()
     (name: "rules, rules_from", type: "\"grow\" | \"fade\", Direction | None", default: "\"grow\", Direction.LEFT", desc: [Cómo entran las cajas sin hijos que dibujan algo (filetes, barras): crecen desde `rules_from` o aparecen con un fundido.]),
   ),
   returns: (type: "Composition", desc: [Un `stagger` sobre las piezas.]),
-  desc: [Es la política que casi toda diapositiva pide: los fondos y demás objetos aparecen con un fundido, los textos entran deslizándose y los filetes crecen. Una caja sin hijos que no dibuja nada no se anima. Para elegir la animación de cada pieza usa `Box.cascade` o `Box.stagger`. Un `rules` desconocido, una `duration` no positiva o una caja sin nada que mostrar lanzan `ValueError`.],
+  desc: [Es la política que casi toda diapositiva pide: los fondos y demás objetos aparecen con un fundido (también un `rolling_number` o un `progress_ring`, aunque su propio `animate` anime el valor), los textos entran deslizándose y los filetes crecen. Una caja sin hijos que no dibuja nada no se anima. Para elegir la animación de cada pieza usa `Box.cascade` o `Box.stagger`. Un `rules` desconocido, una `duration` no positiva o una caja sin nada que mostrar lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -394,7 +394,7 @@ scene.render()
 #api-entry(
   name: "Box.cascade",
   kind: "method",
-  desc: [Elige las piezas de `walk(boxes=boxes)` y devuelve un `BoxCascade`. Cada animación de `.animate` (`fade_in`, `grow_from_center`, `shift_by`…) se puede llamar sobre él con sus mismos argumentos y devuelve un `stagger` sobre todas las piezas. El resto de argumentos son los de `stagger`. Lanza `ValueError` si la caja no tiene piezas y `AttributeError` si una pieza no tiene esa animación; para saltarte piezas usa `Box.stagger`.],
+  desc: [Elige las piezas de `walk(boxes=boxes)` y devuelve un `BoxCascade`. Cada animación de `Drawable.animate` (`fade_in`, `grow_from_center`, `shift_by`…) se puede llamar sobre él con sus mismos argumentos y devuelve un `stagger` sobre todas las piezas; un `rolling_number` o un `progress_ring` se anima como dibujo, no su valor. El resto de argumentos son los de `stagger`. Lanza `ValueError` si la caja no tiene piezas y `AttributeError` si una pieza no tiene esa animación; para saltarte piezas usa `Box.stagger`.],
   signature: "box.cascade(*, boxes=False, each=0.1, total=None, origin=None, grid=None, easing=None, seed=0) -> BoxCascade",
 )[
 ```python

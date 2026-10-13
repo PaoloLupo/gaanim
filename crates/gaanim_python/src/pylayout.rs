@@ -935,6 +935,22 @@ fn text_kwargs<'py>(
     Ok(kwargs)
 }
 
+/// The animation proxy of the drawable a box piece shows. A value display
+/// (a rolling number, a progress ring, a chart...) animates its value with
+/// its own `animate`; `reveal` and `cascade` fade and move the display.
+fn drawable_animate<'py>(piece: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    match piece.extract::<PyRef<'_, PyDrawable>>() {
+        Ok(drawable) => Ok(Bound::new(
+            piece.py(),
+            crate::pydrawable::PyCanvasAnim {
+                inner: drawable.0.animate(),
+            },
+        )?
+        .into_any()),
+        Err(_) => piece.getattr("animate"),
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct LayoutMember {
     pub handle: DrawableHandle,
@@ -942,6 +958,9 @@ pub(crate) struct LayoutMember {
     /// returned by `children` with its own class.
     object: Arc<Py<PyAny>>,
     child_layout: Option<Arc<Mutex<LayoutState>>>,
+    /// A text the box made from a `str` child, which takes the box's
+    /// typography and `set(color=)`.
+    from_str: bool,
 }
 
 pub(crate) struct LayoutState {
@@ -1331,6 +1350,7 @@ impl PyBox {
         text: &Bound<'py, PyDict>,
         child: &Bound<'py, PyAny>,
     ) -> PyResult<LayoutMember> {
+        let from_str = child.is_instance_of::<PyString>();
         let object = if let Ok(content) = child.cast::<PyString>() {
             let markup = text
                 .get_item("markup")?
@@ -1357,6 +1377,7 @@ impl PyBox {
                 handle,
                 object: Arc::new(object.clone().unbind()),
                 child_layout: Some(boxed.inner.clone()),
+                from_str: false,
             });
         }
         if let Ok(drawable) = object.extract::<PyRef<'_, PyDrawable>>() {
@@ -1364,6 +1385,7 @@ impl PyBox {
                 handle: drawable.0.clone(),
                 object: Arc::new(object.clone().unbind()),
                 child_layout: None,
+                from_str,
             });
         }
         Err(pyo3::exceptions::PyTypeError::new_err(
@@ -2013,7 +2035,7 @@ impl PyBox {
         Self::collect_reveal(py, &self.inner, &mut pieces)?;
         let mut animations = Vec::with_capacity(pieces.len());
         for (piece, kind) in pieces {
-            let animate = piece.bind(py).getattr("animate")?;
+            let animate = drawable_animate(piece.bind(py))?;
             let animation = match kind {
                 RevealKind::Text => {
                     animate.call_method1("fade_in_from", (direction.bind(py), distance))?
@@ -2336,6 +2358,7 @@ impl PyBox {
 
     /// Change box properties (the same names as when creating it). With
     /// `duration`, the children move to their new places over that time.
+    /// `color` recolors the texts the box made from strings.
     #[pyo3(signature = (*, duration=None, advance=true, style=None, **props))]
     fn set<'py>(
         slf: PyRef<'py, Self>,
@@ -2354,11 +2377,47 @@ impl PyBox {
             (state.canvas.clone(), state.root.clone())
         };
         let units = Units::new(canvas);
-        {
+        let (scene, texts) = {
             let mut state = slf.inner.lock().expect("layout poisoned");
             apply_container(&mut state.spec, &props, &units)?;
             let text = state.text.bind(py).clone();
             text.update(text_kwargs(py, &props, &units)?.as_mapping())?;
+            let texts: Vec<Py<PyAny>> = state
+                .members
+                .iter()
+                .filter(|member| member.from_str)
+                .map(|member| member.object.clone_ref(py))
+                .collect();
+            (state.scene.clone_ref(py), texts)
+        };
+        // The texts the box made from strings take the new color, as at
+        // creation; other children keep their own.
+        if let Some(color) = prop(&props, "color")?
+            && !texts.is_empty()
+        {
+            match duration {
+                Some(duration) => {
+                    let mut animations = Vec::with_capacity(texts.len());
+                    for text in &texts {
+                        animations.push(
+                            text.bind(py)
+                                .getattr("animate")?
+                                .call_method1("fill", (&color,))?,
+                        );
+                    }
+                    let kwargs = PyDict::new(py);
+                    kwargs.set_item("duration", duration)?;
+                    kwargs.set_item("advance", false)?;
+                    scene
+                        .bind(py)
+                        .call_method("play", (animations,), Some(&kwargs))?;
+                }
+                None => {
+                    for text in &texts {
+                        text.bind(py).call_method1("fill", (&color,))?;
+                    }
+                }
+            }
         }
         let mut item = root.layout_item();
         apply_item(&mut item, &props, &units)?;
@@ -2472,7 +2531,7 @@ impl PyBoxCascade {
                 }
                 let mut items = Vec::with_capacity(pieces.len());
                 for piece in &pieces {
-                    let method = piece.bind(py).getattr("animate")?.getattr(name.as_str())?;
+                    let method = drawable_animate(piece.bind(py))?.getattr(name.as_str())?;
                     items.push(method.call(args, kwargs)?);
                 }
                 let items = PyTuple::new(py, items)?;

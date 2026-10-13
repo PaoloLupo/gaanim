@@ -1048,15 +1048,16 @@ class Box(Drawable):
     ) -> Composition:
         """Reveal the box piece by piece with the usual slide policy, as one ``stagger``.
 
-        Backgrounds and other drawables fade in, texts fade in from
-        ``direction`` (``Direction.UP`` by default) over ``distance`` scene
-        units, and boxes without children that draw something (rules, bars)
-        grow from ``rules_from`` (``Direction.LEFT`` by default) or, with
-        ``rules="fade"``, fade in. Each piece takes ``duration`` seconds and
-        starts ``each`` seconds after the previous one. Use ``cascade`` or
-        ``stagger`` to choose the animation of each piece yourself. An
-        unknown ``rules``, a non-positive ``duration`` or a box with nothing
-        to show raises ``ValueError``.
+        Backgrounds and other drawables fade in (a ``rolling_number`` or a
+        ``progress_ring`` too, although its own ``animate`` sets its value),
+        texts fade in from ``direction`` (``Direction.UP`` by default) over
+        ``distance`` scene units, and boxes without children that draw
+        something (rules, bars) grow from ``rules_from`` (``Direction.LEFT``
+        by default) or, with ``rules="fade"``, fade in. Each piece takes
+        ``duration`` seconds and starts ``each`` seconds after the previous
+        one. Use ``cascade`` or ``stagger`` to choose the animation of each
+        piece yourself. An unknown ``rules``, a non-positive ``duration`` or a
+        box with nothing to show raises ``ValueError``.
 
         Example:
             scene.play(card.reveal())
@@ -1077,8 +1078,10 @@ class Box(Drawable):
 
         Each animation method of the result (``fade_in``, ``grow_from_center``,
         ``shift_by``...) takes the arguments of the same method under
-        ``.animate`` and returns one ``stagger`` over all the pieces. The other
-        arguments are those of the module-level ``stagger``.
+        ``Drawable.animate`` and returns one ``stagger`` over all the pieces:
+        a value display (``rolling_number``, ``progress_ring``) fades or
+        moves as a drawable, not its value. The other arguments are those of
+        the module-level ``stagger``.
 
         Example:
             scene.play(card.cascade(each=0.05).fade_in())
@@ -1125,7 +1128,15 @@ class Box(Drawable):
         """Put ``new`` where ``old`` was (it inherits the old item rules unless it has its own)."""
         ...
     def set(self, *, duration: Optional[float] = None, advance: bool = True, style: Optional[BoxStyle] = None, **props: Any) -> Self:
-        """Change box properties (the same names as when creating it)."""
+        """Change box properties (the same names as when creating it).
+
+        With ``duration``, the children move to their new places over that
+        time. ``color`` recolors the texts the box made from strings, over
+        ``duration`` when given, as it colors them at creation; texts and
+        boxes passed as children keep their own color. The other text
+        properties (``font_size``, ``weight``...) apply to strings added
+        afterwards.
+        """
         ...
     def reflow(self, *, duration: Optional[float] = None, advance: bool = True) -> None:
         """Lay the tree out again after children changed their own size.
