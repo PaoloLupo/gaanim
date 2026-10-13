@@ -129,7 +129,7 @@ enteros, o usa `scene.text.code`.
 
 == Ejemplos
 
-- Una galería, `examples/gallery/`, con 22 escenas cortas en los colores de
+- Una galería, `examples/gallery/`, con 23 escenas cortas en los colores de
   la marca (el tema `gaanim`), agrupadas en conceptos básicos, animaciones,
   gráficas, cámara y 3D, y avanzadas. Va desde el logo construido con
   primitivas hasta los epiciclos de Fourier, pasando por un vector que barre
