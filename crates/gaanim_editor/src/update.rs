@@ -361,33 +361,27 @@ fn parse_checksum(text: &str) -> Option<String> {
     (hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())).then_some(hash)
 }
 
-/// SHA-256 of a file, in lowercase hex, from the system's own tool:
-/// PowerShell's `Get-FileHash` on Windows, `sha256sum` elsewhere.
+/// SHA-256 of a file, in lowercase hex.
 fn sha256_file(path: &Path) -> Result<String, String> {
-    let output = if cfg!(windows) {
-        // The path goes through the environment, which needs no quoting.
-        Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "(Get-FileHash -Algorithm SHA256 -LiteralPath $env:GAANIM_HASHED_FILE).Hash",
-            ])
-            .env("GAANIM_HASHED_FILE", path)
-            .output()
-    } else {
-        Command::new("sha256sum").arg("--").arg(path).output()
+    use sha2::Digest;
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = vec![0; 1 << 16];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
     }
-    .map_err(|error| format!("could not compute the download's SHA-256: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "could not compute the SHA-256 of {}: {}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    parse_checksum(&String::from_utf8_lossy(&output.stdout))
-        .ok_or_else(|| format!("could not compute the SHA-256 of {}", path.display()))
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 /// Unpack a release package into `folder`: a zip on Windows, a gzipped tar
@@ -597,7 +591,7 @@ mod tests {
             Some(hash)
         );
         // PowerShell's Out-File can start the file with a byte order mark,
-        // and Get-FileHash prints uppercase.
+        // and its Get-FileHash prints uppercase.
         assert_eq!(
             parse_checksum(&format!("\u{feff}{}  x.zip\r\n", hash.to_uppercase())).as_deref(),
             Some(hash)
@@ -607,14 +601,23 @@ mod tests {
     }
 
     #[test]
-    fn the_system_tool_computes_sha256() {
+    fn files_hash_to_the_standard_sha256_vectors() {
         let folder = tempfile::tempdir().unwrap();
-        let file = folder.path().join("abc.txt");
-        std::fs::write(&file, b"abc").unwrap();
-        assert_eq!(
-            sha256_file(&file).unwrap(),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
+        // FIPS 180-2's "abc", and a million "a", read in several chunks.
+        for (bytes, hash) in [
+            (
+                b"abc".to_vec(),
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            ),
+            (
+                vec![b'a'; 1_000_000],
+                "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
+            ),
+        ] {
+            let file = folder.path().join(format!("{}.bin", bytes.len()));
+            std::fs::write(&file, &bytes).unwrap();
+            assert_eq!(sha256_file(&file).unwrap(), hash);
+        }
     }
 
     #[test]
