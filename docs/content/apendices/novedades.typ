@@ -522,6 +522,11 @@ bloques de código, cajas escaladas, ecuaciones de varias filas).
   las capturas). Antes el objeto volvía a su posición inicial en la mayoría de
   los cuadros y el rastro acababa con una recta hacia ella; había que trazar
   un punto con `follow(objeto)`.
+- Un `traced_path` con `dissipating_time` ya no deja en algunos cuadros un
+  bloque relleno que parte de su cola: cuando la cola estaba a punto de
+  alcanzar su siguiente muestra, el primer tramo daba media vuelta y el trazo
+  quedaba abierto. Los dos extremos de un rastro siguen su recorrido; antes
+  podían acabar en un pequeño gancho.
 - `race.bar(nombre).animate.opacity(…)` atenúa una fila de una carrera de
   barras, y el desvanecimiento de las filas que salen del top sigue
   funcionando encima. Antes lanzaba un error sobre un `Parameter` inaccesible.

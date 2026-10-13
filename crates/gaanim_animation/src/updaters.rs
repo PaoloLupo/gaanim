@@ -549,11 +549,31 @@ impl TracedPath {
 /// uniform spline where samples are unevenly spaced.
 pub fn traced_path_geometry(points: &[DVec3]) -> BezPath {
     use gaanim_core::kurbo::{Point, Vec2};
+    // Samples closer than this to the previous one add nothing a stroke can
+    // show, and a segment that short gives the stroke's start or end no
+    // direction: the renderer then leaves its outline open.
+    const MERGE_DISTANCE: f64 = 1e-4;
     let mut path = BezPath::new();
-    let points: Vec<Point> = points
-        .iter()
-        .map(|point| Point::new(point.x, point.y))
-        .collect();
+    let mut kept: Vec<Point> = Vec::with_capacity(points.len());
+    for (index, point) in points.iter().enumerate() {
+        let point = Point::new(point.x, point.y);
+        let close = |last: &Point| last.distance(point) < MERGE_DISTANCE;
+        if kept.last().is_some_and(close) {
+            // The tail stays where it expires and the head where its
+            // source is, so a sample next to the head gives way.
+            if index + 1 < points.len() {
+                continue;
+            }
+            while kept.len() > 1 && kept.last().is_some_and(close) {
+                kept.pop();
+            }
+            if kept.last().is_some_and(close) {
+                continue;
+            }
+        }
+        kept.push(point);
+    }
+    let points = kept;
     let Some(first) = points.first() else {
         return path;
     };
@@ -564,20 +584,14 @@ pub fn traced_path_geometry(points: &[DVec3]) -> BezPath {
         }
         return path;
     }
-    // Past the ends, the curve continues the parabola through its last
-    // three samples, so it keeps bending there.
-    let at = |index: isize| -> Point {
-        let last = points.len() - 1;
-        let extend = |a: Point, b: Point, c: Point| {
-            (a.to_vec2() * 3.0 - b.to_vec2() * 3.0 + c.to_vec2()).to_point()
-        };
-        if index < 0 {
-            extend(points[0], points[1], points[2])
-        } else if index as usize > last {
-            extend(points[last], points[last - 1], points[last - 2])
-        } else {
-            points[index as usize]
-        }
+    // At an end, the curve leaves along the parabola through the three
+    // samples there, spaced by their distances: as the tail expires toward
+    // its next sample the first one is short, and evenly spaced it would
+    // turn back.
+    let end_control = |end: Point, next: Point, after: Point| -> Point {
+        let (u, v) = (next - end, after - next);
+        let (a, b) = (u.hypot(), v.hypot());
+        end + (u * ((2.0 * a + b) / (a + b)) - v * (a * a / (b * (a + b)))) / 3.0
     };
     // The control point from `from` toward `to`, past `before`.
     let control = |before: Point, from: Point, to: Point| -> Point {
@@ -590,9 +604,20 @@ pub fn traced_path_geometry(points: &[DVec3]) -> BezPath {
             / (3.0 * d1 * (d1 + d2));
         blend.to_point()
     };
-    for index in 0..points.len() as isize - 1 {
-        let (p0, p1, p2, p3) = (at(index - 1), at(index), at(index + 1), at(index + 2));
-        path.curve_to(control(p0, p1, p2), control(p3, p2, p1), p2);
+    let last = points.len() - 1;
+    for index in 0..last {
+        let (from, to) = (points[index], points[index + 1]);
+        let start = if index == 0 {
+            end_control(from, to, points[2])
+        } else {
+            control(points[index - 1], from, to)
+        };
+        let end = if index + 1 == last {
+            end_control(to, from, points[last - 2])
+        } else {
+            control(points[index + 2], to, from)
+        };
+        path.curve_to(start, end, to);
     }
     path
 }
@@ -3242,6 +3267,36 @@ mod tests {
             let middle = segment.eval(0.5).to_vec2().hypot();
             // The chord's midpoint is 0.19 inside the circle.
             assert!((middle - 10.0).abs() < 0.02, "{middle}");
+        }
+    }
+
+    #[test]
+    fn traced_paths_keep_their_direction_where_a_sample_has_almost_expired() {
+        use gaanim_core::kurbo::{CubicBez, PathSeg};
+        let arc = |angle: f64| DVec3::new(10.0 * angle.cos(), 10.0 * angle.sin(), 0.0);
+        let samples: Vec<DVec3> = (1..=6).map(|k| arc(k as f64 * 0.1)).collect();
+        // The tail moves along the chord to the next sample as it expires
+        // (expire_trace_samples), and the source slows down at the head.
+        for (tail, head) in [(1e-3, 0.05), (1e-7, 0.05), (0.5, 1e-3), (0.5, 1e-7)] {
+            let mut points = samples.clone();
+            points[0] = samples[1].lerp(samples[0], tail);
+            let last = points.len() - 1;
+            points[last] = samples[last - 1].lerp(samples[last], head);
+            let path = traced_path_geometry(&points);
+            for segment in path.segments() {
+                let PathSeg::Cubic(CubicBez { p0, p1, p2, p3 }) = segment else {
+                    panic!("{segment:?}");
+                };
+                let chord = p3 - p0;
+                // A segment too short to give the stroke a direction is left out.
+                assert!(chord.hypot() > 1e-5, "{tail} {head}: {segment:?}");
+                // Each segment leaves and enters along its chord, without
+                // turning back at the ends of the trace.
+                for tangent in [p1 - p0, p3 - p2] {
+                    let cosine = tangent.dot(chord) / (tangent.hypot() * chord.hypot());
+                    assert!(cosine > 0.9, "{tail} {head}: {cosine} in {segment:?}");
+                }
+            }
         }
     }
 
