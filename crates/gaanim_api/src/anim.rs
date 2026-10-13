@@ -187,7 +187,18 @@ impl PropertyAnimation {
 #[derive(Debug, Clone, Copy)]
 pub enum PropertyTranslation {
     To(DVec3),
-    ToAnchor { to: DVec3, anchor: Anchor },
+    ToAnchor {
+        to: DVec3,
+        anchor: Anchor,
+    },
+    /// A text placed as `Text.move_to` places it: the first baseline at
+    /// `horizontal` (-1 left, 0 center, 1 right) of its bounds, or the
+    /// visual center of a multiline block when `center_multiline`.
+    ToTextAnchor {
+        to: DVec3,
+        horizontal: f64,
+        center_multiline: bool,
+    },
     By(DVec3),
     ToAnchorPoint(crate::canvas::AnchorPoint),
 }

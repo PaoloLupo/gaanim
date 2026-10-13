@@ -1704,8 +1704,10 @@ class Anim:
     def move_to(self, x: ScalarSource, y: ScalarSource, anchor: Optional[AnchorName | Anchor] = None) -> Anim:
         """Target an absolute 2D position, placing ``anchor`` at ``(x, y)``.
 
-        Omitting ``anchor`` uses ``Anchor.CENTER``. The returned animation can
-        be chained with other property targets.
+        Omitting ``anchor`` uses ``Anchor.CENTER``, except on a ``Text``, which
+        lands where ``Text.move_to(x, y)`` puts it: its first baseline centered
+        on the point for one line, its visual center for a multiline block.
+        The returned animation can be chained with other property targets.
 
 
         Reactive targets are evaluated at the clip start and frozen for this
@@ -9241,6 +9243,11 @@ class MediaLibrary:
         quality: Literal["low", "medium", "high"] = "medium",
     ) -> Image:
         """Create a local Image with fluent framing and source metadata.
+
+        With ``width`` and ``height``, ``fit`` decides how the image meets
+        that frame, as in ``frame``: ``"contain"`` keeps it whole,
+        ``"cover"`` fills the frame and crops the overflow evenly from both
+        sides, ``"stretch"`` distorts it.
 
         ``quality`` selects Vello image sampling: ``"low"`` is nearest-like,
         ``"medium"`` is bilinear-like, and ``"high"`` requests bicubic sampling.

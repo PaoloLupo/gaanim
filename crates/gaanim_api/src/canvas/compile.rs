@@ -16657,6 +16657,32 @@ mod tests {
         (world, timeline)
     }
 
+    /// A text animated to a point lands where `Text.move_to` would put it:
+    /// from `move_to(-4, 2)` to `(4, 2)` it slides along its baseline.
+    #[test]
+    fn text_move_animations_keep_the_baseline_placement() {
+        let mut canvas = SceneModel::new(640, 360);
+        let word = canvas
+            .configured_text(
+                "Blend",
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .at_text_default(-4.0, 2.0);
+        canvas.wait(0.5);
+        canvas.play(vec![word.animate().move_to_text(4.0, 2.0).duration(1.0)]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.2);
+        let before = transform_of(&mut world, &word).translation;
+        timeline.seek(&mut world, 1.5);
+        let after = transform_of(&mut world, &word).translation;
+        assert!((after.y - before.y).abs() < 1e-9, "{before:?} -> {after:?}");
+        assert!(
+            (after.x - before.x - 8.0).abs() < 1e-9,
+            "{before:?} -> {after:?}"
+        );
+    }
+
     fn transform_of(world: &mut World, handle: &DrawableHandle) -> SpatialTransform {
         let id = ObjectId::from_raw(handle.id.as_raw() - 1);
         *world

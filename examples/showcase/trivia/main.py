@@ -131,7 +131,8 @@ for i in range(12):
     dot = scene.geometry.circle(0.12 * (1 - i / 13)).fill(NEON[i % 4]).no_stroke()
     tail.append(dot.follow(comet, delay=0.035 * (i + 1)))
 
-scene.play([title.animate.move_to(0, 0.9).duration(0.55).settle(overshoot=0.18, frequency=2.5, decay=5)
+scene.play([title.animate.move_to(0, 0.9, anchor="center").duration(0.55)
+            .settle(overshoot=0.18, frequency=2.5, decay=5)
             .sound(TITLE)])
 scene.play([subtitle.animate.typewriter(cps=40, cursor=None)]
            + [dot.animate.fade_in().duration(0.05) for dot in tail])

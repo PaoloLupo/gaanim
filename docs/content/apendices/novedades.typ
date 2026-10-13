@@ -344,6 +344,15 @@ enteros, o usa `scene.text.code`.
 - La referencia de `scene.persist` explica que un objeto nuevo persistido
   justo después de `scene.segment(...)` entra con la transición de ese
   segmento.
+- `text.animate.move_to(x, y)` deja el texto donde lo pone
+  `text.move_to(x, y)`: la primera línea base centrada en el punto (el centro
+  visual si tiene varias líneas). Antes centraba la caja visual, así que un
+  texto colocado con `move_to` y luego animado a otro punto bajaba además de
+  desplazarse.
+- `scene.media.image(ruta, width=…, height=…, fit="cover")` y su equivalente
+  en `video` recortan el sobrante por igual a ambos lados, como
+  `.frame(…, fit="cover")`; antes recortaban desde la esquina superior
+  izquierda.
 - Una cuadrícula con columnas `"auto"` dentro de otra caja mide lo mismo que
   sola. Antes sus columnas se repartían el ancho por igual: la cuadrícula
   quedaba más ancha y, con textos que pueden partirse, el más ancho se partía
@@ -390,6 +399,13 @@ enteros, o usa `scene.text.code`.
 
 == Al actualizar
 
+- `text.animate.move_to(x, y)` sin `anchor` lleva el texto a su línea base,
+  como `text.move_to`. Un texto que se animaba a un punto pensando en su
+  centro queda más arriba; pasa `anchor="center"` para conservar la posición
+  anterior.
+- `image(…, width=…, height=…, fit="cover")` y `video(…, fit="cover")`
+  muestran el centro de la imagen en lugar de su esquina superior izquierda.
+  Para encuadrar otra parte, usa `crop`.
 - Las formas con degradado que se transforman, o que entran o salen en un
   `magic_move`, se ven con su degradado durante y después del morph en lugar
   del color de su primera parada. Si contabas con ese color liso, dale un

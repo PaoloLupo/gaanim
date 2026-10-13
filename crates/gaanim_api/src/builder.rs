@@ -1625,6 +1625,47 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         SpatialTransform::from_affine_2d(&world_affine)
     }
 
+    /// The translation that puts the text `target`'s anchor on the scene
+    /// point `to`, as `Text.move_to` places a text: its first baseline at
+    /// `horizontal` (-1 left, 0 center, 1 right) of its bounds, or the
+    /// visual center of a multiline block when `center_multiline`. `None`
+    /// when `target` has no text metrics.
+    fn text_anchor_translation(
+        &self,
+        target: ObjectId,
+        to: DVec3,
+        horizontal: f64,
+        center_multiline: bool,
+    ) -> Option<DVec3> {
+        let state = self.states.get(target)?;
+        let metrics = self
+            .text_metrics
+            .get(&target)
+            .filter(|metrics| metrics.line_count > 0)?;
+        let bounds = state.bounds;
+        let local = if center_multiline && metrics.line_count > 1 {
+            bounds.center()
+        } else {
+            DVec3::new(
+                bounds.center().x + horizontal * bounds.size().x * 0.5,
+                metrics.first_baseline,
+                bounds.center().z,
+            )
+        };
+        // Scene points arrive in world space; a child keeps its translation
+        // in its parent's space.
+        let to = match state.parent {
+            Some(parent) => self
+                .get_world_transform(parent)
+                .to_mat4()
+                .inverse()
+                .transform_point3(to),
+            None => to,
+        };
+        let placed = state.transform.to_mat4().transform_point3(local);
+        Some(state.transform.translation + (to - placed))
+    }
+
     /// Creates a new `SceneBuilder` wrapping the Bevy `Commands` context, `Timeline` resource, and `FontRegistry`.
     pub fn new(
         commands: &'a mut Commands<'w, 's>,
@@ -3229,6 +3270,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                     crate::anim::PropertyTranslation::ToAnchor { to, anchor } => {
                         AnimationType::TranslateAnchorTo { to, anchor }
                     }
+                    crate::anim::PropertyTranslation::ToTextAnchor {
+                        to,
+                        horizontal,
+                        center_multiline,
+                    } => match self.text_anchor_translation(
+                        anim.target,
+                        to,
+                        horizontal,
+                        center_multiline,
+                    ) {
+                        Some(to) => AnimationType::TranslateTo { to },
+                        // Without text metrics, the visual center.
+                        None => AnimationType::TranslateAnchorTo {
+                            to,
+                            anchor: gaanim_layout::Anchor::Center,
+                        },
+                    },
                     crate::anim::PropertyTranslation::ToAnchorPoint(point) => {
                         AnimationType::TranslateToAnchorPoint { point }
                     }
