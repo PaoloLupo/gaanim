@@ -57,6 +57,10 @@ pub struct ExportState {
     pub format: ExportFormat,
     /// Record a playback bundle (`.gaanim`) instead of a video.
     pub bundle: bool,
+    /// Export a PDF deck, a page for each point where the presentation rests.
+    pub deck: bool,
+    /// The deck prints each slide's speaker notes.
+    pub notes: bool,
     pub quality: ExportQuality,
     /// Frame rate chosen in the dialog; `None` takes the quality's.
     pub fps: Option<FrameRate>,
@@ -259,11 +263,26 @@ fn keeps_alpha(format: ExportFormat) -> bool {
     )
 }
 
-/// What the export dialog writes: a video format or a playback bundle.
+/// What the export dialog writes: a video format, a playback bundle or a
+/// PDF deck.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FormatChoice {
     Video(ExportFormat),
     Bundle,
+    Deck,
+}
+
+impl FormatChoice {
+    /// The choice `state` last made.
+    fn of(state: &ExportState) -> Self {
+        if state.deck {
+            Self::Deck
+        } else if state.bundle {
+            Self::Bundle
+        } else {
+            Self::Video(state.format)
+        }
+    }
 }
 
 impl Default for ExportState {
@@ -272,6 +291,8 @@ impl Default for ExportState {
             dialog_open: false,
             format: ExportFormat::Mp4,
             bundle: false,
+            deck: false,
+            notes: true,
             quality: ExportQuality::Standard,
             fps: None,
             transparent: false,
@@ -319,7 +340,8 @@ pub fn export_dialog_system(
             folder,
             name: output_file::default_name(project, bundle.as_ref().map(|bundle| bundle.path())),
         };
-        state.output_path = output_file::join(&parts, OutputKind::of(state.format, state.bundle));
+        state.output_path =
+            output_file::join(&parts, output_kind(FormatChoice::of(&state), state.format));
         state.output_parts = Some(parts);
     }
 
@@ -347,7 +369,7 @@ pub fn export_dialog_system(
         .collect::<Vec<_>>()
         .join(" · ");
         // A PNG sequence is a folder of frames: show and open the folder.
-        let sequence = state.format == ExportFormat::PngSequence && !state.bundle;
+        let sequence = FormatChoice::of(&state) == FormatChoice::Video(ExportFormat::PngSequence);
         let opened_path = state
             .completed_output_path
             .as_deref()
@@ -442,7 +464,7 @@ pub fn export_dialog_system(
     }
 
     if trigger_open && let Some(path) = state.completed_output_path.clone() {
-        let sequence = state.format == ExportFormat::PngSequence && !state.bundle;
+        let sequence = FormatChoice::of(&state) == FormatChoice::Video(ExportFormat::PngSequence);
         match open_exported_file(&exported_location(&path, sequence)) {
             Ok(()) => trigger_ok = true,
             Err(error) => {
@@ -523,11 +545,8 @@ pub fn export_dialog_system(
 
     // Collect all values BEFORE the button handlers (to avoid borrow issues)
     let mut current_format = state.format;
-    let mut current_choice = if state.bundle {
-        FormatChoice::Bundle
-    } else {
-        FormatChoice::Video(state.format)
-    };
+    let mut current_choice = FormatChoice::of(&state);
+    let mut current_notes = state.notes;
     let mut current_quality = state.quality;
     let mut current_fps = state.fps;
     let mut current_transparent = state.transparent;
@@ -556,7 +575,7 @@ pub fn export_dialog_system(
     // An open bundle exports video; a script's scene can also be recorded
     // into a bundle.
     let offers_bundle = bundle_source.is_none();
-    if !offers_bundle {
+    if !offers_bundle && current_choice == FormatChoice::Bundle {
         current_choice = FormatChoice::Video(current_format);
     }
     // A bundle records whole rates.
@@ -567,7 +586,7 @@ pub fn export_dialog_system(
     }
     let preset_fps = match current_choice {
         FormatChoice::Video(format) => current_quality.preset().fps_for(format),
-        FormatChoice::Bundle => current_quality.fps(),
+        FormatChoice::Bundle | FormatChoice::Deck => current_quality.fps(),
     };
     // A bundle's video runs at its recorded rate.
     let fps = match &bundle {
@@ -595,15 +614,27 @@ pub fn export_dialog_system(
                             .strong()
                             .color(palette::TEXT),
                     );
+                    let detail = if current_choice == FormatChoice::Deck {
+                        let slides = crate::cli::deck_slides(timeline.segments.iter().map(
+                            |segment| {
+                                (
+                                    segment.name.as_str(),
+                                    segment.notes.as_deref(),
+                                    segment.stops.iter().map(|stop| stop.time).collect(),
+                                )
+                            },
+                        ));
+                        let pages =
+                            gaanim_export::deck::deck_pages(&slides, dur, current_notes).len();
+                        let noun = if pages == 1 { "página" } else { "páginas" };
+                        format!("{} · {pages} {noun}", crate::format_time(dur))
+                    } else {
+                        format!("{} · {} frames a {} fps", crate::format_time(dur), total, fps)
+                    };
                     ui.label(
-                        egui::RichText::new(format!(
-                            "{} · {} frames a {} fps",
-                            crate::format_time(dur),
-                            total,
-                            fps,
-                        ))
-                        .size(12.0)
-                        .color(palette::TEXT_MUTED),
+                        egui::RichText::new(detail)
+                            .size(12.0)
+                            .color(palette::TEXT_MUTED),
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -622,10 +653,11 @@ pub fn export_dialog_system(
                 (FormatChoice::Video(ExportFormat::Mp4), "MP4", "H.264"),
                 (FormatChoice::Video(ExportFormat::Webm), "WebM", "VP9"),
                 (FormatChoice::Video(ExportFormat::Mov), "MOV", "ProRes"),
-                // Seven formats share the row: short details keep them apart.
+                // Eight formats share the row: short details keep them apart.
                 (FormatChoice::Video(ExportFormat::Webp), "WebP", "Animada"),
                 (FormatChoice::Video(ExportFormat::Gif), "GIF", "Animada"),
                 (FormatChoice::Video(ExportFormat::PngSequence), "PNG", "Fotogramas"),
+                (FormatChoice::Deck, "PDF", "Pausas"),
                 (FormatChoice::Bundle, "Gaanim", "Escena"),
             ];
             let choices = if offers_bundle {
@@ -670,7 +702,24 @@ pub fn export_dialog_system(
                     .wrap(),
                 );
             }
+            if current_choice == FormatChoice::Deck {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "Un PDF con una página por cada pausa de la presentación (scene.stop()) y la del final, para repartir o imprimir.",
+                        )
+                        .size(12.0)
+                        .color(palette::TEXT_MUTED),
+                    )
+                    .wrap(),
+                );
+                ui.checkbox(&mut current_notes, "Incluir las notas del orador")
+                    .on_hover_text(
+                        "Añade tras la última página de cada diapositiva una página con las notas de scene.segment(notes=...).",
+                    );
+            }
             let recording = current_choice == FormatChoice::Bundle;
+            let deck = current_choice == FormatChoice::Deck;
             if let FormatChoice::Video(format) = current_choice
                 && keeps_alpha(format)
             {
@@ -681,6 +730,8 @@ pub fn export_dialog_system(
             }
             ui.add_space(6.0);
 
+            // A deck's pages are lossless frames at the chosen size.
+            if !deck {
             section_label(ui, "Calidad");
             // With a rate of its own, the quality only chooses the encoding.
             let own_rate = current_fps.is_some() && bundle_source.is_none();
@@ -776,6 +827,7 @@ pub fn export_dialog_system(
                 }
             }
             ui.add_space(6.0);
+            }
 
             if !recording {
             section_label(ui, "Resolución");
@@ -864,6 +916,8 @@ pub fn export_dialog_system(
             ui.horizontal(|ui| {
                 let summary = if recording {
                     format!("paquete · {fps} fps")
+                } else if deck {
+                    format!("{current_width}×{current_height} · PDF")
                 } else {
                     format!("{current_width}×{current_height} · {fps} fps")
                 };
@@ -910,6 +964,8 @@ pub fn export_dialog_system(
     // Apply state changes AFTER the egui closures (no borrow conflicts)
     state.format = current_format;
     state.bundle = current_choice == FormatChoice::Bundle && offers_bundle;
+    state.deck = current_choice == FormatChoice::Deck;
+    state.notes = current_notes;
     state.quality = current_quality;
     state.fps = current_fps;
     state.transparent = current_transparent;
@@ -953,6 +1009,7 @@ pub fn export_dialog_system(
             let out = out_path.to_string_lossy().into_owned();
             let fmt = state.format;
             let record_bundle = state.bundle;
+            let deck = state.deck.then_some(state.notes);
             let qual = state.quality;
             let fps = state.fps;
             let transparent = state.transparent && keeps_alpha(fmt) && !record_bundle;
@@ -1007,7 +1064,9 @@ pub fn export_dialog_system(
                         &out,
                         WorkerEncoding {
                             quality: qual,
-                            format: if record_bundle {
+                            format: if deck.is_some() {
+                                crate::cli::PDF_EXTENSION
+                            } else if record_bundle {
                                 gaanim_bundle::EXTENSION
                             } else {
                                 export_format_arg(fmt)
@@ -1015,12 +1074,26 @@ pub fn export_dialog_system(
                             video_encoder,
                             fps,
                             transparent,
+                            notes: deck.unwrap_or(false),
                         },
                         output_size,
                         output_fit,
                         telemetry.clone(),
                         cancel_requested,
                     ),
+                    None if deck.is_some() => {
+                        let command = crate::cli::ExportCommand {
+                            input: bundle_source,
+                            output: Some(out.clone()),
+                            quality: qual.arg().to_string(),
+                            width: output_size.0,
+                            height: output_size.1,
+                            fit: output_fit,
+                            notes: deck.unwrap_or(false),
+                            ..Default::default()
+                        };
+                        export_deck(&command, canvas, telemetry.clone())
+                    }
                     None if record_bundle => match canvas {
                         Some(canvas) => {
                             let fps = fps
@@ -1078,6 +1151,40 @@ pub fn export_dialog_system(
             });
         }
     }
+}
+
+/// Export the PDF deck `command` describes in this process: from its input
+/// bundle, or from the script's `canvas`.
+#[cfg(not(target_arch = "wasm32"))]
+fn export_deck(
+    command: &crate::cli::ExportCommand,
+    canvas: Option<gaanim_api::canvas::SceneModel>,
+    telemetry: ExportTelemetry,
+) -> Result<(), String> {
+    let telemetry = Some(telemetry);
+    match (command.input.is_some(), canvas) {
+        (true, _) => crate::cli::export_bundle_pdf(command, telemetry)
+            .map(|_| ())
+            .map_err(|error| match error {
+                crate::cli::CommandError::Usage(message)
+                | crate::cli::CommandError::Failed(message) => message,
+            }),
+        (false, Some(canvas)) => {
+            let output = command.output.clone().unwrap_or_default();
+            crate::cli::export_slides_pdf(canvas, command, &output, None, telemetry).map(|_| ())
+        }
+        (false, None) => Err("No replay data available".to_string()),
+    }
+}
+
+/// PDF decks are laid out by the desktop app.
+#[cfg(target_arch = "wasm32")]
+fn export_deck(
+    _command: &crate::cli::ExportCommand,
+    _canvas: Option<gaanim_api::canvas::SceneModel>,
+    _telemetry: ExportTelemetry,
+) -> Result<(), String> {
+    Err("PDF export needs the Gaanim desktop app".to_string())
 }
 
 fn resolve_output_path(raw: &str, project_dir: Option<&Path>) -> Result<PathBuf, String> {
@@ -1221,6 +1328,8 @@ struct WorkerEncoding {
     video_encoder: VideoEncoder,
     fps: Option<FrameRate>,
     transparent: bool,
+    /// A PDF deck prints each slide's speaker notes.
+    notes: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1260,6 +1369,9 @@ fn run_export_worker(
     }
     if encoding.transparent {
         command.arg("--transparent");
+    }
+    if encoding.notes {
+        command.arg("--notes");
     }
     command
         .env("GAANIM_EXPORT_WORKER", "1")
@@ -1372,6 +1484,7 @@ fn aspect_label(width: f64, height: f64) -> String {
 fn output_kind(choice: FormatChoice, format: ExportFormat) -> OutputKind {
     match choice {
         FormatChoice::Bundle => OutputKind::of(format, true),
+        FormatChoice::Deck => OutputKind::File(crate::cli::PDF_EXTENSION),
         FormatChoice::Video(format) => OutputKind::of(format, false),
     }
 }

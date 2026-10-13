@@ -38,6 +38,15 @@ crossbeam-channel = "0.5"
 [target.'cfg(not(target_os = "emscripten"))'.dependencies]
 bevy = { workspace = true, features = ["bevy_winit", "wayland"] }
 
+# Slide decks exported to PDF; Typst (through gaanim_text) lays out the pages.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pdf-writer = "0.15"
+miniz_oxide = "0.8"
+
+[dev-dependencies]
+# Reads the exported PDFs back in tests.
+hayro-syntax = "0.7"
+
 [features]
 dev-dynamic = [
     "bevy/dynamic_linking",

@@ -311,9 +311,14 @@ impl PresenterThumbnailCache {
                             on_frame,
                         )
                     }
-                    PreviewSource::Bundle(bundle) => {
-                        capture_bundle_streaming(&bundle.path, width, height, &times, on_frame)
-                    }
+                    PreviewSource::Bundle(bundle) => capture_bundle_streaming(
+                        &bundle.path,
+                        width,
+                        height,
+                        gaanim_export::prelude::OutputFit::Contain,
+                        &times,
+                        on_frame,
+                    ),
                 }
                 .map_err(|error| error.to_string());
                 let _ = sender.send(WorkerEvent::Finished(result));

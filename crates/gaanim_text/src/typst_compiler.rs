@@ -391,6 +391,8 @@ pub struct GaanimTypstWorld {
     source: Source,
     resources: Arc<TypstResources>,
     main_id: FileId,
+    /// Project files kept in memory, such as the pages of an exported deck.
+    files: HashMap<FileId, Bytes>,
 }
 
 /// Resolves package files through the same cache and registry as Typst's CLI.
@@ -453,6 +455,7 @@ impl GaanimTypstWorld {
             source,
             resources,
             main_id,
+            files: HashMap::new(),
         }
     }
 }
@@ -479,7 +482,10 @@ impl World for GaanimTypstWorld {
     }
 
     fn file(&self, id: FileId) -> typst::diag::FileResult<Bytes> {
-        self.resources.shared.files.file(id)
+        match self.files.get(&id) {
+            Some(bytes) => Ok(bytes.clone()),
+            None => self.resources.shared.files.file(id),
+        }
     }
 
     fn font(&self, index: usize) -> Option<Font> {
@@ -1099,6 +1105,36 @@ fn cached_typst_hierarchy(
         .expect("Typst hierarchy cache poisoned")
         .insert(cache_key, compiled.clone());
     Ok(compiled)
+}
+
+/// Compile the Typst document `source` to PDF. It reads `files` by their
+/// absolute paths (`image("/page-1.pdf")`), kept in memory, and lays out
+/// text with Typst's embedded fonts plus those of `font_registry`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn compile_typst_pdf(
+    source: &str,
+    files: Vec<(String, Vec<u8>)>,
+    font_registry: &FontRegistry,
+) -> Result<Vec<u8>, Vec<String>> {
+    let (_, resources) = typst_resources_for(font_registry);
+    let mut world = GaanimTypstWorld::with_resources(source, resources);
+    for (path, bytes) in files {
+        let path = VirtualPath::new(&path).map_err(|error| vec![format!("{path}: {error:?}")])?;
+        world.files.insert(
+            FileId::new(RootedPath::new(VirtualRoot::Project, path)),
+            Bytes::new(bytes),
+        );
+    }
+    let messages = |errors: &[typst::diag::SourceDiagnostic]| {
+        errors
+            .iter()
+            .map(|error| error.message.to_string())
+            .collect::<Vec<_>>()
+    };
+    let document = typst::compile::<PagedDocument>(&world)
+        .output
+        .map_err(|errors| messages(&errors))?;
+    typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).map_err(|errors| messages(&errors))
 }
 
 /// Measure Typst vector output without spawning ECS entities.

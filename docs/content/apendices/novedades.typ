@@ -41,6 +41,15 @@ enteros, o usa `scene.text.code`.
   encima de un montaje; WebM también lleva alfa, pero los editores lo leen
   mal. El diálogo del editor suma MOV a sus formatos y una casilla
   *Conservar la transparencia* para MOV, WebM, WebP y PNG.
+- Un `--output` terminado en `.pdf` exporta las diapositivas: una página por
+  cada `scene.stop()` y otra para el final, con el fotograma que muestra el
+  Presenter en esa pausa, sin pérdida y al tamaño de `--width` y `--height`.
+  Con `--notes`, tras cada diapositiva va una página con sus notas, en texto
+  que se puede buscar. Sirve para repartir la charla o subirla a una
+  plataforma de cursos sin Gaanim. Un paquete `.gaanim` también se exporta a
+  PDF, sin Python, y el diálogo del editor suma PDF a sus formatos con una
+  casilla para las notas. Ver
+  #link("/referencia/cli/#diapositivas-pdf")[Diapositivas en PDF].
 
 == Actualizaciones
 

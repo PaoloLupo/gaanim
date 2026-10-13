@@ -214,13 +214,13 @@ const INIT: Page = Page {
 };
 
 const EXPORT: Page = Page {
-    summary: "Render a script or project to a video, an animated image, PNG frames, or a\nplayback bundle; or render a bundle to a video without Python.",
+    summary: "Render a script or project to a video, an animated image, PNG frames, a PDF\nof its slides, or a playback bundle; or render a bundle to a video or a PDF\nwithout Python.",
     blocks: &[
         Block::Lines(
             "Usage",
             &[
                 "gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]",
-                "gaanim export <BUNDLE.gaanim> --output <VIDEO> [OPTIONS]",
+                "gaanim export <BUNDLE.gaanim> --output <VIDEO_OR_PDF> [OPTIONS]",
             ],
         ),
         Block::Rows(
@@ -243,6 +243,10 @@ const EXPORT: Page = Page {
                 (
                     ".png",
                     "One PNG per frame (no FFmpeg; supports --transparent). A %d\nor %0Nd in the name becomes the frame number\n(frames/f_%04d.png -> f_0000.png); otherwise it is appended\n(frame.png -> frame_00000.png)",
+                ),
+                (
+                    ".pdf",
+                    "Slides: a page for every scene.stop() and one for the end,\nas a presentation rests (no FFmpeg). Add --notes for each\nslide's speaker notes",
                 ),
                 (
                     ".gaanim",
@@ -285,6 +289,10 @@ const EXPORT: Page = Page {
                     "End of the range (default: the end of the scene). Audio\nis trimmed to the range and PNG frames start at 0",
                 ),
                 (
+                    "--notes",
+                    "PDF only: after the last page of each slide, a page with\nits scene.segment(notes=...)",
+                ),
+                (
                     "--frame <SECONDS|MARKER>[,...]",
                     "Write exactly one PNG at each instant instead of a range.\nOne instant writes --output; several append 1, 2, ...\n(still.png -> still_1.png). Needs a .png output",
                 ),
@@ -317,6 +325,10 @@ const EXPORT: Page = Page {
                 (
                     "gaanim export . -o still.png --frame 11.4",
                     "One PNG of the frame shown at 11.4 s",
+                ),
+                (
+                    "gaanim export . -o talk.pdf --notes",
+                    "A page per pause, with the speaker notes",
                 ),
                 (
                     "gaanim export . -o talk.gaanim",
@@ -599,6 +611,8 @@ mod tests {
             "--to",
             "--fps",
             ".mov",
+            ".pdf",
+            "--notes",
         ] {
             assert!(export.contains(option), "{option}");
         }

@@ -11,6 +11,7 @@ from fractions import Fraction
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -28,7 +29,7 @@ VIDEO_FORMATS = {
     "webp": {},
     "gif": {"video": "gif"},
 }
-ALL_FORMATS = (*VIDEO_FORMATS, "png")
+ALL_FORMATS = (*VIDEO_FORMATS, "png", "pdf")
 ALPHA_FORMATS = {"webm", "mov", "webp", "png"}
 AUDIO_FORMATS = {"mp4", "webm", "mov"}
 # `--fps` rates whose exact value the video streams must carry.
@@ -494,6 +495,60 @@ def export_frame_rate(
     return {"format": format_name, "fps": reported, "artifact": str(artifact)}
 
 
+def pdf_pages(artifact: Path) -> tuple[int, list[tuple[float, float]]]:
+    """The page count and the page sizes in points of an exported deck."""
+    data = artifact.read_bytes()
+    if not data.startswith(b"%PDF-"):
+        raise SmokeFailure(f"{artifact} is not a PDF")
+    count = re.search(rb"/Type\s*/Pages.*?/Count\s+(\d+)", data, re.S)
+    if count is None:
+        raise SmokeFailure(f"{artifact} has no page tree")
+    number = rb"\s*([-\d.]+)"
+    boxes = [
+        (float(box[2]) - float(box[0]), float(box[3]) - float(box[1]))
+        for box in re.findall(rb"/MediaBox\s*\[" + number * 4 + rb"\s*\]", data)
+    ]
+    return int(count.group(1)), boxes
+
+
+def export_slides_pdf(
+    executable: Path,
+    scene: Path,
+    output_dir: Path,
+    *,
+    repo: Path,
+) -> dict[str, Any]:
+    """A page for each of the deck's three resting points, and with --notes
+    each slide's notes after it: six pages, all 16:9."""
+    report: dict[str, Any] = {"mode": "slides-pdf"}
+    for notes, expected in ((False, 3), (True, 6)):
+        artifact = output_dir / ("slides-notes.pdf" if notes else "slides.pdf")
+        artifact.unlink(missing_ok=True)
+        run(
+            [
+                str(executable),
+                "export",
+                str(scene),
+                "--output",
+                str(artifact),
+                *SIZE_ARGS,
+                *(("--notes",) if notes else ()),
+            ],
+            cwd=repo,
+        )
+        pages, boxes = pdf_pages(artifact)
+        if pages != expected:
+            raise SmokeFailure(f"{artifact} has {pages} pages, expected {expected}")
+        if not boxes or any(abs(width / height - 16 / 9) > 0.01 for width, height in boxes):
+            raise SmokeFailure(f"{artifact} pages are not 16:9: {boxes}")
+        report["notes" if notes else "slides"] = {
+            "artifact": str(artifact),
+            "bytes": artifact.stat().st_size,
+            "pages": pages,
+        }
+    return report
+
+
 def export_three_d_worker(
     executable: Path,
     scene: Path,
@@ -549,6 +604,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--three-d-scene", type=Path, default=Path("tests/scenes/smoke/export_3d_smoke.py")
     )
+    parser.add_argument(
+        "--slides-scene", type=Path, default=Path("tests/scenes/smoke/test_slides.py")
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--formats", nargs="+", choices=ALL_FORMATS, default=ALL_FORMATS)
     parser.add_argument("--encoder", choices=ENCODERS, default="libx264")
@@ -577,6 +635,11 @@ def main() -> int:
         if not args.three_d_scene.is_absolute()
         else args.three_d_scene
     )
+    slides_scene = (
+        (repo / args.slides_scene).resolve()
+        if not args.slides_scene.is_absolute()
+        else args.slides_scene
+    )
     output_dir = args.output.resolve()
 
     if not executable.is_file():
@@ -602,6 +665,7 @@ def main() -> int:
                 repo=repo,
             )
             for format_name in args.formats
+            if format_name != "pdf"
         ]
         alpha_reports = [
             export_alpha_format(
@@ -639,6 +703,11 @@ def main() -> int:
             if "mp4" in args.formats
             else None
         )
+        slides_report = (
+            export_slides_pdf(executable, slides_scene, output_dir, repo=repo)
+            if "pdf" in args.formats
+            else None
+        )
     except (OSError, ValueError, json.JSONDecodeError, SmokeFailure) as error:
         print(f"Export smoke failed: {error}", file=sys.stderr)
         return 1
@@ -652,6 +721,7 @@ def main() -> int:
                 "alpha": alpha_reports,
                 "frame_rates": frame_rate_reports,
                 "three_d": three_d_report,
+                "slides": slides_report,
             },
             indent=2,
         ),

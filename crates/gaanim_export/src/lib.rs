@@ -4,11 +4,14 @@
 
 pub mod bundle;
 pub mod config;
+pub mod deck;
 pub mod encoder;
 pub mod exporter;
 pub mod gpu;
 pub mod live_polls;
 mod nv12;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod pdf;
 
 pub mod prelude {
     pub use crate::config::{
@@ -23,7 +26,8 @@ pub mod prelude {
     pub use crate::exporter::export_scene;
     pub use crate::exporter::{
         BundleRenderer, CapturedFrame, capture_bundle_streaming, capture_scene_direct,
-        capture_scene_direct_streaming, compose_bundle_frame, export_bundle, export_scene_direct,
+        capture_scene_direct_streaming, check_bundle_fit, compose_bundle_frame, export_bundle,
+        export_scene_direct,
     };
     pub use crate::gpu::{GpuContext, GpuContextError};
 }

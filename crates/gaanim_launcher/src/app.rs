@@ -136,7 +136,15 @@ fn dispatch_export_mode() -> bool {
         .is_some_and(gaanim_editor::bundle_player::is_bundle_path)
     {
         console::banner("Export");
-        if let Err(error) = gaanim_editor::cli::export_bundle_video(&command) {
+        let pdf = command
+            .output_format()
+            .is_ok_and(|(_, format)| format == gaanim_editor::cli::PDF_EXTENSION);
+        if pdf {
+            match gaanim_editor::cli::export_bundle_pdf(&command, None) {
+                Ok(pages) => report_deck(&command, pages),
+                Err(error) => error.exit("export"),
+            }
+        } else if let Err(error) = gaanim_editor::cli::export_bundle_video(&command) {
             error.exit("export");
         }
         return true;
@@ -159,11 +167,12 @@ fn dispatch_export_mode() -> bool {
             || command.to.is_some()
             || !command.frames.is_empty()
             || command.transparent
+            || command.notes
             || command.encoder != VideoEncoder::Auto
         {
             console::error(
                 "export",
-                "a playback bundle records the whole scene; --from, --to, --frame, --transparent and --encoder do not apply",
+                "a playback bundle records the whole scene; --from, --to, --frame, --transparent, --notes and --encoder do not apply",
             );
             std::process::exit(2);
         }
@@ -175,6 +184,32 @@ fn dispatch_export_mode() -> bool {
         if let Err(error) = run_bundle_export(&script, &output, fps) {
             console::error("export", error);
             std::process::exit(1);
+        }
+        return true;
+    }
+    if format == gaanim_editor::cli::PDF_EXTENSION {
+        if let Err(error) = command.validate_pdf() {
+            console::error("export", error);
+            std::process::exit(2);
+        }
+        console::banner("Export");
+        let pages = crate::python::runtime(&script)
+            .and_then(|python| (python.load_script_canvas)(&script))
+            .and_then(|canvas| {
+                gaanim_editor::cli::export_slides_pdf(
+                    canvas,
+                    &command,
+                    &output,
+                    Some(&script),
+                    None,
+                )
+            });
+        match pages {
+            Ok(pages) => report_deck(&command, pages),
+            Err(error) => {
+                console::error("export", error);
+                std::process::exit(1);
+            }
         }
         return true;
     }
@@ -213,11 +248,19 @@ fn dispatch_export_mode() -> bool {
         fps: command.fps,
         from: command.from,
         to: command.to,
+        notes: false,
     }) {
         console::error("export", error);
         std::process::exit(1);
     }
     true
+}
+
+/// Report the PDF deck `command` wrote, with its number of pages.
+fn report_deck(command: &ExportCommand, pages: usize) {
+    let output = command.output.as_deref().unwrap_or_default();
+    let noun = if pages == 1 { "page" } else { "pages" };
+    console::success("export", format!("wrote {output} ({pages} {noun})"));
 }
 
 /// Record `script` into a playback bundle at `output`.
@@ -268,12 +311,14 @@ struct ExportWorkerArgs {
     /// scene start/end.
     from: Option<ExportBound>,
     to: Option<ExportBound>,
+    /// A PDF deck prints each slide's speaker notes.
+    notes: bool,
 }
 
 fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String> {
     if args.len() < 4 {
         return Err(
-            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|mov|webp|gif|png|gaanim> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent] [--fps <rate>]"
+            "expected: --export-worker <script.py> <output> <draft|standard|production> <mp4|webm|mov|webp|gif|png|gaanim|pdf> [--encoder auto|libx264|nvenc|amf|qsv|vaapi] [--transparent] [--fps <rate>] [--notes]"
                 .to_string(),
         );
     }
@@ -291,10 +336,12 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     let mut fps = None;
     let mut from = None;
     let mut to = None;
+    let mut notes = false;
     let mut index = 4;
     while index < args.len() {
         match args[index].as_str() {
             "--transparent" => transparent = true,
+            "--notes" => notes = true,
             "--fps" => {
                 index += 1;
                 let value = args
@@ -364,6 +411,7 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
         fps,
         from,
         to,
+        notes,
     })
 }
 
@@ -386,6 +434,24 @@ fn dispatch_export_worker_mode() -> bool {
 fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
     let python = crate::python::runtime(&worker.script)?;
     let canvas = (python.load_script_canvas)(&worker.script)?;
+    if worker.format == gaanim_editor::cli::PDF_EXTENSION {
+        let command = ExportCommand {
+            quality: worker.quality.clone(),
+            width: worker.width,
+            height: worker.height,
+            fit: worker.fit,
+            notes: worker.notes,
+            ..Default::default()
+        };
+        return gaanim_editor::cli::export_slides_pdf(
+            canvas,
+            &command,
+            &worker.output,
+            Some(&worker.script),
+            None,
+        )
+        .map(|_| ());
+    }
     if worker.format == gaanim_bundle::EXTENSION {
         let fps = match worker.fps {
             Some(fps) => fps
@@ -1129,6 +1195,7 @@ mod tests {
                 fps: None,
                 from: None,
                 to: None,
+                notes: false,
             }
         );
         let range = [
@@ -1172,6 +1239,10 @@ mod tests {
         let transparent =
             ["scene.py", "overlay.webm", "draft", "webm", "--transparent"].map(str::to_string);
         assert!(parse_export_worker_args(&transparent).unwrap().transparent);
+        let deck = ["talk.py", "talk.pdf", "standard", "pdf", "--notes"].map(str::to_string);
+        let deck = parse_export_worker_args(&deck).unwrap();
+        assert_eq!(deck.format, "pdf");
+        assert!(deck.notes);
         let prores = [
             "scene.py",
             "lower.mov",
