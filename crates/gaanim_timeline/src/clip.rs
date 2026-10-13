@@ -304,9 +304,13 @@ pub enum PropertyLensSpec {
         to: gaanim_animation::TrackingScalar,
     },
     /// Select orthographic projection while tweening its zoom.
+    ///
+    /// `from_pose` is the perspective pose the camera had, if any: the move
+    /// then flattens it (see [`gaanim_math::CameraPose::flatten_to_orthographic`]).
     CameraOrthographic {
         from: f64,
         to: f64,
+        from_pose: Option<gaanim_math::CameraPose>,
     },
     /// Restore the complete authored camera rig to its 2D defaults.
     ///
@@ -634,7 +638,7 @@ impl PropertyLensSpec {
                 from: *from,
                 to: to.clone(),
             },
-            Self::CameraOrthographic { from, to } => PropertyLens::CameraOrthographic {
+            Self::CameraOrthographic { from, to, .. } => PropertyLens::CameraOrthographic {
                 from: *from,
                 to: *to,
             },

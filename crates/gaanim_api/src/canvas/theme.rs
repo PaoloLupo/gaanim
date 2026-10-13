@@ -355,7 +355,8 @@ impl CanvasTheme {
                 background: rgb(0xFDF6E3),
                 foreground: rgb(0x073642),
                 muted: rgb(0x657B83),
-                title: rgb(0xB58900),
+                // Solarized yellow, darkened to read as a title on base3.
+                title: rgb(0xB08500),
                 accent: rgb(0x2AA198),
                 chart: rgb(0x268BD2),
                 panel: rgb(0xEEE8D5),
@@ -398,7 +399,8 @@ impl CanvasTheme {
             "catppuccin-latte" => ThemePalette {
                 background: rgb(0xEFF1F5),
                 foreground: rgb(0x4C4F69),
-                muted: rgb(0x8C8FA1),
+                // Overlay2: Overlay1 is too faint on Base.
+                muted: rgb(0x7C7F93),
                 title: rgb(0x8839EF),
                 accent: rgb(0xEA76CB),
                 chart: rgb(0x1E66F5),
@@ -1375,6 +1377,14 @@ mod tests {
             .set_colors(&HashMap::from([("background".to_owned(), Color::BLACK)]))
             .unwrap();
         assert_eq!(theme.color("shadow").unwrap(), chosen);
+    }
+
+    #[test]
+    fn builtin_themes_pass_their_own_validation() {
+        for name in CanvasTheme::BUILTIN_NAMES {
+            let theme = CanvasTheme::builtin(name).unwrap();
+            assert!(theme.validate().is_empty(), "{name}: {:?}", theme.validate());
+        }
     }
 
     #[test]

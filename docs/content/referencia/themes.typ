@@ -197,6 +197,12 @@ se reparten uniformemente y hacen falta al menos dos. `extend` decide qué pasa
 fuera de la rampa: `"pad"` (predeterminado) prolonga los extremos, `"repeat"`
 la repite y `"reflect"` la repite en espejo.
 
+Un grupo pasa el pincel a cada miembro, que lo pinta en sus propias unidades
+locales: un gradiente no cruza el grupo, sino que se repite en cada pieza. Para
+que un solo gradiente recorra varias formas, únelas con
+`scene.geometry.union(...)` o da a cada una un pincel desplazado según su
+posición.
+
 #api-entry(
   name: "Brush.solid",
   kind: "factory",

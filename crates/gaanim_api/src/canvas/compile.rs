@@ -9201,6 +9201,13 @@ impl SceneModel {
                 *camera_fov = Some((*fov_y, *near, *far));
             }
             AnimationType::CameraOrthographic { zoom } => {
+                let from_pose = camera_fov.map(|(fov_y, near, far)| gaanim_math::CameraPose {
+                    position: *camera_position,
+                    rotation: *camera_rotation,
+                    target: *camera_target,
+                    up: *camera_up,
+                    projection: gaanim_math::Projection::Perspective { fov_y, near, far },
+                });
                 Self::add_camera_lens(
                     builder,
                     start,
@@ -9208,6 +9215,7 @@ impl SceneModel {
                     PropertyLensSpec::CameraOrthographic {
                         from: *camera_zoom,
                         to: *zoom,
+                        from_pose,
                     },
                 );
                 *camera_zoom = *zoom;
@@ -14181,6 +14189,45 @@ mod tests {
         let middle = *world.resource::<gaanim_math::Camera>();
         assert!(middle.validate().is_ok());
         assert!((middle.position - middle.target).length() > 1.0);
+    }
+
+    /// Turning a perspective camera orthographic flattens it over the
+    /// animation, with the target centered, and ends on the same pose.
+    #[test]
+    fn orthographic_animations_flatten_a_perspective_camera() {
+        let eye = DVec3::new(7.0, 5.0, 10.0);
+        let target = DVec3::new(0.0, 0.5, 0.0);
+        let mut canvas = SceneModel::new(1280, 720);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.7, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let look_at = canvas.camera_look_at_endpoints(
+            CanvasEndpoint::Static(eye),
+            CanvasEndpoint::Static(target),
+            DVec3::Y,
+            0.0,
+        );
+        canvas.play(vec![look_at]);
+        let orthographic = canvas.camera_orthographic(1.5, 1.0);
+        canvas.play(vec![orthographic]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+
+        timeline.seek(&mut world, 0.5);
+        let middle = *world.resource::<gaanim_math::Camera>();
+        assert!(middle.validate().is_ok());
+        let gaanim_math::Projection::Perspective { fov_y, .. } = middle.projection else {
+            panic!("orthographic only at the end: {:?}", middle.projection);
+        };
+        assert!(fov_y < 0.7);
+        assert!((middle.target - target).length() < 1e-9);
+        assert!((middle.position - target).length() > (eye - target).length());
+        timeline.seek(&mut world, 1.0);
+        let end = *world.resource::<gaanim_math::Camera>();
+        assert!((end.position - eye).length() < 1e-9);
+        assert!(matches!(
+            end.projection,
+            gaanim_math::Projection::Orthographic { zoom } if (zoom - 1.5).abs() < 1e-9
+        ));
     }
 
     #[test]
