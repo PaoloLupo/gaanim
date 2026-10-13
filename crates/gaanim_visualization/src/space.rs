@@ -380,10 +380,12 @@ impl CartesianSpace {
                 tick_path.move_to(Point::new(y_axis_x - half, y));
                 tick_path.line_to(Point::new(y_axis_x + half, y));
             }
+            // Where both axes cross at the same value, as at the origin, the
+            // x number there already reads for the y axis.
             if self.visibility.y_numbers
                 && tick.major
                 && !tick.label.is_empty()
-                && tick.value != x_cross
+                && !(tick.value == y_cross && y_cross == x_cross)
             {
                 numbers.push(LabelGeometry {
                     text: tick.label.clone(),
@@ -515,6 +517,27 @@ mod tests {
         let data = map.local_to_data(local).unwrap();
         assert!((data.0 - 1.5).abs() < 1e-10);
         assert!((data.1 - 7.0).abs() < 1e-10);
+    }
+
+    /// Only where both axes cross at the same value, as at the origin, does
+    /// the y axis leave its number there to the x axis: with the x axis
+    /// along the bottom of a plot centered on zero, zero keeps its number.
+    #[test]
+    fn y_numbers_skip_only_the_height_of_the_x_axis() {
+        use crate::Crossing;
+        let numbers = |y: Axis| {
+            let x = Axis::linear(0.0, 4.0).unwrap().ticks(1.0).unwrap();
+            CartesianSpace::number_plane(x, y, PlotFrame::new(8.0, 4.0).unwrap())
+                .geometry()
+                .unwrap()
+                .numbers
+                .len()
+        };
+        let y = Axis::linear(-1.5, 1.5).unwrap().ticks(1.0).unwrap();
+        // 0..4 along x, and -1, 0 and 1 along y.
+        assert_eq!(numbers(y.clone().crossing(Crossing::Minimum)), 5 + 3);
+        // Crossing at zero, the y zero would sit on the x axis.
+        assert_eq!(numbers(y), 5 + 2);
     }
 
     #[test]

@@ -717,11 +717,12 @@ scene.render()
   [`solarized-dark`, `solarized-light`], [], [Solarized en sus dos variantes.],
   [`gruvbox-dark`], [`gruvbox`], [Gruvbox oscuro.],
   [`catppuccin-mocha`, `catppuccin-latte`], [`catppuccin`, `mocha`, `latte`], [Catppuccin oscuro y claro.],
+  [`gaanim`], [], [Los colores de la marca: papel `#F7F6FF` sobre grafito `#121212`, acento violeta `#7C6CFF`, títulos en oro `#FFC933`, gráficos en violeta claro `#A99FFF` y reglas en bruma `#3F37A8`.],
 )
 
 Los nombres no distinguen mayúsculas. En el stub, `Scene(theme=...)`,
 `Canvas.set_theme` y `Theme(base)` tipan el nombre como `ThemeName`, un
-`Literal` con los once nombres y los ocho alias de la tabla, así que el editor
+`Literal` con los doce nombres y los ocho alias de la tabla, así que el editor
 los autocompleta. `Theme.schemes()` devuelve solo los nombres canónicos.
 
 #api-entry(

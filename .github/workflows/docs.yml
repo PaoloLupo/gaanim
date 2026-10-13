@@ -9,6 +9,9 @@ on:
     paths:
       - "docs/**"
       - "crates/**"
+      # The examples pages show the cataloged examples and their snapshots.
+      - "examples/**"
+      - "tests/visual/**/baseline/**"
       - "Cargo.toml"
       - "scripts/build_web.py"
       - "scripts/build_playground.py"
@@ -20,6 +23,9 @@ on:
     paths:
       - "docs/**"
       - "crates/**"
+      # The examples pages show the cataloged examples and their snapshots.
+      - "examples/**"
+      - "tests/visual/**/baseline/**"
       - "Cargo.toml"
       - "scripts/build_web.py"
       - "scripts/build_playground.py"
@@ -63,20 +69,26 @@ jobs:
           echo "PYO3_PYTHON=$(which python)" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=${pythonLocation}/lib" >> "$GITHUB_ENV"
 
+      # The cataloged examples are recorded as bundles, and math/matrix_operations
+      # computes with SymPy, the `algebra` extra (crates/gaanim_python/pyproject.toml).
+      - name: Install the examples' optional dependencies
+        run: python -m pip install "sympy>=1.14,<2"
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: docs
 
       # Previews are keyed by each example's source hash, so a stale cache
       # only re-renders the examples that changed. Results cached against
-      # another stub or runtime version are re-checked before reuse.
+      # another stub or runtime version are re-checked before reuse. The
+      # bundles of the cataloged examples are keyed the same way.
       - name: Restore rendered previews
         uses: actions/cache@v4
         with:
           path: |
             docs/target/code_cache
             docs/assets/generated
-          key: docs-previews-${{ hashFiles('docs/content/**', 'crates/**/*.rs') }}
+          key: docs-previews-${{ hashFiles('docs/content/**', 'examples/**', 'crates/**/*.rs') }}
           restore-keys: docs-previews-
 
       - name: Build preview runtime

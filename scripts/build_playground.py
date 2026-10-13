@@ -8,7 +8,7 @@ player, so it needs no server beyond static files:
   version of the Pyodide release the page loads, packaged with the `gaanim`
   package's Python files as a Pyodide wheel;
 - `stubs.zip`, the package's type stubs, for the editor's completions;
-- `examples.json`, the documentation's example scenes;
+- `examples.json`, the quickstart and the gallery of the example catalog;
 - the page itself (`crates/gaanim_pyodide/web`), with the brand's logo and
   the documentation's code face.
 
@@ -34,6 +34,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -58,7 +59,7 @@ PAGE_FILES = (
 ICONS = ("favicon.ico", "gaanim-icon-512.png", "gaanim-icon.svg")
 # The documentation's code face, with its license (SIL OFL 1.1).
 FONTS = ("JetBrainsMono-Variable.ttf", "OFL-1.1.txt")
-EXAMPLES = ROOT / "docs" / "content" / "ejemplos"
+EXAMPLES = ROOT / "examples"
 
 
 def crate_version() -> str:
@@ -203,28 +204,26 @@ def write_stubs(out: Path) -> None:
 
 
 def examples() -> list[dict[str, str]]:
-    """The documentation's example scenes, titled as its catalog titles them."""
-    catalog = (EXAMPLES / "escenas.typ").read_text(encoding="utf-8")
-    titles = dict(re.findall(r'cell: "(\w+)".*?title: "([^"]+)"', catalog, re.DOTALL))
+    """The quickstart, then the gallery examples of the catalog that run on the web."""
     found = [
         {
             "name": "quickstart",
             "title": "Hola, Gaanim",
-            "code": (ROOT / "examples" / "quickstart.py").read_text(encoding="utf-8"),
+            "code": (EXAMPLES / "quickstart.py").read_text(encoding="utf-8"),
         }
     ]
-    for source in ("basicos.py", "avanzados.py"):
-        text = (EXAMPLES / source).read_text(encoding="utf-8")
-        for chunk in re.split(r"(?m)^# %% ", text)[1:]:
-            cell, _, code = chunk.partition("\n")
-            cell = cell.strip()
-            found.append(
-                {
-                    "name": cell,
-                    "title": titles.get(cell, cell.replace("_", " ").capitalize()),
-                    "code": code.strip() + "\n",
-                }
-            )
+    catalog = tomllib.loads((EXAMPLES / "examples.toml").read_text(encoding="utf-8"))
+    for entry in catalog["example"]:
+        path = Path(entry["path"])
+        if path.parts[0] != "gallery" or not entry.get("web", True):
+            continue
+        found.append(
+            {
+                "name": path.stem,
+                "title": entry.get("title", path.stem.replace("_", " ").capitalize()),
+                "code": (EXAMPLES / path).read_text(encoding="utf-8"),
+            }
+        )
     return found
 
 

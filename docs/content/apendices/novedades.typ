@@ -11,7 +11,7 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
-= 0.11.1
+= 0.12.0
 
 Sin publicar. Los vídeos se exportan a cualquier frecuencia (24, 25, 50 o las
 fracciones NTSC como 23,976) y a MOV con Apple ProRes, con canal alfa, para
@@ -111,8 +111,33 @@ enteros, o usa `scene.text.code`.
   suave sobre fondos claros y casi opaco sobre fondos oscuros. Cámbialo con
   `Theme(colors={"shadow": ...})`.
 
+== Estilo y 3D
+
+- Tema integrado `gaanim`, con los colores de la marca: papel sobre grafito,
+  acentos violeta, títulos en oro y reglas en bruma. Sus series empiezan por
+  el violeta y el oro, y su mapa de calor va del grafito al oro pasando por
+  la bruma y el violeta. Ver #link("/referencia/themes/")[Temas].
+- `scene.geometry.light_3d()` crea luces puntuales o direccionales para las
+  primitivas con material: se colocan con `move_to_3d`, se animan y siguen a
+  otros objetos como cualquier dibujable, y alumbran en su color. Mientras la
+  escena muestra luces, sustituyen a la luz principal fija; `fade_in` y
+  `fade_out` las encienden y las apagan. Ver
+  #link("/referencia/geometria/")[Geometría].
+- `space.surface(..., color_map=...)` colorea la superficie por altura con un
+  `ColorMap` o con cualquier mapa integrado por su nombre (`"viridis"`,
+  `"plasma"`…). Sin él conserva la rampa de siempre.
+
 == Ejemplos
 
+- Una galería, `examples/gallery/`, con 23 escenas cortas en los colores de
+  la marca (el tema `gaanim`), agrupadas en conceptos básicos, animaciones,
+  gráficas, cámara y 3D, y avanzadas. Va desde el logo construido con
+  primitivas hasta los epiciclos de Fourier, pasando por un vector que barre
+  el plano, sumas de Riemann que se refinan, una cámara que sigue un punto,
+  una lupa sobre un copo de Koch y una superficie 3D. Abre la sección
+  #link("/ejemplos/gallery/")[Gallery] de los ejemplos y sustituye a «Ejemplos
+  básicos» y «Ejemplos avanzados», cuyas direcciones llevan ahora a la
+  galería. El playground ofrece estas escenas en su menú de ejemplos.
 - Los ejemplos del repositorio se ordenan por temas:
   `examples/animation/easings.py`, `examples/camera/camera_moves.py`,
   `examples/3d/primitives_3d.py`… Cada uno recorre las variantes que ofrece
@@ -121,16 +146,62 @@ enteros, o usa `scene.text.code`.
   `just run easings` abre uno por su nombre. Los scripts sueltos de antes se
   reescribieron en inglés dentro de su tema, o pasaron a `tests/` los que
   eran pruebas.
+- La documentación tiene una sección #link("/ejemplos/")[Examples] con todos
+  los ejemplos por tema: una portada con los temas en cinco bloques, Showcase
+  destacado y un filtro, y una página por tema con cada ejemplo, su captura,
+  su código y su enlace al repositorio. Sale del catálogo al compilar la
+  documentación, así que un ejemplo nuevo aparece sin tocarla.
 
 == Editor
 
 - El título de la ventana dice qué versión de Gaanim se está ejecutando:
-  «Gaanim 0.11.1 — proyecto», con «(dev)» en una build de desarrollo, para
+  «Gaanim 0.12.0 — proyecto», con «(dev)» en una build de desarrollo, para
   distinguirla del release instalado. También en la Presenter View y al
   reproducir un paquete.
 
+== Reproductor web
+
+- La barra del reproductor ligero (`reproductor/insertar/`) marca cada pausa
+  de la escena (`scene.stop()`) en su línea de tiempo; las ya pasadas se ven
+  en violeta, como el progreso.
+- La opción `full=click` del reproductor ligero espera a un clic antes de
+  abrir el reproductor completo para una escena que lo necesita, y avisa a la
+  página que lo contiene para que ofrezca su propio botón (ver
+  #link("/guias/compartir/#insertar")[Insertar en un blog o sitio web]).
+
 == Correcciones
 
+- Las partes de una ecuación que contienen una fracción (`frac(a, b)` o
+  `a/b`) o una función que solo compone sus argumentos (`sqrt`, `abs`,
+  `bold`, `binom`…) se pueden seleccionar: `surrounding_rect`, `fill`,
+  `write(by="part")` y las transformaciones las alcanzan. Antes la selección
+  quedaba vacía y el marco o el color no aparecían. Seleccionar la fracción
+  entera incluye su barra.
+- `transform_to` entre marcas de un plano (`riemann_sum`, `plot_data`,
+  `scatter_data`…) transforma su forma; antes solo cambiaba el color, porque
+  la marca se redibujaba desde sus datos en cada fotograma.
+- `scene.camera.animate.pan_to(dibujable)` centra el dibujable donde se
+  dibuja, también cuando sigue a un punto reactivo, y al terminar la cámara
+  se queda allí; antes iba a la posición con la que se declaró y la
+  siguiente animación de cámara partía de la pose anterior a la panorámica.
+- `scene.camera.animate.orbit` gira alrededor del eje `up` de la cámara: con
+  `look_at(..., up=(0, 0, 1))`, como en los ejes 3D, rodea la escena en vez de
+  pasar por encima. Una órbita tras otra parte de donde terminó la anterior.
+- Un dibujable con `hidden()` dentro de un grupo, o una marca de un plano,
+  espera a su propia animación: el `create` del plano o la entrada del grupo
+  ya no lo muestran.
+- Un plano con el eje X abajo (`crossing("min")`) numera el cero de su eje Y.
+  Solo se omite el número del eje Y donde los dos ejes se cruzan en el mismo
+  valor, como en el origen.
+- Un paquete `.gaanim` guarda bien las escenas 3D. Antes, en cada fotograma
+  salvo el primero de cada bloque, todas las piezas de una malla se dibujaban
+  como la última (un cubo quedaba en una cara, una esfera en un triángulo) y
+  las rejillas de unos ejes 3D en una sola línea, al reproducir, presentar o
+  exportar el paquete. Hay que volver a grabar los paquetes con 3D.
+- El reproductor ligero (`reproductor/insertar/`) abre en el reproductor
+  completo las escenas con cristal; antes las dibujaba sin el efecto. Al
+  pasarle una escena le da la dirección completa del archivo, que antes se
+  perdía en un sitio bajo una ruta base, como GitHub Pages.
 - Los temas `solarized-light` y `catppuccin-latte` pasan su propio
   `validate()`. El título de `solarized-light` (`#B08500`) y el color atenuado
   de `catppuccin-latte` (Overlay2, `#7C7F93`) son algo más oscuros y llegan al
@@ -456,6 +527,12 @@ enteros, o usa `scene.text.code`.
 
 == Al actualizar
 
+- Un `hidden()` dentro de un grupo, o en una marca de un plano, ya no aparece
+  con la entrada del grupo o el `create` del plano. Si contabas con ello,
+  anima el objeto (`fade_in`, `create`…) o quita el `hidden()`.
+- Una órbita de cámara con `up=(0, 0, 1)` rodea la escena en vez de pasar por
+  encima; si buscabas ese giro, usa `look_at` con el ojo que quieras.
+- Los planos con el eje X abajo muestran el cero del eje Y.
 - `scene.camera.animate.orthographic()` ya no es instantáneo: dura un
   segundo, o la `duration` de `scene.play`, y avanza el cursor. Para el salto
   de antes, usa `scene.camera.orthographic()` o `.duration(0)`.

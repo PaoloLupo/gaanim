@@ -417,21 +417,25 @@ impl SceneModel {
                         model.visibility(cache.state(position).ranks[index])
                     })
                 }))?;
-            let row = self
-                .group_no_center(&[&shown])
-                .bind_property(PropertySources::Translation {
-                    values: [
-                        0.0.into(),
-                        {
-                            let cache = cache.clone();
-                            position_source(&parameter, recipe("slot", index), move |position| {
-                                slots.center_y(cache.state(position).ranks[index])
-                            })
-                        },
-                        0.0.into(),
-                    ],
-                    anchor: None,
-                })?;
+            let row =
+                self.group_no_center(&[&shown])
+                    .bind_property(PropertySources::Translation {
+                        values: [
+                            0.0.into(),
+                            {
+                                let cache = cache.clone();
+                                position_source(
+                                    &parameter,
+                                    recipe("slot", index),
+                                    move |position| {
+                                        slots.center_y(cache.state(position).ranks[index])
+                                    },
+                                )
+                            },
+                            0.0.into(),
+                        ],
+                        anchor: None,
+                    })?;
             bars.push(BarRaceBar {
                 name: name.clone(),
                 row,

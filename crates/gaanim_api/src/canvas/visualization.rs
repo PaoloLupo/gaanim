@@ -2173,7 +2173,7 @@ impl SceneModel {
                 space.visibility.y_numbers
                     && tick.major
                     && !tick.label.is_empty()
-                    && tick.value != x_cross
+                    && !(tick.value == y_cross && y_cross == x_cross)
             })
             .map(|tick| self.axis_text_size(&tick.label, number_scale).0)
             .fold(0.0, f64::max);
@@ -3309,6 +3309,7 @@ impl SceneModel {
         space: &CoordinateSpace3DHandle,
         function: ReactiveFunction,
         resolution: [usize; 2],
+        color_map: Option<gaanim_core::ColorMap>,
     ) -> Result<DrawableHandle, VisualizationError> {
         self.validate_reactive_function_owner(&function)?;
         if resolution[0] < 2 || resolution[1] < 2 {
@@ -3321,6 +3322,7 @@ impl SceneModel {
             map: space.map.clone(),
             function,
             resolution,
+            color_map,
         });
         self.attach_to_space_3d(space, &handle);
         Ok(handle)
@@ -7573,6 +7575,7 @@ mod tests {
                     Ok(vec![values[2] * values[0] * values[1]])
                 }),
                 [4, 4],
+                None,
             )
             .unwrap();
 

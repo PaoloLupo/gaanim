@@ -269,19 +269,25 @@ las separa se escribe `&amp;`):
   [`loop`], [Repite la animación entera, como un GIF.],
   [`controls=0`], [Oculta la barra. Un clic o un toque en la animación la pausa o la reanuda, y al terminar la repite desde el principio.],
   [`autoplay=0`], [No empieza sola: un botón en el centro espera un clic.],
+  [`full=click`], [Si la escena necesita el reproductor completo (ver abajo), no lo abre solo: muestra un aviso y lo abre al hacer clic.],
   [`#t=2`], [Empieza a los dos segundos (también `#t=1:05`).],
 )
 
 Sin `controls=0`, una barra fina aparece al pasar el cursor por la animación y
-mientras está pausada: reproducir o pausar, la posición, el tiempo, el bucle,
-el sonido si la escena lo tiene y la pantalla completa. Sin `loop`, la
+mientras está pausada: reproducir o pausar, la posición, con una marca en cada
+pausa de la escena, el tiempo, el bucle, el sonido si la escena lo tiene y la
+pantalla completa. Sin `loop`, la
 animación se detiene en su último fotograma con un botón para repetirla.
 
 El reproductor ligero deja fuera el posprocesado, los fondos de shader, las
-transiciones de shader y los efectos de shader sobre objetos, que se dibujan
-en pasadas propias de la GPU. Cuando la escena usa alguno, abre el
+transiciones de shader, los efectos de shader sobre objetos y el cristal, que
+se dibujan en pasadas propias de la GPU. Cuando la escena usa alguno, abre el
 reproductor completo con las mismas opciones, así que la animación siempre se
-ve como la grabaste; solo descarga más.
+ve como la grabaste; solo descarga más. Con `full=click` espera a un clic
+antes de abrirlo, para que una página con varias animaciones no descargue el
+reproductor completo en cada una; una página del mismo sitio recibe además el
+mensaje `gaanim:status` de tipo `full`, con la dirección del reproductor
+completo en `url`, por si prefiere mostrar su propio botón.
 
 `aspect-ratio` da al marco la proporción de la escena: `16 / 9` para el
 `frame=(16, 9)` por defecto, `1 / 1` para una cuadrada. Así el marco ocupa el

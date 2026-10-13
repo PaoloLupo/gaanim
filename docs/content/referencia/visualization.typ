@@ -1225,7 +1225,7 @@ world = scene.viz.cartesian_3d(
 #api-entry(
   name: "CoordinateSpace3D.surface",
   kind: "method",
-  desc: [Superficie `z = f(x, y)` muestreada en una rejilla de `resolution`, con `inputs` reactivas como `plot`.],
+  desc: [Superficie `z = f(x, y)` muestreada en una rejilla de `resolution`, con `inputs` reactivas como `plot`. Los vértices se colorean por altura, de la más baja a la más alta, con `color_map`: un `ColorMap` o el nombre de un mapa integrado, como `"viridis"` o `"plasma"`. Sin él, usa una rampa de azul, verde y rojo.],
 )[
 ```python
 >>>from gaanim import *

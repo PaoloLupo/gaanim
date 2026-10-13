@@ -313,6 +313,11 @@ scene.render()
   color del material se mantiene legible: una cara iluminada muestra más o
   menos su color, y una en sombra, la mitad. Los materiales pulidos (poca
   rugosidad) tienen un reflejo blanco y los metálicos reflejan el cielo.
+- `scene.geometry.light_3d()` añade una luz puntual (o `"directional"`, como
+  el sol) que se coloca con `move_to_3d` y se anima como cualquier objeto.
+  Mientras hay luces, sustituyen a la luz principal fija, cada una en su
+  color e intensidad; `fade_in` y `fade_out` la encienden y la apagan. Con
+  `lighting_3d("none")` solo alumbran ellas.
   `"none"` deja solo la emisión del material.
 - Las caras planas se pintan de un solo color y las curvas con degradados
   suaves.

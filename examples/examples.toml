@@ -13,6 +13,8 @@
 #   allow        Contract rules the example is exempt from because they are its
 #                subject: "background", "frame", "margin", "theme", "post",
 #                "colors" or "titles".
+#   group        A heading of the topic's page the example is listed under;
+#                the gallery uses it for its sections.
 
 [[topic]]
 id = "basics"
@@ -118,6 +120,11 @@ description = "Presentations: slides, editorial components, sections and tables.
 id = "live"
 title = "Live audience"
 description = "Polls, quizzes and live zones the audience joins from their phones."
+
+[[topic]]
+id = "gallery"
+title = "Gallery"
+description = "Short scenes in the brand's colors, from a logo built of primitives to Fourier epicycles, each one a classic of animation galleries made with the whole API."
 
 [[topic]]
 id = "showcase"
@@ -712,6 +719,144 @@ description = "The motion helpers of gaanim.live, from lerp and easings to sprin
 [[example]]
 path = "live/zone_games.py"
 description = "Characters that move with the game: grouped by the answer each player chose, racing by score, and standing on a podium by rank."
+
+[[example]]
+path = "gallery/logo.py"
+group = "Basic concepts"
+description = "The logo built from primitives: a square that turns into a circle as it moves, and a wordmark cut from ellipses and bars."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/measured_segment.py"
+group = "Basic concepts"
+description = "A segment between two points whose run, rise and length are measured live while the points move."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/vector_arrow.py"
+group = "Basic concepts"
+description = "A vector on a plane whose components, angle and coordinates follow it as it sweeps around, leaving a fading trail."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/boolean_shapes.py"
+group = "Basic concepts"
+description = "Two ellipses and their union, intersection, exclusion and difference, which reshape live as one ellipse turns and slides."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/point_on_shapes.py"
+group = "Animations"
+description = "Points that travel along a circle, a square and a star with a trail of echoes, and an arm that turns about its end."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/moving_around.py"
+group = "Animations"
+description = "A square that slides, recolors, shrinks and turns, one call at a time and then all at once, squashing as it speeds."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/moving_angle.py"
+group = "Animations"
+description = "An angle that opens and closes while its arc, its value in degrees and a fading trail follow the moving ray."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/sliding_ladder.py"
+group = "Animations"
+description = "A ladder whose feet slide along a wall and the floor, its midpoint tracing a quarter circle and its past positions outlining an astroid."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/group_to_destination.py"
+group = "Animations"
+description = "A cluster of points that travels so its gold leader lands on each target, the others trailing it on delayed followers."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/moving_frame_box.py"
+group = "Animations"
+description = "The product rule written term by term, with a frame and a band that glide from one term to the next."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/point_with_trace.py"
+group = "Animations"
+description = "A pen on the end of two turning arms that traces a rose, the second arm turning four times faster the other way."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/sine_cosine_plot.py"
+group = "Plotting"
+description = "The sine and the cosine over two turns, with a scanning line that reads both curves until it stops at two pi."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/gradient_descent.py"
+group = "Plotting"
+description = "Gradient descent from two starts on the same curve: one ball settles in a shallow valley, the other finds the deepest one."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/riemann_area.py"
+group = "Plotting"
+description = "Riemann sums that refine from four rectangles to sixty-four under a curve, their total closing in on the area."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/hyperbola_rectangle.py"
+group = "Plotting"
+description = "A rectangle from the origin to a point that slides along the hyperbola y = 6/x, changing shape while its area stays six."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/heating_curve.py"
+group = "Plotting"
+description = "The heating curve of water, traced as a thermometer fills, through melting and boiling."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/following_camera.py"
+group = "Camera and 3D"
+description = "A camera that zooms in on a point riding a sine wave, follows it along two turns and pulls back out."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/zoomed_inset.py"
+group = "Camera and 3D"
+description = "A Koch snowflake explored through a round magnifier that follows a point along its edge and zooms deeper."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/surface_plot.py"
+group = "Camera and 3D"
+description = "A Gaussian hill on 3D axes that the camera circles while the hill narrows into a peak and spreads back out."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/light_source.py"
+group = "Camera and 3D"
+description = "A gold point light that sweeps over three solids like a sun, lighting each from the side it passes."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/camera_orbit.py"
+group = "Camera and 3D"
+description = "Lit solids on 3D axes seen by a camera that circles them, tilts up and down, and keeps a readout fixed on the screen."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/warped_grid.py"
+group = "Advanced"
+description = "A sentence and an equation that write themselves and transform, then a grid bent by a nonlinear function."
+allow = ["theme"]
+
+[[example]]
+path = "gallery/fourier_epicycles.py"
+group = "Advanced"
+description = "Five turning circles stacked on each other, the odd harmonics of a square wave, whose tip draws the wave as they spin."
+allow = ["theme"]
 
 [[example]]
 path = "showcase/dashboard.py"

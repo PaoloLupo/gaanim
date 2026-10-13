@@ -231,6 +231,7 @@ fn sampled_reactive_surface_3d(
     map: &gaanim_visualization::CoordinateMap3D,
     function: &ReactiveFunction,
     resolution: [usize; 2],
+    color_map: Option<&gaanim_core::ColorMap>,
     time: f64,
     values: &[(ObjectId, f64)],
 ) -> TriangleMeshData {
@@ -267,6 +268,10 @@ fn sampled_reactive_surface_3d(
             } else {
                 0.0
             };
+            if let Some(color) = color_map.and_then(|color_map| color_map.sample(t).ok()) {
+                let [r, g, b, a] = color.components;
+                return [r, g, b, if value.is_finite() { a } else { 0.0 }];
+            }
             [
                 (0x20 as f64 + t * 0xD0 as f64) as f32 / 255.0,
                 (0x60 as f64 + (1.0 - (2.0 * t - 1.0).abs()) * 0x90 as f64) as f32 / 255.0,
@@ -4020,6 +4025,7 @@ impl SceneModel {
                             revealed_deferred,
                             anim,
                             id_map,
+                            object_specs,
                         );
                         if let Some(mut remapped) = Self::remap_anim(anim, id_map, object_specs) {
                             Self::resolve_emphasis_color(builder, &mut remapped);
@@ -4130,6 +4136,7 @@ impl SceneModel {
                             revealed_deferred,
                             anim,
                             id_map,
+                            object_specs,
                         );
                     }
                     let remapped: Vec<(AnimationBuilder, Option<Arc<gaanim_math::TimeMap>>)> =
@@ -6942,6 +6949,14 @@ impl SceneModel {
                                 *offset,
                             ),
                         );
+                        builder.authored_follows.insert(
+                            target_id,
+                            crate::builder::AuthoredFollow {
+                                endpoint: CanvasEndpoint::Entity(*source),
+                                offset: *offset,
+                                offset_space: gaanim_animation::FollowOffsetSpace::World,
+                            },
+                        );
                     }
                 }
 
@@ -6967,6 +6982,14 @@ impl SceneModel {
                                 offset_space: *offset_space,
                                 since: builder.current_time,
                             });
+                        builder.authored_follows.insert(
+                            target_id,
+                            crate::builder::AuthoredFollow {
+                                endpoint: endpoint.clone(),
+                                offset: *offset,
+                                offset_space: *offset_space,
+                            },
+                        );
                     }
                 }
 
@@ -8411,6 +8434,7 @@ impl SceneModel {
         revealed_deferred: &mut HashSet<ObjectId>,
         anim: &AnimationBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
+        object_specs: &HashMap<ObjectId, ObjectSpec>,
     ) {
         if !Self::animation_reveals_deferred(&anim.anim_type) {
             return;
@@ -8421,7 +8445,7 @@ impl SceneModel {
         };
 
         let hierarchy: HashSet<ObjectId> = builder.hierarchy_ids(actual).into_iter().collect();
-        let pending: Vec<ObjectId> = deferred_visibility
+        let (kept_logical, pending): (Vec<ObjectId>, Vec<ObjectId>) = deferred_visibility
             .iter()
             .filter(|logical| {
                 !revealed_deferred.contains(logical)
@@ -8430,6 +8454,16 @@ impl SceneModel {
                         .is_some_and(|runtime| hierarchy.contains(runtime))
             })
             .copied()
+            .partition(|logical| {
+                // A descendant the author hid waits for its own entry.
+                *logical != anim.target
+                    && object_specs
+                        .get(logical)
+                        .is_some_and(|spec| spec.hidden_by_author)
+            });
+        let kept: HashSet<ObjectId> = kept_logical
+            .iter()
+            .filter_map(|logical| id_map.get(logical).copied())
             .collect();
         if pending.is_empty() {
             return;
@@ -8461,12 +8495,15 @@ impl SceneModel {
             &anim.anim_type,
             AnimationType::FadeIn | AnimationType::FadeInFrom { .. }
         ) {
-            builder
-                .schedule_show_descendants_at(actual, builder.current_time + anim.delay.max(0.0));
+            builder.schedule_show_descendants_at_except(
+                actual,
+                builder.current_time + anim.delay.max(0.0),
+                &kept,
+            );
             return;
         }
 
-        builder.schedule_show_at(actual, builder.current_time + anim.delay.max(0.0));
+        builder.schedule_show_at_except(actual, builder.current_time + anim.delay.max(0.0), &kept);
     }
 
     /// A replacing text transition hands the scene over to its target text.
@@ -8694,6 +8731,12 @@ impl SceneModel {
                     };
                     (from.lerp(point + offset, reached), None)
                 }
+                PendingCameraHoldKind::Pan { target } => {
+                    let Some((point, _)) = Self::authored_endpoint(builder, id_map, target) else {
+                        continue;
+                    };
+                    (point, None)
+                }
                 PendingCameraHoldKind::Frame {
                     targets,
                     margins,
@@ -8728,7 +8771,8 @@ impl SceneModel {
                 && let ClipPayload::Animation(animation) = &mut clip.payload
             {
                 match &mut animation.lens {
-                    PropertyLensSpec::CameraFollowEndpoint { hold, .. } => *hold = Some(position),
+                    PropertyLensSpec::CameraFollowEndpoint { hold, .. }
+                    | PropertyLensSpec::CameraPositionSource { hold, .. } => *hold = Some(position),
                     PropertyLensSpec::CameraFrameDynamic { hold, .. } => {
                         *hold = zoom.map(|zoom| (position, zoom));
                     }
@@ -8743,22 +8787,109 @@ impl SceneModel {
         }
     }
 
+    /// The value of `source` as authored at the cursor: Parameters at the
+    /// value their animations last reached and the time at the cursor.
+    fn authored_scalar(
+        builder: &SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        source: &ScalarSource,
+    ) -> Option<f64> {
+        match source {
+            ScalarSource::Constant(value) => Some(*value),
+            ScalarSource::Signal(id) => builder.float_signals.get(id_map.get(id)?).copied(),
+            ScalarSource::Time => Some(builder.current_time),
+            ScalarSource::Function(function) => function
+                .evaluate(&[], builder.current_time, |logical| {
+                    builder.float_signals.get(id_map.get(&logical)?).copied()
+                })
+                .ok()?
+                .first()
+                .copied(),
+        }
+    }
+
     /// Where `endpoint` is as authored, with the world matrix its local
-    /// offsets turn with; `None` for endpoints only the run time resolves
-    /// (expressions, number lines).
+    /// offsets turn with: a drawable that follows an endpoint is where that
+    /// endpoint is, and reactive points take the authored values of their
+    /// sources. `None` for endpoints only the run time resolves (number
+    /// lines, sources driven by updaters).
     fn authored_endpoint(
         builder: &SceneBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
         endpoint: &CanvasEndpoint,
     ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
+        Self::authored_endpoint_at_depth(builder, id_map, endpoint, 0)
+    }
+
+    fn authored_endpoint_at_depth(
+        builder: &SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        endpoint: &CanvasEndpoint,
+        depth: usize,
+    ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
         use gaanim_core::glam::DMat4;
+        // Follows can chain; a cycle has no authored position.
+        if depth > 16 {
+            return None;
+        }
+        let scalar = |source: &ScalarSource| Self::authored_scalar(builder, id_map, source);
+        let point = |endpoint: &CanvasEndpoint| {
+            Self::authored_endpoint_at_depth(builder, id_map, endpoint, depth + 1)
+        };
         match endpoint {
             CanvasEndpoint::Static(position) => Some((*position, DMat4::IDENTITY)),
             CanvasEndpoint::Entity(id) => {
                 let runtime = *id_map.get(id)?;
                 builder.states.get(runtime)?;
+                if let Some(follow) = builder.authored_follows.get(&runtime) {
+                    let (origin, basis) = point(&follow.endpoint)?;
+                    let offset = match follow.offset_space {
+                        gaanim_animation::FollowOffsetSpace::World => follow.offset,
+                        gaanim_animation::FollowOffsetSpace::Local => {
+                            basis.transform_vector3(follow.offset)
+                        }
+                    };
+                    return Some((origin + offset, basis));
+                }
                 let matrix = builder.get_world_transform(runtime).to_mat4();
                 Some((matrix.transform_point3(DVec3::ZERO), matrix))
+            }
+            CanvasEndpoint::Expression { x, y } => {
+                Some((DVec3::new(scalar(x)?, scalar(y)?, 0.0), DMat4::IDENTITY))
+            }
+            CanvasEndpoint::LocalExpression { space, x, y, z } => {
+                let runtime = *id_map.get(space)?;
+                builder.states.get(runtime)?;
+                let matrix = builder.get_world_transform(runtime).to_mat4();
+                let local = DVec3::new(scalar(x)?, scalar(y)?, scalar(z)?);
+                Some((matrix.transform_point3(local), matrix))
+            }
+            CanvasEndpoint::Offset { origin, dx, dy } => {
+                let (origin, _) = point(origin)?;
+                Some((
+                    origin + DVec3::new(scalar(dx)?, scalar(dy)?, 0.0),
+                    DMat4::IDENTITY,
+                ))
+            }
+            CanvasEndpoint::Between {
+                from,
+                to,
+                alpha,
+                offset,
+            } => {
+                let (from, _) = point(from)?;
+                let (to, _) = point(to)?;
+                Some((from.lerp(to, scalar(alpha)?) + *offset, DMat4::IDENTITY))
+            }
+            CanvasEndpoint::Polar {
+                origin,
+                radius,
+                angle,
+            } => {
+                let (origin, _) = point(origin)?;
+                let (radius, angle) = (scalar(radius)?, scalar(angle)?);
+                let offset = DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0);
+                Some((origin + offset, DMat4::IDENTITY))
             }
             CanvasEndpoint::Anchor(anchor) => {
                 let runtime = *id_map.get(&anchor.object)?;
@@ -8836,15 +8967,24 @@ impl SceneModel {
                 *camera_position = *to;
             }
             AnimationType::CameraPositionSource { target } => {
-                Self::add_camera_lens(
+                let clip = Self::add_camera_clip(
                     builder,
                     start,
                     anim,
                     PropertyLensSpec::CameraPositionSource {
                         from: *camera_position,
                         to: compile_tracking_endpoint(target, id_map, &builder.states),
+                        hold: None,
                     },
                 );
+                builder
+                    .pending_camera_holds
+                    .push(crate::builder::PendingCameraHold {
+                        clip,
+                        kind: crate::builder::PendingCameraHoldKind::Pan {
+                            target: Box::new(target.clone()),
+                        },
+                    });
             }
             AnimationType::CameraZoom { to, interpolation } => {
                 Self::add_camera_lens(
@@ -9158,7 +9298,9 @@ impl SceneModel {
                 camera.position = *camera_position;
                 camera.target = *camera_target;
                 camera.rotation = *camera_rotation;
-                camera.up = DVec3::Y;
+                // The pose the next camera move starts from, orbited about the
+                // same up axis as the lens orbits during playback.
+                camera.up = *camera_up;
                 camera.projection = if let Some((fov_y, near, far)) = *camera_fov {
                     gaanim_math::Projection::Perspective { fov_y, near, far }
                 } else {
@@ -9294,6 +9436,7 @@ impl SceneModel {
                         PropertyLensSpec::CameraPositionSource {
                             from: *camera_position,
                             to,
+                            hold: None,
                         },
                     ),
                 }
@@ -10798,6 +10941,7 @@ impl SceneModel {
                 map,
                 function,
                 resolution,
+                color_map,
             } => {
                 let parameter_entities =
                     compile_function_parameters(function, id_map, &builder.states);
@@ -10816,6 +10960,7 @@ impl SceneModel {
                     map,
                     function,
                     *resolution,
+                    color_map.as_ref(),
                     builder.current_time,
                     &values,
                 );
@@ -10827,9 +10972,17 @@ impl SceneModel {
                     let map = map.clone();
                     let function = function.clone();
                     let resolution = *resolution;
+                    let color_map = color_map.clone();
                     let regen = ReactiveMeshRegen::new(move |world| {
                         let (time, values) = reactive_values(world, &parameter_entities);
-                        sampled_reactive_surface_3d(&map, &function, resolution, time, &values)
+                        sampled_reactive_surface_3d(
+                            &map,
+                            &function,
+                            resolution,
+                            color_map.as_ref(),
+                            time,
+                            &values,
+                        )
                     });
                     builder.commands.entity(state.entity).insert(regen);
                 }
@@ -11072,20 +11225,26 @@ impl SceneModel {
                     let kind = kind.clone();
                     let initial_version = source.version();
                     let cache = Arc::new(Mutex::new((initial_version, path)));
-                    let redraw = gaanim_animation::AlwaysRedrawRegen::new(move |_world| {
-                        let version = source.version();
-                        let mut cached = cache.lock().expect("data mark cache poisoned");
-                        if cached.0 != version {
-                            cached.1 = gaanim_visualization::data_mark_path(
-                                &map,
-                                &source.snapshot(),
-                                &kind,
-                            )
-                            .unwrap_or_default();
-                            cached.0 = version;
-                        }
-                        cached.1.clone()
-                    });
+                    // Redrawn only when its data changes, so a morph of the
+                    // mark (transform_to) keeps the shape it animates.
+                    let versioned = source.clone();
+                    let redraw = gaanim_animation::AlwaysRedrawRegen::versioned(
+                        move || versioned.version(),
+                        move |_world| {
+                            let version = source.version();
+                            let mut cached = cache.lock().expect("data mark cache poisoned");
+                            if cached.0 != version {
+                                cached.1 = gaanim_visualization::data_mark_path(
+                                    &map,
+                                    &source.snapshot(),
+                                    &kind,
+                                )
+                                .unwrap_or_default();
+                                cached.0 = version;
+                            }
+                            cached.1.clone()
+                        },
+                    );
                     builder.commands.entity(state.entity).insert(redraw);
                 }
                 mr
@@ -11170,6 +11329,23 @@ impl SceneModel {
                 }
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
+            }
+            SpawnKind::Light3D(light) => {
+                // An empty path: the light is a position, shaded with.
+                let svg_path = gaanim_objects::prelude::SvgPath {
+                    id: "Light3D".to_owned(),
+                    path: gaanim_core::kurbo::BezPath::new(),
+                    bounds: Bounds3D::default(),
+                    fill: None,
+                    stroke: StrokeBrush::transparent(),
+                };
+                let b = builder.svg_path(&svg_path);
+                let mr = Self::finish_spawn_builder(b, spec);
+                if let Some(state) = builder.states.get(mr.id) {
+                    builder.commands.entity(state.entity).insert(*light);
+                }
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                mr
             }
             SpawnKind::Polyline3D { points, colors } => {
                 let base_color = spec
@@ -13957,6 +14133,76 @@ mod tests {
         (world, timeline)
     }
 
+    /// pan_to a drawable that follows a reactive point ends on the point,
+    /// where the drawable is drawn, not where it was declared, and the next
+    /// camera move starts from there.
+    #[test]
+    fn pan_to_a_follower_ends_where_it_is_drawn() {
+        let mut canvas = SceneModel::new(960, 540);
+        let x = canvas.parameter(0.0).unwrap();
+        let rider = canvas.circle(10.0).follow_endpoint(
+            CanvasEndpoint::Expression {
+                x: x.source(),
+                y: ScalarSource::Constant(40.0),
+            },
+            DVec3::ZERO,
+            gaanim_animation::FollowOffsetSpace::World,
+        );
+        canvas.play(vec![x.animate().set(120.0).duration(1.0)]);
+        let pan = canvas.camera_pan_to_endpoint(CanvasEndpoint::Entity(rider.id), 1.0);
+        canvas.play(vec![pan]);
+        let zoom = canvas.camera_zoom_to(2.0, 1.0);
+        canvas.play(vec![zoom]);
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        for time in [2.0, 2.5, 3.0] {
+            timeline.seek(&mut world, time);
+            let position = world.resource::<gaanim_math::Camera>().position;
+            assert!(
+                (position.x - 120.0).abs() < 1e-6 && (position.y - 40.0).abs() < 1e-6,
+                "camera at {position:?} at {time}"
+            );
+        }
+    }
+
+    /// Orbits of a camera with z up chain: the second turn starts where the
+    /// first ended, so two half turns with opposite tilts end at the pose
+    /// they started from.
+    #[test]
+    fn chained_orbits_of_a_z_up_camera_return_to_their_start() {
+        let mut canvas = SceneModel::new(960, 540);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let aim = canvas.camera_look_at_endpoints(
+            CanvasEndpoint::Static(DVec3::new(12.0, -7.0, 3.0)),
+            CanvasEndpoint::Static(DVec3::new(0.0, 0.0, 0.5)),
+            DVec3::Z,
+            0.5,
+        );
+        canvas.play(vec![aim]);
+        let rise = canvas.camera_orbit(std::f64::consts::PI, 0.35, 1.0);
+        canvas.play(vec![rise]);
+        let fall = canvas.camera_orbit(std::f64::consts::PI, -0.35, 1.0);
+        canvas.play(vec![fall]);
+
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        timeline.seek(&mut world, 0.5);
+        let start = world.resource::<gaanim_math::Camera>().position;
+        assert!(
+            (start - DVec3::new(12.0, -7.0, 3.0)).length() < 1e-6,
+            "start {start:?}"
+        );
+        timeline.seek(&mut world, 1.5);
+        let middle = world.resource::<gaanim_math::Camera>().position;
+        timeline.seek(&mut world, 2.5);
+        let end = world.resource::<gaanim_math::Camera>().position;
+        assert!(
+            (end - start).length() < 1e-6,
+            "start {start:?}, middle {middle:?}, end {end:?}"
+        );
+    }
+
     #[test]
     fn depth_of_field_clips_set_the_resource_and_seeks_restore_it() {
         let mut canvas = SceneModel::new(960, 540);
@@ -14327,6 +14573,49 @@ mod tests {
             assert!(
                 delta.abs() < 1e-9,
                 "{actual:?} vs {expected:?}, baseline {baseline}"
+            );
+        }
+    }
+
+    /// A member the author hid is not shown by the entry of the group that
+    /// holds it, as the marks of a coordinate space are not by its create:
+    /// its own animation shows it.
+    #[test]
+    fn author_hidden_members_wait_for_their_own_entry() {
+        let mut canvas = SceneModel::new(640, 360);
+        let shown = canvas.circle(10.0);
+        let kept = canvas.circle(10.0).hidden().unwrap();
+        let group = canvas.group(&[&shown, &kept]);
+        canvas.play(vec![group.animate().create().duration(1.0)]);
+        canvas.play(vec![kept.fade_in(1.0)]);
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = gaanim_text::font::FontRegistry::new();
+        let config = gaanim_text::prelude::TextConfig::default();
+        canvas.compile_into(&mut commands, &mut timeline, &fonts, &config);
+        queue.apply(&mut world);
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+
+        let opacity = |world: &mut World, handle: &DrawableHandle| {
+            let id = ObjectId::from_raw(handle.id.as_raw() - 1);
+            world
+                .query::<(&MobjectId, &Opacity)>()
+                .iter(world)
+                .find(|(object, _)| object.0 == id)
+                .unwrap()
+                .1
+                .0
+        };
+        for (time, expected) in [(0.5, 0.0), (1.0, 0.0), (2.0, 1.0), (0.5, 0.0)] {
+            timeline.seek(&mut world, time);
+            assert!((opacity(&mut world, &shown) - 1.0).abs() < 1e-5 || time < 1.0);
+            let kept_opacity = opacity(&mut world, &kept);
+            assert!(
+                (kept_opacity - expected).abs() < 1e-5,
+                "kept {kept_opacity} at {time}"
             );
         }
     }

@@ -11,8 +11,8 @@
 //!
 //! A frame draws as a preview of the scene does without its GPU passes:
 //! shader backgrounds show their fallback color, a shader transition
-//! cross-fades, drawables under a shader effect draw plainly and
-//! post-processing is left out. [`Player::open`] says when a file uses them,
+//! cross-fades, drawables under a shader effect or behind glass draw plainly
+//! and post-processing is left out. [`Player::open`] says when a file uses them,
 //! so the page can hand it to the web player instead.
 //!
 //! [`compose_captured_at`]: gaanim_renderer::pipeline::compose_captured_at
@@ -328,6 +328,9 @@ mod web {
         }
         if bundle.has_shader_effects() {
             full.push("effect");
+        }
+        if bundle.has_glass() {
+            full.push("glass");
         }
         serde_json::json!({
             "title": scene.title,

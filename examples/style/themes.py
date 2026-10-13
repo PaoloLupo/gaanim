@@ -105,9 +105,11 @@ def aliases(zone):
     return parts
 
 
-def page(names, extra=None):
-    """Lay out up to four cards in a 2 x 2 grid, ``extra(zone)`` filling a free cell, and fade them in."""
-    grid = scene.layout.zones(Zones.grid(rows=2, columns=2, column_gap="72px", row_gap="36px", padding="page_padding"))
+def page(names, extra=None, size=2):
+    """Lay out cards in a ``size`` x ``size`` grid, ``extra(zone)`` filling a free cell, and fade them in."""
+    grid = scene.layout.zones(
+        Zones.grid(rows=size, columns=size, column_gap="72px", row_gap="36px", padding="page_padding")
+    )
     parts = []
     for zone, name in zip(grid, names):
         parts += card(zone, name)
@@ -117,7 +119,7 @@ def page(names, extra=None):
     scene.wait(HOLD)
 
 
-# Theme.schemes() lists the eleven built-in themes, without aliases.
+# Theme.schemes() lists the twelve built-in themes, without aliases.
 SCHEMES = Theme.schemes()
 scene.segment("neutral_dark")
 page(SCHEMES[:2] + ["dracula", "nord"])
@@ -125,10 +127,12 @@ scene.segment("editor_dark")
 page(["solarized-dark", "gruvbox-dark", "tokyo-night", "catppuccin-mocha"])
 scene.segment("light")
 page(["paper", "solarized-light", "catppuccin-latte"], extra=aliases)
+scene.segment("brand")
+page(["gaanim"], size=1)
 
 STEP = GROW + HOLD
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # Fading in and settled, in each of the three segments.
-    scene.snapshots(snapshots, [STEP * index + t for index in range(3) for t in (0.4, 1.8)])
+    # Fading in and settled, in each of the four segments.
+    scene.snapshots(snapshots, [STEP * index + t for index in range(4) for t in (0.4, 1.8)])
 else:
     scene.render()

@@ -880,6 +880,10 @@ impl DrawableHandle {
         }
         drop(state);
         self.defer_visibility_until_play();
+        self.spec
+            .lock()
+            .expect("object spec poisoned")
+            .hidden_by_author = true;
         Ok(self.clone())
     }
 

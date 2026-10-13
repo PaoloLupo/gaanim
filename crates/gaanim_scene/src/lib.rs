@@ -15,11 +15,11 @@ pub use components::{
     CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose, DepthOfField, FillBrush,
     FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, LayoutBackdrop,
     LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame, LayoutInspectionKind,
-    LayoutZoneRecord, LayoutZones, Lighting3D, LineListData, LineListSource, LocalBounds,
-    Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity, ParallaxLayer,
-    Path2D, PathRevealOrder, PathSource, Presence, RasterImage, RenderLayer, RenderOrder,
-    SegmentContent, ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds,
-    ZLayer,
+    LayoutZoneRecord, LayoutZones, Light3D, LightKind3D, Lighting3D, LineListData, LineListSource,
+    LocalBounds, Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
+    ParallaxLayer, Path2D, PathRevealOrder, PathSource, Presence, RasterImage, RenderLayer,
+    RenderOrder, SegmentContent, ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible,
+    WorldBounds, ZLayer,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 

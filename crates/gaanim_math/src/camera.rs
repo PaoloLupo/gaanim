@@ -535,7 +535,9 @@ impl Camera {
         Ok(())
     }
 
-    /// Orbits around `target` by yaw/pitch deltas (radians).
+    /// Orbits around `target` by yaw/pitch deltas (radians): yaw turns about
+    /// the camera's `up` axis and pitch tilts toward it, so a camera with z
+    /// up circles a scene with z up.
     pub fn orbit_around_target(
         &mut self,
         delta_yaw: f64,
@@ -553,15 +555,23 @@ impl Camera {
         } else {
             (authored_dir, authored_dir.length())
         };
-        let mut yaw = f64::atan2(dir.x, dir.z);
-        let mut pitch = (dir.y / radius).asin();
+        // A frame around `up`: yaw 0 faces `forward`, and yaw turns it toward
+        // `side`. With y up these are z and x.
+        let up = self.up.try_normalize().unwrap_or(DVec3::Y);
+        let forward = (DVec3::Z - up * up.dot(DVec3::Z))
+            .try_normalize()
+            .or_else(|| (DVec3::X - up * up.dot(DVec3::X)).try_normalize())
+            .unwrap_or(DVec3::Z);
+        let side = up.cross(forward);
+        let mut yaw = f64::atan2(dir.dot(side), dir.dot(forward));
+        let mut pitch = (dir.dot(up) / radius).clamp(-1.0, 1.0).asin();
         yaw += delta_yaw;
         pitch += delta_pitch;
         let cp = pitch.cos();
         let sp = pitch.sin();
         let cy = yaw.cos();
         let sy = yaw.sin();
-        let new_dir = DVec3::new(sy * cp, sp, cy * cp) * radius;
+        let new_dir = (side * sy * cp + up * sp + forward * cy * cp) * radius;
         self.look_at(self.target + new_dir, self.target, self.up)
     }
 
@@ -1002,6 +1012,30 @@ mod tests {
         let forward = cam.rotation * -DVec3::Z;
         let expected = (target - cam.position).normalize();
         assert!(forward.dot(expected) > 1.0 - 1e-10);
+    }
+
+    /// A camera with z up orbits about z: its height above the target holds
+    /// while it turns, and pitch raises it. With y up, the orbit is the one it
+    /// always was.
+    #[test]
+    fn camera_orbit_turns_about_the_up_axis() {
+        let target = DVec3::new(0.0, 0.0, 0.5);
+        let mut cam = Camera::perspective_3d(1280, 720, 0.8);
+        cam.look_at(DVec3::new(12.0, -7.0, 3.0), target, DVec3::Z)
+            .unwrap();
+        let height = cam.position.z - target.z;
+        cam.orbit_around_target(1.9, 0.0).unwrap();
+        assert!((cam.position.z - target.z - height).abs() < 1e-9);
+        cam.orbit_around_target(0.0, 0.3).unwrap();
+        assert!(cam.position.z - target.z > height + 1.0);
+
+        let mut cam = Camera::perspective_3d(1280, 720, 0.8);
+        cam.look_at(DVec3::new(3.0, 2.0, 5.0), DVec3::ZERO, DVec3::Y)
+            .unwrap();
+        cam.orbit_around_target(std::f64::consts::FRAC_PI_2, 0.0)
+            .unwrap();
+        // Yaw turns z toward x about y: (3, 2, 5) goes to (5, 2, -3).
+        assert!((cam.position - DVec3::new(5.0, 2.0, -3.0)).length() < 1e-9);
     }
 
     #[test]

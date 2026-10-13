@@ -44,7 +44,7 @@ COLOR_LITERAL = re.compile(r"^\s*(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|okl
 TITLE_ROLES = {"title", "subtitle", "kicker", "heading"}
 TITLE_FACTORIES = {"title_card", "section_header"}
 OUTSIDE_PATH = re.compile(r"(^|[\\/])\.\.([\\/]|$)|(^|[\\/])(tests|docs)[\\/]")
-EXAMPLE_KEYS = {"path", "description", "title", "web", "allow"}
+EXAMPLE_KEYS = {"path", "description", "title", "web", "allow", "group"}
 TOPIC_KEYS = {"id", "title", "description"}
 
 

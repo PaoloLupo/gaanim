@@ -2273,20 +2273,26 @@ impl PyCoordinateSpace3D {
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, *, resolution=(64, 48), inputs=Vec::new()))]
+    #[pyo3(signature = (function, *, resolution=(64, 48), inputs=Vec::new(), color_map=None))]
     fn surface(
         &self,
         py: Python<'_>,
         function: Py<PyAny>,
         resolution: (usize, usize),
         inputs: Vec<Py<PyAny>>,
+        color_map: Option<crate::color::PyColorMapArg>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         let function = checked_python_function(py, function, 2, 1, inputs, &self.canvas)?;
         self.canvas
             .lock()
             .expect("scene canvas poisoned")
-            .reactive_surface_plot(&self.inner, function, [resolution.0, resolution.1])
+            .reactive_surface_plot(
+                &self.inner,
+                function,
+                [resolution.0, resolution.1],
+                color_map.map(|color_map| color_map.0),
+            )
             .map(PyDrawable)
             .map_err(value_error)
     }

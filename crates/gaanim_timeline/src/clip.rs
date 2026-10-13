@@ -269,10 +269,14 @@ pub enum PropertyLensSpec {
         from: gaanim_core::glam::DVec3,
         to: gaanim_core::glam::DVec3,
     },
+    /// Pan toward a tracked endpoint, resolved in the camera phase while the
+    /// clip plays, where bindings have placed it. Once it ends the camera
+    /// keeps `hold`, where the endpoint is drawn as authored, when known.
     #[cfg_attr(feature = "serde", serde(skip))]
     CameraPositionSource {
         from: gaanim_core::glam::DVec3,
         to: gaanim_animation::TrackingEndpoint,
+        hold: Option<gaanim_core::glam::DVec3>,
     },
     CameraRotation {
         from: gaanim_core::glam::DQuat,
@@ -612,7 +616,7 @@ impl PropertyLensSpec {
                 from: *from_position,
                 to: gaanim_math::dolly_zoom(*from_position, *target, *from_fov, *factor, 1.0).0,
             },
-            Self::CameraPositionSource { from, to } => PropertyLens::CameraPositionSource {
+            Self::CameraPositionSource { from, to, .. } => PropertyLens::CameraPositionSource {
                 from: *from,
                 to: to.clone(),
             },

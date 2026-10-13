@@ -26,7 +26,8 @@ use gaanim_timeline::{
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::OnceLock;
 use typst_syntax::ast::{
-    Arg, AstNode, MathCall, MathFieldAccess, MathIdent, MathPrimes, MathShorthand, Str,
+    Arg, AstNode, Math, MathCall, MathFieldAccess, MathFrac, MathIdent, MathPrimes, MathShorthand,
+    Str,
 };
 use typst_syntax::{SyntaxNode, parse_math};
 
@@ -141,9 +142,30 @@ fn codex_math_primes(count: usize) -> Option<String> {
     codex_math_symbol(access).map(str::to_owned)
 }
 
+/// The glyphs a Typst math function draws before and after its positional
+/// arguments, for functions that lay out their arguments in order and add
+/// nothing else a selection can match (a fraction's bar is a line, not a
+/// glyph). `None` for every other function, whose call stays verbatim.
+fn math_layout_call_glyphs(name: &str) -> Option<(&'static str, &'static str)> {
+    Some(match name {
+        "frac" | "cancel" | "overline" | "underline" | "lr" | "limits" | "scripts" | "upright"
+        | "italic" | "bold" | "serif" | "sans" | "frak" | "mono" | "bb" | "cal" | "scr"
+        | "display" | "inline" | "script" | "sscript" => ("", ""),
+        "sqrt" => ("\u{221A}", ""),
+        "abs" => ("|", "|"),
+        "norm" => ("\u{2016}", "\u{2016}"),
+        "floor" => ("\u{230A}", "\u{230B}"),
+        "ceil" => ("\u{2308}", "\u{2309}"),
+        "round" => ("\u{230A}", "\u{2309}"),
+        "binom" | "vec" => ("(", ")"),
+        _ => return None,
+    })
+}
+
 /// Convert authored Typst math into the characters its parser resolves before
-/// layout. This covers named Codex symbols, official math shorthands, and the
-/// dedicated prime syntax while preserving unknown identifiers verbatim.
+/// layout. This covers named Codex symbols, official math shorthands, the
+/// dedicated prime syntax, fractions and the functions that only lay out their
+/// arguments, while preserving unknown identifiers verbatim.
 fn typst_math_selection_source(source: &str) -> String {
     fn append_node(node: &SyntaxNode, output: &mut String) {
         if node.cast::<MathFieldAccess>().is_some() {
@@ -158,6 +180,24 @@ fn typst_math_selection_source(source: &str) -> String {
         }
         if let Some(shorthand) = node.cast::<MathShorthand>() {
             output.push(shorthand.get());
+            return;
+        }
+        // `a/b` lays out the numerator over the denominator; the slash is not
+        // drawn.
+        if let Some(fraction) = node.cast::<MathFrac>() {
+            for side in [fraction.num(), fraction.denom()] {
+                let side = side.to_untyped();
+                // Typst drops the parentheses that group a side.
+                if side.cast::<Math>().is_some_and(Math::was_deparenthesized) {
+                    let inner: Vec<&SyntaxNode> = side.children().collect();
+                    for child in &inner[1..inner.len() - 1] {
+                        append_node(child, output);
+                    }
+                } else {
+                    append_node(side, output);
+                }
+                output.push(' ');
+            }
             return;
         }
         // `dot(x)`, `hat(x)`, … lay out the argument followed by a combining
@@ -182,6 +222,21 @@ fn typst_math_selection_source(source: &str) -> String {
                     }
                 }
                 output.push(accent);
+                return;
+            }
+            // `frac(a, b)`, `sqrt(x)`, `bold(v)`, … draw their arguments in
+            // order, with at most a delimiter on each side.
+            if let Some(identifier) = callee.cast::<MathIdent>()
+                && let Some((open, close)) = math_layout_call_glyphs(identifier.as_str())
+            {
+                output.push_str(open);
+                for item in call.args().arg_items() {
+                    if let Arg::Pos(expr) = item.arg {
+                        append_node(expr.to_untyped(), output);
+                        output.push(' ');
+                    }
+                }
+                output.push_str(close);
                 return;
             }
         }
@@ -286,6 +341,35 @@ fn normalize_text_selection(source: &str) -> String {
         normalized.extend(standard_math_char(raw).to_lowercase());
     }
     normalized
+}
+
+/// `selected` children with every shape an equation draws (a fraction's bar,
+/// a root's overline) whose source lays out only selected glyphs, so a
+/// selection that holds a whole fraction holds its bar too.
+fn with_enclosed_shapes(children: &[HierarchyChild], mut selected: Vec<usize>) -> Vec<usize> {
+    let is_shape = |child: &HierarchyChild| child.span.character == '_' && child.ligature.is_none();
+    for (index, shape) in children.iter().enumerate() {
+        let range = shape.span.source_range;
+        if !is_shape(shape) || range.start >= range.end || selected.contains(&index) {
+            continue;
+        }
+        let mut inside = children
+            .iter()
+            .enumerate()
+            .filter(|(_, child)| {
+                let span = child.span.source_range;
+                !is_shape(child)
+                    && span.start < span.end
+                    && range.start <= span.start
+                    && span.end <= range.end
+            })
+            .map(|(glyph, _)| glyph)
+            .peekable();
+        if inside.peek().is_some() && inside.all(|glyph| selected.contains(&glyph)) {
+            selected.push(index);
+        }
+    }
+    selected
 }
 
 fn normalized_match_spans(
@@ -951,6 +1035,15 @@ impl<'a, 'w, 's, 'b> CoordinatedAnimationBuilder<'a, 'w, 's, 'b> {
     }
 }
 
+/// What a drawable follows: an endpoint and an offset in world or
+/// endpoint-local axes.
+#[derive(Clone, Debug)]
+pub(crate) struct AuthoredFollow {
+    pub endpoint: crate::canvas::CanvasEndpoint,
+    pub offset: DVec3,
+    pub offset_space: gaanim_animation::FollowOffsetSpace,
+}
+
 /// A dynamic camera clip waiting for the rest of its `play`: once every
 /// animation in it is scheduled, the targets' authored state gives the pose
 /// the camera keeps after the clip ends.
@@ -969,6 +1062,10 @@ pub(crate) enum PendingCameraHoldKind {
         offset_space: gaanim_animation::FollowOffsetSpace,
         lag: f64,
         duration: f64,
+    },
+    /// `pan_to(endpoint)`: where the endpoint is drawn as authored.
+    Pan {
+        target: Box<crate::canvas::CanvasEndpoint>,
     },
     /// `frame_to(..., dynamic=True)`: the union of the targets' bounds with
     /// `margins` (CSS order), fitted to a `frame` of that width and height.
@@ -1110,6 +1207,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// Opacity each object had before an animation took it to zero, which
     /// an entrance shows it at again.
     pub(crate) faded_opacities: HashMap<ObjectId, f32>,
+    /// The endpoint each drawable follows (`follow`), with its offset, so
+    /// camera moves can find where a follower is drawn as authored.
+    pub(crate) authored_follows: HashMap<ObjectId, AuthoredFollow>,
 }
 
 /// The opacity an entrance shows `target` at: its `current` one, or the one
@@ -1186,6 +1286,7 @@ pub(crate) struct SceneBuilderState {
     declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     faded_opacities: HashMap<ObjectId, f32>,
     backdrop_orders: HashMap<ObjectId, u64>,
+    authored_follows: HashMap<ObjectId, AuthoredFollow>,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -1228,6 +1329,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests: self.layout_rests.clone(),
             declared_pivots: self.declared_pivots.clone(),
             faded_opacities: self.faded_opacities.clone(),
+            authored_follows: self.authored_follows.clone(),
             backdrop_orders: self.backdrop_orders.clone(),
         }
     }
@@ -1279,6 +1381,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             declared_pivots,
             faded_opacities,
             backdrop_orders,
+            authored_follows,
         } = state;
         Self {
             property_source_cursors,
@@ -1332,6 +1435,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             declared_pivots,
             faded_opacities,
             backdrop_orders,
+            authored_follows,
         }
     }
 
@@ -1416,10 +1520,44 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         parent_track: TrackId,
         time: f64,
     ) {
+        self.schedule_show_hierarchy_except(root_id, state, parent_track, time, &HashSet::new());
+    }
+
+    /// The ids of `root_id`'s hierarchy outside the subtrees of `kept`.
+    fn hierarchy_ids_except(&self, root_id: ObjectId, kept: &HashSet<ObjectId>) -> Vec<ObjectId> {
+        let inside_kept = |id: ObjectId| {
+            let mut current = Some(id);
+            while let Some(id) = current {
+                if id == root_id {
+                    return false;
+                }
+                if kept.contains(&id) {
+                    return true;
+                }
+                current = self.states.get(id).and_then(|state| state.parent);
+            }
+            false
+        };
+        self.hierarchy_ids(root_id)
+            .into_iter()
+            .filter(|id| !inside_kept(*id))
+            .collect()
+    }
+
+    /// [`Self::schedule_show_hierarchy`], leaving the subtrees of `kept`
+    /// hidden: descendants the author hid, which keep their own entry.
+    pub(crate) fn schedule_show_hierarchy_except(
+        &mut self,
+        root_id: ObjectId,
+        state: &MobjectState,
+        parent_track: TrackId,
+        time: f64,
+        kept: &HashSet<ObjectId>,
+    ) {
         // Restore every visual descendant. This matters for composite reactive
         // objects: their children may have been hidden individually before the
         // group itself receives its entry animation.
-        let hierarchy = self.hierarchy_ids(root_id);
+        let hierarchy = self.hierarchy_ids_except(root_id, kept);
         for target in hierarchy {
             let opacity = if target == root_id {
                 state.opacity
@@ -1454,11 +1592,21 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Make a previously hidden hierarchy visible at an authored timeline time.
     pub(crate) fn schedule_show_at(&mut self, root_id: ObjectId, time: f64) {
+        self.schedule_show_at_except(root_id, time, &HashSet::new());
+    }
+
+    /// [`Self::schedule_show_at`], leaving the subtrees of `kept` hidden.
+    pub(crate) fn schedule_show_at_except(
+        &mut self,
+        root_id: ObjectId,
+        time: f64,
+        kept: &HashSet<ObjectId>,
+    ) {
         let Some(state) = self.states.get(root_id).cloned() else {
             return;
         };
         let track = self.ensure_track(root_id);
-        self.schedule_show_hierarchy(root_id, &state, track, time);
+        self.schedule_show_hierarchy_except(root_id, &state, track, time, kept);
     }
 
     /// Make only the requested hierarchy root visible. This is used by
@@ -1491,12 +1639,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// omitted when its entry animation owns the root opacity, for example
     /// `FadeIn` and `FadeInFrom`.
     pub(crate) fn schedule_show_descendants_at(&mut self, root_id: ObjectId, time: f64) {
+        self.schedule_show_descendants_at_except(root_id, time, &HashSet::new());
+    }
+
+    /// [`Self::schedule_show_descendants_at`], leaving the subtrees of
+    /// `kept` hidden.
+    pub(crate) fn schedule_show_descendants_at_except(
+        &mut self,
+        root_id: ObjectId,
+        time: f64,
+        kept: &HashSet<ObjectId>,
+    ) {
         if !self.states.contains_key(root_id) {
             return;
         }
         let track = self.ensure_track(root_id);
         for target in self
-            .hierarchy_ids(root_id)
+            .hierarchy_ids_except(root_id, kept)
             .into_iter()
             .filter(|id| *id != root_id)
         {
@@ -1731,6 +1890,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             layout_rests: HashMap::new(),
             declared_pivots: HashMap::new(),
             faded_opacities: HashMap::new(),
+            authored_follows: HashMap::new(),
             backdrop_orders: HashMap::new(),
         }
     }
@@ -9669,6 +9829,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }
             }
 
+            let matches: Vec<Vec<usize>> = matches
+                .into_iter()
+                .map(|span_indices| with_enclosed_shapes(&state.child_spans, span_indices))
+                .collect();
             let mut append_match = |span_indices: &[usize]| {
                 for &span_idx in span_indices {
                     if let Some(child) = state.child_spans.get(span_idx) {
@@ -10218,6 +10382,68 @@ mod tests {
             typst_math_selection_source("\"bloques vistos\" + 3"),
             "bloques vistos + 3"
         );
+    }
+
+    /// Fractions and the functions that only lay out their arguments select
+    /// the glyphs they draw, not their call syntax.
+    #[test]
+    fn typst_selection_source_lays_out_fractions_and_layout_calls() {
+        let glyphs = |source: &str| normalize_text_selection(&typst_math_selection_source(source));
+        assert_eq!(glyphs("frac(d, d x) f"), "ddxf");
+        assert_eq!(glyphs("x/2"), "x2");
+        assert_eq!(glyphs("(a + b)/(c d)"), "a+bcd");
+        assert_eq!(glyphs("sqrt(x) + abs(y)"), "\u{221A}x+|y|");
+        assert_eq!(glyphs("bold(v) binom(n, k)"), "v(nk)");
+        // Other calls keep their source, as functions applied in math do.
+        assert_eq!(glyphs("sin(x) + f(x)"), "sin(x)+f(x)");
+    }
+
+    /// An equation part that holds a fraction selects its glyphs, so frames,
+    /// fills and part reveals reach it.
+    #[test]
+    fn typst_selection_resolves_fractions() {
+        let world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &world);
+        let mut timeline = Timeline::new();
+        let fonts = FontRegistry::new();
+        let text_config = gaanim_text::prelude::TextConfig::default();
+        let mut builder = SceneBuilder::new(&mut commands, &mut timeline, &fonts, &text_config);
+        let equation = builder.typst(
+            "$frac(d, d x) [f g] = f frac(d g, d x) + (a + b)/c$",
+            false,
+            None,
+            None,
+            Some(32.0),
+            None,
+        );
+        let rendered = builder
+            .states
+            .get(equation.id)
+            .expect("compiled equation state")
+            .child_spans
+            .iter()
+            .map(|child| child.span.character)
+            .collect::<String>();
+        let derivative = builder
+            .select_occurrence(equation, "frac(d, d x) [f g]", Some(0))
+            .child_ids;
+        let product = builder
+            .select_occurrence(equation, "f frac(d g, d x)", Some(0))
+            .child_ids;
+        let slash = builder
+            .select_occurrence(equation, "(a + b)/c", Some(0))
+            .child_ids;
+        // d, d, x, [, f, g, ]; f, d, g, d, x; a, +, b, c; each with its bar.
+        assert_eq!(derivative.len(), 8, "rendered={rendered:?}");
+        assert_eq!(product.len(), 6, "rendered={rendered:?}");
+        assert_eq!(slash.len(), 5, "rendered={rendered:?}");
+        assert!(derivative.iter().all(|id| !product.contains(id)));
+        // Part of a fraction leaves its bar out.
+        let numerator = builder
+            .select_occurrence(equation, "d g", Some(0))
+            .child_ids;
+        assert_eq!(numerator.len(), 2, "rendered={rendered:?}");
     }
 
     #[test]

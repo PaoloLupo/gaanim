@@ -194,6 +194,8 @@ fn stdx_module() -> Module {
     scope.define_func::<compile_code_cell>();
     scope.define_func::<read_font>();
     scope.define_func::<python_api>();
+    scope.define_func::<repo_file>();
+    scope.define_func::<crate::examples::example_bundle>();
     // The workspace version the documentation describes.
     scope.define("version", env!("CARGO_PKG_VERSION"));
     Module::new("stdx", scope)
@@ -206,6 +208,24 @@ fn python_api() -> StrResult<Str> {
     let source = std::fs::read_to_string(&path)
         .map_err(|error| eco_format!("cannot read {}: {error}", path.display()))?;
     Ok(crate::pyapi::index_json(&source).into())
+}
+
+/// A file of the repository that the documentation shows: the example
+/// catalog, an example script or an approved snapshot of it. Only files
+/// under `examples/` and `tests/visual/` can be read.
+#[func]
+fn repo_file(path: EcoString) -> StrResult<Bytes> {
+    const READABLE: [&str; 2] = ["examples/", "tests/visual/"];
+    if !READABLE.iter().any(|prefix| path.starts_with(prefix))
+        || path.split(['/', '\\']).any(|part| part == "..")
+    {
+        return Err(eco_format!(
+            "cannot read {path}: the documentation reads only files under examples/ and tests/visual/"
+        ));
+    }
+    std::fs::read(docs_root().join("..").join(path.as_str()))
+        .map(Bytes::new)
+        .map_err(|error| eco_format!("cannot read {path}: {error}"))
 }
 
 #[func]

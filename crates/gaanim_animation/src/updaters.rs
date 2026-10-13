@@ -543,18 +543,64 @@ impl TracedPath {
     }
 }
 
-fn path_from_points(points: &[DVec3]) -> BezPath {
+/// A smooth curve through the samples of a trace: a centripetal Catmull-Rom
+/// spline as cubic Béziers, so a trace sampled once a frame reads as the
+/// curve its source moved along, without the loops and overshoots of a
+/// uniform spline where samples are unevenly spaced.
+pub fn traced_path_geometry(points: &[DVec3]) -> BezPath {
+    use gaanim_core::kurbo::{Point, Vec2};
     let mut path = BezPath::new();
-    if let Some(first) = points.first() {
-        path.move_to(gaanim_core::kurbo::Point::new(first.x, first.y));
+    let points: Vec<Point> = points
+        .iter()
+        .map(|point| Point::new(point.x, point.y))
+        .collect();
+    let Some(first) = points.first() else {
+        return path;
+    };
+    path.move_to(*first);
+    if points.len() < 3 {
         for point in &points[1..] {
-            path.line_to(gaanim_core::kurbo::Point::new(point.x, point.y));
+            path.line_to(*point);
         }
+        return path;
+    }
+    // Past the ends, the curve continues the parabola through its last
+    // three samples, so it keeps bending there.
+    let at = |index: isize| -> Point {
+        let last = points.len() - 1;
+        let extend = |a: Point, b: Point, c: Point| {
+            (a.to_vec2() * 3.0 - b.to_vec2() * 3.0 + c.to_vec2()).to_point()
+        };
+        if index < 0 {
+            extend(points[0], points[1], points[2])
+        } else if index as usize > last {
+            extend(points[last], points[last - 1], points[last - 2])
+        } else {
+            points[index as usize]
+        }
+    };
+    // The control point from `from` toward `to`, past `before`.
+    let control = |before: Point, from: Point, to: Point| -> Point {
+        let (d1, d2) = ((from - before).hypot().sqrt(), (to - from).hypot().sqrt());
+        if d1 < 1e-9 || d2 < 1e-9 {
+            return from + (to - from) / 3.0;
+        }
+        let blend: Vec2 = (to.to_vec2() * (d1 * d1) - before.to_vec2() * (d2 * d2)
+            + from.to_vec2() * (2.0 * d1 * d1 + 3.0 * d1 * d2 + d2 * d2))
+            / (3.0 * d1 * (d1 + d2));
+        blend.to_point()
+    };
+    for index in 0..points.len() as isize - 1 {
+        let (p0, p1, p2, p3) = (at(index - 1), at(index), at(index + 1), at(index + 2));
+        path.curve_to(control(p0, p1, p2), control(p3, p2, p1), p2);
     }
     path
 }
 
-fn expire_samples(
+/// Drop the samples older than `dissipating_time` at `current_time`; the
+/// trace then starts where its source was at that cutoff. Whether any was
+/// dropped.
+pub fn expire_trace_samples(
     points: &mut Vec<DVec3>,
     sample_times: &mut Vec<f64>,
     current_time: f64,
@@ -571,8 +617,24 @@ fn expire_samples(
     if expired == 0 {
         return false;
     }
-    points.drain(0..expired);
-    sample_times.drain(0..expired);
+    // The trace starts where its source was at the cutoff, between the last
+    // expired sample and the next one, so it shortens smoothly.
+    if expired < points.len() {
+        let (before, after) = (expired - 1, expired);
+        let span = sample_times[after] - sample_times[before];
+        let alpha = if span > f64::EPSILON {
+            ((cutoff - sample_times[before]) / span).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        points[before] = points[before].lerp(points[after], alpha);
+        sample_times[before] = cutoff;
+        points.drain(0..before);
+        sample_times.drain(0..before);
+    } else {
+        points.drain(0..expired);
+        sample_times.drain(0..expired);
+    }
     true
 }
 
@@ -663,7 +725,8 @@ pub fn traced_path_system(world: &mut World) {
                     let traced_path = &mut *traced_path;
                     (&mut traced_path.points, &mut traced_path.sample_times)
                 };
-                changed |= expire_samples(points, sample_times, current_time, dissipating_time);
+                changed |=
+                    expire_trace_samples(points, sample_times, current_time, dissipating_time);
 
                 if let Some(pos) = source_pos {
                     let should_add = match traced_path.points.last() {
@@ -686,7 +749,7 @@ pub fn traced_path_system(world: &mut World) {
                 }
             }
             if changed {
-                trace_updates.push((trace_entity, path_from_points(&traced_path.points)));
+                trace_updates.push((trace_entity, traced_path_geometry(&traced_path.points)));
             }
         }
     }
@@ -801,7 +864,8 @@ pub fn traced_path_3d_system(world: &mut World) {
                         let tp = &mut *tp;
                         (&mut tp.points, &mut tp.sample_times)
                     };
-                    changed |= expire_samples(points, sample_times, current_time, dissipating_time);
+                    changed |=
+                        expire_trace_samples(points, sample_times, current_time, dissipating_time);
                     let should_push = source_pos.is_some_and(|pos| match tp.points.last() {
                         Some(last) => last.distance(pos) >= min_distance,
                         None => true,
@@ -3158,6 +3222,29 @@ mod tests {
         assert!((x(&world, entity) - after_half_second).abs() < 1e-12);
     }
 
+    /// A trace sampled sparsely along a circle draws the circle, not the
+    /// polygon of its samples: halfway between two samples it is on the arc.
+    #[test]
+    fn traced_paths_draw_smooth_curves_through_their_samples() {
+        use gaanim_core::kurbo::ParamCurve;
+        let samples: Vec<DVec3> = (0..=8)
+            .map(|k| {
+                let angle = k as f64 * std::f64::consts::FRAC_PI_4 / 2.0;
+                DVec3::new(10.0 * angle.cos(), 10.0 * angle.sin(), 0.0)
+            })
+            .collect();
+        let path = traced_path_geometry(&samples);
+        let segments: Vec<_> = path.segments().collect();
+        assert_eq!(segments.len(), 8);
+        for (segment, pair) in segments.iter().zip(samples.windows(2)) {
+            assert_eq!(segment.start().x, pair[0].x);
+            assert_eq!(segment.end().y, pair[1].y);
+            let middle = segment.eval(0.5).to_vec2().hypot();
+            // The chord's midpoint is 0.19 inside the circle.
+            assert!((middle - 10.0).abs() < 0.02, "{middle}");
+        }
+    }
+
     #[test]
     fn traced_path_starts_at_its_cursor_and_expires_old_samples() {
         let mut world = World::new();
@@ -3194,16 +3281,13 @@ mod tests {
         world.resource_mut::<PlaybackState>().current_time = 2.1;
         traced_path_system(&mut world);
 
+        // At 2.1 the sample of 1.0 has expired: the trace starts where the
+        // source was at the cutoff, 1.1, a fifth of the way to the next one.
         let traced_path = world.get::<TracedPath>(trace).unwrap();
-        assert_eq!(traced_path.sample_times, [1.5, 2.1]);
-        assert_eq!(
-            traced_path
-                .points
-                .iter()
-                .map(|point| point.x)
-                .collect::<Vec<_>>(),
-            [1.0, 2.0]
-        );
+        assert_eq!(traced_path.sample_times, [1.1, 1.5, 2.1]);
+        let xs: Vec<f64> = traced_path.points.iter().map(|point| point.x).collect();
+        assert!((xs[0] - 0.2).abs() < 1e-9, "{xs:?}");
+        assert_eq!(&xs[1..], &[1.0, 2.0]);
     }
 
     #[test]

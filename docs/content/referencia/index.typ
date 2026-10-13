@@ -74,4 +74,4 @@ tarea, en español o en inglés.
 Si es tu primera vez, lee #link("/referencia/scene/")[Escena] y
 #link("/referencia/drawable/")[Drawable]: todo lo demás se construye sobre
 ellos. Para ver la API en escenas completas, consulta los
-#link("/ejemplos/basicos/")[ejemplos].
+#link("/ejemplos/")[ejemplos].

@@ -233,8 +233,11 @@ all use the application host, which owns the native runtime.
 (`examples/animation/easings.py`). `examples/examples.toml` is the catalog: the
 topics in reading order and every example, with its description, its `web`
 flag and the contract rules it is exempt from (`allow`). `README.md` is
-generated from it. Only `quickstart.py` sits at the top of `examples/`; add new
-examples to a topic folder and to the catalog.
+generated from it, and the docs build reads it for the site's examples pages
+(`docs/components/examples.typ`: an index and a page per topic, each example
+with its first approved snapshot as poster); a new topic needs a block there.
+Only `quickstart.py` sits at the top of `examples/`; add new examples to a
+topic folder and to the catalog.
 
 The contract, checked by `just check-examples` (`scripts/examples.py`):
 

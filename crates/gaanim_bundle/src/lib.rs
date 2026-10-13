@@ -102,6 +102,10 @@ const REHEARSAL: &str = "rehearsal.json";
 /// Optional, so that bundles without it stay readable and older readers
 /// draw those drawables processed.
 const UNPROCESSED: &str = "tables/unprocessed.bin";
+
+/// Present when a frame draws glass: players that compose frames without
+/// GPU passes cannot show it. Optional, so files without it still open.
+const GLASS: &str = "tables/glass.bin";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
 
@@ -1211,6 +1215,9 @@ impl<W: Write + Seek> BundleWriter<W> {
             }
             self.write_entry(UNPROCESSED, &unprocessed.into_bytes())?;
         }
+        if self.tables.glass {
+            self.write_entry(GLASS, &[1])?;
+        }
         self.write_entry("scene.bin", &scene_bytes)?;
         let mut index = Writer::new();
         index.len(self.times.len());
@@ -1590,6 +1597,11 @@ impl Bundle {
         !self.tables.effect_shaders.is_empty()
     }
 
+    /// Whether a frame draws glass, which a GPU pass of its own composes.
+    pub fn has_glass(&self) -> bool {
+        self.manifest.entries.contains_key(GLASS)
+    }
+
     /// Time of every recorded frame, by frame index, in recording order: a
     /// recording in two passes stores the frame grid first, then the instants
     /// between grid frames.
@@ -1863,45 +1875,94 @@ mod tests {
         }
     }
 
+    /// An element of the drawable `raw`: a unit square at `x`.
+    fn square(raw: u32, x: f64, post_exempt: bool) -> CapturedElement {
+        let entity = bevy::prelude::Entity::from_raw_u32(raw).unwrap();
+        CapturedElement {
+            entity,
+            recipe: Arc::new(gaanim_renderer::fragment::FragmentRecipe {
+                path: Some(Arc::new(gaanim_core::kurbo::Shape::to_path(
+                    &gaanim_core::kurbo::Rect::new(x, 0.0, x + 1.0, 1.0),
+                    0.1,
+                ))),
+                ..Default::default()
+            }),
+            lottie: None,
+            transform: gaanim_core::kurbo::Affine::IDENTITY,
+            opacity: 1.0,
+            opacity_bounds: gaanim_core::kurbo::Rect::new(x, 0.0, x + 1.0, 1.0),
+            opacity_reach: None,
+            opacity_group: entity,
+            group_opacity: 1.0,
+            group_shadow: None,
+            render_order: Default::default(),
+            clip_mask: None,
+            blend: None,
+            transition_side: Default::default(),
+            post_exempt,
+            lineage: Vec::new(),
+            view_bounds: None,
+            in_views: true,
+            layer: None,
+            screen: None,
+            echo_rank: 0,
+            effect_root: None,
+            effect_extent: None,
+            matte_root: None,
+            matte_of: None,
+            glass_root: None,
+        }
+    }
+
+    /// The left edge of each element's outline in `frame`.
+    fn lefts(frame: &Frame) -> Vec<f64> {
+        frame
+            .capture
+            .elements
+            .iter()
+            .map(|element| {
+                gaanim_core::kurbo::Shape::bounding_box(&**element.recipe.path.as_ref().unwrap()).x0
+            })
+            .collect()
+    }
+
+    /// A drawable that draws several elements in one frame, as the runs of a
+    /// 3D mesh do, keeps each of them in every frame, not only in the first
+    /// frame of a chunk.
+    #[test]
+    fn drawables_with_several_elements_keep_each_one() {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        let frames: Vec<Vec<f64>> = vec![
+            vec![0.0, 2.0, 4.0],
+            vec![0.5, 2.5, 4.5],
+            vec![0.5, 2.5, 4.5],
+            vec![1.0, 3.0],
+        ];
+        for (index, xs) in frames.iter().enumerate() {
+            let mut captured = frame(index as f64 / 60.0);
+            // Drawable 1 draws every square but the last; drawable 2 the last.
+            captured.capture.elements = xs
+                .iter()
+                .enumerate()
+                .map(|(at, x)| square(if at + 1 == xs.len() { 2 } else { 1 }, *x, false))
+                .collect();
+            writer.push_frame(&captured, [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: frames.len() as f64 / 60.0,
+            ..Default::default()
+        };
+        let bytes = writer.finish(&scene).unwrap().into_inner();
+        let mut bundle = Bundle::from_bytes(bytes.into()).unwrap();
+        for (index, xs) in frames.iter().enumerate() {
+            assert_eq!(&lefts(&bundle.frame(index).unwrap()), xs, "frame {index}");
+        }
+    }
+
     #[test]
     fn drawables_left_out_of_the_post_process_round_trip() {
-        let element = |raw: u32, post_exempt: bool| {
-            let entity = bevy::prelude::Entity::from_raw_u32(raw).unwrap();
-            CapturedElement {
-                entity,
-                recipe: Arc::new(gaanim_renderer::fragment::FragmentRecipe {
-                    path: Some(Arc::new(gaanim_core::kurbo::Shape::to_path(
-                        &gaanim_core::kurbo::Rect::new(0.0, 0.0, 1.0, 1.0),
-                        0.1,
-                    ))),
-                    ..Default::default()
-                }),
-                lottie: None,
-                transform: gaanim_core::kurbo::Affine::IDENTITY,
-                opacity: 1.0,
-                opacity_bounds: gaanim_core::kurbo::Rect::new(0.0, 0.0, 1.0, 1.0),
-                opacity_reach: None,
-                opacity_group: entity,
-                group_opacity: 1.0,
-                group_shadow: None,
-                render_order: Default::default(),
-                clip_mask: None,
-                blend: None,
-                transition_side: Default::default(),
-                post_exempt,
-                lineage: Vec::new(),
-                view_bounds: None,
-                in_views: true,
-                layer: None,
-                screen: None,
-                echo_rank: 0,
-                effect_root: None,
-                effect_extent: None,
-                matte_root: None,
-                matte_of: None,
-                glass_root: None,
-            }
-        };
+        let element = |raw: u32, post_exempt: bool| square(raw, 0.0, post_exempt);
         let record = |elements: Vec<CapturedElement>| {
             let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
             let mut first = frame(0.0);
@@ -1917,6 +1978,7 @@ mod tests {
 
         let mut bundle = record(vec![element(1, false), element(2, true)]);
         assert!(bundle.manifest.entries.contains_key(UNPROCESSED));
+        assert!(!bundle.has_glass());
         let decoded = bundle.frame(0).unwrap();
         let flags: Vec<bool> = decoded
             .capture
@@ -1928,6 +1990,32 @@ mod tests {
         // Without such drawables the bundle has no entry for them.
         let bundle = record(vec![element(1, false)]);
         assert!(!bundle.manifest.entries.contains_key(UNPROCESSED));
+    }
+
+    /// A bundle says when its frames draw glass, which players without GPU
+    /// passes hand to the web player.
+    #[test]
+    fn bundles_say_when_they_draw_glass() {
+        let record = |glass: bool| {
+            let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+            let mut first = frame(0.0);
+            first.capture.elements = vec![square(1, 0.0, false)];
+            if glass {
+                first.capture.glasses = vec![gaanim_renderer::pipeline::CapturedGlass {
+                    root: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
+                    glass: Default::default(),
+                }];
+            }
+            writer.push_frame(&first, [0; 32]).unwrap();
+            let scene = SceneData {
+                fps: 60,
+                duration: 1.0 / 60.0,
+                ..Default::default()
+            };
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap()
+        };
+        assert!(record(true).has_glass());
+        assert!(!record(false).has_glass());
     }
 
     #[test]

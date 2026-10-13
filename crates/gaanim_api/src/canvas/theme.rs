@@ -241,6 +241,7 @@ impl CanvasTheme {
         "tokyo-night",
         "catppuccin-mocha",
         "catppuccin-latte",
+        "gaanim",
     ];
 
     /// Alternative names accepted by [`CanvasTheme::builtin`], with the
@@ -408,10 +409,34 @@ impl CanvasTheme {
                 header: rgb(0xDCE0E8),
                 rule: rgb(0x9CA0B0),
             },
+            // The brand's colors (docs/assets/brand): paper on graphite,
+            // violet accents, gold titles and mist rules.
+            "gaanim" => ThemePalette {
+                background: rgb(0x121212),
+                foreground: rgb(0xF7F6FF),
+                muted: rgb(0x8F8AB0),
+                title: rgb(0xFFC933),
+                accent: rgb(0x7C6CFF),
+                chart: rgb(0xA99FFF),
+                panel: rgb(0x1A1A1A),
+                header: rgb(0x2A2A2A),
+                rule: rgb(0x3F37A8),
+            },
             _ => return Err(ThemeError { name: name.into() }),
         };
         let mut theme = Self::from_palette(canonical, palette);
         theme.code_syntax = builtin_code_syntax(canonical, palette.foreground);
+        if canonical == "gaanim" {
+            // Violet first, then gold, and a ramp from graphite through mist
+            // and violet to gold.
+            theme.series = vec![palette.accent, palette.title, palette.chart, palette.muted];
+            theme.heatmap = vec![
+                palette.background,
+                palette.rule,
+                palette.accent,
+                palette.title,
+            ];
+        }
         Ok(theme)
     }
 
@@ -1113,6 +1138,7 @@ fn builtin_code_syntax(name: &str, foreground: Color) -> Option<CodeColors> {
         "tokyo-night" => [0xBB9AF7, 0x9ECE6A, 0xFF9E64, 0x737AA2, 0x7AA2F7, 0x2AC3DE],
         "catppuccin-mocha" => [0xCBA6F7, 0xA6E3A1, 0xFAB387, 0x9399B2, 0x89B4FA, 0xF9E2AF],
         "catppuccin-latte" => [0x8839EF, 0x40A02B, 0xFE640B, 0x7C7F93, 0x1E66F5, 0xDF8E1D],
+        "gaanim" => [0xA99FFF, 0xFFC933, 0xF0A800, 0x8F8AB0, 0xCBC6FF, 0x7C6CFF],
         _ => return None,
     }
     .map(rgb);
@@ -1174,6 +1200,7 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::Axes3D { .. } => "axes_3d",
         SpawnKind::SurfaceMesh { .. } => "surface",
         SpawnKind::Primitive3D(_) => "primitive_3d",
+        SpawnKind::Light3D(_) => "light_3d",
         SpawnKind::Polyline3D { .. } => "polyline_3d",
         SpawnKind::LineSegments3D { .. } => "line_segments_3d",
         SpawnKind::Text(_) => "text",
@@ -1383,7 +1410,11 @@ mod tests {
     fn builtin_themes_pass_their_own_validation() {
         for name in CanvasTheme::BUILTIN_NAMES {
             let theme = CanvasTheme::builtin(name).unwrap();
-            assert!(theme.validate().is_empty(), "{name}: {:?}", theme.validate());
+            assert!(
+                theme.validate().is_empty(),
+                "{name}: {:?}",
+                theme.validate()
+            );
         }
     }
 

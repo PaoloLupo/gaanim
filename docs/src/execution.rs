@@ -42,7 +42,7 @@ fn has_valid_webp_signature(header: &[u8]) -> bool {
     header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP"
 }
 
-fn strip_ansi_escape_codes(s: &str) -> String {
+pub(crate) fn strip_ansi_escape_codes(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
@@ -674,7 +674,7 @@ static RUN_ID: LazyLock<String> = LazyLock::new(|| {
 
 /// The public API and runtime version a cached result was produced against.
 /// When either changes, cached successes are proved again before reuse.
-static FINGERPRINT: LazyLock<String> = LazyLock::new(|| {
+pub(crate) static FINGERPRINT: LazyLock<String> = LazyLock::new(|| {
     let stub = fs::read(project_root().join("../crates/gaanim_python/gaanim/gaanim_core.pyi"))
         .unwrap_or_default();
     format!(
@@ -781,7 +781,7 @@ pub fn prune_unused() -> usize {
     removed
 }
 
-fn project_root() -> PathBuf {
+pub(crate) fn project_root() -> PathBuf {
     PROJECT_ROOT
         .read()
         .unwrap()
@@ -840,7 +840,7 @@ fn lookup_cache(job: &CellJob) -> Lookup {
     }
 }
 
-fn gaanim_binary() -> PathBuf {
+pub(crate) fn gaanim_binary() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|executable| executable.parent().map(Path::to_path_buf))
@@ -1069,7 +1069,7 @@ fn record_bundle(
 }
 
 /// Whether `path` holds a bundle: a ZIP archive.
-fn is_bundle(path: &Path) -> bool {
+pub(crate) fn is_bundle(path: &Path) -> bool {
     let mut header = [0u8; 4];
     fs::File::open(path)
         .and_then(|mut file| file.read_exact(&mut header))
