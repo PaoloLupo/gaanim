@@ -24,8 +24,8 @@ use crate::execution::{
 const RECORD_ARGS: [&str; 2] = ["--fps", "30"];
 
 /// Bump to record every example again, e.g. when the recording settings
-/// change or bundles recorded before were wrong (2: 3D before #501).
-const REVISION: u32 = 2;
+/// change or bundles recorded before were wrong (3: 3D and glass, #501).
+const REVISION: u32 = 3;
 
 /// The longest an example may take to record.
 const TIMEOUT: Duration = Duration::from_secs(600);
