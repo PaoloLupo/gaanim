@@ -274,8 +274,9 @@ las separa se escribe `&amp;`):
 )
 
 Sin `controls=0`, una barra fina aparece al pasar el cursor por la animación y
-mientras está pausada: reproducir o pausar, la posición, el tiempo, el bucle,
-el sonido si la escena lo tiene y la pantalla completa. Sin `loop`, la
+mientras está pausada: reproducir o pausar, la posición, con una marca en cada
+pausa de la escena, el tiempo, el bucle, el sonido si la escena lo tiene y la
+pantalla completa. Sin `loop`, la
 animación se detiene en su último fotograma con un botón para repetirla.
 
 El reproductor ligero deja fuera el posprocesado, los fondos de shader, las

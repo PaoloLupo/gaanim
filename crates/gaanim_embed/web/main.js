@@ -9,7 +9,8 @@
 // `controls=0` hides the bar (a click plays or pauses), `autoplay=0` waits for
 // a click and `#t=12.5` starts there. A stop (`scene.stop()`) pauses it until
 // a click; one with an ambient loop (`scene.stop(loop=…)`) repeats the loop
-// meanwhile, and the click plays on from its end, as a presentation does.
+// meanwhile, and the click plays on from its end, as a presentation does. The
+// bar marks each stop on its track.
 //
 // The wasm module (`gaanim_embed`) only decodes the file and draws the frame
 // at a time; this page keeps the clock, downloads the file (in pieces when
@@ -46,6 +47,7 @@ const bar = $("bar");
 const toggle = $("toggle");
 const toggleIcon = $("toggle-icon");
 const seek = $("seek");
+const stopMarks = $("stops");
 const clock = $("clock");
 const loopButton = $("loop");
 const mute = $("mute");
@@ -141,6 +143,7 @@ function opened(json) {
   message.hidden = true;
   bar.hidden = !options.controls;
   seek.max = String(info.duration || 1);
+  markStops();
   setAudioTracks(info.audio);
   // `full` names the GPU passes the file uses that this player leaves out.
   tellParent("opened", info.title, { full: info.full });
@@ -268,6 +271,21 @@ function formatTime(seconds) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
+// A tick on the track for each stop inside the file, at its time.
+function markStops() {
+  const duration = info.duration || 1;
+  stopMarks.replaceChildren(
+    ...info.stops
+      .filter((time) => time > 1e-6 && time < duration - 1e-6)
+      .map((time) => {
+        const tick = document.createElement("i");
+        tick.dataset.time = String(time);
+        tick.style.setProperty("--at", String(time / duration));
+        return tick;
+      }),
+  );
+}
+
 let shownClock = "";
 function showClock() {
   const text = `${formatTime(state.time)} / ${formatTime(info.duration)}`;
@@ -277,6 +295,9 @@ function showClock() {
   }
   if (!seeking) seek.value = String(state.time);
   seek.style.setProperty("--progress", `${(100 * state.time) / (info.duration || 1)}%`);
+  for (const tick of stopMarks.children) {
+    tick.classList.toggle("passed", Number(tick.dataset.time) <= state.time + 1e-6);
+  }
 }
 
 let revealTimer = 0;
