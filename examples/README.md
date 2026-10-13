@@ -351,6 +351,7 @@ Short scenes in the brand's colors, from a logo built of primitives to Fourier e
 | [Following camera](gallery/following_camera.py) | A camera that zooms in on a point riding a sine wave, follows it along two turns and pulls back out. |
 | [Zoomed inset](gallery/zoomed_inset.py) | A Koch snowflake explored through a round magnifier that follows a point along its edge and zooms deeper. |
 | [Surface plot](gallery/surface_plot.py) | A Gaussian hill on 3D axes that the camera circles while the hill narrows into a peak and spreads back out. |
+| [Light source](gallery/light_source.py) | A gold point light that sweeps over three solids like a sun, lighting each from the side it passes. |
 | [Camera orbit](gallery/camera_orbit.py) | Lit solids on 3D axes seen by a camera that circles them, tilts up and down, and keeps a readout fixed on the screen. |
 | [Warped grid](gallery/warped_grid.py) | A sentence and an equation that write themselves and transform, then a grid bent by a nonlinear function. |
 | [Fourier epicycles](gallery/fourier_epicycles.py) | Five turning circles stacked on each other, the odd harmonics of a square wave, whose tip draws the wave as they spin. |

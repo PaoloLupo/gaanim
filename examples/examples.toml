@@ -835,6 +835,12 @@ description = "A Gaussian hill on 3D axes that the camera circles while the hill
 allow = ["theme"]
 
 [[example]]
+path = "gallery/light_source.py"
+group = "Camera and 3D"
+description = "A gold point light that sweeps over three solids like a sun, lighting each from the side it passes."
+allow = ["theme"]
+
+[[example]]
 path = "gallery/camera_orbit.py"
 group = "Camera and 3D"
 description = "Lit solids on 3D axes seen by a camera that circles them, tilts up and down, and keeps a readout fixed on the screen."
