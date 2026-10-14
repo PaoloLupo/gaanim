@@ -46,7 +46,7 @@ mod model;
 mod repack;
 mod source;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -1291,7 +1291,7 @@ impl<W: Write + Seek> BundleWriter<W> {
         // A scene can take its audience without a poll: a lobby, a gate.
         if !scene.polls.is_empty() || scene.poll_session.is_some() || !scene.stop_gates.is_empty() {
             self.write_entry(POLLS, &write_polls(scene)?)?;
-            let mut written = std::collections::HashSet::new();
+            let mut written = HashSet::new();
             for image in scene.polls.iter().filter_map(|poll| poll.image.as_ref()) {
                 if written.insert(image.hash.clone()) {
                     self.write_entry(&image_entry(&image.hash), &image.bytes)?;
@@ -2019,24 +2019,21 @@ pub fn frame_digest(
     store: &mut FragmentStore,
 ) -> [u8; 32] {
     let (mut composed, requests) = compose_frame_layers(frame, background, store);
-    let effects = std::mem::take(&mut composed.effects);
+    let mut effects = std::mem::take(&mut composed.effects);
+    // Drawables with the same recipe draw the same soft effect. A replay
+    // shares one recipe, and so one effect image, among them, where the
+    // recording built one per drawable: each effect counts once.
+    let mut seen = HashSet::new();
+    effects.retain(|effect| {
+        let mut key = blake3::Hasher::new();
+        hash_effect(&mut key, effect);
+        seen.insert(*key.finalize().as_bytes())
+    });
     let mut hasher = blake3::Hasher::new();
     hasher.update(&scene_digest(&composed.flattened()));
     hasher.update(&(effects.len() as u64).to_le_bytes());
     for effect in &effects {
-        hasher.update(&scene_digest(&effect.scene));
-        for value in effect.to_pixels.as_coeffs() {
-            hasher.update(&value.to_bits().to_le_bytes());
-        }
-        hasher.update(&effect.image.width.to_le_bytes());
-        hasher.update(&effect.image.height.to_le_bytes());
-        hasher.update(&effect.request.time.to_bits().to_le_bytes());
-        for (shader, values) in &effect.request.passes {
-            hasher.update(blake3::hash(shader.source().as_bytes()).as_bytes());
-            for value in values {
-                hasher.update(&value.to_bits().to_le_bytes());
-            }
-        }
+        hash_effect(&mut hasher, effect);
     }
     for request in &requests {
         hasher.update(&request.time().to_bits().to_le_bytes());
@@ -2077,6 +2074,24 @@ pub fn frame_digest(
         hasher.update(&frame_digest(sample, background, store));
     }
     *hasher.finalize().as_bytes()
+}
+
+/// What a shader or soft effect hands the GPU: the scene it draws, where,
+/// at what size, and its passes.
+fn hash_effect(hasher: &mut blake3::Hasher, effect: &gaanim_renderer::object_effects::EffectLayer) {
+    hasher.update(&scene_digest(&effect.scene));
+    for value in effect.to_pixels.as_coeffs() {
+        hasher.update(&value.to_bits().to_le_bytes());
+    }
+    hasher.update(&effect.image.width.to_le_bytes());
+    hasher.update(&effect.image.height.to_le_bytes());
+    hasher.update(&effect.request.time.to_bits().to_le_bytes());
+    for (shader, values) in &effect.request.passes {
+        hasher.update(blake3::hash(shader.source().as_bytes()).as_bytes());
+        for value in values {
+            hasher.update(&value.to_bits().to_le_bytes());
+        }
+    }
 }
 
 #[cfg(test)]
