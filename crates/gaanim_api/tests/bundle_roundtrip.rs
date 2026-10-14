@@ -330,9 +330,10 @@ fn cover_of(canvas: SceneModel, name: &str) -> image::RgbaImage {
         .thumbnail()
         .unwrap()
         .expect("the bundle has a cover");
-    image::load_from_memory_with_format(&png, image::ImageFormat::Png)
-        .unwrap()
-        .into_rgba8()
+    let cover = image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap();
+    // Every frame here is opaque: its cover needs no alpha channel.
+    assert_eq!(cover.color(), image::ColorType::Rgb8);
+    cover.into_rgba8()
 }
 
 /// Mean brightness of the red channel, 0..255.

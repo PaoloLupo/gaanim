@@ -7,7 +7,9 @@
 // below). It plays while at least a quarter of it is on screen and pauses
 // when it scrolls away; one paused by hand stays paused. `loop` repeats it,
 // `controls=0` hides the bar (a click plays or pauses), `autoplay=0` waits for
-// a click and `#t=12.5` starts there. A stop (`scene.stop()`) pauses it until
+// a click and `#t=12.5` starts there. A large file downloads the rest of
+// itself only while it plays; `preload=auto` downloads it all at once, as
+// `<video preload="auto">` does. A stop (`scene.stop()`) pauses it until
 // a click; one with an ambient loop (`scene.stop(loop=…)`) repeats the loop
 // meanwhile, and the click plays on from its end, as a presentation does. The
 // bar marks each stop on its track.
@@ -32,6 +34,8 @@ const options = {
   loop: flag("loop", false),
   controls: flag("controls", true),
   autoplay: flag("autoplay", true),
+  // Download the whole file even while it is not playing.
+  preload: params.get("preload")?.toLowerCase() === "auto",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -543,12 +547,19 @@ function requestWanted() {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Download the rest of the file in the background, in order.
+// Download the rest of the file in the background, in order, while it plays
+// (or always, with `preload=auto`): a reader who scrolls past a large file
+// downloads only what opens it. Playback still asks for the chunks it needs
+// next (`requestWanted`), playing or not.
 async function fill(r) {
   while (remote === r && gaps(0, r.length, r.have).length) {
     const wait = r.retryAt - Date.now();
     if (wait > 0) {
       await sleep(wait);
+      continue;
+    }
+    if (!state.playing && !options.preload) {
+      await sleep(200);
       continue;
     }
     const gap = gaps(0, r.length, r.have, r.inflight)[0];
@@ -560,19 +571,27 @@ async function fill(r) {
   }
 }
 
+// Download a whole file, showing how far it went.
+async function downloadWhole(url) {
+  try {
+    return await download(url, (fraction) => {
+      fillBar.hidden = false;
+      fillBar.style.width = `${100 * fraction}%`;
+    });
+  } finally {
+    fillBar.hidden = true;
+  }
+}
+
 async function playWhole(url) {
   say("Cargando la animación…");
   let bytes;
   try {
-    bytes = await download(url, (fraction) => {
-      fillBar.hidden = false;
-      fillBar.style.width = `${100 * fraction}%`;
-    });
+    bytes = await downloadWhole(url);
   } catch (error) {
     fail(downloadError(error));
     return;
   }
-  fillBar.hidden = true;
   openBytes(bytes);
 }
 
@@ -585,18 +604,13 @@ function openBytes(bytes) {
   }
 }
 
-async function playUrl(url) {
-  url = new URL(url, location.href).href;
-  say("Cargando la animación…");
-  let length = 0;
-  try {
-    const head = await fetch(url, { method: "HEAD" });
-    if (head.status === 404 || head.status === 410) throw httpError(head);
-    if (head.ok) length = Number(head.headers.get("Content-Length")) || 0;
-  } catch (error) {
-    fail(downloadError(error));
-    return;
-  }
+// Fetch what opens the file at `url`, which needs no module: a large file on
+// a host that serves byte ranges, its length and its end (the archive's
+// directory and the tables); any other, the whole file.
+async function locate(url) {
+  const head = await fetch(url, { method: "HEAD" });
+  if (head.status === 404 || head.status === 410) throw httpError(head);
+  const length = head.ok ? Number(head.headers.get("Content-Length")) || 0 : 0;
   if (length >= PIECES_FROM) {
     const start = Math.max(0, length - TAIL);
     let tail = null;
@@ -609,24 +623,32 @@ async function playUrl(url) {
     // fly reports the compressed length, so this tail would not be the end.
     const end = tail && tail.length - 22;
     if (tail && end >= 0 && tail[end] === 0x50 && tail[end + 1] === 0x4b && tail[end + 2] === 5 && tail[end + 3] === 6) {
-      const r = { url, length, have: [[start, length]], inflight: [], retryAt: 0 };
-      remote = r;
-      showFill();
-      try {
-        const json = player.openRemote(length, start, tail);
-        if (json) opened(json);
-        requestWanted();
-      } catch (error) {
-        remote = null;
-        if (error.name === "damaged") playWhole(url);
-        else fail(error);
-        return;
-      }
-      fill(r);
-      return;
+      return { url, length, start, tail };
     }
   }
-  await playWhole(url);
+  return { url, bytes: await downloadWhole(url) };
+}
+
+// Open what `locate` fetched.
+function playLocated({ url, bytes, length, start, tail }) {
+  if (bytes) {
+    openBytes(bytes);
+    return;
+  }
+  const r = { url, length, have: [[start, length]], inflight: [], retryAt: 0 };
+  remote = r;
+  showFill();
+  try {
+    const json = player.openRemote(length, start, tail);
+    if (json) opened(json);
+    requestWanted();
+  } catch (error) {
+    remote = null;
+    if (error.name === "damaged") playWhole(url);
+    else fail(error);
+    return;
+  }
+  fill(r);
 }
 
 // ---------------------------------------------------------------------------
@@ -805,11 +827,41 @@ const fullPlayer = src
   : null;
 
 // The module ships gzip-compressed so it downloads small from any host; a
-// server that already decoded it hands over the plain module.
-async function gunzip(bytes) {
-  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes;
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+// server that already decoded it hands over the plain module. Either way it
+// compiles as it arrives (`instantiateStreaming`), not after the download.
+async function moduleResponse(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw httpError(response);
+  const reader = response.body.getReader();
+  // The first two bytes say whether it is still compressed.
+  let head = new Uint8Array();
+  let done = false;
+  while (head.length < 2 && !done) {
+    const chunk = await reader.read();
+    done = chunk.done;
+    if (chunk.value) {
+      const joined = new Uint8Array(head.length + chunk.value.length);
+      joined.set(head);
+      joined.set(chunk.value, head.length);
+      head = joined;
+    }
+  }
+  let body = new ReadableStream({
+    start(controller) {
+      if (head.length) controller.enqueue(head);
+      if (done) controller.close();
+    },
+    async pull(controller) {
+      const chunk = await reader.read();
+      if (chunk.done) controller.close();
+      else controller.enqueue(chunk.value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+  if (head[0] === 0x1f && head[1] === 0x8b) body = body.pipeThrough(new DecompressionStream("gzip"));
+  return new Response(body, { headers: { "Content-Type": "application/wasm" } });
 }
 
 async function start() {
@@ -818,9 +870,14 @@ async function start() {
     tellParent("error", "WebGPU");
     return;
   }
+  // The file downloads while the module does: on a first visit the two
+  // overlap, and once the module is cached the file no longer waits for it
+  // to compile. A failure shows once the player can open files.
+  const file = src ? locate(new URL(src, location.href).href) : null;
+  file?.catch(() => {});
+  if (src) say("Cargando la animación…");
   try {
-    const module = await gunzip(new Uint8Array(await (await fetch("pkg/gaanim_embed_bg.wasm.gz")).arrayBuffer()));
-    await init({ module_or_path: module });
+    await init({ module_or_path: moduleResponse("pkg/gaanim_embed_bg.wasm.gz") });
     player = await Player.create(canvas);
   } catch (error) {
     fail(error);
@@ -828,8 +885,18 @@ async function start() {
   }
   requestAnimationFrame(frame);
   tellParent("ready");
-  if (src) playUrl(src);
-  else if (window.parent === window) say("Falta la dirección de la animación (?src=).", true);
+  if (file) {
+    let found;
+    try {
+      found = await file;
+    } catch (error) {
+      fail(downloadError(error));
+      return;
+    }
+    playLocated(found);
+  } else if (window.parent === window) {
+    say("Falta la dirección de la animación (?src=).", true);
+  }
 }
 
 // A parent page on this site may send a file and change how it plays.

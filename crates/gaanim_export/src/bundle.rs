@@ -880,7 +880,9 @@ fn visible_amount(frame: &Frame) -> f64 {
 }
 
 /// PNG of `frame` rendered as an export renders it, its longest edge
-/// [`THUMBNAIL_SIZE`] pixels.
+/// [`THUMBNAIL_SIZE`] pixels. It is stored in every bundle and is a sizable
+/// share of a short one, so it is written at the best compression, and an
+/// opaque frame as RGB (half the bytes of RGBA at the default compression).
 fn render_thumbnail(scene: &SceneData, frame: &Frame) -> Result<Vec<u8>> {
     let (width, height) = scene.output_size;
     let longest = width.max(height).max(1);
@@ -897,13 +899,27 @@ fn render_thumbnail(scene: &SceneData, frame: &Frame) -> Result<Vec<u8>> {
         crate::config::OutputFit::Contain,
     )?;
     let rgba = rasterizer.render(frame, frame.time)?;
+    let (pixels, _) = rgba.as_chunks::<4>();
+    let (bytes, color) = if pixels.iter().all(|&[_, _, _, alpha]| alpha == u8::MAX) {
+        let rgb: Vec<u8> = pixels
+            .iter()
+            .flat_map(|&[red, green, blue, _]| [red, green, blue])
+            .collect();
+        (rgb, image::ExtendedColorType::Rgb8)
+    } else {
+        (rgba, image::ExtendedColorType::Rgba8)
+    };
     let mut png = Vec::new();
     image::ImageEncoder::write_image(
-        image::codecs::png::PngEncoder::new(&mut png),
-        &rgba,
+        image::codecs::png::PngEncoder::new_with_quality(
+            &mut png,
+            image::codecs::png::CompressionType::Best,
+            image::codecs::png::FilterType::Adaptive,
+        ),
+        &bytes,
         width,
         height,
-        image::ExtendedColorType::Rgba8,
+        color,
     )
     .map_err(|error| ExportError::General(error.to_string()))?;
     Ok(png)
