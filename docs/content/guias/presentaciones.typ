@@ -134,9 +134,11 @@ Dile a Gaanim cuánto quieres que dure la charla, entera o por diapositivas, y
 Presenter View te dirá cuánto queda y si vas adelantado o retrasado:
 
 ```python
+>>>from gaanim import Scene, Transition, title_slide
+>>>scene = Scene(frame=(16, 9))
 scene.slides.target(20 * 60)                                 # la charla, en segundos
 scene.segment("Portada", template=title_slide, target=30)    # cada diapositiva
-scene.segment("Resultados", Transition.slide(0.5), target=120)
+scene.segment("Resultados", Transition.slide(0.5, "left"), target=120)
 ```
 
 La duración de la charla entera también se fija al presentar, sin tocar el
