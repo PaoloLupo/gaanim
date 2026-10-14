@@ -264,8 +264,12 @@ pub(crate) struct Rehearsals {
 impl Rehearsals {
     /// The rehearsals kept for `source` in Gaanim's data folder.
     pub(crate) fn load(source: &Path) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
         let path = gaanim_project::user_data_dir()
             .map(|dir| dir.join("rehearsals").join(log_name(source)));
+        // The web has no data folder: its rehearsals last the session.
+        #[cfg(target_arch = "wasm32")]
+        let path: Option<PathBuf> = None;
         let log = path
             .as_deref()
             .and_then(|path| std::fs::read_to_string(path).ok())
@@ -340,6 +344,7 @@ impl Rehearsals {
 
 /// The log file of `source`: its name and a digest of its full path, so
 /// two talks with the same name keep apart.
+#[cfg(not(target_arch = "wasm32"))]
 fn log_name(source: &Path) -> String {
     use sha2::Digest;
     let digest = sha2::Sha256::digest(source.to_string_lossy().as_bytes());
