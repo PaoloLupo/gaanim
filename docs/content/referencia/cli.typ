@@ -215,9 +215,9 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--fit <MODO>`], [`error`], [Qué hacer si la proporción de salida no coincide con el marco de la escena: `error` falla, `contain` añade bandas y `cover` recorta los bordes.],
   [`--encoder <CODIFICADOR>`], [`auto`], [Solo MP4: `auto`, `libx264`, `nvenc`, `amf`, `qsv` o `vaapi`.],
   [`--transparent`], [desactivado], [Conserva el canal alfa en WebM, MOV, WebP y PNG. MP4 y GIF lo rechazan.],
-  [`--from <SEGUNDOS|MARCADOR>`], [`0`], [Inicio del tramo exportado.],
-  [`--to <SEGUNDOS|MARCADOR>`], [fin de la escena], [Fin del tramo exportado.],
-  [`--frame <SEGUNDOS|MARCADOR>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
+  [`--from <SEGUNDOS|NOMBRE>`], [`0`], [Inicio del tramo exportado: segundos, un marcador, un segmento (su inicio) o una pausa.],
+  [`--to <SEGUNDOS|NOMBRE>`], [fin de la escena], [Fin del tramo exportado; un segmento lo termina en su final.],
+  [`--frame <SEGUNDOS|NOMBRE>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo; un segmento da su primera pausa. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
   [`--notes`], [desactivado], [Solo PDF: añade tras la última página de cada diapositiva una página con sus notas (`scene.segment(notes=...)`).],
 )
 
@@ -266,12 +266,23 @@ gaanim export rotulo.py --output rotulo.mov --transparent
 gaanim export mi-video --output master.mov --fps 25
 ```
 
-== Tramos y marcadores
+== Tramos y marcadores <tramos-nombres>
 
-`--from` y `--to` aceptan segundos o el nombre de un
-#link("/referencia/scene/#api-scene-marker")[`scene.marker`], y se pueden
-combinar. Los nombres se resuelven después de ejecutar el script; uno que no
-existe produce un error con los marcadores definidos. El audio se recorta al
+`--from` y `--to` aceptan segundos o un nombre, y se pueden combinar. Los
+nombres se resuelven después de ejecutar el script, en este orden:
+
++ un #link("/referencia/scene/#api-scene-marker")[`scene.marker`], con su
+  nombre exacto: su instante;
++ un segmento, la clave de un `Section` (todos sus pasos) o el nombre de un
+  `SectionStep`, sin distinguir mayúsculas, como en `--from` al
+  previsualizar: `--from` empieza en su inicio y `--to` termina en su final;
++ el nombre de una pausa (`scene.stop("nombre")`), sin distinguir
+  mayúsculas: el instante en que descansa.
+
+Un número son siempre segundos. Un nombre que no existe produce un error con
+los marcadores, segmentos y pausas definidos, y el de una pausa que se repite
+en varios segmentos es ambiguo: el error dice dónde está cada una, para pasar
+sus segundos. El audio se recorta al
 mismo tramo, una secuencia PNG numera sus fotogramas desde 0 y un `--to`
 posterior al final se limita a la duración de la escena. `--to` debe quedar
 después de `--from`.
@@ -283,14 +294,20 @@ gaanim export overlay.py --output overlay.webm --transparent
 gaanim export rotulo.py --output rotulo.mov --transparent
 gaanim export mi-video --output exports/tramo.mp4 --from 12 --to 15
 gaanim export mi-video --output exports/climax.mp4 --from climax --to fin
+gaanim export mi-charla --output exports/resultados.mp4 --from resultados --to resultados
 gaanim export mi-video --output frames/f_%04d.png --quality draft
 ```
 
 == Fotogramas sueltos
 
 Para revisar la composición en un instante, `--frame` escribe exactamente un
-PNG con lo que se ve en ese momento, sin exportar un tramo. Acepta segundos o
-marcadores separados por comas. Con un solo instante escribe el archivo de
+PNG con lo que se ve en ese momento, sin exportar un tramo. Acepta segundos y
+nombres separados por comas, con las mismas reglas que
+#link(<tramos-nombres>)[`--from`]; una coma dentro de un nombre se escribe
+`\,`. Un segmento o `Section` da el instante de su primera pausa, el mismo de
+su primera página en el #link(<diapositivas-pdf>)[PDF], o su final si no tiene
+pausas; una pausa, el instante en que descansa, el mismo que captura
+`--diff --capture-stops`. Con un solo instante escribe el archivo de
 `--output`; con varios añade su posición al nombre (`fotos/f.png` escribe
 `f_1.png`, `f_2.png`…). Respeta `--width`, `--height`, `--fit` y
 `--transparent`.
@@ -298,6 +315,7 @@ marcadores separados por comas. Con un solo instante escribe el archivo de
 ```bash
 gaanim export mi-video --output revision.png --frame 11.4
 gaanim export mi-video --output fotos/f.png --frame 3,11.4,climax
+gaanim export mi-charla --output problema.png --frame Problema
 ```
 
 == Diapositivas en PDF <diapositivas-pdf>
