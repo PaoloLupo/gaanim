@@ -542,6 +542,9 @@ struct Dictation {
     /// A warning from Scribe, or why the session stopped or failed.
     note: Option<(String, bool)>,
     closed: bool,
+    /// Where the timeline was when Scribe stopped before the speaker
+    /// finished: nothing after it was transcribed.
+    stopped_at: Option<f64>,
 }
 
 impl Dictation {
@@ -554,6 +557,7 @@ impl Dictation {
             speaking: false,
             note: None,
             closed: false,
+            stopped_at: None,
         }
     }
 
@@ -1515,6 +1519,9 @@ pub(crate) fn narration_session_system(
             if let Some(dictation) = &mut recording.dictation {
                 dictation.absorb();
                 dictation.track(&timeline, elapsed);
+                if dictation.closed && dictation.stopped_at.is_none() {
+                    dictation.stopped_at = Some(timeline.current_time);
+                }
             }
             if let Some(error) = recording.input.recorder.error() {
                 let target = recording.target.clone();
@@ -1565,7 +1572,12 @@ pub(crate) fn narration_session_system(
                     save_recording(*recording, &mut timeline, &mut panel, &mut preview_audio);
                 } else {
                     let target = recording.target.clone();
-                    let reached = timeline.current_time;
+                    // Where the dictation reached: where Scribe stopped, if it
+                    // stopped early, so what it missed can be dictated again.
+                    let reached = dictation
+                        .as_ref()
+                        .and_then(|dictation| dictation.stopped_at)
+                        .unwrap_or(timeline.current_time);
                     drop(recording);
                     finish_capture(&target, &mut timeline, &mut preview_audio);
                     if target.is_live() {

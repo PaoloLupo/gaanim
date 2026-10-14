@@ -202,6 +202,40 @@ pub(crate) fn script_lines(
     lines
 }
 
+/// How much of a slide's script is written, or dictated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScriptCoverage {
+    /// No part has text yet.
+    Pending,
+    /// Some parts have text.
+    Partial,
+    /// Every part the speaker says has text: one per stop, or the whole
+    /// notes of a slide without stops.
+    Complete,
+}
+
+/// How much of `segment`'s script is written.
+pub(crate) fn script_coverage(segment: &SegmentMetadata) -> ScriptCoverage {
+    let parts = segment
+        .notes
+        .as_deref()
+        .map(split_notes)
+        .unwrap_or_default();
+    let needed = segment.stops.len().max(1);
+    let written = (0..needed)
+        .filter(|part| {
+            parts
+                .get(*part)
+                .is_some_and(|notes_part| !notes_part.text.trim().is_empty())
+        })
+        .count();
+    match written {
+        0 => ScriptCoverage::Pending,
+        written if written < needed => ScriptCoverage::Partial,
+        _ => ScriptCoverage::Complete,
+    }
+}
+
 /// Seconds `text` takes to read aloud at the narration's estimated pace.
 fn reading_seconds(text: &str) -> Option<f64> {
     let words = gaanim_media::narration::text_words(text).len();
@@ -523,6 +557,36 @@ mod tests {
                 .any(|line| matches!(line, ScriptLine::Slide { .. }))
         );
         assert_eq!(notes.len(), 3);
+    }
+
+    #[test]
+    fn coverage_counts_the_parts_said_before_each_stop() {
+        let stops = [(1.0, None), (2.0, None)];
+        assert_eq!(
+            script_coverage(&slide(1, "a", None, &stops)),
+            ScriptCoverage::Pending
+        );
+        assert_eq!(
+            script_coverage(&slide(1, "a", Some("Uno.\n[stop]"), &stops)),
+            ScriptCoverage::Partial
+        );
+        assert_eq!(
+            script_coverage(&slide(1, "a", Some("[stop]\nDos.\n[stop]"), &stops)),
+            ScriptCoverage::Partial
+        );
+        assert_eq!(
+            script_coverage(&slide(1, "a", Some("Uno.\n[stop]\nDos.\n[stop]"), &stops)),
+            ScriptCoverage::Complete
+        );
+        // Without stops, any text covers the slide.
+        assert_eq!(
+            script_coverage(&slide(1, "a", Some("Hola."), &[])),
+            ScriptCoverage::Complete
+        );
+        assert_eq!(
+            script_coverage(&slide(1, "a", Some("  "), &[])),
+            ScriptCoverage::Pending
+        );
     }
 
     #[test]

@@ -841,17 +841,28 @@ fn editor_ui_system(
                             .collect();
 
                         let scene_bounds = timeline.scene_bounds_all();
+                        // Script marks only when the talk has a script.
+                        let scripted =
+                            timeline.segments.iter().any(|segment| segment.notes.is_some());
                         let scene_segs: Vec<SceneSegment> = timeline
                             .scene_index
                             .iter()
                             .filter_map(|(&_start_time, &scene_id)| {
                                 let &(s, e) = scene_bounds.get(&scene_id)?;
                                 let name = timeline.scenes.get(scene_id)?.name.clone();
+                                // Slides compile to scenes of the same name.
+                                let script = timeline
+                                    .segments
+                                    .iter()
+                                    .filter(|_| scripted)
+                                    .find(|segment| segment.name == name)
+                                    .map(presenter::prompter::script_coverage);
                                 Some(SceneSegment {
                                     name,
                                     start: s,
                                     start_frac: (s as f32 / total_f32).clamp(0.0, 1.0),
                                     end_frac: (e as f32 / total_f32).clamp(0.0, 1.0),
+                                    script,
                                 })
                             })
                             .collect();
@@ -1617,6 +1628,9 @@ struct SceneSegment {
     start: f64,
     start_frac: f32,
     end_frac: f32,
+    /// How much of its slide's script is written, when the scene has a
+    /// script at all.
+    script: Option<presenter::prompter::ScriptCoverage>,
 }
 
 /// Start of the scene after (or before) the one playing at `time`, given the
@@ -2100,6 +2114,22 @@ fn paint_seek_bar(
         }
         if let Some(stroke) = style.outline {
             painter.rect_stroke(chip, 0.0, stroke, egui::StrokeKind::Inside);
+        }
+        // A square in the corner: the slide's script is complete (green)
+        // or partly written or dictated (amber).
+        let script_mark = match seg.script {
+            Some(presenter::prompter::ScriptCoverage::Complete) => Some(palette::LOOP),
+            Some(presenter::prompter::ScriptCoverage::Partial) => Some(palette::STOP),
+            _ => None,
+        };
+        if let Some(color) = script_mark
+            && chip.width() >= 10.0
+        {
+            let mark = egui::Rect::from_center_size(
+                egui::pos2(chip.max.x - 5.0, chip.min.y + 5.0),
+                egui::Vec2::splat(4.0),
+            );
+            painter.rect_filled(mark, 0.0, color);
         }
 
         let name = scene_display_name(&seg.name);
@@ -4171,6 +4201,7 @@ mod tests {
             start: 0.0,
             start_frac: 0.0,
             end_frac: 0.0,
+            script: None,
         };
         let scenes = [
             scene("Portada"),
@@ -4208,6 +4239,7 @@ mod tests {
             start: 0.25,
             start_frac: 0.25,
             end_frac: 0.75,
+            script: None,
         }];
         let near_boundary = 0.251;
 

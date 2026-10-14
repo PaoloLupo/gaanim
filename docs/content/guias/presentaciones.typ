@@ -124,6 +124,9 @@ scene.stop()
   muestran y los comentarios HTML se ignoran.
 - Al guardar el archivo, el editor actualiza las notas sin volver a compilar
   la escena.
+- En la barra de tiempo del editor, un cuadrado en la esquina de cada
+  diapositiva dice cómo va su guion: verde si todos sus tramos tienen texto,
+  escrito o dictado, y ámbar si solo algunos. Sin cuadrado, está pendiente.
 
 Gaanim escribe el guion por ti y lo mantiene al día con el código. En el
 editor, abre *Guion y narración* (el botón de micrófono de la barra de
@@ -149,7 +152,9 @@ y cada frase va a la diapositiva y al tramo que estabas presentando.
   `Espacio` avanzan en cada stop, `Enter` termina y `Esc` descarta. Al
   terminar con `Enter`, el cabezal se queda donde llegaste: el siguiente
   *Dictar con Scribe* sigue desde ese stop, así que puedes dictar la charla
-  por partes.
+  por partes. Si Scribe se cortó antes (un error, el límite de minutos o dos
+  minutos sin voz), se queda donde se cortó, para dictar de nuevo lo que no
+  se grabó; `Esc` lo descarta todo y vuelve a donde empezaste.
 + Al terminar, Gaanim espera las últimas frases (como mucho 12 segundos;
   `Esc` deja de esperar) y las escribe en el guion. Un tramo vacío recibe lo
   dictado; uno que ya tenía texto lo conserva y lo dictado se añade a su lado
