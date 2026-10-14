@@ -1,7 +1,8 @@
 //! The preview's control channel, `--listen`: an editor moves the preview
 //! and hears where it is, one JSON object per line.
 //!
-//! Commands come in (`seek`, `follow`, `play`, `pause`) and events go out
+//! Commands come in (`seek`, `follow`, `play`, `pause`, `loop`, `unloop`)
+//! and events go out
 //! (`ready`, `reload`, `failed`, `playhead`, `error`). With `--listen stdio`
 //! they use the process's stdin and stdout; with `--listen 127.0.0.1:PORT`
 //! every editor that connects to that loopback port. Without `--listen`
@@ -20,7 +21,8 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 use gaanim_api::canvas::TimelineIndex;
-use gaanim_timeline::timeline::Timeline;
+use gaanim_editor::{EditorState, PresentationMode};
+use gaanim_timeline::timeline::{SegmentMetadata, Timeline};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -79,6 +81,22 @@ pub enum Command {
     },
     Play,
     Pause,
+    /// Repeat a segment or `Section` (from its first segment's start to
+    /// its last's end), or `start`..`end`, as the preview's loop does.
+    Loop {
+        segment: Option<String>,
+        start: Option<f64>,
+        end: Option<f64>,
+    },
+    /// End the loop, restoring the range it replaced.
+    Unloop,
+}
+
+/// What an editor asked to loop, resolved again after each reload.
+#[derive(Debug, Clone, PartialEq)]
+enum LoopRequest {
+    Segment(String),
+    Range(f64, f64),
 }
 
 /// A command, or why its line could not be read.
@@ -95,6 +113,12 @@ pub struct ControlChannel {
     script: Option<PathBuf>,
     last_playhead: Option<Playhead>,
     last_sent: Option<Instant>,
+    /// The loop an editor asked for, while the preview keeps it.
+    loop_request: Option<LoopRequest>,
+    /// The range that request looped, to notice the preview changing it.
+    applied_loop: Option<(f64, f64)>,
+    /// A new scene arrived since the commands last ran.
+    reloaded: bool,
 }
 
 impl ControlChannel {
@@ -106,6 +130,7 @@ impl ControlChannel {
     /// A new scene arrived, with `index`, and is being rebuilt.
     pub fn reloading(&mut self, index: TimelineIndex) {
         self.index = Some(index);
+        self.reloaded = true;
         self.send(json!({ "event": "reload" }));
     }
 
@@ -227,6 +252,9 @@ pub fn listen(
         }),
         last_playhead: None,
         last_sent: None,
+        loop_request: None,
+        applied_loop: None,
+        reloaded: false,
     });
     Ok(())
 }
@@ -263,31 +291,41 @@ fn parse_line(line: &str) -> Option<Incoming> {
 }
 
 /// The time `command`'s seek names on `timeline`.
+/// Whether `left` and `right` name the same thing, ignoring case.
+fn same_name(left: &str, right: &str) -> bool {
+    left.to_lowercase() == right.trim().to_lowercase()
+}
+
+/// The segments `name` selects, in order: a segment by name, or every
+/// segment of a `Section` by its key; every segment without a name.
+fn named_segments<'a>(timeline: &'a Timeline, name: Option<&str>) -> Vec<&'a SegmentMetadata> {
+    timeline
+        .segments
+        .iter()
+        .filter(|candidate| {
+            name.is_none_or(|name| {
+                same_name(&candidate.name, name)
+                    || gaanim_timeline::selection::section_key(&candidate.name)
+                        .is_some_and(|key| same_name(key, name))
+            })
+        })
+        .collect()
+}
+
 fn seek_time(
     timeline: &Timeline,
     time: Option<f64>,
     segment: Option<&str>,
     stop: Option<&str>,
 ) -> Result<f64, String> {
-    let same = |left: &str, right: &str| left.to_lowercase() == right.trim().to_lowercase();
+    let same = same_name;
     match (time, segment, stop) {
         (Some(time), None, None) if time.is_finite() && time >= 0.0 => {
             Ok(time.min(timeline.cached_duration.max(0.0)))
         }
         (Some(_), None, None) => Err("seek: time must be a non-negative number".to_string()),
         (None, Some(_), _) | (None, None, Some(_)) => {
-            // A segment by name, or every segment of a Section by its key.
-            let segments: Vec<_> = timeline
-                .segments
-                .iter()
-                .filter(|candidate| {
-                    segment.is_none_or(|name| {
-                        same(&candidate.name, name)
-                            || gaanim_timeline::selection::section_key(&candidate.name)
-                                .is_some_and(|key| same(key, name))
-                    })
-                })
-                .collect();
+            let segments = named_segments(timeline, segment);
             if segments.is_empty() {
                 return Err(format!(
                     "seek: no segment or section named {:?}",
@@ -318,6 +356,43 @@ fn seek_time(
     }
 }
 
+/// What a `loop` command asks for.
+fn loop_request(
+    segment: Option<String>,
+    start: Option<f64>,
+    end: Option<f64>,
+) -> Result<LoopRequest, String> {
+    match (segment, start, end) {
+        (Some(segment), None, None) => Ok(LoopRequest::Segment(segment)),
+        (None, Some(start), Some(end)) => Ok(LoopRequest::Range(start, end)),
+        _ => Err("loop takes segment, or start and end".to_string()),
+    }
+}
+
+/// The range `request` loops on `timeline`.
+fn loop_range(timeline: &Timeline, request: &LoopRequest) -> Result<(f64, f64), String> {
+    let duration = timeline.cached_duration.max(0.0);
+    match request {
+        LoopRequest::Segment(name) => {
+            let segments = named_segments(timeline, Some(name));
+            match (segments.first(), segments.last()) {
+                (Some(first), Some(last)) => Ok((first.start_time, last.end_time)),
+                _ => Err(format!("loop: no segment or section named {name:?}")),
+            }
+        }
+        LoopRequest::Range(start, end) => {
+            let valid = start.is_finite() && end.is_finite() && *start >= 0.0 && end > start;
+            if !valid || *start >= duration {
+                return Err(format!(
+                    "loop: start and end must be seconds with 0 <= start < end and start before \
+                     the end of the scene ({duration}s), not {start}..{end}"
+                ));
+            }
+            Ok((*start, end.min(duration)))
+        }
+    }
+}
+
 /// Where the preview rests, as `playhead` reports it.
 #[derive(Debug, Clone, PartialEq)]
 struct Playhead {
@@ -326,10 +401,14 @@ struct Playhead {
     segment: Option<String>,
     stop: Option<String>,
     playing: bool,
+    /// The loop's start and end in milliseconds, while a loop is on.
+    looped: Option<(i64, i64)>,
 }
 
 impl Playhead {
-    fn of(timeline: &Timeline) -> Self {
+    /// Where `timeline` rests; `looping` says whether the preview's loop
+    /// is on.
+    fn of(timeline: &Timeline, looping: bool) -> Self {
         let time = timeline.current_time;
         let position = timeline.segment_position_at(time);
         let segment = position.and_then(|position| {
@@ -342,11 +421,16 @@ impl Playhead {
             .zip(position.and_then(|position| position.stop_index))
             .and_then(|(segment, index)| segment.stops.get(index))
             .map(|stop| stop.name.clone().unwrap_or_default());
+        let millis = |time: f64| (time * 1000.0).round() as i64;
         Self {
-            millis: (time * 1000.0).round() as i64,
+            millis: millis(time),
             segment: segment.map(|segment| segment.name.clone()),
             stop,
             playing: timeline.is_playing,
+            looped: timeline
+                .loop_range
+                .filter(|_| looping)
+                .map(|(start, end)| (millis(start), millis(end))),
         }
     }
 
@@ -357,6 +441,7 @@ impl Playhead {
             "segment": self.segment,
             "stop": self.stop,
             "playing": self.playing,
+            "loop": self.looped.map(|(start, end)| [start as f64 / 1000.0, end as f64 / 1000.0]),
         })
     }
 }
@@ -364,14 +449,61 @@ impl Playhead {
 /// While playing, the playhead is reported at most this often.
 const PLAYHEAD_INTERVAL: Duration = Duration::from_millis(100);
 
+/// The range the preview loops, while its loop is on.
+fn active_loop(timeline: &Timeline, editor: Option<&EditorState>) -> Option<(f64, f64)> {
+    timeline
+        .loop_range
+        .filter(|_| editor.is_some_and(EditorState::segment_loop_active))
+}
+
+/// Keep the loop an editor asked for across a reload, which re-resolves
+/// the preview's loop as the slide at the playhead; forget it once the
+/// preview's own loop controls change it.
+fn keep_requested_loop(
+    channel: &mut ControlChannel,
+    timeline: &mut Timeline,
+    editor: Option<&mut EditorState>,
+) {
+    let Some(editor) = editor else {
+        return;
+    };
+    let reloaded = std::mem::take(&mut channel.reloaded);
+    let Some(request) = channel.loop_request.clone() else {
+        return;
+    };
+    if !reloaded {
+        if active_loop(timeline, Some(editor)) != channel.applied_loop {
+            channel.loop_request = None;
+            channel.applied_loop = None;
+        }
+        return;
+    }
+    match loop_range(timeline, &request) {
+        Ok(range) if editor.set_segment_loop(timeline, range, false).is_ok() => {
+            channel.applied_loop = active_loop(timeline, Some(editor));
+        }
+        Ok(_) => {}
+        Err(message) => {
+            editor.clear_segment_loop(timeline);
+            channel.loop_request = None;
+            channel.applied_loop = None;
+            channel.send(json!({ "event": "error", "message": message }));
+        }
+    }
+}
+
 /// System: carry out the commands editors sent.
 pub fn control_command_system(
     channel: Option<ResMut<ControlChannel>>,
     timeline: Option<ResMut<Timeline>>,
+    mut editor: Option<ResMut<EditorState>>,
+    presentation: Option<Res<PresentationMode>>,
 ) {
-    let (Some(channel), Some(mut timeline)) = (channel, timeline) else {
+    let (Some(mut channel), Some(mut timeline)) = (channel, timeline) else {
         return;
     };
+    keep_requested_loop(&mut channel, &mut timeline, editor.as_deref_mut());
+    let presenting = presentation.is_some_and(|mode| mode.active);
     let incoming: Vec<Incoming> = channel.commands.try_iter().collect();
     for command in incoming {
         let result = command.and_then(|command| match command {
@@ -399,6 +531,29 @@ pub fn control_command_system(
                 timeline.is_playing = false;
                 Ok(None)
             }
+            Command::Loop {
+                segment,
+                start,
+                end,
+            } => {
+                let request = loop_request(segment, start, end)?;
+                let Some(editor) = editor.as_deref_mut().filter(|_| !presenting) else {
+                    return Err("loop: a presentation does not loop".to_string());
+                };
+                let range = loop_range(&timeline, &request)?;
+                editor.set_segment_loop(&mut timeline, range, true)?;
+                channel.applied_loop = active_loop(&timeline, Some(editor));
+                channel.loop_request = Some(request);
+                Ok(None)
+            }
+            Command::Unloop => {
+                if let Some(editor) = editor.as_deref_mut() {
+                    editor.clear_segment_loop(&mut timeline);
+                }
+                channel.loop_request = None;
+                channel.applied_loop = None;
+                Ok(None)
+            }
         });
         match result {
             Ok(Some(time)) => timeline.rest_at(time),
@@ -412,6 +567,7 @@ pub fn control_command_system(
 pub fn playhead_event_system(
     channel: Option<ResMut<ControlChannel>>,
     timeline: Option<Res<Timeline>>,
+    editor: Option<Res<EditorState>>,
 ) {
     let (Some(mut channel), Some(timeline)) = (channel, timeline) else {
         return;
@@ -419,7 +575,8 @@ pub fn playhead_event_system(
     if timeline.cached_duration <= 0.0 {
         return;
     }
-    let playhead = Playhead::of(&timeline);
+    let looping = editor.is_some_and(|editor| editor.segment_loop_active());
+    let playhead = Playhead::of(&timeline, looping);
     let Some(last) = channel.last_playhead.as_ref() else {
         channel.send(playhead.event());
         channel.last_playhead = Some(playhead);
@@ -430,10 +587,11 @@ pub fn playhead_event_system(
         return;
     }
     // Moving within the same place while playing waits its turn; a seek, a
-    // pause or a new segment or stop goes at once.
+    // pause, a new segment or stop or a changed loop goes at once.
     let same_place = last.segment == playhead.segment
         && last.stop == playhead.stop
-        && last.playing == playhead.playing;
+        && last.playing == playhead.playing
+        && last.looped == playhead.looped;
     if same_place
         && playhead.playing
         && channel
@@ -552,7 +710,7 @@ mod tests {
     fn the_playhead_names_its_segment_and_stop() {
         let mut timeline = timeline();
         timeline.current_time = 5.2;
-        let playhead = Playhead::of(&timeline);
+        let playhead = Playhead::of(&timeline, false);
         assert_eq!(playhead.millis, 5200);
         assert_eq!(
             playhead.segment.as_deref(),
@@ -560,8 +718,112 @@ mod tests {
         );
         assert_eq!(playhead.stop.as_deref(), Some("dato"));
         assert_eq!(playhead.event()["time"], 5.2);
+        assert!(playhead.event()["loop"].is_null());
         timeline.current_time = 0.5;
-        assert_eq!(Playhead::of(&timeline).stop, None);
+        assert_eq!(Playhead::of(&timeline, false).stop, None);
+        // A loop is reported only while the preview's loop is on.
+        timeline.loop_range = Some((2.0, 6.0));
+        assert!(Playhead::of(&timeline, false).event()["loop"].is_null());
+        assert_eq!(
+            Playhead::of(&timeline, true).event()["loop"],
+            json!([2.0, 6.0])
+        );
+    }
+
+    /// A channel for tests, and the receiver of what it sends.
+    fn channel() -> (ControlChannel, Sender<Incoming>, Receiver<String>) {
+        let (command_tx, commands) = crossbeam_channel::unbounded();
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let channel = ControlChannel {
+            commands,
+            events,
+            index: None,
+            script: None,
+            last_playhead: None,
+            last_sent: None,
+            loop_request: None,
+            applied_loop: None,
+            reloaded: false,
+        };
+        (channel, command_tx, event_rx)
+    }
+
+    #[test]
+    fn loops_take_a_segment_a_section_or_a_range() {
+        let timeline = timeline();
+        let range = |segment: Option<&str>, start, end| {
+            loop_request(segment.map(str::to_owned), start, end)
+                .and_then(|request| loop_range(&timeline, &request))
+        };
+        assert_eq!(range(Some("portada"), None, None), Ok((0.0, 2.0)));
+        // A Section spans its steps.
+        assert_eq!(range(Some("RESULTS"), None, None), Ok((2.0, 6.0)));
+        assert_eq!(range(None, Some(1.2), Some(3.4)), Ok((1.2, 3.4)));
+        // The end stops at the end of the scene.
+        assert_eq!(range(None, Some(5.0), Some(60.0)), Ok((5.0, 6.0)));
+        for (segment, start, end) in [
+            (Some("Cierre"), None, None),
+            (None, Some(3.0), Some(3.0)),
+            (None, Some(-1.0), Some(2.0)),
+            (None, Some(6.0), Some(7.0)),
+            (None, Some(f64::NAN), Some(2.0)),
+            (None, Some(1.0), None),
+            (Some("Portada"), Some(1.0), Some(2.0)),
+        ] {
+            assert!(
+                range(segment, start, end).is_err(),
+                "{segment:?} {start:?} {end:?}"
+            );
+        }
+        assert_eq!(
+            parse_line(r#"{"cmd":"loop","segment":"Problema"}"#),
+            Some(Ok(Command::Loop {
+                segment: Some("Problema".into()),
+                start: None,
+                end: None
+            }))
+        );
+        assert_eq!(parse_line(r#"{"cmd":"unloop"}"#), Some(Ok(Command::Unloop)));
+    }
+
+    #[test]
+    fn a_requested_loop_follows_reloads_until_the_preview_changes_it() {
+        let (mut channel, _, events) = channel();
+        let mut timeline = timeline();
+        let mut editor = EditorState::default();
+        let request = LoopRequest::Segment("results".into());
+        let range = loop_range(&timeline, &request).unwrap();
+        editor.set_segment_loop(&mut timeline, range, true).unwrap();
+        channel.loop_request = Some(request);
+        channel.applied_loop = active_loop(&timeline, Some(&editor));
+
+        // A reload moves the section; its loop follows by name, without
+        // moving the playhead.
+        timeline.segments[2].end_time = 7.0;
+        timeline.cached_duration = 7.0;
+        timeline.seek_request = None;
+        channel.reloaded = true;
+        keep_requested_loop(&mut channel, &mut timeline, Some(&mut editor));
+        assert_eq!(timeline.loop_range, Some((2.0, 7.0)));
+        assert_eq!(channel.applied_loop, Some((2.0, 7.0)));
+        assert_eq!(timeline.seek_request, None);
+
+        // The preview's own loop control takes over: the request is dropped.
+        editor
+            .set_segment_loop(&mut timeline, (0.0, 2.0), false)
+            .unwrap();
+        keep_requested_loop(&mut channel, &mut timeline, Some(&mut editor));
+        assert_eq!(channel.loop_request, None);
+
+        // A section that disappears in a reload ends the loop with an error.
+        channel.loop_request = Some(LoopRequest::Segment("Portada".into()));
+        timeline.segments.remove(0);
+        channel.reloaded = true;
+        keep_requested_loop(&mut channel, &mut timeline, Some(&mut editor));
+        assert!(!editor.segment_loop_active());
+        assert_eq!(channel.loop_request, None);
+        let sent: Value = serde_json::from_str(&events.try_recv().unwrap()).unwrap();
+        assert_eq!(sent["event"], "error");
     }
 
     #[test]
@@ -576,6 +838,9 @@ mod tests {
             script: Some(PathBuf::from("/talk/main.py")),
             last_playhead: None,
             last_sent: None,
+            loop_request: None,
+            applied_loop: None,
+            reloaded: false,
         };
         // A bundle runs no script: its timeline is null.
         assert!(channel.ready_event(2.0)["timeline"].is_null());
