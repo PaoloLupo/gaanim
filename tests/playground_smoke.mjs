@@ -11,6 +11,7 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { inflateRawSync } from "node:zlib";
 import { pathToFileURL } from "node:url";
 
 const dist = resolve(process.argv[2] ?? "dist/playground");
@@ -98,20 +99,47 @@ function run(name, code, { files = {}, check = () => null, failsAt = null, fails
   console.log(`ok   ${name}: ${bundle.length} bytes in ${seconds} s`);
 }
 
-// A bundle is a ZIP: its central directory lists the stored files.
-function entries(bundle) {
+// A bundle is a ZIP: its central directory lists the stored files, with
+// where each starts and its compressed size (in a Zip64 field when it did
+// not fit, as the writer of large files leaves them).
+function directory(bundle) {
   const view = new DataView(bundle.buffer, bundle.byteOffset, bundle.byteLength);
   let end = bundle.length - 22;
   while (end >= 0 && view.getUint32(end, true) !== 0x06054b50) end--;
-  if (end < 0) return [];
-  const names = [];
+  const files = new Map();
+  if (end < 0) return files;
   let at = view.getUint32(end + 16, true);
   for (let i = view.getUint16(end + 10, true); i > 0; i--) {
-    const length = view.getUint16(at + 28, true);
-    names.push(new TextDecoder().decode(bundle.subarray(at + 46, at + 46 + length)));
-    at += 46 + length + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const extraLength = view.getUint16(at + 30, true);
+    const name = new TextDecoder().decode(bundle.subarray(at + 46, at + 46 + nameLength));
+    let size = view.getUint32(at + 20, true);
+    let offset = view.getUint32(at + 42, true);
+    const extraEnd = at + 46 + nameLength + extraLength;
+    for (let extra = at + 46 + nameLength; extra < extraEnd; extra += 4 + view.getUint16(extra + 2, true)) {
+      if (view.getUint16(extra, true) !== 1) continue;
+      // Zip64: the uncompressed size, the compressed size and the offset
+      // that did not fit, in this order.
+      let field = extra + 4;
+      if (view.getUint32(at + 24, true) === 0xffffffff) field += 8;
+      if (size === 0xffffffff) {
+        size = Number(view.getBigUint64(field, true));
+        field += 8;
+      }
+      if (offset === 0xffffffff) offset = Number(view.getBigUint64(field, true));
+    }
+    files.set(name, { method: view.getUint16(at + 10, true), size, offset });
+    at = extraEnd + view.getUint16(at + 32, true);
   }
-  return names;
+  return files;
+}
+
+// The bytes of a stored or deflated entry of `directory`.
+function read(bundle, file) {
+  const view = new DataView(bundle.buffer, bundle.byteOffset, bundle.byteLength);
+  const start = file.offset + 30 + view.getUint16(file.offset + 26, true) + view.getUint16(file.offset + 28, true);
+  const data = bundle.subarray(start, start + file.size);
+  return file.method === 8 ? inflateRawSync(data) : data;
 }
 
 const examples = JSON.parse(readFileSync(join(dist, "examples.json"), "utf8"));
@@ -152,9 +180,13 @@ scene.render()
   {
     files: { "foto.png": readFileSync(join(dist, "gaanim-icon-512.png")), "tono.wav": wav() },
     check(bundle) {
-      const names = entries(bundle);
+      const files = directory(bundle);
+      const names = [...files.keys()];
       if (!names.some((name) => name.startsWith("media/") && name.endsWith(".wav"))) return `no audio in ${names}`;
-      if (!names.includes("tables/images.bin")) return `no image table in ${names}`;
+      if (!files.has("manifest.json")) return `no manifest in ${names}`;
+      // The tables go in segments; the manifest counts what each holds.
+      const manifest = JSON.parse(new TextDecoder().decode(read(bundle, files.get("manifest.json"))));
+      if (!manifest.table_segments?.some((segment) => segment.images > 0)) return `no image in the tables of ${names}`;
       return null;
     },
   },
