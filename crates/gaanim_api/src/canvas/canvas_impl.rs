@@ -3231,6 +3231,7 @@ impl SceneModel {
             .map(|cue| self.sound_track(cue, self.current_time()))
             .transpose()
             .map_err(SegmentError::Sound)?;
+        let site = super::timeline_index::authoring_site();
         let mut guard = self.state.lock().expect("canvas state poisoned");
         let normalized_name = name.to_lowercase();
         if guard
@@ -3249,6 +3250,9 @@ impl SceneModel {
         }
 
         let id = guard.next_segment_id();
+        if let Some(site) = site {
+            guard.authored_timeline.segments.insert(id, site);
+        }
         let mut segment = Segment::new(id, name.clone(), notes, template.clone(), background);
         if replace_implicit {
             // Markers authored at t=0 before the first segment belong to it.
@@ -6211,6 +6215,16 @@ impl SceneModel {
         if time_maps.iter().any(Option::is_some) {
             guard.active_mut().ops.push(Op::TimeMaps(time_maps));
         }
+        if let Some(site) = stack.first() {
+            let segment = guard.active();
+            let play = (
+                segment.id,
+                segment.cursor,
+                segment.cursor + max_duration,
+                site.clone(),
+            );
+            guard.authored_timeline.plays.push(play);
+        }
         guard.record_op_location(stack);
         if !advance {
             guard.active_mut().ops.push(Op::Launch(builders));
@@ -6393,6 +6407,7 @@ impl SceneModel {
             self.wait(hold);
             return Ok(());
         }
+        let site = super::timeline_index::authoring_site();
         let mut state = self.state.lock().expect("canvas state poisoned");
         let segment = state.active_mut();
         let time = segment.cursor;
@@ -6409,6 +6424,10 @@ impl SceneModel {
             ambient: None,
         });
         segment.ops.push(Op::Stop);
+        let key = (segment.id, segment.stops.len() - 1);
+        if let Some(site) = site {
+            state.authored_timeline.stops.insert(key, site);
+        }
         Ok(())
     }
 
@@ -6467,10 +6486,14 @@ impl SceneModel {
                 time: existing.time,
             });
         }
+        let site = super::timeline_index::authoring_site();
         let mut state = self.state.lock().expect("canvas state poisoned");
         let segment = state.active_mut();
         let time = segment.cursor;
-        segment.markers.push((name, time));
+        segment.markers.push((name.clone(), time));
+        if let Some(site) = site {
+            state.authored_timeline.markers.insert(name, site);
+        }
         Ok(())
     }
 

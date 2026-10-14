@@ -117,6 +117,8 @@ pub use narration::{
 };
 mod character;
 pub use character::{CharacterError, CharacterHandle};
+mod timeline_index;
+pub use timeline_index::{IndexedMarker, IndexedSegment, IndexedSpan, IndexedStop, TimelineIndex};
 mod live;
 pub use gaanim_animation::live::{
     LiveZone, Motion as LiveMotion, Program as LiveProgram, ProgramError as LiveProgramError,

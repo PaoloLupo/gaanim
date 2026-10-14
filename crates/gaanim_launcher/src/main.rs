@@ -11,6 +11,7 @@ use gaanim_engine as _;
 mod app;
 mod file_watcher;
 mod hot_reload;
+mod inspect;
 mod python;
 mod runtime_benchmark;
 mod startup;
@@ -43,6 +44,8 @@ fn handle_no_python_commands(args: &[String]) -> bool {
             help::print(Topic::Init);
         } else if args.iter().any(|arg| arg == "check") {
             help::print(Topic::Check);
+        } else if args.get(1).map(String::as_str) == Some("inspect") {
+            help::print(Topic::Inspect);
         } else if args.get(1).map(String::as_str) == Some("export") {
             help::print(Topic::Export);
         } else if args.iter().any(|arg| arg == "--diff") {
