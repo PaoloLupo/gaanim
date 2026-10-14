@@ -305,6 +305,20 @@ el nombre que elijas, compone el código con la dirección donde lo publicarás 
 la proporción de la escena, y muestra cómo se verá con las opciones que
 marques.
 
+Antes de publicarlo, `gaanim pack` puede dejarlo más ligero sin Python:
+
+```bash
+gaanim pack circulo.gaanim animaciones/circulo.gaanim --web
+```
+
+Con `--web` guarda los trazados en una rejilla tan fina que, en un vídeo 4K,
+ningún punto se mueve más de 1/64 de píxel en cada eje (solo cambia el
+suavizado de algunos píxeles de borde), y deja fuera lo que el
+reproductor no usa: los resúmenes de `gaanim check` y los subfotogramas del
+desenfoque de movimiento. En los ejemplos de esta documentación pesa, en la
+mediana, un 41 % menos, y hasta un 97 % menos en escenas con muchas formas en
+movimiento. Conserva el original para exportar vídeo o comprobarlo.
+
 Quien lee la entrada necesita un navegador con WebGPU, igual que para el
 reproductor completo; sin él, el marco explica qué falta. Las demás
 animaciones de la página, y las de visitas siguientes, toman el reproductor
@@ -515,7 +529,9 @@ rejilla repetidos, porque no hay nada que interpolar sin ejecutar la escena.
 
 La grabación se niega, con un mensaje, cuando la escena contiene clips de
 vídeo (`scene.media.video`), que el paquete aún no puede reproducir
-exactamente. En ese caso exporta un vídeo. El contenido 3D sí se graba.
+exactamente. En ese caso exporta un vídeo. El contenido 3D sí se graba: el
+paquete guarda sus mallas, materiales y luces, y el reproductor las proyecta
+en cada fotograma como la vista previa.
 
 Los paquetes son de un solo uso: no se pueden editar ni volver a convertir en
 script. Guarda el proyecto original para seguir trabajando.
@@ -528,12 +544,12 @@ Un `.gaanim` es un ZIP con estas entradas:
   columns: (auto, 1fr),
   inset: 7pt,
   [*Entrada*], [*Contenido*],
-  [`manifest.json`], [Formato y versión, generador, frecuencia, duración, tamaño, bloques de fotogramas y el hash BLAKE3 de cada entrada.],
+  [`manifest.json`], [Formato y versión, generador, frecuencia, duración, tamaño, bloques de fotogramas con los segmentos que usa cada uno, y el hash BLAKE3 de cada entrada.],
   [`scene.bin`], [Título, fondo, color de borrado, posprocesados, segmentos con notas y pausas, marcadores, escenas y pistas de audio.],
-  [`tables/*.bin`], [Trazados, imágenes, recetas de fragmentos, cadenas y los shaders de las transiciones y de los efectos por objeto, cada uno guardado una sola vez.],
+  [`segments/NNNNNN.bin`], [Trazados, imágenes, recetas de fragmentos, cadenas, mallas y líneas 3D, y los shaders de las transiciones y de los efectos por objeto, cada uno guardado una sola vez. Un segmento se cierra al llegar a unos 2 MB y va justo antes del bloque de fotogramas que lo completó.],
   [`frames/NNNNNN.bin`], [Bloques de 60 fotogramas; cada bloque empieza con un fotograma completo y el resto guarda solo lo que cambió.],
   [`scenes/NNNNNN.bin`], [Cada fotograma distinto de una animación Lottie, como escena vectorial de Vello.],
-  [`index.bin`, `digests.bin`], [Instante y resumen BLAKE3 de cada fotograma.],
+  [`index.bin`, `digests.bin`], [Instante y resumen BLAKE3 de cada fotograma. Un fotograma de la rejilla de la exportación ocupa un byte en el índice.],
   [`media/*`], [Archivos de audio, direccionados por contenido.],
   [`thumbnail.png`], [Portada opcional de 512 píxeles de ancho, que el explorador de archivos lee sin decodificar el resto.],
 )
@@ -544,6 +560,13 @@ modo que el paquete compone exactamente lo que compuso la escena.
 Salvo `manifest.json`, `media/*` y `thumbnail.png`, cada entrada guarda sus datos comprimidos
 con Zstandard. En una presentación larga ocupa menos de la mitad que con la
 compresión propia del ZIP; en un paquete pequeño, alrededor de un 10 % menos.
-Este es el formato 5, que escribe y lee Gaanim 0.9 (y su reproductor web).
-Los paquetes grabados con versiones anteriores usan otro formato y ya no se
-abren: vuelve a grabarlos desde su script.
+
+Un reproductor abre el paquete con el manifiesto, `scene.bin`, el primer
+bloque y los segmentos que usa, y descarga los demás bloques con sus
+segmentos a medida que los reproduce. Así, una presentación larga empieza a
+verse sin esperar a descargar los trazados de todas sus diapositivas.
+
+Este es el formato 6. Gaanim sigue leyendo el formato 5 (versiones 0.9 a
+0.12), así que los paquetes ya publicados siguen abriéndose. Los grabados con
+versiones anteriores a la 0.9 ya no se abren: vuelve a grabarlos desde su
+script.

@@ -25,8 +25,9 @@ const RECORD_ARGS: [&str; 2] = ["--fps", "30"];
 
 /// Bump to record every example again, e.g. when the recording settings
 /// change or bundles recorded before were wrong (3: 3D and glass, #501;
-/// 4: traced paths' ends, #507).
-const REVISION: u32 = 4;
+/// 4: traced paths' ends, #507; 5: format 6, with 3D content as meshes,
+/// packed for the web, #509 and #510).
+const REVISION: u32 = 5;
 
 /// The longest an example may take to record.
 const TIMEOUT: Duration = Duration::from_secs(600);
@@ -207,7 +208,22 @@ fn record(path: &str, key: &str) -> Outcome {
         let tail: Vec<&str> = tail.into_iter().rev().collect();
         return Err(format!("recording failed ({status}):\n{}", tail.join("\n")));
     }
-    fs::rename(&partial, &output).map_err(|error| error.to_string())?;
+    // The pages publish it as a blog would: packed for the web, which plays
+    // the same within a fraction of a pixel and downloads far less.
+    let packed = Command::new(gaanim_binary())
+        .arg("pack")
+        .arg(&partial)
+        .arg(&output)
+        .arg("--web")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if packed {
+        let _ = fs::remove_file(&partial);
+    } else {
+        fs::rename(&partial, &output).map_err(|error| error.to_string())?;
+    }
     write_cache(path, serde_json::json!({ "key": key }));
     Ok(Some(Recorded {
         bytes: fs::metadata(&output)

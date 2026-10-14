@@ -281,6 +281,198 @@ pub fn read_path(r: &mut Reader<'_>) -> Result<kurbo::BezPath> {
     Ok(kurbo::BezPath::from_vec(elements))
 }
 
+/// Write `path` with its points on a grid of 2^`exponent` units, for a
+/// bundle packed for the web: its coordinates round to the grid. With
+/// `relative`, each point is the change from the one before (the first from
+/// the origin), so nearby points, as along a curve, take a byte or two
+/// instead of eight; without, each is where it is, so a point that repeats,
+/// as a mesh's vertex in the triangles around it, repeats its bytes and
+/// compresses away.
+pub fn write_grid_path(w: &mut Writer, path: &kurbo::BezPath, exponent: i32, relative: bool) {
+    let per_unit = 2f64.powi(-exponent);
+    let elements = path.elements();
+    w.len(elements.len());
+    w.ivar(i64::from(exponent));
+    let mut previous = (0i64, 0i64);
+    let mut point = |w: &mut Writer, point: kurbo::Point| {
+        let at = (
+            (point.x * per_unit).round() as i64,
+            (point.y * per_unit).round() as i64,
+        );
+        w.ivar(at.0.wrapping_sub(previous.0));
+        w.ivar(at.1.wrapping_sub(previous.1));
+        if relative {
+            previous = at;
+        }
+    };
+    for element in elements {
+        match *element {
+            kurbo::PathEl::MoveTo(p) => {
+                w.u8(0);
+                point(w, p);
+            }
+            kurbo::PathEl::LineTo(p) => {
+                w.u8(1);
+                point(w, p);
+            }
+            kurbo::PathEl::QuadTo(p1, p2) => {
+                w.u8(2);
+                point(w, p1);
+                point(w, p2);
+            }
+            kurbo::PathEl::CurveTo(p1, p2, p3) => {
+                w.u8(3);
+                point(w, p1);
+                point(w, p2);
+                point(w, p3);
+            }
+            kurbo::PathEl::ClosePath => w.u8(4),
+        }
+    }
+}
+
+/// Read a path [`write_grid_path`] wrote with `relative`.
+pub fn read_grid_path(r: &mut Reader<'_>) -> Result<kurbo::BezPath> {
+    read_grid_path_as(r, true)
+}
+
+/// Read a path [`write_grid_path`] wrote without `relative`.
+pub fn read_absolute_grid_path(r: &mut Reader<'_>) -> Result<kurbo::BezPath> {
+    read_grid_path_as(r, false)
+}
+
+fn read_grid_path_as(r: &mut Reader<'_>, relative: bool) -> Result<kurbo::BezPath> {
+    let count = r.len()?;
+    let exponent = i32::try_from(r.ivar()?).map_err(|_| corrupt("invalid path grid"))?;
+    if !(-1074..=1023).contains(&exponent) {
+        return Err(corrupt("invalid path grid"));
+    }
+    let unit = 2f64.powi(exponent);
+    let mut previous = (0i64, 0i64);
+    let mut point = |r: &mut Reader<'_>| -> Result<kurbo::Point> {
+        let at = (
+            previous.0.wrapping_add(r.ivar()?),
+            previous.1.wrapping_add(r.ivar()?),
+        );
+        if relative {
+            previous = at;
+        }
+        Ok(kurbo::Point::new(at.0 as f64 * unit, at.1 as f64 * unit))
+    };
+    let mut elements = Vec::with_capacity(count.min(1 << 20));
+    for _ in 0..count {
+        elements.push(match r.u8()? {
+            0 => kurbo::PathEl::MoveTo(point(r)?),
+            1 => kurbo::PathEl::LineTo(point(r)?),
+            2 => kurbo::PathEl::QuadTo(point(r)?, point(r)?),
+            3 => kurbo::PathEl::CurveTo(point(r)?, point(r)?, point(r)?),
+            4 => kurbo::PathEl::ClosePath,
+            _ => return Err(corrupt("invalid path element")),
+        });
+    }
+    Ok(kurbo::BezPath::from_vec(elements))
+}
+
+// ---------------------------------------------------------------------------
+// 3D content
+// ---------------------------------------------------------------------------
+
+fn write_points<const N: usize>(w: &mut Writer, points: &[[f32; N]]) {
+    w.len(points.len());
+    for point in points {
+        for value in point {
+            w.f32(*value);
+        }
+    }
+}
+
+fn read_points<const N: usize>(r: &mut Reader<'_>) -> Result<Vec<[f32; N]>> {
+    let count = r.len()?;
+    let mut points = Vec::with_capacity(count.min(1 << 22));
+    for _ in 0..count {
+        let mut point = [0.0; N];
+        for value in &mut point {
+            *value = r.f32()?;
+        }
+        points.push(point);
+    }
+    Ok(points)
+}
+
+fn write_indices(w: &mut Writer, indices: &[u32]) {
+    w.len(indices.len());
+    for index in indices {
+        w.var(u64::from(*index));
+    }
+}
+
+fn read_indices(r: &mut Reader<'_>) -> Result<Vec<u32>> {
+    let count = r.len()?;
+    let mut indices = Vec::with_capacity(count.min(1 << 22));
+    for _ in 0..count {
+        indices.push(r.u32()?);
+    }
+    Ok(indices)
+}
+
+pub fn write_material(w: &mut Writer, material: &gaanim_scene::Material3D) {
+    write_color(w, material.color);
+    w.f32(material.roughness);
+    w.f32(material.metallic);
+    write_color(w, material.emissive);
+    w.f32(material.emissive_strength);
+}
+
+pub fn read_material(r: &mut Reader<'_>) -> Result<gaanim_scene::Material3D> {
+    Ok(gaanim_scene::Material3D {
+        color: read_color(r)?,
+        roughness: r.f32()?,
+        metallic: r.f32()?,
+        emissive: read_color(r)?,
+        emissive_strength: r.f32()?,
+    })
+}
+
+pub fn write_mesh(w: &mut Writer, mesh: &gaanim_scene::TriangleMeshData) {
+    write_points(w, &mesh.vertices);
+    write_indices(w, &mesh.indices);
+    w.option(mesh.normals.as_deref(), write_points);
+    w.option(mesh.uvs.as_deref(), write_points);
+    w.option(mesh.color, write_color);
+    w.option(mesh.colors.as_deref(), write_points);
+    w.option(mesh.material.as_ref(), write_material);
+}
+
+pub fn read_mesh(r: &mut Reader<'_>) -> Result<gaanim_scene::TriangleMeshData> {
+    Ok(gaanim_scene::TriangleMeshData {
+        vertices: read_points(r)?,
+        indices: read_indices(r)?,
+        normals: r.option(read_points)?,
+        uvs: r.option(read_points)?,
+        color: r.option(read_color)?,
+        colors: r.option(read_points)?,
+        material: r.option(read_material)?,
+    })
+}
+
+pub fn write_lines(w: &mut Writer, lines: &gaanim_scene::LineListData) {
+    write_points(w, &lines.points);
+    w.option(lines.indices.as_deref(), write_indices);
+    w.bool(lines.strip);
+    write_color(w, lines.color);
+    w.option(lines.colors.as_deref(), write_points);
+}
+
+pub fn read_lines(r: &mut Reader<'_>) -> Result<gaanim_scene::LineListData> {
+    Ok(gaanim_scene::LineListData {
+        points: read_points(r)?,
+        indices: r.option(read_indices)?,
+        strip: r.bool()?,
+        color: read_color(r)?,
+        colors: r.option(read_points)?,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Strokes and fills
 // ---------------------------------------------------------------------------

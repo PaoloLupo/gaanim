@@ -14,10 +14,18 @@
 //!   other entry.
 //! - `scene.bin`: static data (background, post-process shaders, timeline
 //!   structure, audio tracks).
-//! - `tables/*.bin`: deduplicated paths, images, recipes, strings, shader
-//!   transitions and the passes of shader effects on drawables.
+//! - `segments/NNNNNN.bin`: deduplicated paths, images, recipes, strings,
+//!   native 3D meshes and line lists, shader transitions and the passes of
+//!   shader effects on drawables, in segments of about 2 MB, each written
+//!   just before the chunk that filled it.
+//!
+//! Frames store native 3D content as its meshes, matrices, materials and
+//! lights, not the triangles it projects to: reading a frame projects them
+//! again with the renderer's own code
+//! ([`gaanim_renderer::pipeline::captured_three_d_elements`]).
 //! - `frames/NNNNNN.bin`: chunks of frames, each frame encoded against the
-//!   one before it; a chunk starts with a whole frame.
+//!   one before it; a chunk starts with a whole frame, and the manifest lists
+//!   the segments its frames refer to.
 //! - `media/*`: embedded audio files.
 //! - `polls.json`: audience polls, their relay session and the elements
 //!   drawn from live poll data (bars, nicknames, readouts) with the glyphs
@@ -26,8 +34,8 @@
 //!
 //! A bundle opens from its bytes whole or in pieces ([`BundleSource`]): the
 //! web player opens one from the end of the file, which holds the archive's
-//! directory and every table, and downloads frame chunks as playback needs
-//! them.
+//! directory and the manifest, then downloads the first chunk with its
+//! segments, and later chunks with theirs as playback needs them.
 //!
 //! [`FragmentRecipe`]: gaanim_renderer::fragment::FragmentRecipe
 
@@ -35,6 +43,7 @@ mod archive;
 mod codec;
 mod digest;
 mod model;
+mod repack;
 mod source;
 
 use std::collections::HashMap;
@@ -60,7 +69,8 @@ use archive::Archive;
 use codec::{Reader, Writer};
 pub use digest::scene_digest;
 use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, Tables};
-pub use model::{EntityKeys, Frame, PostPass};
+pub use model::{EntityKeys, Frame, PostPass, TableCounts};
+pub use repack::{RepackOptions, repack, repack_with};
 pub use source::BundleSource;
 
 /// The entity that stands for element key `key` in decoded frames.
@@ -80,8 +90,13 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// version 3 (development builds of Gaanim 0.9) had no chalk strokes nor
 /// shader effects on drawables (`tables/effects.bin`), track mattes nor
 /// glass; version 4 (development builds of Gaanim 0.9) had no reactive
-/// uniforms on shader transitions nor shader backgrounds.
-pub const VERSION: u32 = 5;
+/// uniforms on shader transitions nor shader backgrounds; version 5 (Gaanim
+/// 0.9 to 0.12) stored each table whole in `tables/*.bin`, which a player
+/// downloaded before the first frame, and every frame's time as an `f64`.
+pub const VERSION: u32 = 6;
+/// Oldest version this build still reads: bundles published in other pages
+/// keep playing when the hosted players move to a newer version.
+pub const OLDEST_READABLE: u32 = 5;
 /// Zstandard level of data entries, still fast to read. Level 17 made
 /// entries about 8% smaller and compressed nearly four times slower.
 #[cfg(not(target_arch = "wasm32"))]
@@ -108,6 +123,12 @@ const UNPROCESSED: &str = "tables/unprocessed.bin";
 const GLASS: &str = "tables/glass.bin";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
+/// A table segment closes once it holds about this many encoded bytes, at
+/// the end of a chunk: a short bundle keeps its tables in one segment, which
+/// compresses as well as one table, and a long one opens after downloading a
+/// megabyte or two of them at most. Smaller segments open sooner but
+/// compress worse: animated shapes repeat their coordinates over seconds.
+const SEGMENT_BYTES: usize = 2 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
@@ -129,11 +150,11 @@ pub enum BundleError {
 type Result<T> = std::result::Result<T, BundleError>;
 
 fn version_message(found: u32, generator: &str) -> String {
-    if found < VERSION {
+    if found < OLDEST_READABLE {
         format!(
             "this bundle was recorded by {generator} in format version {found}, which this \
-             Gaanim no longer reads (it reads version {VERSION}). Record it again from its \
-             script with `gaanim export <script> --output <file>.gaanim`"
+             Gaanim no longer reads (it reads versions {OLDEST_READABLE} to {VERSION}). Record \
+             it again from its script with `gaanim export <script> --output <file>.gaanim`"
         )
     } else {
         format!(
@@ -931,6 +952,17 @@ pub struct Manifest {
     pub stops: usize,
     /// Frames per chunk entry and the time of each chunk's first frame.
     pub chunks: Vec<ChunkInfo>,
+    /// Table segments, in the order they were written (from version 6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub table_segments: Vec<TableSegment>,
+    /// Table segments the static data (`scene.bin`) refers to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scene_table_segments: Vec<u32>,
+    /// Packed for the web (`gaanim pack --web`): paths are stored on a grid,
+    /// so frames compose within a fraction of a pixel of the recording but
+    /// not bit for bit, and there are no frame digests to check.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approximate: bool,
     /// BLAKE3 hash (hex) of every other entry.
     pub entries: std::collections::BTreeMap<String, String>,
 }
@@ -942,6 +974,19 @@ pub struct ChunkInfo {
     pub frames: usize,
     /// Time of the chunk's first frame.
     pub start: f64,
+    /// Table segments its frames refer to, in increasing order (from
+    /// version 6; a version 5 bundle has one table that every chunk needs).
+    #[serde(default)]
+    pub table_segments: Vec<u32>,
+}
+
+/// A segment of the tables: its entry and how many items of each table it
+/// adds.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TableSegment {
+    pub entry: String,
+    #[serde(flatten)]
+    pub counts: TableCounts,
 }
 
 // ---------------------------------------------------------------------------
@@ -967,6 +1012,13 @@ pub struct BundleWriter<W: Write + Seek> {
     /// chunk (held so their addresses stay unique).
     scenes: HashMap<blake3::Hash, u32>,
     scene_by_ptr: HashMap<usize, (Arc<vello::Scene>, u32)>,
+    /// Segments each recorded Lottie frame refers to (its images).
+    scene_deps: Vec<Vec<u32>>,
+    table_segments: Vec<TableSegment>,
+    /// Packed for the web: see [`Manifest::approximate`].
+    approximate: bool,
+    /// Encoded bytes at which a table segment closes ([`SEGMENT_BYTES`]).
+    segment_bytes: usize,
     generator: String,
 }
 
@@ -1010,6 +1062,10 @@ impl<W: Write + Seek> BundleWriter<W> {
             media: HashMap::new(),
             scenes: HashMap::new(),
             scene_by_ptr: HashMap::new(),
+            scene_deps: Vec::new(),
+            table_segments: Vec::new(),
+            approximate: false,
+            segment_bytes: SEGMENT_BYTES,
             generator: generator.into(),
         }
     }
@@ -1035,20 +1091,30 @@ impl<W: Write + Seek> BundleWriter<W> {
     /// stored once.
     pub fn add_media(&mut self, source: &Path) -> Result<String> {
         let bytes = std::fs::read(source)?;
-        let hash = blake3::hash(&bytes);
-        if let Some(entry) = self.media.get(&hash) {
-            return Ok(entry.clone());
-        }
         let extension = source
             .extension()
             .and_then(|extension| extension.to_str())
-            .filter(|extension| extension.chars().all(|c| c.is_ascii_alphanumeric()))
+            .unwrap_or_default();
+        self.add_media_bytes(&bytes, extension)
+    }
+
+    /// Embed the bytes of a media file whose name ends in `extension` and
+    /// return its entry name, as [`Self::add_media`] does.
+    pub fn add_media_bytes(&mut self, bytes: &[u8], extension: &str) -> Result<String> {
+        let hash = blake3::hash(bytes);
+        if let Some(entry) = self.media.get(&hash) {
+            return Ok(entry.clone());
+        }
+        let extension = Some(extension)
+            .filter(|extension| {
+                !extension.is_empty() && extension.chars().all(|c| c.is_ascii_alphanumeric())
+            })
             .map(|extension| format!(".{}", extension.to_ascii_lowercase()))
             .unwrap_or_default();
         let entry = format!("media/{}{extension}", &hash.to_hex()[..32]);
         // Media is usually compressed already.
         self.zip.start_file(&entry, stored_options())?;
-        self.zip.write_all(&bytes)?;
+        self.zip.write_all(bytes)?;
         self.entries
             .insert(entry.clone(), hash.to_hex().to_string());
         self.media.insert(hash, entry.clone());
@@ -1082,19 +1148,30 @@ impl<W: Write + Seek> BundleWriter<W> {
     fn intern_scene(&mut self, scene: &Arc<vello::Scene>) -> Result<u32> {
         let ptr = Arc::as_ptr(scene) as usize;
         if let Some((_, index)) = self.scene_by_ptr.get(&ptr) {
-            return Ok(*index);
+            let index = *index;
+            self.tables
+                .note_all(&self.scene_deps[index as usize].clone());
+            return Ok(index);
         }
-        let mut w = Writer::new();
-        codec::write_scene(&mut w, &mut self.tables, scene)
+        let (encoded, deps) = self.tables.collect(|tables| {
+            let mut w = Writer::new();
+            codec::write_scene(&mut w, tables, scene).map(|()| w.into_bytes())
+        });
+        let bytes = encoded
             .map_err(|what| BundleError::Unsupported(format!("a Lottie frame draws {what}")))?;
-        let bytes = w.into_bytes();
         let hash = blake3::hash(&bytes);
         let index = match self.scenes.get(&hash) {
-            Some(index) => *index,
+            Some(index) => {
+                let index = *index;
+                self.tables
+                    .note_all(&self.scene_deps[index as usize].clone());
+                index
+            }
             None => {
                 let index = self.scenes.len() as u32;
                 self.write_entry(&scene_entry(index), &bytes)?;
                 self.scenes.insert(hash, index);
+                self.scene_deps.push(deps);
                 index
             }
         };
@@ -1136,6 +1213,7 @@ impl<W: Write + Seek> BundleWriter<W> {
                 first_frame: self.frames,
                 frames: 0,
                 start: frame.time,
+                table_segments: Vec::new(),
             });
         }
         self.delta.write(&mut self.chunk, record);
@@ -1151,9 +1229,16 @@ impl<W: Write + Seek> BundleWriter<W> {
         if self.chunk_frames == 0 {
             return Ok(());
         }
+        let segments = self.tables.take_used();
+        // A full segment goes just before the chunk that filled it, so the
+        // chunk and its newest items download together.
+        if self.tables.pending_bytes() >= self.segment_bytes {
+            self.close_segment()?;
+        }
         let bytes = std::mem::take(&mut self.chunk).into_bytes();
         let info = self.chunks.last_mut().expect("chunk started");
         info.frames = self.chunk_frames;
+        info.table_segments = segments;
         let entry = info.entry.clone();
         self.write_entry(&entry, &bytes)?;
         self.chunk_frames = 0;
@@ -1163,50 +1248,26 @@ impl<W: Write + Seek> BundleWriter<W> {
         Ok(())
     }
 
-    /// Write the tables, the static data and the manifest, and close the file.
+    /// Write the items added to the tables since the last segment, if any.
+    fn close_segment(&mut self) -> Result<()> {
+        if let Some((bytes, counts)) = self.tables.close_segment() {
+            let entry = segment_entry(self.table_segments.len());
+            self.write_entry(&entry, &bytes)?;
+            self.table_segments.push(TableSegment { entry, counts });
+        }
+        Ok(())
+    }
+
+    /// Write the static data, its segment and the manifest, and close the
+    /// file.
     pub fn finish(mut self, scene: &SceneData) -> Result<W> {
         self.flush_chunk()?;
+        self.tables.take_used();
         let mut w = Writer::new();
         scene.write(&mut w, &mut self.tables);
         let scene_bytes = w.into_bytes();
-
-        // Tables last: frames and static data may have added to them.
-        let mut paths = Writer::new();
-        paths.len(self.tables.paths.len());
-        for path in &self.tables.paths {
-            codec::write_path(&mut paths, path);
-        }
-        let mut images = Writer::new();
-        images.len(self.tables.images.len());
-        for image in &self.tables.images {
-            codec::write_image_data(&mut images, image);
-        }
-        let mut recipes = Writer::new();
-        recipes.len(self.tables.recipes.len());
-        for recipe in &self.tables.recipes {
-            recipes.bytes(recipe);
-        }
-        let mut strings = Writer::new();
-        strings.len(self.tables.strings.len());
-        for string in &self.tables.strings {
-            strings.str(string);
-        }
-        self.write_entry("tables/paths.bin", &paths.into_bytes())?;
-        self.write_entry("tables/images.bin", &images.into_bytes())?;
-        self.write_entry("tables/recipes.bin", &recipes.into_bytes())?;
-        self.write_entry("tables/strings.bin", &strings.into_bytes())?;
-        let mut transitions = Writer::new();
-        transitions.len(self.tables.transition_shaders.len());
-        for shader in &self.tables.transition_shaders {
-            model::write_transition_shader(&mut transitions, shader);
-        }
-        self.write_entry("tables/transitions.bin", &transitions.into_bytes())?;
-        let mut effects = Writer::new();
-        effects.len(self.tables.effect_shaders.len());
-        for shader in &self.tables.effect_shaders {
-            model::write_post_shader(&mut effects, shader);
-        }
-        self.write_entry("tables/effects.bin", &effects.into_bytes())?;
+        let scene_table_segments = self.tables.take_used();
+        self.close_segment()?;
         if !self.tables.post_exempt.is_empty() {
             let mut unprocessed = Writer::new();
             unprocessed.len(self.tables.post_exempt.len());
@@ -1219,17 +1280,14 @@ impl<W: Write + Seek> BundleWriter<W> {
             self.write_entry(GLASS, &[1])?;
         }
         self.write_entry("scene.bin", &scene_bytes)?;
-        let mut index = Writer::new();
-        index.len(self.times.len());
-        for time in &self.times {
-            index.f64(*time);
+        self.write_entry("index.bin", &write_index(&self.times, scene.fps))?;
+        if !self.approximate {
+            let mut digests = Vec::with_capacity(self.digests.len() * 32);
+            for digest in &self.digests {
+                digests.extend_from_slice(digest);
+            }
+            self.write_entry(DIGESTS, &digests)?;
         }
-        self.write_entry("index.bin", &index.into_bytes())?;
-        let mut digests = Vec::with_capacity(self.digests.len() * 32);
-        for digest in &self.digests {
-            digests.extend_from_slice(digest);
-        }
-        self.write_entry(DIGESTS, &digests)?;
         // A scene can take its audience without a poll: a lobby, a gate.
         if !scene.polls.is_empty() || scene.poll_session.is_some() || !scene.stop_gates.is_empty() {
             self.write_entry(POLLS, &write_polls(scene)?)?;
@@ -1271,6 +1329,9 @@ impl<W: Write + Seek> BundleWriter<W> {
                 .map(|segment| segment.stops.len())
                 .sum(),
             chunks: self.chunks.clone(),
+            table_segments: self.table_segments.clone(),
+            scene_table_segments,
+            approximate: self.approximate,
             entries: self.entries.clone(),
         };
         let json = serde_json::to_vec_pretty(&manifest)
@@ -1285,7 +1346,8 @@ impl<W: Write + Seek> BundleWriter<W> {
 // Reader
 // ---------------------------------------------------------------------------
 
-/// An open bundle. Frames are decoded chunk by chunk on demand.
+/// An open bundle. Frames are decoded chunk by chunk on demand, and table
+/// segments as the chunks that refer to them are.
 pub struct Bundle {
     archive: Archive,
     pub manifest: Manifest,
@@ -1350,6 +1412,62 @@ fn scene_entry(index: u32) -> String {
     format!("scenes/{index:06}.bin")
 }
 
+fn segment_entry(index: usize) -> String {
+    format!("segments/{index:06}.bin")
+}
+
+/// Frame times as `index.bin` stores them from version 6: the count and the
+/// frame rate, then per frame 0 when it is the next instant of the frame
+/// grid, stepped as an export steps it (`RecordingPlan`), or 1 and its bits.
+/// A long recording's index takes a byte a frame instead of eight.
+fn write_index(times: &[f64], fps: u32) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.len(times.len());
+    w.var(u64::from(fps));
+    let step = 1.0 / f64::from(fps.max(1));
+    let mut grid = 0.0_f64;
+    for time in times {
+        if time.to_bits() == grid.to_bits() {
+            w.u8(0);
+            grid += step;
+        } else {
+            w.u8(1);
+            w.f64(*time);
+        }
+    }
+    w.into_bytes()
+}
+
+/// Read `index.bin` as version `version` wrote it.
+fn read_index(bytes: &[u8], version: u32) -> Result<Vec<f64>> {
+    let mut r = Reader::new(bytes);
+    let count = r.len()?;
+    let mut times = Vec::with_capacity(count.min(1 << 24));
+    if version < 6 {
+        for _ in 0..count {
+            times.push(r.f64()?);
+        }
+    } else {
+        let fps = u32::try_from(r.var()?).map_err(|_| BundleError::Corrupt("frame rate".into()))?;
+        let step = 1.0 / f64::from(fps.max(1));
+        let mut grid = 0.0;
+        for _ in 0..count {
+            match r.u8()? {
+                0 => {
+                    times.push(grid);
+                    grid += step;
+                }
+                1 => times.push(r.f64()?),
+                _ => return Err(BundleError::Corrupt("invalid frame index entry".into())),
+            }
+        }
+    }
+    if !r.is_empty() {
+        return Err(BundleError::Corrupt("index.bin has trailing data".into()));
+    }
+    Ok(times)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(zstd::bulk::compress(bytes, ZSTD_LEVEL)?)
@@ -1405,16 +1523,23 @@ fn read_entry(archive: &Archive, manifest: Option<&Manifest>, name: &str) -> Res
 /// Frame digests, which only [`Bundle::verify`] reads.
 const DIGESTS: &str = "digests.bin";
 
-/// Entries a bundle reads as it opens: everything but frame chunks, Lottie
-/// frames, media, the cover and the frame digests. The first chunk comes
-/// along, since a player shows it next.
+/// Entries a bundle reads as it opens, whatever its manifest says:
+/// everything but frame chunks, table segments, Lottie frames, media, the
+/// cover and the frame digests. The first chunk comes along, since a player
+/// shows it next; the manifest names the segments it and `scene.bin` need.
 fn read_on_open(name: &str) -> bool {
     name == "frames/000000.bin"
         || !(name.starts_with("frames/")
+            || name.starts_with("segments/")
             || name.starts_with("scenes/")
             || name.starts_with("media/")
             || name == THUMBNAIL
             || name == DIGESTS)
+}
+
+/// The segments of a version 6 bundle's chunk or static data, as indices.
+fn segment_indices(segments: &[u32]) -> Vec<usize> {
+    segments.iter().map(|segment| *segment as usize).collect()
 }
 
 impl Bundle {
@@ -1435,13 +1560,24 @@ impl Bundle {
     /// arrive.
     pub fn from_source(source: BundleSource) -> Result<Self> {
         let archive = Archive::open(source)?;
-        let mut missing: Vec<Range<u64>> = archive
+        let missing_of = |names: &mut dyn Iterator<Item = &str>| -> Vec<Range<u64>> {
+            let mut missing: Vec<Range<u64>> = names
+                .filter_map(|name| archive.span(name))
+                .flat_map(|span| archive.source().missing(span))
+                .collect();
+            missing.sort_by_key(|range| range.start);
+            missing
+        };
+        // The manifest names the segments opening needs. Until it is here,
+        // ask for it with the entries any bundle opens with.
+        let on_open: Vec<String> = archive
             .spans()
             .filter(|(name, _)| read_on_open(name))
-            .flat_map(|(_, span)| archive.source().missing(span))
+            .map(|(name, _)| name.to_owned())
             .collect();
-        if !missing.is_empty() {
-            missing.sort_by_key(|range| range.start);
+        let manifest_missing = missing_of(&mut std::iter::once("manifest.json"));
+        if !manifest_missing.is_empty() {
+            let missing = missing_of(&mut on_open.iter().map(String::as_str));
             return Err(BundleError::Incomplete { missing });
         }
         let manifest: Manifest =
@@ -1453,63 +1589,73 @@ impl Bundle {
                 manifest.format
             )));
         }
-        if manifest.version != VERSION {
+        if !(OLDEST_READABLE..=VERSION).contains(&manifest.version) {
             return Err(BundleError::UnsupportedVersion {
                 found: manifest.version,
                 generator: manifest.generator.clone(),
             });
         }
+        let version = manifest.version;
+        let mut opening: Vec<usize> = Vec::new();
+        if version >= 6 {
+            opening.extend(segment_indices(&manifest.scene_table_segments));
+            if let Some(first) = manifest.chunks.first() {
+                opening.extend(segment_indices(&first.table_segments));
+            }
+            opening.sort_unstable();
+            opening.dedup();
+            if opening
+                .iter()
+                .any(|segment| *segment >= manifest.table_segments.len())
+            {
+                return Err(BundleError::Corrupt(
+                    "a segment index is out of range".into(),
+                ));
+            }
+        }
+        let segment_names: Vec<&str> = opening
+            .iter()
+            .map(|segment| manifest.table_segments[*segment].entry.as_str())
+            .collect();
+        let missing = missing_of(
+            &mut on_open
+                .iter()
+                .map(String::as_str)
+                .chain(segment_names.iter().copied()),
+        );
+        if !missing.is_empty() {
+            return Err(BundleError::Incomplete { missing });
+        }
 
-        let mut tables = DecodedTables {
-            paths: Vec::new(),
-            images: Vec::new(),
-            recipes: Vec::new(),
-            strings: Vec::new(),
-            transition_shaders: Vec::new(),
-            effect_shaders: Vec::new(),
-            post_exempt: Default::default(),
-        };
-        let paths = read_entry(&archive, Some(&manifest), "tables/paths.bin")?;
-        let mut r = Reader::new(&paths);
-        for _ in 0..r.len()? {
-            tables.paths.push(Arc::new(codec::read_path(&mut r)?));
-        }
-        let images = read_entry(&archive, Some(&manifest), "tables/images.bin")?;
-        let mut r = Reader::new(&images);
-        for _ in 0..r.len()? {
-            tables.images.push(codec::read_image_data(&mut r)?);
-        }
-        let strings = read_entry(&archive, Some(&manifest), "tables/strings.bin")?;
-        let mut r = Reader::new(&strings);
-        for _ in 0..r.len()? {
-            tables.strings.push(Arc::from(r.str()?));
-        }
-        let transitions = read_entry(&archive, Some(&manifest), "tables/transitions.bin")?;
-        let mut r = Reader::new(&transitions);
-        for _ in 0..r.len()? {
+        let read = |name: &str| read_entry(&archive, Some(&manifest), name);
+        let mut tables = if version < 6 {
+            DecodedTables::from_format_5(
+                &read("tables/paths.bin")?,
+                &read("tables/images.bin")?,
+                &read("tables/strings.bin")?,
+                &read("tables/transitions.bin")?,
+                &read("tables/effects.bin")?,
+                &read("tables/recipes.bin")?,
+            )?
+        } else {
+            let counts: Vec<TableCounts> = manifest
+                .table_segments
+                .iter()
+                .map(|segment| segment.counts)
+                .collect();
+            let mut tables = DecodedTables::new(&counts);
+            for segment in &opening {
+                tables.load(*segment, &read(&manifest.table_segments[*segment].entry)?)?;
+            }
             tables
-                .transition_shaders
-                .push(Arc::new(model::read_transition_shader(&mut r)?));
-        }
-        let effects = read_entry(&archive, Some(&manifest), "tables/effects.bin")?;
-        let mut r = Reader::new(&effects);
-        for _ in 0..r.len()? {
-            tables.effect_shaders.push(model::read_post_shader(&mut r)?);
-        }
+        };
         if manifest.entries.contains_key(UNPROCESSED) {
-            let unprocessed = read_entry(&archive, Some(&manifest), UNPROCESSED)?;
+            let unprocessed = read(UNPROCESSED)?;
             let mut r = Reader::new(&unprocessed);
             for _ in 0..r.len()? {
                 tables.post_exempt.insert(r.u32()?);
             }
         }
-        let recipes = read_entry(&archive, Some(&manifest), "tables/recipes.bin")?;
-        let mut r = Reader::new(&recipes);
-        let mut encoded = Vec::new();
-        for _ in 0..r.len()? {
-            encoded.push(r.bytes()?.to_vec());
-        }
-        model::decode_recipes(&encoded, &mut tables)?;
         let scene_bytes = read_entry(&archive, Some(&manifest), "scene.bin")?;
         let mut scene = SceneData::read(&mut Reader::new(&scene_bytes), &tables)?;
         if manifest.entries.contains_key(POLLS) {
@@ -1530,13 +1676,10 @@ impl Bundle {
             );
         }
 
-        let index = read_entry(&archive, Some(&manifest), "index.bin")?;
-        let mut r = Reader::new(&index);
-        let count = r.len()?;
-        let mut times = Vec::with_capacity(count.min(1 << 24));
-        for _ in 0..count {
-            times.push(r.f64()?);
-        }
+        let times = read_index(
+            &read_entry(&archive, Some(&manifest), "index.bin")?,
+            version,
+        )?;
         let chunked: usize = manifest.chunks.iter().map(|chunk| chunk.frames).sum();
         let mut by_time: Vec<usize> = (0..times.len()).collect();
         by_time.sort_by(|a, b| times[*a].total_cmp(&times[*b]));
@@ -1549,7 +1692,7 @@ impl Bundle {
         {
             return Err(BundleError::Corrupt("frame index is inconsistent".into()));
         }
-        if !manifest.entries.contains_key(DIGESTS) {
+        if !manifest.approximate && !manifest.entries.contains_key(DIGESTS) {
             return Err(BundleError::Corrupt(format!(
                 "entry {DIGESTS} is not in the manifest"
             )));
@@ -1567,18 +1710,69 @@ impl Bundle {
         })
     }
 
-    fn open_chunk(&mut self, chunk: usize) -> Result<ChunkCursor> {
-        let info = self
-            .manifest
+    /// The segments chunk `chunk` refers to; a version 5 bundle's single
+    /// table, which every chunk needs.
+    fn chunk_segments(&self, chunk: usize) -> Vec<usize> {
+        if self.manifest.version < 6 {
+            return vec![0];
+        }
+        self.manifest
             .chunks
             .get(chunk)
-            .ok_or_else(|| BundleError::Corrupt("chunk index out of range".into()))?;
+            .map(|info| segment_indices(&info.table_segments))
+            .unwrap_or_default()
+    }
+
+    /// The bytes still missing to decode chunk `chunk`: its own and those of
+    /// the segments it refers to that are not decoded yet.
+    fn missing_for_chunk(&self, chunk: usize) -> Vec<Range<u64>> {
+        let Some(info) = self.manifest.chunks.get(chunk) else {
+            return Vec::new();
+        };
+        let segments = self
+            .chunk_segments(chunk)
+            .into_iter()
+            .filter(|segment| !self.tables.is_loaded(*segment))
+            .filter_map(|segment| self.manifest.table_segments.get(segment))
+            .map(|segment| segment.entry.as_str());
+        std::iter::once(info.entry.as_str())
+            .chain(segments)
+            .filter_map(|name| self.archive.span(name))
+            .flat_map(|span| self.archive.source().missing(span))
+            .collect()
+    }
+
+    fn open_chunk(&mut self, chunk: usize) -> Result<ChunkCursor> {
+        if chunk >= self.manifest.chunks.len() {
+            return Err(BundleError::Corrupt("chunk index out of range".into()));
+        }
+        // One request for the chunk and every segment it still needs.
+        let mut missing = self.missing_for_chunk(chunk);
+        if !missing.is_empty() {
+            missing.sort_by_key(|range| range.start);
+            return Err(BundleError::Incomplete { missing });
+        }
+        for segment in self.chunk_segments(chunk) {
+            if self.tables.is_loaded(segment) {
+                continue;
+            }
+            let entry = self
+                .manifest
+                .table_segments
+                .get(segment)
+                .ok_or_else(|| BundleError::Corrupt("a segment index is out of range".into()))?
+                .entry
+                .clone();
+            let bytes = read_entry(&self.archive, Some(&self.manifest), &entry)?;
+            self.tables.load(segment, &bytes)?;
+        }
+        let info = &self.manifest.chunks[chunk];
         let bytes = read_entry(&self.archive, Some(&self.manifest), &info.entry)?;
         Ok(ChunkCursor {
             chunk,
             bytes,
             position: 0,
-            decoder: DeltaDecoder::default(),
+            decoder: DeltaDecoder::new(self.manifest.version),
             frames: Vec::with_capacity(info.frames),
             total: info.frames,
         })
@@ -1592,13 +1786,13 @@ impl Bundle {
     /// Whether frames blend segments through a shader transition, which
     /// renders in a GPU pass of its own.
     pub fn has_shader_transitions(&self) -> bool {
-        !self.tables.transition_shaders.is_empty()
+        self.tables.totals().transitions > 0
     }
 
     /// Whether drawables are drawn through a shader effect, which renders in
     /// a GPU pass of its own.
     pub fn has_shader_effects(&self) -> bool {
-        !self.tables.effect_shaders.is_empty()
+        self.tables.totals().effects > 0
     }
 
     /// Whether a frame draws glass, which a GPU pass of its own composes.
@@ -1679,21 +1873,18 @@ impl Bundle {
     }
 
     /// Byte ranges still missing to decode frame `index` and the frames of
-    /// the `ahead` chunks recorded after its own, nearest first. Lottie
-    /// frames are left out: a frame names them only once it decodes.
+    /// the `ahead` chunks recorded after its own, nearest first, with the
+    /// segments they refer to. Lottie frames are left out: a frame names
+    /// them only once it decodes.
     pub fn missing_around(&self, index: usize, ahead: usize) -> Vec<Range<u64>> {
         let chunk = self
             .manifest
             .chunks
             .partition_point(|info| info.first_frame <= index)
             .saturating_sub(1);
-        self.manifest
-            .chunks
-            .iter()
-            .skip(chunk)
-            .take(ahead + 1)
-            .filter_map(|info| self.archive.span(&info.entry))
-            .flat_map(|span| self.archive.source().missing(span))
+        let end = (chunk + ahead + 1).min(self.manifest.chunks.len());
+        (chunk..end)
+            .flat_map(|chunk| self.missing_for_chunk(chunk))
             .collect()
     }
 
@@ -1701,6 +1892,13 @@ impl Bundle {
     fn digests(&self) -> Result<&[[u8; 32]]> {
         if let Some(digests) = self.digests.get() {
             return Ok(digests);
+        }
+        if self.manifest.approximate {
+            return Err(BundleError::Unsupported(
+                "this bundle was packed for the web: its frames are approximate and it keeps no \
+                 digests to check them against"
+                    .into(),
+            ));
         }
         let bytes = read_entry(&self.archive, Some(&self.manifest), DIGESTS)?;
         if bytes.len() != self.times.len() * 32 {
@@ -2306,5 +2504,377 @@ mod tests {
         assert!(!bundle.manifest.entries.contains_key(POLLS));
         assert!(bundle.scene.polls.is_empty());
         assert!(bundle.scene.poll_session.is_none());
+    }
+
+    /// A bundle where a square stays put and another moves every frame:
+    /// each frame meets a new outline, as an animated shape does. Its table
+    /// segments close at `segment_bytes`.
+    fn moving_square_in_segments(frames: u32, segment_bytes: usize) -> Vec<u8> {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        writer.segment_bytes = segment_bytes;
+        let still = square(1, -5.0, false);
+        for index in 0..frames {
+            let mut captured = frame(f64::from(index) / 60.0);
+            captured.capture.elements =
+                vec![still.clone(), square(2, f64::from(index) / 10.0, false)];
+            writer.push_frame(&captured, [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: f64::from(frames) / 60.0,
+            ..Default::default()
+        };
+        writer.finish(&scene).unwrap().into_inner()
+    }
+
+    fn moving_square(frames: u32) -> Vec<u8> {
+        moving_square_in_segments(frames, SEGMENT_BYTES)
+    }
+
+    #[test]
+    fn a_short_bundle_keeps_its_tables_in_one_segment() {
+        let bundle = Bundle::from_bytes(moving_square(200).into()).unwrap();
+        assert_eq!(bundle.manifest.table_segments.len(), 1);
+        for chunk in &bundle.manifest.chunks {
+            assert_eq!(chunk.table_segments, vec![0]);
+        }
+    }
+
+    #[test]
+    fn chunks_store_what_they_meet_first_and_list_the_segments_they_use() {
+        // Every chunk fills a segment.
+        let bytes = moving_square_in_segments(200, 1);
+        let bundle = Bundle::from_bytes(bytes.into()).unwrap();
+        let manifest = &bundle.manifest;
+        assert_eq!(manifest.version, VERSION);
+        // One segment a chunk: the moving outlines it met first.
+        assert_eq!(manifest.chunks.len(), 4);
+        assert_eq!(manifest.table_segments.len(), 4);
+        assert_eq!(manifest.table_segments[1].counts.paths, CHUNK_FRAMES as u32);
+        // The still square was met in the first chunk; every later one
+        // refers to that segment and its own.
+        assert_eq!(manifest.chunks[0].table_segments, vec![0]);
+        for (index, chunk) in manifest.chunks.iter().enumerate().skip(1) {
+            assert_eq!(chunk.table_segments, vec![0, index as u32], "chunk {index}");
+        }
+        assert!(!manifest.entries.contains_key("tables/paths.bin"));
+    }
+
+    #[test]
+    fn opening_downloads_the_first_chunk_with_its_segments_only() {
+        let bytes: Arc<[u8]> = moving_square_in_segments(200, 1).into();
+        let len = bytes.len() as u64;
+        let source = BundleSource::new(len);
+        let add = |ranges: &[Range<u64>]| {
+            for range in ranges {
+                source.insert(
+                    range.start,
+                    Arc::from(&bytes[range.start as usize..range.end as usize]),
+                );
+            }
+        };
+        add(std::slice::from_ref(&(len - 22..len)));
+        let mut bundle = None;
+        for _ in 0..4 {
+            match Bundle::from_source(source.clone()) {
+                Ok(opened) => {
+                    bundle = Some(opened);
+                    break;
+                }
+                Err(BundleError::Incomplete { missing }) => add(&missing),
+                Err(error) => panic!("{error}"),
+            }
+        }
+        let mut bundle = bundle.expect("opens once the asked bytes arrive");
+        let spans: HashMap<String, Range<u64>> = bundle
+            .archive
+            .spans()
+            .map(|(name, span)| (name.to_owned(), span))
+            .collect();
+        let arrived = |name: &str| source.missing(spans[name].clone()).is_empty();
+        assert!(arrived("segments/000000.bin"));
+        for later in [
+            "segments/000001.bin",
+            "segments/000002.bin",
+            "segments/000003.bin",
+        ] {
+            assert!(!arrived(later), "{later} is not needed to open");
+        }
+        assert_eq!(lefts(&bundle.frame(0).unwrap()), vec![-5.0, 0.0]);
+
+        // The last chunk asks for itself and its own segment, not the ones
+        // between.
+        let last = bundle.frame_count() - 1;
+        let Err(BundleError::Incomplete { missing }) = bundle.frame(last) else {
+            panic!("the last chunk has not arrived");
+        };
+        add(&missing);
+        assert!(arrived("segments/000003.bin"));
+        assert!(!arrived("segments/000001.bin"));
+        assert_eq!(
+            lefts(&bundle.frame(last).unwrap()),
+            vec![-5.0, last as f64 / 10.0]
+        );
+    }
+
+    #[test]
+    fn format_5_bundles_still_open_and_verify() {
+        let bytes = include_bytes!("../tests/fixtures/format5.gaanim");
+        let mut bundle = Bundle::from_bytes(Arc::from(&bytes[..])).unwrap();
+        assert_eq!(bundle.manifest.version, 5);
+        assert_eq!(bundle.frame_count(), 61);
+        assert_eq!(bundle.scene.output_size, (1920, 1920));
+        assert!(bundle.verify().unwrap().is_empty());
+    }
+
+    #[test]
+    fn older_formats_are_refused_by_version() {
+        let mut manifest: serde_json::Value = serde_json::from_slice(
+            &Archive::open(BundleSource::whole(Arc::from(
+                &include_bytes!("../tests/fixtures/format5.gaanim")[..],
+            )))
+            .unwrap()
+            .read("manifest.json")
+            .unwrap(),
+        )
+        .unwrap();
+        manifest["version"] = 4.into();
+        let manifest: Manifest = serde_json::from_value(manifest).unwrap();
+        assert!(!(OLDEST_READABLE..=VERSION).contains(&manifest.version));
+        assert!(version_message(4, "gaanim 0.8.0").contains("no longer reads"));
+    }
+
+    #[test]
+    fn frame_times_read_back_bit_for_bit() {
+        // The export's grid at 30 fps, then instants between its frames, as
+        // a recording in two passes stores them.
+        let step = 1.0 / 30.0;
+        let mut times = Vec::new();
+        let mut time = 0.0;
+        for _ in 0..100 {
+            times.push(time);
+            time += step;
+        }
+        times.extend([0.51, 1.234_567, 3.3]);
+        let bytes = write_index(&times, 30);
+        // A byte a grid frame, and the bits of each other instant.
+        assert!(bytes.len() < 100 + 3 * 9 + 8);
+        let read = read_index(&bytes, VERSION).unwrap();
+        assert_eq!(
+            read.iter().map(|t| t.to_bits()).collect::<Vec<_>>(),
+            times.iter().map(|t| t.to_bits()).collect::<Vec<_>>()
+        );
+    }
+
+    /// Bytes of `bundle`'s file that opening it needs: what `from_source`
+    /// waits for.
+    fn opening_bytes(bundle: &Bundle) -> u64 {
+        let mut names: Vec<String> = bundle
+            .archive
+            .spans()
+            .filter(|(name, _)| read_on_open(name))
+            .map(|(name, _)| name.to_owned())
+            .collect();
+        if bundle.manifest.version >= 6 {
+            let mut segments = bundle.manifest.scene_table_segments.clone();
+            segments.extend(&bundle.manifest.chunks[0].table_segments);
+            segments.sort_unstable();
+            segments.dedup();
+            names.extend(segments.iter().map(|segment| {
+                bundle.manifest.table_segments[*segment as usize]
+                    .entry
+                    .clone()
+            }));
+        }
+        names
+            .iter()
+            .filter_map(|name| bundle.archive.span(name))
+            .map(|span| span.end - span.start)
+            .sum()
+    }
+
+    #[test]
+    fn a_format_5_bundle_repacks_into_the_current_format_frame_for_frame() {
+        let bytes = include_bytes!("../tests/fixtures/format5.gaanim");
+        let mut old = Bundle::from_bytes(Arc::from(&bytes[..])).unwrap();
+        let repacked = repack(&mut old, std::io::Cursor::new(Vec::new()), "test")
+            .unwrap()
+            .into_inner();
+        let mut new = Bundle::from_bytes(repacked.into()).unwrap();
+        assert_eq!(new.manifest.version, VERSION);
+        assert_eq!(new.times(), old.times());
+        assert_eq!(new.scene.segments, old.scene.segments);
+        assert!(new.verify().unwrap().is_empty());
+    }
+
+    /// Write every bundle of the folder `GAANIM_BUNDLES` again in the current
+    /// format, check that each frame composes as it was recorded, and print
+    /// how many bytes opening each one needs before and after.
+    #[test]
+    #[ignore = "reads the bundles of the folder GAANIM_BUNDLES"]
+    fn bundles_of_a_folder_repack_frame_for_frame() {
+        let Ok(folder) = std::env::var("GAANIM_BUNDLES") else {
+            return;
+        };
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == EXTENSION)
+            })
+            .collect();
+        paths.sort();
+        // `GAANIM_BUNDLES_PART=i/n` takes every n-th bundle from the i-th, so
+        // several processes share a folder.
+        if let Some((part, parts)) = std::env::var("GAANIM_BUNDLES_PART").ok().and_then(|part| {
+            let (part, parts) = part.split_once('/')?;
+            Some((part.parse::<usize>().ok()?, parts.parse::<usize>().ok()?))
+        }) {
+            paths = paths.into_iter().skip(part).step_by(parts.max(1)).collect();
+        }
+        let (mut total_before, mut total_after, mut open_before, mut open_after) = (0, 0, 0, 0);
+        let (mut total_web, mut open_web) = (0, 0);
+        for path in &paths {
+            let bytes = std::fs::read(path).unwrap();
+            let mut old = Bundle::from_bytes(bytes.clone().into()).unwrap();
+            let repacked = repack(&mut old, std::io::Cursor::new(Vec::new()), "test")
+                .unwrap()
+                .into_inner();
+            let size = repacked.len();
+            let mut new = Bundle::from_bytes(repacked.into()).unwrap();
+            // `GAANIM_BUNDLES_QUICK` only measures the repacked sizes.
+            if std::env::var_os("GAANIM_BUNDLES_QUICK").is_some() {
+                println!(
+                    "{:48} {:>10} -> {:>10} bytes, opening {:>10} -> {:>10}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    bytes.len(),
+                    size,
+                    opening_bytes(&old),
+                    opening_bytes(&new)
+                );
+                continue;
+            }
+            // Frame for frame: the repacked bundle composes what the original
+            // does (some recordings differ from their own digests already).
+            let background = old.scene.background.clone();
+            let mut store = FragmentStore::default();
+            for index in 0..old.frame_count() {
+                let before =
+                    frame_digest(&old.frame(index).unwrap(), background.as_ref(), &mut store);
+                store.end_frame();
+                let after =
+                    frame_digest(&new.frame(index).unwrap(), background.as_ref(), &mut store);
+                store.end_frame();
+                assert_eq!(before, after, "{}: frame {index}", path.display());
+            }
+            let (before, after) = (opening_bytes(&old), opening_bytes(&new));
+            let options = RepackOptions { web: true };
+            let packed = repack_with(&mut old, std::io::Cursor::new(Vec::new()), "test", &options)
+                .unwrap()
+                .into_inner();
+            let web_size = packed.len();
+            let mut web = Bundle::from_bytes(packed.into()).unwrap();
+            let web_open = opening_bytes(&web);
+            for index in 0..web.frame_count() {
+                web.frame(index).unwrap();
+            }
+            println!(
+                "{:48} {:>10} -> {:>10} (web {:>10}) bytes, opening {:>10} -> {:>10} (web {:>10})",
+                path.file_name().unwrap().to_string_lossy(),
+                bytes.len(),
+                size,
+                web_size,
+                before,
+                after,
+                web_open
+            );
+            total_before += bytes.len() as u64;
+            total_after += size as u64;
+            total_web += web_size as u64;
+            open_before += before;
+            open_after += after;
+            open_web += web_open;
+        }
+        println!(
+            "{} bundles: {total_before} -> {total_after} (web {total_web}) bytes; opening {open_before} -> {open_after} (web {open_web})",
+            paths.len()
+        );
+    }
+
+    #[test]
+    fn a_bundle_packed_for_the_web_is_smaller_and_within_its_grid() {
+        let exact = moving_square(200);
+        let mut original = Bundle::from_bytes(exact.clone().into()).unwrap();
+        let options = RepackOptions { web: true };
+        let packed = repack_with(
+            &mut original,
+            std::io::Cursor::new(Vec::new()),
+            "test",
+            &options,
+        )
+        .unwrap()
+        .into_inner();
+        assert!(
+            packed.len() < exact.len(),
+            "{} >= {}",
+            packed.len(),
+            exact.len()
+        );
+        let mut web = Bundle::from_bytes(packed.into()).unwrap();
+        assert!(web.manifest.approximate);
+        assert!(!web.manifest.entries.contains_key(DIGESTS));
+        assert!(matches!(web.verify(), Err(BundleError::Unsupported(_))));
+        // A 1280-unit-wide camera is 3 pixels a unit in a 4K export: points
+        // stay within 1/64 of a pixel, a 192nd of a unit.
+        for index in 0..original.frame_count() {
+            let before = lefts(&original.frame(index).unwrap());
+            let after = lefts(&web.frame(index).unwrap());
+            for (b, a) in before.iter().zip(&after) {
+                assert!((b - a).abs() <= 1.0 / 192.0, "frame {index}: {b} -> {a}");
+            }
+        }
+    }
+
+    #[test]
+    fn grid_paths_read_back_on_their_grid() {
+        let mut path = gaanim_core::kurbo::BezPath::new();
+        path.move_to((0.123_456_789, -7.5));
+        path.curve_to((1.0, 2.0), (3.333_333, 4.0), (5.0, 6.000_001));
+        path.close_path();
+        for (exponent, relative) in [
+            (-20, true),
+            (-10, true),
+            (0, true),
+            (-20, false),
+            (-4, false),
+        ] {
+            let mut w = codec::Writer::new();
+            codec::write_grid_path(&mut w, &path, exponent, relative);
+            let bytes = w.into_bytes();
+            let mut r = codec::Reader::new(&bytes);
+            let read = if relative {
+                codec::read_grid_path(&mut r)
+            } else {
+                codec::read_absolute_grid_path(&mut r)
+            }
+            .unwrap();
+            assert!(r.is_empty());
+            let grid = 2f64.powi(exponent);
+            assert_eq!(read.elements().len(), path.elements().len());
+            for (a, b) in path.elements().iter().zip(read.elements()) {
+                let points = |element: &gaanim_core::kurbo::PathEl| match *element {
+                    gaanim_core::kurbo::PathEl::MoveTo(p)
+                    | gaanim_core::kurbo::PathEl::LineTo(p) => vec![p],
+                    gaanim_core::kurbo::PathEl::QuadTo(p, q) => vec![p, q],
+                    gaanim_core::kurbo::PathEl::CurveTo(p, q, r) => vec![p, q, r],
+                    gaanim_core::kurbo::PathEl::ClosePath => vec![],
+                };
+                for (p, q) in points(a).into_iter().zip(points(b)) {
+                    assert!((p.x - q.x).abs() <= grid / 2.0 && (p.y - q.y).abs() <= grid / 2.0);
+                    assert_eq!((q.x / grid).fract(), 0.0);
+                }
+            }
+        }
     }
 }

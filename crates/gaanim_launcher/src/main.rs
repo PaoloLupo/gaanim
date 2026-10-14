@@ -54,6 +54,7 @@ fn handle_no_python_commands(args: &[String]) -> bool {
     }
     match args.get(1).map(String::as_str) {
         Some("thumbnail") => run_thumbnail(&args[2..]),
+        Some("pack") => run_pack(&args[2..]),
         Some("register") => run_association(true),
         Some("unregister") => run_association(false),
         Some("relay") => run_relay(&args[2..]),
@@ -214,6 +215,76 @@ fn run_thumbnail(args: &[String]) -> ! {
         std::process::exit(1);
     }
     std::process::exit(0);
+}
+
+/// `gaanim pack <BUNDLE> <OUTPUT> [--web]`: write a bundle again in the
+/// current format, whose players open it with its first chunk and download
+/// the rest as they play; `--web` also stores paths on a grid and leaves out
+/// what only `check` and motion-blurred videos use, for publishing in other
+/// pages. Needs no GPU or Python.
+fn run_pack(args: &[String]) -> ! {
+    let usage = || -> ! {
+        console::error(
+            "pack",
+            "usage: gaanim pack <BUNDLE.gaanim> <OUTPUT.gaanim> [--web]",
+        );
+        std::process::exit(2);
+    };
+    let web = args.iter().any(|arg| arg == "--web");
+    let files: Vec<&String> = args.iter().filter(|arg| *arg != "--web").collect();
+    let [input, output] = files[..] else { usage() };
+    if input.starts_with("--") || output.starts_with("--") {
+        usage();
+    }
+    let (input, output) = (Path::new(input), Path::new(output));
+    let packed = (|| -> Result<(u64, u64, usize), String> {
+        let before = std::fs::metadata(input)
+            .map_err(|error| error.to_string())?
+            .len();
+        let mut bundle = gaanim_bundle::Bundle::open(input).map_err(|error| error.to_string())?;
+        let mut temporary = output.as_os_str().to_owned();
+        temporary.push(".partial");
+        let temporary = std::path::PathBuf::from(temporary);
+        let file = std::fs::File::create(&temporary).map_err(|error| error.to_string())?;
+        let options = gaanim_bundle::RepackOptions { web };
+        let written = gaanim_bundle::repack_with(
+            &mut bundle,
+            std::io::BufWriter::new(file),
+            format!("gaanim {}", env!("CARGO_PKG_VERSION")),
+            &options,
+        )
+        .and_then(|mut file| Ok(std::io::Write::flush(&mut file)?));
+        if let Err(error) = written {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error.to_string());
+        }
+        std::fs::rename(&temporary, output).map_err(|error| error.to_string())?;
+        let after = std::fs::metadata(output)
+            .map_err(|error| error.to_string())?
+            .len();
+        Ok((before, after, bundle.frame_count()))
+    })();
+    match packed {
+        Ok((before, after, frames)) => {
+            console::success(
+                "pack",
+                format!(
+                    "{} frames{}: {} → {} ({:.1} → {:.1} MB)",
+                    frames,
+                    if web { " for the web" } else { "" },
+                    console::display_path(input),
+                    console::display_path(output),
+                    before as f64 / 1e6,
+                    after as f64 / 1e6
+                ),
+            );
+            std::process::exit(0);
+        }
+        Err(error) => {
+            console::error("pack", error);
+            std::process::exit(1);
+        }
+    }
 }
 
 /// `gaanim relay [init [DIR] [--force] | use <URL> | forget | reset [PATH] |

@@ -34,7 +34,7 @@ mod post_process_gpu;
 pub mod prelude;
 mod soft_effects;
 mod stroke;
-mod three_d;
+pub mod three_d;
 pub mod transition_presets;
 
 // MainVelloScene is re-exported via prelude; used implicitly by the plugin system registration.
