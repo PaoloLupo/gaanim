@@ -293,7 +293,9 @@ completo en `url`, por si prefiere mostrar su propio botón (ver
 
 `aspect-ratio` da al marco la proporción de la escena: `16 / 9` para el
 `frame=(16, 9)` por defecto, `1 / 1` para una cuadrada. Así el marco ocupa el
-ancho de la columna sin franjas. `loading="lazy"` hace que el navegador no lo
+ancho de la columna sin franjas. Si el marco no tiene la proporción de la
+escena, el reproductor oscurece las franjas y marca el borde de la escena con
+una línea fina, como el editor; en pantalla completa, las franjas son negras. `loading="lazy"` hace que el navegador no lo
 cargue hasta que la entrada se acerca a él, y `allow` deja funcionar la
 pantalla completa.
 

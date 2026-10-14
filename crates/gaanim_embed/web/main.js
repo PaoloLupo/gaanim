@@ -61,6 +61,7 @@ const loopButton = $("loop");
 const mute = $("mute");
 const muteWaves = $("mute-waves");
 const soundHint = $("sound-hint");
+const sceneFrame = $("scene-frame");
 
 // On a 16-unit grid.
 const BAR_PLAY = "M4 2.5v11l9-5.5z";
@@ -125,6 +126,7 @@ const state = {
 
 function fail(error) {
   const text = error?.message ?? String(error);
+  sceneFrame.hidden = true;
   say(text, true);
   tellParent("error", text);
 }
@@ -171,6 +173,7 @@ function opened(json) {
   bar.hidden = !options.controls;
   seek.max = String(info.duration || 1);
   markStops();
+  placeSceneFrame();
   setAudioTracks(info.audio);
   // `full` names the GPU passes the file uses that this player leaves out.
   tellParent("opened", info.title, { full: info.full, ...dimensions() });
@@ -304,7 +307,30 @@ new ResizeObserver((entries) => {
   const box = entry.devicePixelContentBoxSize?.[0];
   if (box) fitCanvas(box.inlineSize, box.blockSize);
   else fitCanvas(entry.contentRect.width * devicePixelRatio, entry.contentRect.height * devicePixelRatio);
+  placeSceneFrame();
 }).observe(canvas);
+
+// Mark where the scene sits on the canvas: centered and fitted inside it, as
+// the module draws it (an export's `fit="contain"`).
+function placeSceneFrame() {
+  const box = canvas.getBoundingClientRect();
+  if (!info || !(info.width > 0 && info.height > 0) || !(box.width > 0 && box.height > 0)) {
+    sceneFrame.hidden = true;
+    return;
+  }
+  const scale = Math.min(box.width / info.width, box.height / info.height);
+  const width = info.width * scale;
+  const height = info.height * scale;
+  Object.assign(sceneFrame.style, {
+    left: `${box.left + (box.width - width) / 2}px`,
+    top: `${box.top + (box.height - height) / 2}px`,
+    width: `${width}px`,
+    height: `${height}px`,
+  });
+  // A player of the scene's shape has no margins to tell apart.
+  sceneFrame.classList.toggle("margins", box.width - width > 1 || box.height - height > 1);
+  sceneFrame.hidden = false;
+}
 
 // ---------------------------------------------------------------------------
 // Controls
