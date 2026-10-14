@@ -8,7 +8,8 @@
 
 En esta guía aprenderás a preparar una charla con Gaanim: diapositivas con
 plantillas reutilizables, notas del orador, pausas donde esperar a que hables,
-ensayos de una sola parte y la vista del presentador en un segundo monitor.
+el guion de la charla en un archivo aparte, ensayos con un teleprompter y la
+vista del presentador en un segundo monitor.
 
 ```python
 # output: preview.webp
@@ -59,6 +60,8 @@ Una presentación de Gaanim es una escena normal organizada así:
 
 - Cada `scene.segment("nombre", ...)` es una *diapositiva*; acepta una
   plantilla (`template=`) y notas (`notes=`). Su nombre y sus notas aparecen en la vista del presentador.
+  Las notas también pueden vivir en un archivo aparte (ver
+  #link(<guion>)[El guion de la charla]).
 - Cada `scene.stop("nombre")` dentro de una diapositiva es un *paso*: el
   punto donde la reproducción espera a que avances. Un paso escrito mientras
   la diapositiva aún entra con su transición espera a que termine.
@@ -68,6 +71,68 @@ Una presentación de Gaanim es una escena normal organizada así:
 la numeración y la línea separadora. Las plantillas `title_slide`, `lecture`,
 `comparison` y `credits` devuelven un layout adaptable y puedes reemplazarlas
 por funciones de Python propias (ver #link("/guias/layout/")[Layout]).
+
+= El guion de la charla <guion>
+
+Lo que vas a decir puede vivir fuera del código, en un archivo Markdown que
+escribes con cualquier editor: una sección `## nombre` por diapositiva, con el
+nombre de su `scene.segment(...)`, y una línea `[stop]` donde avanzas.
+
+```markdown
+# Mi charla
+
+## Portada
+Buenos días. Hoy les cuento cómo crecieron las ventas.
+[stop titulo]
+
+## Resultados
+Primero miren el gráfico de ventas.
+[stop grafico]
+Como ven, crece cada trimestre.
+[stop]
+Y la conclusión es clara.
+```
+
+```python
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9))
+scene.segment("Portada")
+scene.wait(1)
+scene.stop("titulo")
+scene.segment("Resultados")
+scene.wait(1)
+scene.stop("grafico")
+scene.wait(1)
+scene.stop()
+```
+
+- El texto antes de la primera marca es lo que dices mientras la diapositiva
+  espera en su primer stop: al terminarlo, avanzas. El texto antes de la
+  segunda va en el segundo stop, y así. Lo que sigue a la última marca va
+  después del último stop.
+- `[stop grafico]` nombra el stop. `gaanim check` avisa si no coincide con el
+  de `scene.stop("grafico")`, si una diapositiva tiene más o menos marcas que
+  stops y si una sección no corresponde a ninguna diapositiva ni bloque de voz.
+- El archivo es `narration/script.md`, dentro de la carpeta de assets o junto
+  al script si la escena no tiene; `scene.narration_script("guion.md")` elige
+  otro. Es el mismo guion de la
+  #link("/referencia/audio/#narracion")[narración]: una sección puede ser
+  también el texto de un `scene.voiceover(...)`.
+- La sección de una diapositiva manda sobre su `notes=`; sin sección, se usan
+  las notas del código, que también admiten líneas `[stop]`. Los encabezados
+  se comparan sin distinguir mayúsculas, los `###` son notas para ti que no se
+  muestran y los comentarios HTML se ignoran.
+- Al guardar el archivo, el editor actualiza las notas sin volver a compilar
+  la escena.
+
+Gaanim escribe el guion por ti y lo mantiene al día con el código. En el
+editor, abre *Guion y narración* (el botón de micrófono de la barra de
+reproducción, o *Más controles*) y pulsa *Crear guion*: el archivo nace con
+una sección por diapositiva, con sus `notes=` como punto de partida, y una
+marca `[stop nombre]` por cada stop. Cuando el código gana diapositivas o
+stops, el botón pasa a *Abrir y completar*: añade las secciones nuevas detrás
+de la diapositiva anterior y las marcas que faltan al final de cada sección,
+sin tocar lo que escribiste.
 
 = Comprobar y presentar
 
@@ -123,7 +188,10 @@ Con `--present`, la audiencia ve la diapositiva a pantalla completa y tú ves
 - *Up Next:* una miniatura de la siguiente pausa, indicando si es otro paso
   de la misma diapositiva o la siguiente diapositiva. Las miniaturas muestran
   el ensayo, no los votos de la sala.
-- *Speaker notes:* tus notas, con tamaño ajustable mediante `A−`/`A+`.
+- *Speaker notes:* las notas de la diapositiva cortadas en sus `[stop]`, con
+  el tramo que toca decir resaltado y `▶ ADVANCE` donde avanzas. `A−`/`A+`
+  ajustan el tamaño y *Prompter* muestra el guion entero (ver
+  #link(<prompter>)[El prompter]).
 - *Barra inferior:* primer paso, paso anterior, reproducir/pausa, paso
   siguiente, último paso, `Overview`, `Black` y `White`, el progreso de las
   vistas previas y la lista de atajos (icono de teclado).
@@ -175,6 +243,39 @@ diapositiva la vez anterior. Se guardan los 20 últimos ensayos de cada
 archivo, del script o del paquete `.gaanim`, que también conserva los
 objetivos.
 
+== El prompter <prompter>
+
+Para ensayar, o para leer durante la charla, *Prompter* (o la tecla `T`)
+convierte la columna de notas en un teleprompter de televisión con el guion
+entero: todas las diapositivas seguidas, con su número y su nombre. La columna
+se ensancha y la miniatura de *Up Next* se reduce para dejarle sitio.
+
+- El tramo que toca decir va resaltado, con una barra a la izquierda; lo ya
+  dicho se apaga y lo que viene queda en gris.
+- Donde avanzas aparece `▶ ADVANCE` con el nombre del stop, en ámbar. Late
+  cuando la diapositiva ya espera en ese stop: al terminar el tramo, toca
+  avanzar. `≈0:12` es lo que tarda en leerse el tramo, a unas 150 palabras por
+  minuto.
+- El prompter se desplaza solo hasta el tramo actual y lo deja en el tercio
+  superior. Puedes desplazarte a mano; al avanzar, vuelve.
+- Una diapositiva sin guion muestra igualmente sus stops, y una marca de más,
+  sin stop, aparece en rojo.
+- *Notes* o `T` vuelven a las notas de la diapositiva actual.
+
+Para ensayar la charla entera contra su duración, presenta con el prompter
+abierto: Presenter View cuenta el tiempo de cada diapositiva y guarda el
+ensayo (ver #link(<tiempo-de-la-charla>)[El tiempo de la charla]).
+
+```bash
+gaanim --present --duration 20m mi-charla
+```
+
+Para grabarte presentando, llama a `scene.live_take()` al principio del script
+y pulsa *Grabar toma en vivo* en *Guion y narración*. El teleprompter de la
+grabación muestra el guion de cada diapositiva con `▶ AVANZA` en cada stop, y
+la toma guarda cuánto esperaste en cada uno: la reproducción y el vídeo
+exportado siguen tu ritmo (ver #link("/referencia/audio/#narracion")[Narración]).
+
 == Atajos de teclado
 
 #table(
@@ -185,6 +286,7 @@ objetivos.
   [`Space`], [pausar o reanudar la animación en curso; nunca salta de paso],
   [`Home` / `End`], [ir al primer o al último paso],
   [`O`], [vista general: busca por nombre de diapositiva, paso o notas; `Enter` salta a la primera coincidencia],
+  [`T`], [mostrar el guion entero como teleprompter, o volver a las notas de la diapositiva],
   [`B` / `W`], [poner la pantalla de la audiencia en negro o en blanco],
   [`P`], [volver a abrir la vista del presentador si la cerraste],
   [`Esc`], [cerrar la vista general o el negro/blanco; después, salir del modo presentación],
@@ -231,8 +333,8 @@ público dentro de la escena. Todo eso está en
 
 Para repartir la presentación o tener una copia que no necesite Gaanim,
 expórtala a PDF: una página por cada pausa, tal como la muestra el Presenter,
-y otra para el final. Con `--notes`, tras cada
-diapositiva va una página con sus notas.
+y otra para el final. Con `--notes`, tras cada diapositiva va una página con
+sus notas, donde cada `[stop]` se imprime como una flecha (`→ grafico`).
 
 ```bash
 gaanim export mi-charla --output mi-charla.pdf --notes

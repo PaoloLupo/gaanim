@@ -446,7 +446,7 @@ scene.wait(music.duration)
 scene.render()
 ```
 
-== Narración
+== Narración <narracion>
 
 Gaanim graba tu voz sin salir del editor y la sincroniza con la escena, sin
 editor de video externo. Hay dos formas de trabajar:
@@ -469,10 +469,12 @@ tomas como cualquier otra pista.
 
 El texto que lees no tiene que vivir en el código. Escríbelo en
 `narration/script.md` con cualquier editor: cada encabezado `## clave` contiene
-el texto de `scene.voiceover("clave")`. Gaanim lo carga automáticamente; para
-usar otro archivo, llama antes a `scene.narration_script("guion.md")`. Al
-guardar el guion, el editor recarga la escena con las duraciones estimadas
-nuevas.
+el texto de `scene.voiceover("clave")`, y un encabezado con el nombre de una
+diapositiva, sus notas del orador (ver
+#link("/guias/presentaciones/#guion")[El guion de la charla]). Gaanim lo carga
+automáticamente; para usar otro archivo, llama antes a
+`scene.narration_script("guion.md")`. Al guardar el guion, el editor recarga la
+escena con las duraciones estimadas nuevas.
 
 ```markdown
 # Mi video sobre derivadas
@@ -488,19 +490,22 @@ Movemos el punto por la recta y leemos su pendiente, que no cambia.
 ```
 
 Un `# título` cierra el bloque anterior; los encabezados `###` son notas para ti
-que no se leen, y los comentarios HTML se ignoran. Las líneas seguidas se unen
-y una línea en blanco separa párrafos. Una clave repetida o un `##` que no sea
-una clave válida producen `ValueError`. El texto de un bloque se busca en este
-orden: el argumento `text`, su sección del guion y las `notes` del segmento; con
-un guion cargado, una clave sin sección emite un `UserWarning`. El botón
-*Crear guion* / *Abrir guion* del panel crea el archivo o le añade las claves
-que faltan, y lo abre en tu editor. En una toma en vivo, el teleprompter
-muestra la sección con el nombre del segmento actual.
+que no se leen, los comentarios HTML se ignoran y una línea `[stop]` o
+`[stop nombre]` marca dónde avanzas, y la voz no la lee. Las líneas seguidas se
+unen y una línea en blanco separa párrafos. Un `##` vacío o repetido (sin
+distinguir mayúsculas) produce `ValueError`. El texto de un bloque se busca en
+este orden: el argumento `text`, su sección del guion y las notas del segmento;
+con un guion cargado, una clave sin sección emite un `UserWarning`. El botón
+*Crear guion* / *Abrir y completar* del panel crea el archivo o le añade las
+secciones de los bloques y las diapositivas que faltan, y las marcas de sus
+stops, y lo abre en tu editor. En una toma en vivo, el teleprompter muestra el
+guion de la diapositiva actual cortado en sus `[stop]`, con `▶ AVANZA` donde
+toca avanzar.
 
 === Grabar desde el editor
 
 Abre el panel con el botón de micrófono de la barra de reproducción (o
-*Más controles → Narración*). El panel lista el guion, la toma en vivo y cada
+*Más controles → Guion y narración*). El panel lista el guion, la toma en vivo y cada
 bloque de voz en off con su estado: *sin grabar* (duración estimada del texto)
 o *grabada*, su nivel y de dónde sale su texto. El panel y el teleprompter se
 pueden arrastrar desde su asa de puntos, y *Ocultar guion* reduce el
@@ -647,8 +652,8 @@ vo.finish()
   kind: "method",
   signature: "narration_script(path) -> None",
   params: ((name: "path", type: "str", default: none, desc: [Archivo Markdown; una ruta relativa se busca en la carpeta de assets, o junto al script si la escena no tiene assets.]),),
-  returns: (type: "None", desc: [Los bloques que empiezan después leen su texto de este guion.]),
-  desc: [Sin esta llamada se carga `narration/script.md` si existe. Llámala antes de los bloques que la usan. Un archivo ilegible, un `##` que no es una clave válida o una clave repetida producen `ValueError`.],
+  returns: (type: "None", desc: [Los bloques que empiezan después y todas las diapositivas leen su texto de este guion.]),
+  desc: [Sin esta llamada se carga `narration/script.md` si existe. Las secciones con el nombre de una diapositiva son sus notas del orador y sustituyen a `notes=`. Llámala antes de los bloques que la usan; las diapositivas la leen la llames donde la llames. Un archivo ilegible o un `##` vacío o repetido producen `ValueError`.],
 )[
 ```python
 >>>from gaanim import *

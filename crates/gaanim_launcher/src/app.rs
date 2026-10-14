@@ -852,6 +852,7 @@ fn presentation_preflight(
             .into_iter()
             .map(|(_, message)| format!("layout: {message}")),
     );
+    report.warnings.extend(canvas.script_warnings());
 
     if manifest.segments.is_empty() {
         report

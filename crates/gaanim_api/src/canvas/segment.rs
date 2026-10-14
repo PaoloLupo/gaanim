@@ -164,4 +164,6 @@ pub enum SegmentError {
     InvalidTarget { target: f64 },
     #[error("invalid transition sound: {0}")]
     Sound(#[source] crate::export::AudioTrackError),
+    #[error(transparent)]
+    Script(Box<super::narration::VoiceoverError>),
 }

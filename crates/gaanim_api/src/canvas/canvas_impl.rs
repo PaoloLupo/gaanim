@@ -3220,6 +3220,9 @@ impl SceneModel {
         if name.is_empty() {
             return Err(SegmentError::EmptyName);
         }
+        // Slides read their speaker notes from the narration script.
+        self.ensure_default_script()
+            .map_err(|error| SegmentError::Script(Box::new(error)))?;
         // A new segment starts where the timeline currently ends, and so does
         // the transition that enters it.
         let transition_sound = transition
@@ -6508,7 +6511,7 @@ impl SceneModel {
                 let spec = SegmentSpec {
                     id: segment.id,
                     name: segment.name.clone(),
-                    notes: segment.notes.clone(),
+                    notes: self.slide_notes(&segment.name, segment.notes.as_ref()),
                     target: segment.target,
                     template: segment.template.clone(),
                     start_time,

@@ -478,50 +478,97 @@ impl TakeTiming {
 /// Narration script loaded automatically from the narration folder.
 pub const DEFAULT_SCRIPT: &str = "script.md";
 
-/// The text of one take in a narration script.
+/// One section of a narration script: the text of a take, or the speaker
+/// notes of the slide of the same name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScriptSection {
+    /// The heading's text: a take key or a slide's name.
     pub key: String,
+    /// What is read aloud, without the stop marks.
     pub text: String,
+    /// The text with its stop marks, one `[stop]` or `[stop name]` line
+    /// each, as a slide's speaker notes.
+    pub notes: String,
     /// 1-based line of the section heading.
     pub line: usize,
+    /// 1-based last line of the section with anything written on it.
+    pub end: usize,
+}
+
+impl ScriptSection {
+    /// Whether this section belongs to the slide or take `name`, ignoring
+    /// case like slide names do.
+    pub fn is_named(&self, name: &str) -> bool {
+        self.key.to_lowercase() == name.trim().to_lowercase()
+    }
+}
+
+/// A paragraph of a section being read.
+enum Paragraph {
+    Text(String),
+    Mark(Option<String>),
+}
+
+struct OpenSection {
+    key: String,
+    line: usize,
+    end: usize,
+    paragraphs: Vec<Paragraph>,
 }
 
 /// Parse a narration script written in Markdown.
 ///
-/// A level-2 heading names a take (`## intro`) and the text below it is that
-/// take's script. A level-1 heading (`# Title`) ends the current take;
-/// deeper headings are notes for the author and are not read. HTML comments
-/// and `*` emphasis marks are dropped. Lines join with spaces and blank lines
-/// separate paragraphs. An invalid or repeated key is an error.
+/// A level-2 heading opens a section (`## intro`, `## Resultados`) that
+/// holds the text of the take of that key or the notes of the slide of that
+/// name. A level-1 heading (`# Title`) ends the current section; deeper
+/// headings are notes for the author and are not read. A line `[stop]` or
+/// `[stop name]` marks where the speaker advances. HTML comments and `*`
+/// emphasis marks are dropped. Lines join with spaces and blank lines
+/// separate paragraphs. An empty or repeated heading is an error.
 pub fn parse_script(source: &str) -> Result<Vec<ScriptSection>, String> {
     let mut sections: Vec<ScriptSection> = Vec::new();
-    let mut current: Option<(String, usize, Vec<String>)> = None;
+    let mut current: Option<OpenSection> = None;
     let mut paragraph = String::new();
     let mut in_comment = false;
 
-    fn flush_paragraph(paragraph: &mut String, current: &mut Option<(String, usize, Vec<String>)>) {
-        if let Some((_, _, paragraphs)) = current
+    fn flush_paragraph(paragraph: &mut String, current: &mut Option<OpenSection>) {
+        if let Some(section) = current
             && !paragraph.trim().is_empty()
         {
-            paragraphs.push(paragraph.trim().to_owned());
+            section
+                .paragraphs
+                .push(Paragraph::Text(paragraph.trim().to_owned()));
         }
         paragraph.clear();
     }
-    fn close(
-        current: &mut Option<(String, usize, Vec<String>)>,
-        sections: &mut Vec<ScriptSection>,
-    ) {
-        if let Some((key, line, paragraphs)) = current.take() {
-            sections.push(ScriptSection {
-                key,
-                text: paragraphs.join("\n\n"),
-                line,
-            });
+    fn close(current: &mut Option<OpenSection>, sections: &mut Vec<ScriptSection>) {
+        let Some(section) = current.take() else {
+            return;
+        };
+        let mut text = Vec::new();
+        let mut notes = Vec::new();
+        for paragraph in &section.paragraphs {
+            match paragraph {
+                Paragraph::Text(paragraph) => {
+                    text.push(paragraph.clone());
+                    notes.push(paragraph.clone());
+                }
+                Paragraph::Mark(name) => {
+                    notes.push(gaanim_timeline::notes::mark_line(name.as_deref()));
+                }
+            }
         }
+        sections.push(ScriptSection {
+            key: section.key,
+            text: text.join("\n\n"),
+            notes: notes.join("\n\n"),
+            line: section.line,
+            end: section.end,
+        });
     }
 
     for (index, raw) in source.lines().enumerate() {
+        let line_number = index + 1;
         // Drop HTML comments, which may span lines.
         let mut line = String::new();
         let mut rest = raw;
@@ -559,6 +606,13 @@ pub fn parse_script(source: &str) -> Result<Vec<ScriptSection>, String> {
                 .chars()
                 .next()
                 .is_none_or(char::is_whitespace);
+        // Anything written below a heading, comments too, belongs to its section.
+        if !(heading && level <= 2)
+            && !raw.trim().is_empty()
+            && let Some(section) = &mut current
+        {
+            section.end = line_number;
+        }
         if heading {
             if level > 2 {
                 continue;
@@ -569,21 +623,36 @@ pub fn parse_script(source: &str) -> Result<Vec<ScriptSection>, String> {
                 continue;
             }
             let key = trimmed[level..].trim().trim_end_matches('#').trim();
-            let line_number = index + 1;
-            if validate_take_key(key).is_err() {
+            if key.is_empty() {
                 return Err(format!(
-                    "line {line_number}: {key:?} is not a take key; use letters, digits, '-', '_' or '.'"
+                    "line {line_number}: a \"##\" heading needs the name of a slide or take"
                 ));
             }
-            if let Some(first) = sections.iter().find(|section| section.key == key) {
+            let lowered = key.to_lowercase();
+            if let Some(first) = sections
+                .iter()
+                .find(|section| section.key.to_lowercase() == lowered)
+            {
                 return Err(format!(
-                    "the key {key:?} appears twice (lines {} and {line_number})",
+                    "the heading {key:?} appears twice (lines {} and {line_number})",
                     first.line
                 ));
             }
-            current = Some((key.to_owned(), line_number, Vec::new()));
+            current = Some(OpenSection {
+                key: key.to_owned(),
+                line: line_number,
+                end: line_number,
+                paragraphs: Vec::new(),
+            });
         } else if trimmed.is_empty() {
             flush_paragraph(&mut paragraph, &mut current);
+        } else if let Some(name) = gaanim_timeline::notes::stop_mark(trimmed) {
+            flush_paragraph(&mut paragraph, &mut current);
+            if let Some(section) = &mut current {
+                section
+                    .paragraphs
+                    .push(Paragraph::Mark(name.map(str::to_owned)));
+            }
         } else if current.is_some() {
             if !paragraph.is_empty() {
                 paragraph.push(' ');
@@ -596,16 +665,26 @@ pub fn parse_script(source: &str) -> Result<Vec<ScriptSection>, String> {
     Ok(sections)
 }
 
+/// The comment that opens a script the editor writes.
+const SCRIPT_HEADER: &str = "# Guion\n\n<!-- Cada \"## nombre\" es el guion de la diapositiva con ese nombre\n     \
+     o el texto de scene.voiceover(\"nombre\"). Una línea [stop] marca dónde\n     \
+     avanzas. Guarda el archivo y la escena se actualiza. -->\n";
+
 /// Markdown for a script with one section per `(key, text)`, as the editor
 /// writes it the first time.
 pub fn format_script(sections: &[(String, String)]) -> String {
-    let mut source = String::from(
-        "# Guion\n\n<!-- Cada encabezado \"## clave\" es el texto de scene.voiceover(\"clave\").\n     \
-         Guarda el archivo y la escena se actualiza. -->\n",
-    );
+    let mut source = String::from(SCRIPT_HEADER);
+    source.push_str(&format_sections(sections));
+    source
+}
+
+/// Markdown for the sections `(key, text)` alone, to add to a script.
+pub fn format_sections(sections: &[(String, String)]) -> String {
+    let mut source = String::new();
     for (key, text) in sections {
-        source.push_str(&format!("\n## {key}\n\n"));
+        source.push_str(&format!("\n## {key}\n"));
         if !text.trim().is_empty() {
+            source.push('\n');
             source.push_str(text.trim());
             source.push('\n');
         }
@@ -834,11 +913,42 @@ mod tests {
     }
 
     #[test]
-    fn scripts_reject_invalid_and_repeated_keys() {
-        let error = parse_script("## mi intro\ntexto").unwrap_err();
-        assert!(error.contains("line 1"), "{error}");
-        let error = parse_script("## a\nuno\n## a\ndos").unwrap_err();
+    fn scripts_reject_empty_and_repeated_headings() {
+        let error = parse_script("texto\n##\nmás").unwrap_err();
+        assert!(error.contains("line 2"), "{error}");
+        let error = parse_script("## a\nuno\n## A\ndos").unwrap_err();
         assert!(error.contains("twice") && error.contains("3"), "{error}");
+    }
+
+    #[test]
+    fn slide_sections_keep_their_stop_marks_as_notes() {
+        let source = "# Charla\n\
+                      \n\
+                      ## Resultados del año\n\
+                      Primero miren\n\
+                      el gráfico.\n\
+                      [stop grafico]\n\
+                      Como ven, crece. <!-- respiro -->\n\
+                      [STOP]\n\
+                      Y la conclusión.\n\
+                      \n\
+                      \n\
+                      ## cierre\n";
+        let sections = parse_script(source).unwrap();
+        let results = &sections[0];
+        assert_eq!(results.key, "Resultados del año");
+        assert!(results.is_named(" resultados DEL año"));
+        assert_eq!(
+            results.text,
+            "Primero miren el gráfico.\n\nComo ven, crece.\n\nY la conclusión."
+        );
+        assert_eq!(
+            results.notes,
+            "Primero miren el gráfico.\n\n[stop grafico]\n\nComo ven, crece.\n\n[stop]\n\nY la conclusión."
+        );
+        assert_eq!((results.line, results.end), (3, 9));
+        assert_eq!((sections[1].line, sections[1].end), (12, 12));
+        assert_eq!(sections[1].notes, "");
     }
 
     #[test]
