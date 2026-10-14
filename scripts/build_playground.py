@@ -97,9 +97,6 @@ def emscripten_env() -> dict[str, str]:
             f"Pyodide {PYODIDE_VERSION} needs Emscripten {EMSCRIPTEN_VERSION}, found: "
             f"{version.splitlines()[0]}"
         )
-    # The extension is a side module that Pyodide links at load time, so C
-    # dependencies (zstd's encoder) compile position-independent too.
-    env["CFLAGS_wasm32_unknown_emscripten"] = "-fPIC"
     # PyO3 builds an extension module against Python 3.14's stable ABI; the
     # interpreter's symbols resolve when Pyodide loads it.
     env["PYO3_BUILD_EXTENSION_MODULE"] = "1"
