@@ -103,8 +103,9 @@ fn span_json(span: &IndexedSpan) -> Value {
     value
 }
 
-/// The JSON `gaanim inspect --json` prints for `index`, read from `script`.
-fn index_json(script: &Path, index: &TimelineIndex) -> Value {
+/// The JSON `gaanim inspect --json` prints for `index`, read from `script`;
+/// the preview's `--listen` sends the same in each `ready` event.
+pub(crate) fn index_json(script: &Path, index: &TimelineIndex) -> Value {
     let segments: Vec<Value> = index
         .segments
         .iter()

@@ -107,7 +107,8 @@ pub fn run() {
             ),
         );
     if let Some(address) = launch.listen
-        && let Err(error) = crate::control::listen(app.world_mut(), address)
+        && let Err(error) =
+            crate::control::listen(app.world_mut(), address, launch.script_path.as_deref())
     {
         console::error("listen", error);
         std::process::exit(2);
