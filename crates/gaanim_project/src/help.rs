@@ -112,6 +112,10 @@ only says whether there is one",
                     "Planned length of the talk, e.g. 20m or 1h30m: Presenter View\ncounts it down and shows how far ahead or behind you are",
                 ),
                 (
+                    "--listen <stdio|HOST:PORT>",
+                    "Let an editor move the preview and hear where it is, in\nJSON lines on stdin/stdout or a loopback port",
+                ),
+                (
                     "--sections <LIST>",
                     "Play only these segments or Section keys, e.g. intro,results;\na name with commas goes alone or with its commas as \\,",
                 ),

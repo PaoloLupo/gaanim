@@ -95,7 +95,23 @@ pub fn run() {
             bevy_egui::EguiPrimaryContextPass,
             (reload_status_overlay_system, script_error_overlay_system),
         )
-        .add_systems(Update, open_project_request_system);
+        .add_systems(Update, open_project_request_system)
+        .add_systems(
+            Update,
+            (
+                crate::control::control_command_system
+                    .in_set(gaanim_scene::hierarchy::SceneSet::Input)
+                    .after(reload_listener_system),
+                crate::control::playhead_event_system
+                    .in_set(gaanim_scene::hierarchy::SceneSet::Camera),
+            ),
+        );
+    if let Some(address) = launch.listen
+        && let Err(error) = crate::control::listen(app.world_mut(), address)
+    {
+        console::error("listen", error);
+        std::process::exit(2);
+    }
 
     if let Some(bundle) = launch
         .script_path
@@ -1053,6 +1069,8 @@ struct LaunchArgs {
     /// Planned length of the talk (`--duration`), which Presenter View
     /// counts down.
     duration: Option<std::time::Duration>,
+    /// Where editors control the preview (`--listen`).
+    listen: Option<crate::control::ListenAddress>,
 }
 
 fn resolve_project_paths(
@@ -1097,6 +1115,7 @@ fn parse_args() -> LaunchArgs {
             monitor: None,
             selection: Default::default(),
             duration: None,
+            listen: None,
         };
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
@@ -1140,6 +1159,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     let mut present = false;
     let mut monitor = None;
     let mut duration = None;
+    let mut listen = None;
     let mut selection = gaanim_timeline::selection::SegmentSelection::default();
     let mut index = 0;
 
@@ -1165,6 +1185,14 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
                     .ok_or_else(|| "--duration requires a length, e.g. 20m".to_string())?;
                 index += 1;
                 duration = Some(parse_talk_duration(value)?);
+            }
+            "--listen" => {
+                let value = args.get(index).ok_or_else(|| {
+                    "--listen requires stdio or a loopback address such as 127.0.0.1:7801"
+                        .to_string()
+                })?;
+                index += 1;
+                listen = Some(crate::control::ListenAddress::parse(value)?);
             }
             "--monitor" => {
                 let value = args
@@ -1195,6 +1223,9 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     if duration.is_some() && script_path.is_none() {
         return Err("--duration requires <SCRIPT_OR_PROJECT>".to_string());
     }
+    if listen.is_some() && script_path.is_none() {
+        return Err("--listen requires <SCRIPT_OR_PROJECT>".to_string());
+    }
     Ok(LaunchArgs {
         script_path,
         project: None,
@@ -1202,6 +1233,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
         monitor,
         selection,
         duration,
+        listen,
     })
 }
 
@@ -1337,6 +1369,7 @@ mod tests {
                 monitor: Some(1),
                 selection: Default::default(),
                 duration: None,
+                listen: None,
             }
         );
     }
@@ -1390,6 +1423,7 @@ mod tests {
                 monitor: None,
                 selection: Default::default(),
                 duration: None,
+                listen: None,
             }
         );
     }

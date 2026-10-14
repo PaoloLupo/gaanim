@@ -145,6 +145,9 @@ pub fn script_error_listener_system(world: &mut World) {
         return;
     }
     let last = errors.last().expect("checked non-empty").clone();
+    if let Some(control) = world.get_resource::<crate::control::ControlChannel>() {
+        control.failed(&last);
+    }
     let now = world.resource::<Time>().elapsed_secs_f64();
     if let Some(mut err) = world.get_resource_mut::<ScriptError>() {
         err.message = Some(last);
@@ -182,6 +185,9 @@ pub fn reload_listener_system(world: &mut World) {
         (tl.current_time, tl.is_playing, tl.cached_duration > 0.0)
     };
 
+    if let Some(mut control) = world.get_resource_mut::<crate::control::ControlChannel>() {
+        control.reloading(payload.canvas.timeline_index());
+    }
     let (width, height) = payload.canvas.frame.preview_pixel_size();
     let compile_duration = payload.compile_duration.as_secs_f64();
     payload.canvas.report_authoring();
@@ -274,10 +280,18 @@ fn apply_segment_selection(world: &mut World) -> Option<String> {
 /// position. It runs after the timeline seek, in the frame of the reload, so
 /// the time it reports includes the t=0 keyframe capture and the seek back,
 /// which a replay schedules for later in that frame.
-pub fn reload_ready_system(mut status: ResMut<ReloadStatus>, time: Res<Time>) {
+pub fn reload_ready_system(
+    mut status: ResMut<ReloadStatus>,
+    time: Res<Time>,
+    control: Option<ResMut<crate::control::ControlChannel>>,
+    timeline: Option<Res<Timeline>>,
+) {
     let Some(pending) = status.pending.take() else {
         return;
     };
+    if let (Some(mut control), Some(timeline)) = (control, timeline) {
+        control.ready(timeline.cached_duration);
+    }
     let seek = pending.replayed_at.elapsed().as_secs_f64();
     status.last_message = reload_status_message(
         pending.python,
