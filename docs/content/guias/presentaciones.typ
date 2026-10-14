@@ -182,8 +182,16 @@ micrófono, el tiempo que llevas en la diapositiva frente a su objetivo y
 `talk ≈ 3:40 of 4:00`: lo que duraría la charla con lo que llevas grabado y
 los tiempos guardados del resto de diapositivas.
 
-Los tiempos se guardan en la carpeta de datos de Gaanim, junto a los ensayos
-de ese archivo, no en el proyecto. Si la escena tiene una toma en vivo
+Con *Keep the audio, to listen back* marcado, cada grabación guarda además el
+audio de cada diapositiva y stop que cronometra, y regrabar uno sustituye su
+audio. El botón de reproducir de cada fila lo escucha: la diapositiva entera,
+tramo tras tramo, o solo ese stop. Para que tu voz forme parte del vídeo
+exportado, graba en cambio una toma en vivo (ver
+#link("/referencia/audio/#narracion")[Narración]).
+
+Los tiempos y el audio se guardan en la carpeta de datos de Gaanim, junto a
+los ensayos de ese archivo, nunca en el proyecto: no acaban en un
+repositorio. Si la escena tiene una toma en vivo
 (`scene.live_take`), se graba siempre entera: las filas no se regraban por
 separado.
 

@@ -312,6 +312,8 @@ pub struct NarrationPanel {
     dictate: Option<bool>,
     /// Slides whose stops the timing card lists, by name.
     expanded: std::collections::BTreeSet<String>,
+    /// The kept audio files of the talk, and when they were listed.
+    clip_files: Option<(Instant, Vec<String>)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -357,6 +359,28 @@ impl NarrationPanel {
                 .token_stored
                 .get_or_insert_with(|| scribe::vault::load().is_some())
             || std::env::var(scribe::TOKEN_VARIABLE).is_ok_and(|token| !token.trim().is_empty())
+    }
+
+    /// The names of the files in `dir`, listed again every second.
+    fn clip_files(&mut self, dir: Option<&Path>) -> Vec<String> {
+        let stale = self
+            .clip_files
+            .as_ref()
+            .is_none_or(|(listed, _)| listed.elapsed() > Duration::from_secs(1));
+        if stale {
+            let files = dir
+                .and_then(|dir| std::fs::read_dir(dir).ok())
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .collect();
+            self.clip_files = Some((Instant::now(), files));
+        }
+        self.clip_files
+            .as_ref()
+            .map(|(_, files)| files.clone())
+            .unwrap_or_default()
     }
 
     /// Whether recordings dictate the script.
@@ -1414,6 +1438,72 @@ fn record_timing(
     panel.notify(NoticeKind::Success, format!("Timed: {}", names.join(" · ")));
 }
 
+/// The audio of the parts a recording of the talk timed, to keep.
+struct ClipJob {
+    /// Where the talk's clips are kept.
+    dir: PathBuf,
+    /// `(slide, part, start, end)`, in recording seconds.
+    clips: Vec<(String, usize, f64, f64)>,
+    /// Slides recorded whole, whose earlier clips go.
+    whole: Vec<String>,
+}
+
+impl ClipJob {
+    /// Stop the microphone and write each clip, in the background.
+    fn save(self, input: Input) {
+        let (samples, rate) = input.recorder.finish();
+        std::thread::spawn(move || {
+            if let Err(error) = self.write(&samples, rate) {
+                gaanim_core::console::error(
+                    "narration",
+                    format!("the recording's audio was not kept: {error}"),
+                );
+            }
+        });
+    }
+
+    fn write(&self, samples: &[f32], rate: u32) -> Result<(), String> {
+        std::fs::create_dir_all(&self.dir).map_err(|error| error.to_string())?;
+        for slide in &self.whole {
+            for path in slide_clips(&self.dir, slide) {
+                std::fs::remove_file(path).map_err(|error| error.to_string())?;
+            }
+        }
+        let at = |seconds: f64| ((seconds.max(0.0) * f64::from(rate)) as usize).min(samples.len());
+        for (slide, part, start, end) in &self.clips {
+            let range = at(*start)..at(*end);
+            if range.is_empty() {
+                continue;
+            }
+            write_wav_take(
+                &pace::clip_path(&self.dir, slide, *part),
+                &samples[range],
+                rate,
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+/// The kept audio of the slide named `slide`, part by part, in order.
+fn slide_clips(dir: &Path, slide: &str) -> Vec<PathBuf> {
+    let prefix = pace::clip_prefix(slide);
+    let mut clips: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".wav"))
+        })
+        .collect();
+    clips.sort();
+    clips
+}
+
 /// Keep the `seconds` part `part` of the slide named `slide` took, for
 /// the talk at `source`, which changes the slide's time.
 fn record_part_timing(
@@ -1573,8 +1663,16 @@ pub(crate) fn narration_session_system(
     presentation: Res<PresentationMode>,
     paths: Option<Res<ProjectPaths>>,
     mut pace: ResMut<PrompterPace>,
+    mut clip_playback: Option<ResMut<gaanim_media::ClipPlayback>>,
 ) {
     panel.poll_jobs();
+    // A recording does not record what plays back.
+    if session.capturing()
+        && let Some(playback) = clip_playback.as_deref_mut()
+        && playback.playing().is_some()
+    {
+        playback.stop();
+    }
     let pressed = |key| keys.just_pressed(key);
     let reload = reload.map(|reload| reload.0.clone());
     // The talk as last recorded, and the speaker's pace, for the prompter.
@@ -2002,6 +2100,15 @@ pub(crate) fn narration_session_system(
                 }
                 let position = ScriptPosition::of(&timeline);
                 let at_end = timeline.current_time >= timeline.cached_duration - 1e-4;
+                // The audio of the parts timed, when the speaker keeps it.
+                let mut clips = (panel.settings().keep_talk_audio && !recording.keep_take)
+                    .then(|| source.as_deref().and_then(pace::Rehearsals::clips_dir))
+                    .flatten()
+                    .map(|dir| ClipJob {
+                        dir,
+                        clips: Vec::new(),
+                        whole: Vec::new(),
+                    });
                 match scope
                     .as_ref()
                     .and_then(|scope| Some((&scope.slide, scope.part?)))
@@ -2016,14 +2123,17 @@ pub(crate) fn narration_session_system(
                                         && position.part == part
                                         && timeline.segments[position.slide].name == *slide
                                 }));
-                        let seconds =
+                        let span =
                             pace::timed_part(&recording.track, slide, part, elapsed, finished);
+                        if let (Some(job), Some((start, end))) = (&mut clips, span) {
+                            job.clips.push((slide.clone(), part, start, end));
+                        }
                         record_part_timing(
                             &mut pace,
                             source.as_deref(),
                             &timeline,
                             (slide, part),
-                            seconds,
+                            span.map(|(start, end)| end - start),
                             &mut panel,
                         );
                     }
@@ -2040,6 +2150,12 @@ pub(crate) fn narration_session_system(
                             recording.entered_first,
                             finished_last,
                         );
+                        if let Some(job) = &mut clips {
+                            let names: Vec<&str> =
+                                timed.iter().map(|slide| slide.name.as_str()).collect();
+                            job.clips = pace::part_spans(&recording.track, elapsed, &names);
+                            job.whole = timed.iter().map(|slide| slide.name.clone()).collect();
+                        }
                         record_timing(&mut pace, source.as_deref(), timed, &mut panel);
                     }
                     None => {}
@@ -2079,7 +2195,14 @@ pub(crate) fn narration_session_system(
                             .and_then(|dictation| dictation.stopped_at)
                     }
                     .unwrap_or(timeline.current_time);
-                    drop(recording);
+                    match clips.filter(|job| !job.clips.is_empty()) {
+                        Some(job) => {
+                            let Recording { input, .. } = *recording;
+                            job.save(input);
+                            panel.clip_files = None;
+                        }
+                        None => drop(recording),
+                    }
                     finish_capture(&target, &mut timeline, &mut preview_audio);
                     if target.is_live() {
                         // Back to the take as it was recorded.
@@ -2479,6 +2602,7 @@ pub(crate) fn narration_panel_system(
     paths: Option<Res<ProjectPaths>>,
     timeline: Res<Timeline>,
     pace: Res<PrompterPace>,
+    mut clip_playback: Option<ResMut<gaanim_media::ClipPlayback>>,
 ) {
     if !panel.open
         || session.capturing()
@@ -2516,6 +2640,12 @@ pub(crate) fn narration_panel_system(
     let dictating = panel.dictating() && can_dictate;
     let mut dictate = dictating;
     let mut expanded = std::mem::take(&mut panel.expanded);
+    let clips_dir = paths
+        .as_ref()
+        .and_then(|paths| pace::Rehearsals::clips_dir(&paths.script_path));
+    let clip_files = panel.clip_files(clips_dir.as_deref());
+    let keeping = panel.settings().keep_talk_audio;
+    let mut keep_audio = keeping;
 
     egui::Area::new(egui::Id::new("narration_panel"))
         .pivot(egui::Align2::RIGHT_TOP)
@@ -2560,6 +2690,12 @@ pub(crate) fn narration_panel_system(
                             script_card(ui, &manifest, &slides, script.as_deref(), &mut request);
                             if !slides.is_empty() {
                                 ui.label(heading("TIMING"));
+                                let mut audio = TalkAudio {
+                                    keep: &mut keep_audio,
+                                    dir: clips_dir.as_deref(),
+                                    files: &clip_files,
+                                    playback: clip_playback.as_deref_mut(),
+                                };
                                 timing_card(
                                     ui,
                                     &timeline,
@@ -2568,6 +2704,7 @@ pub(crate) fn narration_panel_system(
                                     &mut expanded,
                                     &mut dictate,
                                     can_dictate,
+                                    &mut audio,
                                     &mut request,
                                 );
                             }
@@ -2622,6 +2759,10 @@ pub(crate) fn narration_panel_system(
         panel.dictate = Some(dictate);
     }
     panel.expanded = expanded;
+    if keep_audio != keeping {
+        panel.settings().keep_talk_audio = keep_audio;
+        settings_changed = true;
+    }
     if settings_changed && let Err(error) = panel.settings().save() {
         panel.notify(
             NoticeKind::Error,
@@ -2823,10 +2964,67 @@ fn script_card(
     });
 }
 
+/// The kept audio of the talk, as the timing card shows and plays it.
+struct TalkAudio<'a> {
+    /// Keep the audio of each recording.
+    keep: &'a mut bool,
+    /// Where it is kept, and the names of the files there.
+    dir: Option<&'a Path>,
+    files: &'a [String],
+    playback: Option<&'a mut gaanim_media::ClipPlayback>,
+}
+
+impl TalkAudio<'_> {
+    /// The kept audio of part `part` of the slide named `slide`, or of all
+    /// its parts.
+    fn clips(&self, slide: &str, part: Option<usize>) -> Vec<PathBuf> {
+        let Some(dir) = self.dir else {
+            return Vec::new();
+        };
+        let prefix = pace::clip_prefix(slide);
+        let name = part.map(|part| format!("{prefix}{part:02}.wav"));
+        self.files
+            .iter()
+            .filter(|file| match &name {
+                Some(name) => *file == name,
+                None => file.starts_with(&prefix),
+            })
+            .map(|file| dir.join(file))
+            .collect()
+    }
+
+    /// A button that plays `clips`, named `label`, or stops them.
+    fn listen(&mut self, ui: &mut egui::Ui, label: String, clips: Vec<PathBuf>) {
+        let playing = self
+            .playback
+            .as_deref()
+            .is_some_and(|playback| playback.playing() == Some(label.as_str()));
+        let icon = if playing { Icon::Pause } else { Icon::Play };
+        let enabled = !clips.is_empty() && self.playback.is_some();
+        let hint = match (playing, enabled) {
+            (true, _) => "Stop",
+            (false, true) => "Listen to what you recorded",
+            (false, false) => "Nothing recorded with Keep the audio yet",
+        };
+        if icon_button(ui, icon, ButtonTone::Ghost, enabled)
+            .on_hover_text(hint)
+            .clicked()
+            && let Some(playback) = self.playback.as_deref_mut()
+        {
+            if playing {
+                playback.stop();
+            } else {
+                playback.play(label, clips);
+            }
+        }
+    }
+}
+
 /// The talk's timing: the time each slide took when last recorded against
 /// its target, and each of its stops once unfolded; the total against the
-/// planned length; and buttons to record the talk, or one slide or stop
-/// again. Clicking a name moves the playhead there.
+/// planned length; buttons to record the talk, or one slide or stop again,
+/// and to listen to what was recorded. Clicking a name moves the playhead
+/// there.
 #[allow(clippy::too_many_arguments)]
 fn timing_card(
     ui: &mut egui::Ui,
@@ -2836,6 +3034,7 @@ fn timing_card(
     expanded: &mut std::collections::BTreeSet<String>,
     dictate: &mut bool,
     can_dictate: bool,
+    audio: &mut TalkAudio,
     request: &mut Option<Request>,
 ) {
     let slides: Vec<_> = timeline
@@ -2887,17 +3086,19 @@ fn timing_card(
                     )
                     .on_hover_text(match planned {
                         Some(_) => {
-                            "The slides' recorded times against the talk's planned \
-                                    length (scene.slides.target, or every slide's target)"
+                            "The slides' recorded times against the talk's planned length \
+                             (scene.slides.target, or every slide's target)"
                         }
                         None => {
-                            "Plan the talk with scene.slides.target(...) or a target=… \
-                                 on every slide to see how it fits"
+                            "Plan the talk with scene.slides.target(...) or a target=… on \
+                             every slide to see how it fits"
                         }
                     });
                 });
             });
             ui.add_space(4.0);
+            // The names take what the times and buttons leave.
+            let name_width = (ui.available_width() - 270.0).max(120.0);
             egui::Grid::new("talk-timing")
                 .num_columns(4)
                 .spacing([12.0, 6.0])
@@ -2906,24 +3107,14 @@ fn timing_card(
                         let parts = slide_parts(slide);
                         let open = expanded.contains(&slide.name);
                         ui.horizontal(|ui| {
+                            ui.set_width(name_width);
                             ui.spacing_mut().item_spacing.x = 6.0;
                             if parts > 1 {
-                                let arrow = if open { "▾" } else { "▸" };
-                                let toggle = ui
-                                    .add(
-                                        egui::Label::new(
-                                            egui::RichText::new(arrow)
-                                                .size(15.0)
-                                                .color(palette::TEXT_MUTED),
-                                        )
-                                        .sense(egui::Sense::click()),
-                                    )
-                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                    .on_hover_text(if open {
-                                        "Hide its stops"
-                                    } else {
-                                        "Show its stops, to record one again"
-                                    });
+                                let toggle = disclosure(ui, open).on_hover_text(if open {
+                                    "Hide its stops"
+                                } else {
+                                    "Show its stops, to record or hear one again"
+                                });
                                 if toggle.clicked() {
                                     if open {
                                         expanded.remove(&slide.name);
@@ -2932,10 +3123,10 @@ fn timing_card(
                                     }
                                 }
                             } else {
-                                ui.add_space(15.0);
+                                ui.add_space(16.0);
                             }
                             if name_link(ui, &slide.name, 15.0, palette::TEXT)
-                                .on_hover_text("Go to this slide")
+                                .on_hover_text(format!("{} · go to this slide", slide.name))
                                 .clicked()
                             {
                                 *request = Some(Request::Seek(
@@ -2963,7 +3154,7 @@ fn timing_card(
                             (
                                 "Re-record",
                                 "Present only this slide again: it ends once you leave it, \
-                                 and its time and script are replaced",
+                                 and its time, script and audio are replaced",
                                 true,
                             )
                         } else {
@@ -2974,33 +3165,36 @@ fn timing_card(
                                 false,
                             )
                         };
-                        if small(ui, label, !live)
-                            .on_hover_text(if live { live_hint } else { hint })
-                            .clicked()
-                        {
-                            *request = Some(record(&slide.name, None, only));
-                        }
+                        ui.horizontal(|ui| {
+                            let clips = audio.clips(&slide.name, None);
+                            audio.listen(ui, slide.name.clone(), clips);
+                            if small(ui, label, !live)
+                                .on_hover_text(if live { live_hint } else { hint })
+                                .clicked()
+                            {
+                                *request = Some(record(&slide.name, None, only));
+                            }
+                        });
                         ui.end_row();
                         if !open {
                             continue;
                         }
                         for part in 0..parts {
+                            let label = part_label(slide, part);
                             ui.horizontal(|ui| {
-                                ui.add_space(30.0);
-                                let stop = slide.stops.get(part).or(slide.stops.last());
+                                ui.set_width(name_width);
+                                ui.add_space(22.0);
                                 let time = match slide.stops.get(part) {
                                     Some(stop) => stop.time,
                                     // Past the last stop.
-                                    None => stop.map_or(slide.start_time, |stop| stop.time + 1e-3),
+                                    None => slide
+                                        .stops
+                                        .last()
+                                        .map_or(slide.start_time, |stop| stop.time + 1e-3),
                                 };
-                                if name_link(
-                                    ui,
-                                    &part_label(slide, part),
-                                    14.0,
-                                    palette::TEXT_MUTED,
-                                )
-                                .on_hover_text("Go to this stop")
-                                .clicked()
+                                if name_link(ui, &label, 14.0, palette::TEXT_MUTED)
+                                    .on_hover_text("Go to this stop")
+                                    .clicked()
                                 {
                                     *request = Some(Request::Seek(time));
                                 }
@@ -3008,18 +3202,23 @@ fn timing_card(
                             let seconds = kept.and_then(|kept| kept.parts.get(part).copied());
                             timing_cell(ui, seconds, None, 14.0);
                             ui.label("");
-                            if small(ui, "Re-record", !live)
-                                .on_hover_text(if live {
-                                    live_hint
-                                } else {
-                                    "Present only this stop again: from the stop before it \
-                                     until you advance at this one. Its script is replaced, \
-                                     and its time too once the slide has one"
-                                })
-                                .clicked()
-                            {
-                                *request = Some(record(&slide.name, Some(part), true));
-                            }
+                            ui.horizontal(|ui| {
+                                let clips = audio.clips(&slide.name, Some(part));
+                                audio.listen(ui, format!("{} · {label}", slide.name), clips);
+                                if small(ui, "Re-record", !live)
+                                    .on_hover_text(if live {
+                                        live_hint
+                                    } else {
+                                        "Present only this stop again: from the stop before \
+                                         it until you advance at this one. Its script and \
+                                         audio are replaced, and its time too once the slide \
+                                         has one"
+                                    })
+                                    .clicked()
+                                {
+                                    *request = Some(record(&slide.name, Some(part), true));
+                                }
+                            });
                             ui.end_row();
                         }
                     }
@@ -3056,7 +3255,45 @@ fn timing_card(
             .on_disabled_hover_text(
                 "Paste or save a Scribe token under Zoom Scribe (dictation) below to dictate",
             );
+            ui.checkbox(audio.keep, "Keep the audio, to listen back")
+                .on_hover_text(
+                    "Each recording keeps the audio of every slide and stop it times, in \
+                     Gaanim's data folder on this computer, never in the project; recording \
+                     one again replaces its audio",
+                );
         });
+}
+
+/// A triangle that folds (pointing right) or unfolds (pointing down) a
+/// list.
+fn disclosure(ui: &mut egui::Ui, open: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(16.0), egui::Sense::click());
+    let color = if response.hovered() {
+        palette::TEXT
+    } else {
+        palette::TEXT_MUTED
+    };
+    let center = rect.center();
+    let side = 4.5;
+    let points = if open {
+        vec![
+            egui::pos2(center.x - side, center.y - side * 0.6),
+            egui::pos2(center.x + side, center.y - side * 0.6),
+            egui::pos2(center.x, center.y + side * 0.7),
+        ]
+    } else {
+        vec![
+            egui::pos2(center.x - side * 0.6, center.y - side),
+            egui::pos2(center.x + side * 0.7, center.y),
+            egui::pos2(center.x - side * 0.6, center.y + side),
+        ]
+    };
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        color,
+        egui::Stroke::NONE,
+    ));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A name that moves the playhead when clicked.

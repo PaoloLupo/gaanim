@@ -501,12 +501,15 @@ pub(crate) fn cue_label(ui: &mut egui::Ui, cue: &Cue, size: f32) {
         (true, false) => palette::STOP.gamma_multiply(0.7),
         (false, _) => palette::TEXT_FAINT,
     };
+    // Laid out right to left: the label, then the triangle before it.
     ui.label(
-        egui::RichText::new(format!("▶ {}", cue.label))
+        egui::RichText::new(&cue.label)
             .size(size)
             .strong()
             .color(color),
     );
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(size * 0.8), egui::Sense::hover());
+    crate::ui_kit::paint_icon(ui.painter(), rect, crate::ui_kit::Icon::Play, color);
 }
 
 /// The script's caption at the playhead.

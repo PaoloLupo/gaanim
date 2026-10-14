@@ -362,16 +362,16 @@ pub(crate) fn timed_slides(
         .collect()
 }
 
-/// Seconds a recording that ended at `end` spent on part `part` of
-/// `slide`, once it went through it whole: from reaching it to leaving it,
-/// or to `end` when the speaker `finished` it there.
+/// The recording seconds a recording that ended at `end` spent on part
+/// `part` of `slide`, once it went through it whole: from reaching it to
+/// leaving it, or to `end` when the speaker `finished` it there.
 pub(crate) fn timed_part(
     track: &ScriptTrack,
     slide: &str,
     part: usize,
     end: f64,
     finished: bool,
-) -> Option<f64> {
+) -> Option<(f64, f64)> {
     let here = |entry: &(f64, Option<(String, usize)>)| {
         entry
             .1
@@ -384,7 +384,28 @@ pub(crate) fn timed_part(
         None if finished => end,
         None => return None,
     };
-    Some((until - track[reached].0).max(0.0))
+    Some((track[reached].0, until.max(track[reached].0)))
+}
+
+/// Where each part of the slides named in `slides` begins and ends in a
+/// recording that followed `track` and ended at `end`, in recording
+/// seconds: `(slide, part, start, end)`.
+pub(crate) fn part_spans(
+    track: &ScriptTrack,
+    end: f64,
+    slides: &[&str],
+) -> Vec<(String, usize, f64, f64)> {
+    track
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (start, place))| {
+            let (slide, part) = place.as_ref()?;
+            slides.contains(&slide.as_str()).then(|| {
+                let until = track.get(index + 1).map_or(end, |(next, _)| *next);
+                (slide.clone(), *part, *start, until.max(*start))
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -428,6 +449,23 @@ impl Rehearsals {
                 ..RehearsalLog::default()
             });
         Self { path, log }
+    }
+
+    /// Where the audio of each part of the talk at `source` is kept, as
+    /// last recorded: `<slide>-<digest>-<part>.wav` in a folder named after
+    /// its log. `None` without a data folder.
+    pub(crate) fn clips_dir(source: &Path) -> Option<PathBuf> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let log = log_name(source);
+            let folder = log.strip_suffix(".json").unwrap_or(&log).to_owned();
+            gaanim_project::user_data_dir().map(|dir| dir.join("rehearsals").join(folder))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = source;
+            None
+        }
     }
 
     /// The talk as last recorded in the editor.
@@ -529,6 +567,26 @@ fn log_name(source: &Path) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     format!("{stem}-{hex}.json")
+}
+
+/// The prefix of the audio files of the slide named `slide`: its name made
+/// safe for a file name and a digest of it (FNV-1a, the same in every
+/// version), so two slides keep apart.
+pub(crate) fn clip_prefix(slide: &str) -> String {
+    let digest = slide.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    let name: String = slide
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .take(40)
+        .collect();
+    format!("{name}-{:06x}-", digest & 0xff_ffff)
+}
+
+/// The audio file of part `part` of the slide named `slide`, in `dir`.
+pub(crate) fn clip_path(dir: &Path, slide: &str, part: usize) -> PathBuf {
+    dir.join(format!("{}{part:02}.wav", clip_prefix(slide)))
 }
 
 /// The seconds spent on each segment, by name, for a rehearsal.
@@ -727,11 +785,31 @@ mod tests {
     fn a_part_recorded_again_changes_its_slides_time() {
         let track = [at(0.0, Some(("Datos", 1))), at(6.0, Some(("Datos", 2)))];
         // Reached and left: from one change to the next.
-        assert_eq!(timed_part(&track, "Datos", 1, 9.0, false), Some(6.0));
+        assert_eq!(timed_part(&track, "Datos", 1, 9.0, false), Some((0.0, 6.0)));
         // Still on it at the end: only once finished there.
         assert_eq!(timed_part(&track, "Datos", 2, 9.0, false), None);
-        assert_eq!(timed_part(&track, "Datos", 2, 9.0, true), Some(3.0));
+        assert_eq!(timed_part(&track, "Datos", 2, 9.0, true), Some((6.0, 9.0)));
         assert_eq!(timed_part(&track, "Datos", 0, 9.0, true), None);
+        // Each part of the slides asked for, where it begins and ends.
+        assert_eq!(
+            part_spans(&track, 9.0, &["Datos"]),
+            [
+                ("Datos".to_owned(), 1, 0.0, 6.0),
+                ("Datos".to_owned(), 2, 6.0, 9.0)
+            ]
+        );
+        assert!(part_spans(&track, 9.0, &["Cierre"]).is_empty());
+        let dir = Path::new("clips");
+        assert_eq!(
+            clip_path(dir, "Datos", 1)
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("{}01.wav", clip_prefix("Datos"))
+        );
+        assert!(clip_prefix("¿Qué tal?").starts_with("-Qué-tal--"));
+        assert_ne!(clip_prefix("A b"), clip_prefix("A-b"));
         let mut timing = TalkTiming::default();
         timing.record(SlideTiming {
             name: "Datos".into(),

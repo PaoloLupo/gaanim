@@ -49,6 +49,10 @@ pub(crate) struct NarrationSettings {
     /// which the prompter lights the script at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaking_wpm: Option<f64>,
+    /// Keep the audio of each recording of the talk, part by part, in
+    /// Gaanim's data folder, to listen back to it.
+    #[serde(default)]
+    pub keep_talk_audio: bool,
 }
 
 fn default_language() -> String {
@@ -85,6 +89,7 @@ impl Default for NarrationSettings {
             scribe_vocabulary: false,
             scribe_max_minutes: default_scribe_minutes(),
             speaking_wpm: None,
+            keep_talk_audio: false,
         }
     }
 }
