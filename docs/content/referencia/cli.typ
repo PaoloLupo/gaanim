@@ -51,8 +51,8 @@ necesita el entorno de Python que Gaanim detecta junto al proyecto (ver
 = Previsualizar
 
 ```bash
-gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] <SCRIPT_O_PROYECTO>
-gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] <PAQUETE.gaanim>
+gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <SCRIPT_O_PROYECTO>
+gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] [--listen <DIRECCIÓN>] <PAQUETE.gaanim>
 ```
 
 Sin argumentos, `gaanim` abre el Inicio: crear un proyecto, abrir una carpeta o
@@ -70,6 +70,8 @@ reproduce los fotogramas grabados con las mismas opciones, sin cargar Python.
   [`--duration <TIEMPO>`], [Duración prevista de la charla: `20m`, `1h30m`, `90s`, `20:00` o un número de minutos. Presenter View la cuenta hacia atrás y muestra si vas adelantado o retrasado (ver #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla]).],
   [`--sections <LISTA>`], [Reproduce solo los segmentos indicados, separados por comas, por ejemplo `resultados,cierre`.],
   [`--from <NOMBRE>`], [Empieza en ese segmento y sigue hasta el final. Combinado con `--sections`, recorta la lista a partir de ese nombre.],
+  [`--listen <stdio|HOST:PUERTO>`], [Deja que un editor de código mueva la vista previa y sepa dónde está, con JSON por líneas (ver #link(<listen>)[Controlar la vista previa desde un editor]).],
+  [`--message-format <FORMATO>`], [`json`: mensajes, recargas y errores del script con su línea en JSON por líneas (ver #link(<message-format>)[Mensajes para herramientas]).],
 )
 
 Cada nombre de `--sections` y `--from` puede ser el nombre completo de un
@@ -92,6 +94,68 @@ gaanim --present --monitor 1 mi-charla --from resultados
 
 Los atajos de teclado del modo presentación y de Presenter View están en
 #link("/guias/presentaciones/")[Presentaciones].
+
+== Controlar la vista previa desde un editor <listen>
+
+Con `--listen`, un editor de código mueve la vista previa y sabe dónde está:
+lleva la vista previa a la diapositiva del cursor sin reiniciarla y muestra en
+qué segmento y pausa está. Cada mensaje es un objeto JSON en una línea.
+
+- `--listen stdio`: las órdenes llegan por la entrada estándar y los eventos
+  salen por la salida estándar, para un editor que lanza `gaanim` como
+  proceso hijo. Lo que el script escriba con `print` también sale por ahí:
+  descarta las líneas que no sean un objeto JSON.
+- `--listen 127.0.0.1:7801` (o `localhost:7801`, `[::1]:7801`): escucha en ese
+  puerto de este ordenador; cada editor que se conecta envía órdenes y recibe
+  los eventos, empezando por el último `ready` y el último `playhead`. Solo
+  acepta direcciones locales.
+
+Órdenes:
+
+```json
+{"cmd": "seek", "time": 12.5}
+{"cmd": "seek", "segment": "Resultados"}
+{"cmd": "seek", "segment": "resultados", "stop": "grafico"}
+{"cmd": "seek", "stop": "grafico"}
+{"cmd": "follow", "file": "C:/charla/main.py", "line": 42}
+{"cmd": "play"}
+{"cmd": "pause"}
+```
+
+`seek` se detiene en un instante, en un segmento o un `Section` (por su
+clave), o en una pausa por su nombre, dentro del segmento indicado si lo hay;
+los nombres no distinguen mayúsculas. Un segmento se muestra donde descansa por
+primera vez: en su primera pausa (en un `Section`, la primera de sus pasos),
+como su primera página del PDF, o en su final si no tiene pausas. Su inicio
+todavía puede mostrar la diapositiva anterior. `follow` se detiene
+en el instante que representa esa línea del script, con las mismas reglas que
+#link(<gaanim-inspect>)[`gaanim inspect`]: lo creado en esa línea o, si no,
+en la línea más cercana por encima en el mismo archivo. Un segmento cuenta
+como en `seek`, una pausa o un marcador por su instante, un voiceover por su
+inicio y un `play` por su final, cuando lo que anima ya llegó.
+
+Eventos:
+
+```json
+{"event": "reload"}
+{"event": "ready", "duration": 42.0}
+{"event": "playhead", "time": 12.5, "segment": "Resultados", "stop": "grafico", "playing": false}
+{"event": "failed", "message": "NameError: name 'cirlce' is not defined", "file": "C:/charla/main.py", "line": 17}
+{"event": "error", "message": "seek: no segment or section named \"Cierre\""}
+```
+
+`reload` llega cuando el script se volvió a ejecutar y la escena se
+reconstruye, y `ready` cuando ya se ve. `playhead` llega al moverse: enseguida
+tras un salto, una pausa o al cambiar de segmento o de pausa, y como mucho
+diez veces por segundo mientras se reproduce. `stop` es `null` antes de la
+primera pausa del segmento y `""` en una pausa sin nombre. `failed` trae la
+línea del error del script cuando el traceback la da, y `error`, por qué no
+se pudo cumplir una orden.
+
+```bash
+gaanim mi-charla --listen stdio
+gaanim --present mi-charla --listen 127.0.0.1:7801
+```
 
 = `gaanim init`
 
@@ -125,7 +189,7 @@ reescribe solo esos archivos y no borra nada de `assets/` ni de otras carpetas.
 = `gaanim check`
 
 ```bash
-gaanim check <SCRIPT_O_PROYECTO> [--strict]
+gaanim check <SCRIPT_O_PROYECTO> [--strict] [--message-format json]
 ```
 
 Ejecuta el script sin abrir ventana y revisa la escena resultante. Imprime la
@@ -166,6 +230,10 @@ solo hay advertencias. Si el script lanza una excepción o no termina con
 ```bash
 gaanim check mi-charla --strict
 ```
+
+Con `--message-format json`, el informe sale en JSON por líneas, cada
+diagnóstico con su archivo y línea cuando los tiene (ver
+#link(<message-format>)[Mensajes para herramientas]).
 
 = `gaanim inspect` <gaanim-inspect>
 
@@ -274,6 +342,7 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--to <SEGUNDOS|NOMBRE>`], [fin de la escena], [Fin del tramo exportado; un segmento lo termina en su final.],
   [`--frame <SEGUNDOS|NOMBRE>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo; un segmento da su primera pausa. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
   [`--notes`], [desactivado], [Solo PDF: añade tras la última página de cada diapositiva una página con sus notas (`scene.segment(notes=...)`).],
+  [`--message-format <FORMATO>`], [`human`], [`json`: mensajes y progreso con su porcentaje en JSON por líneas, sin barra (ver #link(<message-format>)[Mensajes para herramientas]).],
 )
 
 La composición se define en unidades lógicas, así que `--width` y `--height`
@@ -537,6 +606,52 @@ gaanim --diff --example escenas/intro.py --bless
 gaanim --diff --example escenas/intro.py --pixel-threshold 4
 gaanim --diff --example mi-charla --capture-stops --stops 3-7 --capture-only
 ```
+
+= Mensajes para herramientas: `--message-format json` <message-format>
+
+`gaanim check`, `gaanim export` y la vista previa aceptan
+`--message-format json`: cada línea que escribirían para una persona sale
+como un objeto JSON en una línea de la salida estándar, para que un editor de
+código o un script la lea sin interpretar texto. Sin la opción, o con
+`--message-format human`, la salida es la de siempre. Los tracebacks de Python
+siguen saliendo por la salida de errores, y lo que el script escriba con
+`print` sale tal cual: descarta las líneas que no sean un objeto JSON.
+
+Cada objeto tiene un `type`:
+
+- `message`: una línea de estado, con `level` (`debug`, `info`, `success`,
+  `warning` o `error`), `label`, `message` y el `file`, `line` y `column` del
+  script a los que se refiere, o `null`. Un error del script trae la línea que
+  nombra su traceback; `column` todavía es siempre `null`.
+- `detail` (`key`, `value`) y `hint` (`message`): las líneas que acompañan a un
+  mensaje.
+- `diagnostic`: un error o aviso de `check`, con `level`, `message`, `file`,
+  `line` y `column`. Un aviso sobre un segmento trae la línea que lo creó.
+- `check`: el veredicto de `check`, con `result` (`pass` o `fail`), `errors`,
+  `warnings`, `segments`, `stops`, `duration`, `width` y `height`. El código de
+  salida es el de siempre.
+- `progress`: el avance de una exportación, con `current`, `total` y `percent`,
+  una vez por cada punto porcentual. La barra de progreso no se dibuja.
+- `reload`: en la vista previa, `phase` `start` cuando un cambio vuelve a
+  ejecutar el script (con `cause`, `source` o `assets`) y `end` cuando la
+  escena nueva ya se ve, con `seconds` y lo que tardaron `python`, `replay` y
+  `seek`.
+
+```bash
+gaanim check mi-charla --message-format json
+gaanim export mi-charla -o charla.mp4 --message-format json
+gaanim mi-charla --message-format json --listen stdio
+```
+
+```json
+{"type":"diagnostic","level":"warning","message":"segment `Problema` has no speaker notes","file":"C:/charla/main.py","line":31,"column":null}
+{"type":"check","script":"C:/charla/main.py","kind":"presentation","result":"pass","errors":0,"warnings":1,"segments":6,"stops":9,"duration":84.5,"width":16,"height":9}
+{"type":"progress","current":1530,"total":5070,"percent":30}
+{"type":"message","level":"error","label":"python","message":"NameError: name 'cirlce' is not defined","file":"C:/charla/main.py","line":17,"column":null}
+```
+
+Con `--listen stdio`, los eventos del canal de control comparten la salida
+estándar; se distinguen porque llevan `event` en lugar de `type`.
 
 = Variables de entorno
 

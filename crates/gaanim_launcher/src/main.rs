@@ -9,6 +9,7 @@
 use gaanim_engine as _;
 
 mod app;
+mod control;
 mod file_watcher;
 mod hot_reload;
 mod inspect;
