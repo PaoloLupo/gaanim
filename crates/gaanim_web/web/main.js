@@ -65,12 +65,15 @@ const presentCard = document.getElementById("present-card");
 
 const pageParams = new URLSearchParams(location.search);
 const presenterSession = pageParams.get("presenter");
-// Embedded (`?embed`): there is nothing to drop here. A parent page on this
-// site (the playground) sends the bundles it records and hears what the
-// player reports.
+// Embedded (`?embed`): there is nothing to drop here. The page around the
+// player, whatever its site, hears what it reports and may steer it, as it
+// does the embed player (crates/gaanim_embed/web/main.js describes the
+// messages); only a page on this site (the playground) sends it bundles.
 const embedded = pageParams.has("embed");
 function tellParent(message) {
-  if (embedded && window.parent !== window) window.parent.postMessage(message, location.origin);
+  if (embedded && window.parent !== window) {
+    window.parent.postMessage({ ...message, time: view.time, playing: view.playing, muted: view.muted }, "*");
+  }
 }
 // `?loop`, `?loop=1`: on; `?loop=0`: off; absent: `fallback`.
 function pageFlag(name, fallback) {
@@ -806,11 +809,23 @@ function followVolume(level, muted) {
   }
 }
 
+// The page around an embedded player hears the time this often while it
+// plays, as a video's `timeupdate` does.
+const TIME_UPDATE_MS = 250;
+let lastTimeUpdate = 0;
+
 // Called by the player every frame with the playhead and the volume.
 window.gaanimAudioState = (time, playing, rate, level, muted) => {
+  view.time = time;
+  view.muted = muted;
   if (playing !== view.playing) {
     view.playing = playing;
     if (playing) playHint.hidden = true;
+    tellParent({ type: "gaanim:status", kind: playing ? "play" : "pause", message: null });
+  }
+  if (playing && performance.now() - lastTimeUpdate >= TIME_UPDATE_MS) {
+    lastTimeUpdate = performance.now();
+    tellParent({ type: "gaanim:status", kind: "timeupdate", message: null });
   }
   followVolume(level, muted);
   const ctx = audio.ctx;
@@ -843,7 +858,7 @@ document.addEventListener("visibilitychange", () => {
 // An embedded file plays while at least a quarter of the player is on
 // screen, and pauses when it scrolls away: a post's animations play as they
 // are read, not before. One paused by hand stays paused.
-const view = { visible: true, opened: false, started: false, pausedAway: false, playing: false };
+const view = { visible: true, opened: false, started: false, pausedAway: false, playing: false, time: 0, muted: false };
 const playHint = document.getElementById("play-hint");
 
 function applyEmbedOptions() {
@@ -864,6 +879,25 @@ function startPlaying() {
   view.pausedAway = false;
   playHint.hidden = true;
   whenReady(() => setPlaying(true));
+}
+
+function stopPlaying() {
+  view.started = true;
+  view.pausedAway = false;
+  whenReady(() => setPlaying(false));
+}
+
+// A command from the page around the player (see tellParent).
+function embeddedCommand({ command, time, value }) {
+  if (command === "play" || (command === "toggle" && !view.playing)) startPlaying();
+  else if (command === "pause" || command === "toggle") stopPlaying();
+  else if (command === "seek" && Number.isFinite(time)) whenReady(() => setLink(`t=${Math.max(0, time)}`));
+  else if (command === "loop") {
+    embedOptions.loop = Boolean(value);
+    applyEmbedOptions();
+  } else if (command === "mute") {
+    whenReady(() => setVolume(audio.volume?.level ?? 1, Boolean(value)));
+  }
 }
 
 function followVisibility() {
@@ -1046,12 +1080,13 @@ if (!navigator.gpu) {
   if (volume) whenReady(() => setVolume(volume.level, volume.muted));
   if (location.hash) whenReady(() => setLink(location.hash));
   if (src) playUrl(src);
-  // A parent page on this site sends what it records, and may change how it
-  // plays (the playground's preview of an embedded scene).
+  // A parent page on this site sends what it records; any page around the
+  // player may change how it plays (the playground's preview of an
+  // embedded scene) and steer it.
   window.addEventListener("message", (event) => {
-    if (event.origin !== location.origin || event.source !== window.parent) return;
+    if (event.source !== window.parent) return;
     const message = event.data;
-    if (message?.type === "gaanim:open" && message.bytes) {
+    if (message?.type === "gaanim:open" && message.bytes && event.origin === location.origin) {
       play(message.name ?? "escena.gaanim", new Uint8Array(message.bytes));
     } else if (message?.type === "gaanim:options") {
       for (const key of ["loop", "controls", "autoplay"]) {
@@ -1059,6 +1094,8 @@ if (!navigator.gpu) {
       }
       applyEmbedOptions();
       followVisibility();
+    } else if (message?.type === "gaanim:command" && view.opened) {
+      embeddedCommand(message);
     }
   });
   tellParent({ type: "gaanim:status", kind: "loaded", message: null });

@@ -14,6 +14,10 @@
 // meanwhile, and the click plays on from its end, as a presentation does. The
 // bar marks each stop on its track.
 //
+// The page around the player, from any site, hears what happens and can
+// steer it with `postMessage` (see "The page around the player" below);
+// `gaanim-player.js` wraps both in a `<gaanim-player>` element.
+//
 // The wasm module (`gaanim_embed`) only decodes the file and draws the frame
 // at a time; this page keeps the clock, downloads the file (in pieces when
 // its host serves byte ranges, as the web player does), shows the controls and
@@ -63,11 +67,29 @@ const BAR_PLAY = "M4 2.5v11l9-5.5z";
 const BAR_PAUSE = "M4 2.5h3v11H4zM9 2.5h3v11H9z";
 const REPLAY = "M8 3.5a4.5 4.5 0 1 1-4.2 2.9l1.3.5A3.1 3.1 0 1 0 8 4.9V7L5 4.2 8 1.5z";
 
-// A parent page on this site (the playground) hears what happens.
+// The page around the player hears what happens, whatever its site: a
+// message only tells where playback is, nothing a page could not see.
 function tellParent(kind, text = null, extra = {}) {
   if (window.parent !== window) {
-    window.parent.postMessage({ type: "gaanim:status", kind, message: text, ...extra }, location.origin);
+    window.parent.postMessage({ type: "gaanim:status", kind, message: text, ...playback(), ...extra }, "*");
   }
+}
+
+// Where playback is, once a file is open.
+function playback() {
+  if (!info) return {};
+  return {
+    time: state.time,
+    duration: info.duration,
+    playing: state.playing,
+    ended: state.ended,
+    muted: audio.muted,
+  };
+}
+
+// What the page needs to fit the player to the file.
+function dimensions() {
+  return { width: info.width, height: info.height, fps: info.fps, stops: info.stops };
 }
 
 function say(text, error = false) {
@@ -120,13 +142,14 @@ function opened(json) {
   if (info.full.length && fullPlayer) {
     // The web player draws what this one leaves out.
     if (params.get("full") === "click") {
-      tellParent("full", info.title, { full: info.full, url: fullPlayer });
+      tellParent("full", info.title, { full: info.full, url: fullPlayer, ...dimensions() });
       say("Esta animación usa efectos que solo dibuja el reproductor completo. Haz clic para abrirlo.");
       message.querySelector(".loader").hidden = true;
       message.classList.add("action");
       message.addEventListener("click", () => location.replace(fullPlayer), { once: true });
       return;
     }
+    tellParent("redirect", info.title, { full: info.full, url: fullPlayer, ...dimensions() });
     location.replace(fullPlayer);
     return;
   }
@@ -150,7 +173,7 @@ function opened(json) {
   markStops();
   setAudioTracks(info.audio);
   // `full` names the GPU passes the file uses that this player leaves out.
-  tellParent("opened", info.title, { full: info.full });
+  tellParent("opened", info.title, { full: info.full, ...dimensions() });
   followVisibility();
   showControls();
 }
@@ -169,11 +192,14 @@ function play() {
   state.pausedAway = false;
   state.playing = true;
   showControls();
+  tellParent("play");
 }
 
 function pause() {
+  const was = state.playing;
   state.playing = false;
   showControls();
+  if (was) tellParent("pause");
 }
 
 // Back to playing where it was: inside a stop's loop, it keeps looping.
@@ -186,6 +212,7 @@ function resume() {
   state.pausedAway = false;
   state.playing = true;
   showControls();
+  tellParent("play");
 }
 
 // A click, Space or the bar's button: a stop's loop waits for it to go on.
@@ -215,6 +242,7 @@ function advance(dt) {
     } else {
       pause();
     }
+    tellParent("stop", null, { stop, loop: loop ?? null });
     return;
   }
   if (next >= info.duration) {
@@ -224,11 +252,17 @@ function advance(dt) {
       state.time = info.duration;
       state.ended = true;
       pause();
+      tellParent("ended");
       return;
     }
   }
   state.time = next;
 }
+
+// The page hears the time this often while it plays, as a video's
+// `timeupdate` does.
+const TIME_UPDATE_MS = 250;
+let lastTimeUpdate = 0;
 
 // When the clock last advanced; `null` restarts it without a step.
 let last = null;
@@ -241,7 +275,13 @@ function frame(now) {
   // A stall (a busy page) must not jump far ahead.
   const dt = last === null ? 0 : Math.min((now - last) / 1000, 0.5);
   last = now;
-  if (state.playing && !state.waiting) advance(dt);
+  if (state.playing && !state.waiting) {
+    advance(dt);
+    if (now - lastTimeUpdate >= TIME_UPDATE_MS) {
+      lastTimeUpdate = now;
+      tellParent("timeupdate");
+    }
+  }
   try {
     state.waiting = !player.draw(state.time);
   } catch (error) {
@@ -359,12 +399,18 @@ canvas.addEventListener("keydown", (event) => {
 });
 
 let seeking = false;
-seek.addEventListener("input", () => {
-  seeking = true;
-  state.time = Number(seek.value);
+// Move the playhead to `time`, out of any stop or loop it rested in.
+function seekTo(time) {
+  state.time = Math.min(Math.max(0, time), info.duration);
   state.ended = false;
   state.stop = null;
   state.ambient = null;
+  tellParent("timeupdate");
+}
+
+seek.addEventListener("input", () => {
+  seeking = true;
+  seekTo(Number(seek.value));
 });
 seek.addEventListener("change", () => {
   seeking = false;
@@ -799,12 +845,13 @@ function followAudio() {
   scheduleAudio(audio.anchor.time + (now - audio.anchor.at), now);
 }
 
-mute.addEventListener("click", () => {
-  audio.muted = !audio.muted;
+function setMuted(muted) {
+  audio.muted = muted;
   muteWaves.style.display = audio.muted ? "none" : "";
   mute.setAttribute("aria-label", audio.muted ? "Activar el sonido" : "Silenciar");
   showSoundHint();
-});
+}
+mute.addEventListener("click", () => setMuted(!audio.muted));
 
 // ---------------------------------------------------------------------------
 // Start
@@ -899,11 +946,32 @@ async function start() {
   }
 }
 
-// A parent page on this site may send a file and change how it plays.
+// ---------------------------------------------------------------------------
+// The page around the player
+// ---------------------------------------------------------------------------
+//
+// It hears `{ type: "gaanim:status", kind, message, time, duration, playing,
+// ended, muted }`, the last five once a file is open. `kind` is one of:
+//
+// - "loaded", "ready": the page, then the module and the GPU, are ready;
+// - "opened": the file opened, with its `width`, `height`, `fps`, `stops`
+//   and `full` (the GPU passes it uses that this player leaves out);
+// - "redirect": the file opens in the web player (`url`), which draws those
+//   passes, with the same sizes; "full" instead, with `full=click`;
+// - "play", "pause", "timeupdate" (four times a second while playing or
+//   after a seek), "stop" (resting at `stop`, repeating `loop` meanwhile),
+//   "ended";
+// - "error" (`message` says why).
+//
+// It may send `{ type: "gaanim:command", command }`: "play", "pause",
+// "toggle", "seek" (with `time` in seconds), "loop" or "mute" (with `value`,
+// true or false); and `{ type: "gaanim:options", loop, controls, autoplay }`.
+// Only a page on this site may hand the player a file:
+// `{ type: "gaanim:open", bytes }` (the playground does).
 window.addEventListener("message", (event) => {
-  if (event.origin !== location.origin || event.source !== window.parent) return;
+  if (event.source !== window.parent) return;
   const data = event.data;
-  if (data?.type === "gaanim:open" && data.bytes && player) {
+  if (data?.type === "gaanim:open" && data.bytes && player && event.origin === location.origin) {
     openBytes(new Uint8Array(data.bytes));
   } else if (data?.type === "gaanim:options") {
     for (const key of ["loop", "controls", "autoplay"]) {
@@ -912,8 +980,21 @@ window.addEventListener("message", (event) => {
     bar.hidden = !info || !options.controls;
     followVisibility();
     showControls();
+  } else if (data?.type === "gaanim:command" && info) {
+    command(data);
   }
 });
+
+function command({ command, time, value }) {
+  if (command === "play") play();
+  else if (command === "pause") pause();
+  else if (command === "toggle") togglePlaying();
+  else if (command === "seek" && Number.isFinite(time)) seekTo(time);
+  else if (command === "loop") {
+    options.loop = Boolean(value);
+    showControls();
+  } else if (command === "mute") setMuted(Boolean(value));
+}
 
 tellParent("loaded");
 start();
