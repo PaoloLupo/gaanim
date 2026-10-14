@@ -324,6 +324,26 @@ reproductor completo; sin él, el marco explica qué falta. Las demás
 animaciones de la página, y las de visitas siguientes, toman el reproductor
 de la caché del navegador.
 
+=== Sin sitio donde publicarla: una página HTML <pagina-html>
+
+Si no tienes dónde publicar el `.gaanim`, o el sitio no deja configurar CORS,
+el playground descarga una página HTML que lleva dentro la animación y el
+reproductor ligero: en *Insertar*, el botón bajo la vista previa, o la
+entrada `.html` del menú *Descargar*. Se abre con doble clic, sin conexión ni
+servidor, y se comparte como cualquier archivo; subida a un sitio, también
+puede ir en un `<iframe>`, y responde a los mismos mensajes que el
+reproductor ligero (ver
+#link(<controlar-desde-la-pagina>)[Controlarlo desde la página]). Sigue las
+opciones marcadas en *Insertar*: bucle, inicio al verse y barra de controles.
+
+Pesa unos 4 MB más que la animación: el reproductor va dentro, y la
+animación, escrita en base64, ocupa un tercio más que su `.gaanim`. El
+reproductor completo no cabe, así que una escena con posprocesado, fondos,
+transiciones o efectos de shader, o cristal, se ve sin ellos; el playground
+avisa al descargarla. La página guarda el reproductor del día en que se
+descargó, sin actualizarse con el sitio, y quien la abre necesita un
+navegador con WebGPU.
+
 === Con el elemento `<gaanim-player>`
 
 En lugar del `<iframe>`, puedes cargar el script del reproductor una vez por
