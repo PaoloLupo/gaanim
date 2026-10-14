@@ -209,6 +209,8 @@ pub struct SceneData {
     /// Shaders that post-process passes reference by index.
     pub post_shaders: Vec<PostProcessShader>,
     pub segments: Vec<SegmentMetadata>,
+    /// Seconds the whole talk is planned to last when presenting.
+    pub talk_target: Option<f64>,
     pub markers: Vec<TimelineMarker>,
     pub scenes: Vec<SceneSpan>,
     pub audio: Vec<AudioData>,
@@ -918,6 +920,8 @@ impl SceneData {
             background,
             post_shaders,
             segments,
+            // In the manifest, which the reader applies.
+            talk_target: None,
             markers,
             scenes,
             audio,
@@ -969,6 +973,10 @@ pub struct Manifest {
     /// segment has one. Earlier readers ignore it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub segment_targets: Vec<Option<f64>>,
+    /// Seconds planned for the whole talk when presenting. Earlier readers
+    /// ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub talk_target: Option<f64>,
     /// BLAKE3 hash (hex) of every other entry.
     pub entries: std::collections::BTreeMap<String, String>,
 }
@@ -1351,6 +1359,7 @@ impl<W: Write + Seek> BundleWriter<W> {
             } else {
                 Vec::new()
             },
+            talk_target: scene.talk_target,
             entries: self.entries.clone(),
         };
         let json = serde_json::to_vec_pretty(&manifest)
@@ -1680,6 +1689,7 @@ impl Bundle {
         for (segment, target) in scene.segments.iter_mut().zip(&manifest.segment_targets) {
             segment.target = *target;
         }
+        scene.talk_target = manifest.talk_target;
         if manifest.entries.contains_key(POLLS) {
             let polls = read_entry(&archive, Some(&manifest), POLLS)?;
             read_polls(&polls, &mut scene, |name| {

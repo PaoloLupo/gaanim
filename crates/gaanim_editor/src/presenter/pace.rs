@@ -15,9 +15,108 @@ use bevy::prelude::Resource;
 use gaanim_timeline::timeline::SegmentMetadata;
 use serde::{Deserialize, Serialize};
 
-/// The length planned for the whole talk with `--present --duration`.
+/// The length planned for the whole talk. From the strongest: the one set
+/// in Presenter View during this run, `--present --duration`, the script's
+/// (`scene.slides.target`), and the one last set in Presenter View for the
+/// presented file.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
-pub struct TalkDuration(pub Option<Duration>);
+pub struct TalkDuration {
+    /// `--present --duration`.
+    pub given: Option<Duration>,
+    /// Set (or, as `Some(None)`, cleared) in Presenter View during this run.
+    pub(crate) chosen: Option<Option<Duration>>,
+    /// Last set in Presenter View for the presented file.
+    pub(crate) remembered: Option<Duration>,
+}
+
+/// Where the planned length comes from, for Presenter View to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LengthSource {
+    Chosen,
+    Given,
+    Script,
+    Remembered,
+}
+
+impl LengthSource {
+    pub(crate) fn describe(self) -> &'static str {
+        match self {
+            Self::Chosen => "Set here",
+            Self::Given => "From --duration",
+            Self::Script => "From the script (scene.slides.target)",
+            Self::Remembered => "Set here last time",
+        }
+    }
+}
+
+impl TalkDuration {
+    /// The length given with `--present --duration`, if any.
+    pub fn given(duration: Option<Duration>) -> Self {
+        Self {
+            given: duration,
+            ..Self::default()
+        }
+    }
+
+    /// The length that applies, with the script's `script`, and where it
+    /// comes from.
+    pub(crate) fn current(&self, script: Option<Duration>) -> Option<(Duration, LengthSource)> {
+        match self.chosen {
+            Some(chosen) => chosen.map(|duration| (duration, LengthSource::Chosen)),
+            None => self
+                .given
+                .map(|duration| (duration, LengthSource::Given))
+                .or(script.map(|duration| (duration, LengthSource::Script)))
+                .or(self
+                    .remembered
+                    .map(|duration| (duration, LengthSource::Remembered))),
+        }
+    }
+}
+
+/// What a talk's length is written as, for messages.
+const EXPECTED_LENGTH: &str = "a length such as 20m, 1h30m, 90s or 20:00";
+
+/// A talk's length: hours, minutes and seconds with their units (`20m`,
+/// `90s`, `1h30m`), a clock (`20:00`, `1:15:00`) or a number of minutes.
+/// The error says what was expected.
+pub fn parse_talk_duration(text: &str) -> Result<Duration, &'static str> {
+    let value = text.trim().to_lowercase();
+    let number = |text: &str| text.parse::<f64>().map_err(|_| EXPECTED_LENGTH);
+    let seconds = if value.contains(':') {
+        let parts = value
+            .split(':')
+            .map(number)
+            .collect::<Result<Vec<_>, _>>()?;
+        if parts.len() > 3 {
+            return Err(EXPECTED_LENGTH);
+        }
+        parts.iter().fold(0.0, |total, part| total * 60.0 + part)
+    } else if value.ends_with(['h', 'm', 's']) {
+        let mut total = 0.0;
+        let mut digits = String::new();
+        for c in value.chars().filter(|c| !c.is_whitespace()) {
+            let unit = match c {
+                'h' => 3600.0,
+                'm' => 60.0,
+                's' => 1.0,
+                _ => {
+                    digits.push(c);
+                    continue;
+                }
+            };
+            total += number(&digits)? * unit;
+            digits.clear();
+        }
+        total
+    } else {
+        number(&value)? * 60.0
+    };
+    if !(seconds.is_finite() && seconds > 0.0) {
+        return Err(EXPECTED_LENGTH);
+    }
+    Ok(Duration::from_secs_f64(seconds))
+}
 
 /// Seconds the talk is planned to last: `duration` when given, otherwise
 /// the sum of the segments' targets when every segment has one.
@@ -149,6 +248,10 @@ impl Rehearsal {
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct RehearsalLog {
     source: PathBuf,
+    /// Seconds planned for the whole talk, set in Presenter View or with
+    /// `--duration`, which the next session starts with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    duration: Option<f64>,
     rehearsals: Vec<Rehearsal>,
 }
 
@@ -169,9 +272,26 @@ impl Rehearsals {
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_else(|| RehearsalLog {
                 source: source.to_path_buf(),
-                rehearsals: Vec::new(),
+                ..RehearsalLog::default()
             });
         Self { path, log }
+    }
+
+    /// The talk's length planned for this file last time.
+    pub(crate) fn duration(&self) -> Option<Duration> {
+        self.log
+            .duration
+            .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+            .map(Duration::from_secs_f64)
+    }
+
+    /// Remember `duration` as this file's planned length.
+    pub(crate) fn plan(&mut self, duration: Option<Duration>) {
+        let seconds = duration.map(|duration| duration.as_secs_f64());
+        if self.log.duration != seconds {
+            self.log.duration = seconds;
+            self.save();
+        }
     }
 
     /// The latest rehearsal before the session that started at `started`.
@@ -199,6 +319,10 @@ impl Rehearsals {
         }
         let extra = rehearsals.len().saturating_sub(KEPT_REHEARSALS);
         rehearsals.drain(..extra);
+        self.save();
+    }
+
+    fn save(&self) {
         let Some(path) = &self.path else {
             return;
         };
@@ -330,6 +454,69 @@ mod tests {
         assert_eq!(countdown_tone(300.0, 600.0), PaceTone::OnTime);
         assert_eq!(countdown_tone(50.0, 600.0), PaceTone::Behind);
         assert_eq!(countdown_tone(-1.0, 600.0), PaceTone::Late);
+    }
+
+    #[test]
+    fn talk_lengths_read_as_units_clocks_or_minutes() {
+        let minutes =
+            |text: &str| parse_talk_duration(text).map(|duration| duration.as_secs_f64() / 60.0);
+        assert_eq!(minutes("20m"), Ok(20.0));
+        assert_eq!(minutes("1h30m"), Ok(90.0));
+        assert_eq!(minutes("1h 30m"), Ok(90.0));
+        assert_eq!(minutes("90s"), Ok(1.5));
+        assert_eq!(minutes(" 20:00 "), Ok(20.0));
+        assert_eq!(minutes("1:15:00"), Ok(75.0));
+        assert_eq!(minutes("45"), Ok(45.0));
+        for invalid in ["", "0m", "-5m", "20x", "m", "1:2:3:4", "abc"] {
+            assert_eq!(
+                parse_talk_duration(invalid),
+                Err(EXPECTED_LENGTH),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_length_set_here_wins_and_the_remembered_one_comes_last() {
+        let minutes = |minutes: u64| Duration::from_secs(minutes * 60);
+        let mut talk = TalkDuration::given(None);
+        assert_eq!(talk.current(None), None);
+        talk.remembered = Some(minutes(25));
+        assert_eq!(
+            talk.current(None),
+            Some((minutes(25), LengthSource::Remembered))
+        );
+        // The script's comes before the remembered one.
+        assert_eq!(
+            talk.current(Some(minutes(20))),
+            Some((minutes(20), LengthSource::Script))
+        );
+        talk.given = Some(minutes(30));
+        assert_eq!(
+            talk.current(Some(minutes(20))),
+            Some((minutes(30), LengthSource::Given))
+        );
+        talk.chosen = Some(Some(minutes(15)));
+        assert_eq!(
+            talk.current(Some(minutes(20))),
+            Some((minutes(15), LengthSource::Chosen))
+        );
+        // Cleared here: no length, whatever the others say.
+        talk.chosen = Some(None);
+        assert_eq!(talk.current(Some(minutes(20))), None);
+    }
+
+    #[test]
+    fn a_file_remembers_its_planned_length() {
+        let mut rehearsals = Rehearsals {
+            path: None,
+            log: RehearsalLog::default(),
+        };
+        assert_eq!(rehearsals.duration(), None);
+        rehearsals.plan(Some(Duration::from_secs(1200)));
+        assert_eq!(rehearsals.duration(), Some(Duration::from_secs(1200)));
+        rehearsals.plan(None);
+        assert_eq!(rehearsals.duration(), None);
     }
 
     #[test]

@@ -240,3 +240,19 @@ scene.segment("Contenido")
 scene.wait(0.5)
 ```
 ]
+
+#api-entry(
+  name: "SlideKit.target",
+  kind: "method",
+  params: ((name: "seconds", type: "float | None", default: none, desc: [Duración prevista de la charla entera; `None` la quita.]),),
+  returns: (type: "None", desc: [No añade nada a la escena.]),
+  desc: [Fija cuánto debe durar la presentación. Presenter View la cuenta hacia atrás en `LEFT`; la que fijes en la propia vista o con `gaanim --present --duration` la sustituye. `scene.segment(..., target=)` fija la de cada diapositiva. Un valor que no sea un número positivo lanza `ValueError`. Consulta #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla].],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9), theme="presentation")
+scene.slides.target(20 * 60)
+scene.segment("Portada", target=60)
+scene.wait(0.5)
+```
+]

@@ -145,7 +145,9 @@ pub fn host_app(options: &HostOptions) -> App {
         active: options.present || options.presenter_page,
     })
     .insert_resource(options.selection.clone())
-    .insert_resource(crate::presenter::pace::TalkDuration(options.duration))
+    .insert_resource(crate::presenter::pace::TalkDuration::given(
+        options.duration,
+    ))
     // The overlay toggles the user left on come back in every session.
     .insert_resource(crate::overlays::EditorOverlays::with_preferences(
         crate::overlays::OverlayPreferences::load(),

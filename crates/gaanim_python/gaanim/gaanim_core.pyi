@@ -9892,6 +9892,18 @@ class SlideKit:
             scene.slides.brand(logo="assets/logo.svg", footer="LAB · 2026")
         """
         ...
+    def target(self, seconds: Optional[float]) -> None:
+        """Plan how many seconds the whole talk should last, or none.
+
+        Presenter View counts it down while presenting and colors the time
+        left; ``scene.segment(..., target=)`` plans each slide. A length set
+        in Presenter View or with ``gaanim --present --duration`` takes its
+        place. Raises ``ValueError`` unless it is a positive number.
+
+        Example:
+            scene.slides.target(20 * 60)
+        """
+        ...
     def badge(
         self,
         text: str,

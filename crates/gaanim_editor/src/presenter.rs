@@ -190,6 +190,15 @@ impl PresentationTimer {
     fn previous_rehearsal(&self) -> Option<&pace::Rehearsal> {
         self.rehearsals.as_ref()?.previous(self.session)
     }
+
+    /// Plan `duration` for the talk during this run, and remember it for
+    /// the presented file.
+    fn plan(&mut self, talk: &mut pace::TalkDuration, duration: Option<Duration>) {
+        talk.chosen = Some(duration);
+        if let Some(rehearsals) = &mut self.rehearsals {
+            rehearsals.plan(duration);
+        }
+    }
 }
 
 pub(crate) fn sync_presentation_timer_system(
@@ -197,6 +206,7 @@ pub(crate) fn sync_presentation_timer_system(
     timeline: Res<Timeline>,
     paths: Option<Res<crate::export::ProjectPaths>>,
     replay: Option<Res<StashedReplay>>,
+    talk: Option<ResMut<pace::TalkDuration>>,
     mut timer: ResMut<PresentationTimer>,
 ) {
     if presentation_mode.active && !timer.was_active {
@@ -206,6 +216,12 @@ pub(crate) fn sync_presentation_timer_system(
             .and_then(|replay| replay.bundle.as_ref().map(|bundle| bundle.path.clone()))
             .or_else(|| paths.as_ref().map(|paths| paths.script_path.clone()));
         timer.rehearsals = source.map(|source| pace::Rehearsals::load(&source));
+        if let Some(mut talk) = talk {
+            talk.remembered = timer
+                .rehearsals
+                .as_ref()
+                .and_then(pace::Rehearsals::duration);
+        }
     }
     let ended = timer.was_active && !presentation_mode.active;
     timer.was_active = presentation_mode.active;
@@ -835,6 +851,118 @@ fn status_pill(ui: &mut egui::Ui, status: PlaybackStatus) {
 }
 
 /// A labelled monospace value for a right-to-left row, read as `LABEL 00:00`.
+/// Lengths offered for a talk, in minutes.
+const TALK_LENGTHS: [u64; 6] = [10, 15, 20, 30, 45, 60];
+
+/// A chip with the talk's planned length that opens a popup to set it:
+/// a preset, a typed length (`25m`, `1h10m`, `25:00`) or none. Returns the
+/// length chosen.
+fn talk_length_control(
+    ui: &mut egui::Ui,
+    talk: Option<(Duration, pace::LengthSource)>,
+) -> Option<Option<Duration>> {
+    let label = match talk {
+        Some((duration, _)) => pace::format_span(duration.as_secs_f64(), false),
+        None => "Plan time".to_owned(),
+    };
+    let chip = egui::Button::new(egui::RichText::new(label).size(13.0).monospace().color(
+        if talk.is_some() {
+            palette::MUTED
+        } else {
+            palette::FAINT
+        },
+    ))
+    .min_size(egui::vec2(64.0, 28.0))
+    .corner_radius(0.0)
+    .stroke(egui::Stroke::new(1.0, palette::BORDER))
+    .fill(palette::RAISED);
+    let response = ui
+        .add(chip)
+        .on_hover_text("Planned length of the talk: LEFT counts it down");
+    let draft_id = response.id.with("draft");
+    let mut chosen = None;
+    egui::Popup::from_toggle_button_response(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(260.0);
+            ui.label(caption("TALK LENGTH"));
+            if let Some((_, source)) = talk {
+                ui.label(
+                    egui::RichText::new(source.describe())
+                        .size(12.0)
+                        .color(palette::FAINT),
+                );
+            }
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for minutes in TALK_LENGTHS {
+                    let duration = Duration::from_secs(minutes * 60);
+                    let selected = talk.is_some_and(|(current, _)| current == duration);
+                    let button = egui::Button::new(
+                        egui::RichText::new(format!("{minutes}m"))
+                            .size(12.0)
+                            .color(if selected {
+                                palette::TEXT
+                            } else {
+                                palette::MUTED
+                            }),
+                    )
+                    .min_size(egui::vec2(36.0, 26.0))
+                    .corner_radius(0.0)
+                    .stroke(egui::Stroke::NONE)
+                    .fill(if selected {
+                        palette::ACCENT_FILL
+                    } else {
+                        palette::SURFACE
+                    });
+                    if ui.add(button).clicked() {
+                        chosen = Some(Some(duration));
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            let mut draft: String = ui.data_mut(|data| data.get_temp(draft_id).unwrap_or_default());
+            let mut error = None;
+            ui.horizontal(|ui| {
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut draft)
+                        .hint_text("25m, 1h10m or 25:00")
+                        .desired_width(150.0),
+                );
+                let submitted =
+                    field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                if (ui.button("Set").clicked() || submitted) && !draft.trim().is_empty() {
+                    match pace::parse_talk_duration(&draft) {
+                        Ok(duration) => {
+                            chosen = Some(Some(duration));
+                            draft.clear();
+                        }
+                        Err(expected) => error = Some(expected),
+                    }
+                }
+            });
+            if let Some(expected) = error {
+                ui.label(
+                    egui::RichText::new(format!("Use {expected}"))
+                        .size(12.0)
+                        .color(palette::DANGER),
+                );
+            }
+            ui.data_mut(|data| data.insert_temp(draft_id, draft));
+            if talk.is_some() {
+                ui.add_space(4.0);
+                if ui.button("No planned length").clicked() {
+                    chosen = Some(None);
+                }
+            }
+            if chosen.is_some() {
+                ui.close();
+            }
+        });
+    chosen
+}
+
 /// The color of a plan going `tone`: `on_time` while it is on time.
 fn tone_color(tone: pace::PaceTone, on_time: egui::Color32) -> egui::Color32 {
     match tone {
@@ -1439,6 +1567,8 @@ struct PresenterFrame {
     overview_open: bool,
     elapsed: String,
     clock: String,
+    /// The talk's planned length, and where it comes from.
+    talk: Option<(Duration, pace::LengthSource)>,
     /// Time left of the planned talk, and how the countdown goes.
     left: Option<(String, pace::PaceTone)>,
     /// How far behind (`+`) or ahead (`-`) of the plan the speaker is.
@@ -1467,6 +1597,7 @@ fn show_header(
     timeline: &Timeline,
     timer: &mut PresentationTimer,
     compact: bool,
+    planned: &mut Option<Option<Duration>>,
 ) -> Option<f64> {
     let slide_position = |ui: &mut egui::Ui| {
         status_pill(ui, frame.status);
@@ -1496,7 +1627,7 @@ fn show_header(
         }
     };
     // Right-to-left: the clock sits at the far right, elapsed time before it.
-    let timers = |ui: &mut egui::Ui, timer: &mut PresentationTimer| {
+    let mut timers = |ui: &mut egui::Ui, timer: &mut PresentationTimer| {
         ui.spacing_mut().item_spacing.x = 6.0;
         readout_rtl(ui, "CLOCK", &frame.clock, palette::TEXT);
         ui.add_space(14.0);
@@ -1514,6 +1645,10 @@ fn show_header(
         if let Some((pace, tone)) = &frame.pace {
             ui.add_space(14.0);
             readout_rtl(ui, "PACE", pace, tone_color(*tone, palette::LIVE));
+        }
+        ui.add_space(10.0);
+        if let Some(choice) = talk_length_control(ui, frame.talk) {
+            *planned = Some(choice);
         }
     };
 
@@ -2413,7 +2548,7 @@ pub(crate) fn presenter_view_system(
     mut polls: Option<ResMut<crate::polls::AudiencePolls>>,
     mut link: Option<ResMut<crate::presenter_link::PresenterLink>>,
     mut mirror: Option<ResMut<PresenterMirror>>,
-    talk: Option<Res<pace::TalkDuration>>,
+    mut talk: Option<ResMut<pace::TalkDuration>>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
@@ -2448,7 +2583,10 @@ pub(crate) fn presenter_view_system(
 
     // The plan: the talk's length (or every slide's target) counted down,
     // and the drift over the slides with a target.
-    let planned = pace::planned_total(&timeline.segments, talk.and_then(|talk| talk.0));
+    let length = talk
+        .as_deref()
+        .and_then(|talk| talk.current(timeline.talk_target.map(Duration::from_secs_f64)));
+    let planned = pace::planned_total(&timeline.segments, length.map(|(duration, _)| duration));
     let elapsed = presentation_timer.elapsed().as_secs_f64();
     let left = planned.map(|planned| {
         let left = planned - elapsed;
@@ -2501,6 +2639,7 @@ pub(crate) fn presenter_view_system(
         overview_open: overview.open,
         elapsed: format_stopwatch(presentation_timer.elapsed()),
         clock: chrono::Local::now().format("%H:%M").to_string(),
+        talk: length,
         left,
         pace: drift,
         slide_time,
@@ -2533,9 +2672,19 @@ pub(crate) fn presenter_view_system(
                 .inner_margin(egui::Margin::symmetric(20, 12)),
         )
         .show(&mut viewport_ui, |ui| {
-            if let Some(time) = show_header(ui, &frame, &timeline, &mut presentation_timer, compact)
-            {
+            let mut planned = None;
+            if let Some(time) = show_header(
+                ui,
+                &frame,
+                &timeline,
+                &mut presentation_timer,
+                compact,
+                &mut planned,
+            ) {
                 requested_seek = Some(time);
+            }
+            if let (Some(duration), Some(talk)) = (planned, talk.as_deref_mut()) {
+                presentation_timer.plan(talk, duration);
             }
         });
 

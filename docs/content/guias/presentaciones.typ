@@ -134,17 +134,26 @@ Dile a Gaanim cuánto quieres que dure la charla, entera o por diapositivas, y
 Presenter View te dirá cuánto queda y si vas adelantado o retrasado:
 
 ```python
-scene.segment("Portada", template=title_slide, target=30)    # segundos
+scene.slides.target(20 * 60)                                 # la charla, en segundos
+scene.segment("Portada", template=title_slide, target=30)    # cada diapositiva
 scene.segment("Resultados", Transition.slide(0.5), target=120)
 ```
+
+La duración de la charla entera también se fija al presentar, sin tocar el
+script: en Presenter View, con el botón que la muestra junto a `LEFT` (o
+`Plan time` si aún no hay ninguna), eliges `10m` a `60m`, escribes otra
+(`25m`, `1h10m`, `25:00`) o la quitas; o desde la línea de comandos:
 
 ```bash
 gaanim --present --duration 20m mi-charla
 ```
 
-- `--duration` fija la duración de la charla entera: `20m`, `1h30m`, `90s`,
-  `20:00` o un número de minutos. Sin ella, la duración es la suma de los
-  objetivos (`target=`), si todas las diapositivas tienen uno.
+- `--duration` acepta `20m`, `1h30m`, `90s`, `20:00` o un número de minutos.
+- Si hay varias, manda la que fijes en Presenter View durante la sesión,
+  luego `--duration`, luego la del script y por último la que fijaste en la
+  vista la vez anterior para ese archivo, que Gaanim recuerda. Sin ninguna,
+  la duración es la suma de los objetivos (`target=`), si todas las
+  diapositivas tienen uno. El popup del botón dice de dónde viene.
 - `LEFT` cuenta hacia atrás lo que queda de esa duración desde que empezó la
   presentación (el `↺` del tiempo transcurrido también la reinicia). Pasa a
   ámbar en el último 10 % y a rojo, con signo menos, cuando te pasas.

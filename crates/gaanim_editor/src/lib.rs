@@ -22,6 +22,7 @@ mod fps_overlay;
 pub mod frame_capture;
 pub mod frame_profile;
 pub mod host;
+pub use presenter::pace::parse_talk_duration;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod idle;
 pub mod inspector;

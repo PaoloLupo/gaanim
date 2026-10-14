@@ -582,11 +582,12 @@ where
         background.pixel_size = (config.width, config.height);
     }
 
-    let (plan, segments, markers, polls, poll_session, stop_gates, scenes, duration) = {
+    let (plan, segments, talk_target, markers, polls, poll_session, stop_gates, scenes, duration) = {
         let timeline = app.world().resource::<Timeline>();
         (
             RecordingPlan::new(timeline, config.fps),
             timeline.segments.clone(),
+            timeline.talk_target,
             timeline.markers.clone(),
             timeline.polls.clone(),
             timeline.poll_session.clone(),
@@ -725,6 +726,7 @@ where
         background,
         post_shaders,
         segments,
+        talk_target,
         markers,
         scenes,
         audio,

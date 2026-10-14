@@ -120,8 +120,8 @@ impl SegmentHandle {
     }
 }
 
-/// `target` when it is a positive number of seconds, as a segment's
-/// presentation target must be.
+/// `target` when it is a positive number of seconds, as a presentation
+/// target (a segment's or the whole talk's) must be.
 pub fn segment_target(target: Option<f64>) -> Result<Option<f64>, SegmentError> {
     match target {
         Some(target) if !(target.is_finite() && target > 0.0) => {
@@ -160,7 +160,7 @@ pub enum SegmentError {
     NumericMarkerName { name: String },
     #[error("a marker named {name:?} already exists at {time:.6}s")]
     DuplicateMarker { name: String, time: f64 },
-    #[error("a segment's target must be a positive number of seconds, not {target}")]
+    #[error("a presentation target must be a positive number of seconds, not {target}")]
     InvalidTarget { target: f64 },
     #[error("invalid transition sound: {0}")]
     Sound(#[source] crate::export::AudioTrackError),

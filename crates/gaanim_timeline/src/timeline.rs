@@ -400,6 +400,9 @@ pub struct Timeline {
     pub playback_rate: f64,
     /// Semantic structure compiled from the canvas segments.
     pub segments: Vec<SegmentMetadata>,
+    /// Seconds the whole talk is planned to last when presenting.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub talk_target: Option<f64>,
     /// Cached segment position matching [`Self::current_time`].
     pub segment_position: Option<SegmentPosition>,
     /// Flag to ignore interactive stop inputs (e.g. when GUI has focus).
@@ -828,6 +831,7 @@ impl Default for Timeline {
             scene_connections: Vec::new(),
             markers: Vec::new(),
             beat_grid: None,
+            talk_target: None,
             polls: Vec::new(),
             poll_session: None,
             stop_gates: Vec::new(),

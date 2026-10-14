@@ -3385,6 +3385,16 @@ impl PySlideKit {
             });
         Ok(())
     }
+
+    /// Plan how many seconds the whole talk should last, or none.
+    fn target(&self, seconds: Option<f64>) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .set_talk_target(seconds)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
 }
 
 impl PyLayoutBuilder {

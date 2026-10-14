@@ -2991,6 +2991,7 @@ impl SceneModel {
             *metadata = compiled;
         }
         timeline.set_segments(segment_metadata.clone());
+        timeline.talk_target = self.talk_target;
         timeline.beat_grid = self.tempo;
         timeline.set_markers(
             self.markers()
@@ -3427,6 +3428,7 @@ impl SceneModel {
                 .collect(),
         );
         builder.timeline.set_segments(segment_metadata);
+        builder.timeline.talk_target = self.talk_target;
 
         // Every tween is scheduled now: continuous rolling displays settle
         // outside the windows in which their parameters are animated.

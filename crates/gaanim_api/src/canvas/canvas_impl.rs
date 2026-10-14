@@ -2362,6 +2362,8 @@ pub struct SceneModel {
     pub(crate) narration: super::narration::NarrationState,
     /// Reusable logo/footer treatment generated for every explicit segment.
     pub branding: Option<PresentationBrand>,
+    /// Seconds the whole talk is planned to last when presenting.
+    pub talk_target: Option<f64>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) lighting_3d: gaanim_scene::Lighting3D,
     pub(crate) state: SharedCanvasState,
@@ -2410,6 +2412,7 @@ impl SceneModel {
             thumbnail_time: None,
             narration: Default::default(),
             branding: None,
+            talk_target: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
             lighting_3d: gaanim_scene::Lighting3D::default(),
             state: Arc::new(Authored::new(CanvasState::new())),
@@ -6228,6 +6231,13 @@ impl SceneModel {
         let mut guard = self.state.lock().expect("canvas state poisoned");
         guard.active_mut().cursor += max_dur;
         guard.active_mut().ops.push(Op::Play(anims));
+    }
+
+    /// Plan `target` seconds for the whole talk, or none: Presenter View
+    /// counts it down while presenting.
+    pub fn set_talk_target(&mut self, target: Option<f64>) -> Result<(), SegmentError> {
+        self.talk_target = super::segment::segment_target(target)?;
+        Ok(())
     }
 
     /// Configure reusable branding generated automatically for explicit segments.
@@ -11749,6 +11759,14 @@ mod tests {
         assert_eq!(targets, [Some(90.0), None]);
         canvas.set_segment_target(&intro, None).unwrap();
         assert_eq!(canvas.segment_manifest().segments[0].target, None);
+
+        // The whole talk's.
+        assert!(matches!(
+            canvas.set_talk_target(Some(-5.0)),
+            Err(SegmentError::InvalidTarget { .. })
+        ));
+        canvas.set_talk_target(Some(1200.0)).unwrap();
+        assert_eq!(canvas.talk_target, Some(1200.0));
     }
 
     #[test]

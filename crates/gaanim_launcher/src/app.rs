@@ -1190,45 +1190,10 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     })
 }
 
-/// A talk's length: hours, minutes and seconds with their units (`20m`,
-/// `90s`, `1h30m`), a clock (`20:00`, `1:15:00`) or a number of minutes.
+/// A talk's length for `--duration` (see [`gaanim_editor::parse_talk_duration`]).
 fn parse_talk_duration(text: &str) -> Result<std::time::Duration, String> {
-    let invalid =
-        || format!("--duration takes a length such as 20m, 1h30m, 90s or 20:00, not `{text}`");
-    let value = text.trim().to_lowercase();
-    let seconds = if value.contains(':') {
-        let parts: Vec<f64> = value
-            .split(':')
-            .map(|part| part.parse::<f64>().map_err(|_| invalid()))
-            .collect::<Result<_, _>>()?;
-        if parts.len() > 3 {
-            return Err(invalid());
-        }
-        parts.iter().fold(0.0, |total, part| total * 60.0 + part)
-    } else if value.ends_with(['h', 'm', 's']) {
-        let mut total = 0.0;
-        let mut number = String::new();
-        for c in value.chars().filter(|c| !c.is_whitespace()) {
-            let unit = match c {
-                'h' => 3600.0,
-                'm' => 60.0,
-                's' => 1.0,
-                _ => {
-                    number.push(c);
-                    continue;
-                }
-            };
-            total += number.parse::<f64>().map_err(|_| invalid())? * unit;
-            number.clear();
-        }
-        total
-    } else {
-        value.parse::<f64>().map_err(|_| invalid())? * 60.0
-    };
-    if !(seconds.is_finite() && seconds > 0.0) {
-        return Err(invalid());
-    }
-    Ok(std::time::Duration::from_secs_f64(seconds))
+    gaanim_editor::parse_talk_duration(text)
+        .map_err(|expected| format!("--duration takes {expected}, not `{text}`"))
 }
 
 #[cfg(test)]
@@ -1380,18 +1345,11 @@ mod tests {
 
     #[test]
     fn parses_the_talk_duration() {
-        let minutes =
-            |text: &str| parse_talk_duration(text).map(|duration| duration.as_secs_f64() / 60.0);
-        assert_eq!(minutes("20m"), Ok(20.0));
-        assert_eq!(minutes("1h30m"), Ok(90.0));
-        assert_eq!(minutes("1h 30m"), Ok(90.0));
-        assert_eq!(minutes("90s"), Ok(1.5));
-        assert_eq!(minutes("20:00"), Ok(20.0));
-        assert_eq!(minutes("1:15:00"), Ok(75.0));
-        assert_eq!(minutes("45"), Ok(45.0));
-        for invalid in ["", "0m", "-5m", "20x", "m", "1:2:3:4", "abc"] {
-            assert!(parse_talk_duration(invalid).is_err(), "{invalid}");
-        }
+        assert!(
+            parse_talk_duration("20x")
+                .unwrap_err()
+                .starts_with("--duration takes a length")
+        );
         let args = ["talk", "--present", "--duration", "20m"].map(str::to_string);
         assert_eq!(
             parse_launch_args(&args).unwrap().duration,

@@ -405,7 +405,7 @@ reproducción interactiva espera al presentador.
     (name: "template", type: "Callable[..., Layout] | None", default: "None", desc: [Plantilla de Python que se rellena después con `Segment.bind`.]),
     (name: "background", type: "BackgroundLike | None", default: "None", desc: [Fondo solo mientras el segmento está activo; `None` usa el de la escena.]),
     (name: "post", type: "PostProcess | False | None", default: "None", desc: [Postprocesado del segmento: otro `PostProcess`, `False` para ninguno o `None` para heredar `scene.canvas.post`.]),
-    (name: "target", type: "float | None", default: "None", desc: [Segundos que prevés dedicarle al presentar. Presenter View compara con él el tiempo que pasas en la diapositiva (ver #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla]).]),
+    (name: "target", type: "float | None", default: "None", desc: [Segundos que prevés dedicarle al presentar. Presenter View compara con él el tiempo que pasas en la diapositiva (ver #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla]). La de la charla entera se fija con `scene.slides.target`.]),
   ),
   returns: (type: "Segment", desc: [Handle que aceptan `link` y `bind`.]),
   desc: [Crea el segmento y lo activa. La primera llamada sustituye al segmento implícito inicial, que aún no tiene contenido. Un nombre vacío o repetido, una transición en el primer segmento o un `target` que no sea un número positivo de segundos lanzan `ValueError`; un `post` de otro tipo lanza `TypeError`.],
