@@ -533,12 +533,10 @@ fn write_deck(
             DeckPage::Frame { .. } => frames.next().map(PdfPage::Frame),
             DeckPage::Notes { slide } => Some(PdfPage::Notes {
                 title: slides[slide].name.clone(),
-                notes: slides[slide]
-                    .notes
-                    .as_deref()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_owned(),
+                // A `[stop]` mark prints as an arrow where the speaker advances.
+                notes: gaanim_timeline::notes::printable(
+                    slides[slide].notes.as_deref().unwrap_or_default().trim(),
+                ),
             }),
         })
         .collect::<Option<Vec<_>>>()

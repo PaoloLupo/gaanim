@@ -24,13 +24,19 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy_egui::egui;
 use gaanim_api::canvas::{
-    MarkerSource, NarrationManifest, TakeFiles, TextSource, VoiceoverSpec, set_live_take_recording,
+    MarkerSource, NarrationManifest, ScriptSection, TakeFiles, TextSource, VoiceoverSpec,
+    set_live_take_recording,
 };
 use gaanim_media::narration::{
     DEFAULT_SCRIPT, TakeSidecar, format_script, normalize_word, parse_script, write_atomically,
     write_wav_take,
 };
+use gaanim_timeline::notes::{mark_line, marks};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
+
+use crate::presenter::prompter::{
+    IMPLICIT_SEGMENT, PrompterWords, ScriptPosition, script_lines, show_script,
+};
 
 use crate::export::StashedReplay;
 use crate::ui_kit::{
@@ -430,8 +436,6 @@ enum Target {
         key: String,
         start_time: f64,
         files: TakeFiles,
-        /// Script sections, shown for the segment of the same name.
-        script: Vec<(String, String)>,
     },
 }
 
@@ -456,12 +460,6 @@ impl Target {
             key: live.key.clone(),
             start_time: live.start_time,
             files: live.files.clone(),
-            script: manifest
-                .script
-                .iter()
-                .flat_map(|script| &script.sections)
-                .map(|section| (section.key.clone(), section.text.clone()))
-                .collect(),
         })
     }
 
@@ -579,52 +577,230 @@ fn script_path(stash: &StashedReplay, manifest: &NarrationManifest) -> Option<Pa
         })
 }
 
-/// Create the script, or add a section for every voiceover it lacks, and
-/// return how many sections were added. New sections start with the text the
-/// code or the segment notes gave the voiceover.
-fn complete_script(path: &Path, manifest: &NarrationManifest) -> Result<usize, String> {
+/// A slide as the script sees it.
+#[derive(Debug, Clone, PartialEq)]
+struct ScriptSlide {
+    name: String,
+    /// The notes it shows: its section's, else its `notes=`.
+    notes: Option<String>,
+    /// Its stops' names.
+    stops: Vec<Option<String>>,
+}
+
+/// The authored slides of the scene, in order.
+fn script_slides(stash: &StashedReplay) -> Vec<ScriptSlide> {
+    let Some(canvas) = stash.canvas.as_ref() else {
+        return Vec::new();
+    };
+    canvas
+        .segment_manifest()
+        .segments
+        .into_iter()
+        .filter(|segment| segment.name != IMPLICIT_SEGMENT)
+        .map(|segment| ScriptSlide {
+            name: segment.name,
+            notes: segment.notes,
+            stops: segment.stops.into_iter().map(|stop| stop.name).collect(),
+        })
+        .collect()
+}
+
+/// What completing the script added to it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct ScriptAdditions {
+    sections: usize,
+    marks: usize,
+    /// New slide sections that start with the slide's `notes=`.
+    from_notes: usize,
+}
+
+impl ScriptAdditions {
+    fn is_empty(self) -> bool {
+        self.sections == 0 && self.marks == 0
+    }
+}
+
+/// The `[stop]` lines `slide` still lacks after the `marked` it has.
+fn missing_marks(slide: &ScriptSlide, marked: usize) -> Vec<String> {
+    slide
+        .stops
+        .iter()
+        .skip(marked)
+        .map(|name| mark_line(name.as_deref()))
+        .collect()
+}
+
+/// How many things completing the script would add: sections for slides
+/// and voiceovers without one, and slides whose section misses marks.
+fn script_gaps(
+    sections: &[ScriptSection],
+    manifest: &NarrationManifest,
+    slides: &[ScriptSlide],
+) -> usize {
+    let slide_gaps = slides
+        .iter()
+        .filter(|slide| {
+            match sections
+                .iter()
+                .find(|section| section.is_named(&slide.name))
+            {
+                Some(section) => marks(&section.notes).len() < slide.stops.len(),
+                None => true,
+            }
+        })
+        .count();
+    let voice_gaps = manifest
+        .voiceovers
+        .iter()
+        .filter(|voice| {
+            !sections.iter().any(|section| section.key == voice.key)
+                && !slides
+                    .iter()
+                    .any(|slide| slide.name.to_lowercase() == voice.key.to_lowercase())
+        })
+        .count();
+    slide_gaps + voice_gaps
+}
+
+/// The script `existing` completed: a section for every slide and voiceover
+/// it lacks, and a `[stop]` mark for every stop a slide's section does not
+/// mark yet. A new slide section starts with the slide's `notes=` and goes
+/// after the section of the slide before it; a new voiceover section
+/// starts with the text the code or the notes gave the take and goes at the
+/// end. What is written is never removed or rewritten.
+fn complete_source(
+    existing: Option<&str>,
+    manifest: &NarrationManifest,
+    slides: &[ScriptSlide],
+) -> Result<(String, ScriptAdditions), String> {
+    let sections = match existing {
+        Some(source) => parse_script(source)?,
+        None => Vec::new(),
+    };
+    let mut additions = ScriptAdditions::default();
+    // Lines to insert after a 1-based line of `existing` (0: before the
+    // first), in order.
+    let mut insertions: Vec<(usize, Vec<String>)> = Vec::new();
+    // New sections, in order, for a script that does not exist yet.
+    let mut fresh: Vec<(String, String)> = Vec::new();
+    let line_count = existing.map_or(0, |source| source.lines().count());
+    let section_of = |name: &str| sections.iter().find(|section| section.is_named(name));
+
+    for (index, slide) in slides.iter().enumerate() {
+        if let Some(section) = section_of(&slide.name) {
+            let lacking = missing_marks(slide, marks(&section.notes).len());
+            if !lacking.is_empty() {
+                additions.marks += lacking.len();
+                let mut lines = Vec::new();
+                for mark in lacking {
+                    lines.push(String::new());
+                    lines.push(mark);
+                }
+                insertions.push((section.end, lines));
+            }
+            continue;
+        }
+        let notes = slide.notes.as_deref().map(str::trim).unwrap_or_default();
+        let lacking = missing_marks(slide, marks(notes).len());
+        additions.sections += 1;
+        additions.marks += lacking.len();
+        if !notes.is_empty() {
+            additions.from_notes += 1;
+        }
+        let body = std::iter::once(notes.to_owned())
+            .chain(lacking)
+            .filter(|paragraph| !paragraph.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        // After the section of the closest slide before it that has one,
+        // else before the first later slide's section, else at the end.
+        let after = slides[..index]
+            .iter()
+            .rev()
+            .find_map(|earlier| section_of(&earlier.name))
+            .map(|section| section.end)
+            .or_else(|| {
+                slides[index + 1..]
+                    .iter()
+                    .find_map(|later| section_of(&later.name))
+                    .map(|section| section.line - 1)
+            })
+            .unwrap_or(line_count);
+        let mut lines = vec![String::new(), format!("## {}", slide.name)];
+        if !body.is_empty() {
+            lines.push(String::new());
+            lines.extend(body.lines().map(str::to_owned));
+        }
+        insertions.push((after, lines));
+        fresh.push((slide.name.clone(), body));
+    }
+    for voice in &manifest.voiceovers {
+        let covered = sections.iter().any(|section| section.key == voice.key)
+            || slides
+                .iter()
+                .any(|slide| slide.name.to_lowercase() == voice.key.to_lowercase())
+            || fresh.iter().any(|(key, _)| *key == voice.key);
+        if covered {
+            continue;
+        }
+        let text = match voice.text_source {
+            TextSource::Argument | TextSource::Notes => voice.text.clone().unwrap_or_default(),
+            TextSource::Script | TextSource::Missing => String::new(),
+        };
+        additions.sections += 1;
+        let mut lines = vec![String::new(), format!("## {}", voice.key)];
+        if !text.trim().is_empty() {
+            lines.push(String::new());
+            lines.extend(text.trim().lines().map(str::to_owned));
+        }
+        insertions.push((line_count, lines));
+        fresh.push((voice.key.clone(), text));
+    }
+
+    let Some(existing) = existing else {
+        return Ok((format_script(&fresh), additions));
+    };
+    // Keep the file's line endings.
+    let newline = if existing.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut output: Vec<String> = Vec::new();
+    let insert_after = |line: usize, output: &mut Vec<String>| {
+        for (_, lines) in insertions.iter().filter(|(after, _)| *after == line) {
+            output.extend(lines.iter().cloned());
+        }
+    };
+    insert_after(0, &mut output);
+    for (index, line) in existing.lines().enumerate() {
+        output.push(line.to_owned());
+        insert_after(index + 1, &mut output);
+    }
+    let mut source = output.join(newline);
+    source.push_str(newline);
+    Ok((source, additions))
+}
+
+/// Create the script at `path`, or complete it (see [`complete_source`]).
+fn complete_script(
+    path: &Path,
+    manifest: &NarrationManifest,
+    slides: &[ScriptSlide],
+) -> Result<ScriptAdditions, String> {
     let existing = match std::fs::read_to_string(path) {
         Ok(source) => Some(source),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.to_string()),
     };
-    let known = match &existing {
-        Some(source) => parse_script(source)?
-            .into_iter()
-            .map(|section| section.key)
-            .collect(),
-        None => Vec::new(),
-    };
-    let missing: Vec<(String, String)> = manifest
-        .voiceovers
-        .iter()
-        .filter(|voice| !known.contains(&voice.key))
-        .map(|voice| {
-            let text = match voice.text_source {
-                TextSource::Argument | TextSource::Notes => voice.text.clone().unwrap_or_default(),
-                TextSource::Script | TextSource::Missing => String::new(),
-            };
-            (voice.key.clone(), text)
-        })
-        .collect();
-    let source = match existing {
-        None => format_script(&missing),
-        Some(mut source) => {
-            if missing.is_empty() {
-                return Ok(0);
-            }
-            let added = format_script(&missing);
-            // Keep only the new sections of the formatted script.
-            let sections = added.find("\n## ").map_or("", |start| &added[start..]);
-            if !source.ends_with('\n') {
-                source.push('\n');
-            }
-            source.push_str(sections);
-            source
+    let (source, additions) = complete_source(existing.as_deref(), manifest, slides)?;
+    if existing.is_none() || !additions.is_empty() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-    };
-    write_atomically(path, source.as_bytes()).map_err(|error| error.to_string())?;
-    Ok(missing.len())
+        write_atomically(path, source.as_bytes()).map_err(|error| error.to_string())?;
+    }
+    Ok(additions)
 }
 
 /// Seconds a live take spent at a stop: the take time at which playback
@@ -687,17 +863,28 @@ pub(crate) fn narration_session_system(
                     Phase::Idle
                 }
                 Request::OpenScript => {
+                    let slides = script_slides(&stash);
                     match script_path(&stash, &manifest) {
-                        Some(path) => match complete_script(&path, &manifest) {
+                        Some(path) => match complete_script(&path, &manifest, &slides) {
                             Ok(added) => {
                                 let opened = crate::platform::open(&path);
-                                let mut message = match added {
-                                    0 => format!("Guion: {}", path.display()),
-                                    added => format!(
-                                        "Guion {} · {added} bloque(s) nuevo(s)",
-                                        path.display()
-                                    ),
-                                };
+                                let mut message = format!("Guion: {}", path.display());
+                                let mut news = Vec::new();
+                                if added.sections > 0 {
+                                    news.push(format!("{} sección(es) nueva(s)", added.sections));
+                                }
+                                if added.marks > 0 {
+                                    news.push(format!("{} marca(s) [stop]", added.marks));
+                                }
+                                if !news.is_empty() {
+                                    message.push_str(&format!(" · {}", news.join(", ")));
+                                }
+                                if added.from_notes > 0 {
+                                    message.push_str(
+                                        ". Las notas del código pasaron al guion, que manda sobre \
+                                         notes=…: puedes quitarlas del código.",
+                                    );
+                                }
                                 if manifest
                                     .voiceovers
                                     .iter()
@@ -1209,6 +1396,7 @@ pub(crate) fn narration_panel_system(
     };
     let manifest = manifest(&stash);
     let script = script_path(&stash, &manifest);
+    let slides = script_slides(&stash);
     let mut close = false;
     let mut request = None;
     let mut settings_changed = false;
@@ -1231,7 +1419,7 @@ pub(crate) fn narration_panel_system(
                         drag_grip(ui);
                         paint_mic_badge(ui);
                         ui.label(
-                            egui::RichText::new("Narración")
+                            egui::RichText::new("Guion y narración")
                                 .size(15.0)
                                 .strong()
                                 .color(palette::TEXT),
@@ -1250,10 +1438,12 @@ pub(crate) fn narration_panel_system(
                         .max_height(max_height)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
-                            if manifest.is_empty() {
+                            if !slides.is_empty() {
+                                slides_hint(ui);
+                            } else if manifest.is_empty() {
                                 empty_state(ui);
                             }
-                            script_card(ui, &manifest, script.as_deref(), &mut request);
+                            script_card(ui, &manifest, &slides, script.as_deref(), &mut request);
                             if let Some(live) = &manifest.live {
                                 ui.label(caption("TOMA EN VIVO"));
                                 live_card(ui, live, panel.busy(&live.key), &mut request);
@@ -1345,10 +1535,25 @@ fn empty_state(ui: &mut egui::Ui) {
     );
 }
 
-/// Where the voiceover texts live, with a button to write them.
+fn slides_hint(ui: &mut egui::Ui) {
+    ui.label(
+        egui::RichText::new(
+            "El guion de la charla: una sección «## nombre» por diapositiva con lo que \
+             dirás, y una línea [stop] donde avanzas. Presenter View lo muestra en sus \
+             notas y, con T, como teleprompter. Gaanim añade las diapositivas y los \
+             stops que falten sin tocar tu texto.",
+        )
+        .size(12.5)
+        .color(palette::TEXT_MUTED),
+    );
+}
+
+/// Where the slides' notes and the voiceover texts live, with a button to
+/// write them.
 fn script_card(
     ui: &mut egui::Ui,
     manifest: &NarrationManifest,
+    slides: &[ScriptSlide],
     path: Option<&Path>,
     request: &mut Option<Request>,
 ) {
@@ -1363,7 +1568,7 @@ fn script_card(
             );
             let detail = match (&manifest.script, path) {
                 (Some(script), _) => format!(
-                    "{} · {} bloques",
+                    "{} · {} secciones",
                     file_name(&script.path),
                     script.sections.len()
                 ),
@@ -1377,25 +1582,20 @@ fn script_card(
             )
             .on_hover_text(path.map_or_else(String::new, |path| path.display().to_string()));
         });
-        let missing = manifest
-            .voiceovers
-            .iter()
-            .filter(|voice| {
-                manifest
-                    .script
-                    .as_ref()
-                    .is_none_or(|script| script.text(&voice.key).is_none())
-            })
-            .count();
+        let sections = manifest
+            .script
+            .as_ref()
+            .map_or(&[][..], |script| &script.sections[..]);
+        let missing = script_gaps(sections, manifest, slides);
         let label = match (&manifest.script, missing) {
             (None, _) => "Crear guion".to_string(),
             (Some(_), 0) => "Abrir guion".to_string(),
-            (Some(_), missing) => format!("Abrir y añadir {missing} bloque(s)"),
+            (Some(_), missing) => format!("Abrir y completar ({missing})"),
         };
         if secondary_button(ui, &label, path.is_some())
             .on_hover_text(
-                "Escribe el texto de cada bloque bajo \"## clave\" en tu editor; \
-                 al guardar, la escena se actualiza",
+                "Escribe bajo \"## nombre\" lo que dices en cada diapositiva o bloque de \
+                 voz, con [stop] donde avanzas; al guardar, la escena se actualiza",
             )
             .clicked()
         {
@@ -1483,8 +1683,8 @@ fn live_card(
         ui.label(
             egui::RichText::new(
                 "Presenta la escena hablando: → o Espacio sigue en cada parada, \
-                 Enter termina. El teleprompter muestra la sección del guion con \
-                 el nombre del segmento, o sus notas.",
+                 Enter termina. El teleprompter muestra el guion de cada diapositiva \
+                 y marca dónde avanzar.",
             )
             .size(11.5)
             .color(palette::TEXT_FAINT),
@@ -1952,37 +2152,40 @@ fn teleprompter(
                                     .color(palette::ACCENT),
                             );
                         }
-                        Target::Live { script, .. } => {
-                            let segment = timeline.segment_position.and_then(|position| {
-                                timeline
-                                    .segments
-                                    .iter()
-                                    .find(|segment| segment.id == position.segment_id)
-                            });
-                            if let Some(segment) = segment
+                        Target::Live { .. } => {
+                            let position = ScriptPosition::of(timeline);
+                            if let Some(position) = position
                                 && !*compact
                             {
                                 ui.label(
-                                    egui::RichText::new(&segment.name)
+                                    egui::RichText::new(&timeline.segments[position.slide].name)
                                         .size(13.0)
                                         .color(palette::TEXT_MUTED),
                                 );
-                                let text = script
-                                    .iter()
-                                    .find(|(key, _)| *key == segment.name)
-                                    .map(|(_, text)| text.as_str())
-                                    .filter(|text| !text.trim().is_empty())
-                                    .or(segment.notes.as_deref())
-                                    .unwrap_or(
-                                        "Sin texto: añade \"## <segmento>\" al guion o notes=\"…\" \
-                                         en scene.segment().",
-                                    );
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(text).size(24.0).color(palette::TEXT),
-                                    )
-                                    .wrap(),
+                                let lines = script_lines(
+                                    &timeline.segments,
+                                    position.slide..position.slide + 1,
+                                    Some(position),
+                                    false,
                                 );
+                                let anchor_id = egui::Id::new("live-teleprompter-anchor");
+                                let anchor = (position.slide, position.part);
+                                let follow = ui
+                                    .data(|data| data.get_temp::<(usize, usize)>(anchor_id))
+                                    != Some(anchor);
+                                ui.data_mut(|data| data.insert_temp(anchor_id, anchor));
+                                egui::ScrollArea::vertical()
+                                    .id_salt("live-teleprompter")
+                                    .max_height((screen.height() * 0.35).max(160.0))
+                                    .show(ui, |ui| {
+                                        show_script(
+                                            ui,
+                                            &lines,
+                                            24.0,
+                                            follow,
+                                            &PrompterWords::SPANISH,
+                                        );
+                                    });
                             }
                             let waiting = recording.and_then(|recording| recording.waiting_at);
                             let status = match (waiting, recording) {
@@ -2260,7 +2463,7 @@ mod tests {
             ],
             ..NarrationManifest::default()
         };
-        assert_eq!(complete_script(&path, &manifest).unwrap(), 2);
+        assert_eq!(complete_script(&path, &manifest, &[]).unwrap().sections, 2);
         let sections = parse_script(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(sections[0].text, "Hola desde el código");
         assert_eq!(sections[1].text, "");
@@ -2273,7 +2476,7 @@ mod tests {
         manifest
             .voiceovers
             .push(voice("cierre", Some("notas"), TextSource::Notes));
-        assert_eq!(complete_script(&path, &manifest).unwrap(), 1);
+        assert_eq!(complete_script(&path, &manifest, &[]).unwrap().sections, 1);
         let sections = parse_script(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let texts: Vec<(&str, &str)> = sections
             .iter()
@@ -2287,6 +2490,94 @@ mod tests {
                 ("cierre", "notas")
             ]
         );
-        assert_eq!(complete_script(&path, &manifest).unwrap(), 0);
+        assert!(complete_script(&path, &manifest, &[]).unwrap().is_empty());
+    }
+
+    fn slide(name: &str, notes: Option<&str>, stops: &[Option<&str>]) -> ScriptSlide {
+        ScriptSlide {
+            name: name.into(),
+            notes: notes.map(str::to_owned),
+            stops: stops.iter().map(|stop| stop.map(str::to_owned)).collect(),
+        }
+    }
+
+    #[test]
+    fn the_script_gets_a_section_per_slide_and_a_mark_per_stop() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("narration").join(DEFAULT_SCRIPT);
+        let manifest = NarrationManifest::default();
+        let mut slides = vec![
+            slide("Portada", Some("Hola a todos."), &[Some("titulo")]),
+            slide("Datos", None, &[Some("grafico"), None]),
+        ];
+        let added = complete_script(&path, &manifest, &slides).unwrap();
+        assert_eq!(
+            added,
+            ScriptAdditions {
+                sections: 2,
+                marks: 3,
+                from_notes: 1
+            }
+        );
+        let notes = |path: &Path| {
+            parse_script(&std::fs::read_to_string(path).unwrap())
+                .unwrap()
+                .into_iter()
+                .map(|section| (section.key, section.notes))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            notes(&path),
+            [
+                (
+                    "Portada".to_owned(),
+                    "Hola a todos.\n\n[stop titulo]".to_owned()
+                ),
+                ("Datos".to_owned(), "[stop grafico]\n\n[stop]".to_owned()),
+            ]
+        );
+        let sections = parse_script(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(script_gaps(&sections, &manifest, &slides), 0);
+
+        // The author writes the script; the code gains a slide and a stop.
+        let written = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("## Datos\n", "## datos\n\nMiren el gráfico.\n")
+            .replace('\n', "\r\n");
+        std::fs::write(&path, written).unwrap();
+        slides[0].stops.push(Some("logo".into()));
+        slides.insert(1, slide("Método", None, &[]));
+        let sections = parse_script(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(script_gaps(&sections, &manifest, &slides), 2);
+        let added = complete_script(&path, &manifest, &slides).unwrap();
+        assert_eq!(
+            added,
+            ScriptAdditions {
+                sections: 1,
+                marks: 1,
+                from_notes: 0
+            }
+        );
+        let source = std::fs::read_to_string(&path).unwrap();
+        assert!(!source.replace("\r\n", "").contains('\n'), "keeps CRLF");
+        assert_eq!(
+            notes(&path),
+            [
+                (
+                    "Portada".to_owned(),
+                    "Hola a todos.\n\n[stop titulo]\n\n[stop logo]".to_owned()
+                ),
+                ("Método".to_owned(), String::new()),
+                (
+                    "datos".to_owned(),
+                    "Miren el gráfico.\n\n[stop grafico]\n\n[stop]".to_owned()
+                ),
+            ]
+        );
+        assert!(
+            complete_script(&path, &manifest, &slides)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

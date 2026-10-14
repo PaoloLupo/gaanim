@@ -2,6 +2,7 @@
 
 mod mirror;
 pub(crate) mod pace;
+pub(crate) mod prompter;
 mod thumbnails;
 
 use bevy::platform::time::Instant;
@@ -105,11 +106,17 @@ const NOTES_SIZE_MAX: f32 = 44.0;
 #[derive(Resource, Debug, Clone, Copy)]
 pub(crate) struct PresenterPreferences {
     notes_size: f32,
+    /// The speaker column shows the whole talk's script as a teleprompter
+    /// instead of the current slide's notes.
+    prompter: bool,
 }
 
 impl Default for PresenterPreferences {
     fn default() -> Self {
-        Self { notes_size: 22.0 }
+        Self {
+            notes_size: 22.0,
+            prompter: false,
+        }
     }
 }
 
@@ -737,6 +744,7 @@ pub(crate) fn presentation_input_system(
     mut overview: ResMut<PresenterOverviewState>,
     polls: Option<ResMut<crate::polls::AudiencePolls>>,
     link: Option<ResMut<crate::presenter_link::PresenterLink>>,
+    mut preferences: ResMut<PresenterPreferences>,
     mut commands: Commands,
 ) {
     if !presentation_mode.active {
@@ -789,6 +797,9 @@ pub(crate) fn presentation_input_system(
         }
         if keys.just_pressed(KeyCode::KeyP) && presenter_windows.is_empty() {
             actions.push(PresentationAction::ReopenPresenter);
+        }
+        if keys.just_pressed(KeyCode::KeyT) {
+            preferences.prompter = !preferences.prompter;
         }
         if keys.just_pressed(KeyCode::KeyR) {
             match (polls, link) {
@@ -1580,6 +1591,8 @@ struct PresenterFrame {
     total_time: f64,
     /// The audience, while a presentation with polls runs.
     audience: Option<AudienceView>,
+    /// Where the speaker is in the script.
+    script: Option<prompter::ScriptPosition>,
 }
 
 impl PresenterFrame {
@@ -1858,6 +1871,7 @@ fn show_now_panel(
 fn show_speaker_column(
     ui: &mut egui::Ui,
     frame: &PresenterFrame,
+    segments: &[SegmentMetadata],
     preferences: &mut PresenterPreferences,
     notes_min_height: f32,
     requests: &mut AudienceRequests,
@@ -1881,7 +1895,9 @@ fn show_speaker_column(
     );
     ui.add_space(4.0);
     let width = ui.available_width();
-    let height = (width / frame.next_preview.aspect()).min((ui.available_height() * 0.4).max(90.0));
+    let share = if preferences.prompter { 0.22 } else { 0.4 };
+    let height =
+        (width / frame.next_preview.aspect()).min((ui.available_height() * share).max(90.0));
     let empty = if frame.next.is_some() {
         frame.preview_message()
     } else {
@@ -1903,30 +1919,57 @@ fn show_speaker_column(
 
     ui.add_space(14.0);
     ui.horizontal(|ui| {
-        section_label(ui, "SPEAKER NOTES");
+        section_label(
+            ui,
+            if preferences.prompter {
+                "PROMPTER"
+            } else {
+                "SPEAKER NOTES"
+            },
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let size = preferences.notes_size;
             if small_button(ui, "A+", size < NOTES_SIZE_MAX)
-                .on_hover_text("Larger notes")
+                .on_hover_text("Larger text")
                 .clicked()
             {
                 preferences.adjust_notes_size(2.0);
             }
             if small_button(ui, "A−", size > NOTES_SIZE_MIN)
-                .on_hover_text("Smaller notes")
+                .on_hover_text("Smaller text")
                 .clicked()
             {
                 preferences.adjust_notes_size(-2.0);
             }
+            ui.add_space(6.0);
+            let (label, hint) = if preferences.prompter {
+                ("Notes", "Show this slide's notes · T")
+            } else {
+                (
+                    "Prompter",
+                    "Scroll the whole talk's script like a teleprompter · T",
+                )
+            };
+            if small_button(ui, label, true).on_hover_text(hint).clicked() {
+                preferences.prompter = !preferences.prompter;
+            }
         });
     });
-    let notes = frame
-        .slide
-        .as_ref()
-        .and_then(|slide| slide.segment.notes.as_deref())
-        .map(str::trim)
-        .filter(|notes| !notes.is_empty());
+    let slides = match (preferences.prompter, frame.slide.as_ref()) {
+        (true, _) => 0..segments.len(),
+        (false, Some(slide)) => slide.index..slide.index + 1,
+        (false, None) => 0..0,
+    };
+    let lines = prompter::script_lines(segments, slides, frame.script, preferences.prompter);
+    // Scroll to the part being said when it changes or the view switches.
+    let anchor = (
+        preferences.prompter,
+        frame.script.map(|script| (script.slide, script.part)),
+    );
+    let anchor_id = egui::Id::new("presenter-prompter-anchor");
+    let follow = ui.data(|data| data.get_temp::<_>(anchor_id)) != Some(anchor);
+    ui.data_mut(|data| data.insert_temp(anchor_id, anchor));
     egui::Frame::new()
         .fill(palette::SURFACE)
         .inner_margin(egui::Margin::same(16))
@@ -1936,24 +1979,14 @@ fn show_speaker_column(
                 .id_salt("presenter-notes")
                 .auto_shrink([false, false])
                 .max_height(height)
-                .show(ui, |ui| match notes {
-                    Some(notes) => {
-                        let size = preferences.notes_size;
-                        ui.label(
-                            egui::RichText::new(notes)
-                                .size(size)
-                                .color(palette::TEXT)
-                                .line_height(Some(size * 1.4)),
-                        );
-                    }
-                    None => {
-                        ui.label(
-                            egui::RichText::new("No speaker notes for this slide.")
-                                .size(16.0)
-                                .italics()
-                                .color(palette::FAINT),
-                        );
-                    }
+                .show(ui, |ui| {
+                    prompter::show_script(
+                        ui,
+                        &lines,
+                        preferences.notes_size,
+                        follow,
+                        &prompter::PrompterWords::ENGLISH,
+                    );
                 });
         });
 }
@@ -2649,6 +2682,7 @@ pub(crate) fn presenter_view_system(
             .as_deref()
             .and_then(crate::polls::AudiencePolls::view)
             .or_else(|| link.as_deref().and_then(|link| link.audience().cloned())),
+        script: prompter::ScriptPosition::of(&timeline),
     };
     let mut actions = Vec::new();
     let mut requested_seek = None;
@@ -2700,15 +2734,28 @@ pub(crate) fn presenter_view_system(
         });
 
     if !compact && frame.slide.is_some() {
+        // The prompter takes room from the slide preview for its text.
+        let width = if preferences.prompter {
+            (viewport.width() * 0.5).clamp(360.0, 760.0)
+        } else {
+            (viewport.width() * 0.36).clamp(320.0, 540.0)
+        };
         egui::Panel::right("presenter-speaker")
-            .exact_size((viewport.width() * 0.36).clamp(320.0, 540.0))
+            .exact_size(width)
             .frame(
                 egui::Frame::new()
                     .fill(palette::BACKGROUND)
                     .inner_margin(egui::Margin::same(18)),
             )
             .show(&mut viewport_ui, |ui| {
-                show_speaker_column(ui, &frame, &mut preferences, 120.0, &mut audience_requests);
+                show_speaker_column(
+                    ui,
+                    &frame,
+                    &timeline.segments,
+                    &mut preferences,
+                    120.0,
+                    &mut audience_requests,
+                );
             });
     }
 
@@ -2735,6 +2782,7 @@ pub(crate) fn presenter_view_system(
                     show_speaker_column(
                         ui,
                         &frame,
+                        &timeline.segments,
                         &mut preferences,
                         220.0,
                         &mut audience_requests,
@@ -3131,9 +3179,33 @@ mod tests {
             .init_resource::<AudienceBlank>()
             .init_resource::<AudienceControlsState>()
             .init_resource::<PresenterOverviewState>()
+            .init_resource::<PresenterPreferences>()
             .insert_resource(PresentationMode { active: true })
             .add_systems(Update, presentation_input_system);
         app
+    }
+
+    #[test]
+    fn t_switches_the_speaker_column_to_the_prompter_and_back() {
+        let mut app = input_app();
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        for expected in [true, false] {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release_all();
+            keys.clear();
+            keys.press(KeyCode::KeyT);
+            app.update();
+            assert_eq!(
+                app.world().resource::<PresenterPreferences>().prompter,
+                expected
+            );
+        }
     }
 
     #[test]

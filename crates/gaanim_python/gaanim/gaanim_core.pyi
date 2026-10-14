@@ -10714,9 +10714,13 @@ class Scene:
         post-processing and ``None`` inherits ``scene.canvas.post``. Any other
         value raises ``TypeError``. ``target`` is how many seconds you plan to
         spend on the segment when presenting: Presenter View compares the time
-        spent on it with the plan. Empty or duplicate names, a transition on
-        the first segment, and a target that is not a positive number of
-        seconds raise ``ValueError``.
+        spent on it with the plan. ``notes`` are the speaker notes Presenter
+        View shows; a line ``[stop]`` or ``[stop name]`` in them marks where
+        you advance. The narration script's ``## name`` section, when it has
+        one, replaces them (see ``narration_script``). Empty or duplicate
+        names, a transition on the first segment, a target that is not a
+        positive number of seconds, and a narration script that cannot be read
+        raise ``ValueError``.
 
         Example:
             result = scene.segment("example", background="#0f172a")
@@ -11271,19 +11275,23 @@ class Scene:
         """
         ...
     def narration_script(self, path: str) -> None:
-        """Read voiceover texts from a Markdown script edited outside the code.
+        """Read the talk's script and voiceover texts from a Markdown file.
 
-        Each ``## key`` heading holds the text of ``voiceover("key")``; a
+        Each ``## name`` heading holds the speaker notes of the segment of
+        that name (ignoring case), which replace its ``notes=``, or the text
+        of ``voiceover("name")``. A line ``[stop]`` or ``[stop name]`` marks
+        where you advance: Presenter View's prompter and the live take's
+        teleprompter cut the notes there, and voiceovers do not read it. A
         ``# Title`` ends a section, ``###`` headings are notes that are not
         read, and HTML comments are ignored. A relative path resolves in the
         asset directory (or beside the script without one). Without this
         call, ``narration/script.md`` is loaded automatically when it exists.
-        Call it before the voiceovers that use it. Saving the file reloads
-        the scene in the editor.
+        Call it before the voiceovers that use it; segments read it wherever
+        it is called. Saving the file reloads the scene in the editor.
 
         Raises:
-            ValueError: If the file cannot be read, a ``##`` heading is not a
-                valid key, or a key appears twice.
+            ValueError: If the file cannot be read, or a ``##`` heading is
+                empty or appears twice.
 
         Example:
             scene.narration_script("guion.md")

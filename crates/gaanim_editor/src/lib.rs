@@ -1172,7 +1172,7 @@ fn editor_ui_system(
                                         if narration_available
                                             && icon_button(ui, Icon::Mic, narration_tone, true)
                                                 .on_hover_text(
-                                                    "Narración: grabar la voz de la escena",
+                                                    "Guion y narración: el guion de la charla y la voz de la escena",
                                                 )
                                                 .clicked()
                                         {
@@ -1362,7 +1362,7 @@ fn editor_ui_system(
                                             }
                                             if narration_available
                                                 && ui
-                                                    .selectable_label(narration_open, "Narración")
+                                                    .selectable_label(narration_open, "Guion y narración")
                                                     .clicked()
                                             {
                                                 actions.push(PlaybackAction::ToggleNarration);

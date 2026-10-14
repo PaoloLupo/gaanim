@@ -300,7 +300,16 @@ fn replay_incremental_for(
     // it, and only once something is inspected.
     let inspected = (goal == ReplayGoal::Reload && crate::canvas::tracks_script_lines())
         .then(|| canvas.clone());
+    // The narration script holds speaker notes but no fingerprint reads it,
+    // so a reused revision takes this one's notes too.
+    let notes: Vec<(u32, Option<String>)> = canvas
+        .segment_manifest()
+        .segments
+        .into_iter()
+        .map(|segment| (segment.id.raw(), segment.notes))
+        .collect();
     let kind = replay_revision(world, canvas, allow_reuse, clear_scene, goal);
+    refresh_segment_notes(world, notes);
     if let Some(canvas) = inspected {
         let ids = world
             .get_resource::<RetainedReplay>()
@@ -320,6 +329,26 @@ fn replay_incremental_for(
         world.insert_resource(crate::canvas::deferred_index(canvas, ids));
     }
     kind
+}
+
+/// Give the timeline's segments the speaker notes `notes`, by segment id.
+fn refresh_segment_notes(world: &mut World, notes: Vec<(u32, Option<String>)>) {
+    let stale = world.get_resource::<Timeline>().is_some_and(|timeline| {
+        timeline.segments.iter().any(|segment| {
+            notes
+                .iter()
+                .any(|(id, notes)| *id == segment.id && *notes != segment.notes)
+        })
+    });
+    if !stale {
+        return;
+    }
+    let mut timeline = world.resource_mut::<Timeline>();
+    for segment in &mut timeline.segments {
+        if let Some((_, notes)) = notes.iter().find(|(id, _)| *id == segment.id) {
+            segment.notes = notes.clone();
+        }
+    }
 }
 
 fn replay_revision(
@@ -1030,6 +1059,47 @@ mod tests {
         for (incremental, full) in incremental.iter().zip(&full) {
             assert_eq!(incremental, full);
         }
+    }
+
+    #[test]
+    fn a_reused_revision_takes_the_notes_of_the_new_script() {
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("guion.md");
+        let deck = |notes: &str| {
+            std::fs::write(&script, notes).unwrap();
+            let mut canvas = SceneModel::new(640, 360);
+            canvas.narration_script(&script).unwrap();
+            canvas.segment("Portada", None).unwrap();
+            canvas.wait(1.0);
+            canvas
+        };
+        let mut world = incremental_world();
+        assert_eq!(
+            hot_reload(
+                &mut world,
+                deck(
+                    "## Portada
+Hola.
+"
+                )
+            ),
+            ReplayKind::Full
+        );
+        assert_eq!(
+            hot_reload(
+                &mut world,
+                deck(
+                    "## portada
+Buenos días.
+"
+                )
+            ),
+            ReplayKind::Unchanged { segments: 1 }
+        );
+        assert_eq!(
+            world.resource::<Timeline>().segments[0].notes.as_deref(),
+            Some("Buenos días.")
+        );
     }
 
     #[test]

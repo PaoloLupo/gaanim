@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 pub mod clip;
+pub mod notes;
 pub mod prelude;
 pub mod scene;
 pub mod selection;

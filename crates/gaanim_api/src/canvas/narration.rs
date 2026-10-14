@@ -5,6 +5,9 @@
 //! recorded) decides how long that is. A live take instead records a speaker
 //! presenting the scene, and replaces every later `stop` with the pause the
 //! speaker actually made there.
+//!
+//! The narration script also holds the slides' speaker notes: the section
+//! named after a slide replaces its `notes=`.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -110,6 +113,16 @@ impl ScriptSpec {
             .find(|section| section.key == key)
             .map(|section| section.text.as_str())
     }
+
+    /// The speaker notes the script holds for the slide `name`, with their
+    /// stop marks, unless its section is missing or empty.
+    pub fn slide_notes(&self, name: &str) -> Option<&str> {
+        self.sections
+            .iter()
+            .find(|section| section.is_named(name))
+            .map(|section| section.notes.as_str())
+            .filter(|notes| !notes.trim().is_empty())
+    }
 }
 
 /// Everything the editor needs to record and inspect a scene's narration.
@@ -207,9 +220,9 @@ impl SceneModel {
         Ok(())
     }
 
-    /// Load `narration/script.md` the first time narration needs text, unless
-    /// a script was chosen explicitly.
-    fn ensure_default_script(&mut self) -> Result<(), VoiceoverError> {
+    /// Load `narration/script.md` the first time narration or a slide needs
+    /// text, unless a script was chosen explicitly.
+    pub(crate) fn ensure_default_script(&mut self) -> Result<(), VoiceoverError> {
         if self.narration.script_checked {
             return Ok(());
         }
@@ -219,6 +232,87 @@ impl SceneModel {
             self.narration_script(path)?;
         }
         Ok(())
+    }
+
+    /// The speaker notes of the slide `name`: its section of the narration
+    /// script, else `own`, its `notes=`.
+    pub(crate) fn slide_notes(&self, name: &str, own: Option<&String>) -> Option<String> {
+        self.narration
+            .manifest
+            .script
+            .as_ref()
+            .and_then(|script| script.slide_notes(name))
+            .map(str::to_owned)
+            .or_else(|| own.cloned())
+    }
+
+    /// What `gaanim check` should say about the speaker notes' stop marks
+    /// and the narration script's sections.
+    pub fn script_warnings(&self) -> Vec<String> {
+        let plural = |count: usize| format!("{count} stop{}", if count == 1 { "" } else { "s" });
+        let segments = self.segment_manifest().segments;
+        let mut warnings = Vec::new();
+        for segment in &segments {
+            let Some(notes) = &segment.notes else {
+                continue;
+            };
+            let marks = gaanim_timeline::notes::marks(notes);
+            if marks.is_empty() {
+                continue;
+            }
+            if marks.len() != segment.stops.len() {
+                warnings.push(format!(
+                    "segment `{}` marks {} in its notes but has {}",
+                    segment.name,
+                    plural(marks.len()),
+                    plural(segment.stops.len())
+                ));
+            }
+            for (index, (mark, stop)) in marks.iter().zip(&segment.stops).enumerate() {
+                let Some(mark) = &mark.name else {
+                    continue;
+                };
+                let stop_name = stop.name.as_deref().map(str::trim).unwrap_or_default();
+                if mark.to_lowercase() != stop_name.to_lowercase() {
+                    let stop = match stop_name {
+                        "" => "has no name".to_owned(),
+                        name => format!("is `{name}`"),
+                    };
+                    warnings.push(format!(
+                        "segment `{}`: mark {} is [stop {mark}] but stop {} {stop}",
+                        segment.name,
+                        index + 1,
+                        index + 1
+                    ));
+                }
+            }
+        }
+        let manifest = &self.narration.manifest;
+        if let Some(script) = &manifest.script {
+            let file = script
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            for section in &script.sections {
+                let slide = segments
+                    .iter()
+                    .any(|segment| section.is_named(&segment.name));
+                let take = manifest
+                    .voiceovers
+                    .iter()
+                    .map(|voice| voice.key.as_str())
+                    .chain(manifest.live.as_ref().map(|live| live.key.as_str()))
+                    .any(|key| key == section.key);
+                if !slide && !take {
+                    warnings.push(format!(
+                        "{file}: section `{}` (line {}) matches no segment or voiceover",
+                        section.key, section.line
+                    ));
+                }
+            }
+        }
+        warnings
     }
 
     fn ensure_unused_key(&self, key: &str) -> Result<(), VoiceoverError> {
@@ -256,6 +350,9 @@ impl SceneModel {
             let active = state.active();
             (active.name.clone(), active.notes.clone())
         };
+        let notes = self
+            .slide_notes(&segment, notes.as_ref())
+            .map(|notes| gaanim_timeline::notes::spoken(&notes));
         let written = |text: Option<String>| text.filter(|text| !text.trim().is_empty());
         let script = written(
             self.narration
@@ -667,10 +764,104 @@ mod tests {
     }
 
     #[test]
+    fn slides_read_their_notes_from_the_script() {
+        let root = tempfile::tempdir().unwrap();
+        let narration = root.path().join(NARRATION_DIR);
+        std::fs::create_dir_all(&narration).unwrap();
+        std::fs::write(
+            narration.join(DEFAULT_SCRIPT),
+            "## portada\nHola a todos.\n[stop titulo]\n\n\
+             ## Resultados del año\nMiren.\n[stop grafico]\nCrece.\n[stop]\n\n\
+             ## sobra\nNada.\n",
+        )
+        .unwrap();
+        let mut scene = scene_with_assets(root.path());
+        scene
+            .segment_with("Portada", None, Some("notas del código".into()), None)
+            .unwrap();
+        scene.wait(1.0);
+        scene.stop(Some("titulo".into())).unwrap();
+        scene
+            .segment_with("Resultados del año", None, None, None)
+            .unwrap();
+        scene.wait(1.0);
+        scene.stop(Some("tabla".into())).unwrap();
+        // Without text of its own, a voiceover reads the slide's notes
+        // aloud, without their marks.
+        let voice = scene.voiceover("lectura", None, 1.0).unwrap();
+        assert_eq!(
+            scene.voiceover_spec(voice).text.as_deref(),
+            Some("Miren.\n\nCrece.")
+        );
+        assert_eq!(scene.voiceover_spec(voice).text_source, TextSource::Notes);
+        scene.finish_voiceover(voice);
+        scene
+            .segment_with("Cierre", None, Some("Gracias.".into()), None)
+            .unwrap();
+        scene.wait(1.0);
+
+        let notes = |scene: &SceneModel| {
+            scene
+                .segment_manifest()
+                .segments
+                .into_iter()
+                .map(|segment| segment.notes)
+                .collect::<Vec<_>>()
+        };
+        // The script's section wins over `notes=`; a slide without one keeps it.
+        assert_eq!(
+            notes(&scene),
+            [
+                Some("Hola a todos.\n\n[stop titulo]".to_owned()),
+                Some("Miren.\n\n[stop grafico]\n\nCrece.\n\n[stop]".to_owned()),
+                Some("Gracias.".to_owned()),
+            ]
+        );
+        let warnings = scene.script_warnings();
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
+        assert!(
+            warnings[0].contains("marks 2 stops in its notes but has 1 stop"),
+            "{warnings:?}"
+        );
+        assert!(
+            warnings[1].contains("[stop grafico] but stop 1 is `tabla`"),
+            "{warnings:?}"
+        );
+        assert!(warnings[2].contains("`sobra` (line 11)"), "{warnings:?}");
+
+        // A script chosen later applies to the slides already made.
+        std::fs::write(root.path().join("otro.md"), "## cierre\nAdiós.\n").unwrap();
+        scene.narration_script("otro.md").unwrap();
+        assert_eq!(
+            notes(&scene),
+            [
+                Some("notas del código".to_owned()),
+                None,
+                Some("Adiós.".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_broken_script_stops_the_first_slide() {
+        let root = tempfile::tempdir().unwrap();
+        let narration = root.path().join(NARRATION_DIR);
+        std::fs::create_dir_all(&narration).unwrap();
+        std::fs::write(narration.join(DEFAULT_SCRIPT), "## a\nuno\n## A\ndos\n").unwrap();
+        let mut scene = scene_with_assets(root.path());
+        let error = scene.segment("Portada", None).unwrap_err();
+        assert!(
+            matches!(error, crate::canvas::SegmentError::Script(_)),
+            "{error}"
+        );
+        assert!(error.to_string().contains("twice"), "{error}");
+    }
+
+    #[test]
     fn scripts_load_from_an_explicit_path_and_report_errors() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("guion.md"), "## intro\nhola mundo\n").unwrap();
-        std::fs::write(root.path().join("roto.md"), "## dos palabras\nx\n").unwrap();
+        std::fs::write(root.path().join("roto.md"), "## dos\nx\n## Dos\ny\n").unwrap();
         let mut scene = scene_with_assets(root.path());
         scene.narration_script("guion.md").unwrap();
         let voice = scene.voiceover("intro", None, 1.0).unwrap();

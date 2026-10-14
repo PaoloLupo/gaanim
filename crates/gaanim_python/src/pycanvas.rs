@@ -6852,6 +6852,12 @@ impl PyScene {
         let scene = slf.borrow();
         let handle = {
             let mut canvas = scene.inner.lock().expect("scene canvas poisoned");
+            // Where the narration script, which holds speaker notes, lives.
+            if canvas.asset_root.is_none()
+                && let Ok(directory) = calling_script_dir(slf.py())
+            {
+                canvas.set_narration_fallback_root(directory);
+            }
             let handle = canvas
                 .segment_with_background(
                     name,
@@ -7457,7 +7463,7 @@ impl PyScene {
         })
     }
 
-    /// Read voiceover texts from a Markdown narration script.
+    /// Read the talk's script and voiceover texts from a Markdown file.
     fn narration_script(&self, py: Python<'_>, path: &str) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
