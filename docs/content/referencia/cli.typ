@@ -138,14 +138,18 @@ Eventos:
 
 ```json
 {"event": "reload"}
-{"event": "ready", "duration": 42.0}
+{"event": "ready", "duration": 42.0, "timeline": {"schema": 1, "segments": [...], ...}}
 {"event": "playhead", "time": 12.5, "segment": "Resultados", "stop": "grafico", "playing": false}
 {"event": "failed", "message": "NameError: name 'cirlce' is not defined", "file": "C:/charla/main.py", "line": 17}
 {"event": "error", "message": "seek: no segment or section named \"Cierre\""}
 ```
 
 `reload` llega cuando el script se volvió a ejecutar y la escena se
-reconstruye, y `ready` cuando ya se ve. `playhead` llega al moverse: enseguida
+reconstruye, y `ready` cuando ya se ve. `ready` trae en `timeline` la línea de
+tiempo de la escena que se ve, el mismo objeto que imprime
+#link(<gaanim-inspect>)[`gaanim inspect --json`], así que un editor sabe sus
+segmentos, pausas y líneas sin volver a ejecutar el script; al reproducir un
+paquete `.gaanim` es `null`. `playhead` llega al moverse: enseguida
 tras un salto, una pausa o al cambiar de segmento o de pausa, y como mucho
 diez veces por segundo mientras se reproduce. `stop` es `null` antes de la
 primera pausa del segmento y `""` en una pausa sin nombre. `failed` trae la

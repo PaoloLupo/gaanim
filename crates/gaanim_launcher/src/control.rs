@@ -6,10 +6,14 @@
 //! they use the process's stdin and stdout; with `--listen 127.0.0.1:PORT`
 //! every editor that connects to that loopback port. Without `--listen`
 //! nothing listens.
+//!
+//! Each `ready` carries the scene's timeline, the object `gaanim inspect
+//! --json` prints, so an editor knows the segments, stops and their lines
+//! without running the script again.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -85,8 +89,10 @@ type Incoming = Result<Command, String>;
 pub struct ControlChannel {
     commands: Receiver<Incoming>,
     events: Sender<String>,
-    /// The index of the scene shown, for `follow`.
+    /// The index of the scene shown, for `follow` and `ready`.
     index: Option<TimelineIndex>,
+    /// The script previewed, absolute, as `ready`'s timeline names it.
+    script: Option<PathBuf>,
     last_playhead: Option<Playhead>,
     last_sent: Option<Instant>,
 }
@@ -106,7 +112,16 @@ impl ControlChannel {
     /// The scene is shown.
     pub fn ready(&mut self, duration: f64) {
         self.last_playhead = None;
-        self.send(json!({ "event": "ready", "duration": duration }));
+        self.send(self.ready_event(duration));
+    }
+
+    /// `ready`, with the timeline of the scene shown; null for a bundle,
+    /// which runs no script.
+    fn ready_event(&self, duration: f64) -> Value {
+        let timeline = self.index.as_ref().map(|index| {
+            crate::inspect::index_json(self.script.as_deref().unwrap_or(Path::new("")), index)
+        });
+        json!({ "event": "ready", "duration": duration, "timeline": timeline })
     }
 
     /// The script failed with `message`.
@@ -121,8 +136,12 @@ impl ControlChannel {
     }
 }
 
-/// Start listening at `address`, inside `world`'s app.
-pub fn listen(world: &mut World, address: ListenAddress) -> Result<(), String> {
+/// Start listening at `address`, inside `world`'s app previewing `script`.
+pub fn listen(
+    world: &mut World,
+    address: ListenAddress,
+    script: Option<&Path>,
+) -> Result<(), String> {
     let (command_tx, command_rx) = crossbeam_channel::unbounded::<Incoming>();
     let (event_tx, event_rx) = crossbeam_channel::unbounded::<String>();
     match address {
@@ -200,6 +219,12 @@ pub fn listen(world: &mut World, address: ListenAddress) -> Result<(), String> {
         commands,
         events: event_tx,
         index: None,
+        // Absolute and written as the script lines are, like `inspect`.
+        script: script.map(|script| {
+            std::path::absolute(script)
+                .map(|script| gaanim_core::console::plain_path(&script))
+                .unwrap_or_else(|_| script.to_path_buf())
+        }),
         last_playhead: None,
         last_sent: None,
     });
@@ -537,6 +562,52 @@ mod tests {
         assert_eq!(playhead.event()["time"], 5.2);
         timeline.current_time = 0.5;
         assert_eq!(Playhead::of(&timeline).stop, None);
+    }
+
+    #[test]
+    fn ready_carries_the_timeline_of_the_scene_shown() {
+        let (command_tx, commands) = crossbeam_channel::unbounded();
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        drop(command_tx);
+        let mut channel = ControlChannel {
+            commands,
+            events,
+            index: None,
+            script: Some(PathBuf::from("/talk/main.py")),
+            last_playhead: None,
+            last_sent: None,
+        };
+        // A bundle runs no script: its timeline is null.
+        assert!(channel.ready_event(2.0)["timeline"].is_null());
+
+        let index = TimelineIndex {
+            duration: 2.0,
+            segments: vec![gaanim_api::canvas::IndexedSegment {
+                name: "Portada".into(),
+                section: None,
+                start: 0.0,
+                end: 2.0,
+                location: Some(gaanim_core::console::ScriptLocation::new(
+                    "/talk/main.py",
+                    4,
+                )),
+                stops: Vec::new(),
+            }],
+            ..TimelineIndex::default()
+        };
+        channel.reloading(index);
+        channel.ready(2.0);
+        let sent: Vec<Value> = event_rx
+            .try_iter()
+            .map(|event| serde_json::from_str(&event).unwrap())
+            .collect();
+        assert_eq!(sent[0]["event"], "reload");
+        let ready = &sent[1];
+        assert_eq!(ready["event"], "ready");
+        assert_eq!(ready["duration"], 2.0);
+        assert_eq!(ready["timeline"]["schema"], crate::inspect::SCHEMA);
+        assert_eq!(ready["timeline"]["segments"][0]["name"], "Portada");
+        assert_eq!(ready["timeline"]["segments"][0]["line"], 4);
     }
 
     #[test]
