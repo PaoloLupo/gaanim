@@ -922,3 +922,52 @@ fn three_d_content_records_its_meshes_and_draws_them_again() {
     assert!(three_d.elements <= middle.capture.elements.len());
     assert!(bundle.verify().unwrap().is_empty());
 }
+
+/// Groups whose members draw alike under a glow and a blur, and two rows
+/// that end on the same glow: their drawables share one recipe. A replay
+/// shares one effect image among them where the recording built one per
+/// drawable, and the frames still verify.
+#[test]
+fn drawables_alike_under_soft_effects_replay_bit_for_bit() {
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let color = Color::from_rgb8(0x4f, 0x9d, 0xff);
+    let halo = Color::from_rgb8(0xff, 0xd1, 0x66);
+    let coins = |canvas: &mut SceneModel, y: f64| {
+        let members: Vec<_> = [-1.3, 0.0, 1.3]
+            .into_iter()
+            .map(|x| canvas.circle(0.6).fill(color).move_to(x, y))
+            .collect();
+        canvas.group(&members.iter().collect::<Vec<_>>())
+    };
+    coins(&mut canvas, 2.5).glow(halo, 0.4, 2.0);
+    coins(&mut canvas, 0.0).blur(0.1);
+    let rows: Vec<_> = [-2.5, -3.8]
+        .into_iter()
+        .map(|y| canvas.rect(3.0, 1.0).fill(color).move_to(4.0, y))
+        .collect();
+    let glow = gaanim_renderer::effects::Glow {
+        color: halo,
+        radius: 0.5,
+        intensity: 2.0,
+    };
+    canvas.play(
+        rows.iter()
+            .map(|row| row.animate().glow(Some(glow.clone())).duration(0.3))
+            .collect(),
+    );
+    canvas.wait(0.2);
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("alike.gaanim");
+    let mut config = BundleConfig::new(&path);
+    config.fps = 10;
+    record_canvas(canvas, config).expect("record the bundle");
+    let mismatched = Bundle::open(&path)
+        .unwrap()
+        .verify()
+        .expect("decode every frame");
+    assert!(
+        mismatched.is_empty(),
+        "frames differ from the recording: {mismatched:?}"
+    );
+}
