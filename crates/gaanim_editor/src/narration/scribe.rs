@@ -51,6 +51,25 @@ pub(crate) const LANGUAGES: [&str; 11] = [
     "ar-AE",
 ];
 
+/// The Scribe locale for a BCP 47 `tag`: the same one (`es-ES`), else the
+/// first of its language (`es` and `es-PE` are `es-ES`, `pt` is `pt-BR`).
+pub(crate) fn locale_for(tag: &str) -> Option<&'static str> {
+    let tag = tag.trim().replace('_', "-");
+    LANGUAGES
+        .iter()
+        .find(|locale| locale.eq_ignore_ascii_case(&tag))
+        .or_else(|| {
+            let language = tag.split('-').next()?;
+            LANGUAGES.iter().find(|locale| {
+                locale
+                    .split('-')
+                    .next()
+                    .is_some_and(|own| own.eq_ignore_ascii_case(language))
+            })
+        })
+        .copied()
+}
+
 /// Whether a session is streaming, so a second one never starts.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -943,6 +962,18 @@ mod tests {
         );
         assert_eq!(parse_event("not json"), None);
         assert_eq!(parse_event(r#"{"type":"other"}"#), None);
+    }
+
+    #[test]
+    fn language_tags_map_to_scribe_locales() {
+        assert_eq!(locale_for("es-ES"), Some("es-ES"));
+        assert_eq!(locale_for(" es "), Some("es-ES"));
+        assert_eq!(locale_for("es_PE"), Some("es-ES"));
+        assert_eq!(locale_for("EN-gb"), Some("en-US"));
+        assert_eq!(locale_for("pt-PT"), Some("pt-PT"));
+        assert_eq!(locale_for("pt"), Some("pt-BR"));
+        assert_eq!(locale_for("ko-KR"), None);
+        assert_eq!(locale_for(""), None);
     }
 
     #[test]

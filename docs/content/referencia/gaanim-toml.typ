@@ -32,10 +32,15 @@ output_dir = "exports"
   [`name`], [cadena], [nombre de la carpeta], [Nombre que muestran el Inicio y el título de la ventana.],
   [`assets_dir`], [ruta], [`"assets"`], [Carpeta de recursos, relativa al manifiesto. La lee `scene.assets.load_project()`.],
   [`output_dir`], [ruta], [`"exports"`], [Carpeta donde el diálogo de exportación del editor propone guardar, y donde van las capturas del fotograma.],
+  [`language`], [cadena], [ninguno], [Idioma en que se habla la charla, como etiqueta BCP 47 (`"es-ES"`, `"es"`). Lo usa el dictado del guion.],
   [`polls.relay`], [URL], [ninguno], [Relay de las encuestas de este proyecto, en una tabla `[polls]`.],
 )
 
-Las claves desconocidas se ignoran.
+Las claves desconocidas se ignoran. Las que parecen credenciales, porque su
+nombre contiene `token`, `secret`, `password` o `api_key`, también, pero
+`gaanim check` y el panel *Guion y narración* avisan de ellas: el manifiesto
+viaja con el proyecto, también a un repositorio, así que los tokens no van
+ahí (ver #link("/guias/presentaciones/#token-scribe")[El token]).
 
 === `kind`
 
@@ -82,6 +87,24 @@ propone guardar ahí, con el nombre del proyecto (`<output_dir>/mi-video.mp4`),
 y las capturas del fotograma actual van a
 `<output_dir>/captures/`. `gaanim export` no la usa: escribe en la ruta de
 `--output`, relativa al directorio actual.
+
+=== `language` <language>
+
+```toml
+language = "es-ES"
+```
+
+El idioma en que se habla la charla del proyecto, como etiqueta BCP 47:
+`"es-ES"`, `"es"`, `"es-PE"`, `"en-US"`… Al
+#link("/guias/presentaciones/#dictar")[dictar el guion con Scribe] manda sobre
+el idioma elegido en el editor, así que la charla se dicta igual en cualquier
+equipo. Scribe usa la misma etiqueta si la tiene y, si no, la primera de ese
+idioma: `"es"` y `"es-PE"` se dictan como `es-ES`, y `"pt"` como `pt-BR`. Si
+Scribe no transcribe ese idioma, se usa el del editor y el panel lo avisa.
+
+En *Guion y narración → Scribe de Zoom*, *Fijar en gaanim.toml* escribe el
+idioma elegido y *Desfijar* lo quita; el resto del archivo, comentarios
+incluidos, queda como estaba.
 
 === `[polls]`
 

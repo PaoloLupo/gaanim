@@ -10,6 +10,9 @@ gaanim_core = { path = "../gaanim_core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
+# Rewrites one key of gaanim.toml keeping its comments and layout (the
+# toml_edit build toml already uses).
+toml_edit = { version = "0.22", default-features = false, features = ["parse", "display"] }
 directories = { workspace = true }
 gaanim_thumbnail = { path = "../gaanim_thumbnail" }
 

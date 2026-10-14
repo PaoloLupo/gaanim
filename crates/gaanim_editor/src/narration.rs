@@ -43,7 +43,7 @@ use crate::presenter::prompter::{
 };
 use scribe::{ScribeConfig, ScribeEvent, ScribeSession, ScribeToken, StopReason, TokenSource};
 
-use crate::export::StashedReplay;
+use crate::export::{ProjectPaths, StashedReplay};
 use crate::ui_kit::{
     ButtonTone, Icon, caption, card_frame, field_frame, icon_button, paint_icon, palette,
     primary_button, secondary_button, section_label, small_button,
@@ -260,6 +260,8 @@ pub struct NarrationPanel {
     scribe_token: String,
     /// Whether the credential store holds a token, once looked up.
     token_stored: Option<bool>,
+    /// What the project's gaanim.toml says, read again on every replay.
+    speech: Option<(u64, ProjectSpeech)>,
     /// Dictate the script with Scribe while recording the live take.
     dictate_live: bool,
 }
@@ -1007,9 +1009,48 @@ fn merge_dictation(
 
 /// The plan of a dictation: the token and what to ask Scribe, from the
 /// speaker's preferences.
+/// What the open project's `gaanim.toml` says about speech.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ProjectSpeech {
+    /// The manifest, when the scene belongs to a project.
+    manifest: Option<PathBuf>,
+    /// Its `language`.
+    language: Option<String>,
+    /// Its keys that look like credentials.
+    secret_keys: Vec<String>,
+}
+
+impl ProjectSpeech {
+    fn read(paths: Option<&ProjectPaths>) -> Self {
+        paths
+            .and_then(|paths| gaanim_project::resolve_project(&paths.project_dir).ok())
+            .map(|project| Self {
+                manifest: Some(project.manifest_path),
+                language: project.manifest.language,
+                secret_keys: project.manifest.secret_keys,
+            })
+            .unwrap_or_default()
+    }
+
+    /// The Scribe locale the project pins, if it pins one Scribe has.
+    fn locale(&self) -> Option<&'static str> {
+        self.language.as_deref().and_then(scribe::locale_for)
+    }
+}
+
+/// The locale Scribe dictates in: the project's `language`, else the
+/// speaker's choice, else Spanish.
+fn dictation_language(project: &ProjectSpeech, settings: &NarrationSettings) -> &'static str {
+    project
+        .locale()
+        .or_else(|| scribe::locale_for(&settings.scribe_language))
+        .unwrap_or(scribe::LANGUAGES[0])
+}
+
 fn dictation_plan(
     panel: &mut NarrationPanel,
     slides: &[ScriptSlide],
+    project: &ProjectSpeech,
     keep_take: bool,
 ) -> Result<CapturePlan, String> {
     if slides.is_empty() {
@@ -1024,11 +1065,7 @@ fn dictation_plan(
         "Falta el token de Scribe: guárdalo o pégalo en Ajustes → Scribe de Zoom".to_owned()
     })?;
     let settings = panel.settings();
-    let language = if scribe::LANGUAGES.contains(&settings.scribe_language.as_str()) {
-        settings.scribe_language.clone()
-    } else {
-        scribe::LANGUAGES[0].to_owned()
-    };
+    let language = dictation_language(project, settings).to_owned();
     let phrases = if settings.scribe_vocabulary {
         vocabulary(slides)
     } else {
@@ -1161,6 +1198,7 @@ pub(crate) fn narration_session_system(
     stash: Res<StashedReplay>,
     reload: Option<Res<ScriptReload>>,
     presentation: Res<PresentationMode>,
+    paths: Option<Res<ProjectPaths>>,
 ) {
     panel.poll_jobs();
     let pressed = |key| keys.just_pressed(key);
@@ -1284,7 +1322,8 @@ pub(crate) fn narration_session_system(
                 }
                 Request::RecordLive { dictate } => {
                     let plan = if dictate {
-                        match dictation_plan(&mut panel, &script_slides(&stash), true) {
+                        let project = ProjectSpeech::read(paths.as_deref());
+                        match dictation_plan(&mut panel, &script_slides(&stash), &project, true) {
                             Ok(plan) => plan,
                             Err(error) => {
                                 panel.notify(NoticeKind::Error, error);
@@ -1310,13 +1349,15 @@ pub(crate) fn narration_session_system(
                     }
                 }
                 Request::Dictate => {
-                    let plan = match dictation_plan(&mut panel, &script_slides(&stash), false) {
-                        Ok(plan) => plan,
-                        Err(error) => {
-                            panel.notify(NoticeKind::Error, error);
-                            return;
-                        }
-                    };
+                    let project = ProjectSpeech::read(paths.as_deref());
+                    let plan =
+                        match dictation_plan(&mut panel, &script_slides(&stash), &project, false) {
+                            Ok(plan) => plan,
+                            Err(error) => {
+                                panel.notify(NoticeKind::Error, error);
+                                return;
+                            }
+                        };
                     match (Target::live(&manifest), &manifest.live) {
                         // A live take replaces the stops: present with its
                         // stops restored, and keep the take as it was.
@@ -1896,6 +1937,7 @@ pub(crate) fn narration_panel_system(
     stash: Res<StashedReplay>,
     presentation: Res<PresentationMode>,
     hub: Option<Res<crate::project_hub::ProjectHubState>>,
+    paths: Option<Res<ProjectPaths>>,
 ) {
     if !panel.open
         || session.capturing()
@@ -1910,6 +1952,19 @@ pub(crate) fn narration_panel_system(
     let manifest = manifest(&stash);
     let script = script_path(&stash, &manifest);
     let slides = script_slides(&stash);
+    // gaanim.toml changes re-run the scene, so a replay is when to read it.
+    if panel
+        .speech
+        .as_ref()
+        .is_none_or(|(revision, _)| *revision != stash.revision)
+    {
+        panel.speech = Some((stash.revision, ProjectSpeech::read(paths.as_deref())));
+    }
+    let project = panel
+        .speech
+        .as_ref()
+        .map(|(_, speech)| speech.clone())
+        .unwrap_or_default();
     let mut close = false;
     let mut request = None;
     let mut settings_changed = false;
@@ -1987,7 +2042,7 @@ pub(crate) fn narration_panel_system(
                             let stored = *token_stored
                                 .get_or_insert_with(|| scribe::vault::load().is_some());
                             let (changed, action) =
-                                scribe_settings(ui, settings, scribe_token, stored);
+                                scribe_settings(ui, settings, scribe_token, stored, &project);
                             settings_changed |= changed;
                             vault_action = action;
                         });
@@ -2041,15 +2096,53 @@ pub(crate) fn narration_panel_system(
             }
             Err(error) => panel.notify(NoticeKind::Error, error),
         },
+        Some(VaultAction::Pin(language)) => {
+            let pinned = language.clone();
+            write_project_language(&mut panel, &project, Some(language), move || {
+                format!("Idioma fijado en gaanim.toml: language = \"{pinned}\"")
+            });
+        }
+        Some(VaultAction::Unpin) => {
+            write_project_language(&mut panel, &project, None, || {
+                "gaanim.toml ya no fija el idioma: se usa el tuyo".to_owned()
+            });
+        }
         None => {}
     }
 }
 
-/// What the Scribe settings ask of the credential store.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Write the project's `language`, or remove it, and say so.
+fn write_project_language(
+    panel: &mut NarrationPanel,
+    project: &ProjectSpeech,
+    language: Option<String>,
+    done: impl FnOnce() -> String,
+) {
+    let Some(manifest) = &project.manifest else {
+        panel.notify(
+            NoticeKind::Error,
+            "esta escena no pertenece a un proyecto con gaanim.toml",
+        );
+        return;
+    };
+    match gaanim_project::set_project_language(manifest, language.as_deref()) {
+        Ok(()) => {
+            // Read it again on the next frame rather than wait for the replay.
+            panel.speech = None;
+            panel.notify(NoticeKind::Success, done());
+        }
+        Err(error) => panel.notify(NoticeKind::Error, error),
+    }
+}
+
+/// What the Scribe settings ask for: the credential store, or the
+/// project's language.
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum VaultAction {
     Save,
     Forget,
+    Pin(String),
+    Unpin,
 }
 
 fn paint_mic_badge(ui: &mut egui::Ui) {
@@ -2507,6 +2600,7 @@ fn scribe_settings(
     settings: &mut NarrationSettings,
     typed_token: &mut String,
     stored: bool,
+    project: &ProjectSpeech,
 ) -> (bool, Option<VaultAction>) {
     let before = settings.clone();
     let mut action = None;
@@ -2581,20 +2675,86 @@ fn scribe_settings(
                 action = Some(VaultAction::Forget);
             }
         });
+        // The project's language wins; changing it then rewrites gaanim.toml.
+        let current = dictation_language(project, settings);
+        let pinned = project.locale().is_some();
+        let mut chosen = current;
         ui.horizontal(|ui| {
             section_label(ui, "Idioma");
             egui::ComboBox::from_id_salt("narration_scribe_language")
-                .selected_text(settings.scribe_language.clone())
+                .selected_text(current)
                 .show_ui(ui, |ui| {
                     for language in scribe::LANGUAGES {
-                        ui.selectable_value(
-                            &mut settings.scribe_language,
-                            language.to_owned(),
-                            language,
-                        );
+                        ui.selectable_value(&mut chosen, language, language);
                     }
                 });
+            if pinned {
+                if small_button(ui, "Desfijar", true)
+                    .on_hover_text("Quita language de gaanim.toml y usa tu idioma")
+                    .clicked()
+                {
+                    action = Some(VaultAction::Unpin);
+                }
+            } else if project.manifest.is_some()
+                && small_button(ui, "Fijar en gaanim.toml", true)
+                    .on_hover_text(
+                        "Escribe language en el gaanim.toml del proyecto: la charla se dicta \
+                         en este idioma en cualquier equipo",
+                    )
+                    .clicked()
+            {
+                action = Some(VaultAction::Pin(current.to_owned()));
+            }
         });
+        if chosen != current {
+            if pinned {
+                action = Some(VaultAction::Pin(chosen.to_owned()));
+            } else {
+                settings.scribe_language = chosen.to_owned();
+            }
+        }
+        match (&project.language, project.locale()) {
+            (Some(tag), Some(locale)) if !tag.eq_ignore_ascii_case(locale) => {
+                ui.label(faint(format!(
+                    "Fijado en gaanim.toml como «{tag}»; Scribe lo dicta como {locale}"
+                )));
+            }
+            (Some(_), Some(_)) => {
+                ui.label(faint("Fijado en gaanim.toml (language)".to_owned()));
+            }
+            (Some(tag), None) => {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!(
+                            "gaanim.toml pide «{tag}», que Scribe no transcribe: se usa {current}"
+                        ))
+                        .size(11.5)
+                        .color(palette::STOP),
+                    )
+                    .wrap(),
+                );
+            }
+            (None, _) => {}
+        }
+        if !project.secret_keys.is_empty() {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!(
+                        "gaanim.toml tiene {} con pinta de credencial. Gaanim no la lee: \
+                         quítala del proyecto y, si llegó a un repositorio, genera otra clave.",
+                        project
+                            .secret_keys
+                            .iter()
+                            .map(|key| format!("`{key}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ))
+                    .size(11.5)
+                    .color(palette::DANGER),
+                )
+                .wrap(),
+            );
+        }
         ui.horizontal(|ui| {
             section_label(ui, "Minutos máximos por sesión");
             ui.add(
@@ -3399,6 +3559,24 @@ mod tests {
             "{source}"
         );
         assert!(source.contains("[stop titulo]\n\n## Datos"), "{source}");
+    }
+
+    #[test]
+    fn the_project_language_wins_over_the_speakers() {
+        let mut settings = NarrationSettings {
+            scribe_language: "en-US".into(),
+            ..NarrationSettings::default()
+        };
+        let mut project = ProjectSpeech::default();
+        assert_eq!(dictation_language(&project, &settings), "en-US");
+        project.language = Some("es-PE".into());
+        assert_eq!(dictation_language(&project, &settings), "es-ES");
+        // A language Scribe lacks leaves the speaker's.
+        project.language = Some("ko".into());
+        assert_eq!(dictation_language(&project, &settings), "en-US");
+        settings.scribe_language = "xx".into();
+        project.language = None;
+        assert_eq!(dictation_language(&project, &settings), "es-ES");
     }
 
     #[test]

@@ -679,11 +679,22 @@ fn dispatch_check_mode() -> bool {
     });
     let source = std::fs::read_to_string(&script).unwrap_or_default();
     let is_presentation = canvas.has_presentation_features();
-    let report = if is_presentation {
+    let mut report = if is_presentation {
         presentation_preflight(&canvas, &source)
     } else {
         scene_preflight(&canvas, &source)
     };
+    // A manifest travels with the project, repositories included.
+    if let Some(project) = gaanim_project::find_project_for_script(&script) {
+        report
+            .warnings
+            .extend(project.manifest.secret_keys.iter().map(|key| {
+                format!(
+                    "gaanim.toml: `{key}` looks like a credential; keep tokens and keys out of \
+                     the project"
+                )
+            }));
+    }
 
     // The report goes to stdout so it can be captured. Its first line, the
     // `check` status line, marks where it starts (the docs builder relies on it).

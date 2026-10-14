@@ -159,8 +159,10 @@ cambia; para grabarla y dictar a la vez, marca *Dictar también el guion con
 Scribe* junto a *Grabar toma en vivo*.
 
 - Idiomas: `es-ES`, `en-US`, `pt-BR`, `pt-PT`, `fr-FR`, `de-DE`, `it-IT`,
-  `ja-JP`, `zh-CN`, `ar-SA` y `ar-AE`. Se elige en los ajustes; el español de
-  Scribe es `es-ES`.
+  `ja-JP`, `zh-CN`, `ar-SA` y `ar-AE`; el español de Scribe es `es-ES`. Se
+  elige en los ajustes del panel o, para todo el proyecto, con
+  #link("/referencia/gaanim-toml/#language")[`language`] en `gaanim.toml`
+  (*Fijar en gaanim.toml*), que manda sobre el de los ajustes.
 - Scribe asigna cada frase completa al tramo en el que empezó a decirse: haz
   una pausa breve al avanzar para que la frase siguiente caiga en su tramo.
 - *Enviar los nombres de diapositivas y stops como vocabulario* ayuda a
