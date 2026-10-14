@@ -28,8 +28,10 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
     {
-        let res = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/assets/brand/gaanim-app.res");
+        // The manifest folder of this build, not the one the build script
+        // was compiled in: checkouts sharing a target directory reuse it.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let res = std::path::Path::new(&manifest).join("../../docs/assets/brand/gaanim-app.res");
         println!("cargo:rerun-if-changed={}", res.display());
         println!("cargo:rustc-link-arg-bins={}", res.display());
     }
