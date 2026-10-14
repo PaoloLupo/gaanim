@@ -70,7 +70,7 @@ fn transcribe(
                 .args(["-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le"])
                 .arg(&input),
         )
-        .map_err(|error| format!("FFmpeg no pudo preparar la toma: {error}"))?;
+        .map_err(|error| format!("FFmpeg could not prepare the take: {error}"))?;
         let prefix = work.join("take");
         run_tool(
             Command::new(cli)
@@ -81,11 +81,11 @@ fn transcribe(
                 .args(["-l", language, "-ml", "1", "-sow", "-oj", "-np", "-of"])
                 .arg(&prefix),
         )
-        .map_err(|error| format!("whisper-cli falló: {error}"))?;
+        .map_err(|error| format!("whisper-cli failed: {error}"))?;
         let json = std::fs::read_to_string(prefix.with_extension("json"))
-            .map_err(|error| format!("whisper-cli no escribió su JSON: {error}"))?;
+            .map_err(|error| format!("whisper-cli did not write its JSON: {error}"))?;
         let words = parse_whisper_json(&json)
-            .map_err(|error| format!("respuesta de whisper-cli inválida: {error}"))?;
+            .map_err(|error| format!("invalid whisper-cli response: {error}"))?;
         let count = words.len();
         update_sidecar(sidecar_path, |sidecar| sidecar.words = words)?;
         Ok(count)

@@ -144,12 +144,12 @@ impl Report {
     /// Columns every per-player file starts with: the nickname, what
     /// joining asked, and the team.
     fn who_headers(&self) -> Vec<String> {
-        let mut headers = vec!["Apodo".to_string()];
+        let mut headers = vec!["Nickname".to_string()];
         if let Some(ask) = &self.ask {
             headers.push(ask.label.clone());
         }
         if self.teams.is_some() {
-            headers.push("Equipo".into());
+            headers.push("Team".into());
         }
         headers
     }
@@ -167,10 +167,10 @@ impl Report {
 
     /// `jugadores.csv`: a row per player, best first.
     pub fn players_csv(&self) -> String {
-        let mut headers = vec!["Puesto".to_string()];
+        let mut headers = vec!["Rank".to_string()];
         headers.extend(self.who_headers());
         headers.extend(
-            ["Puntos", "Aciertos", "Respondidas", "Racha", "Entró"]
+            ["Points", "Correct", "Answered", "Streak", "Joined"]
                 .into_iter()
                 .map(String::from),
         );
@@ -212,13 +212,7 @@ impl Report {
         let mut headers = self.who_headers();
         headers.extend(
             [
-                "N.º",
-                "Pregunta",
-                "Tipo",
-                "Respuesta",
-                "Correcta",
-                "Puntos",
-                "Segundos",
+                "No.", "Question", "Type", "Answer", "Correct", "Points", "Seconds",
             ]
             .into_iter()
             .map(String::from),
@@ -236,7 +230,7 @@ impl Report {
                     kind(poll).into(),
                     text(&poll.texts(&answer.options)),
                     match answer.right {
-                        Some(true) => "sí".into(),
+                        Some(true) => "yes".into(),
                         Some(false) => "no".into(),
                         None => String::new(),
                     },
@@ -261,21 +255,21 @@ impl Report {
             .max()
             .unwrap_or(0);
         let mut headers: Vec<String> = [
-            "N.º",
-            "Pregunta",
-            "Tipo",
-            "Correcta",
-            "Respondieron",
-            "Acertaron",
-            "% de acierto",
-            "Segundos en promedio",
+            "No.",
+            "Question",
+            "Type",
+            "Correct answer",
+            "Respondents",
+            "Correct",
+            "% correct",
+            "Average seconds",
         ]
         .into_iter()
         .map(String::from)
         .collect();
         for index in 1..=most {
-            headers.push(format!("Respuesta {index}"));
-            headers.push(format!("Votos {index}"));
+            headers.push(format!("Answer {index}"));
+            headers.push(format!("Votes {index}"));
         }
         let mut rows = vec![headers.iter().map(|header| text(header)).collect()];
         for (number, poll) in self.polls.iter().enumerate() {
@@ -386,11 +380,7 @@ impl Report {
 }
 
 fn kind(poll: &PollReport) -> &'static str {
-    if poll.is_quiz() {
-        "cuestionario"
-    } else {
-        "encuesta"
-    }
+    if poll.is_quiz() { "quiz" } else { "poll" }
 }
 
 /// A local time of day, `15:04:05`, from milliseconds since the epoch.
@@ -511,7 +501,7 @@ mod tests {
         assert_eq!(
             lines(&csv),
             [
-                "Puesto,Apodo,Código,Equipo,Puntos,Aciertos,Respondidas,Racha,Entró,1. ¿Té o café?,\"2. ¿2 + 2, o 5?\"",
+                "Rank,Nickname,Código,Team,Points,Correct,Answered,Streak,Joined,1. ¿Té o café?,\"2. ¿2 + 2, o 5?\"",
                 "1,Ana,2026-0042,Azul,900,1,1,1,,Café,4 ✓",
                 "2,Beto,\"'=HYPERLINK(\"\"x\"\")\",Rojo,0,0,1,0,,,5 ✗",
             ]
@@ -523,10 +513,10 @@ mod tests {
         assert_eq!(
             lines(&report().answers_csv()),
             [
-                "Apodo,Código,Equipo,N.º,Pregunta,Tipo,Respuesta,Correcta,Puntos,Segundos",
-                "Ana,2026-0042,Azul,1,¿Té o café?,encuesta,Café,,,",
-                "Ana,2026-0042,Azul,2,\"¿2 + 2, o 5?\",cuestionario,4,sí,900,2.6",
-                "Beto,\"'=HYPERLINK(\"\"x\"\")\",Rojo,2,\"¿2 + 2, o 5?\",cuestionario,5,no,0,4.0",
+                "Nickname,Código,Team,No.,Question,Type,Answer,Correct,Points,Seconds",
+                "Ana,2026-0042,Azul,1,¿Té o café?,poll,Café,,,",
+                "Ana,2026-0042,Azul,2,\"¿2 + 2, o 5?\",quiz,4,yes,900,2.6",
+                "Beto,\"'=HYPERLINK(\"\"x\"\")\",Rojo,2,\"¿2 + 2, o 5?\",quiz,5,no,0,4.0",
             ]
         );
     }
@@ -536,9 +526,9 @@ mod tests {
         assert_eq!(
             lines(&report().questions_csv()),
             [
-                "N.º,Pregunta,Tipo,Correcta,Respondieron,Acertaron,% de acierto,Segundos en promedio,Respuesta 1,Votos 1,Respuesta 2,Votos 2,Respuesta 3,Votos 3",
-                "1,¿Té o café?,encuesta,,3,,,,Té,1,Café,2,,",
-                "2,\"¿2 + 2, o 5?\",cuestionario,4,2,1,50,3.3,3,0,4,1,5,1",
+                "No.,Question,Type,Correct answer,Respondents,Correct,% correct,Average seconds,Answer 1,Votes 1,Answer 2,Votes 2,Answer 3,Votes 3",
+                "1,¿Té o café?,poll,,3,,,,Té,1,Café,2,,",
+                "2,\"¿2 + 2, o 5?\",quiz,4,2,1,50,3.3,3,0,4,1,5,1",
             ]
         );
     }
@@ -548,8 +538,8 @@ mod tests {
         let mut report = report();
         report.ask = None;
         report.teams = None;
-        assert!(lines(&report.players_csv())[0].starts_with("Puesto,Apodo,Puntos,"));
-        assert!(lines(&report.answers_csv())[0].starts_with("Apodo,N.º,"));
+        assert!(lines(&report.players_csv())[0].starts_with("Rank,Nickname,Points,"));
+        assert!(lines(&report.answers_csv())[0].starts_with("Nickname,No.,"));
     }
 
     #[test]

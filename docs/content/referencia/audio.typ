@@ -496,41 +496,45 @@ unen y una línea en blanco separa párrafos. Un `##` vacío o repetido (sin
 distinguir mayúsculas) produce `ValueError`. El texto de un bloque se busca en
 este orden: el argumento `text`, su sección del guion y las notas del segmento;
 con un guion cargado, una clave sin sección emite un `UserWarning`. El botón
-*Crear guion* / *Abrir y completar* del panel crea el archivo o le añade las
+*Create script* / *Open and complete* del panel crea el archivo o le añade las
 secciones de los bloques y las diapositivas que faltan, y las marcas de sus
-stops, y lo abre en tu editor. En una toma en vivo, el teleprompter muestra el
-guion de la diapositiva actual cortado en sus `[stop]`, con `▶ AVANZA` donde
-toca avanzar.
+stops, y lo abre en tu editor. En una toma en vivo, el subtítulo del editor
+muestra el tramo del guion que toca decir, con `▶` y el nombre del stop donde
+toca avanzar (ver
+#link("/guias/presentaciones/#prompter")[El prompter]).
 
 === Grabar desde el editor
 
 Abre el panel con el botón de micrófono de la barra de reproducción (o
-*Más controles → Guion y narración*). El panel lista el guion, la toma en vivo y cada
-bloque de voz en off con su estado: *sin grabar* (duración estimada del texto)
-o *grabada*, su nivel y de dónde sale su texto. El panel y el teleprompter se
-pueden arrastrar desde su asa de puntos, y *Ocultar guion* reduce el
-teleprompter a su línea de estado para ver la escena.
+*More controls → Script & narration*). El panel lista el guion, la toma en vivo y cada
+bloque de voz en off con su estado: *Not recorded* (duración estimada del texto)
+o *Recorded*, su nivel y de dónde sale su texto. El panel se puede arrastrar
+desde su asa de puntos. Mientras grabas, un subtítulo abajo de la vista previa
+muestra el texto que toca decir y, debajo, el reloj, el medidor de nivel y las
+teclas.
 
-- *Grabar* posiciona la escena al inicio del bloque y abre el micrófono
+- *Record* posiciona la escena al inicio del bloque y abre el micrófono
   predeterminado durante una cuenta atrás de tres segundos que sirve de prueba
   de nivel (no se guarda). Después graba mientras la escena avanza, con el
-  texto del bloque como teleprompter y la siguiente marca resaltada. Pulsa
+  texto del bloque en el subtítulo y la siguiente marca resaltada. Pulsa
   *Espacio* al decir cada marca, *Enter* para guardar y *Esc* para descartar.
-- *Grabar toma en vivo* recarga la escena con sus paradas originales y graba
+- *Record live take* recarga la escena con sus paradas originales y graba
   mientras presentas. La reproducción se detiene en cada parada; *→* o
-  *Espacio* continúa, *Enter* termina y *Esc* descarta.
-- *Oír* reproduce el bloque desde su inicio.
-- *Nivelar* lleva una toma ya grabada al nivel configurado.
+  *Espacio* continúa, *Enter* termina y *Esc* descarta. Con *Also dictate the script with Scribe*, Scribe de Zoom transcribe a la vez lo que dices y lo
+  escribe en el guion (ver
+  #link("/guias/presentaciones/#dictar")[Dictar el guion con Scribe]).
+- *Listen* reproduce el bloque desde su inicio.
+- *Level* lleva una toma ya grabada al nivel configurado.
 
 Durante la grabación el audio del preview se silencia para que la toma anterior
 no se cuele en el micrófono.
 
 === Nivel de la voz
 
-Al grabar, el medidor del teleprompter muestra los picos del micrófono en dBFS.
+Al grabar, el medidor del subtítulo muestra los picos del micrófono en dBFS.
 La zona verde, entre -18 y -6 dBFS, es la ideal. Entre -6 y -3 dBFS el medidor
-pasa a ámbar, y por encima de -3 dBFS el borde del teleprompter se pone rojo con
-el aviso "¡Muy fuerte!": una palabra más fuerte podría saturar, y la saturación
+pasa a ámbar, y por encima de -3 dBFS el borde del subtítulo se pone rojo con
+el aviso "Too loud!": una palabra más fuerte podría saturar, y la saturación
 no se corrige después. Si algún tramo satura, el aviso lo cuenta hasta el final
 de la toma; si durante cuatro segundos nada llega a -30 dBFS, avisa de que la
 voz está muy baja.
@@ -539,7 +543,7 @@ Cada toma nueva se nivela al guardarla a -16 LUFS integrados, el nivel
 recomendado para voz en video online (YouTube reproduce a -14 y la televisión
 usa -23). FFmpeg mide la toma y le aplica una ganancia constante, con un pico
 real máximo de -1.5 dBTP y un filtro paso alto a 80 Hz. La grabación original
-se conserva en `narration/.originals/`. En *Voz y grabación* puedes cambiar el
+se conserva en `narration/.originals/`. En *Voice and recording* puedes cambiar el
 nivel final: el panel avisa si eliges más de -14 LUFS o menos de -20, o
 desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
 
@@ -547,8 +551,8 @@ desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
 
 En lugar de pulsar Espacio, whisper.cpp puede detectar cuándo dices cada
 palabra. Instala `whisper-cli` y un modelo `ggml-*.bin`, e indícalos en
-*Whisper (opcional)* dentro del panel (vacío busca `whisper-cli` en el `PATH`).
-*Transcribir* guarda en el JSON de la toma el tiempo de cada palabra; también
+*Whisper (optional)* dentro del panel (vacío busca `whisper-cli` en el `PATH`).
+*Transcribe* guarda en el JSON de la toma el tiempo de cada palabra; también
 puede hacerse automáticamente al guardar cada toma. Requiere FFmpeg. Para que
 una marca se resuelva por transcripción, su nombre debe ser la palabra o frase
 que dices; se ignoran mayúsculas, tildes y puntuación.

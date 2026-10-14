@@ -71,7 +71,7 @@ impl LinkTarget {
                 });
                 Some(found.ok_or_else(|| {
                     format!(
-                        "El enlace apunta al segmento «{name}», que esta presentación no tiene."
+                        "The link points to segment \"{name}\", which this presentation does not have."
                     )
                 })?)
             }
@@ -86,7 +86,7 @@ impl LinkTarget {
                 })
                 .ok_or_else(|| {
                     format!(
-                        "El enlace apunta a la pausa {stop} del segmento «{}», que tiene {}.",
+                        "The link points to stop {stop} of segment \"{}\", which has {}.",
                         segment.name,
                         segment.stops.len()
                     )
@@ -105,7 +105,7 @@ impl LinkTarget {
                     })
                     .ok_or_else(|| {
                         format!(
-                            "El enlace apunta a la pausa {stop}, pero esta presentación tiene {}.",
+                            "The link points to stop {stop}, but this presentation has {}.",
                             stops.len()
                         )
                     })
@@ -318,7 +318,7 @@ mod tests {
         assert_eq!(land("pausa=3"), at(6.0, true));
         assert_eq!(land("t=1:30"), at(9.0, false));
         assert_eq!(land("t=2.5&present"), at(2.5, false));
-        assert!(land("segmento=cierre").unwrap_err().contains("«cierre»"));
+        assert!(land("segmento=cierre").unwrap_err().contains("\"cierre\""));
         assert!(land("segmento=1&pausa=5").is_err());
         assert!(land("pausa=9").is_err());
         assert_eq!(LinkTarget::parse("present"), None);

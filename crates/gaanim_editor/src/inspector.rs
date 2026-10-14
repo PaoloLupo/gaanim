@@ -141,89 +141,88 @@ pub fn inspector_panel_system(
     let window = inspector_window(panel.position).show(ctx, |ui| {
         ui.set_width(280.0);
         ui.spacing_mut().item_spacing.y = 6.0;
-        top = window_header(ui, "Quitar la selección");
+        top = window_header(ui, "Clear the selection");
         header(ui, object.map(|(_, object)| object), data.0);
         if let Some((_, object)) = object {
             location_row(ui, object);
         } else if authored.is_some() {
-            muted(ui, "Una parte interna, sin línea propia en el script.");
+            muted(
+                ui,
+                "An internal part, with no line of its own in the script.",
+            );
         }
         if let Some(text) = &text {
-            field(ui, "Texto", text);
+            field(ui, "Text", text);
         }
 
-        section(ui, "TRANSFORMACIÓN");
+        section(ui, "TRANSFORM");
         if let Some(transform) = data.1 {
-            field(ui, "Posición", &format_vec(transform.translation));
-            field(ui, "Rotación", &format_rotation(transform.rotation));
-            field(ui, "Escala", &format_scale(transform.scale));
+            field(ui, "Position", &format_vec(transform.translation));
+            field(ui, "Rotation", &format_rotation(transform.rotation));
+            field(ui, "Scale", &format_scale(transform.scale));
         }
         if let Some(bounds) = bounds {
             let size = bounds.max - bounds.min;
             field(
                 ui,
-                "Tamaño",
+                "Size",
                 &format!("{} × {}", number(size.x), number(size.y)),
             );
-            field(ui, "Centro", &format_vec((bounds.min + bounds.max) * 0.5));
+            field(ui, "Center", &format_vec((bounds.min + bounds.max) * 0.5));
         } else if let Some(global) = data.2 {
             field(
                 ui,
-                "En la escena",
+                "In the scene",
                 &format_vec(global.mat4.w_axis.truncate()),
             );
         }
 
-        section(ui, "ESTILO");
+        section(ui, "STYLE");
         match data.3 {
-            Some(fill) => brush_field(ui, "Relleno", fill.0.as_ref()),
-            None => field(ui, "Relleno", "—"),
+            Some(fill) => brush_field(ui, "Fill", fill.0.as_ref()),
+            None => field(ui, "Fill", "—"),
         }
         match data.4 {
             Some(stroke) if stroke.brush.is_some() && stroke.style.width > 0.0 => {
-                brush_field(ui, "Trazo", stroke.brush.as_ref());
-                field(ui, "Grosor", &number(stroke.style.width));
+                brush_field(ui, "Stroke", stroke.brush.as_ref());
+                field(ui, "Width", &number(stroke.style.width));
             }
-            _ => field(ui, "Trazo", "—"),
+            _ => field(ui, "Stroke", "—"),
         }
         let opacity = data.5.map_or(1.0, |opacity| opacity.0);
         let global = data.6.map_or(opacity, |opacity| opacity.0);
         field(
             ui,
-            "Opacidad",
+            "Opacity",
             &if (global - opacity).abs() > 1e-3 {
-                format!("{} (en pantalla {})", percent(opacity), percent(global))
+                format!("{} ({} on screen)", percent(opacity), percent(global))
             } else {
                 percent(opacity)
             },
         );
 
-        section(ui, "ORDEN");
+        section(ui, "ORDER");
         if let Some(order) = data.7 {
             field(ui, "z_index", &order.z_index.to_string());
         }
         if let Some(layer) = data.8 {
-            field(ui, "Capa", &format!("rango {}", layer.0));
+            field(ui, "Layer", &format!("rank {}", layer.0));
         }
         if let Some(parallax) = data.9 {
-            field(
-                ui,
-                "Parallax",
-                &format!("profundidad {}", number(parallax.depth)),
-            );
+            field(ui, "Parallax", &format!("depth {}", number(parallax.depth)));
         }
         if data.10 {
-            field(ui, "HUD", "fijo en pantalla");
+            field(ui, "HUD", "fixed on screen");
         }
-        field(ui, "Visible", if data.11 { "sí" } else { "no" });
+        field(ui, "Visible", if data.11 { "yes" } else { "no" });
         if child_count > 0 {
-            field(ui, "Hijos", &child_count.to_string());
+            field(ui, "Children", &child_count.to_string());
         }
         if let Some((entity, parent)) = parent {
             ui.add_space(4.0);
-            let label = format!("Dentro de {}", object_title(parent));
+            let label = format!("Inside {}", object_title(parent));
             if ui_kit::small_button(ui, &label, true)
-                .on_hover_text("Seleccionar el grupo que lo contiene")
+                .on_hover_text("Select the group that contains it")
                 .clicked()
             {
                 select = Some(entity);
@@ -288,25 +287,25 @@ fn camera_panel(
     let window = inspector_window(*position).show(ctx, |ui| {
         ui.set_width(280.0);
         ui.spacing_mut().item_spacing.y = 6.0;
-        top = window_header(ui, "Ocultar el inspector");
+        top = window_header(ui, "Hide the inspector");
         ui.add(
             egui::Label::new(
-                egui::RichText::new("Cámara de la escena")
+                egui::RichText::new("Scene camera")
                     .size(16.0)
                     .strong()
                     .color(palette::TEXT),
             )
             .wrap(),
         );
-        muted(ui, "Un clic en un objeto lo inspecciona.");
+        muted(ui, "Click an object to inspect it.");
         for (name, value) in camera_fields(camera) {
             field(ui, name, &value);
         }
         if let Some(depth_of_field) = depth_of_field.filter(|dof| dof.aperture > 0.0) {
-            section(ui, "PROFUNDIDAD DE CAMPO");
-            field(ui, "Enfoque", &number(depth_of_field.focus));
-            field(ui, "Apertura", &number(depth_of_field.aperture));
-            field(ui, "Desenfoque máx.", &number(depth_of_field.max_blur));
+            section(ui, "DEPTH OF FIELD");
+            field(ui, "Focus", &number(depth_of_field.focus));
+            field(ui, "Aperture", &number(depth_of_field.aperture));
+            field(ui, "Max blur", &number(depth_of_field.max_blur));
         }
     });
     let rect = window.map(|window| window.response.rect);
@@ -317,8 +316,8 @@ fn camera_panel(
 /// The camera's pose and lens, as a script would set them.
 fn camera_fields(camera: &gaanim_math::Camera) -> Vec<(&'static str, String)> {
     let mut fields = vec![
-        ("Posición", format_vec(camera.position)),
-        ("Rotación", format_rotation(camera.rotation)),
+        ("Position", format_vec(camera.position)),
+        ("Rotation", format_rotation(camera.rotation)),
     ];
     match camera.projection {
         gaanim_math::Projection::Orthographic { zoom } => fields.push(("Zoom", number(zoom))),
@@ -331,12 +330,12 @@ fn camera_fields(camera: &gaanim_math::Camera) -> Vec<(&'static str, String)> {
                     number_with(fov_y.to_degrees(), 1)
                 ),
             ));
-            fields.push(("Recorte", format!("{} – {}", number(near), number(far))));
-            fields.push(("Objetivo", format_vec(camera.target)));
+            fields.push(("Clipping", format!("{} – {}", number(near), number(far))));
+            fields.push(("Target", format_vec(camera.target)));
         }
     }
     fields.push((
-        "Encuadre",
+        "Frame",
         format!(
             "{} × {}",
             number(camera.frame_width),
@@ -349,8 +348,8 @@ fn camera_fields(camera: &gaanim_math::Camera) -> Vec<(&'static str, String)> {
 fn header(ui: &mut egui::Ui, object: Option<&AuthoredObject>, id: Option<&MobjectId>) {
     let title = match (object, id) {
         (Some(object), _) => object_title(object),
-        (None, Some(id)) => format!("objeto {}", id.0.index()),
-        (None, None) => "entidad".to_owned(),
+        (None, Some(id)) => format!("object {}", id.0.index()),
+        (None, None) => "entity".to_owned(),
     };
     ui.add(
         egui::Label::new(
@@ -373,7 +372,7 @@ pub(crate) fn object_title(object: &AuthoredObject) -> String {
 
 fn location_row(ui: &mut egui::Ui, object: &AuthoredObject) {
     let Some(location) = &object.location else {
-        muted(ui, "Creado sin una línea de script conocida.");
+        muted(ui, "Created without a known script line.");
         return;
     };
     ui.horizontal(|ui| {
@@ -385,17 +384,17 @@ fn location_row(ui: &mut egui::Ui, object: &AuthoredObject) {
         .on_hover_text(location.to_string());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if crate::source_link::AVAILABLE
-                && ui_kit::small_button(ui, "Abrir", true)
+                && ui_kit::small_button(ui, "Open", true)
                     .on_hover_text(format!(
-                        "Abrir esta línea en el editor de código\n{}",
+                        "Open this line in the code editor\n{}",
                         crate::source_link::hint()
                     ))
                     .clicked()
             {
                 crate::source_link::open_or_report(location);
             }
-            if ui_kit::small_button(ui, "Copiar", true)
-                .on_hover_text("Copiar archivo:línea")
+            if ui_kit::small_button(ui, "Copy", true)
+                .on_hover_text("Copy file:line")
                 .clicked()
             {
                 ui.ctx().copy_text(location.to_string());
@@ -404,7 +403,7 @@ fn location_row(ui: &mut egui::Ui, object: &AuthoredObject) {
     });
     // A drawable a script's own function created: the lines that called it.
     for caller in &object.callers {
-        let text = format!("llamado desde {}", crate::feedback::location_label(caller));
+        let text = format!("called from {}", crate::feedback::location_label(caller));
         let response = ui
             .add(
                 egui::Label::new(
@@ -416,9 +415,9 @@ fn location_row(ui: &mut egui::Ui, object: &AuthoredObject) {
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         let response = if crate::source_link::AVAILABLE {
-            response.on_hover_text(format!("{caller}\nClic: abrir en el editor de código"))
+            response.on_hover_text(format!("{caller}\nClick: open in the code editor"))
         } else {
-            response.on_hover_text(format!("{caller}\nClic: copiar"))
+            response.on_hover_text(format!("{caller}\nClick: copy"))
         };
         if response.clicked() {
             if crate::source_link::AVAILABLE {
@@ -510,8 +509,8 @@ fn brush_label(brush: Option<&Brush>) -> String {
                 format!("#{:02X}{:02X}{:02X}{:02X}", rgba.r, rgba.g, rgba.b, rgba.a)
             }
         }
-        Some(Brush::Gradient(_)) => "degradado".to_owned(),
-        Some(Brush::Image(_)) => "imagen".to_owned(),
+        Some(Brush::Gradient(_)) => "gradient".to_owned(),
+        Some(Brush::Image(_)) => "image".to_owned(),
     }
 }
 
@@ -645,9 +644,9 @@ mod tests {
         camera.position = glam::DVec3::new(2.0, -1.5, 0.0);
         camera.projection = gaanim_math::Projection::Orthographic { zoom: 1.6 };
         let fields = camera_fields(&camera);
-        assert!(fields.contains(&("Posición", "(2, -1.5)".to_owned())));
+        assert!(fields.contains(&("Position", "(2, -1.5)".to_owned())));
         assert!(fields.contains(&("Zoom", "1.6".to_owned())));
-        assert!(fields.contains(&("Encuadre", "16 × 9".to_owned())));
+        assert!(fields.contains(&("Frame", "16 × 9".to_owned())));
         camera.projection = gaanim_math::Projection::Perspective {
             fov_y: 0.5,
             near: 0.1,
@@ -655,7 +654,7 @@ mod tests {
         };
         let fields = camera_fields(&camera);
         assert!(fields.contains(&("FOV", "0.5 rad (28.6°)".to_owned())));
-        assert!(fields.contains(&("Recorte", "0.1 – 100".to_owned())));
+        assert!(fields.contains(&("Clipping", "0.1 – 100".to_owned())));
         assert!(!fields.iter().any(|(name, _)| *name == "Zoom"));
     }
 

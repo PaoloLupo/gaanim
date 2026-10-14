@@ -201,9 +201,9 @@ Python 3.12 produce un error aunque tengas 3.14 instalado.
 
 = Actualiza
 
-Cuando sale una versión nueva, la pantalla de inicio lo avisa: *Novedades*
-abre su página y *Actualizar* la instala sobre la carpeta de Gaanim; al
-terminar, *Reiniciar* abre la versión nueva. Desde la terminal hace lo mismo:
+Cuando sale una versión nueva, la pantalla de inicio lo avisa: *What's new*
+abre su página y *Update* la instala sobre la carpeta de Gaanim; al
+terminar, *Restart* abre la versión nueva. Desde la terminal hace lo mismo:
 
 ```bash
 gaanim update --check   # solo dice si hay una versión nueva

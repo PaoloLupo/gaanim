@@ -65,9 +65,9 @@ general y atajos de teclado (ver
 el script no está: la recarga al guardar y la narración.
 
 También puedes abrirlo desde el inicio de Gaanim (`gaanim` sin argumentos):
-la tarjeta *Reproducir .gaanim* (`Ctrl Shift O`) elige el archivo, y también
+la tarjeta *Play .gaanim* (`Ctrl Shift O`) elige el archivo, y también
 puedes arrastrarlo a la ventana. Los archivos que abres aparecen en
-*Recientes* junto a tus proyectos. En un equipo sin Python, el inicio se abre
+*Recent* junto a tus proyectos. En un equipo sin Python, el inicio se abre
 igual y reproduce archivos `.gaanim`; para crear o abrir proyectos te indica
 cómo instalarlo. Sin FFmpeg, el paquete se reproduce sin audio y se exporta
 solo a secuencias PNG.
@@ -85,10 +85,10 @@ el zoom los redibuja nítidos.
 sin permisos de administrador:
 
 - el doble clic reproduce el archivo;
-- el menú contextual ofrece *Presentar*;
+- el menú contextual ofrece *Present*;
 - el explorador de archivos muestra su portada.
 
-El botón *Asociar archivos .gaanim* de la sección _Entorno_ del inicio hace lo
+El botón *Associate .gaanim files* de la sección _Environment_ del inicio hace lo
 mismo, y `gaanim unregister` lo deshace. La asociación apunta al `gaanim` desde
 el que la creas: si mueves la carpeta de Gaanim, vuelve a registrarla.
 
@@ -161,7 +161,7 @@ pasa.
   abierta.
 - *Volumen*: el altavoz silencia y el deslizador regula el volumen; solo
   aparecen si la escena tiene audio. El volumen se recuerda en la próxima
-  visita. En barras estrechas están en el menú *Más controles*.
+  visita. En barras estrechas están en el menú *More controls*.
 
 Lo mismo vale para la barra del editor de escritorio.
 
@@ -226,16 +226,16 @@ Como en los sitios de vídeo, lo que va después de `#` elige dónde empieza:
   [`#segmento=resultados&pausa=2`], [En la segunda pausa de ese segmento, detenido ahí.],
   [`#pausa=12`], [En la duodécima pausa de toda la presentación.],
   [`#t=83.5` o `#t=1:23.5`], [A los 83,5 segundos.],
-  [`#present`], [Muestra el botón *Presentar*, que abre el Presenter View; se combina con los demás: `#segmento=5&present`.],
+  [`#present`], [Muestra el botón *Present*, que abre el Presenter View; se combina con los demás: `#segmento=5&present`.],
 )
 
 El botón de enlace de la barra (dos eslabones) copia el enlace al archivo
-abierto. *Copiar enlace a este instante* añade el fragmento de lo que se ve:
+abierto. *Copy link to this moment* añade el fragmento de lo que se ve:
 la pausa en la que está detenida la presentación o, si no, el segundo actual.
 Solo los archivos abiertos con `?src=` tienen enlace; uno que abriste desde tu
 equipo hay que publicarlo antes.
 
-El botón *Presentar* existe porque el navegador solo deja abrir otra ventana
+El botón *Present* existe porque el navegador solo deja abrir otra ventana
 tras un clic: el enlace no puede abrir el Presenter View por sí solo.
 
 == Insertar en un blog o sitio web <insertar>
@@ -480,12 +480,12 @@ Admite los mismos formatos y opciones que exportar un script
 (ver #link("/referencia/cli/")[`gaanim export`]), incluido
 `--from`/`--to` con nombres de marcadores y el audio de la escena. La
 frecuencia del vídeo es siempre la del paquete; `--quality` elige la
-compresión. El botón Exportar del editor hace lo mismo con el paquete
+compresión. El botón *Export* del editor hace lo mismo con el paquete
 abierto.
 
 = Desde el editor
 
-Con un script o proyecto abierto, el botón Exportar ofrece el formato
+Con un script o proyecto abierto, el botón *Export* ofrece el formato
 *Gaanim*: graba la escena en un `.gaanim` sin salir del editor. La calidad
 elige la frecuencia (Borrador, 30 fps; Estándar y Producción, 60 fps), salvo
 que elijas otra en *Fotogramas por segundo*; la resolución no se aplica,

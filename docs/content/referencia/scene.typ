@@ -1986,7 +1986,7 @@ scene.play([scene.camera.animate.dolly_zoom(1.8).duration(2.0)])
 
 El editor tiene una cámara de inspección separada de `scene.camera`, que
 nunca cambia las capturas, Presenter View ni la exportación. Empieza
-desactivada; cada vez que se activa con `I` (o con el botón *Interactivo* de
+desactivada; cada vez que se activa con `I` (o con el botón *Interactive* de
 la barra de overlays, `O`) parte de una copia de la cámara de la escena en ese
 instante.
 
@@ -2013,16 +2013,16 @@ contenido 3D, la barra de tiempo desactiva el ajuste magnético.
 `O` muestra una barra con guías que se dibujan solo en el editor, nunca en las
 capturas ni en la exportación. `O` o `Esc` la ocultan.
 
-- *Límites* (`B`): el marco de salida y su tamaño en unidades lógicas.
-- *Coordenadas* (`C`): los ejes con sus marcas y el punto bajo el cursor en
+- *Bounds* (`B`): el marco de salida y su tamaño en unidades lógicas.
+- *Coordinates* (`C`): los ejes con sus marcas y el punto bajo el cursor en
   unidades de la escena. Mantén Mayús para ajustarlo a la grilla y pulsa
   `Ctrl+C` (`Cmd+C` en macOS) para copiarlo como tupla, lista para pegar en
   `move_to((x, y))`. La etiqueta se oculta sobre los paneles del editor.
-- *Grilla* (`G`): líneas cada 1, 2 o 5 unidades (o sus potencias de diez),
+- *Grid* (`G`): líneas cada 1, 2 o 5 unidades (o sus potencias de diez),
   según el zoom. Durante la inspección cubren toda la vista, no solo el marco.
   En 3D es una grilla sobre el plano XZ alrededor del punto que mira la cámara,
   con el eje X en rojo y el Z en azul.
-- *Guías* (`M`): márgenes seguros de acción (90 %) y de títulos (80 %), y los
+- *Guides* (`M`): márgenes seguros de acción (90 %) y de títulos (80 %), y los
   tercios del marco.
 - *Layout* (`K`): inspecciona las cajas como las herramientas de desarrollo
   de un navegador. Cada caja lleva un contorno discontinuo y las zonas del
@@ -2033,7 +2033,7 @@ capturas ni en la exportación. `O` o `Esc` la ocultan.
   de la línea de tiempo, también mientras se reorganiza.
 - El objeto seleccionado se enmarca con su centro y su tamaño en unidades, y
   el *Inspector* muestra sus propiedades (ver más abajo).
-- Con la inspección activa, la barra muestra el zoom de la vista (o *3D libre*)
+- Con la inspección activa, la barra muestra el zoom de la vista (o *Free 3D*)
   en azul cuando ya no coincide con la cámara de la escena, y un botón para
   restablecerla (`R`). El botón de captura guarda el fotograma actual como
   PNG, sin overlays (`Ctrl+Mayús+S`). El icono de teclado lista todos los
@@ -2049,9 +2049,9 @@ Con los overlays visibles, un clic en la vista previa selecciona un objeto y el
 
 - su tipo con el vocabulario del script (`circle`, `rounded_rect`, `text`…) y
   el nombre que le diste con `named`;
-- la línea del script que lo creó, con *Abrir* para ir a ella en tu editor de
-  código y *Copiar* para llevarte `archivo:línea`. Si lo creó una función tuya,
-  debajo aparecen las líneas que la llamaron (*llamado desde main.py · línea
+- la línea del script que lo creó, con *Open* para ir a ella en tu editor de
+  código y *Copy* para llevarte `archivo:línea`. Si lo creó una función tuya,
+  debajo aparecen las líneas que la llamaron (*called from main.py · line
   11*), cada una también se abre con un clic;
 - su posición, rotación (en radianes, como `rotate_to`, y en grados), escala,
   tamaño y centro en unidades de la escena; su relleno y su trazo con el color
@@ -2065,27 +2065,27 @@ perspectiva), el encuadre y, si está activa, la profundidad de campo. Los
 valores son los del instante de la línea de tiempo, así que cambian al
 reproducir o recorrer la escena. Un clic sobre una letra selecciona el texto
 entero y, a igual `z_index`, gana la caja más pequeña bajo el cursor: la
-etiqueta sobre su tarjeta, el miembro dentro de su grupo. *Dentro de…* sube al
+etiqueta sobre su tarjeta, el miembro dentro de su grupo. *Inside …* sube al
 grupo que lo contiene. Las líneas siguen siendo correctas tras cada recarga,
 aunque la recarga reutilice segmentos ya compilados.
 
-La *Consola* (`J`, o el botón de la barra) reúne lo que antes solo llegaba a la
+La *Console* (`J`, o el botón de la barra) reúne lo que antes solo llegaba a la
 terminal: los avisos de Gaanim y de Python (`warnings.warn`), lo que escribe
 `print`, los errores del script con su traceback y las líneas de estado de
 cada recarga. Cada mensaje ocupa una fila y enlaza con la línea del script que
 lo produjo; un clic en la fila muestra debajo el mensaje completo y, si lo
 tiene, su traceback. Filtra por errores, avisos y mensajes, busca por texto o archivo,
 copia lo listado como en la terminal y limpia la lista. Por defecto muestra
-solo la última ejecución del script; *Historial* conserva las anteriores.
+solo la última ejecución del script; *History* conserva las anteriores.
 Mientras está oculta, una insignia arriba a la izquierda cuenta los errores y
 avisos de la última ejecución y la abre con un clic.
 
-*Animaciones* (`T`, o el botón de la barra) abre sobre la barra de
+*Animations* (`T`, o el botón de la barra) abre sobre la barra de
 reproducción una línea de tiempo de la escena: una fila por objeto animado,
 más la de la cámara, y un bloque por cada `play` que lo anima, coloreado por
 tipo (movimiento, transformación, aparición, estilo, trazo o cámara). Las
 animaciones de las letras de un texto aparecen en la fila del texto. Muestra
-el segmento bajo el cabezal; *Escena completa* muestra toda la escena, y la
+el segmento bajo el cabezal; *Whole scene* muestra toda la escena, y la
 búsqueda filtra por objeto o por animación. Un clic o un arrastre en la regla
 mueve el cabezal. Un clic en un bloque pausa, lleva el cabezal a su inicio y
 selecciona el objeto para verlo en el inspector; un doble clic abre la línea
@@ -2101,11 +2101,11 @@ cambiar de selección y nunca sale de la pantalla. Un doble clic en la
 cabecera lo devuelve a su sitio. Mientras el panel de animaciones está en su
 sitio, la consola se coloca encima de él.
 
-*Abrir* usa el comando de `GAANIM_EDITOR` (por ejemplo
+*Open* usa el comando de `GAANIM_EDITOR` (por ejemplo
 `code --goto {file}:{line}`); sin ella, el primero que encuentre en el `PATH`
 entre VS Code (`code`), Cursor, VSCodium, Zed y Sublime Text, y si no hay
 ninguno abre el archivo con la aplicación predeterminada, que no salta a la
-línea. El panel de error del script también ofrece *Abrir en el editor*.
+línea. El panel de error del script también ofrece *Open in the editor*.
 
 == Recorte y máscaras
 

@@ -2217,7 +2217,7 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(200));
         };
-        assert!(players.contains("Puesto,Apodo,Código,"), "{players}");
+        assert!(players.contains("Rank,Nickname,Código,"), "{players}");
         assert!(players.contains("1,Ana,"), "{players}");
 
         // Coming back to the first poll keeps its votes.

@@ -199,8 +199,8 @@ continuo.
 
 == Desde el editor
 
-El botón Exportar de la barra de reproducción abre las mismas opciones. Al
-pulsar Exportar, el diálogo se cierra y la exportación sigue en segundo plano:
+El botón *Export* de la barra de reproducción abre las mismas opciones. Al
+pulsar *Export*, el diálogo se cierra y la exportación sigue en segundo plano:
 puedes seguir reproduciendo y navegando la escena. La barra de tiempo marca en
 verde, bajo cada segmento, la parte ya exportada; la barra de reproducción
 muestra el porcentaje (pasa el cursor para ver fotogramas y tiempo restante) y
@@ -208,9 +208,9 @@ una X para cancelar. La terminal desde la que abriste `gaanim` muestra la misma
 barra de progreso que `gaanim export` y el resultado. Al terminar aparece un
 aviso en la esquina con el archivo y un botón para abrirlo.
 
-En *Archivo* escribes solo el nombre: la extensión la pone el formato. Al
+En *File* escribes solo el nombre: la extensión la pone el formato. Al
 principio es el del proyecto (su carpeta, si el script es `main.py`, o el
-nombre del script), en la carpeta `output_dir` de `gaanim.toml`. *Cambiar…*
+nombre del script), en la carpeta `output_dir` de `gaanim.toml`. *Change…*
 elige otra carpeta con el selector del sistema; pasa el cursor por ella para
 ver la ruta completa. Si ya existe un archivo con ese nombre, el diálogo avisa
 de que lo reemplazará y ofrece el siguiente nombre libre (`intro-2`,

@@ -236,14 +236,10 @@ pub fn frame_capture_notice_system(
         return;
     };
     let (text, color, file) = match (&shown, busy) {
-        (_, true) => (
-            "Guardando el fotograma…".to_owned(),
-            palette::TEXT_MUTED,
-            None,
-        ),
+        (_, true) => ("Saving the frame…".to_owned(), palette::TEXT_MUTED, None),
         (Some(Ok(path)), false) => (
             format!(
-                "Fotograma guardado · {}",
+                "Frame saved · {}",
                 path.file_name()
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_default()
@@ -252,7 +248,7 @@ pub fn frame_capture_notice_system(
             Some(path.clone()),
         ),
         (Some(Err(error)), false) => (
-            format!("No se pudo guardar el fotograma: {error}"),
+            format!("Could not save the frame: {error}"),
             palette::DANGER,
             None,
         ),
@@ -280,7 +276,7 @@ pub fn frame_capture_notice_system(
                 let response = response
                     .interact(egui::Sense::click())
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text(format!("{}\nClic: abrir", file.display()));
+                    .on_hover_text(format!("{}\nClick: open", file.display()));
                 if response.clicked()
                     && let Err(error) = crate::platform::open_detached(&file)
                 {

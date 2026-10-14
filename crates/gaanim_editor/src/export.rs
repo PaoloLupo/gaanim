@@ -245,12 +245,12 @@ impl ExportQuality {
 
 /// Rates the dialog offers besides the quality's, with what uses them.
 const FRAME_RATES: [(u32, u32, &str); 8] = [
-    (24, 1, "cine"),
+    (24, 1, "film"),
     (25, 1, "PAL"),
     (30, 1, ""),
     (50, 1, "PAL"),
     (60, 1, ""),
-    (24_000, 1001, "NTSC, cine"),
+    (24_000, 1001, "NTSC, film"),
     (30_000, 1001, "NTSC"),
     (60_000, 1001, "NTSC"),
 ];
@@ -354,11 +354,11 @@ pub fn export_dialog_system(
     if state.show_complete {
         let cancelled = state.message.starts_with("export cancelled");
         let (icon, color, title) = if state.completed_successfully {
-            (Icon::Check, palette::LOOP, "Exportación completada")
+            (Icon::Check, palette::LOOP, "Export complete")
         } else if cancelled {
-            (Icon::Close, palette::TEXT_MUTED, "Exportación cancelada")
+            (Icon::Close, palette::TEXT_MUTED, "Export cancelled")
         } else {
-            (Icon::Warning, palette::DANGER, "La exportación falló")
+            (Icon::Warning, palette::DANGER, "Export failed")
         };
         let summary = [
             state.elapsed_seconds.map(short_duration),
@@ -444,18 +444,14 @@ pub fn export_dialog_system(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         if can_open {
-                            let open_label = if sequence {
-                                "Abrir carpeta"
-                            } else {
-                                "Abrir archivo"
-                            };
+                            let open_label = if sequence { "Open folder" } else { "Open file" };
                             if primary_button(ui, open_label, None, true).clicked() {
                                 trigger_open = true;
                             }
-                            if secondary_button(ui, "Cerrar", true).clicked() {
+                            if secondary_button(ui, "Close", true).clicked() {
                                 trigger_ok = true;
                             }
-                        } else if primary_button(ui, "Cerrar", None, true).clicked() {
+                        } else if primary_button(ui, "Close", None, true).clicked() {
                             trigger_ok = true;
                         }
                     });
@@ -609,7 +605,7 @@ pub fn export_dialog_system(
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.label(
-                        egui::RichText::new("Exportar")
+                        egui::RichText::new("Export")
                             .size(17.0)
                             .strong()
                             .color(palette::TEXT),
@@ -626,10 +622,10 @@ pub fn export_dialog_system(
                         ));
                         let pages =
                             gaanim_export::deck::deck_pages(&slides, dur, current_notes).len();
-                        let noun = if pages == 1 { "página" } else { "páginas" };
+                        let noun = if pages == 1 { "page" } else { "pages" };
                         format!("{} · {pages} {noun}", crate::format_time(dur))
                     } else {
-                        format!("{} · {} frames a {} fps", crate::format_time(dur), total, fps)
+                        format!("{} · {} frames at {} fps", crate::format_time(dur), total, fps)
                     };
                     ui.label(
                         egui::RichText::new(detail)
@@ -639,7 +635,7 @@ pub fn export_dialog_system(
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                     if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
-                        .on_hover_text("Cerrar · Esc")
+                        .on_hover_text("Close · Esc")
                         .clicked()
                     {
                         trigger_cancel = true;
@@ -648,17 +644,17 @@ pub fn export_dialog_system(
             });
             ui.add_space(8.0);
 
-            section_label(ui, "Formato");
+            section_label(ui, "Format");
             let videos = [
                 (FormatChoice::Video(ExportFormat::Mp4), "MP4", "H.264"),
                 (FormatChoice::Video(ExportFormat::Webm), "WebM", "VP9"),
                 (FormatChoice::Video(ExportFormat::Mov), "MOV", "ProRes"),
                 // Eight formats share the row: short details keep them apart.
-                (FormatChoice::Video(ExportFormat::Webp), "WebP", "Animada"),
-                (FormatChoice::Video(ExportFormat::Gif), "GIF", "Animada"),
-                (FormatChoice::Video(ExportFormat::PngSequence), "PNG", "Fotogramas"),
-                (FormatChoice::Deck, "PDF", "Pausas"),
-                (FormatChoice::Bundle, "Gaanim", "Escena"),
+                (FormatChoice::Video(ExportFormat::Webp), "WebP", "Animated"),
+                (FormatChoice::Video(ExportFormat::Gif), "GIF", "Animated"),
+                (FormatChoice::Video(ExportFormat::PngSequence), "PNG", "Frames"),
+                (FormatChoice::Deck, "PDF", "Stops"),
+                (FormatChoice::Bundle, "Gaanim", "Scene"),
             ];
             let choices = if offers_bundle {
                 &videos[..]
@@ -670,7 +666,7 @@ pub fn export_dialog_system(
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
-                            "Un PNG por fotograma (frame_00000.png, frame_00001.png…) en la carpeta de salida, para editar o componer en otro programa.",
+                            "One PNG per frame (frame_00000.png, frame_00001.png…) in the output folder, to edit or composite in another program.",
                         )
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
@@ -682,7 +678,7 @@ pub fn export_dialog_system(
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
-                            "Apple ProRes para editores de vídeo: 422 HQ, o 4444 con canal alfa si conservas la transparencia. Archivos grandes, sin pérdida visible.",
+                            "Apple ProRes for video editors: 422 HQ, or 4444 with an alpha channel if you keep transparency. Large files, no visible loss.",
                         )
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
@@ -694,7 +690,7 @@ pub fn export_dialog_system(
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
-                            "Un archivo .gaanim con toda la escena: se reproduce, presenta y exporta a vídeo en cualquier equipo.",
+                            "A .gaanim file with the whole scene: it plays, presents and exports to video on any computer.",
                         )
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
@@ -706,16 +702,16 @@ pub fn export_dialog_system(
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
-                            "Un PDF con una página por cada pausa de la presentación (scene.stop()) y la del final, para repartir o imprimir.",
+                            "A PDF with a page for each stop in the presentation (scene.stop()) and one for the end, to hand out or print.",
                         )
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
                     )
                     .wrap(),
                 );
-                ui.checkbox(&mut current_notes, "Incluir las notas del orador")
+                ui.checkbox(&mut current_notes, "Include speaker notes")
                     .on_hover_text(
-                        "Añade tras la última página de cada diapositiva una página con las notas de scene.segment(notes=...).",
+                        "Adds, after each slide's last page, a page with the notes from scene.segment(notes=...).",
                     );
             }
             let recording = current_choice == FormatChoice::Bundle;
@@ -723,16 +719,16 @@ pub fn export_dialog_system(
             if let FormatChoice::Video(format) = current_choice
                 && keeps_alpha(format)
             {
-                ui.checkbox(&mut current_transparent, "Conservar la transparencia")
+                ui.checkbox(&mut current_transparent, "Keep transparency")
                     .on_hover_text(
-                        "Guarda el canal alfa. La escena necesita un fondo transparente, por ejemplo Scene(background=\"#00000000\").",
+                        "Saves the alpha channel. The scene needs a transparent background, for example Scene(background=\"#00000000\").",
                     );
             }
             ui.add_space(6.0);
 
             // A deck's pages are lossless frames at the chosen size.
             if !deck {
-            section_label(ui, "Calidad");
+            section_label(ui, "Quality");
             // With a rate of its own, the quality only chooses the encoding.
             let own_rate = current_fps.is_some() && bundle_source.is_none();
             segmented(
@@ -742,18 +738,18 @@ pub fn export_dialog_system(
                 &[
                     (
                         ExportQuality::Draft,
-                        "Borrador",
-                        if own_rate { "rápida" } else { "30 fps · rápida" },
+                        "Draft",
+                        if own_rate { "fast" } else { "30 fps · fast" },
                     ),
                     (
                         ExportQuality::Standard,
-                        "Estándar",
-                        if own_rate { "equilibrada" } else { "60 fps · equilibrada" },
+                        "Standard",
+                        if own_rate { "balanced" } else { "60 fps · balanced" },
                     ),
                     (
                         ExportQuality::Production,
-                        "Producción",
-                        if own_rate { "máxima" } else { "60 fps · máxima" },
+                        "Production",
+                        if own_rate { "best" } else { "60 fps · best" },
                     ),
                 ],
             );
@@ -762,10 +758,10 @@ pub fn export_dialog_system(
             if bundle_source.is_none() {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    section_label(ui, "Fotogramas por segundo");
+                    section_label(ui, "Frames per second");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label = |rate: Option<FrameRate>| match rate {
-                            None => format!("Según la calidad · {preset_fps} fps"),
+                            None => format!("From quality · {preset_fps} fps"),
                             Some(rate) => FRAME_RATES
                                 .iter()
                                 .find(|(numerator, denominator, _)| {
@@ -795,7 +791,7 @@ pub fn export_dialog_system(
             if current_choice == FormatChoice::Video(ExportFormat::Mp4) {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    section_label(ui, "Codificador");
+                    section_label(ui, "Encoder");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         egui::ComboBox::from_id_salt("export_encoder")
                             .width(200.0)
@@ -822,7 +818,7 @@ pub fn export_dialog_system(
                     notice(
                         ui,
                         palette::STOP,
-                        "VAAPI solo se usa si lo eliges: un fallo del driver puede reiniciar la GPU.",
+                        "VAAPI is used only if you choose it: a driver fault can reset the GPU.",
                     );
                 }
             }
@@ -830,7 +826,7 @@ pub fn export_dialog_system(
             }
 
             if !recording {
-            section_label(ui, "Resolución");
+            section_label(ui, "Resolution");
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 for (label, width, height) in RESOLUTION_PRESETS {
@@ -853,7 +849,7 @@ pub fn export_dialog_system(
                                 .range(1..=16384)
                                 .speed(4.0),
                         )
-                        .on_hover_text("Alto (px)");
+                        .on_hover_text("Height (px)");
                     });
                     ui.label(egui::RichText::new("×").color(palette::TEXT_FAINT));
                     field_frame().inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
@@ -862,21 +858,21 @@ pub fn export_dialog_system(
                                 .range(1..=16384)
                                 .speed(4.0),
                         )
-                        .on_hover_text("Ancho (px)");
+                        .on_hover_text("Width (px)");
                     });
                 });
             });
             ui.add_space(6.0);
 
-            section_label(ui, "Si la proporción no coincide con la escena");
+            section_label(ui, "If the aspect ratio does not match the scene");
             segmented(
                 ui,
                 "export_fit",
                 &mut current_fit,
                 &[
-                    (OutputFit::Error, "Avisar con error", ""),
-                    (OutputFit::Contain, "Contener", ""),
-                    (OutputFit::Cover, "Cubrir", ""),
+                    (OutputFit::Error, "Fail with an error", ""),
+                    (OutputFit::Contain, "Contain", ""),
+                    (OutputFit::Cover, "Cover", ""),
                 ],
             );
             if let Some((scene_w, scene_h)) = scene_resolution
@@ -888,18 +884,18 @@ pub fn export_dialog_system(
                         ui,
                         palette::DANGER,
                         &format!(
-                            "La escena es {scene_aspect} y la salida no: la exportación fallará. Elige Contener o Cubrir."
+                            "The scene is {scene_aspect} and the output is not: the export will fail. Choose Contain or Cover."
                         ),
                     ),
                     OutputFit::Contain => notice(
                         ui,
                         palette::TEXT_MUTED,
-                        &format!("La escena ({scene_aspect}) se verá completa, con bandas."),
+                        &format!("The scene ({scene_aspect}) will show in full, with bars."),
                     ),
                     OutputFit::Cover => notice(
                         ui,
                         palette::TEXT_MUTED,
-                        &format!("La escena ({scene_aspect}) llenará el cuadro y se recortará."),
+                        &format!("The scene ({scene_aspect}) will fill the frame and be cropped."),
                     ),
                 }
             }
@@ -915,7 +911,7 @@ pub fn export_dialog_system(
 
             ui.horizontal(|ui| {
                 let summary = if recording {
-                    format!("paquete · {fps} fps")
+                    format!("bundle · {fps} fps")
                 } else if deck {
                     format!("{current_width}×{current_height} · PDF")
                 } else {
@@ -929,17 +925,17 @@ pub fn export_dialog_system(
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     let named = !current_parts.name.trim().is_empty();
-                    if primary_button(ui, "Exportar", Some(Icon::Export), named)
+                    if primary_button(ui, "Export", Some(Icon::Export), named)
                         .on_hover_text(if named {
                             "Enter"
                         } else {
-                            "Escribe un nombre para el archivo"
+                            "Type a name for the file"
                         })
                         .clicked()
                     {
                         trigger_export = true;
                     }
-                    if secondary_button(ui, "Cancelar", true).clicked() {
+                    if secondary_button(ui, "Cancel", true).clicked() {
                         trigger_cancel = true;
                     }
                 });
@@ -1489,7 +1485,7 @@ fn output_kind(choice: FormatChoice, format: ExportFormat) -> OutputKind {
     }
 }
 
-/// The dialog's *Archivo* section: the name with the format's extension,
+/// The dialog's *File* section: the name with the format's extension,
 /// the folder with a picker, the full path, and a notice when the export
 /// would replace an earlier one.
 fn output_file_section(
@@ -1498,7 +1494,7 @@ fn output_file_section(
     kind: OutputKind,
     project_dir: Option<&Path>,
 ) {
-    section_label(ui, "Archivo");
+    section_label(ui, "File");
     let suffix = kind.suffix();
     let mono = egui::FontId::monospace(12.0);
     field_frame().show(ui, |ui| {
@@ -1511,7 +1507,7 @@ fn output_file_section(
                 .x;
             let response = ui.add(
                 egui::TextEdit::singleline(&mut parts.name)
-                    .hint_text("nombre")
+                    .hint_text("name")
                     .desired_width((ui.available_width() - suffix_width).max(80.0))
                     .font(mono.clone())
                     .text_color(palette::TEXT)
@@ -1556,7 +1552,7 @@ fn output_file_section(
             palette::TEXT_MUTED,
         );
         let shown = if parts.folder.is_empty() {
-            "carpeta del proyecto".to_owned()
+            "project folder".to_owned()
         } else {
             parts.folder.clone()
         };
@@ -1581,16 +1577,16 @@ fn output_file_section(
                     )
                     .truncate(),
                 )
-                .on_hover_text(format!("Se guarda en {full_path}"));
+                .on_hover_text(format!("Saves to {full_path}"));
             },
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if !crate::WEB
-                && small_button(ui, "Cambiar…", true)
-                    .on_hover_text("Elegir la carpeta donde se guarda")
+                && small_button(ui, "Change…", true)
+                    .on_hover_text("Choose the folder to save in")
                     .clicked()
                 && let Some(chosen) =
-                    crate::platform::pick_folder("Carpeta de exportación", folder.as_deref())
+                    crate::platform::pick_folder("Export folder", folder.as_deref())
             {
                 parts.folder = output_file::relative_folder(&chosen, project_dir);
             }
@@ -1598,7 +1594,7 @@ fn output_file_section(
     });
 
     if parts.name.trim().is_empty() {
-        notice(ui, palette::STOP, "Escribe un nombre para el archivo.");
+        notice(ui, palette::STOP, "Type a name for the file.");
         return;
     }
     let Ok(resolved) = resolve_output_path(&output_file::join(parts, kind), project_dir) else {
@@ -1614,19 +1610,23 @@ fn output_file_section(
                 palette::STOP,
                 &match kind {
                     OutputKind::File(_) => {
-                        format!("{}{} ya existe: se reemplazará.", parts.name, kind.suffix())
+                        format!(
+                            "{}{} already exists: it will be replaced.",
+                            parts.name,
+                            kind.suffix()
+                        )
                     }
                     OutputKind::Frames => {
                         format!(
-                            "La carpeta {} ya tiene fotogramas: se reemplazarán.",
+                            "The folder {} already has frames: they will be replaced.",
                             parts.name
                         )
                     }
                 },
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if small_button(ui, &format!("Usar «{free}»"), true)
-                    .on_hover_text("Guardar con el siguiente nombre libre")
+                if small_button(ui, &format!("Use \"{free}\""), true)
+                    .on_hover_text("Save with the next free name")
                     .clicked()
                 {
                     parts.name = free.clone();

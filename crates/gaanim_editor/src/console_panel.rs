@@ -197,7 +197,7 @@ pub fn console_panel_system(
     let panel = &mut *panel;
     let mut close = false;
     let max_width = (ctx.viewport_rect().width() - 24.0).max(320.0);
-    egui::Window::new("Consola")
+    egui::Window::new("Console")
         .id(egui::Id::new("editor_console"))
         .title_bar(false)
         // Above the animation timeline when it is open.
@@ -223,36 +223,39 @@ pub fn console_panel_system(
             ui.spacing_mut().item_spacing.y = 6.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                ui.label(caption("CONSOLA"));
+                ui.label(caption("CONSOLE"));
                 ui.add_space(6.0);
                 let filter = &mut panel.filter;
-                if ui_kit::chip(ui, &format!("Errores {}", counts.errors), filter.errors).clicked()
-                {
+                if ui_kit::chip(ui, &format!("Errors {}", counts.errors), filter.errors).clicked() {
                     filter.errors = !filter.errors;
                 }
-                if ui_kit::chip(ui, &format!("Avisos {}", counts.warnings), filter.warnings)
-                    .clicked()
+                if ui_kit::chip(
+                    ui,
+                    &format!("Warnings {}", counts.warnings),
+                    filter.warnings,
+                )
+                .clicked()
                 {
                     filter.warnings = !filter.warnings;
                 }
                 if ui_kit::chip(
                     ui,
-                    &format!("Mensajes {}", counts.messages),
+                    &format!("Messages {}", counts.messages),
                     filter.messages,
                 )
                 .clicked()
                 {
                     filter.messages = !filter.messages;
                 }
-                if ui_kit::chip(ui, "Historial", filter.history)
-                    .on_hover_text("Conservar los mensajes de las recargas anteriores")
+                if ui_kit::chip(ui, "History", filter.history)
+                    .on_hover_text("Keep the messages of earlier reloads")
                     .clicked()
                 {
                     filter.history = !filter.history;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
-                        .on_hover_text("Ocultar la consola · J")
+                        .on_hover_text("Hide the console · J")
                         .clicked()
                     {
                         close = true;
@@ -264,18 +267,18 @@ pub fn console_panel_system(
             ui.horizontal(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut panel.filter.query)
-                        .hint_text("Buscar")
+                        .hint_text("Search")
                         .desired_width(width - 150.0),
                 );
-                if ui_kit::small_button(ui, "Copiar", !visible.is_empty())
-                    .on_hover_text("Copiar los mensajes listados")
+                if ui_kit::small_button(ui, "Copy", !visible.is_empty())
+                    .on_hover_text("Copy the listed messages")
                     .clicked()
                 {
                     let listed: Vec<&LogEntry> =
                         visible.iter().map(|&index| &panel.entries[index]).collect();
                     ui.ctx().copy_text(plain_text(&listed));
                 }
-                if ui_kit::small_button(ui, "Limpiar", true).clicked() {
+                if ui_kit::small_button(ui, "Clear", true).clicked() {
                     clear = true;
                 }
             });
@@ -286,9 +289,9 @@ pub fn console_panel_system(
                     ui.set_min_height(LIST_HEIGHT);
                     ui.label(
                         egui::RichText::new(if panel.entries.is_empty() {
-                            "Sin mensajes todavía."
+                            "No messages yet."
                         } else {
-                            "Ningún mensaje coincide con el filtro."
+                            "No message matches the filter."
                         })
                         .size(12.0)
                         .color(palette::TEXT_FAINT),
@@ -360,24 +363,24 @@ fn problems_badge(ctx: &egui::Context, counts: Counts) -> bool {
                 })
                 .response
                 .interact(egui::Sense::click())
-                .on_hover_text("Abrir la consola · J");
+                .on_hover_text("Open the console · J");
             clicked = response.clicked();
         });
     clicked
 }
 
-/// `1 error · 2 avisos`.
+/// `1 error · 2 warnings`.
 fn badge_text(counts: Counts) -> String {
     let mut parts = Vec::new();
     match counts.errors {
         0 => {}
         1 => parts.push("1 error".to_owned()),
-        errors => parts.push(format!("{errors} errores")),
+        errors => parts.push(format!("{errors} errors")),
     }
     match counts.warnings {
         0 => {}
-        1 => parts.push("1 aviso".to_owned()),
-        warnings => parts.push(format!("{warnings} avisos")),
+        1 => parts.push("1 warning".to_owned()),
+        warnings => parts.push(format!("{warnings} warnings")),
     }
     parts.join(" · ")
 }
@@ -456,11 +459,11 @@ fn entry_row(ui: &mut egui::Ui, entry: &LogEntry, selected: bool, earlier_run: b
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(if crate::source_link::AVAILABLE {
                 format!(
-                    "{location}\nClic: abrir en el editor de código\n{}",
+                    "{location}\nClick: open in the code editor\n{}",
                     crate::source_link::hint()
                 )
             } else {
-                format!("{location}\nClic: copiar")
+                format!("{location}\nClick: copy")
             });
         painter.galley(link.min, galley, palette::ACCENT);
         if link_response.clicked() {
@@ -477,7 +480,7 @@ fn entry_row(ui: &mut egui::Ui, entry: &LogEntry, selected: bool, earlier_run: b
     if more {
         // What the row leaves out shows when it is clicked.
         let hint = painter.layout_no_wrap(
-            "detalle".to_owned(),
+            "detail".to_owned(),
             egui::FontId::proportional(11.0),
             palette::TEXT_FAINT,
         );
@@ -503,9 +506,9 @@ fn entry_row(ui: &mut egui::Ui, entry: &LogEntry, selected: bool, earlier_run: b
             }),
         );
     let response = response.on_hover_text(if more {
-        "Clic: ver el mensaje completo"
+        "Click: show the whole message"
     } else {
-        "Clic: ver el mensaje"
+        "Click: show the message"
     });
     response.clicked() && !location_clicked
 }
@@ -544,15 +547,15 @@ fn entry_detail(ui: &mut egui::Ui, entry: &LogEntry) {
                 }
             });
         ui.horizontal(|ui| {
-            if ui_kit::small_button(ui, "Copiar", true)
-                .on_hover_text("Copiar este mensaje")
+            if ui_kit::small_button(ui, "Copy", true)
+                .on_hover_text("Copy this message")
                 .clicked()
             {
                 ui.ctx().copy_text(plain_text(&[entry]));
             }
             if let Some(location) = &entry.location
                 && crate::source_link::AVAILABLE
-                && ui_kit::small_button(ui, "Abrir", true)
+                && ui_kit::small_button(ui, "Open", true)
                     .on_hover_text(format!("{location}\n{}", crate::source_link::hint()))
                     .clicked()
             {
@@ -571,7 +574,7 @@ fn display_message(message: &str) -> std::borrow::Cow<'_, str> {
         None => message.into(),
         Some((end, _)) => {
             let hidden = message[end..].chars().count();
-            format!("{}… ({hidden} caracteres más)", &message[..end]).into()
+            format!("{}… ({hidden} more characters)", &message[..end]).into()
         }
     }
 }
@@ -680,7 +683,7 @@ mod tests {
                 warnings: 2,
                 messages: 9
             }),
-            "1 error · 2 avisos"
+            "1 error · 2 warnings"
         );
         assert_eq!(
             badge_text(Counts {
@@ -688,7 +691,7 @@ mod tests {
                 warnings: 1,
                 messages: 0
             }),
-            "1 aviso"
+            "1 warning"
         );
     }
 
@@ -697,7 +700,7 @@ mod tests {
         assert_eq!(display_message("corto"), "corto");
         let long = "x".repeat(MAX_SHOWN_CHARS + 25);
         let shown = display_message(&long);
-        assert!(shown.ends_with("… (25 caracteres más)"));
+        assert!(shown.ends_with("… (25 more characters)"));
         assert_eq!(
             shown.chars().filter(|&ch| ch == 'x').count(),
             MAX_SHOWN_CHARS

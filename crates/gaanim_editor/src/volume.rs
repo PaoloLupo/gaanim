@@ -34,7 +34,7 @@ pub fn load() -> PreviewVolume {
 }
 
 fn save(volume: PreviewVolume) -> Result<(), String> {
-    let path = path().ok_or("no se encontró la carpeta de datos de Gaanim")?;
+    let path = path().ok_or("Gaanim's data folder was not found")?;
     let saved = Saved {
         level: volume.level,
         muted: volume.muted,
@@ -67,7 +67,7 @@ pub(crate) fn save_volume_system(
         *pending = None;
         *saved = Some(waiting);
         if let Err(error) = save(waiting) {
-            gaanim_core::console::warn("audio", format!("no se guardó el volumen: {error}"));
+            gaanim_core::console::warn("audio", format!("the volume was not saved: {error}"));
         }
     }
 }

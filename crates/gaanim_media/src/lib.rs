@@ -1216,6 +1216,91 @@ fn sync_preview_audio_system(world: &mut World) {
     world.insert_resource(registry);
 }
 
+/// Recordings played on their own, outside the timeline, one after the
+/// other: a rehearsal the speaker listens back to.
+#[derive(Resource, Debug, Default)]
+pub struct ClipPlayback {
+    queue: std::collections::VecDeque<std::path::PathBuf>,
+    /// What the clips playing are, as named when they started.
+    label: Option<String>,
+    playing: Option<Entity>,
+    /// Stop what plays before the next frame plays anything.
+    stop: bool,
+}
+
+impl ClipPlayback {
+    /// Play the WAV `files` in order, after stopping what plays; `label`
+    /// names them.
+    pub fn play(&mut self, label: impl Into<String>, files: Vec<std::path::PathBuf>) {
+        self.stop = true;
+        self.queue = files.into();
+        self.label = Some(label.into());
+    }
+
+    pub fn stop(&mut self) {
+        self.stop = true;
+        self.queue.clear();
+        self.label = None;
+    }
+
+    /// What plays now, as named when it started.
+    pub fn playing(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+}
+
+#[cfg(not(target_os = "emscripten"))]
+fn clip_playback_system(world: &mut World) {
+    use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings};
+
+    if !world.contains_resource::<Assets<AudioSource>>() {
+        return;
+    }
+    let Some(mut clips) = world.remove_resource::<ClipPlayback>() else {
+        return;
+    };
+    if clips.stop {
+        if let Some(entity) = clips.playing.take() {
+            let _ = world.despawn(entity);
+        }
+        clips.stop = false;
+    }
+    // A finished clip despawns itself.
+    if clips
+        .playing
+        .is_some_and(|entity| world.get_entity(entity).is_err())
+    {
+        clips.playing = None;
+    }
+    if clips.playing.is_none() {
+        while let Some(path) = clips.queue.pop_front() {
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    let handle = world
+                        .resource_mut::<Assets<AudioSource>>()
+                        .add(AudioSource {
+                            bytes: bytes.into(),
+                        });
+                    clips.playing = Some(
+                        world
+                            .spawn((AudioPlayer(handle), PlaybackSettings::DESPAWN))
+                            .id(),
+                    );
+                    break;
+                }
+                Err(error) => gaanim_core::console::warn(
+                    "audio",
+                    format!("could not play {}: {error}", path.display()),
+                ),
+            }
+        }
+        if clips.playing.is_none() {
+            clips.label = None;
+        }
+    }
+    world.insert_resource(clips);
+}
+
 pub struct GaanimMediaPlugin;
 
 impl Plugin for GaanimMediaPlugin {
@@ -1226,13 +1311,17 @@ impl Plugin for GaanimMediaPlugin {
             .init_resource::<PreviewAudioTracks>()
             .init_resource::<VideoDecoder>()
             .init_resource::<PreviewAudioRegistry>()
+            .init_resource::<ClipPlayback>()
             .add_systems(Update, sample_video_system.in_set(SceneSet::Updaters));
         #[cfg(not(target_os = "emscripten"))]
         app.add_systems(
             Update,
-            sync_preview_audio_system
-                .after(sample_video_system)
-                .in_set(SceneSet::Updaters),
+            (
+                sync_preview_audio_system
+                    .after(sample_video_system)
+                    .in_set(SceneSet::Updaters),
+                clip_playback_system,
+            ),
         );
     }
 }

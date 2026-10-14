@@ -92,6 +92,12 @@ pub struct ProjectManifest {
     /// Base URL of the relay that carries audience votes (`[polls] relay`),
     /// deployed from `gaanim relay init`.
     pub poll_relay: Option<String>,
+    /// The language the project's talk is spoken in (`language`), as a
+    /// BCP 47 tag such as `es-ES` or `es`.
+    pub language: Option<String>,
+    /// Keys whose names look like credentials (`token`, `api_key`, …),
+    /// which have no place in a project that may end up in a repository.
+    pub secret_keys: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,8 +107,70 @@ struct RawProjectManifest {
     entry: PathBuf,
     assets_dir: Option<PathBuf>,
     output_dir: Option<PathBuf>,
+    language: Option<String>,
     #[serde(default)]
     polls: RawPolls,
+}
+
+/// Words that make a key's name look like a credential.
+const SECRET_WORDS: [&str; 6] = [
+    "token", "secret", "password", "apikey", "api_key", "api-key",
+];
+
+/// The dotted names of the keys of `table` that look like credentials.
+fn secret_keys(table: &toml::Table, prefix: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for (key, value) in table {
+        let name = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        let lowered = key.to_lowercase();
+        if SECRET_WORDS.iter().any(|word| lowered.contains(word)) {
+            found.push(name.clone());
+        }
+        if let toml::Value::Table(inner) = value {
+            found.extend(secret_keys(inner, &name));
+        }
+    }
+    found
+}
+
+/// Pin the language of the project whose manifest is `manifest_path`
+/// (`language = "es-ES"`), or remove it with `None`. The rest of the file
+/// stays as written, comments included.
+pub fn set_project_language(manifest_path: &Path, language: Option<&str>) -> Result<(), String> {
+    let source = std::fs::read_to_string(manifest_path).map_err(|error| {
+        format!(
+            "could not read project manifest {}: {error}",
+            manifest_path.display()
+        )
+    })?;
+    let mut document: toml_edit::DocumentMut = source.parse().map_err(|error| {
+        format!(
+            "invalid project manifest {}: {error}",
+            manifest_path.display()
+        )
+    })?;
+    match language
+        .map(str::trim)
+        .filter(|language| !language.is_empty())
+    {
+        Some(language) => document["language"] = toml_edit::value(language),
+        None => {
+            document.remove("language");
+        }
+    }
+    // Through a sibling the file watcher ignores, so the manifest is never
+    // seen half written.
+    let temporary = manifest_path.with_extension("toml.tmp");
+    std::fs::write(&temporary, document.to_string())
+        .and_then(|()| std::fs::rename(&temporary, manifest_path))
+        .map_err(|error| {
+            let _ = std::fs::remove_file(&temporary);
+            format!("could not write {}: {error}", manifest_path.display())
+        })
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -189,6 +257,9 @@ pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
             manifest_path.display()
         )
     })?;
+    let secret_keys = toml::from_str::<toml::Table>(&source)
+        .map(|table| secret_keys(&table, ""))
+        .unwrap_or_default();
     let kind = ProjectKind::parse(&raw.kind)?;
     validate_relative_path(&raw.entry, "entry")?;
     let entry = root.join(&raw.entry);
@@ -217,6 +288,11 @@ pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
                 .relay
                 .map(|relay| relay.trim().to_string())
                 .filter(|relay| !relay.is_empty()),
+            language: raw
+                .language
+                .map(|language| language.trim().to_string())
+                .filter(|language| !language.is_empty()),
+            secret_keys,
         },
         entry: entry.canonicalize().unwrap_or(entry),
     })
@@ -326,6 +402,8 @@ pub struct RecentBundle {
 }
 
 /// One entry of [`RecentProjects`].
+// A few dozen entries at most: boxing projects would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum RecentEntry {
     Project(ResolvedProject),
@@ -1095,6 +1173,77 @@ mod tests {
         let output = output_with_timeout(sleeper("0"), std::time::Duration::from_secs(30)).unwrap();
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "done");
+    }
+
+    #[test]
+    fn the_language_is_read_pinned_and_unpinned_keeping_the_manifest_as_written() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("main.py"), "").unwrap();
+        let manifest = temp.path().join("gaanim.toml");
+        let written = "# Mi charla
+name = \"charla\"  # visible en el Inicio
+kind = \"slides\"
+entry = \"main.py\"
+
+[polls]
+relay = \"https://relay.example\"
+";
+        std::fs::write(&manifest, written).unwrap();
+        let project = resolve_project(temp.path()).unwrap();
+        assert_eq!(project.manifest.language, None);
+        assert!(project.manifest.secret_keys.is_empty());
+
+        set_project_language(&manifest, Some("es-ES")).unwrap();
+        let pinned = std::fs::read_to_string(&manifest).unwrap();
+        assert!(
+            pinned.starts_with(
+                "# Mi charla
+name = \"charla\"  # visible en el Inicio
+"
+            ),
+            "{pinned}"
+        );
+        assert!(
+            pinned.contains(
+                "language = \"es-ES\"
+
+[polls]"
+            ),
+            "{pinned}"
+        );
+        let project = resolve_project(temp.path()).unwrap();
+        assert_eq!(project.manifest.language.as_deref(), Some("es-ES"));
+        assert_eq!(
+            project.manifest.poll_relay.as_deref(),
+            Some("https://relay.example")
+        );
+
+        set_project_language(&manifest, None).unwrap();
+        assert_eq!(std::fs::read_to_string(&manifest).unwrap(), written);
+        assert!(!temp.path().join("gaanim.toml.tmp").exists());
+    }
+
+    #[test]
+    fn keys_that_look_like_credentials_are_reported() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("main.py"), "").unwrap();
+        std::fs::write(
+            temp.path().join("gaanim.toml"),
+            "kind = \"slides\"
+entry = \"main.py\"
+scribe_token = \"x\"
+
+[zoom]
+api_key = \"y\"
+language = \"es\"
+",
+        )
+        .unwrap();
+        let project = resolve_project(temp.path()).unwrap();
+        assert_eq!(
+            project.manifest.secret_keys,
+            ["scribe_token", "zoom.api_key"]
+        );
     }
 
     #[test]

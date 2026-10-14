@@ -224,11 +224,7 @@ pub(crate) fn volume_control(ui: &mut Ui, volume: &mut gaanim_media::PreviewVolu
     };
     // Right to left in the bar: the slider sits left of the speaker.
     if icon_button(ui, icon, ButtonTone::Ghost, true)
-        .on_hover_text(if silent {
-            "Activar sonido"
-        } else {
-            "Silenciar"
-        })
+        .on_hover_text(if silent { "Unmute" } else { "Mute" })
         .clicked()
     {
         if volume.muted || volume.level > 0.0 {
@@ -878,6 +874,25 @@ pub(crate) fn chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
     response
 }
 
+/// The size of a text button: its font and its height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ButtonSize {
+    pub font: f32,
+    pub height: f32,
+}
+
+impl ButtonSize {
+    pub(crate) const REGULAR: Self = Self {
+        font: 13.0,
+        height: 34.0,
+    };
+    /// For panels read while speaking, such as Script & narration.
+    pub(crate) const LARGE: Self = Self {
+        font: 15.0,
+        height: 38.0,
+    };
+}
+
 /// Filled call-to-action button with an optional leading icon.
 pub(crate) fn primary_button(
     ui: &mut Ui,
@@ -885,12 +900,33 @@ pub(crate) fn primary_button(
     icon: Option<Icon>,
     enabled: bool,
 ) -> Response {
-    text_button(ui, label, icon, enabled, true)
+    text_button(ui, label, icon, enabled, true, ButtonSize::REGULAR)
+}
+
+/// [`primary_button`] at `size`.
+pub(crate) fn primary_button_sized(
+    ui: &mut Ui,
+    label: &str,
+    icon: Option<Icon>,
+    enabled: bool,
+    size: ButtonSize,
+) -> Response {
+    text_button(ui, label, icon, enabled, true, size)
 }
 
 /// Quiet button for secondary actions.
 pub(crate) fn secondary_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
-    text_button(ui, label, None, enabled, false)
+    text_button(ui, label, None, enabled, false, ButtonSize::REGULAR)
+}
+
+/// [`secondary_button`] at `size`.
+pub(crate) fn secondary_button_sized(
+    ui: &mut Ui,
+    label: &str,
+    enabled: bool,
+    size: ButtonSize,
+) -> Response {
+    text_button(ui, label, None, enabled, false, size)
 }
 
 fn text_button(
@@ -899,13 +935,15 @@ fn text_button(
     icon: Option<Icon>,
     enabled: bool,
     primary: bool,
+    button: ButtonSize,
 ) -> Response {
-    let font = FontId::proportional(13.0);
+    let font = FontId::proportional(button.font);
     let galley = ui
         .painter()
         .layout_no_wrap(label.to_owned(), font.clone(), palette::TEXT);
-    let icon_w = if icon.is_some() { 20.0 } else { 0.0 };
-    let size = vec2(galley.size().x + icon_w + 32.0, 34.0);
+    let icon_side = (button.font * 14.0 / 13.0).round();
+    let icon_w = if icon.is_some() { icon_side + 6.0 } else { 0.0 };
+    let size = vec2(galley.size().x + icon_w + 32.0, button.height);
     let sense = if enabled {
         Sense::click()
     } else {
@@ -948,7 +986,10 @@ fn text_button(
     if let Some(icon) = icon {
         paint_icon(
             painter,
-            Rect::from_center_size(pos2(start_x + 7.0, rect.center().y), Vec2::splat(14.0)),
+            Rect::from_center_size(
+                pos2(start_x + icon_side / 2.0, rect.center().y),
+                Vec2::splat(icon_side),
+            ),
             icon,
             text,
         );
@@ -1036,9 +1077,14 @@ pub(crate) fn pill_toggle(
 
 /// Compact text button for secondary, in-panel actions (e.g. `A+`).
 pub(crate) fn small_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
+    small_button_sized(ui, label, enabled, 13.0)
+}
+
+/// [`small_button`] with its text at `font` points.
+pub(crate) fn small_button_sized(ui: &mut Ui, label: &str, enabled: bool, font: f32) -> Response {
     ui.add_enabled(
         enabled,
-        egui::Button::new(egui::RichText::new(label).size(13.0).color(if enabled {
+        egui::Button::new(egui::RichText::new(label).size(font).color(if enabled {
             palette::TEXT
         } else {
             palette::TEXT_FAINT
@@ -1046,7 +1092,7 @@ pub(crate) fn small_button(ui: &mut Ui, label: &str, enabled: bool) -> Response 
         .fill(palette::FIELD)
         .stroke(Stroke::NONE)
         .corner_radius(0.0)
-        .min_size(vec2(34.0, 26.0)),
+        .min_size(vec2(font * 34.0 / 13.0, font * 2.0)),
     )
 }
 
@@ -1078,7 +1124,7 @@ pub(crate) fn drag_handle(ui: &mut Ui, height: f32) -> HeaderDrag {
     let handle = ui
         .interact(row, ui.id().with("drag_handle"), Sense::click_and_drag())
         .on_hover_cursor(egui::CursorIcon::Grab)
-        .on_hover_text("Arrastra para mover · doble clic: volver a su sitio");
+        .on_hover_text("Drag to move · double click: dock it again");
     let dragged = handle.dragged();
     if dragged {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);

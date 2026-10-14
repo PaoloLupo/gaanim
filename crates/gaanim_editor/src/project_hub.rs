@@ -106,7 +106,7 @@ struct UpdateOffer {
     error: Option<String>,
     /// Closed for this session.
     dismissed: bool,
-    /// Start this executable and close; set by *Reiniciar*.
+    /// Start this executable and close; set by *Restart*.
     restart: Option<PathBuf>,
 }
 
@@ -180,7 +180,7 @@ impl UpdateOffer {
                         break;
                     }
                     Err(TryRecvError::Disconnected) => {
-                        finished = Some(Err("la actualización terminó sin respuesta".into()));
+                        finished = Some(Err("the update ended without a response".into()));
                         break;
                     }
                     Err(TryRecvError::Empty) => break,
@@ -271,7 +271,7 @@ impl ProjectHubState {
         self.opening = None;
         self.preparing = None;
         self.notice = Some(Notice::Error(format!(
-            "No se pudo abrir el proyecto: {error}"
+            "Could not open the project: {error}"
         )));
     }
 
@@ -315,7 +315,7 @@ impl ProjectHubState {
                 .and_then(|preparation| match preparation.result.try_recv() {
                     Ok(result) => Some(result),
                     Err(TryRecvError::Disconnected) => {
-                        Some(Err("la preparación terminó sin respuesta".into()))
+                        Some(Err("the preparation ended without a response".into()))
                     }
                     Err(TryRecvError::Empty) => None,
                 });
@@ -328,7 +328,7 @@ impl ProjectHubState {
                     self.waiting = Some(preparation.project);
                     self.section = Section::Environment;
                     self.notice = Some(Notice::Error(format!(
-                        "No se pudo preparar el entorno de Python: {error}"
+                        "Could not prepare the Python environment: {error}"
                     )));
                 }
             }
@@ -368,8 +368,8 @@ impl ProjectHubState {
             self.opening = Some(project);
         } else {
             self.notice = Some(Notice::Info(format!(
-                "Para abrir «{}» Gaanim necesita uv. Instálalo con el comando de abajo; el \
-                 proyecto se abrirá solo en cuanto lo detecte.",
+                "Gaanim needs uv to open “{}”. Install it with the command below; the \
+                 project opens on its own as soon as Gaanim detects it.",
                 project.manifest.name
             )));
             self.waiting = Some(project);
@@ -397,7 +397,7 @@ impl ProjectHubState {
             }
             Err(error) => {
                 self.notice = Some(Notice::Error(format!(
-                    "No se pudo iniciar la preparación: {error}"
+                    "Could not start the preparation: {error}"
                 )))
             }
         }
@@ -433,7 +433,7 @@ impl ProjectHubState {
             })
             .unwrap_or_else(default_project_parent);
         if let Some(path) = crate::platform::pick_file(
-            "Reproducir un archivo .gaanim",
+            "Play a .gaanim file",
             Some(&directory),
             &[("Gaanim (.gaanim)", &[gaanim_bundle::EXTENSION])],
         ) {
@@ -445,7 +445,7 @@ impl ProjectHubState {
     fn open_bundle(&mut self, path: &Path) {
         if !path.is_file() {
             self.notice = Some(Notice::Error(format!(
-                "No se encontró «{}».",
+                "“{}” was not found.",
                 display_path(path)
             )));
             return;
@@ -457,8 +457,8 @@ impl ProjectHubState {
     /// Ask for a folder with the native picker and create the project there.
     fn create_with_picker(&mut self, kind: ProjectKind) {
         let title = match kind {
-            ProjectKind::Video => "Elige o crea una carpeta para el nuevo video",
-            ProjectKind::Slides => "Elige o crea una carpeta para la nueva presentación",
+            ProjectKind::Video => "Choose or create a folder for the new video",
+            ProjectKind::Slides => "Choose or create a folder for the new presentation",
         };
         let Some(picked) = crate::platform::pick_folder(title, Some(&default_project_parent()))
         else {
@@ -477,7 +477,7 @@ impl ProjectHubState {
                 Ok(project) => self.open_project(project, true),
                 Err(error) => {
                     self.notice = Some(Notice::Error(format!(
-                        "No se pudo crear el proyecto: {error}"
+                        "Could not create the project: {error}"
                     )))
                 }
             },
@@ -485,10 +485,9 @@ impl ProjectHubState {
     }
 
     fn open_with_picker(&mut self) {
-        if let Some(path) = crate::platform::pick_folder(
-            "Abrir un proyecto de Gaanim",
-            Some(&default_project_parent()),
-        ) {
+        if let Some(path) =
+            crate::platform::pick_folder("Open a Gaanim project", Some(&default_project_parent()))
+        {
             self.open_path(&path);
         }
     }
@@ -509,8 +508,8 @@ impl ProjectHubState {
             Some(project) => self.open_project(project, false),
             None => {
                 self.notice = Some(Notice::Error(format!(
-                    "«{}» no es un proyecto de Gaanim (no tiene gaanim.toml) ni un archivo \
-                     .gaanim. Usa «Nuevo video» o «Nueva presentación» para crear uno.",
+                    "“{}” is neither a Gaanim project (it has no gaanim.toml) nor a \
+                     .gaanim file. Use “New video” or “New presentation” to create one.",
                     path.file_name()
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| path.display().to_string())
@@ -539,8 +538,8 @@ fn new_project_target(picked: &Path, kind: ProjectKind) -> NewProjectTarget {
         return NewProjectTarget::Create(picked.to_path_buf());
     }
     let base = match kind {
-        ProjectKind::Video => "nuevo-video",
-        ProjectKind::Slides => "nueva-presentacion",
+        ProjectKind::Video => "new-video",
+        ProjectKind::Slides => "new-presentation",
     };
     let candidate = (1..)
         .map(|n| {
@@ -558,7 +557,7 @@ fn new_project_target(picked: &Path, kind: ProjectKind) -> NewProjectTarget {
 fn kind_label(kind: ProjectKind) -> &'static str {
     match kind {
         ProjectKind::Video => "Video",
-        ProjectKind::Slides => "Presentación",
+        ProjectKind::Slides => "Presentation",
     }
 }
 
@@ -569,21 +568,21 @@ fn kind_color(kind: ProjectKind) -> Color32 {
     }
 }
 
-/// "hace 3 h": how long ago a project was last edited.
+/// "3 h ago": how long ago a project was last edited.
 fn relative_age(elapsed: Duration) -> String {
     let minutes = elapsed.as_secs() / 60;
     let hours = minutes / 60;
     let days = hours / 24;
     match () {
-        _ if minutes < 1 => "ahora mismo".into(),
-        _ if hours < 1 => format!("hace {minutes} min"),
-        _ if days < 1 => format!("hace {hours} h"),
-        _ if days == 1 => "ayer".into(),
-        _ if days < 7 => format!("hace {days} días"),
-        _ if days < 30 => format!("hace {} sem.", days / 7),
-        _ if days < 60 => "hace 1 mes".into(),
-        _ if days < 365 => format!("hace {} meses", days / 30),
-        _ => "hace más de un año".into(),
+        _ if minutes < 1 => "just now".into(),
+        _ if hours < 1 => format!("{minutes} min ago"),
+        _ if days < 1 => format!("{hours} h ago"),
+        _ if days == 1 => "yesterday".into(),
+        _ if days < 7 => format!("{days} days ago"),
+        _ if days < 30 => format!("{} wk ago", days / 7),
+        _ if days < 60 => "1 month ago".into(),
+        _ if days < 365 => format!("{} months ago", days / 30),
+        _ => "over a year ago".into(),
     }
 }
 
@@ -592,7 +591,7 @@ fn recorded_ago(bundle: &RecentBundle) -> Option<String> {
     let elapsed = SystemTime::now()
         .duration_since(modified)
         .unwrap_or_default();
-    Some(format!("Grabado {}", relative_age(elapsed)))
+    Some(format!("Recorded {}", relative_age(elapsed)))
 }
 
 fn edited_ago(project: &ResolvedProject) -> Option<String> {
@@ -600,7 +599,7 @@ fn edited_ago(project: &ResolvedProject) -> Option<String> {
     let elapsed = SystemTime::now()
         .duration_since(modified)
         .unwrap_or_default();
-    Some(format!("Editado {}", relative_age(elapsed)))
+    Some(format!("Edited {}", relative_age(elapsed)))
 }
 
 /// Paths as people write them, without Windows' `\\?\` verbatim prefix.
@@ -646,9 +645,9 @@ fn ffmpeg_help() -> ToolHelp {
 }
 
 const TERMINAL: &str = if cfg!(windows) {
-    "PowerShell (búscalo en el menú Inicio)"
+    "PowerShell (search for it in the Start menu)"
 } else {
-    "una terminal"
+    "a terminal"
 };
 
 fn has_ffmpeg() -> bool {
@@ -751,9 +750,7 @@ fn open_bundle_request_system(world: &mut World) {
             state.active = false;
         }
         Err(error) => {
-            state.notice = Some(Notice::Error(format!(
-                "No se pudo reproducir el archivo: {error}"
-            )));
+            state.notice = Some(Notice::Error(format!("Could not play the file: {error}")));
         }
     }
 }
@@ -829,7 +826,7 @@ fn project_hub_ui_system(
             }
             Err(error) => {
                 state.notice = Some(Notice::Error(format!(
-                    "No se pudo abrir la versión nueva ({}): {error}. Ábrela tú.",
+                    "Could not open the new version ({}): {error}. Open it yourself.",
                     executable.display()
                 )));
             }
@@ -905,9 +902,9 @@ fn sidebar_ui(ui: &mut Ui, state: &mut ProjectHubState) {
             Readiness::WithoutUv | Readiness::NeedsUv => palette::STOP,
         });
         for (section, icon, label) in [
-            (Section::Projects, Icon::Grid, "Proyectos"),
-            (Section::Environment, Icon::Package, "Entorno"),
-            (Section::Learn, Icon::Book, "Aprender"),
+            (Section::Projects, Icon::Grid, "Projects"),
+            (Section::Environment, Icon::Package, "Environment"),
+            (Section::Learn, Icon::Book, "Learn"),
         ] {
             let dot = (section == Section::Environment)
                 .then_some(status_dot)
@@ -991,11 +988,7 @@ fn paint_status_card(ui: &Ui, rect: Rect, state: &ProjectHubState, hovered: bool
         },
     );
     let (color, title, detail) = match (&state.tools, state.checking.is_some()) {
-        (None, _) => (
-            palette::TEXT_FAINT,
-            "Comprobando…".to_string(),
-            String::new(),
-        ),
+        (None, _) => (palette::TEXT_FAINT, "Checking…".to_string(), String::new()),
         (Some(tools), _) => {
             let python =
                 tools.probe.python.as_ref().map(|python| {
@@ -1004,21 +997,21 @@ fn paint_status_card(ui: &Ui, rect: Rect, state: &ProjectHubState, hovered: bool
             match tools.readiness() {
                 Readiness::Ready => (
                     palette::LOOP,
-                    "Todo listo".to_string(),
+                    "All set".to_string(),
                     match python {
                         Some(python) => format!("{python} · uv"),
-                        None => "uv preparará Python".to_string(),
+                        None => "uv will set up Python".to_string(),
                     },
                 ),
                 Readiness::WithoutUv => (
                     palette::STOP,
-                    "Casi listo".to_string(),
-                    "Instala uv para entornos aislados".to_string(),
+                    "Almost ready".to_string(),
+                    "Install uv for isolated environments".to_string(),
                 ),
                 Readiness::NeedsUv => (
                     palette::STOP,
-                    "Falta instalar uv".to_string(),
-                    "Toca aquí para ver cómo".to_string(),
+                    "uv is not installed".to_string(),
+                    "Click here to see how".to_string(),
                 ),
             }
         }
@@ -1027,7 +1020,7 @@ fn paint_status_card(ui: &Ui, rect: Rect, state: &ProjectHubState, hovered: bool
     painter.text(
         pos2(left, rect.min.y + 16.0),
         Align2::LEFT_CENTER,
-        "ENTORNO",
+        "ENVIRONMENT",
         FontId::proportional(10.0),
         palette::TEXT_FAINT,
     );
@@ -1110,35 +1103,32 @@ fn update_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         (
             palette::DANGER,
             Icon::Warning,
-            format!(
-                "No se pudo actualizar a Gaanim {}: {error}",
-                release.version
-            ),
+            format!("Could not update to Gaanim {}: {error}", release.version),
         )
     } else if offer.installed.is_some() {
         (
             palette::LOOP,
             Icon::Check,
             format!(
-                "Gaanim {} está instalado. Reinicia para usarlo.",
+                "Gaanim {} is installed. Restart to use it.",
                 release.version
             ),
         )
     } else {
         let doing = match offer.step {
             Some(crate::update::Step::Downloading { done, total }) if total > 0 => format!(
-                "Descargando Gaanim {}… {} %",
+                "Downloading Gaanim {}… {}%",
                 release.version,
                 done * 100 / total
             ),
             Some(crate::update::Step::Downloading { .. }) => {
-                format!("Descargando Gaanim {}…", release.version)
+                format!("Downloading Gaanim {}…", release.version)
             }
-            Some(crate::update::Step::Verifying) => "Comprobando la descarga…".to_owned(),
-            Some(crate::update::Step::Unpacking) => "Descomprimiendo…".to_owned(),
-            Some(crate::update::Step::Installing) => "Instalando…".to_owned(),
+            Some(crate::update::Step::Verifying) => "Verifying the download…".to_owned(),
+            Some(crate::update::Step::Unpacking) => "Unpacking…".to_owned(),
+            Some(crate::update::Step::Installing) => "Installing…".to_owned(),
             None => format!(
-                "Gaanim {} está disponible; tienes la {}.",
+                "Gaanim {} is available; you have {}.",
                 release.version,
                 env!("CARGO_PKG_VERSION")
             ),
@@ -1162,23 +1152,23 @@ fn update_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if !installing
                         && icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
-                            .on_hover_text("Cerrar")
+                            .on_hover_text("Close")
                             .clicked()
                     {
                         dismiss = true;
                     }
                     if offer.installed.is_some() {
-                        restart = primary_button(ui, "Reiniciar", None, true).clicked();
+                        restart = primary_button(ui, "Restart", None, true).clicked();
                     } else if !installing {
                         let label = if offer.error.is_some() {
-                            "Reintentar"
+                            "Retry"
                         } else {
-                            "Actualizar"
+                            "Update"
                         };
                         install = primary_button(ui, label, None, true).clicked();
                     }
                     if !release.page.is_empty() {
-                        notes = secondary_button(ui, "Novedades", true).clicked();
+                        notes = secondary_button(ui, "What's new", true).clicked();
                     }
                 });
             });
@@ -1226,7 +1216,7 @@ fn notice_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                     ui.label(egui::RichText::new(text).size(13.0).color(palette::TEXT));
                 });
                 if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
-                    .on_hover_text("Cerrar")
+                    .on_hover_text("Close")
                     .clicked()
                 {
                     dismiss = true;
@@ -1252,9 +1242,9 @@ enum Start {
 fn projects_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     page_header(
         ui,
-        "PROYECTOS",
-        "¿Qué quieres animar hoy?",
-        "Crea un proyecto o abre uno reciente. Gaanim prepara Python por ti.",
+        "PROJECTS",
+        "What do you want to animate today?",
+        "Create a project or open a recent one. Gaanim sets up Python for you.",
     );
 
     let busy = state.busy();
@@ -1268,26 +1258,26 @@ fn projects_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     let starts = [
         (
             Start::Video,
-            "Nuevo video",
-            "Animación 16:9 lista para exportar a MP4, WebM o GIF.",
+            "New video",
+            "A 16:9 animation ready to export to MP4, WebM or GIF.",
             "Ctrl N",
         ),
         (
             Start::Slides,
-            "Nueva presentación",
-            "Diapositivas con pasos, notas y modo presentador.",
+            "New presentation",
+            "Slides with steps, notes and Presenter View.",
             "Ctrl Shift N",
         ),
         (
             Start::Open,
-            "Abrir proyecto",
-            "Elige su carpeta o arrástrala a esta ventana.",
+            "Open project",
+            "Choose its folder or drag it onto this window.",
             "Ctrl O",
         ),
         (
             Start::Bundle,
-            "Reproducir .gaanim",
-            "Reproduce, presenta o exporta un archivo .gaanim.",
+            "Play .gaanim",
+            "Play, present or export a .gaanim file.",
             "Ctrl Shift O",
         ),
     ];
@@ -1636,7 +1626,7 @@ fn paint_bundle_scene(painter: &egui::Painter, stage: Rect, playing: bool, time:
 fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     let entries = state.recents.entries();
     ui.horizontal(|ui| {
-        ui.label(caption("RECIENTES"));
+        ui.label(caption("RECENT"));
         if !entries.is_empty() {
             ui.add_space(8.0);
             ui.label(
@@ -1649,7 +1639,7 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                 if ui
                     .add(
                         egui::Label::new(
-                            egui::RichText::new("Limpiar lista")
+                            egui::RichText::new("Clear list")
                                 .size(12.0)
                                 .color(palette::TEXT_MUTED),
                         )
@@ -1809,18 +1799,18 @@ fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> 
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
             |ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                if primary_button(ui, "Abrir", Some(Icon::Play), true).clicked() {
+                if primary_button(ui, "Open", Some(Icon::Play), true).clicked() {
                     action = Some(RowAction::Open);
                 }
                 ui.add_space(6.0);
                 if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
-                    .on_hover_text("Quitar de la lista (no borra archivos)")
+                    .on_hover_text("Remove from recent (does not delete files)")
                     .clicked()
                 {
                     action = Some(RowAction::Remove);
                 }
                 if icon_button(ui, Icon::Folder, ButtonTone::Ghost, true)
-                    .on_hover_text("Mostrar la carpeta")
+                    .on_hover_text("Show folder")
                     .clicked()
                 {
                     action = Some(RowAction::ShowFolder);
@@ -1880,14 +1870,14 @@ fn empty_recents(ui: &mut Ui, state: &mut ProjectHubState) {
     painter.text(
         pos2(rect.center().x, rect.min.y + 98.0),
         Align2::CENTER_CENTER,
-        "Tus proyectos aparecerán aquí",
+        "Your projects will appear here",
         FontId::proportional(15.0),
         palette::TEXT,
     );
     painter.text(
         pos2(rect.center().x, rect.min.y + 120.0),
         Align2::CENTER_CENTER,
-        "Crea tu primer video: elige una carpeta y Gaanim prepara todo lo demás.",
+        "Create your first video: choose a folder and Gaanim sets up everything else.",
         FontId::proportional(12.5),
         palette::TEXT_MUTED,
     );
@@ -1898,7 +1888,7 @@ fn empty_recents(ui: &mut Ui, state: &mut ProjectHubState) {
             egui::UiBuilder::new()
                 .max_rect(button)
                 .layout(egui::Layout::top_down(egui::Align::Center)),
-            |ui| primary_button(ui, "Nuevo video", Some(Icon::Plus), !state.busy()).clicked(),
+            |ui| primary_button(ui, "New video", Some(Icon::Plus), !state.busy()).clicked(),
         )
         .inner;
     if clicked {
@@ -1919,10 +1909,10 @@ enum ToolState {
 fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     page_header(
         ui,
-        "ENTORNO",
-        "Lo que Gaanim necesita en tu equipo",
-        "Cada proyecto tiene su propio Python aislado, que Gaanim prepara solo. Para eso \
-         necesita uv; FFmpeg es opcional.",
+        "ENVIRONMENT",
+        "What Gaanim needs on your computer",
+        "Each project has its own isolated Python, which Gaanim sets up on its own. For that \
+         it needs uv; FFmpeg is optional.",
     );
 
     ui.horizontal(|ui| {
@@ -1930,9 +1920,9 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         if primary_button(
             ui,
             if checking {
-                "Comprobando…"
+                "Checking…"
             } else {
-                "Comprobar de nuevo"
+                "Check again"
             },
             Some(Icon::Loop),
             !checking,
@@ -1945,7 +1935,7 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
             ui.add_space(12.0);
             ui.label(
                 egui::RichText::new(format!(
-                    "«{}» se abrirá en cuanto el entorno esté listo.",
+                    "“{}” will open as soon as the environment is ready.",
                     project.manifest.name
                 ))
                 .size(12.5)
@@ -1957,7 +1947,7 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
 
     let Some(tools) = state.tools.clone() else {
         ui.label(
-            egui::RichText::new("Buscando Python, uv y FFmpeg…")
+            egui::RichText::new("Looking for Python, uv and FFmpeg…")
                 .size(13.0)
                 .color(palette::TEXT_MUTED),
         );
@@ -1970,19 +1960,19 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         ToolState::Missing
     };
     let uv_detail = match &tools.probe.uv {
-        Some(uv) => format!("Instalado · {}", uv.version),
-        None => "No instalado · necesario para crear y preparar proyectos".into(),
+        Some(uv) => format!("Installed · {}", uv.version),
+        None => "Not installed · needed to create and set up projects".into(),
     };
     tool_card(
         ui,
         "uv",
-        "Descarga Python y crea el entorno de cada proyecto. Lo usas una vez; Gaanim hace el resto.",
+        "Downloads Python and creates each project's environment. You use it once; Gaanim does the rest.",
         uv_state,
         &uv_detail,
         (uv_state == ToolState::Missing).then(uv_help),
         &[
-            "Cuando termine, vuelve a esta ventana: Gaanim lo detecta solo.",
-            "Si no aparece, pulsa «Comprobar de nuevo».",
+            "When it finishes, come back to this window: Gaanim detects it on its own.",
+            "If it does not show up, click “Check again”.",
         ],
     );
     ui.add_space(12.0);
@@ -1996,39 +1986,39 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                 python.version.minor,
                 python.version.patch,
                 match python.source {
-                    PythonSource::ActiveVenv => "entorno activo",
-                    PythonSource::ProjectVenv => "entorno del proyecto",
-                    PythonSource::System => "sistema",
+                    PythonSource::ActiveVenv => "active environment",
+                    PythonSource::ProjectVenv => "project environment",
+                    PythonSource::System => "system",
                 }
             ),
         ),
         Some(python) if tools.probe.uv.is_some() => (
             ToolState::Handled,
             format!(
-                "Tienes Python {}.{}; uv descargará Python 3.14 para tus proyectos",
+                "You have Python {}.{}; uv will download Python 3.14 for your projects",
                 python.version.major, python.version.minor
             ),
         ),
         None if tools.probe.uv.is_some() => (
             ToolState::Handled,
-            "uv lo descargará al crear tu primer proyecto".into(),
+            "uv will download it when you create your first project".into(),
         ),
         Some(python) => (
             ToolState::Missing,
             format!(
-                "Python {}.{} no es compatible · instala uv y él traerá Python 3.14",
+                "Python {}.{} is not supported · install uv and it will bring Python 3.14",
                 python.version.major, python.version.minor
             ),
         ),
         None => (
             ToolState::Missing,
-            "No encontrado · instala uv y él traerá Python 3.14".into(),
+            "Not found · install uv and it will bring Python 3.14".into(),
         ),
     };
     tool_card(
         ui,
         "Python 3.14",
-        "El lenguaje en el que escribes las escenas. No tienes que instalarlo a mano.",
+        "The language you write scenes in. You do not have to install it by hand.",
         python_state,
         &python_detail,
         None,
@@ -2044,16 +2034,16 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     tool_card(
         ui,
         "FFmpeg",
-        "Opcional. Exporta a MP4 y WebM y permite usar video y audio en las escenas. Sin él \
-         puedes exportar WebP, GIF y PNG.",
+        "Optional. Exports to MP4 and WebM and lets scenes use video and audio. Without it \
+         you can export WebP, GIF and PNG.",
         ffmpeg_state,
         if tools.ffmpeg {
-            "Instalado"
+            "Installed"
         } else {
-            "No instalado"
+            "Not installed"
         },
         (!tools.ffmpeg).then(ffmpeg_help),
-        &["Cuando termine, cierra y vuelve a abrir Gaanim si al exportar sigue sin encontrarlo."],
+        &["When it finishes, close and reopen Gaanim if exporting still cannot find it."],
     );
     if !crate::WEB {
         ui.add_space(12.0);
@@ -2068,9 +2058,9 @@ fn association_card(ui: &mut Ui, state: &mut ProjectHubState) {
         .associated
         .get_or_insert_with(association::is_registered);
     let (color, icon, badge) = if associated {
-        (palette::LOOP, Icon::Check, "Asociados")
+        (palette::LOOP, Icon::Check, "Associated")
     } else {
-        (palette::TEXT_MUTED, Icon::Warning, "Opcional")
+        (palette::TEXT_MUTED, Icon::Warning, "Optional")
     };
     let mut clicked = false;
     egui::Frame::new()
@@ -2086,7 +2076,7 @@ fn association_card(ui: &mut Ui, state: &mut ProjectHubState) {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("Archivos .gaanim")
+                            egui::RichText::new(".gaanim files")
                                 .size(16.0)
                                 .color(palette::TEXT),
                         );
@@ -2096,8 +2086,8 @@ fn association_card(ui: &mut Ui, state: &mut ProjectHubState) {
                     ui.add_space(4.0);
                     ui.label(
                         egui::RichText::new(
-                            "Ábrelos con doble clic, preséntalos desde el menú contextual y ve \
-                             su portada en el explorador de archivos. Solo para tu usuario.",
+                            "Open them with a double click, present them from the context menu \
+                             and see their cover in the file manager. Only for your user.",
                         )
                         .size(12.5)
                         .color(palette::TEXT_MUTED),
@@ -2106,9 +2096,9 @@ fn association_card(ui: &mut Ui, state: &mut ProjectHubState) {
                     clicked = ui_kit::secondary_button(
                         ui,
                         if associated {
-                            "Quitar la asociación"
+                            "Remove the association"
                         } else {
-                            "Asociar archivos .gaanim"
+                            "Associate .gaanim files"
                         },
                         true,
                     )
@@ -2130,15 +2120,13 @@ fn association_card(ui: &mut Ui, state: &mut ProjectHubState) {
     state.notice = Some(match result {
         Ok(report) if report.warnings.is_empty() => Notice::Info(
             if associated {
-                "Los archivos .gaanim ya no se abren con Gaanim."
+                ".gaanim files no longer open with Gaanim."
             } else {
-                "Listo: los archivos .gaanim se abren con Gaanim."
+                "Done: .gaanim files open with Gaanim."
             }
             .into(),
         ),
-        Ok(_) if associated => {
-            Notice::Info("Los archivos .gaanim ya no se abren con Gaanim.".into())
-        }
+        Ok(_) if associated => Notice::Info(".gaanim files no longer open with Gaanim.".into()),
         Ok(report)
             if report
                 .warnings
@@ -2146,18 +2134,18 @@ fn association_card(ui: &mut Ui, state: &mut ProjectHubState) {
                 .any(|warning| warning.contains(association::THUMBNAIL_HANDLER_DLL)) =>
         {
             Notice::Info(format!(
-                "Los archivos .gaanim se abren con Gaanim, pero el Explorador no \
-                 mostrará su portada: falta {} junto a gaanim.exe. Viene en el .zip \
-                 de cada versión; cópialo a esa carpeta y vuelve a asociar.",
+                ".gaanim files open with Gaanim, but Explorer will not show their \
+                 cover: {} is missing next to gaanim.exe. It comes in each release's \
+                 .zip; copy it to that folder and associate again.",
                 association::THUMBNAIL_HANDLER_DLL
             ))
         }
         Ok(_) => Notice::Info(
-            "Listo: los archivos .gaanim se abren con Gaanim. Si el explorador de \
-             archivos aún no lo muestra, cierra la sesión y vuelve a entrar."
+            "Done: .gaanim files open with Gaanim. If the file manager does not show it \
+             yet, log out and back in."
                 .into(),
         ),
-        Err(error) => Notice::Error(format!("No se pudo cambiar la asociación: {error}")),
+        Err(error) => Notice::Error(format!("Could not change the association: {error}")),
     });
 }
 
@@ -2171,10 +2159,10 @@ fn tool_card(
     after: &[&str],
 ) {
     let (color, icon, badge) = match tool_state {
-        ToolState::Ok => (palette::LOOP, Icon::Check, "Listo"),
-        ToolState::Handled => (palette::ACCENT, Icon::Check, "Automático"),
-        ToolState::Missing => (palette::STOP, Icon::Warning, "Falta"),
-        ToolState::Optional => (palette::TEXT_MUTED, Icon::Warning, "Opcional"),
+        ToolState::Ok => (palette::LOOP, Icon::Check, "Ready"),
+        ToolState::Handled => (palette::ACCENT, Icon::Check, "Automatic"),
+        ToolState::Missing => (palette::STOP, Icon::Warning, "Missing"),
+        ToolState::Optional => (palette::TEXT_MUTED, Icon::Warning, "Optional"),
     };
     egui::Frame::new()
         .fill(palette::SURFACE)
@@ -2224,7 +2212,7 @@ fn tool_card(
 /// Numbered steps with the exact command, a copy button and a link to more
 /// options.
 fn install_steps(ui: &mut Ui, name: &str, help: &ToolHelp, after: &[&str]) {
-    ui.label(caption("CÓMO INSTALARLO"));
+    ui.label(caption("HOW TO INSTALL IT"));
     ui.add_space(10.0);
     let step = |ui: &mut Ui, number: usize, text: &str| {
         ui.horizontal(|ui| {
@@ -2242,8 +2230,8 @@ fn install_steps(ui: &mut Ui, name: &str, help: &ToolHelp, after: &[&str]) {
         });
         ui.add_space(8.0);
     };
-    step(ui, 1, &format!("Abre {}.", help.terminal));
-    step(ui, 2, "Copia este comando, pégalo y pulsa Enter:");
+    step(ui, 1, &format!("Open {}.", help.terminal));
+    step(ui, 2, "Copy this command, paste it and press Enter:");
     egui::Frame::new()
         .fill(Color32::from_rgb(11, 12, 16))
         .inner_margin(egui::Margin::symmetric(14, 10))
@@ -2261,12 +2249,8 @@ fn install_steps(ui: &mut Ui, name: &str, help: &ToolHelp, after: &[&str]) {
                     let copied_at: Option<f64> = ui.data(|data| data.get_temp(copied_id));
                     let now = ui.input(|input| input.time);
                     let recently = copied_at.is_some_and(|at| now - at < 1.6);
-                    if ui_kit::secondary_button(
-                        ui,
-                        if recently { "Copiado" } else { "Copiar" },
-                        true,
-                    )
-                    .clicked()
+                    if ui_kit::secondary_button(ui, if recently { "Copied" } else { "Copy" }, true)
+                        .clicked()
                     {
                         ui.ctx().copy_text(help.command.to_owned());
                         ui.data_mut(|data| data.insert_temp(copied_id, now));
@@ -2284,7 +2268,7 @@ fn install_steps(ui: &mut Ui, name: &str, help: &ToolHelp, after: &[&str]) {
     if ui
         .add(
             egui::Label::new(
-                egui::RichText::new(format!("Otras formas de instalar {name} ↗"))
+                egui::RichText::new(format!("Other ways to install {name} ↗"))
                     .size(12.0)
                     .color(palette::ACCENT),
             )
@@ -2302,45 +2286,45 @@ fn install_steps(ui: &mut Ui, name: &str, help: &ToolHelp, after: &[&str]) {
 fn learn_ui(ui: &mut Ui) {
     page_header(
         ui,
-        "APRENDER",
-        "Aprende Gaanim paso a paso",
-        "La documentación se abre en tu navegador.",
+        "LEARN",
+        "Learn Gaanim step by step",
+        "The documentation opens in your browser.",
     );
     let links = [
         (
             Icon::Book,
-            "Guía rápida",
-            "Tu primera escena en cinco minutos.",
+            "Quick start",
+            "Your first scene in five minutes.",
             "empezar/primera-animacion/",
         ),
         (
             Icon::Play,
-            "Proyecto práctico",
-            "Del círculo al seno en ocho capítulos.",
+            "Hands-on project",
+            "From circle to sine wave in eight chapters.",
             "tutorial/antes-de-empezar/",
         ),
         (
             Icon::Grid,
-            "Ejemplos",
-            "Escenas listas para copiar y modificar.",
+            "Examples",
+            "Scenes ready to copy and modify.",
             "ejemplos/",
         ),
         (
             Icon::Present,
-            "Presentaciones",
-            "Pasos, notas y modo presentador.",
+            "Presentations",
+            "Steps, notes and Presenter View.",
             "guias/presentaciones/",
         ),
         (
             Icon::Code,
-            "Referencia de la API",
-            "Cada función, con ejemplos animados.",
+            "API reference",
+            "Every function, with animated examples.",
             "referencia/",
         ),
         (
             Icon::Export,
-            "Instalación y exportación",
-            "Formatos, FFmpeg y actualizaciones.",
+            "Installation and export",
+            "Formats, FFmpeg and updates.",
             "empezar/instalacion/",
         ),
     ];
@@ -2360,7 +2344,7 @@ fn learn_ui(ui: &mut Ui) {
     }
 
     ui.add_space(22.0);
-    ui.label(caption("ATAJOS EN LA VISTA PREVIA"));
+    ui.label(caption("PREVIEW SHORTCUTS"));
     ui.add_space(12.0);
     egui::Frame::new()
         .fill(palette::SURFACE)
@@ -2368,13 +2352,13 @@ fn learn_ui(ui: &mut Ui) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             for (keys, action) in [
-                ("Espacio", "Reproducir o pausar"),
-                ("← →", "Escena anterior o siguiente"),
-                ("Inicio  Fin", "Ir al principio o al final"),
-                ("L", "Repetir la escena actual"),
-                ("F11", "Pantalla completa"),
-                ("O", "Mostrar guías de composición"),
-                ("Guardar el archivo", "Recarga la escena al instante"),
+                ("Space", "Play or pause"),
+                ("← →", "Previous or next scene"),
+                ("Home  End", "Go to the start or the end"),
+                ("L", "Repeat the current scene"),
+                ("F11", "Full screen"),
+                ("O", "Show composition guides"),
+                ("Save the file", "Reloads the scene instantly"),
             ] {
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(vec2(170.0, 28.0), Sense::hover());
@@ -2482,10 +2466,10 @@ fn preparation_modal(ctx: &egui::Context, state: &mut ProjectHubState) {
         .show(ctx, |ui| {
             ui.set_width(460.0);
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-            ui.label(caption(if opening { "ABRIENDO" } else { "PREPARANDO" }));
+            ui.label(caption(if opening { "OPENING" } else { "PREPARING" }));
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new(format!("«{name}»"))
+                egui::RichText::new(format!("“{name}”"))
                     .size(20.0)
                     .color(palette::TEXT),
             );
@@ -2498,22 +2482,22 @@ fn preparation_modal(ctx: &egui::Context, state: &mut ProjectHubState) {
             ui.add_space(22.0);
             let steps = [
                 if created {
-                    "Proyecto creado"
+                    "Project created"
                 } else {
-                    "Proyecto"
+                    "Project"
                 },
-                "Python y autocompletado",
-                "Vista previa",
+                "Python and autocomplete",
+                "Preview",
             ];
             let current = if opening { 2 } else { 1 };
             paint_steps(ui, &steps, current, time);
             ui.add_space(20.0);
             ui.label(
                 egui::RichText::new(if opening {
-                    "Cargando la escena…"
+                    "Loading the scene…"
                 } else {
-                    "uv está creando el entorno de Python del proyecto e instalando el \
-                     autocompletado. La primera vez puede tardar un minuto mientras descarga \
+                    "uv is creating the project's Python environment and installing \
+                     autocomplete. The first time can take a minute while it downloads \
                      Python 3.14."
                 })
                 .size(12.5)
@@ -2522,7 +2506,7 @@ fn preparation_modal(ctx: &egui::Context, state: &mut ProjectHubState) {
             if !opening {
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
-                    if secondary_button(ui, "Mostrar carpeta", true).clicked() {
+                    if secondary_button(ui, "Show folder", true).clicked() {
                         let _ = crate::platform::open_detached(&root);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2600,7 +2584,7 @@ fn paint_drop_overlay(ctx: &egui::Context, area: Rect) {
     painter.text(
         zone.center() + vec2(0.0, 22.0),
         Align2::CENTER_CENTER,
-        "Suelta la carpeta de un proyecto o un archivo .gaanim para abrirlo",
+        "Drop a project folder or a .gaanim file to open it",
         FontId::proportional(16.0),
         palette::TEXT,
     );
@@ -2717,14 +2701,14 @@ mod tests {
     fn busy_folders_get_a_free_subfolder() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("notes.txt"), "").unwrap();
-        std::fs::create_dir(dir.path().join("nuevo-video")).unwrap();
+        std::fs::create_dir(dir.path().join("new-video")).unwrap();
         assert_eq!(
             new_project_target(dir.path(), ProjectKind::Video),
-            NewProjectTarget::Create(dir.path().join("nuevo-video-2"))
+            NewProjectTarget::Create(dir.path().join("new-video-2"))
         );
         assert_eq!(
             new_project_target(dir.path(), ProjectKind::Slides),
-            NewProjectTarget::Create(dir.path().join("nueva-presentacion"))
+            NewProjectTarget::Create(dir.path().join("new-presentation"))
         );
     }
 
@@ -2750,13 +2734,13 @@ mod tests {
     #[test]
     fn ages_read_naturally() {
         let minutes = |m: u64| Duration::from_secs(m * 60);
-        assert_eq!(relative_age(Duration::from_secs(20)), "ahora mismo");
-        assert_eq!(relative_age(minutes(5)), "hace 5 min");
-        assert_eq!(relative_age(minutes(180)), "hace 3 h");
-        assert_eq!(relative_age(minutes(60 * 30)), "ayer");
-        assert_eq!(relative_age(minutes(60 * 24 * 3)), "hace 3 días");
-        assert_eq!(relative_age(minutes(60 * 24 * 14)), "hace 2 sem.");
-        assert_eq!(relative_age(minutes(60 * 24 * 90)), "hace 3 meses");
+        assert_eq!(relative_age(Duration::from_secs(20)), "just now");
+        assert_eq!(relative_age(minutes(5)), "5 min ago");
+        assert_eq!(relative_age(minutes(180)), "3 h ago");
+        assert_eq!(relative_age(minutes(60 * 30)), "yesterday");
+        assert_eq!(relative_age(minutes(60 * 24 * 3)), "3 days ago");
+        assert_eq!(relative_age(minutes(60 * 24 * 14)), "2 wk ago");
+        assert_eq!(relative_age(minutes(60 * 24 * 90)), "3 months ago");
     }
 
     #[test]
