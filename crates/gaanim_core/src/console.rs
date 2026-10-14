@@ -14,6 +14,12 @@ use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
+mod messages;
+pub use messages::{
+    Json, emit_json, json_object, level_name, location_fields, message_format_json, message_object,
+    parse_message_format, set_message_format_json,
+};
+
 /// The standard stream a line is written to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stream {
@@ -191,6 +197,29 @@ pub fn status(level: Level, label: &str, message: impl Display) {
 /// Prints a status line on stderr without keeping it in the log, for a line
 /// whose entry was [recorded](record) with more detail.
 pub fn print_status(level: Level, label: &str, message: &str) {
+    print_status_at(level, label, message, None);
+}
+
+/// [`print_status`] for a line about `location`, which a JSON message
+/// carries as its `file` and `line`.
+pub fn print_status_at(
+    level: Level,
+    label: &str,
+    message: &str,
+    location: Option<&ScriptLocation>,
+) {
+    if message_format_json() {
+        // A traceback names the line that failed.
+        let failed = location
+            .is_none()
+            .then(|| traceback_summary(message).1)
+            .flatten();
+        let line = message_object(level, label, message, location.or(failed.as_ref()));
+        let mut stdout = std::io::stdout().lock();
+        let _ = writeln!(stdout, "{line}");
+        let _ = stdout.flush();
+        return;
+    }
     let line = format_line(level, label, message, color_enabled(Stream::Stderr));
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
@@ -451,6 +480,13 @@ pub fn format_hint(message: &str, color: bool) -> String {
 
 /// Prints a dimmed follow-up line under a status line, such as how to get help.
 pub fn hint(message: impl Display) {
+    if message_format_json() {
+        emit_json(&[
+            ("type", "hint".into()),
+            ("message", message.to_string().into()),
+        ]);
+        return;
+    }
     let line = format_hint(&message.to_string(), color_enabled(Stream::Stderr));
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
@@ -463,6 +499,14 @@ pub fn format_detail(key: &str, value: &str, color: bool) -> String {
 
 /// Prints a `Key:  value` line under a status line.
 pub fn detail(key: &str, value: impl Display) {
+    if message_format_json() {
+        emit_json(&[
+            ("type", "detail".into()),
+            ("key", key.into()),
+            ("value", value.to_string().into()),
+        ]);
+        return;
+    }
     let line = format_detail(key, &value.to_string(), color_enabled(Stream::Stderr));
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }

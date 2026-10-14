@@ -40,6 +40,10 @@ pub struct CapturedFrame {
 /// The terminal progress bar every export draws, from `gaanim export` or the
 /// editor.
 pub fn create_progress_bar(total_frames: u64) -> ProgressBar {
+    // JSON messages report progress themselves (see `export_progress`).
+    if console::message_format_json() {
+        return ProgressBar::hidden();
+    }
     let pb = ProgressBar::new(total_frames).with_prefix("render");
     pb.set_style(
         ProgressStyle::default_bar()
@@ -85,6 +89,10 @@ fn export_log(
     if let Some(telemetry) = telemetry {
         telemetry.push_log(console::format_line(level, label, &message, false));
     }
+    if console::message_format_json() {
+        println!("{}", console::message_object(level, label, &message, None));
+        return;
+    }
     let color = console::color_enabled(console::Stream::Stdout);
     println!("{}", console::format_line(level, label, &message, color));
 }
@@ -95,6 +103,14 @@ fn export_detail(telemetry: &Option<ExportTelemetry>, key: &str, value: impl std
     let value = value.to_string();
     if let Some(telemetry) = telemetry {
         telemetry.push_log(console::format_detail(key, &value, false));
+    }
+    if console::message_format_json() {
+        console::emit_json(&[
+            ("type", "detail".into()),
+            ("key", key.into()),
+            ("value", value.into()),
+        ]);
+        return;
     }
     let color = console::color_enabled(console::Stream::Stdout);
     println!("{}", console::format_detail(key, &value, color));
@@ -132,6 +148,27 @@ pub(crate) fn export_progress(telemetry: &Option<ExportTelemetry>, current: u64,
     if std::env::var_os("GAANIM_EXPORT_WORKER").is_some() {
         println!("GAANIM_EXPORT_PROGRESS {current} {total}");
     }
+    if console::message_format_json()
+        && let Some(percent) = progress_step(current, total)
+    {
+        console::emit_json(&[
+            ("type", "progress".into()),
+            ("current", current.into()),
+            ("total", total.into()),
+            ("percent", percent.into()),
+        ]);
+    }
+}
+
+/// The whole percent `current` of `total` frames reached, when it is a new
+/// one: JSON progress reports each percent once, not every frame.
+fn progress_step(current: u64, total: u64) -> Option<u64> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST: AtomicU64 = AtomicU64::new(u64::MAX);
+    let percent = (current.min(total) * 100).checked_div(total).unwrap_or(100);
+    let last = LAST.swap(percent, Ordering::Relaxed);
+    // A new export starts over from a lower percent.
+    (last != percent || current == 0).then_some(percent)
 }
 
 /// Where the time of one headless export went, for the benchmark harness.
