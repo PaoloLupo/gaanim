@@ -54,8 +54,8 @@ use scribe::{
 
 use crate::export::{ProjectPaths, StashedReplay};
 use crate::ui_kit::{
-    ButtonTone, Icon, caption, card_frame, field_frame, icon_button, paint_icon, palette,
-    primary_button, secondary_button, section_label, small_button,
+    ButtonSize, ButtonTone, Icon, caption, card_frame, field_frame, icon_button, paint_icon,
+    palette, primary_button_sized, secondary_button_sized, section_label, small_button_sized,
 };
 use crate::{EditorState, PresentationMode};
 use level::{Leveling, start_leveling};
@@ -83,6 +83,41 @@ const QUIET_AFTER: Duration = Duration::from_secs(4);
 const HOT_WARNING: Duration = Duration::from_millis(1500);
 /// Range drawn by the input meter, in dBFS.
 const METER_FLOOR_DB: f32 = -48.0;
+
+/// Script & narration is read while speaking, a step away from the
+/// screen: it is wider and larger than the editor's other panels.
+const PANEL_WIDTH: f32 = 470.0;
+/// The size of its small buttons' text.
+const SMALL_TEXT: f32 = 14.5;
+
+/// The styles of Script & narration's widgets, a size up from the editor's.
+fn enlarge(style: &mut egui::Style) {
+    for font in style.text_styles.values_mut() {
+        font.size = (font.size * 1.15).round();
+    }
+    style.spacing.item_spacing.y = 10.0;
+    style.spacing.interact_size.y = 30.0;
+    style.spacing.icon_width = 18.0;
+    style.spacing.icon_width_inner = 10.0;
+    style.spacing.icon_spacing = 8.0;
+}
+
+fn primary(ui: &mut egui::Ui, label: &str, icon: Option<Icon>, enabled: bool) -> egui::Response {
+    primary_button_sized(ui, label, icon, enabled, ButtonSize::LARGE)
+}
+
+fn secondary(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
+    secondary_button_sized(ui, label, enabled, ButtonSize::LARGE)
+}
+
+fn small(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
+    small_button_sized(ui, label, enabled, SMALL_TEXT)
+}
+
+/// A section's heading.
+fn heading(text: &str) -> egui::RichText {
+    caption(text).size(12.5)
+}
 
 fn to_db(linear: f32) -> f32 {
     20.0 * linear.max(1e-5).log10()
@@ -275,6 +310,8 @@ pub struct NarrationPanel {
     /// Write what the speaker says into the script with Scribe while
     /// recording; unset, whenever a token is at hand.
     dictate: Option<bool>,
+    /// Slides whose stops the timing card lists, by name.
+    expanded: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -291,13 +328,16 @@ enum Request {
         dictate: bool,
     },
     /// Present the talk to time it, dictating its script with Scribe when
-    /// `dictate`: from the slide named `from` (the first when `None`), and
-    /// only that slide when `only`.
+    /// `dictate`: from the slide named `from` (the first when `None`), or
+    /// from its part `part`, and only that slide or part when `only`.
     RecordTalk {
         from: Option<String>,
+        part: Option<usize>,
         only: bool,
         dictate: bool,
     },
+    /// Move the playhead there, paused.
+    Seek(f64),
     Listen(f64),
     Transcribe(String),
     Level(String),
@@ -490,12 +530,26 @@ enum Target {
         files: TakeFiles,
     },
     /// Present the talk to time it and dictate its script; no take is
-    /// recorded. With `only`, the slide of that name, and the recording
-    /// ends once the speaker leaves it.
+    /// recorded. With `only`, one slide or part, and the recording ends
+    /// once the speaker leaves it.
     Talk {
         start_time: f64,
-        only: Option<String>,
+        only: Option<Scope>,
     },
+}
+
+/// What recording the talk records again: one slide, or one part of it.
+#[derive(Debug, Clone, PartialEq)]
+struct Scope {
+    slide: String,
+    /// The part, by index: the text said before its stop.
+    part: Option<usize>,
+}
+
+impl Scope {
+    fn covers(&self, slide: &str, part: usize) -> bool {
+        self.slide == slide && self.part.is_none_or(|own| own == part)
+    }
 }
 
 impl Target {
@@ -666,13 +720,40 @@ fn script_place(timeline: &Timeline) -> Option<(String, usize)> {
     })
 }
 
-/// Whether a recording that followed `track` went through the slide named
-/// `slide` and has left it.
-fn left_slide(track: &pace::ScriptTrack, slide: &str) -> bool {
-    let named = |entry: &(f64, Option<(String, usize)>)| {
-        entry.1.as_ref().is_some_and(|(name, _)| name == slide)
+/// Whether a recording that followed `track` went through `scope` and has
+/// left it.
+fn left_scope(track: &pace::ScriptTrack, scope: &Scope) -> bool {
+    let inside = |entry: &(f64, Option<(String, usize)>)| {
+        entry
+            .1
+            .as_ref()
+            .is_some_and(|(slide, part)| scope.covers(slide, *part))
     };
-    track.iter().any(named) && track.last().is_some_and(|last| !named(last))
+    track.iter().any(inside) && track.last().is_some_and(|last| !inside(last))
+}
+
+/// The name of part `part` of the slide named `slide`: its stop's, else
+/// its number, or what follows the last stop.
+fn part_label(segment: &gaanim_timeline::timeline::SegmentMetadata, part: usize) -> String {
+    match segment.stops.get(part) {
+        Some(stop) => stop
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map_or_else(|| format!("Step {}", part + 1), str::to_owned),
+        None => "until the next slide".to_owned(),
+    }
+}
+
+/// The parts of `segment` its stops cut it into: one before each stop, and
+/// one after the last when the slide goes on past it.
+fn slide_parts(segment: &gaanim_timeline::timeline::SegmentMetadata) -> usize {
+    let after = segment
+        .stops
+        .last()
+        .is_some_and(|stop| segment.end_time - stop.time > 0.05);
+    segment.stops.len() + usize::from(after)
 }
 
 struct Recording {
@@ -755,6 +836,8 @@ enum Phase {
     Finishing {
         dictation: Box<Dictation>,
         track: Vec<(f64, Option<(String, usize)>)>,
+        /// The slide or part recorded again: the dictation goes only there.
+        scope: Option<Scope>,
         since: Instant,
     },
 }
@@ -1040,24 +1123,27 @@ fn complete_script(
     Ok(additions)
 }
 
-/// What dictating added to the script.
+/// What dictating did to the script.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct DictationReport {
     /// Slide parts that received dictated text.
     parts: usize,
-    /// Of those, parts that already had text, where it went as a comment.
-    commented: usize,
-    /// Of those, parts whose earlier dictation, untouched, it replaced.
+    /// Of those, parts whose text it replaced, keeping that text in a
+    /// comment.
     replaced: usize,
+    /// Of those, parts it could not replace safely (their text shares a
+    /// line with a comment), where it went beside the text as a comment.
+    commented: usize,
 }
 
-/// What went into each dictated part: its new text, or `None` when the
-/// part kept the speaker's own and the dictation went beside it.
-type DictatedParts = Vec<(String, usize, Option<String>)>;
+/// Comments Gaanim writes beside a part: an earlier dictation, or the text
+/// a dictation replaced.
+const OWN_COMMENTS: [&str; 3] = ["<!-- dictated:", "<!-- dictado:", "<!-- previous:"];
 
-/// The 1-based lines of `lines` that hold the text of part `part` of
-/// `section`, when they hold nothing else: comments on lines of their own
-/// stay, and a part with text and a comment on one line has none.
+/// The 1-based lines of `lines` a dictation replaces in part `part` of
+/// `section`: those with its text and Gaanim's own comments; the speaker's
+/// comments on lines of their own stay. `None` when text and a comment
+/// share a line, or a comment spans lines.
 fn part_lines(lines: &[&str], section: &ScriptSection, part: usize) -> Option<Vec<usize>> {
     let first = match part.checked_sub(1) {
         Some(previous) => section.marks.get(previous)? + 1,
@@ -1067,7 +1153,7 @@ fn part_lines(lines: &[&str], section: &ScriptSection, part: usize) -> Option<Ve
         .marks
         .get(part)
         .map_or(section.end, |mark| mark.saturating_sub(1));
-    let mut text = Vec::new();
+    let mut replaced = Vec::new();
     for line in first..=last {
         let raw = lines.get(line.checked_sub(1)?)?.trim();
         if raw.is_empty() {
@@ -1076,35 +1162,44 @@ fn part_lines(lines: &[&str], section: &ScriptSection, part: usize) -> Option<Ve
         let opens = raw.matches("<!--").count();
         let closes = raw.matches("-->").count();
         match (opens, closes) {
-            (0, 0) => text.push(line),
-            (1, 1) if raw.starts_with("<!--") && raw.ends_with("-->") => {}
+            (0, 0) => replaced.push(line),
+            (1, 1) if raw.starts_with("<!--") && raw.ends_with("-->") => {
+                if OWN_COMMENTS.iter().any(|own| raw.starts_with(own)) {
+                    replaced.push(line);
+                }
+            }
             _ => return None,
         }
     }
-    (!text.is_empty()).then_some(text)
+    Some(replaced)
+}
+
+/// `text` on one line inside an HTML comment, which ends at the first
+/// `-->`.
+fn comment(label: &str, text: &str) -> String {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    format!("<!-- {label}: {} -->", text.replace("--", "–"))
 }
 
 /// The script `existing` completed (see [`complete_source`]) with the
-/// dictated text of each `(slide, part, text)`: before the part's stop
+/// dictated text of each `(slide, part, text)`, which becomes the part's
+/// text: in place of what it had, kept below in a `<!-- previous: … -->`
+/// comment (one, replacing Gaanim's earlier ones), or before the part's stop
 /// mark, or at the end of the section for the text after the last one. A
-/// part that already has text keeps it, and the dictation goes beside it as
-/// an HTML comment, which the script ignores, unless `replaceable` says
-/// that text is an earlier dictation nobody edited: then the new one takes
-/// its place.
+/// part whose text shares a line with a comment keeps it, and the
+/// dictation goes beside it as a comment.
 fn merge_dictation(
     existing: Option<&str>,
     slides: &[ScriptSlide],
     dictated: &[(String, usize, String)],
-    replaceable: impl Fn(&str, usize, &str) -> bool,
-) -> Result<(String, DictationReport, DictatedParts), String> {
+) -> Result<(String, DictationReport), String> {
     let (completed, _) = complete_source(existing, &NarrationManifest::default(), slides)?;
     let sections = parse_script(&completed)?;
     let lines: Vec<&str> = completed.lines().collect();
     let mut report = DictationReport::default();
-    let mut outcomes = Vec::new();
     // Lines to insert before a 1-based line (one past the last: the end).
     let mut insertions: Vec<(usize, Vec<String>)> = Vec::new();
-    // Lines of earlier dictations that new ones replace.
+    // Lines the dictation replaces.
     let mut removed: Vec<usize> = Vec::new();
     for (slide, part, text) in dictated {
         let Some(section) = sections.iter().find(|section| section.is_named(slide)) else {
@@ -1118,32 +1213,47 @@ fn merge_dictation(
             .get(*part)
             .map(|written| written.text.trim().to_owned())
             .filter(|written| !written.is_empty());
-        let replaced = written
-            .as_deref()
-            .filter(|written| replaceable(slide, *part, written))
-            .and_then(|_| part_lines(&lines, section, *part));
+        let before_mark = match section.marks.get(*part) {
+            Some(&mark) => (mark, false),
+            None => (section.end + 1, true),
+        };
         report.parts += 1;
-        match (written, replaced) {
-            (Some(_), Some(old)) => {
-                report.replaced += 1;
-                insertions.push((old[0], vec![text.to_owned()]));
-                removed.extend(old);
-                outcomes.push((slide.clone(), *part, Some(text.to_owned())));
-            }
-            (written, _) => {
-                let paragraph = if written.is_some() {
-                    report.commented += 1;
-                    outcomes.push((slide.clone(), *part, None));
-                    // A comment ends at the first `-->`.
-                    format!("<!-- dictated: {} -->", text.replace("--", "–"))
-                } else {
-                    outcomes.push((slide.clone(), *part, Some(text.to_owned())));
-                    text.to_owned()
-                };
-                match section.marks.get(*part) {
-                    Some(&mark) => insertions.push((mark, vec![paragraph, String::new()])),
-                    None => insertions.push((section.end + 1, vec![String::new(), paragraph])),
+        match (written, part_lines(&lines, section, *part)) {
+            (written, Some(old)) if !old.is_empty() => {
+                let mut paragraph = vec![text.to_owned()];
+                if let Some(previous) = written {
+                    report.replaced += 1;
+                    let same = previous.split_whitespace().eq(text.split_whitespace());
+                    if !same {
+                        paragraph.push(comment("previous", &previous));
+                    }
                 }
+                insertions.push((old[0], paragraph));
+                removed.extend(old);
+            }
+            (Some(_), _) => {
+                report.commented += 1;
+                let (line, at_end) = before_mark;
+                let note = comment("dictated", text);
+                insertions.push((
+                    line,
+                    if at_end {
+                        vec![String::new(), note]
+                    } else {
+                        vec![note, String::new()]
+                    },
+                ));
+            }
+            (None, _) => {
+                let (line, at_end) = before_mark;
+                insertions.push((
+                    line,
+                    if at_end {
+                        vec![String::new(), text.to_owned()]
+                    } else {
+                        vec![text.to_owned(), String::new()]
+                    },
+                ));
             }
         }
     }
@@ -1165,7 +1275,7 @@ fn merge_dictation(
     }
     let mut source = output.join(newline);
     source.push_str(newline);
-    Ok((source, report, outcomes))
+    Ok((source, report))
 }
 
 /// The plan of a dictation: the token and what to ask Scribe, from the
@@ -1261,16 +1371,17 @@ fn vocabulary(slides: &[ScriptSlide]) -> Vec<String> {
 }
 
 /// Where recording the talk starts: where the slide named `from` begins,
-/// or the first slide when `None`.
-fn talk_start(timeline: &Timeline, from: Option<&str>) -> Option<f64> {
-    timeline
-        .segments
-        .iter()
-        .find(|segment| match from {
-            Some(name) => segment.name == name,
-            None => segment.name != IMPLICIT_SEGMENT,
-        })
-        .map(|segment| crate::presenter::segment_entry_time(timeline, segment))
+/// or the first slide when `None`; for its part `part`, at the stop before
+/// it.
+fn talk_start(timeline: &Timeline, from: Option<&str>, part: Option<usize>) -> Option<f64> {
+    let segment = timeline.segments.iter().find(|segment| match from {
+        Some(name) => segment.name == name,
+        None => segment.name != IMPLICIT_SEGMENT,
+    })?;
+    match part.and_then(|part| part.checked_sub(1)) {
+        Some(previous) => segment.stops.get(previous).map(|stop| stop.time),
+        None => Some(crate::presenter::segment_entry_time(timeline, segment)),
+    }
 }
 
 /// Keep the time of the slides a recording went through whole, for the
@@ -1303,17 +1414,60 @@ fn record_timing(
     panel.notify(NoticeKind::Success, format!("Timed: {}", names.join(" · ")));
 }
 
+/// Keep the `seconds` part `part` of the slide named `slide` took, for
+/// the talk at `source`, which changes the slide's time.
+fn record_part_timing(
+    pace: &mut PrompterPace,
+    source: Option<&Path>,
+    timeline: &Timeline,
+    (slide, part): (&str, usize),
+    seconds: Option<f64>,
+    panel: &mut NarrationPanel,
+) {
+    let (Some(source), Some(seconds)) = (source, seconds) else {
+        return;
+    };
+    let recorded = chrono::Utc::now().timestamp().max(0) as u64;
+    pace.timing = Rehearsals::update_timing(source, |timing| {
+        timing.record_part(slide, part, seconds, recorded);
+    });
+    pace.source = Some(source.to_path_buf());
+    let label = timeline
+        .segments
+        .iter()
+        .find(|segment| segment.name == slide)
+        .map_or_else(
+            || format!("Step {}", part + 1),
+            |segment| part_label(segment, part),
+        );
+    let total = pace
+        .timing
+        .slide(slide)
+        .map(|kept| format!(" (the slide, {})", pace::format_span(kept.seconds, false)))
+        .unwrap_or_default();
+    panel.notify(
+        NoticeKind::Success,
+        format!(
+            "Timed: {slide} · {label} {}{total}",
+            pace::format_span(seconds, false)
+        ),
+    );
+}
+
 /// Write what Scribe dictated into the script and say how it went; keep
 /// the speaker's pace it measured for the prompter.
 fn write_dictation(
     dictation: Dictation,
     track: &pace::ScriptTrack,
+    scope: Option<&Scope>,
     stash: &StashedReplay,
     panel: &mut NarrationPanel,
     pace: &mut PrompterPace,
-    source: Option<&Path>,
 ) {
-    let parts = scribe::dictated_parts(track, &dictation.turns);
+    let mut parts = scribe::dictated_parts(track, &dictation.turns);
+    // Recording one slide or part again writes only there, not what was
+    // said while advancing out of it.
+    parts.retain(|(slide, part, _)| scope.is_none_or(|scope| scope.covers(slide, *part)));
     if let Some(rate) = scribe::speaking_rate(track, &dictation.turns) {
         let settings = panel.settings();
         let rate = settings
@@ -1356,30 +1510,17 @@ fn write_dictation(
             return;
         }
     };
-    let timing = pace.timing.clone();
-    let written = merge_dictation(existing.as_deref(), &slides, &parts, |slide, part, text| {
-        timing.still_dictated(slide, part, text)
-    })
-    .and_then(|(script, report, outcomes)| {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        write_atomically(&path, script.as_bytes())
-            .map(|()| (report, outcomes))
-            .map_err(|error| error.to_string())
-    });
-    match written {
-        Ok((report, outcomes)) => {
-            // What was dictated, so the next dictation can replace it
-            // unless the speaker edits it meanwhile.
-            if let Some(source) = source {
-                pace.timing = Rehearsals::update_timing(source, |timing| {
-                    for (slide, part, text) in &outcomes {
-                        timing.note_dictated(slide, *part, text.as_deref());
-                    }
-                });
-                pace.source = Some(source.to_path_buf());
+    let written =
+        merge_dictation(existing.as_deref(), &slides, &parts).and_then(|(script, report)| {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
+            write_atomically(&path, script.as_bytes())
+                .map(|()| report)
+                .map_err(|error| error.to_string())
+        });
+    match written {
+        Ok(report) => {
             // Counts only: the dictated words stay in the script.
             let mut message = format!(
                 "Script dictated: {} part(s) in {}",
@@ -1388,13 +1529,13 @@ fn write_dictation(
             );
             if report.replaced > 0 {
                 message.push_str(&format!(
-                    "; {} replaced their earlier dictation",
+                    "; it replaced the text of {}, kept below as <!-- previous: … -->",
                     report.replaced
                 ));
             }
             if report.commented > 0 {
                 message.push_str(&format!(
-                    "; {} beside text you already had, as a comment",
+                    "; {} share a line with a comment, so it went beside them",
                     report.commented
                 ));
             }
@@ -1593,8 +1734,14 @@ pub(crate) fn narration_session_system(
                         _ => Phase::Idle,
                     }
                 }
+                Request::Seek(time) => {
+                    timeline.seek_request = Some(time);
+                    timeline.is_playing = false;
+                    Phase::Idle
+                }
                 Request::RecordTalk {
                     from,
+                    part,
                     only,
                     dictate,
                 } => {
@@ -1627,11 +1774,11 @@ pub(crate) fn narration_session_system(
                             reload.as_ref(),
                             stash.revision,
                         ),
-                        _ => match talk_start(&timeline, from.as_deref()) {
+                        _ => match talk_start(&timeline, from.as_deref(), part) {
                             Some(start_time) => {
                                 let target = Target::Talk {
                                     start_time,
-                                    only: from.filter(|_| only),
+                                    only: from.filter(|_| only).map(|slide| Scope { slide, part }),
                                 };
                                 prepare_capture(
                                     &target,
@@ -1760,6 +1907,7 @@ pub(crate) fn narration_session_system(
         Phase::Finishing {
             mut dictation,
             track,
+            scope,
             since,
         } => {
             dictation.absorb();
@@ -1768,16 +1916,17 @@ pub(crate) fn narration_session_system(
                 write_dictation(
                     *dictation,
                     &track,
+                    scope.as_ref(),
                     &stash,
                     &mut panel,
                     &mut pace,
-                    source.as_deref(),
                 );
                 Phase::Idle
             } else {
                 Phase::Finishing {
                     dictation,
                     track,
+                    scope,
                     since,
                 }
             }
@@ -1832,13 +1981,15 @@ pub(crate) fn narration_session_system(
             {
                 recording.waiting_at = Some(timeline.current_time);
             }
-            // Recording one slide again ends once the speaker leaves it.
-            let left_only = match &recording.target {
-                Target::Talk {
-                    only: Some(slide), ..
-                } => left_slide(&recording.track, slide),
-                _ => false,
+            // Recording one slide or part again ends once the speaker
+            // leaves it.
+            let scope = match &recording.target {
+                Target::Talk { only, .. } => only.clone(),
+                _ => None,
             };
+            let left_only = scope
+                .as_ref()
+                .is_some_and(|scope| left_scope(&recording.track, scope));
             if left_only || pressed(KeyCode::Enter) || pressed(KeyCode::NumpadEnter) {
                 if let Some(stop_time) = recording.waiting_at.take() {
                     let hold = live_hold(
@@ -1849,19 +2000,49 @@ pub(crate) fn narration_session_system(
                     );
                     recording.holds.push(hold);
                 }
-                if recording.target.presents() {
-                    // The slide being said counts once all of it is said.
-                    let finished_last = (!left_only
-                        && ScriptPosition::of(&timeline)
-                            .is_some_and(|position| position.finishes_slide(&timeline.segments)))
-                        || timeline.current_time >= timeline.cached_duration - 1e-4;
-                    let timed = pace::timed_slides(
-                        &recording.track,
-                        elapsed,
-                        recording.entered_first,
-                        finished_last,
-                    );
-                    record_timing(&mut pace, source.as_deref(), timed, &mut panel);
+                let position = ScriptPosition::of(&timeline);
+                let at_end = timeline.current_time >= timeline.cached_duration - 1e-4;
+                match scope
+                    .as_ref()
+                    .and_then(|scope| Some((&scope.slide, scope.part?)))
+                {
+                    // One part: it counts once left, or finished resting at
+                    // its stop.
+                    Some((slide, part)) => {
+                        let finished = at_end
+                            || (!left_only
+                                && position.is_some_and(|position| {
+                                    position.resting
+                                        && position.part == part
+                                        && timeline.segments[position.slide].name == *slide
+                                }));
+                        let seconds =
+                            pace::timed_part(&recording.track, slide, part, elapsed, finished);
+                        record_part_timing(
+                            &mut pace,
+                            source.as_deref(),
+                            &timeline,
+                            (slide, part),
+                            seconds,
+                            &mut panel,
+                        );
+                    }
+                    None if recording.target.presents() => {
+                        // The slide being said counts once all of it is said.
+                        let finished_last = at_end
+                            || (!left_only
+                                && position.is_some_and(|position| {
+                                    position.finishes_slide(&timeline.segments)
+                                }));
+                        let timed = pace::timed_slides(
+                            &recording.track,
+                            elapsed,
+                            recording.entered_first,
+                            finished_last,
+                        );
+                        record_timing(&mut pace, source.as_deref(), timed, &mut panel);
+                    }
+                    None => {}
                 }
                 let track = std::mem::take(&mut recording.track);
                 let dictation = recording.dictation.take();
@@ -1874,12 +2055,24 @@ pub(crate) fn narration_session_system(
                     // stopped, if it stopped early, so what it missed can be
                     // dictated again.
                     let reached = if left_only {
-                        ScriptPosition::of(&timeline).map(|position| {
-                            crate::presenter::segment_entry_time(
-                                &timeline,
-                                &timeline.segments[position.slide],
-                            )
-                        })
+                        match scope
+                            .as_ref()
+                            .and_then(|scope| Some((&scope.slide, scope.part?)))
+                        {
+                            // Resting at the stop of the part recorded again.
+                            Some((slide, part)) => timeline
+                                .segments
+                                .iter()
+                                .find(|segment| segment.name == *slide)
+                                .and_then(|segment| segment.stops.get(part))
+                                .map(|stop| stop.time),
+                            None => position.map(|position| {
+                                crate::presenter::segment_entry_time(
+                                    &timeline,
+                                    &timeline.segments[position.slide],
+                                )
+                            }),
+                        }
                     } else {
                         dictation
                             .as_ref()
@@ -1902,6 +2095,7 @@ pub(crate) fn narration_session_system(
                     session.phase = Phase::Finishing {
                         dictation: Box::new(dictation),
                         track,
+                        scope,
                         since: Instant::now(),
                     };
                 }
@@ -2092,8 +2286,20 @@ fn begin_recording(
     let entered_first = timeline.segments.iter().any(|segment| {
         (crate::presenter::segment_entry_time(timeline, segment) - start).abs() < 1e-4
     });
+    // Recording one part again plays on from the stop before it.
+    let rolls_on = matches!(
+        &target,
+        Target::Talk {
+            only: Some(Scope {
+                part: Some(part),
+                ..
+            }),
+            ..
+        } if *part > 0
+    );
     // A presentation that starts on a stop waits there first.
     let waiting_at = (target.presents()
+        && !rolls_on
         && timeline
             .segments
             .iter()
@@ -2309,6 +2515,7 @@ pub(crate) fn narration_panel_system(
     let can_dictate = panel.token_available();
     let dictating = panel.dictating() && can_dictate;
     let mut dictate = dictating;
+    let mut expanded = std::mem::take(&mut panel.expanded);
 
     egui::Area::new(egui::Id::new("narration_panel"))
         .pivot(egui::Align2::RIGHT_TOP)
@@ -2320,14 +2527,14 @@ pub(crate) fn narration_panel_system(
             card_frame()
                 .inner_margin(egui::Margin::same(16))
                 .show(ui, |ui| {
-                    ui.set_width(360.0);
-                    ui.spacing_mut().item_spacing.y = 8.0;
+                    ui.set_width(PANEL_WIDTH);
+                    enlarge(ui.style_mut());
                     ui.horizontal(|ui| {
                         drag_grip(ui);
                         paint_mic_badge(ui);
                         ui.label(
                             egui::RichText::new("Script & narration")
-                                .size(15.0)
+                                .size(18.0)
                                 .strong()
                                 .color(palette::TEXT),
                         );
@@ -2352,24 +2559,25 @@ pub(crate) fn narration_panel_system(
                             }
                             script_card(ui, &manifest, &slides, script.as_deref(), &mut request);
                             if !slides.is_empty() {
-                                ui.label(caption("TIMING"));
+                                ui.label(heading("TIMING"));
                                 timing_card(
                                     ui,
                                     &timeline,
                                     &pace.timing,
                                     manifest.live.is_some(),
+                                    &mut expanded,
                                     &mut dictate,
                                     can_dictate,
                                     &mut request,
                                 );
                             }
                             if let Some(live) = &manifest.live {
-                                ui.label(caption("LIVE TAKE"));
+                                ui.label(heading("LIVE TAKE"));
                                 let busy = panel.busy(&live.key);
                                 live_card(ui, live, busy, &mut dictate, &mut request);
                             }
                             if !manifest.voiceovers.is_empty() {
-                                ui.label(caption("VOICEOVER"));
+                                ui.label(heading("VOICEOVER"));
                                 for voice in &manifest.voiceovers {
                                     voiceover_card(
                                         ui,
@@ -2401,7 +2609,7 @@ pub(crate) fn narration_panel_system(
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(message)
-                                    .size(12.0)
+                                    .size(14.0)
                                     .color(notice_color(*kind)),
                             )
                             .wrap(),
@@ -2413,6 +2621,7 @@ pub(crate) fn narration_panel_system(
     if dictate != dictating {
         panel.dictate = Some(dictate);
     }
+    panel.expanded = expanded;
     if settings_changed && let Err(error) = panel.settings().save() {
         panel.notify(
             NoticeKind::Error,
@@ -2519,7 +2728,7 @@ fn empty_state(ui: &mut egui::Ui) {
             "The scene declares no narration. Add a voiceover block \
              and save the script:",
         )
-        .size(12.5)
+        .size(14.5)
         .color(palette::TEXT_MUTED),
     );
     field_frame().show(ui, |ui| {
@@ -2530,7 +2739,7 @@ fn empty_state(ui: &mut egui::Ui) {
                  scene.play([title.animate.write()])\n    vo.wait_until(\"derivative\")",
             )
             .monospace()
-            .size(11.5)
+            .size(13.5)
             .color(palette::TEXT),
         );
     });
@@ -2540,7 +2749,7 @@ fn empty_state(ui: &mut egui::Ui) {
              call scene.live_take(\"lecture\") at the start and use scene.stop() where \
              you want to pause.",
         )
-        .size(12.5)
+        .size(14.5)
         .color(palette::TEXT_MUTED),
     );
 }
@@ -2553,7 +2762,7 @@ fn slides_hint(ui: &mut egui::Ui) {
              notes and, with T, as a teleprompter. Gaanim adds the missing slides and \
              stops without touching your text.",
         )
-        .size(12.5)
+        .size(14.5)
         .color(palette::TEXT_MUTED),
     );
 }
@@ -2572,7 +2781,7 @@ fn script_card(
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new("Script")
-                    .size(13.0)
+                    .size(15.0)
                     .strong()
                     .color(palette::TEXT),
             );
@@ -2587,7 +2796,7 @@ fn script_card(
             };
             ui.label(
                 egui::RichText::new(detail)
-                    .size(12.0)
+                    .size(14.0)
                     .color(palette::TEXT_MUTED),
             )
             .on_hover_text(path.map_or_else(String::new, |path| path.display().to_string()));
@@ -2602,7 +2811,7 @@ fn script_card(
             (Some(_), 0) => "Open script".to_string(),
             (Some(_), missing) => format!("Open and complete ({missing})"),
         };
-        if secondary_button(ui, &label, path.is_some())
+        if secondary(ui, &label, path.is_some())
             .on_hover_text(
                 "Write under \"## name\" what you say on each slide or voiceover block, \
                  with [stop] where you advance; when you save, the scene updates",
@@ -2615,13 +2824,16 @@ fn script_card(
 }
 
 /// The talk's timing: the time each slide took when last recorded against
-/// its target, the total against the planned length, and buttons to record
-/// the talk or one slide again.
+/// its target, and each of its stops once unfolded; the total against the
+/// planned length; and buttons to record the talk, or one slide or stop
+/// again. Clicking a name moves the playhead there.
+#[allow(clippy::too_many_arguments)]
 fn timing_card(
     ui: &mut egui::Ui,
     timeline: &Timeline,
     timing: &pace::TalkTiming,
     live: bool,
+    expanded: &mut std::collections::BTreeSet<String>,
     dictate: &mut bool,
     can_dictate: bool,
     request: &mut Option<Request>,
@@ -2632,148 +2844,246 @@ fn timing_card(
         .filter(|segment| segment.name != IMPLICIT_SEGMENT)
         .collect();
     let planned = planned_length(timeline);
-    let recorded: Vec<Option<f64>> = slides
+    let recorded: Vec<Option<&SlideTiming>> = slides
         .iter()
-        .map(|slide| timing.slide(&slide.name).map(|slide| slide.seconds))
+        .map(|slide| timing.slide(&slide.name))
         .collect();
-    let total: f64 = recorded.iter().flatten().sum();
-    let missing = recorded.iter().filter(|seconds| seconds.is_none()).count();
+    let total: f64 = recorded.iter().flatten().map(|slide| slide.seconds).sum();
+    let missing = recorded.iter().filter(|slide| slide.is_none()).count();
     let dictating = *dictate && can_dictate;
-    field_frame().show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Recorded")
-                    .size(13.0)
-                    .strong()
-                    .color(palette::TEXT),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let mut summary = pace::format_span(total, false);
-                if let Some(planned) = planned {
-                    summary.push_str(&format!(" of {}", pace::format_span(planned, false)));
-                }
-                let color = if missing == 0 {
-                    timing_color(total, planned)
-                } else {
-                    palette::TEXT_MUTED
-                };
+    let record = |slide: &str, part: Option<usize>, only: bool| Request::RecordTalk {
+        from: Some(slide.to_owned()),
+        part,
+        only,
+        dictate: dictating,
+    };
+    let live_hint = "A live take is recorded whole: record it again from its card";
+    field_frame()
+        .inner_margin(egui::Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(summary)
-                        .size(12.5)
-                        .monospace()
-                        .color(color),
-                )
-                .on_hover_text(match planned {
-                    Some(_) => {
-                        "The slides' recorded times against the talk's planned length \
-                                (scene.slides.target, or every slide's target)"
+                    egui::RichText::new("Recorded")
+                        .size(15.0)
+                        .strong()
+                        .color(palette::TEXT),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut summary = pace::format_span(total, false);
+                    if let Some(planned) = planned {
+                        summary.push_str(&format!(" of {}", pace::format_span(planned, false)));
                     }
-                    None => {
-                        "Plan the talk with scene.slides.target(...) or a target=… on \
-                             every slide to see how it fits"
-                    }
-                });
-            });
-        });
-        egui::Grid::new("talk-timing")
-            .num_columns(4)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                for (slide, seconds) in slides.iter().zip(&recorded) {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(&slide.name)
-                                .size(12.5)
-                                .color(palette::TEXT),
-                        )
-                        .truncate(),
-                    );
-                    match seconds {
-                        Some(seconds) => ui.label(
-                            egui::RichText::new(pace::format_span(*seconds, false))
-                                .monospace()
-                                .size(12.5)
-                                .color(timing_color(*seconds, slide.target)),
-                        ),
-                        None => ui.label(
-                            egui::RichText::new("—")
-                                .size(12.5)
-                                .color(palette::TEXT_FAINT),
-                        ),
-                    };
-                    let detail = match (seconds, slide.target) {
-                        (Some(seconds), Some(target)) if *seconds > target + 0.5 => {
-                            format!("{} over", pace::format_span(seconds - target, true))
-                        }
-                        (_, Some(target)) => format!("of {}", pace::format_span(target, false)),
-                        _ => String::new(),
+                    let color = if missing == 0 {
+                        timing_color(total, planned)
+                    } else {
+                        palette::TEXT_MUTED
                     };
                     ui.label(
-                        egui::RichText::new(detail)
-                            .size(11.5)
-                            .color(palette::TEXT_FAINT),
-                    );
-                    let (label, hint, only) = if seconds.is_some() {
-                        (
-                            "Re-record",
-                            "Present only this slide again: its time, and its script when \
-                             dictating, are replaced once you leave it",
-                            true,
-                        )
-                    } else {
-                        (
-                            "Record",
-                            "Present from this slide on: each slide you go through keeps \
-                             its time; Enter finishes",
-                            false,
-                        )
-                    };
-                    let hint = if live {
-                        "A live take is recorded whole: record it again from its card"
-                    } else {
-                        hint
-                    };
-                    if small_button(ui, label, !live).on_hover_text(hint).clicked() {
-                        *request = Some(Request::RecordTalk {
-                            from: Some(slide.name.clone()),
-                            only,
-                            dictate: dictating,
+                        egui::RichText::new(summary)
+                            .size(15.0)
+                            .monospace()
+                            .color(color),
+                    )
+                    .on_hover_text(match planned {
+                        Some(_) => {
+                            "The slides' recorded times against the talk's planned \
+                                    length (scene.slides.target, or every slide's target)"
+                        }
+                        None => {
+                            "Plan the talk with scene.slides.target(...) or a target=… \
+                                 on every slide to see how it fits"
+                        }
+                    });
+                });
+            });
+            ui.add_space(4.0);
+            egui::Grid::new("talk-timing")
+                .num_columns(4)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    for (slide, kept) in slides.iter().zip(&recorded) {
+                        let parts = slide_parts(slide);
+                        let open = expanded.contains(&slide.name);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            if parts > 1 {
+                                let arrow = if open { "▾" } else { "▸" };
+                                let toggle = ui
+                                    .add(
+                                        egui::Label::new(
+                                            egui::RichText::new(arrow)
+                                                .size(15.0)
+                                                .color(palette::TEXT_MUTED),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    )
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text(if open {
+                                        "Hide its stops"
+                                    } else {
+                                        "Show its stops, to record one again"
+                                    });
+                                if toggle.clicked() {
+                                    if open {
+                                        expanded.remove(&slide.name);
+                                    } else {
+                                        expanded.insert(slide.name.clone());
+                                    }
+                                }
+                            } else {
+                                ui.add_space(15.0);
+                            }
+                            if name_link(ui, &slide.name, 15.0, palette::TEXT)
+                                .on_hover_text("Go to this slide")
+                                .clicked()
+                            {
+                                *request = Some(Request::Seek(
+                                    crate::presenter::segment_entry_time(timeline, slide),
+                                ));
+                            }
                         });
+                        let seconds = kept.map(|kept| kept.seconds);
+                        timing_cell(ui, seconds, slide.target, 15.0);
+                        let detail = match (seconds, slide.target) {
+                            (Some(seconds), Some(target)) if seconds > target + 0.5 => {
+                                format!("{} over", pace::format_span(seconds - target, true))
+                            }
+                            (_, Some(target)) => {
+                                format!("of {}", pace::format_span(target, false))
+                            }
+                            _ => String::new(),
+                        };
+                        ui.label(
+                            egui::RichText::new(detail)
+                                .size(13.5)
+                                .color(palette::TEXT_FAINT),
+                        );
+                        let (label, hint, only) = if kept.is_some() {
+                            (
+                                "Re-record",
+                                "Present only this slide again: it ends once you leave it, \
+                                 and its time and script are replaced",
+                                true,
+                            )
+                        } else {
+                            (
+                                "Record",
+                                "Present from this slide on: each slide you go through keeps \
+                                 its time; Enter finishes",
+                                false,
+                            )
+                        };
+                        if small(ui, label, !live)
+                            .on_hover_text(if live { live_hint } else { hint })
+                            .clicked()
+                        {
+                            *request = Some(record(&slide.name, None, only));
+                        }
+                        ui.end_row();
+                        if !open {
+                            continue;
+                        }
+                        for part in 0..parts {
+                            ui.horizontal(|ui| {
+                                ui.add_space(30.0);
+                                let stop = slide.stops.get(part).or(slide.stops.last());
+                                let time = match slide.stops.get(part) {
+                                    Some(stop) => stop.time,
+                                    // Past the last stop.
+                                    None => stop.map_or(slide.start_time, |stop| stop.time + 1e-3),
+                                };
+                                if name_link(
+                                    ui,
+                                    &part_label(slide, part),
+                                    14.0,
+                                    palette::TEXT_MUTED,
+                                )
+                                .on_hover_text("Go to this stop")
+                                .clicked()
+                                {
+                                    *request = Some(Request::Seek(time));
+                                }
+                            });
+                            let seconds = kept.and_then(|kept| kept.parts.get(part).copied());
+                            timing_cell(ui, seconds, None, 14.0);
+                            ui.label("");
+                            if small(ui, "Re-record", !live)
+                                .on_hover_text(if live {
+                                    live_hint
+                                } else {
+                                    "Present only this stop again: from the stop before it \
+                                     until you advance at this one. Its script is replaced, \
+                                     and its time too once the slide has one"
+                                })
+                                .clicked()
+                            {
+                                *request = Some(record(&slide.name, Some(part), true));
+                            }
+                            ui.end_row();
+                        }
                     }
-                    ui.end_row();
-                }
-            });
-        if let Some((verdict, color)) = timing_verdict(total, missing, planned) {
-            ui.add(egui::Label::new(egui::RichText::new(verdict).size(12.0).color(color)).wrap());
-        }
-        if primary_button(ui, "Record the talk", Some(Icon::Record), true)
-            .on_hover_text(
-                "Present from the first slide while speaking: each slide you go through \
-                 keeps its time. → or Space advances at each stop, Enter finishes, Esc \
-                 discards",
+                });
+            if let Some((verdict, color)) = timing_verdict(total, missing, planned) {
+                ui.add(
+                    egui::Label::new(egui::RichText::new(verdict).size(14.0).color(color)).wrap(),
+                );
+            }
+            ui.add_space(2.0);
+            if primary(ui, "Record the talk", Some(Icon::Record), true)
+                .on_hover_text(
+                    "Present from the first slide while speaking: each slide you go through \
+                     keeps its time. → or Space advances at each stop, Enter finishes, Esc \
+                     discards",
+                )
+                .clicked()
+            {
+                *request = Some(Request::RecordTalk {
+                    from: None,
+                    part: None,
+                    only: false,
+                    dictate: dictating,
+                });
+            }
+            ui.add_enabled(
+                can_dictate,
+                egui::Checkbox::new(dictate, "Write what I say into the script (Zoom Scribe)"),
             )
-            .clicked()
-        {
-            *request = Some(Request::RecordTalk {
-                from: None,
-                only: false,
-                dictate: dictating,
-            });
-        }
-        ui.add_enabled(
-            can_dictate,
-            egui::Checkbox::new(dictate, "Write what I say into the script (Zoom Scribe)"),
-        )
-        .on_hover_text(
-            "Each phrase goes to its slide and part: empty parts get it, an earlier \
-             dictation you did not edit is replaced, and text you wrote keeps it as a \
-             comment beside it",
-        )
-        .on_disabled_hover_text(
-            "Paste or save a Scribe token under Zoom Scribe (dictation) below to dictate",
-        );
-    });
+            .on_hover_text(
+                "Each phrase goes to its slide and stop and replaces the text there; the \
+                 earlier text stays below as a <!-- previous: … --> comment",
+            )
+            .on_disabled_hover_text(
+                "Paste or save a Scribe token under Zoom Scribe (dictation) below to dictate",
+            );
+        });
+}
+
+/// A name that moves the playhead when clicked.
+fn name_link(ui: &mut egui::Ui, text: &str, size: f32, color: egui::Color32) -> egui::Response {
+    ui.add(
+        egui::Label::new(egui::RichText::new(text).size(size).color(color))
+            .truncate()
+            .sense(egui::Sense::click()),
+    )
+    .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A recorded time against its target, or a dash without one.
+fn timing_cell(ui: &mut egui::Ui, seconds: Option<f64>, target: Option<f64>, size: f32) {
+    match seconds {
+        Some(seconds) => ui.label(
+            egui::RichText::new(pace::format_span(seconds, false))
+                .monospace()
+                .size(size)
+                .color(timing_color(seconds, target)),
+        ),
+        None => ui.label(
+            egui::RichText::new("—")
+                .size(size)
+                .color(palette::TEXT_FAINT),
+        ),
+    };
 }
 
 /// The talk's planned length: `scene.slides.target`, else every slide's
@@ -2865,7 +3175,7 @@ fn status_line(ui: &mut egui::Ui, recorded: bool, detail: String) {
         ui.painter().rect_filled(rect, 0.0, color);
         ui.label(
             egui::RichText::new(detail)
-                .size(12.0)
+                .size(14.0)
                 .color(palette::TEXT_MUTED),
         );
     });
@@ -2908,7 +3218,7 @@ fn live_card(
         ui.set_width(ui.available_width());
         ui.label(
             egui::RichText::new(&live.key)
-                .size(14.0)
+                .size(16.0)
                 .strong()
                 .color(palette::TEXT),
         );
@@ -2931,7 +3241,7 @@ fn live_card(
                  Enter finishes. The teleprompter shows each slide's script \
                  and marks where to advance.",
             )
-            .size(11.5)
+            .size(13.5)
             .color(palette::TEXT_FAINT),
         );
         ui.horizontal_wrapped(|ui| {
@@ -2940,14 +3250,14 @@ fn live_card(
             } else {
                 "Record live take"
             };
-            if primary_button(ui, label, Some(Icon::Record), !busy).clicked() {
+            if primary(ui, label, Some(Icon::Record), !busy).clicked() {
                 *request = Some(Request::RecordLive { dictate: *dictate });
             }
             if live.applied {
-                if secondary_button(ui, "Listen", true).clicked() {
+                if secondary(ui, "Listen", true).clicked() {
                     *request = Some(Request::Listen(live.start_time));
                 }
-                if small_button(ui, if busy { "Leveling…" } else { "Level" }, !busy)
+                if small(ui, if busy { "Leveling…" } else { "Level" }, !busy)
                     .on_hover_text("Brings the voice to the level set for video")
                     .clicked()
                 {
@@ -2976,14 +3286,14 @@ fn voiceover_card(
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(&voice.key)
-                    .size(14.0)
+                    .size(16.0)
                     .strong()
                     .color(palette::TEXT),
             );
             if voice.segment != "_default" {
                 ui.label(
                     egui::RichText::new(&voice.segment)
-                        .size(12.0)
+                        .size(14.0)
                         .color(palette::TEXT_FAINT),
                 );
             }
@@ -3013,7 +3323,7 @@ fn voiceover_card(
         };
         ui.label(
             egui::RichText::new(text_source_label(voice.text_source))
-                .size(11.5)
+                .size(13.5)
                 .color(text_color),
         );
         if !voice.markers.is_empty() {
@@ -3021,7 +3331,7 @@ fn voiceover_card(
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
                 for marker in &voice.markers {
                     let color = source_color(marker.source);
-                    let text = egui::RichText::new(&marker.name).size(11.5).color(color);
+                    let text = egui::RichText::new(&marker.name).size(13.5).color(color);
                     let hover = match marker.offset {
                         Some(offset) => format!(
                             "{} · {}",
@@ -3045,10 +3355,10 @@ fn voiceover_card(
             } else {
                 "Record"
             };
-            if primary_button(ui, label, Some(Icon::Record), !busy).clicked() {
+            if primary(ui, label, Some(Icon::Record), !busy).clicked() {
                 *request = Some(Request::RecordVoiceover(voice.key.clone()));
             }
-            if secondary_button(ui, "Listen", true).clicked() {
+            if secondary(ui, "Listen", true).clicked() {
                 *request = Some(Request::Listen(voice.start_time));
             }
             if voice.recorded {
@@ -3057,14 +3367,14 @@ fn voiceover_card(
                 } else {
                     "Transcribe"
                 };
-                if small_button(ui, label, !busy)
+                if small(ui, label, !busy)
                     .on_hover_text("Finds the markers by word with Whisper")
                     .clicked()
                 {
                     *request = Some(Request::Transcribe(voice.key.clone()));
                 }
                 let label = if leveling { "Leveling…" } else { "Level" };
-                if small_button(ui, label, !busy)
+                if small(ui, label, !busy)
                     .on_hover_text("Brings the voice to the level set for video")
                     .clicked()
                 {
@@ -3080,7 +3390,7 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
     let before = settings.clone();
     egui::CollapsingHeader::new(
         egui::RichText::new("Voice and recording")
-            .size(12.5)
+            .size(14.5)
             .color(palette::TEXT_MUTED),
     )
     .id_salt("narration_voice_settings")
@@ -3100,7 +3410,7 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
                     .suffix(" LUFS"),
             );
             if (settings.loudness - settings::DEFAULT_LOUDNESS).abs() > 0.05
-                && small_button(ui, "Recommended", settings.level_voice)
+                && small(ui, "Recommended", settings.level_voice)
                     .on_hover_text("Back to -16 LUFS")
                     .clicked()
             {
@@ -3114,13 +3424,13 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
                  kept in narration/.originals.",
                 settings::DEFAULT_LOUDNESS
             ))
-            .size(11.5)
+            .size(13.5)
             .color(palette::TEXT_FAINT),
         );
         if settings.level_voice
             && let Some((color, warning)) = loudness_warning(settings.loudness)
         {
-            ui.label(egui::RichText::new(warning).size(11.5).color(color));
+            ui.label(egui::RichText::new(warning).size(13.5).color(color));
         }
         ui.label(
             egui::RichText::new(format!(
@@ -3128,14 +3438,14 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
                  warns in red if you get close to 0 dBFS.",
                 IDEAL_PEAK_DB.0, IDEAL_PEAK_DB.1
             ))
-            .size(11.5)
+            .size(13.5)
             .color(palette::TEXT_FAINT),
         );
         ui.checkbox(&mut settings.countdown, "Countdown of 3 s before recording");
     });
     egui::CollapsingHeader::new(
         egui::RichText::new("Whisper (optional)")
-            .size(12.5)
+            .size(14.5)
             .color(palette::TEXT_MUTED),
     )
     .id_salt("narration_whisper_settings")
@@ -3146,7 +3456,7 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
                  press Space while recording. The marker must be named like the word \
                  you say.",
             )
-            .size(11.5)
+            .size(13.5)
             .color(palette::TEXT_FAINT),
         );
         section_label(ui, "whisper-cli (empty: search the PATH)");
@@ -3169,7 +3479,7 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
             Ok((cli, _)) => (palette::LOOP, format!("Ready · {}", cli.display())),
             Err(error) => (palette::TEXT_FAINT, error),
         };
-        ui.add(egui::Label::new(egui::RichText::new(status.1).size(11.5).color(status.0)).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(status.1).size(13.5).color(status.0)).wrap());
     });
     *settings != before
 }
@@ -3187,14 +3497,14 @@ fn scribe_settings(
     let mut action = None;
     egui::CollapsingHeader::new(
         egui::RichText::new("Zoom Scribe (dictation)")
-            .size(12.5)
+            .size(14.5)
             .color(palette::TEXT_MUTED),
     )
     .id_salt("narration_scribe_settings")
     .show(ui, |ui| {
         let faint = |text: String| {
             egui::RichText::new(text)
-                .size(11.5)
+                .size(13.5)
                 .color(palette::TEXT_FAINT)
         };
         ui.add(
@@ -3223,7 +3533,7 @@ fn scribe_settings(
             ),
             None => (palette::TEXT_FAINT, "No token: paste it here".to_owned()),
         };
-        ui.label(egui::RichText::new(status).size(11.5).color(color));
+        ui.label(egui::RichText::new(status).size(13.5).color(color));
         ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(typed_token)
@@ -3233,7 +3543,7 @@ fn scribe_settings(
             );
             if !typed_token.is_empty() {
                 if scribe::vault::AVAILABLE
-                    && small_button(ui, "Save in Windows", true)
+                    && small(ui, "Save in Windows", true)
                         .on_hover_text(
                             "Windows Credential Manager encrypts it for your user; it never \
                              goes to the project folder",
@@ -3242,14 +3552,14 @@ fn scribe_settings(
                 {
                     action = Some(VaultAction::Save);
                 }
-                if small_button(ui, "Forget", true)
+                if small(ui, "Forget", true)
                     .on_hover_text("Removes it from this session")
                     .clicked()
                 {
                     typed_token.clear();
                 }
             } else if stored
-                && small_button(ui, "Remove saved token", true)
+                && small(ui, "Remove saved token", true)
                     .on_hover_text("Deletes it from Windows Credential Manager")
                     .clicked()
             {
@@ -3270,14 +3580,14 @@ fn scribe_settings(
                     }
                 });
             if pinned {
-                if small_button(ui, "Unpin", true)
+                if small(ui, "Unpin", true)
                     .on_hover_text("Removes language from gaanim.toml and uses your language")
                     .clicked()
                 {
                     action = Some(VaultAction::Unpin);
                 }
             } else if project.manifest.is_some()
-                && small_button(ui, "Pin in gaanim.toml", true)
+                && small(ui, "Pin in gaanim.toml", true)
                     .on_hover_text(
                         "Writes language in the project's gaanim.toml: the talk is dictated \
                          in this language on any computer",
@@ -3310,7 +3620,7 @@ fn scribe_settings(
                             "gaanim.toml asks for \"{tag}\", which Scribe does not transcribe: \
                              {current} is used"
                         ))
-                        .size(11.5)
+                        .size(13.5)
                         .color(palette::STOP),
                     )
                     .wrap(),
@@ -3332,7 +3642,7 @@ fn scribe_settings(
                             .collect::<Vec<_>>()
                             .join(", ")
                     ))
-                    .size(11.5)
+                    .size(13.5)
                     .color(palette::DANGER),
                 )
                 .wrap(),
@@ -3377,9 +3687,7 @@ fn path_field(ui: &mut egui::Ui, value: &mut String, title: &str, extensions: &[
                 .desired_width((ui.available_width() - browse_width - 8.0).max(80.0))
                 .font(egui::FontId::monospace(11.5)),
         );
-        if small_button(ui, "…", true)
-            .on_hover_text("Browse")
-            .clicked()
+        if small(ui, "…", true).on_hover_text("Browse").clicked()
             && let Some(path) =
                 crate::platform::pick_file(title, None, &[(title, extensions), ("All", &["*"])])
         {
@@ -3468,7 +3776,7 @@ pub(crate) fn narration_overlay_system(
             status_row(ui, None, |ui| {
                 ui.label(
                     egui::RichText::new(format!("{}", remaining.ceil().max(1.0) as u64))
-                        .size(20.0)
+                        .size(24.0)
                         .strong()
                         .color(palette::DANGER),
                 );
@@ -3484,7 +3792,7 @@ pub(crate) fn narration_overlay_system(
                 };
                 ui.label(
                     egui::RichText::new(starting)
-                        .size(13.0)
+                        .size(15.0)
                         .color(palette::TEXT),
                 );
                 level_meter(ui, &input.level, 90.0);
@@ -3520,7 +3828,7 @@ pub(crate) fn narration_overlay_system(
                 ui.label(
                     egui::RichText::new(format_seconds(elapsed))
                         .monospace()
-                        .size(13.0)
+                        .size(15.0)
                         .color(palette::TEXT_MUTED),
                 );
                 level_meter(ui, &recording.input.level, 90.0);
@@ -3647,7 +3955,7 @@ fn status_row(ui: &mut egui::Ui, cue: Option<&Cue>, left: impl FnOnce(&mut egui:
         left(ui);
         if let Some(cue) = cue {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                prompter::cue_label(ui, cue, 13.0);
+                prompter::cue_label(ui, cue, 15.0);
             });
         }
     });
@@ -3655,7 +3963,7 @@ fn status_row(ui: &mut egui::Ui, cue: Option<&Cue>, left: impl FnOnce(&mut egui:
 
 /// A small line under the caption: keys, a warning or Scribe's state.
 fn notes_row(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
-    ui.add(egui::Label::new(egui::RichText::new(text).size(11.5).color(color)).wrap());
+    ui.add(egui::Label::new(egui::RichText::new(text).size(13.5).color(color)).wrap());
 }
 
 /// A caption that only says `text`.
@@ -3693,7 +4001,7 @@ fn caption_menu(
         ui.separator();
         ui.label(
             egui::RichText::new(pace)
-                .size(12.0)
+                .size(14.0)
                 .color(palette::TEXT_MUTED),
         );
     }
@@ -3711,7 +4019,7 @@ fn caption_menu(
 fn slide_label(ui: &mut egui::Ui, slide: &str, timeline: &Timeline, pace: &PrompterPace) {
     ui.label(
         egui::RichText::new(slide.to_uppercase())
-            .size(12.0)
+            .size(14.0)
             .strong()
             .color(palette::TEXT_FAINT),
     );
@@ -3728,7 +4036,7 @@ fn slide_label(ui: &mut egui::Ui, slide: &str, timeline: &Timeline, pace: &Promp
             }
             ui.label(
                 egui::RichText::new(text)
-                    .size(12.0)
+                    .size(14.0)
                     .monospace()
                     .color(timing_color(recorded.seconds, target)),
             )
@@ -3737,7 +4045,7 @@ fn slide_label(ui: &mut egui::Ui, slide: &str, timeline: &Timeline, pace: &Promp
         (None, Some(target)) => {
             ui.label(
                 egui::RichText::new(format!("target {}", pace::format_span(target, false)))
-                    .size(12.0)
+                    .size(14.0)
                     .color(palette::TEXT_FAINT),
             );
         }
@@ -3762,7 +4070,7 @@ fn recording_dot(ui: &mut egui::Ui, target: &Target, dictating: bool) {
     };
     ui.label(
         egui::RichText::new(title)
-            .size(12.0)
+            .size(14.0)
             .strong()
             .color(palette::TEXT),
     );
@@ -3790,7 +4098,7 @@ fn timing_label(
     }
     ui.label(
         egui::RichText::new(text)
-            .size(12.5)
+            .size(14.5)
             .color(timing_color(spent, target)),
     );
     if let Some((expected, planned)) = expected_talk(timeline, &pace.timing, track, slide, elapsed)
@@ -3801,7 +4109,7 @@ fn timing_label(
                 pace::format_span(expected, false),
                 pace::format_span(planned, false)
             ))
-            .size(12.5)
+            .size(14.5)
             .color(timing_color(expected, Some(planned))),
         )
         .on_hover_text(
@@ -3871,12 +4179,23 @@ fn recording_hints(recording: &Recording, timeline: &Timeline) -> (String, egui:
             let keys = if timeline.current_time >= timeline.cached_duration - 1e-4 {
                 "End of the scene · Enter: finish".to_owned()
             } else if let Target::Talk {
-                only: Some(slide), ..
+                only: Some(scope), ..
             } = &recording.target
             {
+                let what = match scope.part {
+                    Some(part) => timeline
+                        .segments
+                        .iter()
+                        .find(|segment| segment.name == scope.slide)
+                        .map_or_else(
+                            || scope.slide.clone(),
+                            |segment| format!("{} · {}", scope.slide, part_label(segment, part)),
+                        ),
+                    None => scope.slide.clone(),
+                };
                 format!(
-                    "Recording {slide} again: it ends when you leave it · → or Space: continue \
-                     · Esc: discard"
+                    "Recording {what} again: it ends when you advance out of it · → or Space: \
+                     continue · Esc: discard"
                 )
             } else {
                 "→ or Space: continue · Enter: finish · Esc: discard".to_owned()
@@ -3938,7 +4257,7 @@ fn level_meter(ui: &mut egui::Ui, level: &InputLevel, width: f32) {
     ui.label(
         egui::RichText::new(label)
             .monospace()
-            .size(12.0)
+            .size(14.0)
             .color(color),
     );
 }
@@ -4226,7 +4545,7 @@ mod tests {
     }
 
     #[test]
-    fn dictation_fills_empty_parts_and_comments_beside_written_ones() {
+    fn dictation_fills_empty_parts_and_replaces_written_ones() {
         let slides = vec![
             slide("Portada", None, &[Some("titulo")]),
             slide("Datos", None, &[Some("grafico"), None]),
@@ -4239,22 +4558,14 @@ mod tests {
             ("Datos".to_owned(), 2, "Gracias.".to_owned()),
             ("Otra".to_owned(), 0, "Nada.".to_owned()),
         ];
-        let (source, report, outcomes) =
-            merge_dictation(Some(existing), &slides, &dictated, |_, _, _| false).unwrap();
+        let (source, report) = merge_dictation(Some(existing), &slides, &dictated).unwrap();
         assert_eq!(
             report,
             DictationReport {
                 parts: 4,
-                commented: 1,
-                replaced: 0
+                replaced: 1,
+                commented: 0
             }
-        );
-        // The commented part keeps the speaker's text; the others take the
-        // dictation.
-        assert_eq!(outcomes[1], ("datos".to_owned(), 0, None));
-        assert_eq!(
-            outcomes[2],
-            ("Datos".to_owned(), 1, Some("Crece.".to_owned()))
         );
         let notes: Vec<(String, String)> = parse_script(&source)
             .unwrap()
@@ -4270,106 +4581,118 @@ mod tests {
                 ),
                 (
                     "Datos".to_owned(),
-                    "Ya escrito.\n\n[stop grafico]\n\nCrece.\n\n[stop]\n\nGracias.".to_owned()
+                    "Miren --> esto.\n\n[stop grafico]\n\nCrece.\n\n[stop]\n\nGracias.".to_owned()
                 ),
             ]
         );
-        // The written text stays; the dictation sits beside it, closed once.
+        // The text it replaced stays below it, as a comment.
         assert!(
-            source.contains("<!-- dictated: Miren –> esto. -->"),
+            source.contains("Miren --> esto.\n<!-- previous: Ya escrito. -->"),
             "{source}"
         );
         assert!(source.contains("[stop titulo]\n\n## Datos"), "{source}");
     }
 
     #[test]
-    fn a_new_dictation_replaces_an_earlier_one_nobody_edited() {
+    fn recording_again_keeps_one_previous_text_and_the_speakers_comments() {
         let slides = vec![slide("Datos", None, &[Some("grafico")])];
-        let existing =
-            "## Datos\n\nPrimer dictado.\n<!-- una nota -->\n\n[stop grafico]\n\nEscrito a mano.\n";
+        let existing = "## Datos\n\nPrimer dictado.\n<!-- una nota -->\n<!-- dictated: viejo -->\n\
+                        <!-- previous: más viejo -->\n\n[stop grafico]\n\nEscrito a mano.\n";
         let dictated = vec![
             ("Datos".to_owned(), 0, "Segundo dictado.".to_owned()),
-            ("Datos".to_owned(), 1, "Otro dictado.".to_owned()),
+            ("Datos".to_owned(), 1, "Escrito  a\nmano.".to_owned()),
         ];
-        let mut timing = pace::TalkTiming::default();
-        timing.note_dictated("Datos", 0, Some("Primer dictado."));
-        let (source, report, outcomes) =
-            merge_dictation(Some(existing), &slides, &dictated, |slide, part, text| {
-                timing.still_dictated(slide, part, text)
-            })
-            .unwrap();
+        let (source, report) = merge_dictation(Some(existing), &slides, &dictated).unwrap();
         assert_eq!(
             report,
             DictationReport {
                 parts: 2,
-                commented: 1,
-                replaced: 1
+                replaced: 2,
+                commented: 0
             }
         );
-        // The earlier dictation gives way; the comment beside it stays, and
-        // the text written by hand keeps the new dictation as a comment.
+        // Gaanim's earlier comments give way to one with the text replaced;
+        // the speaker's own stays. Saying the same again leaves no comment.
         assert_eq!(
             source,
-            "## Datos\n\nSegundo dictado.\n<!-- una nota -->\n\n[stop grafico]\n\nEscrito a mano.\n\n<!-- dictated: Otro dictado. -->\n"
-        );
-        assert_eq!(
-            outcomes,
-            [
-                ("Datos".to_owned(), 0, Some("Segundo dictado.".to_owned())),
-                ("Datos".to_owned(), 1, None),
-            ]
+            "## Datos\n\nSegundo dictado.\n<!-- previous: Primer dictado. -->\n<!-- una nota -->\n\n\
+             [stop grafico]\n\nEscrito  a\nmano.\n"
         );
         // Text and a comment on one line: never replaced.
         let mixed = "## Datos\n\nPrimer dictado. <!-- nota -->\n\n[stop grafico]\n";
-        let (_, report, _) =
-            merge_dictation(Some(mixed), &slides, &dictated[..1], |_, _, _| true).unwrap();
-        assert_eq!(report.replaced, 0);
-        assert_eq!(report.commented, 1);
+        let (source, report) = merge_dictation(Some(mixed), &slides, &dictated[..1]).unwrap();
+        assert_eq!((report.replaced, report.commented), (0, 1));
+        assert!(
+            source.contains("<!-- dictated: Segundo dictado. -->\n\n[stop grafico]"),
+            "{source}"
+        );
     }
 
     #[test]
-    fn a_recording_of_the_talk_starts_at_a_slide() {
+    fn a_recording_of_the_talk_starts_at_a_slide_or_a_stop() {
         use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop};
-        let slide = |id, name: &str, start, end, stop| SegmentMetadata {
+        let slide = |id, name: &str, start, end, stops: &[f64]| SegmentMetadata {
             id,
             name: name.into(),
             notes: None,
             target: None,
             start_time: start,
             end_time: end,
-            stops: vec![SegmentStop {
-                name: None,
-                time: stop,
-                ambient: None,
-            }],
+            stops: stops
+                .iter()
+                .map(|time| SegmentStop {
+                    name: None,
+                    time: *time,
+                    ambient: None,
+                })
+                .collect(),
         };
         let mut timeline = Timeline::new();
         timeline.cached_duration = 6.0;
-        let implicit = SegmentMetadata {
-            stops: Vec::new(),
-            ..slide(1, IMPLICIT_SEGMENT, 0.0, 0.0, 0.0)
-        };
         timeline.set_segments(vec![
-            implicit,
-            slide(2, "Portada", 0.0, 2.0, 1.0),
-            slide(3, "Datos", 2.0, 6.0, 4.0),
+            slide(1, IMPLICIT_SEGMENT, 0.0, 0.0, &[]),
+            slide(2, "Portada", 0.0, 2.0, &[1.0]),
+            slide(3, "Datos", 2.0, 6.0, &[3.0, 4.0]),
+            slide(4, "Cierre", 6.0, 7.0, &[7.0]),
         ]);
         // The first slide, past the segment before the first one.
-        assert_eq!(talk_start(&timeline, None), Some(0.0));
-        assert_eq!(talk_start(&timeline, Some("Datos")), Some(2.0));
-        assert_eq!(talk_start(&timeline, Some("Otra")), None);
-        // Recording one slide again ends once the speaker leaves it.
-        let place = |time: f64, slide: Option<&str>| (time, slide.map(|name| (name.to_owned(), 0)));
-        assert!(!left_slide(&[place(0.0, Some("Datos"))], "Datos"));
-        assert!(left_slide(
-            &[place(0.0, Some("Datos")), place(3.0, Some("Cierre"))],
-            "Datos"
+        assert_eq!(talk_start(&timeline, None, None), Some(0.0));
+        assert_eq!(talk_start(&timeline, Some("Datos"), None), Some(2.0));
+        assert_eq!(talk_start(&timeline, Some("Otra"), None), None);
+        // A part starts at the stop before it; the first, with its slide.
+        assert_eq!(talk_start(&timeline, Some("Datos"), Some(0)), Some(2.0));
+        assert_eq!(talk_start(&timeline, Some("Datos"), Some(2)), Some(4.0));
+        assert_eq!(talk_start(&timeline, Some("Datos"), Some(5)), None);
+        // Datos goes on past its last stop; Cierre ends at its own.
+        let datos = &timeline.segments[2];
+        assert_eq!(slide_parts(datos), 3);
+        assert_eq!(slide_parts(&timeline.segments[3]), 1);
+        assert_eq!(part_label(datos, 1), "Step 2");
+        assert_eq!(part_label(datos, 2), "until the next slide");
+
+        // Recording one slide or part again ends once the speaker leaves it.
+        let place = |time: f64, slide: &str, part| (time, Some((slide.to_owned(), part)));
+        let slide_scope = Scope {
+            slide: "Datos".into(),
+            part: None,
+        };
+        let part_scope = |part| Scope {
+            slide: "Datos".into(),
+            part: Some(part),
+        };
+        let within = [place(0.0, "Datos", 0), place(2.0, "Datos", 1)];
+        assert!(!left_scope(&within, &slide_scope));
+        assert!(left_scope(&within, &part_scope(0)));
+        assert!(!left_scope(&within, &part_scope(1)));
+        assert!(left_scope(
+            &[place(0.0, "Datos", 1), place(3.0, "Cierre", 0)],
+            &slide_scope
         ));
-        assert!(left_slide(
-            &[place(0.0, Some("Datos")), place(3.0, None)],
-            "Datos"
+        assert!(left_scope(
+            &[place(0.0, "Datos", 0), (3.0, None)],
+            &slide_scope
         ));
-        assert!(!left_slide(&[place(0.0, Some("Cierre"))], "Datos"));
+        assert!(!left_scope(&[place(0.0, "Cierre", 0)], &slide_scope));
     }
 
     #[test]

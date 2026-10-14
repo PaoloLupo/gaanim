@@ -148,7 +148,9 @@ con Scribe]).
 
 En *Script & narration*, la tarjeta *TIMING* tiene una fila por diapositiva
 con el tiempo grabado, su objetivo y un botón, y arriba el total frente a la
-duración prevista.
+duración prevista. `▸` despliega los stops de una diapositiva, cada uno con su
+tiempo y su botón, y un clic en el nombre de una diapositiva o de un stop
+lleva el cabezal allí.
 
 + Planifica la charla con `scene.slides.target(...)` o con un `target=` en
   cada diapositiva (ver #link(<tiempo-de-la-charla>)[El tiempo de la
@@ -169,6 +171,10 @@ duración prevista.
   sola cuando sales de ella y su tiempo sustituye al anterior. En una
   diapositiva sin tiempo, *Record* presenta desde ahí hasta que pulsas
   `Enter`.
++ Para ajustar menos, despliega la diapositiva y pulsa *Re-record* en un
+  stop: la grabación arranca justo al dejar el stop anterior (o al entrar en
+  la diapositiva, para el primero) y termina sola cuando avanzas en ese stop.
+  Su tiempo sustituye al del tramo, y el de la diapositiva se recalcula.
 
 Mientras grabas, el subtítulo del editor (ver #link(<prompter>)[El
 prompter]) muestra, además del guion, el reloj de la grabación, el nivel del
@@ -199,13 +205,13 @@ cada frase va a la diapositiva y al tramo que estabas presentando.
   donde se cortó, para grabar de nuevo lo que falta; `Esc` lo descarta todo y
   vuelve a donde empezaste.
 + Gaanim espera las últimas frases (como mucho 12 segundos; `Esc` deja de
-  esperar) y las escribe en el guion:
-  - un tramo vacío recibe lo dictado;
-  - un tramo que conserva tal cual lo que dictaste la vez anterior lo cambia
-    por lo nuevo, así que regrabar una diapositiva actualiza su guion;
-  - un tramo que escribiste o editaste conserva tu texto, y lo dictado se
-    añade a su lado como comentario (`<!-- dictated: … -->`), que el guion
-    ignora.
+  esperar) y las escribe en el guion: lo que dices en un tramo pasa a ser su
+  texto. Si el tramo ya tenía texto, lo sustituye y deja el anterior justo
+  debajo en un comentario `<!-- previous: … -->`, que el guion ignora; al
+  regrabar de nuevo, ese comentario se cambia por el del último texto, así
+  que nunca se acumulan. Tus propios comentarios se quedan donde están.
++ Al regrabar una diapositiva o un stop, solo se escribe en ellos: lo que
+  digas mientras avanzas fuera no cae en el tramo siguiente.
 
 Durante el dictado, el subtítulo del editor muestra el guion del tramo que
 toca decir; si el tramo aún no tiene guion, muestra en vivo lo que Scribe va
