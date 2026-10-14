@@ -135,7 +135,10 @@ una sección por diapositiva, con sus `notes=` como punto de partida, y una
 marca `[stop nombre]` por cada stop. Cuando el código gana diapositivas o
 stops, el botón pasa a *Open and complete*: añade las secciones nuevas detrás
 de la diapositiva anterior y las marcas que faltan al final de cada sección,
-sin tocar lo que escribiste.
+sin tocar lo que escribiste. El guion se abre en tu editor de código, como el
+resto de los saltos al código (ver `GAANIM_EDITOR` en
+#link("/referencia/cli/")[la CLI]), en lo primero que añadió o, si no faltaba
+nada, en la primera sección sin texto.
 
 == Grabar la charla y ajustar sus tiempos <grabar-charla>
 
