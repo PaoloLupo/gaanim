@@ -12,8 +12,8 @@ use gaanim_renderer::effects::{
 use gaanim_renderer::fragment::{FragmentRecipe, GroupShadow};
 use gaanim_renderer::object_effects::{Glass, MatteMode};
 use gaanim_renderer::pipeline::{
-    CapturedEffect, CapturedElement, CapturedGlass, CapturedMatte, CapturedTransition,
-    CapturedView, FrameCapture,
+    CapturedEffect, CapturedElement, CapturedGlass, CapturedMatte, CapturedThreeD,
+    CapturedThreeDSource, CapturedTransition, CapturedView, FrameCapture, ThreeDComposition,
 };
 use gaanim_renderer::post_process::PostProcessShader;
 use gaanim_scene::{
@@ -101,6 +101,14 @@ pub struct TableCounts {
     pub strings: u32,
     pub transitions: u32,
     pub effects: u32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub meshes: u32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lines: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 impl TableCounts {
@@ -112,6 +120,8 @@ impl TableCounts {
             strings: self.strings + other.strings,
             transitions: self.transitions + other.transitions,
             effects: self.effects + other.effects,
+            meshes: self.meshes + other.meshes,
+            lines: self.lines + other.lines,
         }
     }
 
@@ -123,6 +133,8 @@ impl TableCounts {
             strings: self.strings - other.strings,
             transitions: self.transitions - other.transitions,
             effects: self.effects - other.effects,
+            meshes: self.meshes - other.meshes,
+            lines: self.lines - other.lines,
         }
     }
 
@@ -154,6 +166,11 @@ pub struct Tables {
     pub(crate) transition_shaders: Vec<Arc<TransitionShader>>,
     /// Passes of the drawables' shader effects, deduplicated.
     pub(crate) effect_shaders: Vec<PostProcessShader>,
+    /// Native 3D meshes and line lists, encoded, deduplicated by content.
+    pub(crate) meshes: Vec<Vec<u8>>,
+    mesh_by_hash: HashMap<blake3::Hash, u32>,
+    pub(crate) lines: Vec<Vec<u8>>,
+    lines_by_hash: HashMap<blake3::Hash, u32>,
     /// Keys of the drawables the post-process leaves out.
     pub(crate) post_exempt: BTreeSet<u32>,
     /// Whether a frame draws glass, which only a GPU pass composes.
@@ -190,6 +207,10 @@ impl Default for Tables {
             string_index: HashMap::new(),
             transition_shaders: Vec::new(),
             effect_shaders: Vec::new(),
+            meshes: Vec::new(),
+            mesh_by_hash: HashMap::new(),
+            lines: Vec::new(),
+            lines_by_hash: HashMap::new(),
             post_exempt: BTreeSet::new(),
             glass: false,
             starts: vec![TableCounts::default()],
@@ -347,7 +368,49 @@ impl Tables {
             strings: self.strings.len() as u32,
             transitions: self.transition_shaders.len() as u32,
             effects: self.effect_shaders.len() as u32,
+            meshes: self.meshes.len() as u32,
+            lines: self.lines.len() as u32,
         }
+    }
+
+    /// Store a mesh once and return its index.
+    pub(crate) fn mesh(&mut self, mesh: &gaanim_scene::TriangleMeshData) -> u32 {
+        let mut w = Writer::new();
+        codec::write_mesh(&mut w, mesh);
+        let bytes = w.into_bytes();
+        let hash = blake3::hash(&bytes);
+        let index = match self.mesh_by_hash.get(&hash) {
+            Some(index) => *index,
+            None => {
+                let index = self.meshes.len() as u32;
+                self.pending_bytes += bytes.len();
+                self.meshes.push(bytes);
+                self.mesh_by_hash.insert(hash, index);
+                index
+            }
+        };
+        self.note(segment_of(&self.starts, |c| c.meshes, index));
+        index
+    }
+
+    /// Store a line list once and return its index.
+    pub(crate) fn line_list(&mut self, lines: &gaanim_scene::LineListData) -> u32 {
+        let mut w = Writer::new();
+        codec::write_lines(&mut w, lines);
+        let bytes = w.into_bytes();
+        let hash = blake3::hash(&bytes);
+        let index = match self.lines_by_hash.get(&hash) {
+            Some(index) => *index,
+            None => {
+                let index = self.lines.len() as u32;
+                self.pending_bytes += bytes.len();
+                self.lines.push(bytes);
+                self.lines_by_hash.insert(hash, index);
+                index
+            }
+        };
+        self.note(segment_of(&self.starts, |c| c.lines, index));
+        index
     }
 
     /// Close the segment being filled: its encoding and how many items of
@@ -417,6 +480,14 @@ impl Tables {
         w.len(counts.recipes as usize);
         for recipe in &self.recipes[range(start.recipes, end.recipes)] {
             w.bytes(recipe);
+        }
+        w.len(counts.meshes as usize);
+        for mesh in &self.meshes[range(start.meshes, end.meshes)] {
+            w.buf.extend_from_slice(mesh);
+        }
+        w.len(counts.lines as usize);
+        for lines in &self.lines[range(start.lines, end.lines)] {
+            w.buf.extend_from_slice(lines);
         }
         self.starts.push(end);
         self.pending_bytes = 0;
@@ -530,6 +601,8 @@ struct Segment {
     transition_shaders: Vec<Arc<TransitionShader>>,
     effect_shaders: Vec<PostProcessShader>,
     recipes: Vec<Arc<FragmentRecipe>>,
+    meshes: Vec<Arc<gaanim_scene::TriangleMeshData>>,
+    lines: Vec<Arc<gaanim_scene::LineListData>>,
 }
 
 /// Decoded tables of an open bundle, segment by segment as frames need
@@ -648,6 +721,12 @@ impl DecodedTables {
         for _ in 0..recipes {
             encoded.push(r.bytes()?);
         }
+        for _ in 0..count(&mut r, expected.meshes, "meshes")? {
+            decoded.meshes.push(Arc::new(codec::read_mesh(&mut r)?));
+        }
+        for _ in 0..count(&mut r, expected.lines, "line lists")? {
+            decoded.lines.push(Arc::new(codec::read_lines(&mut r)?));
+        }
         if !r.is_empty() {
             return Err(corrupt("a segment has trailing data"));
         }
@@ -717,6 +796,8 @@ impl DecodedTables {
             strings: decoded.strings.len() as u32,
             transitions: decoded.transition_shaders.len() as u32,
             effects: decoded.effect_shaders.len() as u32,
+            meshes: 0,
+            lines: 0,
         };
         let mut tables = Self::new(&[counts]);
         tables.segments[0] = Some(decoded);
@@ -757,6 +838,152 @@ impl DecodedTables {
     fn string(&self, index: u32) -> Result<Arc<str>> {
         lookup(self, |c| c.strings, |s| &s.strings, index, "string").cloned()
     }
+
+    fn mesh(&self, index: u32) -> Result<Arc<gaanim_scene::TriangleMeshData>> {
+        lookup(self, |c| c.meshes, |s| &s.meshes, index, "mesh").cloned()
+    }
+
+    fn line_list(&self, index: u32) -> Result<Arc<gaanim_scene::LineListData>> {
+        lookup(self, |c| c.lines, |s| &s.lines, index, "line list").cloned()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Native 3D content
+// ---------------------------------------------------------------------------
+
+fn write_side(w: &mut Writer, side: TransitionSide) {
+    w.u8(match side {
+        TransitionSide::None => 0,
+        TransitionSide::Outgoing => 1,
+        TransitionSide::Incoming => 2,
+    });
+}
+
+fn read_side(r: &mut Reader<'_>) -> Result<TransitionSide> {
+    match r.u8()? {
+        0 => Ok(TransitionSide::None),
+        1 => Ok(TransitionSide::Outgoing),
+        2 => Ok(TransitionSide::Incoming),
+        _ => Err(corrupt("invalid transition side")),
+    }
+}
+
+/// Encode a frame's 3D content, its meshes and line lists in the tables.
+fn write_three_d(
+    w: &mut Writer,
+    tables: &mut Tables,
+    keys: &mut EntityKeys,
+    three_d: &CapturedThreeD,
+) {
+    w.bool(three_d.lighting.enabled);
+    w.f32(three_d.lighting.intensity);
+    w.bool(three_d.lighting.shadows);
+    w.len(three_d.lights.len());
+    for light in &three_d.lights {
+        for value in light.position.to_array() {
+            w.f64(value);
+        }
+        w.bool(light.directional);
+        for value in light.color {
+            w.f32(value);
+        }
+    }
+    w.rect(three_d.opacity_fallback);
+    // A count of elements drawn again, not of bytes that follow.
+    w.var(three_d.elements as u64);
+    w.len(three_d.sources.len());
+    for source in &three_d.sources {
+        w.var(u64::from(keys.key(source.entity)));
+        for value in source.transform.to_cols_array() {
+            w.f64(value);
+        }
+        w.f32(source.opacity);
+        w.option(source.mesh.as_deref(), |w, mesh| {
+            w.var(u64::from(tables.mesh(mesh)))
+        });
+        w.option(source.lines.as_deref(), |w, lines| {
+            w.var(u64::from(tables.line_list(lines)))
+        });
+        w.option(source.material.as_ref(), codec::write_material);
+        let composition = &source.composition;
+        w.bool(composition.in_views);
+        w.bool(composition.post_exempt);
+        w.option(composition.layer.as_ref(), |w, layer| {
+            w.var(u64::from(tables.string(layer)))
+        });
+        write_side(w, composition.transition_side);
+        let lineage: Vec<u32> = composition
+            .lineage
+            .iter()
+            .map(|entity| keys.key(*entity))
+            .collect();
+        write_keys(w, &lineage);
+    }
+}
+
+/// Decode what [`write_three_d`] wrote.
+fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedThreeD> {
+    use gaanim_core::glam::{DMat4, DVec3};
+    let lighting = gaanim_scene::Lighting3D {
+        enabled: r.bool()?,
+        intensity: r.f32()?,
+        shadows: r.bool()?,
+    };
+    let count = r.len()?;
+    let mut lights = Vec::with_capacity(count.min(256));
+    for _ in 0..count {
+        lights.push(gaanim_renderer::three_d::Light {
+            position: DVec3::new(r.f64()?, r.f64()?, r.f64()?),
+            directional: r.bool()?,
+            color: [r.f32()?, r.f32()?, r.f32()?],
+        });
+    }
+    let opacity_fallback = r.rect()?;
+    let elements = usize::try_from(r.var()?).map_err(|_| corrupt("3D element count"))?;
+    let count = r.len()?;
+    let mut sources = Vec::with_capacity(count.min(1 << 16));
+    for _ in 0..count {
+        let entity = key_entity(r.u32()?)?;
+        let mut matrix = [0.0; 16];
+        for value in &mut matrix {
+            *value = r.f64()?;
+        }
+        let opacity = r.f32()?;
+        let mesh = r.option(|r| tables.mesh(r.u32()?))?;
+        let lines = r.option(|r| tables.line_list(r.u32()?))?;
+        let material = r.option(codec::read_material)?;
+        let in_views = r.bool()?;
+        let post_exempt = r.bool()?;
+        let layer = r.option(|r| tables.string(r.u32()?))?;
+        let transition_side = read_side(r)?;
+        let lineage = read_keys(r)?
+            .into_iter()
+            .map(key_entity)
+            .collect::<Result<Vec<_>>>()?;
+        sources.push(CapturedThreeDSource {
+            entity,
+            transform: DMat4::from_cols_array(&matrix),
+            opacity,
+            mesh,
+            lines,
+            material,
+            composition: ThreeDComposition {
+                in_views,
+                post_exempt,
+                layer,
+                transition_side,
+                lineage,
+            },
+        });
+    }
+    Ok(CapturedThreeD {
+        lighting,
+        lights,
+        opacity_fallback,
+        sources,
+        elements,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1517,6 +1744,9 @@ pub(crate) struct FrameRecord {
     pub mattes: Vec<(u32, u32, MatteMode)>,
     /// Glass drawables and their glass.
     pub glasses: Vec<(u32, Glass)>,
+    /// Encoded native 3D content ([`write_three_d`]), compared as bytes;
+    /// `elements` leaves out what its projection draws.
+    pub three_d: Option<Vec<u8>>,
     /// Motion blur sub-frames, each without sub-frames of its own.
     pub motion_blur: Vec<FrameRecord>,
 }
@@ -1601,7 +1831,16 @@ impl FrameRecord {
         if !frame.capture.glasses.is_empty() {
             tables.glass = true;
         }
+        // The projection of the 3D content is drawn again from the content.
+        let projected = frame.capture.three_d.as_ref().map_or(0, |three_d| {
+            three_d.elements.min(frame.capture.elements.len())
+        });
         Self {
+            three_d: frame.capture.three_d.as_ref().map(|three_d| {
+                let mut w = Writer::new();
+                write_three_d(&mut w, tables, keys, three_d);
+                w.into_bytes()
+            }),
             time: frame.time,
             background_time: frame.capture.background_time,
             background_values: frame.capture.background_values.clone(),
@@ -1612,9 +1851,7 @@ impl FrameRecord {
                 w.into_bytes()
             }),
             post: frame.post.clone(),
-            elements: frame
-                .capture
-                .elements
+            elements: frame.capture.elements[projected..]
                 .iter()
                 .map(|element| ElementRecord::capture(element, tables, keys, lottie(element)))
                 .collect(),
@@ -1660,18 +1897,32 @@ impl FrameRecord {
         tables: &DecodedTables,
         lottie_scene: &mut dyn FnMut(u32) -> Result<Option<Arc<vello::Scene>>>,
     ) -> Result<Frame> {
-        let elements = self
-            .elements
-            .iter()
-            .map(|element| {
-                let scene = element
-                    .lottie
-                    .map(&mut *lottie_scene)
-                    .transpose()?
-                    .flatten();
-                element.resolve(tables, scene)
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut three_d = self
+            .three_d
+            .as_ref()
+            .map(|bytes| read_three_d(&mut Reader::new(bytes), tables))
+            .transpose()?;
+        // The same code projects it again. Shading calls functions such as
+        // `powf` whose last bits differ between platforms (the web player's
+        // WebAssembly), which may group triangles into other runs: the
+        // projection drawn here is the frame's, whatever it counts.
+        let mut elements = match &mut three_d {
+            Some(three_d) => {
+                let projected =
+                    gaanim_renderer::pipeline::captured_three_d_elements(three_d, &self.camera);
+                three_d.elements = projected.len();
+                projected
+            }
+            None => Vec::new(),
+        };
+        for element in &self.elements {
+            let scene = element
+                .lottie
+                .map(&mut *lottie_scene)
+                .transpose()?
+                .flatten();
+            elements.push(element.resolve(tables, scene)?);
+        }
         Ok(Frame {
             time: self.time,
             camera: self.camera,
@@ -1722,6 +1973,7 @@ impl FrameRecord {
                         })
                     })
                     .collect::<Result<_>>()?,
+                three_d,
             },
             post: self.post.clone(),
             motion_blur: self
@@ -1748,6 +2000,11 @@ pub(crate) struct DeltaEncoder {
 
 const FRAME_FULL: u8 = 0;
 const FRAME_DELTA: u8 = 1;
+/// A frame without native 3D content, with the previous frame's, or with
+/// its own, which follows.
+const THREE_D_NONE: u8 = 0;
+const THREE_D_SAME: u8 = 1;
+const THREE_D_NEW: u8 = 2;
 
 impl DeltaEncoder {
     pub fn reset(&mut self) {
@@ -1809,6 +2066,22 @@ impl DeltaEncoder {
                 w.f64(value);
             }
         }
+        // 3D content usually stays while the camera moves: written once.
+        match &frame.three_d {
+            None => w.u8(THREE_D_NONE),
+            Some(bytes)
+                if self
+                    .previous
+                    .as_ref()
+                    .is_some_and(|previous| previous.three_d.as_ref() == Some(bytes)) =>
+            {
+                w.u8(THREE_D_SAME)
+            }
+            Some(bytes) => {
+                w.u8(THREE_D_NEW);
+                w.bytes(bytes);
+            }
+        }
         // A delta matches elements by their drawable's key, so a frame where
         // one drawable draws several elements (the runs of a 3D mesh, echo
         // copies) is written whole, as is the frame after it.
@@ -1860,17 +2133,26 @@ impl DeltaEncoder {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct DeltaDecoder {
     previous: Option<FrameRecord>,
+    /// Format version of the frames: version 5 frames hold no 3D content.
+    version: u32,
 }
 
 impl DeltaDecoder {
+    pub fn new(version: u32) -> Self {
+        Self {
+            previous: None,
+            version,
+        }
+    }
+
     pub fn read(&mut self, r: &mut Reader<'_>) -> Result<FrameRecord> {
         let mut frame = self.read_frame(r)?;
         let count = r.len()?;
         let mut sub = DeltaDecoder {
             previous: self.previous.clone(),
+            version: self.version,
         };
         frame.motion_blur = (0..count)
             .map(|_| sub.read_frame(r))
@@ -1927,6 +2209,21 @@ impl DeltaDecoder {
                 },
             ));
         }
+        let three_d = if self.version < 6 {
+            None
+        } else {
+            match r.u8()? {
+                THREE_D_NONE => None,
+                THREE_D_SAME => Some(
+                    self.previous
+                        .as_ref()
+                        .and_then(|previous| previous.three_d.clone())
+                        .ok_or_else(|| corrupt("a frame repeats 3D content no frame had"))?,
+                ),
+                THREE_D_NEW => Some(r.bytes()?.to_vec()),
+                _ => return Err(corrupt("invalid 3D content")),
+            }
+        };
         let elements = match r.u8()? {
             FRAME_FULL => {
                 let count = r.len()?;
@@ -1985,6 +2282,7 @@ impl DeltaDecoder {
             effects,
             mattes,
             glasses,
+            three_d,
             motion_blur: Vec::new(),
         };
         self.previous = Some(frame.clone());

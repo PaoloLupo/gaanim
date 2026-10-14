@@ -2630,7 +2630,7 @@ fn compile_scene_with_pins(
     pins: Option<&mut PinnedElements>,
     effects: bool,
 ) -> ComposedFrame {
-    let mut extraction = extract_world(world, camera, pins, true, effects);
+    let mut extraction = extract_world(world, camera, pins, true, effects, false);
     let soft = soft_layers(&extraction.elements);
     if effects {
         crate::soft_effects::collect_group_shadows();
@@ -2776,6 +2776,8 @@ struct WorldExtraction {
     transition: Option<gaanim_scene::SceneTransitionFrame>,
     background_time: f64,
     background_values: Vec<BackgroundValues>,
+    /// What draws the frame's 3D content, when the extraction captures it.
+    three_d: Option<CapturedThreeD>,
 }
 
 /// The scene times whose backgrounds a frame may draw: the frame's and,
@@ -2838,6 +2840,7 @@ fn extract_world(
     mut pins: Option<&mut PinnedElements>,
     cull: bool,
     gpu: bool,
+    capture_three_d: bool,
 ) -> WorldExtraction {
     // Fragments of drawables not extracted this frame are dropped with it.
     let mut previous_fragments = world
@@ -3296,6 +3299,7 @@ fn extract_world(
         }
         pins.recorded = true;
     }
+    let mut three_d = capture_three_d.then(CapturedThreeD::default);
     if let Some(camera) = camera {
         extract_three_d(
             world,
@@ -3304,6 +3308,7 @@ fn extract_world(
             !camera_views.is_empty(),
             opacity_fallback,
             &mut extracted,
+            three_d.as_mut(),
         );
     }
 
@@ -3317,6 +3322,7 @@ fn extract_world(
         transition: transition_frame,
         background_time,
         background_values,
+        three_d,
     }
 }
 
@@ -3419,6 +3425,7 @@ fn extract_three_d(
     with_lineage: bool,
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
+    capture: Option<&mut CapturedThreeD>,
 ) {
     let mut lights = world.query_filtered::<LightData, With<Visible>>();
     let lighting = illumination(
@@ -3437,12 +3444,98 @@ fn extract_three_d(
         with_lineage,
         opacity_fallback,
         extracted,
+        capture,
     );
+}
+
+/// A drawable's 3D content as a recording keeps it: what the projection
+/// reads and how its elements compose (see [`CapturedThreeD`]).
+#[derive(Clone, Debug)]
+pub struct CapturedThreeDSource {
+    pub entity: Entity,
+    /// The drawable's world matrix.
+    pub transform: gaanim_core::glam::DMat4,
+    pub opacity: f32,
+    pub mesh: Option<Arc<gaanim_scene::TriangleMeshData>>,
+    pub lines: Option<Arc<gaanim_scene::LineListData>>,
+    pub material: Option<gaanim_scene::Material3D>,
+    pub composition: ThreeDComposition,
+}
+
+/// A frame's native 3D content as a recording keeps it: the meshes, lines,
+/// matrices, materials and lights the projection reads, not the triangles it
+/// drew. [`captured_three_d_elements`] draws them again, through the frame's
+/// camera, into the elements the frame began with.
+#[derive(Clone, Debug, Default)]
+pub struct CapturedThreeD {
+    pub lighting: gaanim_scene::Lighting3D,
+    pub lights: Vec<crate::three_d::Light>,
+    /// Layer bounds of the elements of an opaque drawable.
+    pub opacity_fallback: kurbo::Rect,
+    pub sources: Vec<CapturedThreeDSource>,
+    /// How many of the frame's first elements the projection drew.
+    pub elements: usize,
+}
+
+/// The elements the 3D content `captured` draws through `camera`, exactly as
+/// the frame it was captured from began: a bundle stores the content and
+/// draws it again instead of storing every projected triangle.
+pub fn captured_three_d_elements(
+    captured: &CapturedThreeD,
+    camera: &gaanim_math::Camera,
+) -> Vec<CapturedElement> {
+    let held: Vec<(GlobalSpatialTransform, GlobalOpacity)> = captured
+        .sources
+        .iter()
+        .map(|source| {
+            (
+                GlobalSpatialTransform {
+                    mat4: source.transform,
+                    ..Default::default()
+                },
+                GlobalOpacity(source.opacity),
+            )
+        })
+        .collect();
+    let sources = captured
+        .sources
+        .iter()
+        .zip(&held)
+        .map(|(source, (transform, opacity))| {
+            (
+                source.entity,
+                crate::three_d::Content {
+                    transform,
+                    opacity,
+                    mesh: source.mesh.as_deref(),
+                    lines: source.lines.as_deref(),
+                    material: source.material.as_ref(),
+                },
+                source.composition.clone(),
+            )
+        })
+        .collect();
+    let lighting = crate::three_d::Illumination {
+        lighting: captured.lighting,
+        lights: captured.lights.clone(),
+    };
+    let mut extracted = Vec::new();
+    project_three_d(
+        camera,
+        &lighting,
+        sources,
+        captured.opacity_fallback,
+        false,
+        &mut extracted,
+    );
+    extracted.sort_by(ExtractedElement::draw_order);
+    extracted.into_iter().map(captured_element).collect()
 }
 
 /// Native 3D content (see [`crate::three_d`]) as drawables beneath the 2D
 /// content, back to front. Consecutive primitives of one drawable with the
-/// same paint share an element.
+/// same paint share an element. With `capture`, also what a recording keeps
+/// to draw them again.
 #[allow(clippy::too_many_arguments)]
 fn three_d_elements<'a>(
     camera: &gaanim_math::Camera,
@@ -3453,39 +3546,12 @@ fn three_d_elements<'a>(
     with_lineage: bool,
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
+    capture: Option<&mut CapturedThreeD>,
 ) {
-    use crate::three_d::{Primitive, Projector, sort_back_to_front};
-
-    let Some(projector) = Projector::new(camera) else {
-        return;
-    };
-    // Drawables project independently, so they spread over the compute
-    // threads; their items keep the order of `sources`.
-    let mut sources: Vec<ThreeDSource<'a>> = sources.collect();
-    let projected: Vec<Vec<_>> = parallel_chunks(&mut sources, 1, |_, sources| {
-        sources
-            .iter()
-            .map(|(entity, content, ..)| {
-                let mut items = Vec::new();
-                projector.push(*entity, content, lighting, &mut items);
-                items
-            })
-            .collect::<Vec<_>>()
-    })
-    .into_iter()
-    .flatten()
-    .collect();
     // How each drawable's elements compose, the same for all of them.
-    let mut composition = HashMap::new();
-    let mut items = Vec::new();
-    for ((entity, _, hud, exempt, layer), projected) in sources.into_iter().zip(projected) {
-        if projected.is_empty() {
-            continue;
-        }
-        items.extend(projected);
-        composition.insert(
-            entity,
-            ThreeDComposition {
+    let sources: Vec<(Entity, crate::three_d::Content<'a>, ThreeDComposition)> = sources
+        .map(|(entity, content, hud, exempt, layer)| {
+            let composition = ThreeDComposition {
                 in_views: !hud,
                 post_exempt: exempt,
                 layer,
@@ -3497,8 +3563,69 @@ fn three_d_elements<'a>(
                 } else {
                     Vec::new()
                 },
-            },
-        );
+            };
+            (entity, content, composition)
+        })
+        .collect();
+    if let Some(capture) = capture {
+        capture.lighting = lighting.lighting;
+        capture.lights = lighting.lights.clone();
+        capture.opacity_fallback = opacity_fallback;
+        capture.sources = sources
+            .iter()
+            .map(|(entity, content, composition)| CapturedThreeDSource {
+                entity: *entity,
+                transform: content.transform.mat4,
+                opacity: content.opacity.0,
+                mesh: content.mesh.cloned().map(Arc::new),
+                lines: content.lines.cloned().map(Arc::new),
+                material: content.material.copied(),
+                composition: composition.clone(),
+            })
+            .collect();
+    }
+    project_three_d(camera, lighting, sources, opacity_fallback, true, extracted);
+}
+
+/// The elements of 3D `sources`, each with how its elements compose. With
+/// `scenes`, each element carries its fragment's scene, as the preview
+/// draws it; a replay builds fragments from recipes and needs none.
+fn project_three_d(
+    camera: &gaanim_math::Camera,
+    lighting: &crate::three_d::Illumination,
+    mut sources: Vec<(Entity, crate::three_d::Content<'_>, ThreeDComposition)>,
+    opacity_fallback: kurbo::Rect,
+    scenes: bool,
+    extracted: &mut Vec<ExtractedElement>,
+) {
+    use crate::three_d::{Primitive, Projector, sort_back_to_front};
+
+    let Some(projector) = Projector::new(camera) else {
+        return;
+    };
+    // Drawables project independently, so they spread over the compute
+    // threads; their items keep the order of `sources`.
+    let projected: Vec<Vec<_>> = parallel_chunks(&mut sources, 1, |_, sources| {
+        sources
+            .iter()
+            .map(|(entity, content, _)| {
+                let mut items = Vec::new();
+                projector.push(*entity, content, lighting, &mut items);
+                items
+            })
+            .collect::<Vec<_>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    let mut composition = HashMap::new();
+    let mut items = Vec::new();
+    for ((entity, _, drawn), projected) in sources.into_iter().zip(projected) {
+        if projected.is_empty() {
+            continue;
+        }
+        items.extend(projected);
+        composition.insert(entity, drawn);
     }
     if items.is_empty() {
         return;
@@ -3601,7 +3728,11 @@ fn three_d_elements<'a>(
                     stroke_align: StrokeAlign::Center,
                     ..Default::default()
                 };
-                let scene = build_fragment(&recipe, None).scene;
+                let scene = if scenes {
+                    build_fragment(&recipe, None).scene
+                } else {
+                    vello::Scene::new()
+                };
                 let composition = &composition[&entity];
                 ExtractedElement {
                     soft: Default::default(),
@@ -3657,12 +3788,13 @@ fn three_d_elements<'a>(
 const RUNS_PER_TASK: usize = 128;
 
 /// How the elements of one drawable with 3D content compose.
-struct ThreeDComposition {
-    in_views: bool,
-    post_exempt: bool,
-    layer: Option<Arc<str>>,
-    transition_side: gaanim_scene::TransitionSide,
-    lineage: Vec<Entity>,
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreeDComposition {
+    pub in_views: bool,
+    pub post_exempt: bool,
+    pub layer: Option<Arc<str>>,
+    pub transition_side: gaanim_scene::TransitionSide,
+    pub lineage: Vec<Entity>,
 }
 
 /// `f` of consecutive chunks of `items`, given the index of each chunk's
@@ -4742,16 +4874,72 @@ pub struct FrameCapture {
     pub glasses: Vec<CapturedGlass>,
     /// Uniforms of the shader backgrounds this frame draws.
     pub background_values: Vec<BackgroundValues>,
+    /// The native 3D content whose projection is the first
+    /// [`CapturedThreeD::elements`] of `elements`, for a recording that
+    /// stores it instead of them.
+    pub three_d: Option<CapturedThreeD>,
+}
+
+/// Whether `element` is part of the native 3D content, which draws beneath
+/// every 2D drawable.
+fn is_three_d(element: &ExtractedElement) -> bool {
+    element.z_layer == i32::MIN && element.render_order.z_index == i32::MIN
 }
 
 /// Capture the drawables of the world as it stands, without culling, for a
 /// replay that composites the same frame with [`compose_captured`].
 pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) -> FrameCapture {
-    let extraction = extract_world(world, camera, None, false, false);
+    let extraction = extract_world(world, camera, None, false, false, true);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
     let mattes = world_mattes(world);
     let glasses = world_glasses(world);
     capture_extraction(extraction, effects, mattes, glasses)
+}
+
+/// The captured form of an extracted element.
+fn captured_element(element: ExtractedElement) -> CapturedElement {
+    CapturedElement {
+        entity: element.entity,
+        recipe: element
+            .recipe
+            .expect("world extraction records every recipe"),
+        lottie: element.lottie,
+        transform: element.transform,
+        opacity: element.opacity,
+        opacity_bounds: element
+            .opacity_extent
+            .map_or(element.opacity_bounds, |(rect, _)| rect),
+        opacity_reach: element.opacity_extent.map(|(_, reach)| reach),
+        opacity_group: element.opacity_group,
+        group_opacity: element.group_opacity,
+        group_shadow: element.group_shadow,
+        render_order: element.render_order,
+        clip_mask: element.clip_mask,
+        blend: element.blend,
+        transition_side: element.transition_side,
+        post_exempt: element.post_exempt,
+        lineage: element.lineage,
+        view_bounds: element.view_bounds,
+        in_views: element.in_views,
+        layer: element.layer,
+        screen: element.screen.map(|screen| {
+            let view = &screen.view;
+            CapturedView {
+                clip: Arc::clone(&view.clip),
+                content: view.content,
+                region: view.region,
+                excluded: view.excluded.clone(),
+                layers: view.layers.clone(),
+                background: view.background.clone(),
+            }
+        }),
+        echo_rank: element.echo_rank,
+        effect_root: element.effect_root,
+        effect_extent: element.effect_extent,
+        matte_root: element.matte_root,
+        matte_of: element.matte_of,
+        glass_root: element.glass_root,
+    }
 }
 
 /// [`capture_frame`] for a motion blur sub-frame: like
@@ -4762,7 +4950,7 @@ pub fn capture_frame_pinned(
     camera: Option<&gaanim_math::Camera>,
     pins: &mut PinnedElements,
 ) -> FrameCapture {
-    let extraction = extract_world(world, camera, Some(pins), false, false);
+    let extraction = extract_world(world, camera, Some(pins), false, false, true);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
     let mattes = world_mattes(world);
     let glasses = world_glasses(world);
@@ -4775,7 +4963,16 @@ fn capture_extraction(
     mattes: Vec<CapturedMatte>,
     glasses: Vec<CapturedGlass>,
 ) -> FrameCapture {
+    let three_d_elements = extraction
+        .elements
+        .iter()
+        .take_while(|element| is_three_d(element))
+        .count();
     FrameCapture {
+        three_d: extraction.three_d.map(|mut three_d| {
+            three_d.elements = three_d_elements;
+            three_d
+        }),
         background_time: extraction.background_time,
         background_values: extraction.background_values,
         effects,
@@ -4794,48 +4991,7 @@ fn capture_extraction(
         elements: extraction
             .elements
             .into_iter()
-            .map(|element| CapturedElement {
-                entity: element.entity,
-                recipe: element
-                    .recipe
-                    .expect("world extraction records every recipe"),
-                lottie: element.lottie,
-                transform: element.transform,
-                opacity: element.opacity,
-                opacity_bounds: element
-                    .opacity_extent
-                    .map_or(element.opacity_bounds, |(rect, _)| rect),
-                opacity_reach: element.opacity_extent.map(|(_, reach)| reach),
-                opacity_group: element.opacity_group,
-                group_opacity: element.group_opacity,
-                group_shadow: element.group_shadow,
-                render_order: element.render_order,
-                clip_mask: element.clip_mask,
-                blend: element.blend,
-                transition_side: element.transition_side,
-                post_exempt: element.post_exempt,
-                lineage: element.lineage,
-                view_bounds: element.view_bounds,
-                in_views: element.in_views,
-                layer: element.layer,
-                screen: element.screen.map(|screen| {
-                    let view = &screen.view;
-                    CapturedView {
-                        clip: Arc::clone(&view.clip),
-                        content: view.content,
-                        region: view.region,
-                        excluded: view.excluded.clone(),
-                        layers: view.layers.clone(),
-                        background: view.background.clone(),
-                    }
-                }),
-                echo_rank: element.echo_rank,
-                effect_root: element.effect_root,
-                effect_extent: element.effect_extent,
-                matte_root: element.matte_root,
-                matte_of: element.matte_of,
-                glass_root: element.glass_root,
-            })
+            .map(captured_element)
             .collect(),
     }
 }
@@ -5845,6 +6001,7 @@ pub fn gaanim_render_system(
             !camera_views.is_empty(),
             opacity_fallback,
             local_extracted,
+            None,
         );
     }
 

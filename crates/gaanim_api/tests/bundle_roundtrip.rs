@@ -870,3 +870,55 @@ fn a_video_exported_from_a_bundle_with_reactive_shaders_matches_the_scene_export
         );
     }
 }
+
+/// A lit sphere and cube under a point light, seen by a perspective camera
+/// that orbits them, records its meshes once and the camera per frame, and
+/// draws the projection again exactly.
+#[test]
+fn three_d_content_records_its_meshes_and_draws_them_again() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("orbit.gaanim");
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let material =
+        gaanim_scene::Material3D::new(Color::from_rgb8(200, 80, 60), 0.5, 0.0, None, 0.0).unwrap();
+    // Dense enough that its projection draws thousands of elements.
+    canvas.sphere(1.0, 96, 64, material).unwrap();
+    canvas.cube(1.2, material).unwrap();
+    canvas.light_3d(gaanim_scene::LightKind3D::Point, Color::WHITE, 1.0);
+    let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
+    canvas.play(vec![perspective]);
+    let look = canvas.camera_look_at((6.0, 4.0, 6.0), (0.0, 0.0, 0.0), None, 0.0);
+    canvas.play(vec![look]);
+    let orbit = canvas.camera_orbit(1.0, 0.2, 1.0);
+    canvas.play(vec![orbit]);
+    let mut config = BundleConfig::new(&path);
+    config.fps = 10;
+    config.thumbnail = false;
+    record_canvas(canvas, config).unwrap();
+
+    let mut bundle = Bundle::open(&path).unwrap();
+    let totals =
+        bundle
+            .manifest
+            .table_segments
+            .iter()
+            .fold((0, 0), |(meshes, recipes), segment| {
+                (
+                    meshes + segment.counts.meshes,
+                    recipes + segment.counts.recipes,
+                )
+            });
+    // Two meshes, stored once while the camera moves; no projected run of
+    // triangles became a recipe.
+    assert_eq!(totals.0, 2, "{totals:?}");
+    assert!(totals.1 < 10, "{totals:?}");
+    let middle = bundle.frame(bundle.frame_index_at(0.5)).unwrap();
+    let three_d = middle
+        .capture
+        .three_d
+        .as_ref()
+        .expect("the frame keeps its 3D content");
+    assert!(three_d.elements > 1000, "{}", three_d.elements);
+    assert!(three_d.elements <= middle.capture.elements.len());
+    assert!(bundle.verify().unwrap().is_empty());
+}

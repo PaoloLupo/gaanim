@@ -312,9 +312,9 @@ gaanim pack circulo.gaanim animaciones/circulo.gaanim --web
 Con `--web` guarda los trazados en una rejilla tan fina que, en un vídeo 4K,
 ningún punto se mueve más de 1/64 de píxel, y deja fuera lo que el
 reproductor no usa: los resúmenes de `gaanim check` y los subfotogramas del
-desenfoque de movimiento. En los ejemplos de esta documentación, el paquete
-pesa entre un 30 y un 90 % menos. Conserva el original para exportar vídeo o
-comprobarlo.
+desenfoque de movimiento. En los ejemplos de esta documentación pesa, en la
+mediana, un 41 % menos, y hasta un 97 % menos en escenas con muchas formas en
+movimiento. Conserva el original para exportar vídeo o comprobarlo.
 
 Quien lee la entrada necesita un navegador con WebGPU, igual que para el
 reproductor completo; sin él, el marco explica qué falta. Las demás
@@ -526,7 +526,9 @@ rejilla repetidos, porque no hay nada que interpolar sin ejecutar la escena.
 
 La grabación se niega, con un mensaje, cuando la escena contiene clips de
 vídeo (`scene.media.video`), que el paquete aún no puede reproducir
-exactamente. En ese caso exporta un vídeo. El contenido 3D sí se graba.
+exactamente. En ese caso exporta un vídeo. El contenido 3D sí se graba: el
+paquete guarda sus mallas, materiales y luces, y el reproductor las proyecta
+en cada fotograma como la vista previa.
 
 Los paquetes son de un solo uso: no se pueden editar ni volver a convertir en
 script. Guarda el proyecto original para seguir trabajando.
@@ -541,7 +543,7 @@ Un `.gaanim` es un ZIP con estas entradas:
   [*Entrada*], [*Contenido*],
   [`manifest.json`], [Formato y versión, generador, frecuencia, duración, tamaño, bloques de fotogramas con los segmentos que usa cada uno, y el hash BLAKE3 de cada entrada.],
   [`scene.bin`], [Título, fondo, color de borrado, posprocesados, segmentos con notas y pausas, marcadores, escenas y pistas de audio.],
-  [`segments/NNNNNN.bin`], [Trazados, imágenes, recetas de fragmentos, cadenas y los shaders de las transiciones y de los efectos por objeto, cada uno guardado una sola vez. Cada segmento guarda lo que un bloque de fotogramas usó por primera vez, y va justo antes de ese bloque.],
+  [`segments/NNNNNN.bin`], [Trazados, imágenes, recetas de fragmentos, cadenas, mallas y líneas 3D, y los shaders de las transiciones y de los efectos por objeto, cada uno guardado una sola vez. Un segmento se cierra al llegar a unos 2 MB y va justo antes del bloque de fotogramas que lo completó.],
   [`frames/NNNNNN.bin`], [Bloques de 60 fotogramas; cada bloque empieza con un fotograma completo y el resto guarda solo lo que cambió.],
   [`scenes/NNNNNN.bin`], [Cada fotograma distinto de una animación Lottie, como escena vectorial de Vello.],
   [`index.bin`, `digests.bin`], [Instante y resumen BLAKE3 de cada fotograma. Un fotograma de la rejilla de la exportación ocupa un byte en el índice.],

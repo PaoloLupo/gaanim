@@ -15,9 +15,14 @@
 //! - `scene.bin`: static data (background, post-process shaders, timeline
 //!   structure, audio tracks).
 //! - `segments/NNNNNN.bin`: deduplicated paths, images, recipes, strings,
-//!   shader transitions and the passes of shader effects on drawables, in
-//!   segments: each holds what a chunk of frames met first, and is written
-//!   just before that chunk.
+//!   native 3D meshes and line lists, shader transitions and the passes of
+//!   shader effects on drawables, in segments of about 2 MB, each written
+//!   just before the chunk that filled it.
+//!
+//! Frames store native 3D content as its meshes, matrices, materials and
+//! lights, not the triangles it projects to: reading a frame projects them
+//! again with the renderer's own code
+//! ([`gaanim_renderer::pipeline::captured_three_d_elements`]).
 //! - `frames/NNNNNN.bin`: chunks of frames, each frame encoded against the
 //!   one before it; a chunk starts with a whole frame, and the manifest lists
 //!   the segments its frames refer to.
@@ -63,8 +68,8 @@ use serde::{Deserialize, Serialize};
 use archive::Archive;
 use codec::{Reader, Writer};
 pub use digest::scene_digest;
-use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, TableCounts, Tables};
-pub use model::{EntityKeys, Frame, PostPass};
+use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, Tables};
+pub use model::{EntityKeys, Frame, PostPass, TableCounts};
 pub use repack::{RepackOptions, repack, repack_with};
 pub use source::BundleSource;
 
@@ -1772,7 +1777,7 @@ impl Bundle {
             chunk,
             bytes,
             position: 0,
-            decoder: DeltaDecoder::default(),
+            decoder: DeltaDecoder::new(self.manifest.version),
             frames: Vec::with_capacity(info.frames),
             total: info.frames,
         })

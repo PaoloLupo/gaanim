@@ -374,6 +374,106 @@ fn read_grid_path_as(r: &mut Reader<'_>, relative: bool) -> Result<kurbo::BezPat
 }
 
 // ---------------------------------------------------------------------------
+// 3D content
+// ---------------------------------------------------------------------------
+
+fn write_points<const N: usize>(w: &mut Writer, points: &[[f32; N]]) {
+    w.len(points.len());
+    for point in points {
+        for value in point {
+            w.f32(*value);
+        }
+    }
+}
+
+fn read_points<const N: usize>(r: &mut Reader<'_>) -> Result<Vec<[f32; N]>> {
+    let count = r.len()?;
+    let mut points = Vec::with_capacity(count.min(1 << 22));
+    for _ in 0..count {
+        let mut point = [0.0; N];
+        for value in &mut point {
+            *value = r.f32()?;
+        }
+        points.push(point);
+    }
+    Ok(points)
+}
+
+fn write_indices(w: &mut Writer, indices: &[u32]) {
+    w.len(indices.len());
+    for index in indices {
+        w.var(u64::from(*index));
+    }
+}
+
+fn read_indices(r: &mut Reader<'_>) -> Result<Vec<u32>> {
+    let count = r.len()?;
+    let mut indices = Vec::with_capacity(count.min(1 << 22));
+    for _ in 0..count {
+        indices.push(r.u32()?);
+    }
+    Ok(indices)
+}
+
+pub fn write_material(w: &mut Writer, material: &gaanim_scene::Material3D) {
+    write_color(w, material.color);
+    w.f32(material.roughness);
+    w.f32(material.metallic);
+    write_color(w, material.emissive);
+    w.f32(material.emissive_strength);
+}
+
+pub fn read_material(r: &mut Reader<'_>) -> Result<gaanim_scene::Material3D> {
+    Ok(gaanim_scene::Material3D {
+        color: read_color(r)?,
+        roughness: r.f32()?,
+        metallic: r.f32()?,
+        emissive: read_color(r)?,
+        emissive_strength: r.f32()?,
+    })
+}
+
+pub fn write_mesh(w: &mut Writer, mesh: &gaanim_scene::TriangleMeshData) {
+    write_points(w, &mesh.vertices);
+    write_indices(w, &mesh.indices);
+    w.option(mesh.normals.as_deref(), write_points);
+    w.option(mesh.uvs.as_deref(), write_points);
+    w.option(mesh.color, write_color);
+    w.option(mesh.colors.as_deref(), write_points);
+    w.option(mesh.material.as_ref(), write_material);
+}
+
+pub fn read_mesh(r: &mut Reader<'_>) -> Result<gaanim_scene::TriangleMeshData> {
+    Ok(gaanim_scene::TriangleMeshData {
+        vertices: read_points(r)?,
+        indices: read_indices(r)?,
+        normals: r.option(read_points)?,
+        uvs: r.option(read_points)?,
+        color: r.option(read_color)?,
+        colors: r.option(read_points)?,
+        material: r.option(read_material)?,
+    })
+}
+
+pub fn write_lines(w: &mut Writer, lines: &gaanim_scene::LineListData) {
+    write_points(w, &lines.points);
+    w.option(lines.indices.as_deref(), write_indices);
+    w.bool(lines.strip);
+    write_color(w, lines.color);
+    w.option(lines.colors.as_deref(), write_points);
+}
+
+pub fn read_lines(r: &mut Reader<'_>) -> Result<gaanim_scene::LineListData> {
+    Ok(gaanim_scene::LineListData {
+        points: read_points(r)?,
+        indices: r.option(read_indices)?,
+        strip: r.bool()?,
+        color: read_color(r)?,
+        colors: r.option(read_points)?,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Strokes and fills
 // ---------------------------------------------------------------------------
 
