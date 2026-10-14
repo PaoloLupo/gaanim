@@ -310,7 +310,8 @@ gaanim pack circulo.gaanim animaciones/circulo.gaanim --web
 ```
 
 Con `--web` guarda los trazados en una rejilla tan fina que, en un vídeo 4K,
-ningún punto se mueve más de 1/64 de píxel, y deja fuera lo que el
+ningún punto se mueve más de 1/64 de píxel en cada eje (solo cambia el
+suavizado de algunos píxeles de borde), y deja fuera lo que el
 reproductor no usa: los resúmenes de `gaanim check` y los subfotogramas del
 desenfoque de movimiento. En los ejemplos de esta documentación pesa, en la
 mediana, un 41 % menos, y hasta un 97 % menos en escenas con muchas formas en
