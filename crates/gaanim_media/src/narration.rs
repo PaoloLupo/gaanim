@@ -672,9 +672,9 @@ pub fn parse_script(source: &str) -> Result<Vec<ScriptSection>, String> {
 }
 
 /// The comment that opens a script the editor writes.
-const SCRIPT_HEADER: &str = "# Guion\n\n<!-- Cada \"## nombre\" es el guion de la diapositiva con ese nombre\n     \
-     o el texto de scene.voiceover(\"nombre\"). Una línea [stop] marca dónde\n     \
-     avanzas. Guarda el archivo y la escena se actualiza. -->\n";
+const SCRIPT_HEADER: &str = "# Script\n\n<!-- Each \"## name\" is the script of the slide of that name\n     \
+     or the text of scene.voiceover(\"name\"). A [stop] line marks where\n     \
+     you advance. Save the file and the scene updates. -->\n";
 
 /// Markdown for a script with one section per `(key, text)`, as the editor
 /// writes it the first time.

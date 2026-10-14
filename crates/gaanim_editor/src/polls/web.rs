@@ -362,16 +362,16 @@ impl RelaySession {
             .map_or(self.session_url.as_str(), |(relay, _)| relay);
         let message = match (status, reason) {
             (0, _) => format!(
-                "No se puede conectar con el relay ({relay}). Si es anterior a Gaanim 0.8, \
-                 actualízalo para el reproductor web: `gaanim relay init --force <su carpeta>` y \
-                 `npx wrangler deploy`. Se reintenta solo."
+                "Cannot connect to the relay ({relay}). If it predates Gaanim 0.8, \
+                 update it for the web player: `gaanim relay init --force <its folder>` and \
+                 `npx wrangler deploy`. Retrying on its own."
             ),
-            (403, _) => "Otra computadora presenta esta sesión con otra clave. Para presentarla \
-                 aquí, abre el enlace que da `gaanim relay key <archivo.gaanim>` en esa \
-                 computadora."
+            (403, _) => "Another computer presents this session with another key. To present it \
+                 here, open the link that `gaanim relay key <file.gaanim>` gives on that \
+                 computer."
                 .to_string(),
-            (status, Some(reason)) => format!("El relay respondió {status}: {reason}."),
-            (status, None) => format!("El relay respondió {status}."),
+            (status, Some(reason)) => format!("The relay answered {status}: {reason}."),
+            (status, None) => format!("The relay answered {status}."),
         };
         gaanim_core::console::warn("polls", message.clone());
         (Self::hooks().notify)(&message);
@@ -381,7 +381,7 @@ impl RelaySession {
         let hooks = Self::hooks();
         if !ok {
             (hooks.notify)(&format!(
-                "No se pudieron descargar los resultados (el relay respondió {status})."
+                "Could not download the results (the relay answered {status})."
             ));
             return;
         }
@@ -389,14 +389,14 @@ impl RelaySession {
             .map_err(|error| format!("the relay's report is not valid: {error}"))
             .and_then(|report| {
                 if report.is_empty() {
-                    Err("todavía nadie respondió".to_string())
+                    Err("nobody has answered yet".to_string())
                 } else {
                     report.archive()
                 }
             });
         match archive {
             Ok((name, bytes)) => (hooks.download)(&name, bytes),
-            Err(error) => (hooks.notify)(&format!("No hay resultados que descargar: {error}.")),
+            Err(error) => (hooks.notify)(&format!("No results to download: {error}.")),
         }
     }
 }

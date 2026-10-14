@@ -97,7 +97,7 @@ impl NarrationSettings {
     }
 
     pub(crate) fn save(&self) -> Result<(), String> {
-        let path = Self::path().ok_or("no se encontró la carpeta de datos de Gaanim")?;
+        let path = Self::path().ok_or("Gaanim's data folder was not found")?;
         let source = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
         gaanim_media::narration::write_atomically(&path, source.as_bytes())
             .map_err(|error| error.to_string())
@@ -107,20 +107,20 @@ impl NarrationSettings {
     pub(crate) fn whisper(&self) -> Result<(PathBuf, PathBuf), String> {
         let cli = if self.whisper_cli.trim().is_empty() {
             find_on_path("whisper-cli")
-                .ok_or("no se encontró whisper-cli en el PATH; indica su ruta")?
+                .ok_or("whisper-cli was not found on the PATH; enter its path")?
         } else {
             let path = PathBuf::from(self.whisper_cli.trim());
             if !path.is_file() {
-                return Err(format!("no existe {}", path.display()));
+                return Err(format!("{} does not exist", path.display()));
             }
             path
         };
         let model = PathBuf::from(self.whisper_model.trim());
         if self.whisper_model.trim().is_empty() {
-            return Err("elige un modelo de whisper.cpp (ggml-*.bin)".to_string());
+            return Err("choose a whisper.cpp model (ggml-*.bin)".to_string());
         }
         if !model.is_file() {
-            return Err(format!("no existe el modelo {}", model.display()));
+            return Err(format!("the model {} does not exist", model.display()));
         }
         Ok((cli, model))
     }
@@ -160,18 +160,13 @@ mod tests {
             whisper_cli: cli.to_string_lossy().into_owned(),
             ..NarrationSettings::default()
         };
-        assert!(settings.whisper().unwrap_err().contains("modelo"));
+        assert!(settings.whisper().unwrap_err().contains("model"));
         settings.whisper_model = directory
             .path()
             .join("ggml-base.bin")
             .to_string_lossy()
             .into_owned();
-        assert!(
-            settings
-                .whisper()
-                .unwrap_err()
-                .contains("no existe el modelo")
-        );
+        assert!(settings.whisper().unwrap_err().contains("does not exist"));
         std::fs::write(&settings.whisper_model, "").unwrap();
         assert_eq!(
             settings.whisper().unwrap(),

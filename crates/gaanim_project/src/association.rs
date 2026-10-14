@@ -17,7 +17,7 @@ pub const MIME_TYPE: &str = "application/x-gaanim";
 /// Windows programmatic identifier of the file type.
 pub const PROG_ID: &str = "Gaanim.Bundle";
 /// Name shown for the file type.
-const TYPE_NAME: &str = "Paquete de Gaanim";
+const TYPE_NAME: &str = "Gaanim bundle";
 /// Icon group resource of `.gaanim` files in `gaanim.exe`.
 #[cfg_attr(not(windows), allow(dead_code))]
 const DOCUMENT_ICON_RESOURCE: u32 = 2;
@@ -110,7 +110,7 @@ fn mime_package() -> String {
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="{MIME_TYPE}">
     <comment>Gaanim bundle</comment>
-    <comment xml:lang="es">{TYPE_NAME}</comment>
+    <comment xml:lang="es">Paquete de Gaanim</comment>
     <sub-class-of type="application/zip"/>
     <icon name="application-x-gaanim"/>
     <generic-icon name="video-x-generic"/>
@@ -334,13 +334,13 @@ fn windows_values(launcher: &Path, handler: Option<&Path>) -> Vec<RegistryValue>
             format!("\"{exe}\",-{DOCUMENT_ICON_RESOURCE}"),
         ),
         value(format!(r"{PROG_ID}\shell"), None, "open"),
-        value(format!(r"{PROG_ID}\shell\open"), None, "Reproducir"),
+        value(format!(r"{PROG_ID}\shell\open"), None, "Play"),
         value(
             format!(r"{PROG_ID}\shell\open\command"),
             None,
             format!("\"{exe}\" \"%1\""),
         ),
-        value(format!(r"{PROG_ID}\shell\present"), None, "Presentar"),
+        value(format!(r"{PROG_ID}\shell\present"), None, "Present"),
         value(
             format!(r"{PROG_ID}\shell\present\command"),
             None,

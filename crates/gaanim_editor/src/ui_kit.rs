@@ -224,11 +224,7 @@ pub(crate) fn volume_control(ui: &mut Ui, volume: &mut gaanim_media::PreviewVolu
     };
     // Right to left in the bar: the slider sits left of the speaker.
     if icon_button(ui, icon, ButtonTone::Ghost, true)
-        .on_hover_text(if silent {
-            "Activar sonido"
-        } else {
-            "Silenciar"
-        })
+        .on_hover_text(if silent { "Unmute" } else { "Mute" })
         .clicked()
     {
         if volume.muted || volume.level > 0.0 {
@@ -1078,7 +1074,7 @@ pub(crate) fn drag_handle(ui: &mut Ui, height: f32) -> HeaderDrag {
     let handle = ui
         .interact(row, ui.id().with("drag_handle"), Sense::click_and_drag())
         .on_hover_cursor(egui::CursorIcon::Grab)
-        .on_hover_text("Arrastra para mover · doble clic: volver a su sitio");
+        .on_hover_text("Drag to move · double click: dock it again");
     let dragged = handle.dragged();
     if dragged {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);

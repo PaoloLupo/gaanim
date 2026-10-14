@@ -91,14 +91,17 @@ enum LevelWarning {
 impl LevelWarning {
     fn message(&self) -> String {
         match self {
-            Self::Hot => "¡Muy fuerte! Baja la ganancia o aléjate del micrófono".to_string(),
+            Self::Hot => "Too loud! Lower the gain or move away from the microphone".to_string(),
             Self::Clipped(1) => {
-                "Saturó 1 vez: esa distorsión no se corrige; considera repetir la toma".to_string()
+                "Clipped once: that distortion cannot be fixed; consider redoing the take"
+                    .to_string()
             }
             Self::Clipped(count) => format!(
-                "Saturó {count} veces: esa distorsión no se corrige; considera repetir la toma"
+                "Clipped {count} times: that distortion cannot be fixed; consider redoing the take"
             ),
-            Self::Quiet => "Voz muy baja: acércate al micrófono o sube la ganancia".to_string(),
+            Self::Quiet => {
+                "Voice too low: move closer to the microphone or raise the gain".to_string()
+            }
         }
     }
 
@@ -214,7 +217,7 @@ pub(crate) fn run_tool(command: &mut Command) -> Result<Output, String> {
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let detail = stderr.lines().rev().find(|line| !line.trim().is_empty());
-        Err(detail.unwrap_or("sin detalles").trim().to_string())
+        Err(detail.unwrap_or("no details").trim().to_string())
     }
 }
 
@@ -330,7 +333,7 @@ impl NarrationPanel {
                 self.transcriptions.push(job);
                 self.notify(
                     NoticeKind::Info,
-                    format!("Transcribiendo «{key}» con Whisper…"),
+                    format!("Transcribing \"{key}\" with Whisper…"),
                 );
             }
             Err(error) => self.notify(NoticeKind::Error, format!("Whisper: {error}")),
@@ -343,7 +346,7 @@ impl NarrationPanel {
             return;
         }
         let Some(audio) = files.audio.clone() else {
-            self.notify(NoticeKind::Error, format!("«{key}» todavía no tiene toma"));
+            self.notify(NoticeKind::Error, format!("\"{key}\" has no take yet"));
             return;
         };
         let originals = originals_dir(files);
@@ -360,7 +363,7 @@ impl NarrationPanel {
                 if let Err(error) = copied {
                     self.notify(
                         NoticeKind::Error,
-                        format!("no se pudo guardar el original de «{key}»: {error}"),
+                        format!("could not keep the original of \"{key}\": {error}"),
                     );
                     return;
                 }
@@ -383,10 +386,10 @@ impl NarrationPanel {
                 self.levelings.push(job);
                 self.notify(
                     NoticeKind::Info,
-                    format!("Nivelando «{key}» a {target:.0} LUFS…"),
+                    format!("Leveling \"{key}\" to {target:.0} LUFS…"),
                 );
             }
-            Err(error) => self.notify(NoticeKind::Error, format!("no se pudo nivelar: {error}")),
+            Err(error) => self.notify(NoticeKind::Error, format!("could not level: {error}")),
         }
     }
 
@@ -397,11 +400,11 @@ impl NarrationPanel {
                 finished.push(match result {
                     Ok(words) => (
                         NoticeKind::Success,
-                        format!("«{}» transcrita: {words} palabras con tiempo", job.key),
+                        format!("\"{}\" transcribed: {words} timed words", job.key),
                     ),
                     Err(error) => (
                         NoticeKind::Error,
-                        format!("Whisper («{}»): {error}", job.key),
+                        format!("Whisper (\"{}\"): {error}", job.key),
                     ),
                 });
                 false
@@ -418,13 +421,13 @@ impl NarrationPanel {
                     Ok(measured) => (
                         NoticeKind::Success,
                         format!(
-                            "«{}» nivelada a {target:.0} LUFS (estaba en {:.1})",
+                            "\"{}\" leveled to {target:.0} LUFS (it was at {:.1})",
                             job.key, measured.integrated
                         ),
                     ),
                     Err(error) => (
                         NoticeKind::Error,
-                        format!("«{}» se guardó sin nivelar: {error}", job.key),
+                        format!("\"{}\" was saved without leveling: {error}", job.key),
                     ),
                 });
                 false
@@ -483,7 +486,7 @@ impl Target {
     fn key(&self) -> &str {
         match self {
             Self::Voiceover { key, .. } | Self::Live { key, .. } => key,
-            Self::Dictation { .. } => "guion",
+            Self::Dictation { .. } => "script",
         }
     }
 
@@ -574,13 +577,13 @@ impl Dictation {
                     self.note = Some((
                         match reason {
                             StopReason::Limit => {
-                                "Scribe se detuvo: se alcanzó el límite de minutos".to_owned()
+                                "Scribe stopped: the minute limit was reached".to_owned()
                             }
                             StopReason::Silence => {
-                                "Scribe se detuvo tras dos minutos sin voz".to_owned()
+                                "Scribe stopped after two minutes without speech".to_owned()
                             }
                             StopReason::NoAudio => {
-                                "Scribe se detuvo: el micrófono dejó de enviar audio".to_owned()
+                                "Scribe stopped: the microphone stopped sending audio".to_owned()
                             }
                         },
                         false,
@@ -989,7 +992,7 @@ fn merge_dictation(
         let paragraph = if written {
             report.commented += 1;
             // A comment ends at the first `-->`.
-            format!("<!-- dictado: {} -->", text.replace("--", "–"))
+            format!("<!-- dictated: {} -->", text.replace("--", "–"))
         } else {
             text.to_owned()
         };
@@ -1066,15 +1069,14 @@ fn dictation_plan(
     keep_take: bool,
 ) -> Result<CapturePlan, String> {
     if slides.is_empty() {
-        return Err(
-            "La escena no tiene diapositivas: crea segmentos con scene.segment(...)".to_owned(),
-        );
+        return Err("The scene has no slides: create segments with scene.segment(...)".to_owned());
     }
     let (token, _) = ScribeToken::resolve(&panel.scribe_token, scribe::vault::load, |name| {
         std::env::var(name).ok()
     })
     .ok_or_else(|| {
-        "Falta el token de Scribe: guárdalo o pégalo en Ajustes → Scribe de Zoom".to_owned()
+        "The Scribe token is missing: paste or save it under Zoom Scribe (dictation) in this \n         panel"
+            .to_owned()
     })?;
     let settings = panel.settings();
     let language = dictation_language(project, settings).to_owned();
@@ -1137,8 +1139,8 @@ fn write_dictation(dictation: Dictation, stash: &StashedReplay, panel: &mut Narr
     drop(dictation);
     if parts.is_empty() {
         let message = match failure {
-            Some(failure) => format!("Scribe no dictó nada: {failure}"),
-            None => "Scribe no transcribió ninguna frase".to_owned(),
+            Some(failure) => format!("Scribe dictated nothing: {failure}"),
+            None => "Scribe did not transcribe any phrase".to_owned(),
         };
         panel.notify(NoticeKind::Error, message);
         return;
@@ -1146,7 +1148,7 @@ fn write_dictation(dictation: Dictation, stash: &StashedReplay, panel: &mut Narr
     let manifest = manifest(stash);
     let slides = script_slides(stash);
     let Some(path) = script_path(stash, &manifest) else {
-        panel.notify(NoticeKind::Error, "la escena aún no se cargó");
+        panel.notify(NoticeKind::Error, "the scene has not loaded yet");
         return;
     };
     let existing = match std::fs::read_to_string(&path) {
@@ -1155,7 +1157,7 @@ fn write_dictation(dictation: Dictation, stash: &StashedReplay, panel: &mut Narr
         Err(error) => {
             panel.notify(
                 NoticeKind::Error,
-                format!("no se pudo leer el guion: {error}"),
+                format!("could not read the script: {error}"),
             );
             return;
         }
@@ -1173,24 +1175,24 @@ fn write_dictation(dictation: Dictation, stash: &StashedReplay, panel: &mut Narr
         Ok(report) => {
             // Counts only: the dictated words stay in the script.
             let mut message = format!(
-                "Guion dictado: {} tramo(s) en {}",
+                "Script dictated: {} part(s) in {}",
                 report.parts,
                 file_name(&path)
             );
             if report.commented > 0 {
                 message.push_str(&format!(
-                    "; {} junto a texto que ya tenías, como comentario",
+                    "; {} beside text you already had, as a comment",
                     report.commented
                 ));
             }
             if let Some(failure) = failure {
-                message.push_str(&format!(". Scribe se cortó: {failure}"));
+                message.push_str(&format!(". Scribe was cut off: {failure}"));
             }
             panel.notify(NoticeKind::Success, message);
         }
         Err(error) => panel.notify(
             NoticeKind::Error,
-            format!("no se pudo escribir el guion: {error}"),
+            format!("could not write the script: {error}"),
         ),
     }
 }
@@ -1241,10 +1243,8 @@ pub(crate) fn narration_session_system(
                     if let Some(files) = take_files(&manifest, &key) {
                         match files.audio {
                             Some(take) => panel.transcribe(&key, take, files.sidecar),
-                            None => panel.notify(
-                                NoticeKind::Error,
-                                format!("«{key}» todavía no tiene toma"),
-                            ),
+                            None => panel
+                                .notify(NoticeKind::Error, format!("\"{key}\" has no take yet")),
                         }
                     }
                     Phase::Idle
@@ -1261,21 +1261,21 @@ pub(crate) fn narration_session_system(
                         Some(path) => match complete_script(&path, &manifest, &slides) {
                             Ok(added) => {
                                 let opened = crate::platform::open(&path);
-                                let mut message = format!("Guion: {}", path.display());
+                                let mut message = format!("Script: {}", path.display());
                                 let mut news = Vec::new();
                                 if added.sections > 0 {
-                                    news.push(format!("{} sección(es) nueva(s)", added.sections));
+                                    news.push(format!("{} new section(s)", added.sections));
                                 }
                                 if added.marks > 0 {
-                                    news.push(format!("{} marca(s) [stop]", added.marks));
+                                    news.push(format!("{} [stop] mark(s)", added.marks));
                                 }
                                 if !news.is_empty() {
                                     message.push_str(&format!(" · {}", news.join(", ")));
                                 }
                                 if added.from_notes > 0 {
                                     message.push_str(
-                                        ". Las notas del código pasaron al guion, que manda sobre \
-                                         notes=…: puedes quitarlas del código.",
+                                        ". The notes in the code moved to the script, which \
+                                         overrides notes=…: you can remove them from the code.",
                                     );
                                 }
                                 if manifest
@@ -1284,21 +1284,21 @@ pub(crate) fn narration_session_system(
                                     .any(|voice| voice.text_source == TextSource::Argument)
                                 {
                                     message.push_str(
-                                        ". Quita text=… del código para usar el texto del guion.",
+                                        ". Remove text=… from the code to use the script's text.",
                                     );
                                 }
                                 if let Err(error) = opened {
                                     message =
-                                        format!("{message}. No se pudo abrir el editor: {error}");
+                                        format!("{message}. Could not open the editor: {error}");
                                 }
                                 panel.notify(NoticeKind::Info, message);
                             }
                             Err(error) => panel.notify(
                                 NoticeKind::Error,
-                                format!("no se pudo preparar el guion: {error}"),
+                                format!("could not prepare the script: {error}"),
                             ),
                         },
-                        None => panel.notify(NoticeKind::Error, "la escena aún no se cargó"),
+                        None => panel.notify(NoticeKind::Error, "the scene has not loaded yet"),
                     }
                     Phase::Idle
                 }
@@ -1307,7 +1307,7 @@ pub(crate) fn narration_session_system(
                         Some(_) if panel.busy(&key) => {
                             panel.notify(
                                 NoticeKind::Info,
-                                format!("espera a que termine el trabajo en curso de «{key}»"),
+                                format!("wait until the running job on \"{key}\" finishes"),
                             );
                             Phase::Idle
                         }
@@ -1331,7 +1331,7 @@ pub(crate) fn narration_session_system(
                         None => {
                             panel.notify(
                                 NoticeKind::Error,
-                                format!("«{key}» ya no está en la escena"),
+                                format!("\"{key}\" is no longer in the scene"),
                             );
                             Phase::Idle
                         }
@@ -1439,7 +1439,7 @@ pub(crate) fn narration_session_system(
                 abort_live(
                     &mut panel,
                     reload.as_deref(),
-                    Some("la escena no se recargó a tiempo; revisa errores del script"),
+                    Some("the scene did not reload in time; check the script for errors"),
                 );
                 preview_audio.0 = true;
                 Phase::Idle
@@ -1482,7 +1482,7 @@ pub(crate) fn narration_session_system(
                             Err(error) if keep_take => {
                                 panel.notify(
                                     NoticeKind::Error,
-                                    format!("La toma se graba sin dictado: {error}"),
+                                    format!("The take records without dictation: {error}"),
                                 );
                                 None
                             }
@@ -1538,15 +1538,15 @@ pub(crate) fn narration_session_system(
                 if target.is_live() {
                     abort_live(&mut panel, reload.as_deref(), None);
                 }
-                panel.notify(NoticeKind::Error, format!("el micrófono falló: {error}"));
+                panel.notify(NoticeKind::Error, format!("the microphone failed: {error}"));
                 return;
             }
             if pressed(KeyCode::Escape) {
                 let target = recording.target.clone();
                 let message = if recording.keep_take {
-                    "Grabación descartada"
+                    "Recording discarded"
                 } else {
-                    "Dictado descartado"
+                    "Dictation discarded"
                 };
                 // Dropping the dictation ends its Scribe session at once.
                 drop(recording);
@@ -1668,7 +1668,7 @@ fn start_live(
         panel.notify(
             NoticeKind::Info,
             format!(
-                "espera a que termine el trabajo en curso de «{}»",
+                "wait until the running job on \"{}\" finishes",
                 target.key()
             ),
         );
@@ -1696,7 +1696,7 @@ fn start_live(
     } else {
         set_live_take_recording(false);
         preview_audio.0 = true;
-        panel.notify(NoticeKind::Error, "no se puede recargar la escena");
+        panel.notify(NoticeKind::Error, "the scene cannot be reloaded");
         Phase::Idle
     }
 }
@@ -1832,10 +1832,7 @@ fn save_recording(
     let seconds = samples.len() as f64 / sample_rate.max(1) as f64;
     let key = target.key().to_owned();
     if seconds < MIN_TAKE_SECONDS {
-        panel.notify(
-            NoticeKind::Error,
-            "La toma es demasiado corta; no se guardó",
-        );
+        panel.notify(NoticeKind::Error, "The take is too short; it was not saved");
         return;
     }
     let Some(files) = target.files().cloned() else {
@@ -1866,7 +1863,7 @@ fn save_recording(
     if let Err(error) = written {
         panel.notify(
             NoticeKind::Error,
-            format!("no se pudo guardar la toma: {error}"),
+            format!("could not save the take: {error}"),
         );
         return;
     }
@@ -1874,14 +1871,14 @@ fn save_recording(
         panel.notify(
             NoticeKind::Error,
             format!(
-                "Toma «{key}» guardada, pero saturó {clipped} vez/veces: conviene repetirla \
-                 con menos ganancia"
+                "Take \"{key}\" saved, but it clipped {clipped} time(s): better redo it \
+                 with less gain"
             ),
         );
     } else {
         panel.notify(
             NoticeKind::Success,
-            format!("Toma «{key}» guardada · {}", format_seconds(seconds)),
+            format!("Take \"{key}\" saved · {}", format_seconds(seconds)),
         );
     }
     if settings.level_voice {
@@ -1915,19 +1912,19 @@ fn source_color(source: MarkerSource) -> egui::Color32 {
 
 fn source_label(source: MarkerSource) -> &'static str {
     match source {
-        MarkerSource::Tapped => "marcada",
+        MarkerSource::Tapped => "tapped",
         MarkerSource::Transcript => "Whisper",
-        MarkerSource::Estimated => "estimada",
-        MarkerSource::Missing => "no encontrada",
+        MarkerSource::Estimated => "estimated",
+        MarkerSource::Missing => "not found",
     }
 }
 
 fn text_source_label(source: TextSource) -> &'static str {
     match source {
-        TextSource::Argument => "texto en el código",
-        TextSource::Script => "texto del guion",
-        TextSource::Notes => "texto de las notas del segmento",
-        TextSource::Missing => "sin texto",
+        TextSource::Argument => "text in the code",
+        TextSource::Script => "text from the script",
+        TextSource::Notes => "text from the segment's notes",
+        TextSource::Missing => "no text",
     }
 }
 
@@ -1955,7 +1952,7 @@ fn drag_grip(ui: &mut egui::Ui) {
             );
         }
     }
-    response.on_hover_text("Arrastra para mover");
+    response.on_hover_text("Drag to move");
 }
 
 /// The narration panel: takes of the scene and recorder settings.
@@ -2018,14 +2015,14 @@ pub(crate) fn narration_panel_system(
                         drag_grip(ui);
                         paint_mic_badge(ui);
                         ui.label(
-                            egui::RichText::new("Guion y narración")
+                            egui::RichText::new("Script & narration")
                                 .size(15.0)
                                 .strong()
                                 .color(palette::TEXT),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
-                                .on_hover_text("Cerrar")
+                                .on_hover_text("Close")
                                 .clicked()
                             {
                                 close = true;
@@ -2044,12 +2041,12 @@ pub(crate) fn narration_panel_system(
                             }
                             script_card(ui, &manifest, &slides, script.as_deref(), &mut request);
                             if let Some(live) = &manifest.live {
-                                ui.label(caption("TOMA EN VIVO"));
+                                ui.label(caption("LIVE TAKE"));
                                 let busy = panel.busy(&live.key);
                                 live_card(ui, live, busy, &mut panel.dictate_live, &mut request);
                             }
                             if !manifest.voiceovers.is_empty() {
-                                ui.label(caption("VOZ EN OFF"));
+                                ui.label(caption("VOICEOVER"));
                                 for voice in &manifest.voiceovers {
                                     voiceover_card(
                                         ui,
@@ -2093,7 +2090,7 @@ pub(crate) fn narration_panel_system(
     if settings_changed && let Err(error) = panel.settings().save() {
         panel.notify(
             NoticeKind::Error,
-            format!("no se guardó la configuración: {error}"),
+            format!("the settings were not saved: {error}"),
         );
     }
     if close {
@@ -2105,7 +2102,7 @@ pub(crate) fn narration_panel_system(
     match vault_action {
         Some(VaultAction::Save) => {
             let saved = ScribeToken::new(&panel.scribe_token)
-                .ok_or_else(|| "pega el token antes de guardarlo".to_owned())
+                .ok_or_else(|| "paste the token before saving it".to_owned())
                 .and_then(|token| scribe::vault::save(&token));
             match saved {
                 Ok(()) => {
@@ -2113,7 +2110,7 @@ pub(crate) fn narration_panel_system(
                     panel.token_stored = Some(true);
                     panel.notify(
                         NoticeKind::Success,
-                        "Token de Scribe guardado en el Administrador de credenciales de Windows",
+                        "Scribe token saved in Windows Credential Manager",
                     );
                 }
                 Err(error) => panel.notify(NoticeKind::Error, error),
@@ -2122,19 +2119,22 @@ pub(crate) fn narration_panel_system(
         Some(VaultAction::Forget) => match scribe::vault::forget() {
             Ok(()) => {
                 panel.token_stored = Some(false);
-                panel.notify(NoticeKind::Info, "Token de Scribe quitado del almacén");
+                panel.notify(
+                    NoticeKind::Info,
+                    "Scribe token removed from the credential store",
+                );
             }
             Err(error) => panel.notify(NoticeKind::Error, error),
         },
         Some(VaultAction::Pin(language)) => {
             let pinned = language.clone();
             write_project_language(&mut panel, &project, Some(language), move || {
-                format!("Idioma fijado en gaanim.toml: language = \"{pinned}\"")
+                format!("Language pinned in gaanim.toml: language = \"{pinned}\"")
             });
         }
         Some(VaultAction::Unpin) => {
             write_project_language(&mut panel, &project, None, || {
-                "gaanim.toml ya no fija el idioma: se usa el tuyo".to_owned()
+                "gaanim.toml no longer pins the language: yours is used".to_owned()
             });
         }
         None => {}
@@ -2151,7 +2151,7 @@ fn write_project_language(
     let Some(manifest) = &project.manifest else {
         panel.notify(
             NoticeKind::Error,
-            "esta escena no pertenece a un proyecto con gaanim.toml",
+            "this scene does not belong to a project with a gaanim.toml",
         );
         return;
     };
@@ -2190,8 +2190,8 @@ fn paint_mic_badge(ui: &mut egui::Ui) {
 fn empty_state(ui: &mut egui::Ui) {
     ui.label(
         egui::RichText::new(
-            "La escena no declara narración. Añade un bloque de voz en off \
-             y guarda el script:",
+            "The scene declares no narration. Add a voiceover block \
+             and save the script:",
         )
         .size(12.5)
         .color(palette::TEXT_MUTED),
@@ -2201,7 +2201,7 @@ fn empty_state(ui: &mut egui::Ui) {
         ui.label(
             egui::RichText::new(
                 "with scene.voiceover(\"intro\") as vo:\n    \
-                 scene.play([titulo.animate.write()])\n    vo.wait_until(\"derivada\")",
+                 scene.play([title.animate.write()])\n    vo.wait_until(\"derivative\")",
             )
             .monospace()
             .size(11.5)
@@ -2210,9 +2210,9 @@ fn empty_state(ui: &mut egui::Ui) {
     });
     ui.label(
         egui::RichText::new(
-            "El texto de cada bloque va en el guion (## intro). O graba presentando: \
-             llama a scene.live_take(\"clase\") al inicio y usa scene.stop() donde \
-             quieras hacer pausas.",
+            "Each block's text goes in the script (## intro). Or record while presenting: \
+             call scene.live_take(\"lecture\") at the start and use scene.stop() where \
+             you want to pause.",
         )
         .size(12.5)
         .color(palette::TEXT_MUTED),
@@ -2222,10 +2222,10 @@ fn empty_state(ui: &mut egui::Ui) {
 fn slides_hint(ui: &mut egui::Ui) {
     ui.label(
         egui::RichText::new(
-            "El guion de la charla: una sección «## nombre» por diapositiva con lo que \
-             dirás, y una línea [stop] donde avanzas. Presenter View lo muestra en sus \
-             notas y, con T, como teleprompter. Gaanim añade las diapositivas y los \
-             stops que falten sin tocar tu texto.",
+            "The talk's script: one \"## name\" section per slide with what you will \
+             say, and a [stop] line where you advance. Presenter View shows it in its \
+             notes and, with T, as a teleprompter. Gaanim adds the missing slides and \
+             stops without touching your text.",
         )
         .size(12.5)
         .color(palette::TEXT_MUTED),
@@ -2245,19 +2245,19 @@ fn script_card(
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("Guion")
+                egui::RichText::new("Script")
                     .size(13.0)
                     .strong()
                     .color(palette::TEXT),
             );
             let detail = match (&manifest.script, path) {
                 (Some(script), _) => format!(
-                    "{} · {} secciones",
+                    "{} · {} sections",
                     file_name(&script.path),
                     script.sections.len()
                 ),
-                (None, Some(path)) => format!("sin crear · {}", file_name(path)),
-                (None, None) => "sin crear".to_string(),
+                (None, Some(path)) => format!("not created · {}", file_name(path)),
+                (None, None) => "not created".to_string(),
             };
             ui.label(
                 egui::RichText::new(detail)
@@ -2272,26 +2272,26 @@ fn script_card(
             .map_or(&[][..], |script| &script.sections[..]);
         let missing = script_gaps(sections, manifest, slides);
         let label = match (&manifest.script, missing) {
-            (None, _) => "Crear guion".to_string(),
-            (Some(_), 0) => "Abrir guion".to_string(),
-            (Some(_), missing) => format!("Abrir y completar ({missing})"),
+            (None, _) => "Create script".to_string(),
+            (Some(_), 0) => "Open script".to_string(),
+            (Some(_), missing) => format!("Open and complete ({missing})"),
         };
         ui.horizontal_wrapped(|ui| {
             if secondary_button(ui, &label, path.is_some())
                 .on_hover_text(
-                    "Escribe bajo \"## nombre\" lo que dices en cada diapositiva o bloque de \
-                     voz, con [stop] donde avanzas; al guardar, la escena se actualiza",
+                    "Write under \"## name\" what you say on each slide or voiceover block, \
+                     with [stop] where you advance; when you save, the scene updates",
                 )
                 .clicked()
             {
                 *request = Some(Request::OpenScript);
             }
             if !slides.is_empty()
-                && secondary_button(ui, "Dictar con Scribe", path.is_some())
+                && secondary_button(ui, "Dictate with Scribe", path.is_some())
                     .on_hover_text(
-                        "Presenta desde la diapositiva actual hablando: Scribe de Zoom \
-                         transcribe tu voz y cada frase va a su diapositiva y su tramo del \
-                         guion, sin pisar lo que ya escribiste",
+                        "Present from the current slide while speaking: Zoom Scribe \
+                         transcribes your voice and each phrase goes to its slide and its \
+                         part of the script, without overwriting what you already wrote",
                     )
                     .clicked()
             {
@@ -2328,7 +2328,7 @@ fn status_line(ui: &mut egui::Ui, recorded: bool, detail: String) {
 fn loudness_detail(loudness: Option<f64>) -> String {
     match loudness {
         Some(loudness) => format!(" · {loudness:.0} LUFS"),
-        None => " · sin nivelar".to_string(),
+        None => " · not leveled".to_string(),
     }
 }
 
@@ -2337,13 +2337,13 @@ fn loudness_warning(loudness: f64) -> Option<(egui::Color32, &'static str)> {
     if loudness > settings::LOUDNESS_RANGE.1 {
         Some((
             palette::DANGER,
-            "Más fuerte que el nivel de YouTube (-14 LUFS): la plataforma la bajará y \
-             el limitador de picos trabaja más.",
+            "Louder than YouTube's level (-14 LUFS): the platform will turn it down and \
+             the peak limiter works harder.",
         ))
     } else if loudness < settings::LOUDNESS_RANGE.0 {
         Some((
             palette::STOP,
-            "Por debajo de -20 LUFS la voz sonará débil al lado de otros videos.",
+            "Below -20 LUFS the voice will sound weak next to other videos.",
         ))
     } else {
         None
@@ -2366,52 +2366,52 @@ fn live_card(
                 .color(palette::TEXT),
         );
         let stops = match live.stops {
-            1 => "1 parada".to_string(),
-            count => format!("{count} paradas"),
+            1 => "1 stop".to_string(),
+            count => format!("{count} stops"),
         };
         let detail = match live.duration {
             Some(duration) if live.applied => format!(
-                "Grabada · {} · {stops}{}",
+                "Recorded · {} · {stops}{}",
                 format_seconds(duration),
                 loudness_detail(live.loudness)
             ),
-            _ => format!("Sin grabar · {stops} en la escena"),
+            _ => format!("Not recorded · {stops} in the scene"),
         };
         status_line(ui, live.applied, detail);
         ui.label(
             egui::RichText::new(
-                "Presenta la escena hablando: → o Espacio sigue en cada parada, \
-                 Enter termina. El teleprompter muestra el guion de cada diapositiva \
-                 y marca dónde avanzar.",
+                "Present the scene while speaking: → or Space continues at each stop, \
+                 Enter finishes. The teleprompter shows each slide's script \
+                 and marks where to advance.",
             )
             .size(11.5)
             .color(palette::TEXT_FAINT),
         );
         ui.horizontal_wrapped(|ui| {
             let label = if live.applied {
-                "Regrabar toma"
+                "Re-record take"
             } else {
-                "Grabar toma en vivo"
+                "Record live take"
             };
             if primary_button(ui, label, Some(Icon::Record), !busy).clicked() {
                 *request = Some(Request::RecordLive { dictate: *dictate });
             }
             if live.applied {
-                if secondary_button(ui, "Oír", true).clicked() {
+                if secondary_button(ui, "Listen", true).clicked() {
                     *request = Some(Request::Listen(live.start_time));
                 }
-                if small_button(ui, if busy { "Nivelando…" } else { "Nivelar" }, !busy)
-                    .on_hover_text("Lleva la voz al nivel configurado para video")
+                if small_button(ui, if busy { "Leveling…" } else { "Level" }, !busy)
+                    .on_hover_text("Brings the voice to the level set for video")
                     .clicked()
                 {
                     *request = Some(Request::Level(live.key.clone()));
                 }
             }
         });
-        ui.checkbox(dictate, "Dictar también el guion con Scribe")
+        ui.checkbox(dictate, "Also dictate the script with Scribe")
             .on_hover_text(
-                "Mientras grabas, Scribe de Zoom transcribe tu voz y cada frase va a su \
-                 diapositiva en el guion (Ajustes → Scribe de Zoom)",
+                "While you record, Zoom Scribe transcribes your voice and each phrase goes to \
+                 its slide in the script (set it up under Zoom Scribe (dictation) below)",
             );
     });
 }
@@ -2443,17 +2443,20 @@ fn voiceover_card(
         });
         let detail = if voice.recorded {
             let transcript = if voice.transcribed {
-                " · con transcripción"
+                " · with transcript"
             } else {
                 ""
             };
             format!(
-                "Grabada · {}{}{transcript}",
+                "Recorded · {}{}{transcript}",
                 format_seconds(voice.duration),
                 loudness_detail(voice.loudness)
             )
         } else {
-            format!("Sin grabar · ~{} estimados", format_seconds(voice.duration))
+            format!(
+                "Not recorded · ~{} estimated",
+                format_seconds(voice.duration)
+            )
         };
         status_line(ui, voice.recorded, detail);
         let text_color = if voice.text_source == TextSource::Missing {
@@ -2490,28 +2493,32 @@ fn voiceover_card(
             });
         }
         ui.horizontal_wrapped(|ui| {
-            let label = if voice.recorded { "Regrabar" } else { "Grabar" };
+            let label = if voice.recorded {
+                "Re-record"
+            } else {
+                "Record"
+            };
             if primary_button(ui, label, Some(Icon::Record), !busy).clicked() {
                 *request = Some(Request::RecordVoiceover(voice.key.clone()));
             }
-            if secondary_button(ui, "Oír", true).clicked() {
+            if secondary_button(ui, "Listen", true).clicked() {
                 *request = Some(Request::Listen(voice.start_time));
             }
             if voice.recorded {
                 let label = if transcribing {
-                    "Transcribiendo…"
+                    "Transcribing…"
                 } else {
-                    "Transcribir"
+                    "Transcribe"
                 };
                 if small_button(ui, label, !busy)
-                    .on_hover_text("Detecta las marcas por palabra con Whisper")
+                    .on_hover_text("Finds the markers by word with Whisper")
                     .clicked()
                 {
                     *request = Some(Request::Transcribe(voice.key.clone()));
                 }
-                let label = if leveling { "Nivelando…" } else { "Nivelar" };
+                let label = if leveling { "Leveling…" } else { "Level" };
                 if small_button(ui, label, !busy)
-                    .on_hover_text("Lleva la voz al nivel configurado para video")
+                    .on_hover_text("Brings the voice to the level set for video")
                     .clicked()
                 {
                     *request = Some(Request::Level(voice.key.clone()));
@@ -2525,7 +2532,7 @@ fn voiceover_card(
 fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
     let before = settings.clone();
     egui::CollapsingHeader::new(
-        egui::RichText::new("Voz y grabación")
+        egui::RichText::new("Voice and recording")
             .size(12.5)
             .color(palette::TEXT_MUTED),
     )
@@ -2533,10 +2540,10 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
     .show(ui, |ui| {
         ui.checkbox(
             &mut settings.level_voice,
-            "Nivelar cada toma nueva al guardarla",
+            "Level each new take when saving it",
         );
         ui.horizontal(|ui| {
-            section_label(ui, "Nivel final de la voz");
+            section_label(ui, "Final voice level");
             ui.add_enabled(
                 settings.level_voice,
                 egui::DragValue::new(&mut settings.loudness)
@@ -2546,8 +2553,8 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
                     .suffix(" LUFS"),
             );
             if (settings.loudness - settings::DEFAULT_LOUDNESS).abs() > 0.05
-                && small_button(ui, "Recomendado", settings.level_voice)
-                    .on_hover_text("Volver a -16 LUFS")
+                && small_button(ui, "Recommended", settings.level_voice)
+                    .on_hover_text("Back to -16 LUFS")
                     .clicked()
             {
                 settings.loudness = settings::DEFAULT_LOUDNESS;
@@ -2555,9 +2562,9 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
         });
         ui.label(
             egui::RichText::new(format!(
-                "Recomendado: {:.0} LUFS, voz clara en video online. YouTube reproduce \
-                 a -14 y la televisión usa -23. Pico máximo -1.5 dBTP; el original se \
-                 conserva en narration/.originals.",
+                "Recommended: {:.0} LUFS, a clear voice in online video. YouTube plays \
+                 at -14 and television uses -23. Peak ceiling -1.5 dBTP; the original is \
+                 kept in narration/.originals.",
                 settings::DEFAULT_LOUDNESS
             ))
             .size(11.5)
@@ -2570,20 +2577,17 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
         }
         ui.label(
             egui::RichText::new(format!(
-                "Al grabar, los picos deben quedar entre {:.0} y {:.0} dBFS; el medidor \
-                 avisa en rojo si te acercas a 0 dBFS.",
+                "While recording, peaks should stay between {:.0} and {:.0} dBFS; the meter \
+                 warns in red if you get close to 0 dBFS.",
                 IDEAL_PEAK_DB.0, IDEAL_PEAK_DB.1
             ))
             .size(11.5)
             .color(palette::TEXT_FAINT),
         );
-        ui.checkbox(
-            &mut settings.countdown,
-            "Cuenta atrás de 3 s antes de grabar",
-        );
+        ui.checkbox(&mut settings.countdown, "Countdown of 3 s before recording");
     });
     egui::CollapsingHeader::new(
-        egui::RichText::new("Whisper (opcional)")
+        egui::RichText::new("Whisper (optional)")
             .size(12.5)
             .color(palette::TEXT_MUTED),
     )
@@ -2591,19 +2595,19 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
     .show(ui, |ui| {
         ui.label(
             egui::RichText::new(
-                "whisper.cpp detecta las marcas por palabra para que no tengas que \
-                 pulsar Espacio al grabar. La marca debe llamarse como la palabra \
-                 que dices.",
+                "whisper.cpp finds the markers by word so you do not have to \
+                 press Space while recording. The marker must be named like the word \
+                 you say.",
             )
             .size(11.5)
             .color(palette::TEXT_FAINT),
         );
-        section_label(ui, "whisper-cli (vacío: buscar en el PATH)");
+        section_label(ui, "whisper-cli (empty: search the PATH)");
         path_field(ui, &mut settings.whisper_cli, "whisper-cli", &["exe"]);
-        section_label(ui, "Modelo ggml (p. ej. ggml-base.bin)");
-        path_field(ui, &mut settings.whisper_model, "Modelo", &["bin"]);
+        section_label(ui, "ggml model (e.g. ggml-base.bin)");
+        path_field(ui, &mut settings.whisper_model, "Model", &["bin"]);
         ui.horizontal(|ui| {
-            section_label(ui, "Idioma");
+            section_label(ui, "Language");
             ui.add(
                 egui::TextEdit::singleline(&mut settings.language)
                     .desired_width(60.0)
@@ -2612,10 +2616,10 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
         });
         ui.checkbox(
             &mut settings.auto_transcribe,
-            "Transcribir cada toma nueva al guardarla",
+            "Transcribe each new take when saving it",
         );
         let status = match settings.whisper() {
-            Ok((cli, _)) => (palette::LOOP, format!("Listo · {}", cli.display())),
+            Ok((cli, _)) => (palette::LOOP, format!("Ready · {}", cli.display())),
             Err(error) => (palette::TEXT_FAINT, error),
         };
         ui.add(egui::Label::new(egui::RichText::new(status.1).size(11.5).color(status.0)).wrap());
@@ -2635,7 +2639,7 @@ fn scribe_settings(
     let before = settings.clone();
     let mut action = None;
     egui::CollapsingHeader::new(
-        egui::RichText::new("Scribe de Zoom (dictado)")
+        egui::RichText::new("Zoom Scribe (dictation)")
             .size(12.5)
             .color(palette::TEXT_MUTED),
     )
@@ -2648,8 +2652,8 @@ fn scribe_settings(
         };
         ui.add(
             egui::Label::new(faint(
-                "Dicta el guion presentando: Scribe Live de Zoom transcribe tu voz y cada \
-                 frase va a la diapositiva y el tramo que presentabas."
+                "Dictate the script while presenting: Zoom's Scribe Live transcribes your \
+                 voice and each phrase goes to the slide and part you were presenting."
                     .to_owned(),
             ))
             .wrap(),
@@ -2661,45 +2665,45 @@ fn scribe_settings(
             |name| std::env::var(name).ok(),
         );
         let (color, status) = match resolved.map(|(_, source)| source) {
-            Some(TokenSource::Typed) => (palette::LOOP, "Token pegado para esta sesión".to_owned()),
+            Some(TokenSource::Typed) => (palette::LOOP, "Token pasted for this session".to_owned()),
             Some(TokenSource::Vault) => (
                 palette::LOOP,
-                "Token guardado en el Administrador de credenciales de Windows".to_owned(),
+                "Token saved in Windows Credential Manager".to_owned(),
             ),
             Some(TokenSource::Environment) => (
                 palette::LOOP,
-                format!("Token de la variable {}", scribe::TOKEN_VARIABLE),
+                format!("Token from the {} variable", scribe::TOKEN_VARIABLE),
             ),
-            None => (palette::TEXT_FAINT, "Sin token: pégalo aquí".to_owned()),
+            None => (palette::TEXT_FAINT, "No token: paste it here".to_owned()),
         };
         ui.label(egui::RichText::new(status).size(11.5).color(color));
         ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(typed_token)
                     .password(true)
-                    .hint_text("Pegar token")
+                    .hint_text("Paste token")
                     .desired_width(180.0),
             );
             if !typed_token.is_empty() {
                 if scribe::vault::AVAILABLE
-                    && small_button(ui, "Guardar en Windows", true)
+                    && small_button(ui, "Save in Windows", true)
                         .on_hover_text(
-                            "Lo cifra el Administrador de credenciales de Windows para tu \
-                             usuario; nunca va a la carpeta del proyecto",
+                            "Windows Credential Manager encrypts it for your user; it never \
+                             goes to the project folder",
                         )
                         .clicked()
                 {
                     action = Some(VaultAction::Save);
                 }
-                if small_button(ui, "Olvidar", true)
-                    .on_hover_text("Lo quita de esta sesión")
+                if small_button(ui, "Forget", true)
+                    .on_hover_text("Removes it from this session")
                     .clicked()
                 {
                     typed_token.clear();
                 }
             } else if stored
-                && small_button(ui, "Quitar el guardado", true)
-                    .on_hover_text("Lo borra del Administrador de credenciales de Windows")
+                && small_button(ui, "Remove saved token", true)
+                    .on_hover_text("Deletes it from Windows Credential Manager")
                     .clicked()
             {
                 action = Some(VaultAction::Forget);
@@ -2710,7 +2714,7 @@ fn scribe_settings(
         let pinned = project.locale().is_some();
         let mut chosen = current;
         ui.horizontal(|ui| {
-            section_label(ui, "Idioma");
+            section_label(ui, "Language");
             egui::ComboBox::from_id_salt("narration_scribe_language")
                 .selected_text(current)
                 .show_ui(ui, |ui| {
@@ -2719,17 +2723,17 @@ fn scribe_settings(
                     }
                 });
             if pinned {
-                if small_button(ui, "Desfijar", true)
-                    .on_hover_text("Quita language de gaanim.toml y usa tu idioma")
+                if small_button(ui, "Unpin", true)
+                    .on_hover_text("Removes language from gaanim.toml and uses your language")
                     .clicked()
                 {
                     action = Some(VaultAction::Unpin);
                 }
             } else if project.manifest.is_some()
-                && small_button(ui, "Fijar en gaanim.toml", true)
+                && small_button(ui, "Pin in gaanim.toml", true)
                     .on_hover_text(
-                        "Escribe language en el gaanim.toml del proyecto: la charla se dicta \
-                         en este idioma en cualquier equipo",
+                        "Writes language in the project's gaanim.toml: the talk is dictated \
+                         in this language on any computer",
                     )
                     .clicked()
             {
@@ -2746,17 +2750,18 @@ fn scribe_settings(
         match (&project.language, project.locale()) {
             (Some(tag), Some(locale)) if !tag.eq_ignore_ascii_case(locale) => {
                 ui.label(faint(format!(
-                    "Fijado en gaanim.toml como «{tag}»; Scribe lo dicta como {locale}"
+                    "Pinned in gaanim.toml as \"{tag}\"; Scribe dictates it as {locale}"
                 )));
             }
             (Some(_), Some(_)) => {
-                ui.label(faint("Fijado en gaanim.toml (language)".to_owned()));
+                ui.label(faint("Pinned in gaanim.toml (language)".to_owned()));
             }
             (Some(tag), None) => {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(format!(
-                            "gaanim.toml pide «{tag}», que Scribe no transcribe: se usa {current}"
+                            "gaanim.toml asks for \"{tag}\", which Scribe does not transcribe: \
+                             {current} is used"
                         ))
                         .size(11.5)
                         .color(palette::STOP),
@@ -2770,8 +2775,9 @@ fn scribe_settings(
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(format!(
-                        "gaanim.toml tiene {} con pinta de credencial. Gaanim no la lee: \
-                         quítala del proyecto y, si llegó a un repositorio, genera otra clave.",
+                        "gaanim.toml has {} that looks like a credential. Gaanim does not read \
+                         it: remove it from the project and, if it reached a repository, \
+                         generate a new key.",
                         project
                             .secret_keys
                             .iter()
@@ -2786,7 +2792,7 @@ fn scribe_settings(
             );
         }
         ui.horizontal(|ui| {
-            section_label(ui, "Minutos máximos por sesión");
+            section_label(ui, "Max minutes per session");
             ui.add(
                 egui::DragValue::new(&mut settings.scribe_max_minutes)
                     .range(1..=scribe::MAX_SESSION_MINUTES)
@@ -2795,16 +2801,17 @@ fn scribe_settings(
         });
         ui.checkbox(
             &mut settings.scribe_vocabulary,
-            "Enviar los nombres de diapositivas y stops como vocabulario",
+            "Send the names of slides and stops as vocabulary",
         );
         ui.add(
             egui::Label::new(faint(format!(
-                "Mientras dictas, tu voz se envía a Zoom{}. El token nunca va a la carpeta \
-                 del proyecto ni aparece en mensajes: pegado vive solo en esta sesión, y \
-                 guardado lo cifra Windows. La sesión se corta sola al llegar al límite de \
-                 minutos o tras dos minutos sin voz, y nunca se reconecta sola.",
+                "While you dictate, your voice is sent to Zoom{}. The token never goes to the \
+                 project folder or appears in messages: pasted, it lives only in this session, \
+                 and saved, Windows encrypts it. The session ends by itself when it reaches the \
+                 minute limit or after two minutes without speech, and never reconnects by \
+                 itself.",
                 if settings.scribe_vocabulary {
-                    ", con los nombres de las diapositivas"
+                    ", with the names of the slides"
                 } else {
                     ""
                 }
@@ -2824,10 +2831,10 @@ fn path_field(ui: &mut egui::Ui, value: &mut String, title: &str, extensions: &[
                 .font(egui::FontId::monospace(11.5)),
         );
         if small_button(ui, "…", true)
-            .on_hover_text("Buscar")
+            .on_hover_text("Browse")
             .clicked()
             && let Some(path) =
-                crate::platform::pick_file(title, None, &[(title, extensions), ("Todos", &["*"])])
+                crate::platform::pick_file(title, None, &[(title, extensions), ("All", &["*"])])
         {
             *value = path.to_string_lossy().into_owned();
         }
@@ -2853,16 +2860,14 @@ pub(crate) fn narration_overlay_system(
         Phase::AwaitingLiveReload { .. } => {
             centered_card(ctx, |ui| {
                 ui.label(
-                    egui::RichText::new("Preparando la toma en vivo…")
+                    egui::RichText::new("Preparing the live take…")
                         .size(16.0)
                         .color(palette::TEXT),
                 );
                 ui.label(
-                    egui::RichText::new(
-                        "La escena se recarga con sus paradas originales. Esc cancela.",
-                    )
-                    .size(12.0)
-                    .color(palette::TEXT_MUTED),
+                    egui::RichText::new("The scene reloads with its original stops. Esc cancels.")
+                        .size(12.0)
+                        .color(palette::TEXT_MUTED),
                 );
             });
         }
@@ -2883,9 +2888,11 @@ pub(crate) fn narration_overlay_system(
                         .color(palette::DANGER),
                 );
                 let starting = match (target, plan.scribe.is_some()) {
-                    (Target::Dictation { .. }, _) => "Dictando el guion en un momento".to_owned(),
-                    (_, true) => format!("Grabando «{}» y dictando en un momento", target.key()),
-                    (_, false) => format!("Grabando «{}» en un momento", target.key()),
+                    (Target::Dictation { .. }, _) => "Dictating the script in a moment".to_owned(),
+                    (_, true) => {
+                        format!("Recording \"{}\" and dictating in a moment", target.key())
+                    }
+                    (_, false) => format!("Recording \"{}\" in a moment", target.key()),
                 };
                 ui.label(
                     egui::RichText::new(starting)
@@ -2893,12 +2900,12 @@ pub(crate) fn narration_overlay_system(
                         .color(palette::TEXT),
                 );
                 ui.label(
-                    egui::RichText::new(format!("Micrófono: {}", input.recorder.device()))
+                    egui::RichText::new(format!("Microphone: {}", input.recorder.device()))
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
                 );
                 ui.label(
-                    egui::RichText::new("Habla como en la toma para probar tu nivel · Esc cancela")
+                    egui::RichText::new("Speak as in the take to check your level · Esc cancels")
                         .size(12.0)
                         .color(palette::TEXT_MUTED),
                 );
@@ -2918,13 +2925,13 @@ pub(crate) fn narration_overlay_system(
         Phase::Finishing { dictation, .. } => {
             centered_card(ctx, |ui| {
                 ui.label(
-                    egui::RichText::new("Terminando el dictado…")
+                    egui::RichText::new("Finishing the dictation…")
                         .size(16.0)
                         .color(palette::TEXT),
                 );
                 ui.label(
                     egui::RichText::new(format!(
-                        "{} frase(s) recibida(s) · Esc deja de esperar",
+                        "{} phrase(s) received · Esc stops waiting",
                         dictation.turns.len()
                     ))
                     .size(12.0)
@@ -2996,9 +3003,9 @@ fn teleprompter(
                         };
                         ui.painter().circle_filled(dot.center(), 6.0, color);
                         let title = match (recording_now, target) {
-                            (true, Target::Dictation { .. }) => "DICTANDO",
-                            (true, _) => "GRABANDO",
-                            (false, _) => "PREPARADO",
+                            (true, Target::Dictation { .. }) => "DICTATING",
+                            (true, _) => "RECORDING",
+                            (false, _) => "READY",
                         };
                         ui.label(
                             egui::RichText::new(format!("{title} · {}", target.key()))
@@ -3017,9 +3024,9 @@ fn teleprompter(
                         level_meter(ui, &input.level);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let label = if *compact {
-                                "Mostrar guion"
+                                "Show script"
                             } else {
-                                "Ocultar guion"
+                                "Hide script"
                             };
                             if small_button(ui, label, true).clicked() {
                                 *compact = !*compact;
@@ -3044,8 +3051,8 @@ fn teleprompter(
                                     None => {
                                         ui.label(
                                             egui::RichText::new(
-                                                "Sin texto: escríbelo en el guion bajo \
-                                                 \"## clave\" o pasa text=\"…\".",
+                                                "No text: write it in the script under \
+                                                 \"## key\" or pass text=\"…\".",
                                             )
                                             .size(15.0)
                                             .color(palette::TEXT_MUTED),
@@ -3055,14 +3062,15 @@ fn teleprompter(
                             }
                             let status = match next {
                                 Some(marker) => format!(
-                                    "Siguiente marca: «{marker}» · pulsa Espacio al decirla \
+                                    "Next marker: \"{marker}\" · press Space as you say it \
                                      ({tapped}/{})",
                                     markers.len()
                                 ),
                                 None if markers.is_empty() => {
-                                    "Sin marcas: lee el texto y pulsa Enter al terminar".to_string()
+                                    "No markers: read the text and press Enter when done"
+                                        .to_string()
                                 }
-                                None => "Todas las marcas listas · Enter para terminar".to_string(),
+                                None => "All markers done · Enter to finish".to_string(),
                             };
                             ui.label(
                                 egui::RichText::new(status)
@@ -3077,7 +3085,7 @@ fn teleprompter(
                             {
                                 ui.label(
                                     egui::RichText::new(format!(
-                                        "{} · el guion sigue en el Prompter",
+                                        "{} · the script continues in the Prompter",
                                         timeline.segments[position.slide].name
                                     ))
                                     .size(13.0)
@@ -3087,13 +3095,13 @@ fn teleprompter(
                             let waiting = recording.and_then(|recording| recording.waiting_at);
                             let status = match (waiting, recording) {
                                 (Some(_), Some(recording)) => format!(
-                                    "En pausa en la parada {} · → o Espacio para seguir",
+                                    "Paused at stop {} · → or Space to continue",
                                     recording.holds.len() + 1
                                 ),
                                 (None, Some(_))
                                     if timeline.current_time >= timeline.cached_duration - 1e-4 =>
                                 {
-                                    "Fin de la escena · Enter para terminar".to_string()
+                                    "End of the scene · Enter to finish".to_string()
                                 }
                                 _ => String::new(),
                             };
@@ -3116,8 +3124,8 @@ fn teleprompter(
                         None if recording.is_none() => {
                             ui.label(
                                 egui::RichText::new(format!(
-                                    "Prueba de nivel: los picos deben quedar en la zona verde \
-                                     ({:.0} a {:.0} dBFS)",
+                                    "Level check: peaks should stay in the green zone \
+                                     ({:.0} to {:.0} dBFS)",
                                     IDEAL_PEAK_DB.0, IDEAL_PEAK_DB.1
                                 ))
                                 .size(13.0)
@@ -3132,9 +3140,9 @@ fn teleprompter(
                         dictation_status(ui, dictation);
                     }
                     let hints = if target.presents() {
-                        "→/Espacio: seguir · Enter: terminar · Esc: descartar"
+                        "→/Space: continue · Enter: finish · Esc: discard"
                     } else {
-                        "Espacio: marca · Enter: terminar · Esc: descartar"
+                        "Space: marker · Enter: finish · Esc: discard"
                     };
                     ui.label(
                         egui::RichText::new(hints)
@@ -3150,22 +3158,22 @@ fn dictation_status(ui: &mut egui::Ui, dictation: &Dictation) {
     let (color, state) = match (&dictation.note, dictation.closed, dictation.ready) {
         (Some((note, true)), ..) => (palette::DANGER, note.clone()),
         (Some((note, false)), ..) => (palette::STOP, note.clone()),
-        (None, true, _) => (palette::TEXT_MUTED, "Scribe terminó".to_owned()),
-        (None, false, false) => (palette::TEXT_MUTED, "Scribe: conectando…".to_owned()),
+        (None, true, _) => (palette::TEXT_MUTED, "Scribe finished".to_owned()),
+        (None, false, false) => (palette::TEXT_MUTED, "Scribe: connecting…".to_owned()),
         (None, false, true) if dictation.speaking => {
-            (palette::LOOP, "Scribe: te escucha…".to_owned())
+            (palette::LOOP, "Scribe: listening…".to_owned())
         }
-        (None, false, true) => (palette::LOOP, "Scribe: listo".to_owned()),
+        (None, false, true) => (palette::LOOP, "Scribe: ready".to_owned()),
     };
     ui.label(
-        egui::RichText::new(format!("{state} · {} frase(s)", dictation.turns.len()))
+        egui::RichText::new(format!("{state} · {} phrase(s)", dictation.turns.len()))
             .size(13.0)
             .color(color),
     );
     if let Some((_, text)) = dictation.turns.last() {
         ui.add(
             egui::Label::new(
-                egui::RichText::new(format!("«{}»", truncate_chars(text, 140)))
+                egui::RichText::new(format!("\"{}\"", truncate_chars(text, 140)))
                     .size(13.0)
                     .italics()
                     .color(palette::TEXT_FAINT),
@@ -3223,8 +3231,8 @@ fn level_meter(ui: &mut egui::Ui, level: &InputLevel) {
         );
     }
     response.on_hover_text(format!(
-        "Picos ideales entre {:.0} y {:.0} dBFS (verde). Por encima de {:.0} dBFS una \
-         palabra fuerte puede saturar, y la saturación no se corrige después.",
+        "Ideal peaks between {:.0} and {:.0} dBFS (green). Above {:.0} dBFS a \
+         loud word may clip, and clipping cannot be fixed afterwards.",
         IDEAL_PEAK_DB.0, IDEAL_PEAK_DB.1, HOT_PEAK_DB
     ));
     let label = if db <= METER_FLOOR_DB {
@@ -3329,7 +3337,7 @@ mod tests {
         assert!(loudness_warning(settings::DEFAULT_LOUDNESS).is_none());
         assert_eq!(loudness_warning(-12.0).unwrap().0, palette::DANGER);
         assert_eq!(loudness_warning(-22.0).unwrap().0, palette::STOP);
-        assert_eq!(loudness_detail(None), " · sin nivelar");
+        assert_eq!(loudness_detail(None), " · not leveled");
     }
 
     #[test]
@@ -3528,7 +3536,7 @@ mod tests {
             slide("Portada", None, &[Some("titulo")]),
             slide("Datos", None, &[Some("grafico"), None]),
         ];
-        let existing = "# Guion\n\n## Datos\n\nYa escrito.\n\n[stop grafico]\n\n[stop]\n";
+        let existing = "# Script\n\n## Datos\n\nYa escrito.\n\n[stop grafico]\n\n[stop]\n";
         let dictated = vec![
             ("Portada".to_owned(), 0, "Hola a todos.".to_owned()),
             ("datos".to_owned(), 0, "Miren --> esto.".to_owned()),
@@ -3564,7 +3572,7 @@ mod tests {
         );
         // The written text stays; the dictation sits beside it, closed once.
         assert!(
-            source.contains("<!-- dictado: Miren –> esto. -->"),
+            source.contains("<!-- dictated: Miren –> esto. -->"),
             "{source}"
         );
         assert!(source.contains("[stop titulo]\n\n## Datos"), "{source}");

@@ -27,9 +27,9 @@ fn summarize_error(message: &str) -> ErrorSummary<'_> {
     ErrorSummary { headline, location }
 }
 
-/// `file.py · línea N`, how the editor names a script line.
+/// `file.py · line N`, how the editor names a script line.
 pub(crate) fn location_label(location: &ScriptLocation) -> String {
-    format!("{} · línea {}", location.file_name(), location.line)
+    format!("{} · line {}", location.file_name(), location.line)
 }
 
 /// Badge confirming a reload, faded by `opacity` while it disappears.
@@ -79,7 +79,7 @@ pub fn script_error_panel(ctx: &egui::Context, message: &str) -> ErrorPanelActio
     let summary = summarize_error(message);
     let mut action = ErrorPanelAction::None;
     let max_width = (ctx.viewport_rect().width() - 48.0).max(320.0);
-    egui::Window::new("Error en el script")
+    egui::Window::new("Script error")
         .id(egui::Id::new("script_error_window"))
         .title_bar(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -100,7 +100,7 @@ pub fn script_error_panel(ctx: &egui::Context, message: &str) -> ErrorPanelActio
                 ui_kit::status_badge(ui, Icon::Warning, palette::DANGER);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 3.0;
-                    ui.label(ui_kit::caption("ERROR EN EL SCRIPT"));
+                    ui.label(ui_kit::caption("SCRIPT ERROR"));
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(summary.headline)
@@ -140,7 +140,7 @@ pub fn script_error_panel(ctx: &egui::Context, message: &str) -> ErrorPanelActio
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
-                            "Corrige el archivo y guárdalo: el editor lo vuelve a cargar solo.",
+                            "Fix the file and save it: the editor reloads it on its own.",
                         )
                         .size(12.0)
                         .color(palette::TEXT_FAINT),
@@ -148,18 +148,18 @@ pub fn script_error_panel(ctx: &egui::Context, message: &str) -> ErrorPanelActio
                     .wrap(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui_kit::secondary_button(ui, "Cerrar · Esc", true).clicked() {
+                    if ui_kit::secondary_button(ui, "Close · Esc", true).clicked() {
                         action = ErrorPanelAction::Close;
                     }
-                    if ui_kit::secondary_button(ui, "Copiar", true)
-                        .on_hover_text("Copiar el error completo")
+                    if ui_kit::secondary_button(ui, "Copy", true)
+                        .on_hover_text("Copy the whole error")
                         .clicked()
                     {
                         ctx.copy_text(message.to_owned());
                     }
                     if let Some(location) = &summary.location
                         && crate::source_link::AVAILABLE
-                        && ui_kit::secondary_button(ui, "Abrir en el editor", true)
+                        && ui_kit::secondary_button(ui, "Open in the editor", true)
                             .on_hover_text(format!("{location}\n{}", crate::source_link::hint()))
                             .clicked()
                     {
@@ -182,7 +182,7 @@ mod tests {
         assert_eq!(summary.headline, "ZeroDivisionError: division by zero");
         assert_eq!(
             summary.location.as_ref().map(location_label).as_deref(),
-            Some("lib.py · línea 12")
+            Some("lib.py · line 12")
         );
     }
 

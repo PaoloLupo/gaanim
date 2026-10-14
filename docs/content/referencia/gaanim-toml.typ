@@ -38,7 +38,7 @@ output_dir = "exports"
 
 Las claves desconocidas se ignoran. Las que parecen credenciales, porque su
 nombre contiene `token`, `secret`, `password` o `api_key`, también, pero
-`gaanim check` y el panel *Guion y narración* avisan de ellas: el manifiesto
+`gaanim check` y el panel *Script & narration* avisan de ellas: el manifiesto
 viaja con el proyecto, también a un repositorio, así que los tokens no van
 ahí (ver #link("/guias/presentaciones/#token-scribe")[El token]).
 
@@ -102,8 +102,8 @@ equipo. Scribe usa la misma etiqueta si la tiene y, si no, la primera de ese
 idioma: `"es"` y `"es-PE"` se dictan como `es-ES`, y `"pt"` como `pt-BR`. Si
 Scribe no transcribe ese idioma, se usa el del editor y el panel lo avisa.
 
-En *Guion y narración → Scribe de Zoom*, *Fijar en gaanim.toml* escribe el
-idioma elegido y *Desfijar* lo quita; el resto del archivo, comentarios
+En *Script & narration → Zoom Scribe (dictation)*, *Pin in gaanim.toml* escribe el
+idioma elegido y *Unpin* lo quita; el resto del archivo, comentarios
 incluidos, queda como estaba.
 
 === `[polls]`

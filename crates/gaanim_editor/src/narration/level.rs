@@ -101,11 +101,11 @@ pub(crate) fn loudnorm_filter(target: f64, measured: Option<&Measurement>) -> St
 pub(crate) fn parse_measurement(stderr: &str) -> Result<Measurement, String> {
     let start = stderr
         .rfind('{')
-        .ok_or("FFmpeg no informó la sonoridad de la toma")?;
+        .ok_or("FFmpeg did not report the take's loudness")?;
     let end = stderr[start..]
         .find('}')
         .map(|end| start + end + 1)
-        .ok_or("respuesta de loudnorm incompleta")?;
+        .ok_or("incomplete loudnorm response")?;
     let values: std::collections::HashMap<String, String> =
         serde_json::from_str(&stderr[start..end]).map_err(|error| error.to_string())?;
     let value = |name: &str| -> Result<f64, String> {
@@ -113,7 +113,7 @@ pub(crate) fn parse_measurement(stderr: &str) -> Result<Measurement, String> {
             .get(name)
             .and_then(|value| value.trim().parse::<f64>().ok())
             .filter(|value| value.is_finite())
-            .ok_or_else(|| format!("la toma parece estar en silencio ({name} inválido)"))
+            .ok_or_else(|| format!("the take seems to be silent (invalid {name})"))
     };
     Ok(Measurement {
         integrated: value("input_i")?,
@@ -138,7 +138,7 @@ fn level(
             .arg(loudnorm_filter(target, None))
             .args(["-f", "null", "-"]),
     )
-    .map_err(|error| format!("FFmpeg no pudo medir «{key}»: {error}"))?;
+    .map_err(|error| format!("FFmpeg could not measure \"{key}\": {error}"))?;
     let measurement = parse_measurement(&String::from_utf8_lossy(&measured.stderr))?;
     let temporary = temporary_sibling(destination);
     let applied = run_tool(
@@ -151,7 +151,7 @@ fn level(
             .args(["-c:a", "pcm_s16le", "-f", "wav"])
             .arg(&temporary),
     )
-    .map_err(|error| format!("FFmpeg no pudo nivelar «{key}»: {error}"));
+    .map_err(|error| format!("FFmpeg could not level \"{key}\": {error}"));
     if let Err(error) = applied {
         let _ = std::fs::remove_file(&temporary);
         return Err(error);
@@ -194,7 +194,7 @@ mod tests {
         assert_eq!(measured.true_peak, -4.47);
         assert_eq!(measured.offset, 0.52);
         let silent = FIRST_PASS.replace("\"-27.61\"", "\"-inf\"");
-        assert!(parse_measurement(&silent).unwrap_err().contains("silencio"));
+        assert!(parse_measurement(&silent).unwrap_err().contains("silent"));
         assert!(parse_measurement("no json").is_err());
     }
 

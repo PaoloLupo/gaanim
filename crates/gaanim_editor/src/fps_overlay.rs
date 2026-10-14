@@ -124,9 +124,9 @@ impl FpsOverlay {
 
                 if let Some(preview) = preview {
                     let mode = if preview.adaptive {
-                        "automática: baja al reproducir si no llega a 60 fps"
+                        "automatic: lowers during playback below 60 fps"
                     } else {
-                        "fija"
+                        "fixed"
                     };
                     p.text(
                         egui::Pos2::new(rect.min.x + 6.0, rect.min.y + 33.0),
@@ -228,9 +228,9 @@ pub fn render_render_health(ctx: &egui::Context, health: Option<&RenderHealth>) 
                             egui::RichText::new(detail).color(Color32::from_rgb(255, 235, 225)),
                         );
                         if ui
-                            .button("Reintentar renderer")
+                            .button("Retry renderer")
                             .on_hover_text(
-                                "Crea de nuevo el dispositivo GPU sin descartar la escena",
+                                "Creates the GPU device again without discarding the scene",
                             )
                             .clicked()
                         {

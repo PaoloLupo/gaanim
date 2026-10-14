@@ -496,7 +496,7 @@ unen y una línea en blanco separa párrafos. Un `##` vacío o repetido (sin
 distinguir mayúsculas) produce `ValueError`. El texto de un bloque se busca en
 este orden: el argumento `text`, su sección del guion y las notas del segmento;
 con un guion cargado, una clave sin sección emite un `UserWarning`. El botón
-*Crear guion* / *Abrir y completar* del panel crea el archivo o le añade las
+*Create script* / *Open and complete* del panel crea el archivo o le añade las
 secciones de los bloques y las diapositivas que faltan, y las marcas de sus
 stops, y lo abre en tu editor. En una toma en vivo, el teleprompter muestra el
 guion de la diapositiva actual cortado en sus `[stop]`, con `▶ AVANZA` donde
@@ -505,25 +505,24 @@ toca avanzar.
 === Grabar desde el editor
 
 Abre el panel con el botón de micrófono de la barra de reproducción (o
-*Más controles → Guion y narración*). El panel lista el guion, la toma en vivo y cada
-bloque de voz en off con su estado: *sin grabar* (duración estimada del texto)
-o *grabada*, su nivel y de dónde sale su texto. El panel y el teleprompter se
-pueden arrastrar desde su asa de puntos, y *Ocultar guion* reduce el
+*More controls → Script & narration*). El panel lista el guion, la toma en vivo y cada
+bloque de voz en off con su estado: *Not recorded* (duración estimada del texto)
+o *Recorded*, su nivel y de dónde sale su texto. El panel y el teleprompter se
+pueden arrastrar desde su asa de puntos, y *Hide script* reduce el
 teleprompter a su línea de estado para ver la escena.
 
-- *Grabar* posiciona la escena al inicio del bloque y abre el micrófono
+- *Record* posiciona la escena al inicio del bloque y abre el micrófono
   predeterminado durante una cuenta atrás de tres segundos que sirve de prueba
   de nivel (no se guarda). Después graba mientras la escena avanza, con el
   texto del bloque como teleprompter y la siguiente marca resaltada. Pulsa
   *Espacio* al decir cada marca, *Enter* para guardar y *Esc* para descartar.
-- *Grabar toma en vivo* recarga la escena con sus paradas originales y graba
+- *Record live take* recarga la escena con sus paradas originales y graba
   mientras presentas. La reproducción se detiene en cada parada; *→* o
-  *Espacio* continúa, *Enter* termina y *Esc* descarta. Con *Dictar también el
-  guion con Scribe*, Scribe de Zoom transcribe a la vez lo que dices y lo
+  *Espacio* continúa, *Enter* termina y *Esc* descarta. Con *Also dictate the script with Scribe*, Scribe de Zoom transcribe a la vez lo que dices y lo
   escribe en el guion (ver
   #link("/guias/presentaciones/#dictar")[Dictar el guion con Scribe]).
-- *Oír* reproduce el bloque desde su inicio.
-- *Nivelar* lleva una toma ya grabada al nivel configurado.
+- *Listen* reproduce el bloque desde su inicio.
+- *Level* lleva una toma ya grabada al nivel configurado.
 
 Durante la grabación el audio del preview se silencia para que la toma anterior
 no se cuele en el micrófono.
@@ -542,7 +541,7 @@ Cada toma nueva se nivela al guardarla a -16 LUFS integrados, el nivel
 recomendado para voz en video online (YouTube reproduce a -14 y la televisión
 usa -23). FFmpeg mide la toma y le aplica una ganancia constante, con un pico
 real máximo de -1.5 dBTP y un filtro paso alto a 80 Hz. La grabación original
-se conserva en `narration/.originals/`. En *Voz y grabación* puedes cambiar el
+se conserva en `narration/.originals/`. En *Voice and recording* puedes cambiar el
 nivel final: el panel avisa si eliges más de -14 LUFS o menos de -20, o
 desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
 
@@ -550,8 +549,8 @@ desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
 
 En lugar de pulsar Espacio, whisper.cpp puede detectar cuándo dices cada
 palabra. Instala `whisper-cli` y un modelo `ggml-*.bin`, e indícalos en
-*Whisper (opcional)* dentro del panel (vacío busca `whisper-cli` en el `PATH`).
-*Transcribir* guarda en el JSON de la toma el tiempo de cada palabra; también
+*Whisper (optional)* dentro del panel (vacío busca `whisper-cli` en el `PATH`).
+*Transcribe* guarda en el JSON de la toma el tiempo de cada palabra; también
 puede hacerse automáticamente al guardar cada toma. Requiere FFmpeg. Para que
 una marca se resuelva por transcripción, su nombre debe ser la palabra o frase
 que dices; se ignoran mayúsculas, tildes y puntuación.

@@ -322,7 +322,7 @@ gaanim export mi-charla.gaanim --output mi-charla.pdf   # sin Python
 ```
 
 Un paquete se exporta a PDF igual, sin ejecutar Python. El diálogo
-*Exportar* del editor también ofrece el formato PDF, con una casilla para las
+*Export* del editor también ofrece el formato PDF, con una casilla para las
 notas.
 
 == Paquetes

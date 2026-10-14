@@ -361,7 +361,7 @@ fn reading_seconds(text: &str) -> Option<f64> {
     (words > 0).then(|| words as f64 / gaanim_media::narration::ESTIMATED_WORDS_PER_SECOND)
 }
 
-/// The words the teleprompter writes, in the language of the screen it is on.
+/// The words the teleprompter writes.
 pub(crate) struct PrompterWords {
     pub(crate) advance: &'static str,
     pub(crate) silent: &'static str,
@@ -384,16 +384,6 @@ impl PrompterWords {
         faster: "Read faster",
         slower: "Read slower",
         pace: "wpm",
-    };
-    pub(crate) const SPANISH: Self = Self {
-        advance: "AVANZA",
-        silent: "Sin guion para esta diapositiva",
-        unmatched: "no hay ese stop",
-        larger: "Texto más grande",
-        smaller: "Texto más pequeño",
-        faster: "Leer más rápido",
-        slower: "Leer más despacio",
-        pace: "ppm",
     };
 }
 
@@ -596,8 +586,8 @@ fn follow_reading(ui: &mut egui::Ui, point: egui::Rect, content_top: f32) {
 }
 
 /// The editor's prompter: the same as Presenter View's, in a window over
-/// the preview. It shows while the speaker opens it (`T`) or presents to
-/// record a live take or dictate the script.
+/// the preview. It shows while the speaker opens it (`Shift+T`) or presents
+/// to record a live take or dictate the script.
 pub(crate) fn editor_prompter_system(
     mut contexts: bevy_egui::EguiContexts,
     timeline: Option<Res<Timeline>>,
@@ -646,7 +636,7 @@ pub(crate) fn editor_prompter_system(
                     .color(palette::TEXT_MUTED),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                prompter_controls(ui, &mut settings, &PrompterWords::SPANISH);
+                prompter_controls(ui, &mut settings, &PrompterWords::ENGLISH);
             });
         });
         ui.add_space(6.0);
@@ -673,7 +663,7 @@ pub(crate) fn editor_prompter_system(
                     settings.size,
                     true,
                     Some(read),
-                    &PrompterWords::SPANISH,
+                    &PrompterWords::ENGLISH,
                 );
             });
     });

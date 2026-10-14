@@ -87,7 +87,7 @@ impl OverlayPreferences {
     }
 
     fn save(&self) -> Result<(), String> {
-        let path = Self::path().ok_or("no se encontró la carpeta de datos de Gaanim")?;
+        let path = Self::path().ok_or("Gaanim's data folder was not found")?;
         let source = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
         gaanim_media::narration::write_atomically(&path, source.as_bytes())
             .map_err(|error| error.to_string())
@@ -134,7 +134,7 @@ pub fn save_overlay_preferences_system(
     }
     *saved = Some(current);
     if let Err(error) = current.save() {
-        warn!("no se pudieron guardar las preferencias de overlays: {error}");
+        warn!("could not save the overlay preferences: {error}");
     }
 }
 
@@ -385,14 +385,14 @@ pub fn overlays_settings_ui_system(
                         if pill_toggle(
                             ui,
                             Icon::Move,
-                            Some("Interactivo"),
+                            Some("Interactive"),
                             interactive.enabled,
                             palette::ACCENT,
                             HEIGHT,
                         )
                         .on_hover_text(
-                            "Mover la vista sin tocar la cámara de la escena · I\n\
-                             Arrastrar desplaza, la rueda acerca hacia el cursor y un clic selecciona.",
+                            "Move the view without touching the scene's camera · I\n\
+                             Dragging pans, the wheel zooms toward the cursor and a click selects.",
                         )
                         .clicked()
                         {
@@ -402,12 +402,12 @@ pub fn overlays_settings_ui_system(
                         if pill_toggle(
                             ui,
                             Icon::Fullscreen,
-                            Some("Límites"),
+                            Some("Bounds"),
                             overlays.show_bounds,
                             colors::BOUNDS,
                             HEIGHT,
                         )
-                        .on_hover_text("Límites del marco de salida · B")
+                        .on_hover_text("Bounds of the output frame · B")
                         .clicked()
                         {
                             overlays.show_bounds = !overlays.show_bounds;
@@ -415,14 +415,14 @@ pub fn overlays_settings_ui_system(
                         if pill_toggle(
                             ui,
                             Icon::Crosshair,
-                            Some("Coordenadas"),
+                            Some("Coordinates"),
                             overlays.show_coords,
                             colors::AXIS_Y,
                             HEIGHT,
                         )
                         .on_hover_text(
-                            "Ejes y coordenadas del cursor · C\n\
-                             Ctrl+C copia el punto bajo el cursor; Mayús lo ajusta a la grilla.",
+                            "Axes and cursor coordinates · C\n\
+                             Ctrl+C copies the point under the cursor; Shift snaps it to the grid.",
                         )
                         .clicked()
                         {
@@ -431,14 +431,12 @@ pub fn overlays_settings_ui_system(
                         if pill_toggle(
                             ui,
                             Icon::Grid,
-                            Some("Grilla"),
+                            Some("Grid"),
                             overlays.show_grid,
                             palette::ACCENT,
                             HEIGHT,
                         )
-                        .on_hover_text(
-                            "Grilla en unidades lógicas · G\nEn 3D, sobre el plano XZ.",
-                        )
+                        .on_hover_text("Grid in logical units · G\nIn 3D, on the XZ plane.")
                         .clicked()
                         {
                             overlays.show_grid = !overlays.show_grid;
@@ -446,12 +444,12 @@ pub fn overlays_settings_ui_system(
                         if pill_toggle(
                             ui,
                             Icon::Thirds,
-                            Some("Guías"),
+                            Some("Guides"),
                             overlays.show_guides,
                             palette::TEXT,
                             HEIGHT,
                         )
-                        .on_hover_text("Márgenes seguros (90 % y 80 %) y tercios · M")
+                        .on_hover_text("Safe margins (90 % and 80 %) and thirds · M")
                         .clicked()
                         {
                             overlays.show_guides = !overlays.show_guides;
@@ -465,8 +463,8 @@ pub fn overlays_settings_ui_system(
                             HEIGHT,
                         )
                         .on_hover_text(
-                            "Cajas y zonas del layout · K\n\
-                             Al pasar el cursor por una caja: contenido, padding, margen y gap.",
+                            "Layout boxes and zones · K\n\
+                             Hovering a box shows its content, padding, margin and gap.",
                         )
                         .clicked()
                         {
@@ -479,27 +477,27 @@ pub fn overlays_settings_ui_system(
                                 || interactive.pan != glam::DVec2::ZERO
                                 || (interactive.user_zoom - 1.0).abs() > 1e-9;
                             let zoom = if free_3d {
-                                "3D libre".to_owned()
+                                "Free 3D".to_owned()
                             } else {
                                 format!("{:.0} %", interactive.user_zoom * 100.0)
                             };
                             ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(zoom).size(12.5).color(if moved {
+                                egui::Label::new(egui::RichText::new(zoom).size(12.5).color(
+                                    if moved {
                                         palette::ACCENT
                                     } else {
                                         palette::TEXT_MUTED
-                                    }),
-                                )
+                                    },
+                                ))
                                 .selectable(false),
                             )
                             .on_hover_text(if moved {
-                                "La vista no coincide con la cámara de la escena"
+                                "The view does not match the scene's camera"
                             } else {
-                                "La vista coincide con la cámara de la escena"
+                                "The view matches the scene's camera"
                             });
                             if icon_button_sized(ui, Icon::Reset, ButtonTone::Ghost, moved, HEIGHT)
-                                .on_hover_text("Restablecer la vista · R")
+                                .on_hover_text("Reset the view · R")
                                 .clicked()
                             {
                                 interactive.reset();
@@ -515,8 +513,8 @@ pub fn overlays_settings_ui_system(
                             HEIGHT,
                         )
                         .on_hover_text(
-                            "Propiedades del objeto seleccionado y su línea en el script
-                             Un clic en la vista selecciona un objeto.",
+                            "Properties of the selected object and its line in the script
+                             A click in the view selects an object.",
                         )
                         .clicked()
                         {
@@ -525,12 +523,12 @@ pub fn overlays_settings_ui_system(
                         if pill_toggle(
                             ui,
                             Icon::Console,
-                            Some("Consola"),
+                            Some("Console"),
                             console.open,
                             palette::ACCENT,
                             HEIGHT,
                         )
-                        .on_hover_text("Avisos, errores y salida del script · J")
+                        .on_hover_text("Warnings, errors and script output · J")
                         .clicked()
                         {
                             console.open = !console.open;
@@ -538,14 +536,14 @@ pub fn overlays_settings_ui_system(
                         if pill_toggle(
                             ui,
                             Icon::Timeline,
-                            Some("Animaciones"),
+                            Some("Animations"),
                             animations.open,
                             palette::ACCENT,
                             HEIGHT,
                         )
                         .on_hover_text(
-                            "Qué anima cada objeto y cuándo · T\n\
-                             Clic en un bloque: ir a su inicio · doble clic: abrir su play.",
+                            "What animates each object and when · T\n\
+                             Click a block: go to its start · double-click: open its play.",
                         )
                         .clicked()
                         {
@@ -560,8 +558,8 @@ pub fn overlays_settings_ui_system(
                                 HEIGHT,
                             )
                             .on_hover_text(
-                                "Guardar el fotograma actual como PNG · Ctrl+Mayús+S
-                                 Sin overlays, en la carpeta captures/ del proyecto.",
+                                "Save the current frame as PNG · Ctrl+Shift+S
+                                 Without overlays, in the project's captures/ folder.",
                             )
                             .clicked()
                         {
@@ -570,10 +568,10 @@ pub fn overlays_settings_ui_system(
                         divider(ui);
                         let keyboard =
                             icon_button_sized(ui, Icon::Keyboard, ButtonTone::Ghost, true, HEIGHT)
-                                .on_hover_text("Atajos de teclado");
+                                .on_hover_text("Keyboard shortcuts");
                         egui::Popup::menu(&keyboard).show(show_shortcuts);
                         if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, HEIGHT)
-                            .on_hover_text("Ocultar overlays · O o Esc")
+                            .on_hover_text("Hide overlays · O or Esc")
                             .clicked()
                         {
                             overlays.enabled = false;
@@ -915,7 +913,7 @@ fn paint_layout(
     if let Some(gap) = gap.filter(|gap| gap != "0" && gap != "0 0") {
         label.push_str(&format!(" · gap {gap} px"));
     }
-    label.push_str(&format!(" · {} hijos", cells.len()));
+    label.push_str(&format!(" · {} children", cells.len()));
     // Above the box, or below it near the top of the screen, and always
     // inside the screen.
     let screen_box = egui::Rect::from_points(&hovered.screen);
@@ -945,33 +943,27 @@ fn paint_layout(
 
 /// Atajos del modo overlays y de la inspección.
 const SHORTCUTS: &[(&str, &str)] = &[
-    ("O · Esc", "Mostrar u ocultar los overlays"),
-    ("I", "Inspección: mover la vista sin tocar la cámara"),
+    ("O · Esc", "Show or hide the overlays"),
+    ("I", "Inspection: move the view without touching the camera"),
     (
         "B · C · G · M · K",
-        "Límites, coordenadas, grilla, guías y layout",
+        "Bounds, coordinates, grid, guides and layout",
     ),
-    (
-        "Arrastrar",
-        "Desplazar la vista (en 3D, orbitar con el derecho)",
-    ),
-    (
-        "Clic",
-        "Seleccionar e inspeccionar el objeto bajo el cursor",
-    ),
-    ("J", "Mostrar u ocultar la consola"),
-    ("T", "Mostrar u ocultar las animaciones"),
-    ("Ctrl+Mayús+S", "Guardar el fotograma actual como PNG"),
-    ("Rueda", "Acercar o alejar hacia el cursor"),
-    ("W A S D", "Mover la cámara"),
-    ("R · F", "Restablecer la vista · encuadrar en 3D"),
-    ("Mayús", "Ajustar el punto a la grilla"),
-    ("Ctrl+C", "Copiar el punto bajo el cursor"),
+    ("Drag", "Pan the view (in 3D, orbit with the right button)"),
+    ("Click", "Select and inspect the object under the cursor"),
+    ("J", "Show or hide the console"),
+    ("T", "Show or hide the animations"),
+    ("Ctrl+Shift+S", "Save the current frame as PNG"),
+    ("Wheel", "Zoom in or out toward the cursor"),
+    ("W A S D", "Move the camera"),
+    ("R · F", "Reset the view · frame in 3D"),
+    ("Shift", "Snap the point to the grid"),
+    ("Ctrl+C", "Copy the point under the cursor"),
 ];
 
 fn show_shortcuts(ui: &mut egui::Ui) {
     ui.set_min_width(360.0);
-    ui.label(caption("ATAJOS DE TECLADO"));
+    ui.label(caption("KEYBOARD SHORTCUTS"));
     ui.add_space(6.0);
     egui::Grid::new("overlay-shortcuts")
         .num_columns(2)
@@ -1128,10 +1120,7 @@ pub fn scene_overlays_system(
         let hh = cam.frame_height * 0.5;
         (glam::DVec2::new(-hw, -hh), glam::DVec2::new(hw, hh))
     };
-    let label = format!(
-        "{} × {} unidades lógicas",
-        cam.frame_width, cam.frame_height
-    );
+    let label = format!("{} × {} logical units", cam.frame_width, cam.frame_height);
 
     let corners_screen: Vec<egui::Pos2> = if is_perspective {
         // En perspectiva el canvas es screen-space (fijo a la cámara), no world-space.
@@ -1377,7 +1366,7 @@ pub fn scene_overlays_system(
                         let (rect, _) =
                             ui.allocate_exact_size(egui::Vec2::splat(12.0), egui::Sense::hover());
                         paint_icon(ui.painter(), rect, icon, tint);
-                        let value = if copied { "Copiado".to_owned() } else { text };
+                        let value = if copied { "Copied".to_owned() } else { text };
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(value)

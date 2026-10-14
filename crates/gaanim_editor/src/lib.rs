@@ -926,7 +926,7 @@ fn editor_ui_system(
                                     detail.title = (!name.is_empty()).then(|| name.to_string());
                                     detail.place = Some(match position.stop_index {
                                         Some(stop) => format!(
-                                            "{} / {segment_count} · pausa {} de {}",
+                                            "{} / {segment_count} · stop {} of {}",
                                             index + 1,
                                             stop + 1,
                                             segment.stops.len()
@@ -1007,7 +1007,7 @@ fn editor_ui_system(
                             .clone()
                             .or_else(|| (!scene_name.is_empty()).then(|| scene_name.clone()))
                             .or_else(|| {
-                                has_scenes.then(|| format!("{} escenas", scene_segs.len()))
+                                has_scenes.then(|| format!("{} scenes", scene_segs.len()))
                             });
                         let loop_on = state.segment_loop.is_active();
                         let is_playing = timeline.is_playing;
@@ -1027,7 +1027,7 @@ fn editor_ui_system(
                                     ui.spacing_mut().item_spacing.x = 2.0;
                                     if density != PlaybackDensity::Minimal
                                         && icon_button(ui, Icon::SkipStart, ButtonTone::Ghost, true)
-                                            .on_hover_text("Inicio · Home")
+                                            .on_hover_text("Go to start · Home")
                                             .clicked()
                                     {
                                         actions.push(PlaybackAction::Jump(0.0));
@@ -1040,7 +1040,7 @@ fn editor_ui_system(
                                             ButtonTone::Ghost,
                                             prev_scene.is_some(),
                                         )
-                                        .on_hover_text("Escena anterior · ←")
+                                        .on_hover_text("Previous scene · ←")
                                         .clicked()
                                         && let Some(target) = prev_scene
                                     {
@@ -1053,7 +1053,7 @@ fn editor_ui_system(
                                         Icon::Play
                                     };
                                     if icon_button(ui, play_icon, ButtonTone::Primary, true)
-                                        .on_hover_text("Reproducir / Pausa · Espacio")
+                                        .on_hover_text("Play / pause · Space")
                                         .clicked()
                                     {
                                         actions.push(PlaybackAction::TogglePlay);
@@ -1067,7 +1067,7 @@ fn editor_ui_system(
                                             ButtonTone::Ghost,
                                             next_scene.is_some(),
                                         )
-                                        .on_hover_text("Escena siguiente · →")
+                                        .on_hover_text("Next scene · →")
                                         .clicked()
                                         && let Some(target) = next_scene
                                     {
@@ -1075,7 +1075,7 @@ fn editor_ui_system(
                                     }
                                     if density != PlaybackDensity::Minimal
                                         && icon_button(ui, Icon::SkipEnd, ButtonTone::Ghost, true)
-                                            .on_hover_text("Final · End")
+                                            .on_hover_text("Go to end · End")
                                             .clicked()
                                     {
                                         actions.push(PlaybackAction::Jump(total));
@@ -1093,7 +1093,7 @@ fn editor_ui_system(
                                             .selectable(false)
                                             .sense(egui::Sense::click()),
                                         )
-                                        .on_hover_text("Click para copiar el timecode");
+                                        .on_hover_text("Click to copy the timecode");
                                     if time_resp.clicked() {
                                         ui.ctx().copy_text(format_time(current));
                                     }
@@ -1134,7 +1134,7 @@ fn editor_ui_system(
                                         if listed {
                                             let label = label
                                                 .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                                .on_hover_text("Ver y buscar los segmentos");
+                                                .on_hover_text("View and search the segments");
                                             let shown = egui::Popup::menu(&label)
                                                 .close_behavior(
                                                     egui::PopupCloseBehavior::CloseOnClickOutside,
@@ -1170,9 +1170,9 @@ fn editor_ui_system(
                                         if !WEB
                                             && icon_button(ui, Icon::Pin, pin_tone, true)
                                             .on_hover_text(if pinned {
-                                                "Desfijar ventana (P)"
+                                                "Unpin window (P)"
                                             } else {
-                                                "Fijar ventana encima (P)"
+                                                "Pin window on top (P)"
                                             })
                                             .clicked()
                                         {
@@ -1187,7 +1187,7 @@ fn editor_ui_system(
                                         if narration_available
                                             && icon_button(ui, Icon::Mic, narration_tone, true)
                                                 .on_hover_text(
-                                                    "Guion y narración: el guion de la charla y la voz de la escena",
+                                                    "Script & narration: the talk's script and the scene's voice",
                                                 )
                                                 .clicked()
                                         {
@@ -1204,16 +1204,16 @@ fn editor_ui_system(
                                                 ButtonTone::Ghost,
                                                 !status.cancelling,
                                             )
-                                            .on_hover_text("Cancelar la exportación")
+                                            .on_hover_text("Cancel export")
                                             .clicked()
                                             {
                                                 actions.push(PlaybackAction::CancelExport);
                                             }
                                             let text = if status.cancelling {
-                                                "Deteniendo…".to_owned()
+                                                "Stopping…".to_owned()
                                             } else {
                                                 format!(
-                                                    "Exportando {:.0} %",
+                                                    "Exporting {:.0} %",
                                                     status.fraction * 100.0
                                                 )
                                             };
@@ -1233,7 +1233,7 @@ fn editor_ui_system(
                                                 ButtonTone::Ghost,
                                                 true,
                                             )
-                                            .on_hover_text("Exportar animación")
+                                            .on_hover_text("Export animation")
                                             .clicked()
                                         {
                                             actions.push(PlaybackAction::OpenExport);
@@ -1246,19 +1246,19 @@ fn editor_ui_system(
                                                 ButtonTone::Ghost,
                                                 true,
                                             )
-                                            .on_hover_text("Copiar enlace");
+                                            .on_hover_text("Copy link");
                                             egui::Popup::menu(&share).show(|ui| {
                                                 ui.set_min_width(200.0);
-                                                if ui.button("Copiar enlace").clicked() {
+                                                if ui.button("Copy link").clicked() {
                                                     actions.push(PlaybackAction::CopyLink(false));
                                                 }
-                                                if ui.button("Copiar enlace a este instante").clicked() {
+                                                if ui.button("Copy link to this moment").clicked() {
                                                     actions.push(PlaybackAction::CopyLink(true));
                                                 }
                                             });
                                         }
                                         if icon_button(ui, Icon::Present, ButtonTone::Ghost, true)
-                                            .on_hover_text("Presentar a pantalla completa")
+                                            .on_hover_text("Present in full screen")
                                             .clicked()
                                         {
                                             actions.push(PlaybackAction::Present);
@@ -1269,7 +1269,7 @@ fn editor_ui_system(
                                             ButtonTone::Ghost,
                                             true,
                                         )
-                                        .on_hover_text("Pantalla completa · F11")
+                                        .on_hover_text("Full screen · F11")
                                         .clicked() {
  actions.push(PlaybackAction::ToggleFullscreen);
  }
@@ -1287,7 +1287,7 @@ fn editor_ui_system(
                                             true,
                                         )
                                         .on_hover_text(
-                                            "Reproducción continua: ignora los scene.stop() en el editor",
+                                            "Continuous playback: ignores scene.stop() in the editor",
                                         )
                                         .clicked()
                                         {
@@ -1295,17 +1295,17 @@ fn editor_ui_system(
                                         }
                                     } else {
                                         let more = icon_button(ui, Icon::More, ButtonTone::Ghost, true)
-                                            .on_hover_text("Más controles");
+                                            .on_hover_text("More controls");
                                         egui::Popup::menu(&more).show(|ui| {
                                             ui.set_min_width(180.0);
                                             if density == PlaybackDensity::Minimal {
-                                                if ui.button("Inicio").clicked() {
+                                                if ui.button("Go to start").clicked() {
                                                     actions.push(PlaybackAction::Jump(0.0));
                                                 }
                                                 if ui
                                                     .add_enabled(
                                                         prev_scene.is_some(),
-                                                        egui::Button::new("Escena anterior"),
+                                                        egui::Button::new("Previous scene"),
                                                     )
                                                     .clicked()
                                                     && let Some(target) = prev_scene
@@ -1315,21 +1315,21 @@ fn editor_ui_system(
                                                 if ui
                                                     .add_enabled(
                                                         next_scene.is_some(),
-                                                        egui::Button::new("Escena siguiente"),
+                                                        egui::Button::new("Next scene"),
                                                     )
                                                     .clicked()
                                                     && let Some(target) = next_scene
                                                 {
                                                     actions.push(PlaybackAction::Seek(target));
                                                 }
-                                                if ui.button("Final").clicked() {
+                                                if ui.button("Go to end").clicked() {
                                                     actions.push(PlaybackAction::Jump(total));
                                                 }
                                                 ui.separator();
                                             }
                                             ui.menu_button(
                                                 format!(
-                                                    "Velocidad · {}",
+                                                    "Speed · {}",
                                                     format_rate(playback_rate)
                                                 ),
                                                 |ui| {
@@ -1348,16 +1348,16 @@ fn editor_ui_system(
                                                 },
                                             );
                                             if ui
-                                                .selectable_label(continuous, "Reproducción continua")
+                                                .selectable_label(continuous, "Continuous playback")
                                                 .clicked()
                                             {
                                                 actions.push(PlaybackAction::ToggleContinuous);
                                             }
                                             ui.separator();
-                                            if ui.button("Pantalla completa · F11").clicked() {
+                                            if ui.button("Full screen · F11").clicked() {
  actions.push(PlaybackAction::ToggleFullscreen);
  }
-                                            if ui.button("Presentar").clicked() {
+                                            if ui.button("Present").clicked() {
                                                 actions.push(PlaybackAction::Present);
                                             }
                                             if has_audio {
@@ -1368,22 +1368,22 @@ fn editor_ui_system(
                                                 });
                                             }
                                             if WEB {
-                                                if ui.button("Copiar enlace").clicked() {
+                                                if ui.button("Copy link").clicked() {
                                                     actions.push(PlaybackAction::CopyLink(false));
                                                 }
-                                                if ui.button("Copiar enlace a este instante").clicked() {
+                                                if ui.button("Copy link to this moment").clicked() {
                                                     actions.push(PlaybackAction::CopyLink(true));
                                                 }
                                             }
                                             if narration_available
                                                 && ui
-                                                    .selectable_label(narration_open, "Guion y narración")
+                                                    .selectable_label(narration_open, "Script & narration")
                                                     .clicked()
                                             {
                                                 actions.push(PlaybackAction::ToggleNarration);
                                             }
                                             if ui
-                                                .selectable_label(prompter.editor_open, "Prompter · T")
+                                                .selectable_label(prompter.editor_open, "Prompter · Shift+T")
                                                 .clicked()
                                             {
                                                 actions.push(PlaybackAction::TogglePrompter);
@@ -1394,7 +1394,7 @@ fn editor_ui_system(
                                                 && ui
                                                     .add_enabled(
                                                         !is_exporting,
-                                                        egui::Button::new("Exportar"),
+                                                        egui::Button::new("Export"),
                                                     )
                                                     .clicked()
                                             {
@@ -1402,7 +1402,7 @@ fn editor_ui_system(
                                             }
                                             if let Some(status) = export_status {
                                                 ui.label(format!(
-                                                    "Exportando {:.0} % · {}/{}",
+                                                    "Exporting {:.0} % · {}/{}",
                                                     export_progress_pct * 100.0,
                                                     status.current,
                                                     status.total,
@@ -1410,7 +1410,7 @@ fn editor_ui_system(
                                                 if ui
                                                     .add_enabled(
                                                         !status.cancelling,
-                                                        egui::Button::new("Cancelar exportación"),
+                                                        egui::Button::new("Cancel export"),
                                                     )
                                                     .clicked()
                                                 {
@@ -1418,9 +1418,9 @@ fn editor_ui_system(
                                                 }
                                             }
                                             let pin_label = if pinned {
-                                                "Desfijar ventana (P)"
+                                                "Unpin window (P)"
                                             } else {
-                                                "Fijar ventana encima (P)"
+                                                "Pin window on top (P)"
                                             };
                                             if !WEB && ui.button(pin_label).clicked() {
                                                 actions.push(PlaybackAction::TogglePin);
@@ -1441,7 +1441,7 @@ fn editor_ui_system(
                                             active_scene_loop_range.is_some(),
                                         )
                                         .on_hover_text(
-                                            "Loop del segmento actual · L\nArrastra los tiradores para refinar",
+                                            "Loop the current segment · L\nDrag the handles to refine",
                                         )
                                         .clicked()
                                             && let Some(range) = active_scene_loop_range
@@ -1622,15 +1622,15 @@ const EXPORT_PROGRESS_COLOR: egui::Color32 = palette::LOOP;
 
 fn export_tooltip(status: &export::ExportStatus) -> String {
     let mut text = format!(
-        "{} / {} fotogramas · {}",
+        "{} / {} frames · {}",
         status.current,
         status.total,
         export::short_duration(status.elapsed)
     );
     if let Some(remaining) = status.remaining {
-        text.push_str(&format!(" · quedan ~{}", export::short_duration(remaining)));
+        text.push_str(&format!(" · ~{} left", export::short_duration(remaining)));
     }
-    text.push_str("\nLa barra de tiempo marca lo ya exportado; puedes seguir reproduciendo.");
+    text.push_str("\nThe time bar marks what is already exported; you can keep playing.");
     text
 }
 
@@ -1684,7 +1684,7 @@ struct SeekBarResponse {
 struct HoverDetail {
     /// The segment's name.
     title: Option<String>,
-    /// Where it sits: `12 / 61 · pausa 2 de 3`.
+    /// Where it sits: `12 / 61 · stop 2 of 3`.
     place: Option<String>,
     /// The cue preview for the moment, once rendered.
     preview: Option<egui::TextureHandle>,
@@ -1729,7 +1729,7 @@ fn segment_list(
     let before = query.clone();
     let search = ui.add(
         egui::TextEdit::singleline(query)
-            .hint_text(format!("Buscar entre {} segmentos…", rows.len()))
+            .hint_text(format!("Search {} segments…", rows.len()))
             .desired_width(f32::INFINITY)
             .lock_focus(true),
     );
@@ -1832,8 +1832,8 @@ fn segment_list(
                 let mut meta = String::new();
                 match row.stops {
                     0 => {}
-                    1 => meta.push_str("1 pausa  "),
-                    stops => meta.push_str(&format!("{stops} pausas  ")),
+                    1 => meta.push_str("1 stop  "),
+                    stops => meta.push_str(&format!("{stops} stops  ")),
                 }
                 meta.push_str(&format_time(row.start));
                 let meta = painter.layout_no_wrap(
@@ -1856,7 +1856,7 @@ fn segment_list(
                 let name = fit_text(
                     painter,
                     if row.name.is_empty() {
-                        "(sin nombre)"
+                        "(unnamed)"
                     } else {
                         &row.name
                     },
@@ -1881,7 +1881,7 @@ fn segment_list(
             }
             if shown.is_empty() {
                 ui.label(
-                    egui::RichText::new("Ningún segmento coincide")
+                    egui::RichText::new("No segment matches")
                         .italics()
                         .color(palette::TEXT_FAINT),
                 );
@@ -2766,14 +2766,14 @@ fn speed_control(ui: &mut egui::Ui, rate: f64) -> Option<f64> {
     .corner_radius(0.0)
     .stroke(egui::Stroke::NONE)
     .fill(egui::Color32::from_white_alpha(10));
-    let response = ui.add(chip).on_hover_text("Velocidad · Alt + rueda");
+    let response = ui.add(chip).on_hover_text("Speed · Alt + wheel");
     let mut chosen = None;
     egui::Popup::from_toggle_button_response(&response)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(220.0);
             ui.label(
-                egui::RichText::new("Velocidad")
+                egui::RichText::new("Speed")
                     .size(11.0)
                     .color(palette::TEXT_MUTED),
             );
@@ -2944,7 +2944,9 @@ fn global_playback_keys_system(
         return;
     }
 
+    // `T` alone is the animation panel's.
     if keys.just_pressed(KeyCode::KeyT)
+        && keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
         && let Some(mut prompter) = prompter
     {
         prompter.editor_open = !prompter.editor_open;

@@ -61,7 +61,9 @@ pub fn open_or_report(location: &ScriptLocation) {
 
 /// How a person learns to choose the editor, for tooltips.
 pub fn hint() -> String {
-    format!("Elige el editor con {EDITOR_VARIABLE}, por ejemplo \"code --goto {{file}}:{{line}}\".")
+    format!(
+        "Choose the editor with {EDITOR_VARIABLE}, for example \"code --goto {{file}}:{{line}}\"."
+    )
 }
 
 /// The command `template` runs for `file` at `line`, split like a shell

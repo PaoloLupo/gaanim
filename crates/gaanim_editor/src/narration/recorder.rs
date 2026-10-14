@@ -77,7 +77,7 @@ impl MicRecorder {
                 let _ = thread.join();
                 Err(error)
             }
-            Err(_) => Err("el micrófono no respondió".to_string()),
+            Err(_) => Err("the microphone did not respond".to_string()),
         }
     }
 
@@ -213,14 +213,14 @@ fn open_default_input(shared: Arc<Shared>) -> Result<(cpal::Stream, u32, String)
     let host = cpal::default_host();
     let device = host
         .default_input_device()
-        .ok_or_else(|| "no hay ningún micrófono disponible".to_string())?;
+        .ok_or_else(|| "no microphone is available".to_string())?;
     let name = device
         .description()
         .map(|description| description.name().to_owned())
-        .unwrap_or_else(|_| "micrófono".to_string());
+        .unwrap_or_else(|_| "microphone".to_string());
     let config = device
         .default_input_config()
-        .map_err(|error| format!("no se pudo configurar el micrófono: {error}"))?;
+        .map_err(|error| format!("could not configure the microphone: {error}"))?;
     let channels = usize::from(config.channels().max(1));
     let rate = config.sample_rate();
     let stream_config = config.config();
@@ -232,11 +232,11 @@ fn open_default_input(shared: Arc<Shared>) -> Result<(cpal::Stream, u32, String)
         cpal::SampleFormat::I8 => build::<i8>(&device, &stream_config, channels, shared),
         cpal::SampleFormat::U16 => build::<u16>(&device, &stream_config, channels, shared),
         cpal::SampleFormat::U8 => build::<u8>(&device, &stream_config, channels, shared),
-        other => Err(format!("formato de micrófono no soportado: {other}")),
+        other => Err(format!("unsupported microphone format: {other}")),
     }?;
     stream
         .play()
-        .map_err(|error| format!("no se pudo iniciar el micrófono: {error}"))?;
+        .map_err(|error| format!("could not start the microphone: {error}"))?;
     Ok((stream, rate, name))
 }
 
@@ -263,7 +263,7 @@ where
             },
             None,
         )
-        .map_err(|error| format!("no se pudo abrir el micrófono: {error}"))
+        .map_err(|error| format!("could not open the microphone: {error}"))
 }
 
 /// Mix interleaved frames down to mono and track their peak.

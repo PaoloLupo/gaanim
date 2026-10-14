@@ -356,18 +356,18 @@ mod web {
     fn describe(error: &BundleError) -> String {
         match error {
             BundleError::UnsupportedVersion { found, .. } if *found > gaanim_bundle::VERSION => {
-                "Este archivo usa una versión del formato .gaanim más nueva que este reproductor. \
-                 Recarga la página para usar la última versión."
+                "This file uses a newer version of the .gaanim format than this player. \
+                 Reload the page to use the latest version."
                     .into()
             }
             BundleError::UnsupportedVersion { generator, .. } => format!(
-                "Este archivo lo grabó {generator} en un formato que ya no se lee. Vuelve a \
-                 grabarlo con una versión reciente de Gaanim."
+                "This file was recorded by {generator} in a format that can no longer be read. \
+                 Record it again with a recent version of Gaanim."
             ),
             BundleError::Corrupt(detail) => {
-                format!("No es un archivo .gaanim o está dañado ({detail}).")
+                format!("This is not a .gaanim file or it is damaged ({detail}).")
             }
-            error => format!("No se pudo abrir el archivo: {error}."),
+            error => format!("Could not open the file: {error}."),
         }
     }
 
@@ -496,7 +496,9 @@ mod web {
                 }
                 Ok(None) => index += 1,
                 Err(error) => {
-                    notify(&format!("No se pudo leer un audio del archivo: {error}."));
+                    notify(&format!(
+                        "Could not read an audio track from the file: {error}."
+                    ));
                     pending.0.remove(index);
                 }
             }

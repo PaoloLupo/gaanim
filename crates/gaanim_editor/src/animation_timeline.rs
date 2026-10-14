@@ -150,13 +150,13 @@ impl Category {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Motion => "movimiento",
-            Self::Transform => "transformación",
-            Self::Appearance => "aparición",
-            Self::Style => "estilo",
-            Self::Stroke => "trazo",
-            Self::Camera => "cámara",
-            Self::Other => "otra",
+            Self::Motion => "motion",
+            Self::Transform => "transform",
+            Self::Appearance => "appearance",
+            Self::Style => "style",
+            Self::Stroke => "stroke",
+            Self::Camera => "camera",
+            Self::Other => "other",
         }
     }
 }
@@ -234,7 +234,7 @@ fn view_window(timeline: &Timeline, whole_scene: bool) -> (f64, f64) {
     (0.0, duration)
 }
 
-/// `T` shows or hides the panel.
+/// `T` shows or hides the panel; `Shift+T` is the prompter's.
 pub fn animation_timeline_keys_system(
     egui_wants: Res<EguiWantsInput>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -244,7 +244,8 @@ pub fn animation_timeline_keys_system(
     if presentation.active || egui_wants.wants_keyboard_input() {
         return;
     }
-    if keys.just_pressed(KeyCode::KeyT) {
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    if keys.just_pressed(KeyCode::KeyT) && !shift {
         panel.open = !panel.open;
     }
 }
@@ -310,13 +311,13 @@ pub fn animation_timeline_model_system(
             .into_iter()
             .map(|(key, blocks)| {
                 let (title, entity, location) = match key {
-                    RowKey::Camera => ("cámara".to_owned(), None, None),
+                    RowKey::Camera => ("camera".to_owned(), None, None),
                     RowKey::Object(id) => {
                         let object = authored.and_then(|authored| authored.get(&id));
                         (
                             object
                                 .map(crate::inspector::object_title)
-                                .unwrap_or_else(|| format!("objeto {}", id.index())),
+                                .unwrap_or_else(|| format!("object {}", id.index())),
                             by_id.get(&id).copied(),
                             object.and_then(|object| object.location.clone()),
                         )
@@ -389,7 +390,7 @@ pub fn animation_timeline_panel_system(
         .collect();
     let in_view = rows.len();
 
-    let window = egui::Window::new("Animaciones")
+    let window = egui::Window::new("Animations")
         .id(egui::Id::new("editor_animation_timeline"))
         .title_bar(false)
         .order(egui::Order::Foreground)
@@ -411,26 +412,26 @@ pub fn animation_timeline_panel_system(
             ui.set_min_height(HEADER_HEIGHT);
             ui.spacing_mut().item_spacing.x = 6.0;
             ui_kit::grip(ui, &drag);
-            ui.label(caption("ANIMACIONES"));
+            ui.label(caption("ANIMATIONS"));
             ui.add_space(6.0);
-            if ui_kit::chip(ui, "Segmento", !panel.whole_scene)
-                .on_hover_text("Solo el segmento bajo el cabezal")
+            if ui_kit::chip(ui, "Segment", !panel.whole_scene)
+                .on_hover_text("Only the segment under the playhead")
                 .clicked()
             {
                 panel.whole_scene = false;
             }
-            if ui_kit::chip(ui, "Escena completa", panel.whole_scene).clicked() {
+            if ui_kit::chip(ui, "Whole scene", panel.whole_scene).clicked() {
                 panel.whole_scene = true;
             }
             ui.add(
                 egui::TextEdit::singleline(&mut panel.query)
-                    .hint_text("Buscar objeto o animación")
+                    .hint_text("Search object or animation")
                     .desired_width(200.0),
             );
             ui.label(
                 egui::RichText::new(format!(
                     "{in_view} {} · {} – {} s",
-                    if in_view == 1 { "objeto" } else { "objetos" },
+                    if in_view == 1 { "object" } else { "objects" },
                     seconds(from),
                     seconds(to)
                 ))
@@ -439,7 +440,7 @@ pub fn animation_timeline_panel_system(
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon_button_sized(ui, Icon::Close, ButtonTone::Ghost, true, 24.0)
-                    .on_hover_text("Ocultar las animaciones · T")
+                    .on_hover_text("Hide the animations · T")
                     .clicked()
                 {
                     actions.close = true;
@@ -458,11 +459,11 @@ pub fn animation_timeline_panel_system(
                     ui.add_space(6.0);
                     ui.label(
                         egui::RichText::new(if panel.model.rows.is_empty() {
-                            "La escena no tiene animaciones con duración."
+                            "The scene has no animations with a duration."
                         } else if query.is_empty() {
-                            "Nada se anima en este tramo."
+                            "Nothing animates in this stretch."
                         } else {
-                            "Ninguna animación coincide con la búsqueda."
+                            "No animation matches the search."
                         })
                         .size(12.0)
                         .color(palette::TEXT_FAINT),
@@ -565,7 +566,7 @@ fn ruler(ui: &mut egui::Ui, from: f64, to: f64, now: f64, actions: &mut Actions)
     {
         actions.seek = Some(time_of(pointer.x, from, to, track));
     }
-    response.on_hover_text("Clic o arrastre: mover el cabezal");
+    response.on_hover_text("Click or drag: move the playhead");
 }
 
 /// One row: the drawable's name, then its blocks in the window.
@@ -616,11 +617,11 @@ fn row_view(
     );
     let label = label.on_hover_text(match &row.location {
         Some(location) => format!(
-            "{}\nCreado en {}\nClic: seleccionar · doble clic: abrir la línea",
+            "{}\nCreated at {}\nClick: select · double click: open the line",
             row.title,
             crate::feedback::location_label(location)
         ),
-        None => format!("{}\nClic: seleccionar", row.title),
+        None => format!("{}\nClick: select", row.title),
     });
     if label.clicked()
         && let Some(entity) = row.entity
@@ -686,7 +687,7 @@ fn row_view(
             .origin
             .and_then(|origin| authored.and_then(|authored| authored.play(origin)));
         let mut hover = format!(
-            "{text} · {}\n{} – {} s ({} s) · {}\ncurva: {}",
+            "{text} · {}\n{} – {} s ({} s) · {}\neasing: {}",
             row.title,
             seconds(block.start),
             seconds(block.end),
@@ -696,18 +697,18 @@ fn row_view(
         );
         if let Some(play) = play {
             hover.push_str(&format!(
-                "\nplay en {}",
+                "\nplay at {}",
                 crate::feedback::location_label(&play.location)
             ));
             for caller in &play.callers {
                 hover.push_str(&format!(
-                    "\n  llamado desde {}",
+                    "\n  called from {}",
                     crate::feedback::location_label(caller)
                 ));
             }
-            hover.push_str("\nClic: ir al inicio · doble clic: abrir la línea");
+            hover.push_str("\nClick: go to the start · double click: open the line");
         } else {
-            hover.push_str("\nClic: ir al inicio");
+            hover.push_str("\nClick: go to the start");
         }
         let response = response.on_hover_text(hover);
         if response.clicked() {

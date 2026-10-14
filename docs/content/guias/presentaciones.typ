@@ -48,8 +48,7 @@ gaanim init slides mi-charla
 gaanim mi-charla
 ```
 
-También puedes ejecutar `gaanim` sin argumentos, elegir *Nuevo proyecto* y
-seleccionar *Slides*. Si aún no tienes Gaanim listo, sigue
+También puedes ejecutar `gaanim` sin argumentos, elegir *New presentation*. Si aún no tienes Gaanim listo, sigue
 #link("/empezar/instalacion/")[Instalación]. El proyecto de ejemplo no incluye
 colores, fuentes ni contenido de ninguna institución: la identidad visual es
 tuya.
@@ -129,11 +128,11 @@ scene.stop()
   escrito o dictado, y ámbar si solo algunos. Sin cuadrado, está pendiente.
 
 Gaanim escribe el guion por ti y lo mantiene al día con el código. En el
-editor, abre *Guion y narración* (el botón de micrófono de la barra de
-reproducción, o *Más controles*) y pulsa *Crear guion*: el archivo nace con
+editor, abre *Script & narration* (el botón de micrófono de la barra de
+reproducción, o *More controls*) y pulsa *Create script*: el archivo nace con
 una sección por diapositiva, con sus `notes=` como punto de partida, y una
 marca `[stop nombre]` por cada stop. Cuando el código gana diapositivas o
-stops, el botón pasa a *Abrir y completar*: añade las secciones nuevas detrás
+stops, el botón pasa a *Open and complete*: añade las secciones nuevas detrás
 de la diapositiva anterior y las marcas que faltan al final de cada sección,
 sin tocar lo que escribiste.
 
@@ -145,41 +144,41 @@ y cada frase va a la diapositiva y al tramo que estabas presentando.
 
 + Consigue un token de Scribe en Zoom Platform Studio (*View JWT Token*). Elige
   la caducidad más corta que te sirva: si se filtrara, deja de valer antes.
-+ En *Guion y narración*, abre *Scribe de Zoom (dictado)*, pega el token y
-  pulsa *Guardar en Windows* (ver #link(<token-scribe>)[El token]).
++ En *Script & narration*, abre *Zoom Scribe (dictation)*, pega el token y
+  pulsa *Save in Windows* (ver #link(<token-scribe>)[El token]).
 + Lleva el cabezal a la diapositiva desde la que quieres dictar y pulsa
-  *Dictar con Scribe*. Tras la cuenta atrás, presenta hablando: `→` o
+  *Dictate with Scribe*. Tras la cuenta atrás, presenta hablando: `→` o
   `Espacio` avanzan en cada stop, `Enter` termina y `Esc` descarta. Al
   terminar con `Enter`, el cabezal se queda donde llegaste: el siguiente
-  *Dictar con Scribe* sigue desde ese stop, así que puedes dictar la charla
+  *Dictate with Scribe* sigue desde ese stop, así que puedes dictar la charla
   por partes. Si Scribe se cortó antes (un error, el límite de minutos o dos
   minutos sin voz), se queda donde se cortó, para dictar de nuevo lo que no
   se grabó; `Esc` lo descarta todo y vuelve a donde empezaste.
 + Al terminar, Gaanim espera las últimas frases (como mucho 12 segundos;
   `Esc` deja de esperar) y las escribe en el guion. Un tramo vacío recibe lo
   dictado; uno que ya tenía texto lo conserva y lo dictado se añade a su lado
-  como comentario (`<!-- dictado: … -->`), que el guion ignora.
+  como comentario (`<!-- dictated: … -->`), que el guion ignora.
 
-Durante el dictado, el teleprompter muestra el guion de la diapositiva, el
-estado de Scribe y la última frase que oyó. Si la escena tiene una toma en vivo
-(`scene.live_take`), se dicta con sus paradas originales y la toma grabada no
-cambia; para grabarla y dictar a la vez, marca *Dictar también el guion con
-Scribe* junto a *Grabar toma en vivo*.
+Durante el dictado, el #link(<prompter>)[prompter] del editor sigue el guion y
+la barra de abajo muestra el estado de Scribe y la última frase que oyó. Si la
+escena tiene una toma en vivo (`scene.live_take`), se dicta con sus paradas
+originales y la toma grabada no cambia; para grabarla y dictar a la vez, marca
+*Also dictate the script with Scribe* junto a *Record live take*.
 
 - Idiomas: `es-ES`, `en-US`, `pt-BR`, `pt-PT`, `fr-FR`, `de-DE`, `it-IT`,
   `ja-JP`, `zh-CN`, `ar-SA` y `ar-AE`; el español de Scribe es `es-ES`. Se
   elige en los ajustes del panel o, para todo el proyecto, con
   #link("/referencia/gaanim-toml/#language")[`language`] en `gaanim.toml`
-  (*Fijar en gaanim.toml*), que manda sobre el de los ajustes.
+  (*Pin in gaanim.toml*), que manda sobre el de los ajustes.
 - Scribe asigna cada frase completa al tramo en el que empezó a decirse: haz
   una pausa breve al avanzar para que la frase siguiente caiga en su tramo.
-- *Enviar los nombres de diapositivas y stops como vocabulario* ayuda a
+- *Send the names of slides and stops as vocabulary* ayuda a
   Scribe con nombres propios y términos; está desactivado, porque envía esos
   nombres a Zoom.
 
 Scribe Live cobra por minuto de audio recibido, así que Gaanim lo limita: una
 sola sesión a la vez, sin reconexiones automáticas si falla, y la sesión se
-corta sola al llegar a los *Minutos máximos por sesión* de los ajustes (60 por
+corta sola al llegar a los *Max minutes per session* de los ajustes (60 por
 defecto, nunca más de los 120 de Zoom), tras dos minutos sin voz o si el
 micrófono deja de enviar audio, aunque el editor esté en segundo plano.
 
@@ -192,7 +191,7 @@ lo busca en este orden:
 + *Pegado en el panel:* vive solo en la memoria de esta sesión del editor.
 + *Guardado en Windows* (recomendado): el Administrador de credenciales de
   Windows lo cifra para tu usuario, como `gaanim/scribe-token`. Puedes verlo o
-  borrarlo allí, o con *Quitar el guardado*.
+  borrarlo allí, o con *Remove saved token*.
 + *La variable de entorno `GAANIM_SCRIBE_TOKEN`* de tu usuario. Es cómoda en
   otros sistemas, pero cualquier programa que ejecutes la puede leer, incluido
   el código Python de las escenas.
@@ -314,22 +313,34 @@ objetivos.
 
 == El prompter <prompter>
 
-Para ensayar, o para leer durante la charla, *Prompter* (o la tecla `T`)
-convierte la columna de notas en un teleprompter de televisión con el guion
-entero: todas las diapositivas seguidas, con su número y su nombre. La columna
-se ensancha y la miniatura de *Up Next* se reduce para dejarle sitio.
+El prompter es un teleprompter de televisión con el guion entero de la charla:
+todas las diapositivas seguidas, con su número y su nombre, y el tramo que toca
+decir iluminándose palabra a palabra mientras hablas. Es el mismo en Presenter
+View y en el editor, con el mismo tamaño y el mismo ritmo.
 
-- El tramo que toca decir va resaltado, con una barra a la izquierda; lo ya
-  dicho se apaga y lo que viene queda en gris.
+- *En Presenter View:* *Prompter* (o la tecla `T`) convierte la columna de
+  notas en el prompter. La columna se ensancha y la miniatura de *Up Next* se
+  reduce para dejarle sitio. *Notes* o `T` vuelven a las notas de la
+  diapositiva actual.
+- *En el editor:* `Shift+T` o *More controls → Prompter · Shift+T* abren el prompter en
+  una ventana sobre la vista previa, que puedes mover y redimensionar. Sigue
+  la reproducción igual que al presentar, así que sirve para ensayar sin
+  pantalla completa. Se abre solo mientras grabas una toma en vivo o dictas el
+  guion.
+
+Cómo se lee:
+
+- El tramo que toca decir va resaltado, con una barra a la izquierda. Desde
+  que empieza, sus palabras se iluminan al ritmo de lectura: 150 palabras por
+  minuto por defecto, que cambias con `+` y `−` (`A+` y `A−` cambian el tamaño
+  del texto). Lo ya dicho se apaga y lo que viene queda en gris.
+- El prompter se desplaza solo, con suavidad, para dejar la palabra que toca
+  en el tercio superior, y salta al siguiente tramo cuando avanzas.
 - Donde avanzas aparece `▶ ADVANCE` con el nombre del stop, en ámbar. Late
   cuando la diapositiva ya espera en ese stop: al terminar el tramo, toca
-  avanzar. `≈0:12` es lo que tarda en leerse el tramo, a unas 150 palabras por
-  minuto.
-- El prompter se desplaza solo hasta el tramo actual y lo deja en el tercio
-  superior. Puedes desplazarte a mano; al avanzar, vuelve.
+  avanzar. `≈0:12` es lo que tarda en leerse el tramo a tu ritmo.
 - Una diapositiva sin guion muestra igualmente sus stops, y una marca de más,
   sin stop, aparece en rojo.
-- *Notes* o `T` vuelven a las notas de la diapositiva actual.
 
 Para ensayar la charla entera contra su duración, presenta con el prompter
 abierto: Presenter View cuenta el tiempo de cada diapositiva y guarda el
@@ -340,10 +351,10 @@ gaanim --present --duration 20m mi-charla
 ```
 
 Para grabarte presentando, llama a `scene.live_take()` al principio del script
-y pulsa *Grabar toma en vivo* en *Guion y narración*. El teleprompter de la
-grabación muestra el guion de cada diapositiva con `▶ AVANZA` en cada stop, y
-la toma guarda cuánto esperaste en cada uno: la reproducción y el vídeo
-exportado siguen tu ritmo (ver #link("/referencia/audio/#narracion")[Narración]).
+y pulsa *Record live take* en *Script & narration*. El prompter del editor
+sigue la grabación, y la toma guarda cuánto esperaste en cada stop: la
+reproducción y el vídeo exportado siguen tu ritmo (ver
+#link("/referencia/audio/#narracion")[Narración]).
 
 == Atajos de teclado
 
@@ -355,7 +366,7 @@ exportado siguen tu ritmo (ver #link("/referencia/audio/#narracion")[Narración]
   [`Space`], [pausar o reanudar la animación en curso; nunca salta de paso],
   [`Home` / `End`], [ir al primer o al último paso],
   [`O`], [vista general: busca por nombre de diapositiva, paso o notas; `Enter` salta a la primera coincidencia],
-  [`T`], [mostrar el guion entero como teleprompter, o volver a las notas de la diapositiva],
+  [`T`], [mostrar el guion entero en el prompter, o volver a las notas de la diapositiva; en el editor, `Shift+T` abre o cierra la ventana del prompter],
   [`B` / `W`], [poner la pantalla de la audiencia en negro o en blanco],
   [`P`], [volver a abrir la vista del presentador si la cerraste],
   [`Esc`], [cerrar la vista general o el negro/blanco; después, salir del modo presentación],
@@ -409,7 +420,7 @@ sus notas, donde cada `[stop]` se imprime como una flecha (`→ grafico`).
 gaanim export mi-charla --output mi-charla.pdf --notes
 ```
 
-También funciona con un paquete `.gaanim` y desde el diálogo *Exportar* del
+También funciona con un paquete `.gaanim` y desde el diálogo *Export* del
 editor; la #link("/referencia/cli/#diapositivas-pdf")[referencia de la línea
 de comandos] explica las opciones.
 

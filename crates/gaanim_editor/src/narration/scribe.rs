@@ -156,19 +156,15 @@ pub(crate) mod vault {
         {
             if token.0.len() > MAX_BYTES {
                 return Err(format!(
-                    "el token pasa de {MAX_BYTES} bytes, lo que Windows guarda por credencial"
+                    "the token is over {MAX_BYTES} bytes, the most Windows keeps per credential"
                 ));
             }
-            credentials::write(
-                TARGET,
-                "Token de Scribe de Zoom para Gaanim",
-                token.0.as_bytes(),
-            )
+            credentials::write(TARGET, "Zoom Scribe token for Gaanim", token.0.as_bytes())
         }
         #[cfg(not(windows))]
         {
             let _ = token;
-            Err("este sistema no tiene un almacén de credenciales que Gaanim use".to_owned())
+            Err("this system has no credential store that Gaanim uses".to_owned())
         }
     }
 
@@ -289,7 +285,7 @@ pub(crate) mod vault {
             if written {
                 Ok(())
             } else {
-                Err(format!("Windows no guardó la credencial: {error}"))
+                Err(format!("Windows did not save the credential: {error}"))
             }
         }
 
@@ -303,7 +299,7 @@ pub(crate) mod vault {
             if error.raw_os_error() == Some(ERROR_NOT_FOUND) {
                 Ok(())
             } else {
-                Err(format!("Windows no borró la credencial: {error}"))
+                Err(format!("Windows did not delete the credential: {error}"))
             }
         }
 
@@ -410,7 +406,7 @@ pub(crate) fn parse_event(text: &str) -> Option<ScribeEvent> {
             let message = error
                 .and_then(|error| error.get("message"))
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("Scribe informó un error")
+                .unwrap_or("Scribe reported an error")
                 .to_owned();
             let fatal = error
                 .and_then(|error| error.get("fatal"))
@@ -432,12 +428,12 @@ pub(crate) fn parse_event(text: &str) -> Option<ScribeEvent> {
 #[cfg(not(target_arch = "wasm32"))]
 fn describe_status(status: u16) -> String {
     match status {
-        401 => "Zoom rechazó el token (401): puede haber caducado".to_owned(),
-        403 => "el token no tiene permiso para Scribe Live (403)".to_owned(),
-        426 => "Zoom pidió otro protocolo de conexión (426)".to_owned(),
-        429 => "Zoom limita las sesiones de Scribe ahora mismo (429); prueba más tarde".to_owned(),
-        503 => "Scribe no está disponible ahora (503)".to_owned(),
-        status => format!("Zoom respondió {status} al conectar"),
+        401 => "Zoom rejected the token (401): it may have expired".to_owned(),
+        403 => "the token has no permission for Scribe Live (403)".to_owned(),
+        426 => "Zoom asked for another connection protocol (426)".to_owned(),
+        429 => "Zoom is limiting Scribe sessions right now (429); try again later".to_owned(),
+        503 => "Scribe is not available right now (503)".to_owned(),
+        status => format!("Zoom answered {status} when connecting"),
     }
 }
 
@@ -556,7 +552,7 @@ impl ScribeSession {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = (token, config, source);
-            Err("Scribe solo está disponible en la aplicación de escritorio".to_owned())
+            Err("Scribe is only available in the desktop app".to_owned())
         }
     }
 
@@ -571,7 +567,7 @@ impl ScribeSession {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return Err("ya hay una sesión de Scribe en curso".to_owned());
+            return Err("a Scribe session is already running".to_owned());
         }
         let (events_tx, events) = crossbeam_channel::unbounded();
         let control = Arc::new(AtomicU8::new(RUNNING));
@@ -652,9 +648,9 @@ fn connect(url: &str, token: &ScribeToken) -> Result<Socket, String> {
 
     let mut request = url
         .into_client_request()
-        .map_err(|_| "la dirección de Scribe no es válida".to_owned())?;
+        .map_err(|_| "the Scribe address is not valid".to_owned())?;
     let mut authorization = HeaderValue::from_str(&format!("Bearer {}", token.0))
-        .map_err(|_| "el token tiene caracteres no válidos".to_owned())?;
+        .map_err(|_| "the token has invalid characters".to_owned())?;
     authorization.set_sensitive(true);
     request
         .headers_mut()
@@ -666,14 +662,14 @@ fn connect(url: &str, token: &ScribeToken) -> Result<Socket, String> {
     let host = request
         .uri()
         .host()
-        .ok_or_else(|| "la dirección de Scribe no tiene host".to_owned())?
+        .ok_or_else(|| "the Scribe address has no host".to_owned())?
         .to_owned();
     let secure = request.uri().scheme_str() == Some("wss");
     let port = request
         .uri()
         .port_u16()
         .unwrap_or(if secure { 443 } else { 80 });
-    let unreachable = |error: &dyn fmt::Display| format!("no se pudo conectar con Scribe: {error}");
+    let unreachable = |error: &dyn fmt::Display| format!("could not connect to Scribe: {error}");
     let addresses = (host.as_str(), port)
         .to_socket_addrs()
         .map_err(|error| unreachable(&error))?;
@@ -691,7 +687,7 @@ fn connect(url: &str, token: &ScribeToken) -> Result<Socket, String> {
     let stream = match (stream, last) {
         (Some(stream), _) => stream,
         (None, Some(error)) => return Err(unreachable(&error)),
-        (None, None) => return Err(unreachable(&"la dirección no resuelve")),
+        (None, None) => return Err(unreachable(&"the address does not resolve")),
     };
     stream
         .set_read_timeout(Some(CONNECT_TIMEOUT))
@@ -710,7 +706,7 @@ fn connect(url: &str, token: &ScribeToken) -> Result<Socket, String> {
             describe_status(response.status().as_u16())
         }
         tungstenite::HandshakeError::Failure(error) => unreachable(&error),
-        tungstenite::HandshakeError::Interrupted(_) => unreachable(&"la conexión tardó demasiado"),
+        tungstenite::HandshakeError::Interrupted(_) => unreachable(&"the connection took too long"),
     })?;
     let tcp = match socket.get_ref() {
         tungstenite::stream::MaybeTlsStream::Plain(tcp) => Some(tcp),
@@ -757,7 +753,7 @@ fn stream(
         let _ = socket.flush();
     };
     if socket.send(Message::text(session_update(config))).is_err() {
-        fail(&mut socket, "se cortó la conexión con Scribe".to_owned());
+        fail(&mut socket, "the connection to Scribe was cut".to_owned());
         return;
     }
     let max_samples =
@@ -803,7 +799,7 @@ fn stream(
                 let count = pending.len().min(FRAME_SAMPLES);
                 let frame: Vec<u8> = pending.drain(..count).flat_map(i16::to_le_bytes).collect();
                 if socket.send(Message::binary(frame)).is_err() {
-                    fail(&mut socket, "se cortó la conexión con Scribe".to_owned());
+                    fail(&mut socket, "the connection to Scribe was cut".to_owned());
                     return;
                 }
                 streamed.fetch_add(count as u64, Ordering::Relaxed);
@@ -814,7 +810,7 @@ fn stream(
                 }
                 let close = serde_json::json!({ "type": "session.close" }).to_string();
                 if socket.send(Message::text(close)).is_err() {
-                    fail(&mut socket, "se cortó la conexión con Scribe".to_owned());
+                    fail(&mut socket, "the connection to Scribe was cut".to_owned());
                     return;
                 }
                 closing = Some(Instant::now());
@@ -846,7 +842,7 @@ fn stream(
             Err(error) => {
                 fail(
                     &mut socket,
-                    format!("la conexión con Scribe falló: {error}"),
+                    format!("the connection to Scribe failed: {error}"),
                 );
                 return;
             }
@@ -985,7 +981,7 @@ mod tests {
     fn statuses_explain_themselves_without_quoting_the_request() {
         assert!(describe_status(401).contains("token"));
         assert!(describe_status(403).contains("403"));
-        assert_eq!(describe_status(500), "Zoom respondió 500 al conectar");
+        assert_eq!(describe_status(500), "Zoom answered 500 when connecting");
     }
 
     #[test]
