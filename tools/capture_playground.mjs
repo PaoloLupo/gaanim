@@ -10,7 +10,8 @@
 // Node 22 or newer (its WebSocket drives the browser through the DevTools
 // protocol, so nothing is installed). The browser needs WebGPU; the profile is
 // a new temporary one, so the playground starts as a first visit does. The
-// video export is checked too: the MP4 it downloads must exist.
+// video export and the HTML page are checked too: the MP4 and the page they
+// download must exist.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -408,6 +409,16 @@ try {
   await click("#embed");
   await sleep(4000);
   await shot("insertar");
+  // Its page with everything inside must download.
+  await click("#embed-html");
+  let pages = [];
+  for (let tries = 0; tries < 100 && !pages.length; tries++) {
+    await sleep(300);
+    pages = readdirSync(downloads).filter((name) => name.endsWith(".html"));
+  }
+  if (!pages.length) throw new Error(`no HTML page downloaded (${await evaluate(`document.getElementById("toast").textContent`)})`);
+  await sleep(500);
+  console.log(`page: ${pages[0]}, ${(statSync(join(downloads, pages[0])).size / 1e6).toFixed(1)} MB`);
   await click("#embed-close");
 
   // The light theme, after a clean run.

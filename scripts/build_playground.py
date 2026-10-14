@@ -51,6 +51,7 @@ PAGE_FILES = (
     "playground.css",
     "main.js",
     "video.js",
+    "standalone.js",
     "language.js",
     "runner.js",
     "language.py",
@@ -133,7 +134,7 @@ def content_hash(path: Path) -> str:
 
 
 def version_page(out: Path) -> None:
-    """Ask for the page's script, styles and video module by their content
+    """Ask for the page's script, styles and modules by their content
     (`?v=`): cached apart, a browser could otherwise run a new page with an
     old script after a deploy. The workers carry the release's version."""
     digest = hashlib.sha256(b"".join((out / name).read_bytes() for name in PAGE_FILES)).hexdigest()[:12]
@@ -142,7 +143,10 @@ def version_page(out: Path) -> None:
             ('href="playground.css"', f'href="playground.css?v={digest}"'),
             ('src="main.js"', f'src="main.js?v={digest}"'),
         ],
-        "main.js": [('from "./video.js"', f'from "./video.js?v={digest}"')],
+        "main.js": [
+            ('from "./video.js"', f'from "./video.js?v={digest}"'),
+            ('from "./standalone.js"', f'from "./standalone.js?v={digest}"'),
+        ],
     }
     for name, pairs in rewrites.items():
         path = out / name

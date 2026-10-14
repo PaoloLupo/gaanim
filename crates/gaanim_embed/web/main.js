@@ -26,12 +26,40 @@
 // player with the same options instead; with `full=click` it waits for a
 // click first, since the web player downloads far more, and a parent page
 // hears `full` with the web player's address to offer that click itself.
+//
+// A page may also carry its file, as the playground's HTML download does to
+// play from a disk, with no server: this page with this
+// script inline, importing the bindings from a `data:` address, plus three
+// blocks the script reads: `<script type="application/json"
+// id="gaanim-options">` with the options above, and two `<script
+// type="application/octet-stream">` in base64, `gaanim-module` (the module,
+// gzip-compressed) and `gaanim-file`. With no web player to hand a file to,
+// it plays one that needs it without those passes.
 import init, { Player } from "./pkg/gaanim_embed.js";
 
+const carried = {
+  options: document.getElementById("gaanim-options"),
+  module: document.getElementById("gaanim-module"),
+  file: document.getElementById("gaanim-file"),
+};
+const carriedOptions = carried.options ? JSON.parse(carried.options.textContent) : {};
+
+// The bytes of a carried block, which leaves the page once read.
+function carriedBytes(block) {
+  const text = block.textContent;
+  block.remove();
+  if (Uint8Array.fromBase64) return Uint8Array.fromBase64(text);
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 const params = new URLSearchParams(location.search);
-// `?loop`, `?loop=1`: on; `?loop=0`: off; absent: `fallback`.
+// `?loop`, `?loop=1`: on; `?loop=0`: off; absent: the carried option, or
+// `fallback`.
 function flag(name, fallback) {
-  if (!params.has(name)) return fallback;
+  if (!params.has(name)) return typeof carriedOptions[name] === "boolean" ? carriedOptions[name] : fallback;
   return !["0", "false", "no"].includes(params.get(name).toLowerCase());
 }
 const options = {
@@ -159,7 +187,8 @@ function opened(json) {
     const [r, g, b] = info.background;
     document.body.style.background = `rgb(${r} ${g} ${b})`;
   }
-  document.title = info.title || document.title;
+  // A page that carries its file keeps the title it was given.
+  if (!carried.file) document.title = info.title || document.title;
   Object.assign(state, {
     time: Math.min(startTime(), info.duration),
     playing: false,
@@ -902,8 +931,9 @@ const fullPlayer = src
 // The module ships gzip-compressed so it downloads small from any host; a
 // server that already decoded it hands over the plain module. Either way it
 // compiles as it arrives (`instantiateStreaming`), not after the download.
+// A page that carries it reads it from itself.
 async function moduleResponse(url) {
-  const response = await fetch(url);
+  const response = carried.module ? new Response(carriedBytes(carried.module)) : await fetch(url);
   if (!response.ok) throw httpError(response);
   const reader = response.body.getReader();
   // The first two bytes say whether it is still compressed.
@@ -946,9 +976,11 @@ async function start() {
   // The file downloads while the module does: on a first visit the two
   // overlap, and once the module is cached the file no longer waits for it
   // to compile. A failure shows once the player can open files.
-  const file = src ? locate(new URL(src, location.href).href) : null;
+  let file = null;
+  if (src) file = locate(new URL(src, location.href).href);
+  else if (carried.file) file = Promise.resolve().then(() => ({ bytes: carriedBytes(carried.file) }));
   file?.catch(() => {});
-  if (src) say("Cargando la animación…");
+  if (file) say("Cargando la animación…");
   try {
     await init({ module_or_path: moduleResponse("pkg/gaanim_embed_bg.wasm.gz") });
     player = await Player.create(canvas);
@@ -963,7 +995,7 @@ async function start() {
     try {
       found = await file;
     } catch (error) {
-      fail(downloadError(error));
+      fail(src ? downloadError(error) : error);
       return;
     }
     playLocated(found);

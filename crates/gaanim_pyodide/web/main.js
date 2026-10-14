@@ -16,9 +16,11 @@
 //   (post-processing, shader backgrounds) plays in the web player (`?embed`).
 // - Insertar prepares the recording for a blog or website: the file to
 //   publish there and the <iframe> of the embed player that plays it, with a
-//   preview of that player.
+//   preview of that player; or, for whoever has no site, one HTML page with
+//   the recording and the embed player inside (standalone.js).
 // Nothing leaves the browser: the page is static files.
 
+import { standalonePage } from "./standalone.js";
 import { FORMATS, evenSize, exportVideo, supportedCodec } from "./video.js";
 
 const MONACO = "https://cdn.jsdelivr.net/npm/monaco-editor@0.57.0/min";
@@ -87,6 +89,7 @@ const ui = {
   videoCancel: $("video-cancel"),
   videoStart: $("video-start"),
   downloadBundle: $("download-bundle"),
+  downloadHtml: $("download-html"),
   explorer: $("explorer"),
   explorerToggle: $("explorer-toggle"),
   tree: $("tree"),
@@ -140,6 +143,8 @@ const ui = {
   embedCode: $("embed-code"),
   embedCopy: $("embed-copy"),
   embedLocal: $("embed-local"),
+  embedHtml: $("embed-html"),
+  embedHtmlWarning: $("embed-html-warning"),
 };
 
 // ---------------------------------------------------------------------------
@@ -2544,6 +2549,7 @@ window.addEventListener("message", (event) => {
     pendingBundle = null;
   } else if (message.kind === "opened" && playerKind === "embed" && message.full?.length) {
     lastFull = message.full;
+    if (ui.embedDialog.open) showEmbed();
     // Post-processing or a shader background: the web player draws them.
     usePlayer("full");
     pendingBundle = lastBundle;
@@ -2565,6 +2571,7 @@ function showBundle(bytes, scene) {
   lastScene = scene;
   lastFull = [];
   ui.downloadBundle.disabled = false;
+  ui.downloadHtml.disabled = false;
   ui.downloadVideo.disabled = false;
   ui.embed.disabled = false;
   ui.embed.title = "Insertar: la animación en un blog o sitio web";
@@ -3351,16 +3358,51 @@ ui.downloadToggle.addEventListener("click", (event) => {
   event.stopPropagation();
   const open = ui.downloadMenu.hidden;
   ui.downloadBundle.textContent = `${embedName()}.gaanim`;
+  ui.downloadHtml.textContent = `${embedName()}.html`;
   ui.downloadMenu.hidden = !open;
   ui.downloadToggle.setAttribute("aria-expanded", String(open));
 });
 document.addEventListener("click", closeMenu);
 ui.downloadProject.addEventListener("click", downloadProject);
 ui.downloadBundle.addEventListener("click", downloadRecording);
+ui.downloadHtml.addEventListener("click", downloadPage);
 ui.downloadVideo.addEventListener("click", openVideo);
 
 function downloadRecording() {
   if (lastBundle) downloadBlob(`${embedName()}.gaanim`, lastBundle);
+}
+
+// The recording as one HTML page with the embed player inside, which plays
+// with no server (standalone.js), with the options Insertar remembers.
+let pageBusy = false;
+async function downloadPage() {
+  if (!lastBundle || pageBusy) return;
+  closeMenu();
+  const name = `${embedName()}.html`;
+  pageBusy = true;
+  ui.downloadHtml.disabled = ui.embedHtml.disabled = true;
+  toast(`Preparando ${name}…`, 60000);
+  try {
+    const page = await standalonePage(embedUrl, lastBundle, {
+      title: currentName(),
+      generator: `Gaanim Playground ${config.version}`,
+      loop: embed.loop,
+      controls: embed.controls,
+      autoplay: embed.autoplay,
+    });
+    downloadBlob(name, page, "text/html");
+    toast(`${name} descargado (${formatSize(page.size)}).${lastFull.length ? ` ${pageWarning()}` : ""}`, lastFull.length ? 8000 : 2600);
+  } catch (error) {
+    toast(`No se pudo preparar la página: ${error?.message ?? error}`, 6000);
+  } finally {
+    pageBusy = false;
+    ui.downloadHtml.disabled = ui.embedHtml.disabled = !lastBundle;
+  }
+}
+
+// What the page leaves out of a recording that needs the web player.
+function pageWarning() {
+  return `La escena usa ${listOf(lastFull.map((pass) => PASSES[pass] ?? pass))}, que la página HTML no dibuja; publicada con el código de Insertar se ve entera.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -3469,6 +3511,9 @@ function showEmbed() {
     ui.embedTest.href = embedSource(fileUrl());
   }
   ui.embedCode.value = embedCode();
+  ui.embedHtml.textContent = `Descargar ${name.replace(/\.gaanim$/, ".html")}`;
+  ui.embedHtmlWarning.hidden = !lastFull.length;
+  if (lastFull.length) ui.embedHtmlWarning.textContent = pageWarning();
 }
 
 function showEmbedScene() {
@@ -3562,6 +3607,7 @@ for (const [box, key] of [
   });
 }
 ui.embedDownload.addEventListener("click", downloadRecording);
+ui.embedHtml.addEventListener("click", downloadPage);
 ui.embedCopy.addEventListener("click", async () => {
   const code = embedCode();
   try {

@@ -215,7 +215,7 @@ comprimidos en la propia dirección: quien lo abre recibe una copia como
 proyecto nuevo. Las imágenes, el audio y las fuentes no caben en un enlace;
 para compartirlos, descarga el `.zip`.
 
-*Descargar* ofrece tres cosas:
+*Descargar* ofrece cuatro cosas:
 
 - *Vídeo o GIF…* convierte la última grabación en MP4 (H.264), WebM (VP9) o
   GIF, a 480p, 720p, 1080p o 4K. La conversión usa los codificadores del
@@ -225,6 +225,9 @@ para compartirlos, descarga el `.zip`.
   por segundo y 256 colores.
 - El `.gaanim` de la grabación, que se reproduce, presenta y exporta con la
   aplicación sin Python (ver #link("/guias/compartir/")[Compartir sin Python]).
+- Una página `.html` con la grabación y el reproductor dentro, que se abre
+  con doble clic, sin servidor (ver
+  #link("/guias/compartir/#pagina-html")[Sin sitio donde publicarla]).
 - El proyecto en un `.zip`.
 
 #figure(
@@ -241,12 +244,14 @@ con todo, o con la calidad de producción, expórtalo con la aplicación.
 *Insertar* prepara la escena para publicarla: descarga el `.gaanim` con el
 nombre que elijas y compone el `<iframe>` del reproductor ligero, con la
 dirección donde lo publicarás y la proporción de la escena. Al lado muestra
-cómo se verá. Los detalles y las opciones están en
+cómo se verá. Si no tienes dónde publicarlo, debajo de la vista previa
+descarga en su lugar una página HTML con la animación y el reproductor
+dentro. Los detalles y las opciones están en
 #link("/guias/compartir/#insertar")[Insertar en un blog o sitio web].
 
 #figure(
-  image("../../assets/playground/insertar.webp", alt: "El diálogo Insertar: la vista previa a la izquierda y los pasos con el código del iframe a la derecha"),
-  caption: [Insertar: el nombre del archivo, su dirección, las opciones y el código.],
+  image("../../assets/playground/insertar.webp", alt: "El diálogo Insertar: la vista previa a la izquierda, con la descarga de la página HTML debajo, y los pasos con el código del iframe a la derecha"),
+  caption: [Insertar: el nombre del archivo, su dirección, las opciones y el código; bajo la vista previa, la página HTML.],
 )
 
 = Tema claro y oscuro
