@@ -50,8 +50,8 @@ necesita el entorno de Python que Gaanim detecta junto al proyecto (ver
 = Previsualizar
 
 ```bash
-gaanim [--present] [--monitor <ÍNDICE>] [--sections <LISTA>] [--from <NOMBRE>] <SCRIPT_O_PROYECTO>
-gaanim [--present] [--monitor <ÍNDICE>] [--sections <LISTA>] [--from <NOMBRE>] <PAQUETE.gaanim>
+gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] <SCRIPT_O_PROYECTO>
+gaanim [--present] [--monitor <ÍNDICE>] [--duration <TIEMPO>] [--sections <LISTA>] [--from <NOMBRE>] <PAQUETE.gaanim>
 ```
 
 Sin argumentos, `gaanim` abre el Inicio: crear un proyecto, abrir una carpeta o
@@ -66,6 +66,7 @@ reproduce los fotogramas grabados con las mismas opciones, sin cargar Python.
   [*Opción*], [*Efecto*],
   [`--present`], [Abre la escena en modo presentación: pantalla completa sin bordes para la audiencia y Presenter View para quien presenta. Requiere `<SCRIPT_O_PROYECTO>`.],
   [`--monitor <ÍNDICE>`], [Monitor de la presentación, contado desde `0`. Sin él se usa el monitor principal. Solo es válido junto con `--present`.],
+  [`--duration <TIEMPO>`], [Duración prevista de la charla: `20m`, `1h30m`, `90s`, `20:00` o un número de minutos. Presenter View la cuenta hacia atrás y muestra si vas adelantado o retrasado (ver #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla]).],
   [`--sections <LISTA>`], [Reproduce solo los segmentos indicados, separados por comas, por ejemplo `resultados,cierre`.],
   [`--from <NOMBRE>`], [Empieza en ese segmento y sigue hasta el final. Combinado con `--sections`, recorta la lista a partir de ese nombre.],
 )

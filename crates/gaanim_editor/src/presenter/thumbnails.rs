@@ -727,6 +727,7 @@ mod tests {
                 id: 1,
                 name: "intro".into(),
                 notes: None,
+                target: None,
                 start_time: 0.0,
                 end_time: 2.0,
                 stops: vec![SegmentStop {
@@ -739,6 +740,7 @@ mod tests {
                 id: 2,
                 name: "closing".into(),
                 notes: None,
+                target: None,
                 start_time: 2.0,
                 end_time: 4.0 + 4.0 * f64::EPSILON,
                 stops: vec![SegmentStop {

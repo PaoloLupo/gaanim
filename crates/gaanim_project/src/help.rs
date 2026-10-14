@@ -103,6 +103,10 @@ only says whether there is one",
                     "Monitor used by --present (default: the primary one)",
                 ),
                 (
+                    "--duration <TIME>",
+                    "Planned length of the talk, e.g. 20m or 1h30m: Presenter View\ncounts it down and shows how far ahead or behind you are",
+                ),
+                (
                     "--sections <LIST>",
                     "Play only these segments or Section keys, e.g. intro,results;\na name with commas goes alone or with its commas as \\,",
                 ),

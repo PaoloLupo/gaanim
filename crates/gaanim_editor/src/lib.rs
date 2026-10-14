@@ -22,6 +22,7 @@ mod fps_overlay;
 pub mod frame_capture;
 pub mod frame_profile;
 pub mod host;
+pub use presenter::pace::parse_talk_duration;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod idle;
 pub mod inspector;
@@ -3756,6 +3757,7 @@ mod tests {
                 id: 1,
                 name: "first".into(),
                 notes: None,
+                target: None,
                 start_time: 0.0,
                 end_time: 1.25,
                 stops: Vec::new(),
@@ -3764,6 +3766,7 @@ mod tests {
                 id: 2,
                 name: "last".into(),
                 notes: None,
+                target: None,
                 start_time: 1.25,
                 end_time: 3.0,
                 stops: Vec::new(),
@@ -3869,6 +3872,7 @@ mod tests {
             id: 1,
             name: "changed".into(),
             notes: None,
+            target: None,
             start_time: 0.75,
             end_time: 2.5,
             stops: Vec::new(),
@@ -3912,6 +3916,7 @@ mod tests {
             id: 1,
             name: "loop me".into(),
             notes: None,
+            target: None,
             start_time: 1.0,
             end_time: 2.0,
             stops: vec![gaanim_timeline::timeline::SegmentStop {
@@ -3953,6 +3958,7 @@ mod tests {
             id: 1,
             name: "present".into(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 1.0,
             stops: Vec::new(),

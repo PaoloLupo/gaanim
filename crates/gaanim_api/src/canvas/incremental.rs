@@ -126,6 +126,7 @@ impl SceneModel {
             thumbnail_time: _,
             narration: _,
             branding,
+            talk_target,
             camera_position,
             lighting_3d,
             // Authored state, fingerprinted per segment by `fingerprints`.
@@ -156,6 +157,7 @@ impl SceneModel {
         global.add(audio_tracks);
         global.add(tempo);
         global.add(branding);
+        global.add(talk_target);
         global.add(camera_position);
         global.add(lighting_3d);
         global
@@ -177,6 +179,7 @@ fn add_segment(
         id,
         name,
         notes,
+        target,
         template,
         background,
         post_process,
@@ -193,6 +196,7 @@ fn add_segment(
     fingerprint.add(id);
     fingerprint.add(name);
     fingerprint.add(notes);
+    fingerprint.add(target);
     fingerprint.add(template);
     fingerprint.add(background);
     fingerprint.add(post_process);

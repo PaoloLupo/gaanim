@@ -73,7 +73,7 @@ por funciones de Python propias (ver #link("/guias/layout/")[Layout]).
 
 ```bash
 gaanim check mi-charla --strict
-gaanim --present --monitor 1 mi-charla
+gaanim --present --monitor 1 --duration 20m mi-charla
 ```
 
 `gaanim check` revisa segmentos, notas, paradas y el formato 16:9. Los índices
@@ -111,8 +111,11 @@ Con `--present`, la audiencia ve la diapositiva a pantalla completa y tú ves
 
 - *Encabezado:* estado (`PLAYING`, `PAUSED` o `END`), `Slide n of N`, la hora,
   el tiempo transcurrido con un botón `↺` para reiniciarlo y una barra con un
-  bloque por diapositiva y marcas de pasos; un clic salta a ese punto.
-- *Now on screen:* nombre de la diapositiva, `Step k of K · nombre` y una
+  bloque por diapositiva y marcas de pasos; un clic salta a ese punto. Si la
+  charla tiene una duración prevista, también `LEFT` y `PACE` (ver
+  #link(<tiempo-de-la-charla>)[El tiempo de la charla]).
+- *Now on screen:* nombre de la diapositiva, `Step k of K · nombre`, el
+  tiempo que llevas en ella si tiene objetivo o un ensayo anterior, y una
   vista grande de lo que ve la audiencia, en vivo: con los votos y los
   jugadores de la sala cuando hay público. Si la pantalla de la audiencia está
   en negro o en blanco, la vista lo indica. Debajo, unos botones permiten
@@ -124,6 +127,53 @@ Con `--present`, la audiencia ve la diapositiva a pantalla completa y tú ves
 - *Barra inferior:* primer paso, paso anterior, reproducir/pausa, paso
   siguiente, último paso, `Overview`, `Black` y `White`, el progreso de las
   vistas previas y la lista de atajos (icono de teclado).
+
+== El tiempo de la charla <tiempo-de-la-charla>
+
+Dile a Gaanim cuánto quieres que dure la charla, entera o por diapositivas, y
+Presenter View te dirá cuánto queda y si vas adelantado o retrasado:
+
+```python
+>>>from gaanim import Scene, Transition, title_slide
+>>>scene = Scene(frame=(16, 9))
+scene.slides.target(20 * 60)                                 # la charla, en segundos
+scene.segment("Portada", template=title_slide, target=30)    # cada diapositiva
+scene.segment("Resultados", Transition.slide(0.5, "left"), target=120)
+```
+
+La duración de la charla entera también se fija al presentar, sin tocar el
+script: en Presenter View, con el botón que la muestra junto a `LEFT` (o
+`Plan time` si aún no hay ninguna), eliges `10m` a `60m`, escribes otra
+(`25m`, `1h10m`, `25:00`) o la quitas; o desde la línea de comandos:
+
+```bash
+gaanim --present --duration 20m mi-charla
+```
+
+- `--duration` acepta `20m`, `1h30m`, `90s`, `20:00` o un número de minutos.
+- Si hay varias, manda la que fijes en Presenter View durante la sesión,
+  luego `--duration`, luego la del script y por último la que fijaste en la
+  vista la vez anterior para ese archivo, que Gaanim recuerda. Sin ninguna,
+  la duración es la suma de los objetivos (`target=`), si todas las
+  diapositivas tienen uno. El popup del botón dice de dónde viene.
+- `LEFT` cuenta hacia atrás lo que queda de esa duración desde que empezó la
+  presentación (el `↺` del tiempo transcurrido también la reinicia). Pasa a
+  ámbar en el último 10 % y a rojo, con signo menos, cuando te pasas.
+- `PACE` aparece si alguna diapositiva tiene objetivo. Suma lo que cada
+  diapositiva ya dejada tardó de más o de menos, y lo que la actual ya se
+  pasó: `+1:05` es un minuto y cinco segundos de retraso, `-0:20` veinte
+  segundos de adelanto. Va en verde si vas a tiempo o adelantado, en ámbar
+  con un retraso de hasta un 10 % de la duración prevista (30 segundos como
+  mínimo) y en rojo con más.
+- Bajo el nombre de la diapositiva, `0:45 of 1:30 on this slide` compara el
+  tiempo que llevas en ella con su objetivo; en rojo, cuando lo superas.
+
+Cada presentación que dura más de 30 segundos se guarda como un ensayo, con
+el tiempo de cada diapositiva, en la carpeta de datos de Gaanim. En el
+siguiente, Presenter View añade `last rehearsal 1:20`: lo que tardaste en esa
+diapositiva la vez anterior. Se guardan los 20 últimos ensayos de cada
+archivo, del script o del paquete `.gaanim`, que también conserva los
+objetivos.
 
 == Atajos de teclado
 

@@ -12,7 +12,9 @@ use gaanim_timeline::transition::TransitionType;
 /// camera motion, stops, markers and masked scene transitions.
 fn showcase() -> SceneModel {
     let mut canvas = SceneModel::new(16.0, 9.0);
-    canvas.segment("intro", None).unwrap();
+    let intro = canvas.segment("intro", None).unwrap();
+    canvas.set_segment_target(&intro, Some(30.0)).unwrap();
+    canvas.set_talk_target(Some(600.0)).unwrap();
     let title = canvas
         .text("Reproducible")
         .fill(Color::WHITE)
@@ -134,6 +136,15 @@ fn every_recorded_frame_replays_bit_for_bit() {
         2
     );
     assert_eq!(bundle.scene.markers.len(), 1);
+    // What the speaker planned, for Presenter View.
+    let targets: Vec<_> = bundle
+        .scene
+        .segments
+        .iter()
+        .map(|segment| segment.target)
+        .collect();
+    assert_eq!(targets, [Some(30.0), None, None]);
+    assert_eq!(bundle.scene.talk_target, Some(600.0));
     // The grid plus the instants a presentation rests on.
     let stops: Vec<f64> = bundle
         .scene

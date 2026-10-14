@@ -2362,6 +2362,8 @@ pub struct SceneModel {
     pub(crate) narration: super::narration::NarrationState,
     /// Reusable logo/footer treatment generated for every explicit segment.
     pub branding: Option<PresentationBrand>,
+    /// Seconds the whole talk is planned to last when presenting.
+    pub talk_target: Option<f64>,
     pub(crate) camera_position: gaanim_core::glam::DVec3,
     pub(crate) lighting_3d: gaanim_scene::Lighting3D,
     pub(crate) state: SharedCanvasState,
@@ -2410,6 +2412,7 @@ impl SceneModel {
             thumbnail_time: None,
             narration: Default::default(),
             branding: None,
+            talk_target: None,
             camera_position: gaanim_core::glam::DVec3::ZERO,
             lighting_3d: gaanim_scene::Lighting3D::default(),
             state: Arc::new(Authored::new(CanvasState::new())),
@@ -2558,6 +2561,28 @@ impl SceneModel {
             .find(|candidate| candidate.id == segment.id)
             .ok_or(SegmentError::UnknownSegment { id: segment.id })?;
         target.post_process = post;
+        Ok(())
+    }
+
+    /// Plan `target` seconds of a presentation for one segment of this
+    /// scene, or none: Presenter View counts the time spent on it against
+    /// the plan.
+    pub fn set_segment_target(
+        &mut self,
+        segment: &SegmentHandle,
+        target: Option<f64>,
+    ) -> Result<(), SegmentError> {
+        if !segment.belongs_to(&self.state) {
+            return Err(SegmentError::ForeignSegment);
+        }
+        let target = super::segment::segment_target(target)?;
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard
+            .segments
+            .iter_mut()
+            .find(|candidate| candidate.id == segment.id)
+            .ok_or(SegmentError::UnknownSegment { id: segment.id })?
+            .target = target;
         Ok(())
     }
 
@@ -6208,6 +6233,13 @@ impl SceneModel {
         guard.active_mut().ops.push(Op::Play(anims));
     }
 
+    /// Plan `target` seconds for the whole talk, or none: Presenter View
+    /// counts it down while presenting.
+    pub fn set_talk_target(&mut self, target: Option<f64>) -> Result<(), SegmentError> {
+        self.talk_target = super::segment::segment_target(target)?;
+        Ok(())
+    }
+
     /// Configure reusable branding generated automatically for explicit segments.
     pub fn set_branding(&mut self, branding: PresentationBrand) {
         self.branding = Some(branding);
@@ -6477,6 +6509,7 @@ impl SceneModel {
                     id: segment.id,
                     name: segment.name.clone(),
                     notes: segment.notes.clone(),
+                    target: segment.target,
                     template: segment.template.clone(),
                     start_time,
                     end_time,
@@ -11702,6 +11735,38 @@ mod tests {
             .filter(|op| matches!(op, Op::Stop))
             .count();
         assert_eq!(stops, 1);
+    }
+
+    #[test]
+    fn segment_targets_reach_the_manifest_and_bad_ones_are_refused() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let intro = canvas.segment("intro", None).unwrap();
+        canvas.set_segment_target(&intro, Some(90.0)).unwrap();
+        canvas.wait(1.0);
+        let outro = canvas.segment("outro", None).unwrap();
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                canvas.set_segment_target(&outro, Some(bad)),
+                Err(SegmentError::InvalidTarget { .. })
+            ));
+        }
+        let manifest = canvas.segment_manifest();
+        let targets: Vec<_> = manifest
+            .segments
+            .iter()
+            .map(|segment| segment.target)
+            .collect();
+        assert_eq!(targets, [Some(90.0), None]);
+        canvas.set_segment_target(&intro, None).unwrap();
+        assert_eq!(canvas.segment_manifest().segments[0].target, None);
+
+        // The whole talk's.
+        assert!(matches!(
+            canvas.set_talk_target(Some(-5.0)),
+            Err(SegmentError::InvalidTarget { .. })
+        ));
+        canvas.set_talk_target(Some(1200.0)).unwrap();
+        assert_eq!(canvas.talk_target, Some(1200.0));
     }
 
     #[test]

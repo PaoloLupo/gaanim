@@ -1330,6 +1330,8 @@ pub struct Segment {
     pub id: SegmentId,
     pub name: String,
     pub notes: Option<String>,
+    /// Seconds the speaker plans to spend on this segment when presenting.
+    pub target: Option<f64>,
     pub template: Option<String>,
     /// Optional full-canvas paint used while this segment is active.
     pub background: Option<BackgroundPaint>,
@@ -1358,6 +1360,7 @@ impl Segment {
             id: SegmentId(0),
             name: "_default".to_string(),
             notes: None,
+            target: None,
             template: None,
             background: None,
             post_process: PostProcessOverride::Inherit,
@@ -1384,6 +1387,7 @@ impl Segment {
             id,
             name,
             notes,
+            target: None,
             template,
             background,
             post_process: PostProcessOverride::Inherit,

@@ -339,6 +339,9 @@ pub struct SegmentMetadata {
     pub id: u32,
     pub name: String,
     pub notes: Option<String>,
+    /// Seconds the speaker plans to spend on the segment when presenting.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub target: Option<f64>,
     pub start_time: f64,
     pub end_time: f64,
     pub stops: Vec<SegmentStop>,
@@ -397,6 +400,9 @@ pub struct Timeline {
     pub playback_rate: f64,
     /// Semantic structure compiled from the canvas segments.
     pub segments: Vec<SegmentMetadata>,
+    /// Seconds the whole talk is planned to last when presenting.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub talk_target: Option<f64>,
     /// Cached segment position matching [`Self::current_time`].
     pub segment_position: Option<SegmentPosition>,
     /// Flag to ignore interactive stop inputs (e.g. when GUI has focus).
@@ -825,6 +831,7 @@ impl Default for Timeline {
             scene_connections: Vec::new(),
             markers: Vec::new(),
             beat_grid: None,
+            talk_target: None,
             polls: Vec::new(),
             poll_session: None,
             stop_gates: Vec::new(),
@@ -5656,6 +5663,7 @@ mod tests {
             id: 1,
             name: "gates".into(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 4.0,
             stops: vec![
@@ -6836,6 +6844,7 @@ mod tests {
                 id: index + 1,
                 name: format!("segment {index}"),
                 notes: None,
+                target: None,
                 start_time: f64::from(index) * 2.0,
                 end_time: f64::from(index + 1) * 2.0,
                 stops: Vec::new(),
@@ -7330,6 +7339,7 @@ mod tests {
                 id: 10,
                 name: "intro".to_string(),
                 notes: Some("Opening".to_string()),
+                target: None,
                 start_time: 0.0,
                 end_time: 3.0,
                 stops: vec![SegmentStop {
@@ -7342,6 +7352,7 @@ mod tests {
                 id: 20,
                 name: "Área".to_string(),
                 notes: None,
+                target: None,
                 start_time: 3.0,
                 end_time: 5.0,
                 stops: vec![
@@ -7941,6 +7952,7 @@ mod tests {
                 id: index as u32 + 1,
                 name: format!("segment {index}"),
                 notes: None,
+                target: None,
                 start_time: span[0],
                 end_time: span[1],
                 stops: Vec::new(),
@@ -8113,6 +8125,7 @@ mod tests {
             id,
             name: format!("segment {id}"),
             notes: None,
+            target: None,
             start_time,
             end_time,
             stops: stops

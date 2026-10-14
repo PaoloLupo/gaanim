@@ -1849,6 +1849,7 @@ mod tests {
             id: 1,
             name: "lobby".into(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 3.0,
             stops: vec![SegmentStop {

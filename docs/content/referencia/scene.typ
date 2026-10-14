@@ -397,7 +397,7 @@ reproducción interactiva espera al presentador.
 #api-entry(
   name: "Scene.segment",
   kind: "method",
-  signature: "segment(name: str, transition: Transition | None = None, *, notes: str | None = None, template: Callable[..., Layout] | None = None, background: BackgroundLike | None = None, post: PostProcess | Literal[False] | None = None) -> Segment",
+  signature: "segment(name: str, transition: Transition | None = None, *, notes: str | None = None, template: Callable[..., Layout] | None = None, background: BackgroundLike | None = None, post: PostProcess | Literal[False] | None = None, target: float | None = None) -> Segment",
   params: (
     (name: "name", type: "str", default: none, desc: [Nombre no vacío, único en la escena sin distinguir mayúsculas.]),
     (name: "transition", type: "Transition | None", default: "None", desc: [Transición de entrada desde el segmento anterior. Ver #link("/referencia/animations/#api-transition-cross-fade")[Transiciones].]),
@@ -405,9 +405,10 @@ reproducción interactiva espera al presentador.
     (name: "template", type: "Callable[..., Layout] | None", default: "None", desc: [Plantilla de Python que se rellena después con `Segment.bind`.]),
     (name: "background", type: "BackgroundLike | None", default: "None", desc: [Fondo solo mientras el segmento está activo; `None` usa el de la escena.]),
     (name: "post", type: "PostProcess | False | None", default: "None", desc: [Postprocesado del segmento: otro `PostProcess`, `False` para ninguno o `None` para heredar `scene.canvas.post`.]),
+    (name: "target", type: "float | None", default: "None", desc: [Segundos que prevés dedicarle al presentar. Presenter View compara con él el tiempo que pasas en la diapositiva (ver #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la charla]). La de la charla entera se fija con `scene.slides.target`.]),
   ),
   returns: (type: "Segment", desc: [Handle que aceptan `link` y `bind`.]),
-  desc: [Crea el segmento y lo activa. La primera llamada sustituye al segmento implícito inicial, que aún no tiene contenido. Un nombre vacío o repetido, o una transición en el primer segmento, lanzan `ValueError`; un `post` de otro tipo lanza `TypeError`.],
+  desc: [Crea el segmento y lo activa. La primera llamada sustituye al segmento implícito inicial, que aún no tiene contenido. Un nombre vacío o repetido, una transición en el primer segmento o un `target` que no sea un número positivo de segundos lanzan `ValueError`; un `post` de otro tipo lanza `TypeError`.],
 )[
 ```python
 >>>from gaanim import *

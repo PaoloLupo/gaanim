@@ -72,6 +72,7 @@ pub fn run() {
         present: launch.present,
         monitor: launch.monitor,
         selection: launch.selection.clone(),
+        duration: launch.duration,
         ..Default::default()
     });
     crate::startup::mark("app setup");
@@ -1034,6 +1035,9 @@ struct LaunchArgs {
     monitor: Option<usize>,
     /// Segments to rehearse with `--sections` / `--from`.
     selection: gaanim_timeline::selection::SegmentSelection,
+    /// Planned length of the talk (`--duration`), which Presenter View
+    /// counts down.
+    duration: Option<std::time::Duration>,
 }
 
 fn resolve_project_paths(
@@ -1077,6 +1081,7 @@ fn parse_args() -> LaunchArgs {
             present: false,
             monitor: None,
             selection: Default::default(),
+            duration: None,
         };
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
@@ -1119,6 +1124,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     let mut script_path = None;
     let mut present = false;
     let mut monitor = None;
+    let mut duration = None;
     let mut selection = gaanim_timeline::selection::SegmentSelection::default();
     let mut index = 0;
 
@@ -1137,6 +1143,13 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
                 } else {
                     selection.set_sections(value)?;
                 }
+            }
+            "--duration" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--duration requires a length, e.g. 20m".to_string())?;
+                index += 1;
+                duration = Some(parse_talk_duration(value)?);
             }
             "--monitor" => {
                 let value = args
@@ -1164,13 +1177,23 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     if !selection.is_empty() && script_path.is_none() {
         return Err("--sections and --from require <SCRIPT_OR_PROJECT>".to_string());
     }
+    if duration.is_some() && script_path.is_none() {
+        return Err("--duration requires <SCRIPT_OR_PROJECT>".to_string());
+    }
     Ok(LaunchArgs {
         script_path,
         project: None,
         present,
         monitor,
         selection,
+        duration,
     })
+}
+
+/// A talk's length for `--duration` (see [`gaanim_editor::parse_talk_duration`]).
+fn parse_talk_duration(text: &str) -> Result<std::time::Duration, String> {
+    gaanim_editor::parse_talk_duration(text)
+        .map_err(|expected| format!("--duration takes {expected}, not `{text}`"))
 }
 
 #[cfg(test)]
@@ -1298,6 +1321,7 @@ mod tests {
                 present: true,
                 monitor: Some(1),
                 selection: Default::default(),
+                duration: None,
             }
         );
     }
@@ -1320,6 +1344,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_talk_duration() {
+        assert!(
+            parse_talk_duration("20x")
+                .unwrap_err()
+                .starts_with("--duration takes a length")
+        );
+        let args = ["talk", "--present", "--duration", "20m"].map(str::to_string);
+        assert_eq!(
+            parse_launch_args(&args).unwrap().duration,
+            Some(std::time::Duration::from_secs(1200))
+        );
+        assert!(parse_launch_args(&["--duration".into(), "20m".into()]).is_err());
+    }
+
+    #[test]
     fn rejects_monitor_without_presentation_mode() {
         let args = ["demo.py", "--monitor", "0"].map(str::to_string);
         assert!(parse_launch_args(&args).is_err());
@@ -1335,6 +1374,7 @@ mod tests {
                 present: false,
                 monitor: None,
                 selection: Default::default(),
+                duration: None,
             }
         );
     }
