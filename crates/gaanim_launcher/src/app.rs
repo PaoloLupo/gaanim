@@ -308,8 +308,8 @@ struct ExportWorkerArgs {
     /// Frame rate of the video (or whole rate of the bundle); `None` takes
     /// the quality preset's.
     fps: Option<gaanim_export::prelude::FrameRate>,
-    /// Exported time range in seconds or marker names; `None` means the
-    /// scene start/end.
+    /// Exported time range in seconds or names (markers, segments, stops);
+    /// `None` means the scene start/end.
     from: Option<ExportBound>,
     to: Option<ExportBound>,
     /// A PDF deck prints each slide's speaker notes.
@@ -469,16 +469,9 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
         return gaanim_api::export::record_canvas(canvas, config)
             .map_err(|error| error.to_string());
     }
-    let markers = canvas.markers();
-    let markers: Vec<(&str, f64)> = markers
-        .iter()
-        .map(|marker| (marker.name.as_str(), marker.time))
-        .collect();
-    let range = gaanim_editor::cli::resolve_export_range(
-        worker.from.as_ref(),
-        worker.to.as_ref(),
-        &markers,
-    )?;
+    let names = gaanim_editor::cli::TimelineNames::of_canvas(&canvas);
+    let range =
+        gaanim_editor::cli::resolve_export_range(worker.from.as_ref(), worker.to.as_ref(), &names)?;
     let format =
         gaanim_editor::cli::export_format(&worker.format).expect("validated export format");
     let command = ExportCommand {
@@ -1253,8 +1246,8 @@ mod tests {
         assert_eq!(
             (markers.from, markers.to),
             (
-                Some(ExportBound::Marker("climax".into())),
-                Some(ExportBound::Marker("fin".into()))
+                Some(ExportBound::Name("climax".into())),
+                Some(ExportBound::Name("fin".into()))
             )
         );
         for invalid in [

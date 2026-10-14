@@ -129,10 +129,17 @@ impl SegmentSelection {
 
 /// Indices of the segments `name` selects.
 fn matching_names(name: &str, segments: &[(&str, f64, f64)]) -> Vec<usize> {
+    segments_named(name, segments.iter().map(|(segment, _, _)| *segment))
+}
+
+/// Indices of the segments `name` selects among `segments` in timeline
+/// order: a whole segment name, every segment of a `Section` with that key,
+/// or the steps whose title matches, ignoring case.
+pub fn segments_named<'a>(name: &str, segments: impl IntoIterator<Item = &'a str>) -> Vec<usize> {
     segments
-        .iter()
+        .into_iter()
         .enumerate()
-        .filter(|(_, (segment, _, _))| segment_matches(segment, name))
+        .filter(|(_, segment)| segment_matches(segment, name))
         .map(|(index, _)| index)
         .collect()
 }
@@ -156,10 +163,11 @@ fn step_title(segment: &str) -> Option<&str> {
     (visit.parse::<usize>().is_ok() && step.parse::<usize>().is_ok()).then_some(title)
 }
 
-fn unknown_segment(name: &str, segments: &[(&str, f64, f64)]) -> String {
+/// The names to offer for `segments`: each `Section` key once instead of
+/// every segment it generates, and every other segment by its name.
+pub fn segment_choices<'a>(segments: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     let mut choices: Vec<String> = Vec::new();
-    for (segment, _, _) in segments {
-        // Offer section keys once instead of every generated segment name.
+    for segment in segments {
         let choice = match segment.split_once(" · ") {
             Some((key, rest)) if rest.split(" · ").count() >= 3 => key.to_string(),
             _ => segment.to_string(),
@@ -168,6 +176,11 @@ fn unknown_segment(name: &str, segments: &[(&str, f64, f64)]) -> String {
             choices.push(choice);
         }
     }
+    choices
+}
+
+fn unknown_segment(name: &str, segments: &[(&str, f64, f64)]) -> String {
+    let choices = segment_choices(segments.iter().map(|(segment, _, _)| *segment));
     // Quote the choices: a name may itself contain commas.
     let listed: Vec<String> = choices.iter().map(|choice| format!("`{choice}`")).collect();
     let hint = if choices.iter().any(|choice| choice.contains(',')) {
