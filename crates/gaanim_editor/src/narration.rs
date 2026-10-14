@@ -1100,8 +1100,13 @@ fn vocabulary(slides: &[ScriptSlide]) -> Vec<String> {
     words
 }
 
-/// Where a dictation starts: the slide under the playhead.
+/// Where a dictation starts: the stop the playhead rests on, else the start
+/// of the slide under it.
 fn dictation_start(timeline: &Timeline) -> f64 {
+    // Resting on a stop, as the last dictation leaves it: go on from there.
+    if let Some(stop) = timeline.resting_stop() {
+        return stop;
+    }
     ScriptPosition::of(timeline)
         .map(|position| {
             crate::presenter::segment_entry_time(timeline, &timeline.segments[position.slide])
@@ -1560,11 +1565,16 @@ pub(crate) fn narration_session_system(
                     save_recording(*recording, &mut timeline, &mut panel, &mut preview_audio);
                 } else {
                     let target = recording.target.clone();
+                    let reached = timeline.current_time;
                     drop(recording);
                     finish_capture(&target, &mut timeline, &mut preview_audio);
                     if target.is_live() {
                         // Back to the take as it was recorded.
                         abort_live(&mut panel, reload.as_deref(), None);
+                    } else {
+                        // The timeline stays where the dictation reached, and
+                        // the next one goes on from there.
+                        timeline.seek_request = Some(reached);
                     }
                 }
                 if let Some(dictation) = dictation {
@@ -3559,6 +3569,37 @@ mod tests {
             "{source}"
         );
         assert!(source.contains("[stop titulo]\n\n## Datos"), "{source}");
+    }
+
+    #[test]
+    fn a_dictation_starts_where_the_last_one_ended() {
+        use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop};
+        let slide = |id, name: &str, start, end, stop| SegmentMetadata {
+            id,
+            name: name.into(),
+            notes: None,
+            target: None,
+            start_time: start,
+            end_time: end,
+            stops: vec![SegmentStop {
+                name: None,
+                time: stop,
+                ambient: None,
+            }],
+        };
+        let mut timeline = Timeline::new();
+        timeline.cached_duration = 6.0;
+        timeline.set_segments(vec![
+            slide(1, "Portada", 0.0, 2.0, 1.0),
+            slide(2, "Datos", 2.0, 6.0, 4.0),
+        ]);
+        timeline.is_playing = false;
+        // Resting on a stop: right there.
+        timeline.current_time = 4.0;
+        assert_eq!(dictation_start(&timeline), 4.0);
+        // Elsewhere in a slide: from its start.
+        timeline.current_time = 3.0;
+        assert_eq!(dictation_start(&timeline), 2.0);
     }
 
     #[test]

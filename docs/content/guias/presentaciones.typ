@@ -146,7 +146,10 @@ y cada frase va a la diapositiva y al tramo que estabas presentando.
   pulsa *Guardar en Windows* (ver #link(<token-scribe>)[El token]).
 + Lleva el cabezal a la diapositiva desde la que quieres dictar y pulsa
   *Dictar con Scribe*. Tras la cuenta atrás, presenta hablando: `→` o
-  `Espacio` avanzan en cada stop, `Enter` termina y `Esc` descarta.
+  `Espacio` avanzan en cada stop, `Enter` termina y `Esc` descarta. Al
+  terminar con `Enter`, el cabezal se queda donde llegaste: el siguiente
+  *Dictar con Scribe* sigue desde ese stop, así que puedes dictar la charla
+  por partes.
 + Al terminar, Gaanim espera las últimas frases (como mucho 12 segundos;
   `Esc` deja de esperar) y las escribe en el guion. Un tramo vacío recibe lo
   dictado; uno que ya tenía texto lo conserva y lo dictado se añade a su lado
