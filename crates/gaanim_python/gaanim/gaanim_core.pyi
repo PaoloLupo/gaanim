@@ -10864,10 +10864,12 @@ class Scene:
         """Pause interactive playback at the current timeline position.
 
         At a segment boundary, the completed outgoing segment remains visible
-        until playback advances; no trailing ``wait`` is required.
-        Export ignores stops and renders the timeline continuously. After a
-        recorded ``live_take`` starts, a stop instead waits for as long as the
-        speaker paused there while recording.
+        until playback advances; no trailing ``wait`` is required. A stop
+        written while the segment's entry transition still runs waits for it
+        to end, advancing the cursor, so a presentation never rests on a slide
+        halfway in. Export ignores stops and renders the timeline
+        continuously. After a recorded ``live_take`` starts, a stop instead
+        waits for as long as the speaker paused there while recording.
 
         ``loop`` adds an ambient animation, accepted like ``scene.play``: it
         is played right after the stop, advancing the cursor by its length,
