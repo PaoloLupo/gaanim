@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Animación Gaanim</title>
   <link rel="icon" href="../favicon.ico">
+  <!-- The bindings and the module download with the page instead of after
+       main.js imports them (scripts/build_web.py versions these addresses). -->
+  <link rel="modulepreload" href="pkg/gaanim_embed.js">
+  <link rel="preload" href="pkg/gaanim_embed_bg.wasm.gz" as="fetch" crossorigin>
   <style>
     /* Gaanim's identity (docs/assets/brand/README.md): graphite without a blue
        tint, violet for what came before, gold for the current frame, square

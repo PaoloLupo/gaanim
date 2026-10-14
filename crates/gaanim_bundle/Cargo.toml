@@ -29,7 +29,8 @@ flate2 = { version = "1.0", default-features = false, features = ["rust_backend"
 # Pure Rust, so the web player decodes bundles too.
 ruzstd = "0.8"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The C encoder, with every level; Emscripten (the playground) builds it too.
+[target.'cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))'.dependencies]
 zstd = { version = "0.13", default-features = false }
 
 [features]

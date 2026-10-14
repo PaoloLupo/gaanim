@@ -269,6 +269,7 @@ las separa se escribe `&amp;`):
   [`loop`], [Repite la animación entera, como un GIF.],
   [`controls=0`], [Oculta la barra. Un clic o un toque en la animación la pausa o la reanuda, y al terminar la repite desde el principio.],
   [`autoplay=0`], [No empieza sola: un botón en el centro espera un clic.],
+  [`preload=auto`], [Descarga el archivo entero aunque no se reproduzca. Sin esta opción, un archivo de más de 2 MB en un sitio que admite descargas por partes baja al principio solo lo que necesita para abrirse, y el resto mientras se reproduce: quien pasa de largo no lo descarga entero.],
   [`full=click`], [Si la escena necesita el reproductor completo (ver abajo), no lo abre solo: muestra un aviso y lo abre al hacer clic.],
   [`#t=2`], [Empieza a los dos segundos (también `#t=1:05`).],
 )

@@ -86,6 +86,11 @@ pub const VERSION: u32 = 5;
 /// entries about 8% smaller and compressed nearly four times slower.
 #[cfg(not(target_arch = "wasm32"))]
 const ZSTD_LEVEL: i32 = 15;
+/// Zstandard level of the playground (Pyodide), which records a bundle on
+/// every run: about 2% larger than level 15 and ten times faster. The
+/// pure-Rust encoder's only level made a playground bundle 1.7 times larger.
+#[cfg(target_os = "emscripten")]
+const ZSTD_LEVEL: i32 = 9;
 /// File extension of playback bundles.
 pub const EXTENSION: &str = "gaanim";
 /// Optional cover image: a PNG stored as-is, which file managers show
@@ -1229,7 +1234,7 @@ impl<W: Write + Seek> BundleWriter<W> {
         for digest in &self.digests {
             digests.extend_from_slice(digest);
         }
-        self.write_entry("digests.bin", &digests)?;
+        self.write_entry(DIGESTS, &digests)?;
         // A scene can take its audience without a poll: a lobby, a gate.
         if !scene.polls.is_empty() || scene.poll_session.is_some() || !scene.stop_gates.is_empty() {
             self.write_entry(POLLS, &write_polls(scene)?)?;
@@ -1295,8 +1300,10 @@ pub struct Bundle {
     times: Vec<f64>,
     /// Frame indices by increasing time.
     by_time: Vec<usize>,
-    /// [`frame_digest`] of every frame as the scene drew it while recording.
-    digests: Vec<[u8; 32]>,
+    /// [`frame_digest`] of every frame as the scene drew it while recording,
+    /// read the first time they are asked for: only checking a bundle
+    /// compares them, so players never download them.
+    digests: std::sync::OnceLock<Vec<[u8; 32]>>,
     /// Chunks being decoded, least recently used first.
     cached: Vec<ChunkCursor>,
     /// Decoded Lottie frames of the cached chunks.
@@ -1348,12 +1355,12 @@ fn scene_entry(index: u32) -> String {
     format!("scenes/{index:06}.bin")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))]
 fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(zstd::bulk::compress(bytes, ZSTD_LEVEL)?)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
 fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(ruzstd::encoding::compress_to_vec(
         bytes,
@@ -1400,15 +1407,19 @@ fn read_entry(archive: &Archive, manifest: Option<&Manifest>, name: &str) -> Res
     Ok(bytes)
 }
 
+/// Frame digests, which only [`Bundle::verify`] reads.
+const DIGESTS: &str = "digests.bin";
+
 /// Entries a bundle reads as it opens: everything but frame chunks, Lottie
-/// frames, media and the cover. The first chunk comes along, since a player
-/// shows it next.
+/// frames, media, the cover and the frame digests. The first chunk comes
+/// along, since a player shows it next.
 fn read_on_open(name: &str) -> bool {
     name == "frames/000000.bin"
         || !(name.starts_with("frames/")
             || name.starts_with("scenes/")
             || name.starts_with("media/")
-            || name == THUMBNAIL)
+            || name == THUMBNAIL
+            || name == DIGESTS)
 }
 
 impl Bundle {
@@ -1543,13 +1554,11 @@ impl Bundle {
         {
             return Err(BundleError::Corrupt("frame index is inconsistent".into()));
         }
-        let digest_bytes = read_entry(&archive, Some(&manifest), "digests.bin")?;
-        if digest_bytes.len() != times.len() * 32 {
-            return Err(BundleError::Corrupt(
-                "frame digests are inconsistent".into(),
-            ));
+        if !manifest.entries.contains_key(DIGESTS) {
+            return Err(BundleError::Corrupt(format!(
+                "entry {DIGESTS} is not in the manifest"
+            )));
         }
-        let digests = digest_bytes.as_chunks::<32>().0.to_vec();
         Ok(Self {
             archive,
             manifest,
@@ -1557,7 +1566,7 @@ impl Bundle {
             tables,
             times,
             by_time,
-            digests,
+            digests: std::sync::OnceLock::new(),
             cached: Vec::new(),
             scenes: HashMap::new(),
         })
@@ -1693,20 +1702,38 @@ impl Bundle {
             .collect()
     }
 
-    /// [`frame_digest`] recorded for frame `index`.
+    /// The [`frame_digest`] of every frame, read on first use.
+    fn digests(&self) -> Result<&[[u8; 32]]> {
+        if let Some(digests) = self.digests.get() {
+            return Ok(digests);
+        }
+        let bytes = read_entry(&self.archive, Some(&self.manifest), DIGESTS)?;
+        if bytes.len() != self.times.len() * 32 {
+            return Err(BundleError::Corrupt(
+                "frame digests are inconsistent".into(),
+            ));
+        }
+        Ok(self
+            .digests
+            .get_or_init(|| bytes.as_chunks::<32>().0.to_vec()))
+    }
+
+    /// [`frame_digest`] recorded for frame `index`; `None` when the digests
+    /// cannot be read (still downloading, or damaged).
     pub fn digest(&self, index: usize) -> Option<[u8; 32]> {
-        self.digests.get(index).copied()
+        self.digests().ok()?.get(index).copied()
     }
 
     /// Compose every frame again and compare it with the digest recorded
     /// for it. Returns the frames that differ, by index and time.
     pub fn verify(&mut self) -> Result<Vec<(usize, f64)>> {
+        let digests = self.digests()?.to_vec();
         let background = self.scene.background.clone();
         let mut store = FragmentStore::default();
         let mut mismatched = Vec::new();
-        for index in 0..self.frame_count() {
+        for (index, digest) in digests.iter().enumerate() {
             let frame = self.frame(index)?;
-            if frame_digest(&frame, background.as_ref(), &mut store) != self.digests[index] {
+            if frame_digest(&frame, background.as_ref(), &mut store) != *digest {
                 mismatched.push((index, frame.time));
             }
             store.end_frame();
@@ -2094,6 +2121,14 @@ mod tests {
         let mut bundle = bundle.expect("opens once the asked bytes arrive");
         assert!(!source.is_complete());
         bundle.frame(0).unwrap();
+
+        // Players never compare digests, so opening leaves them out; they
+        // read once their bytes are there.
+        let digests = bundle.archive.span(DIGESTS).unwrap();
+        assert!(!source.missing(digests.clone()).is_empty());
+        assert_eq!(bundle.digest(0), None);
+        add(&source, std::slice::from_ref(&digests));
+        assert_eq!(bundle.digest(0), Some([0; 32]));
 
         let last = bundle.frame_count() - 1;
         let ahead = bundle.missing_around(last - 70, 1);

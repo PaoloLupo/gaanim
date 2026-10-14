@@ -138,12 +138,22 @@ def version(out: Path, stem: str, digest: str) -> None:
         ],
         "index.html": [('src="main.js"', f'src="main.js?v={digest}"')],
     }
+    # A page may preload the bindings and the module; the addresses must match
+    # the ones main.js asks for, or the browser downloads them twice.
+    optional = {
+        "index.html": [
+            (f'href="pkg/{stem}.js"', f'href="pkg/{stem}.js?v={digest}"'),
+            (f'href="pkg/{stem}_bg.wasm.gz"', f'href="pkg/{stem}_bg.wasm.gz?v={digest}"'),
+        ],
+    }
     for name, pairs in rewrites.items():
         path = out / name
         text = path.read_text(encoding="utf-8")
         for old, new in pairs:
             if old not in text:
                 raise SystemExit(f"{path}: {old} not found; update scripts/build_web.py")
+            text = text.replace(old, new)
+        for old, new in optional.get(name, []):
             text = text.replace(old, new)
         path.write_text(text, encoding="utf-8", newline="\n")
     (out / "pkg" / "version.txt").write_text(digest, encoding="utf-8")
