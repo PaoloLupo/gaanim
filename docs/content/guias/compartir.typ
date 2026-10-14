@@ -286,9 +286,10 @@ se dibujan en pasadas propias de la GPU. Cuando la escena usa alguno, abre el
 reproductor completo con las mismas opciones, así que la animación siempre se
 ve como la grabaste; solo descarga más. Con `full=click` espera a un clic
 antes de abrirlo, para que una página con varias animaciones no descargue el
-reproductor completo en cada una; una página del mismo sitio recibe además el
+reproductor completo en cada una; la página que lo contiene recibe además el
 mensaje `gaanim:status` de tipo `full`, con la dirección del reproductor
-completo en `url`, por si prefiere mostrar su propio botón.
+completo en `url`, por si prefiere mostrar su propio botón (ver
+#link(<controlar-desde-la-pagina>)[Controlarlo desde la página]).
 
 `aspect-ratio` da al marco la proporción de la escena: `16 / 9` para el
 `frame=(16, 9)` por defecto, `1 / 1` para una cuadrada. Así el marco ocupa el
@@ -306,6 +307,98 @@ Quien lee la entrada necesita un navegador con WebGPU, igual que para el
 reproductor completo; sin él, el marco explica qué falta. Las demás
 animaciones de la página, y las de visitas siguientes, toman el reproductor
 de la caché del navegador.
+
+=== Con el elemento `<gaanim-player>`
+
+En lugar del `<iframe>`, puedes cargar el script del reproductor una vez por
+página y escribir un elemento por animación:
+
+```html
+<script type="module" src="https://paololupo.github.io/gaanim/reproductor/insertar/gaanim-player.js"></script>
+
+<gaanim-player src="animaciones/circulo.gaanim" loop controls="0"
+  label="Animación: círculo"></gaanim-player>
+```
+
+El elemento crea el marco por ti. Ocupa el ancho de la columna, toma la
+proporción de la escena en cuanto la abre (16:9 hasta entonces) y no carga
+hasta que la página se acerca a él. `src` puede ser relativa a la página.
+Acepta las opciones de la tabla como atributos (`loop`, `controls="0"`,
+`autoplay="0"`, `preload="auto"`, `full="click"`), además de:
+
+- `start`: el segundo en que empieza, como `#t=`.
+- `label`: lo que anuncia un lector de pantalla.
+- `ratio`: la proporción desde el principio, como `ratio="1 / 1"`. Un
+  `aspect-ratio` en el estilo de la página tiene prioridad sobre ambas.
+
+Desde JavaScript, el elemento se maneja como un `<video>`:
+
+- Métodos: `play()`, `pause()` y `seek(segundos)`.
+- Propiedades: `currentTime` (al asignarla, salta a ese instante), `duration`,
+  `paused`, `ended`, `loop` y `muted`.
+- Eventos: `opened`, `play`, `pause`, `timeupdate`, `stop` (una pausa de la
+  escena), `ended` y `error`. Cada uno lleva en `detail` el mensaje del
+  reproductor (ver abajo).
+
+Los métodos actúan una vez abierta la animación, es decir, después del evento
+`opened`.
+
+```js
+const animacion = document.querySelector("gaanim-player");
+animacion.addEventListener("ended", () => console.log("Terminó"));
+document.querySelector("#otra-vez").addEventListener("click", () => {
+  animacion.seek(0);
+  animacion.play();
+});
+```
+
+=== Controlarlo desde la página <controlar-desde-la-pagina>
+
+Con un `<iframe>`, la página que lo contiene se comunica con el reproductor
+mediante `postMessage`, sea del sitio que sea.
+
+*Lo que avisa el reproductor.* Envía mensajes
+`{ type: "gaanim:status", kind, time, duration, playing, ended, muted }`.
+Los cinco últimos campos llegan una vez abierta la animación. Cuando la
+animación pasa al reproductor completo, sus mensajes traen solo `time`,
+`playing` y `muted`, y no avisan de `stop` ni de `ended`.
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*`kind`*], [*Cuándo*],
+  [`ready`], [El reproductor ya puede abrir archivos.],
+  [`opened`], [Abrió la animación. Incluye su tamaño en píxeles (`width`, `height`), `fps` y los instantes de sus pausas (`stops`).],
+  [`redirect`], [La animación necesita el reproductor completo, que ocupa el marco a continuación, con los mismos datos de tamaño; con `full=click`, el aviso es `full`.],
+  [`play`, `pause`], [Empezó o se detuvo.],
+  [`timeupdate`], [Cuatro veces por segundo mientras se reproduce, y tras cada salto.],
+  [`stop`], [Llegó a una pausa de la escena: `stop` es su instante, y `loop` el bucle que repite mientras espera, si lo tiene.],
+  [`ended`], [Llegó al final, sin `loop`.],
+  [`error`], [No pudo abrir o reproducir la animación; `message` dice por qué.],
+)
+
+*Las órdenes que acepta.* Recibe `{ type: "gaanim:command", command }`:
+
+- `"play"`, `"pause"` y `"toggle"`, para reproducir, pausar o alternar.
+- `"seek"`, con `time` en segundos.
+- `"loop"` y `"mute"`, con `value` igual a `true` o `false`.
+
+Por ejemplo, para dar al marco la proporción de la escena y saltar a los dos
+segundos:
+
+```js
+const marco = document.querySelector("iframe");
+window.addEventListener("message", (event) => {
+  if (event.source !== marco.contentWindow || event.data?.type !== "gaanim:status") return;
+  if (event.data.kind === "opened") {
+    marco.style.aspectRatio = `${event.data.width} / ${event.data.height}`;
+    marco.contentWindow.postMessage(
+      { type: "gaanim:command", command: "seek", time: 2 },
+      "https://paololupo.github.io",
+    );
+  }
+});
+```
 
 == Controles táctiles
 

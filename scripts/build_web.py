@@ -31,6 +31,9 @@ TARGET = "wasm32-unknown-unknown"
 # getrandom 0.3 needs its web backend selected explicitly.
 RUSTFLAGS = '--cfg getrandom_backend="wasm_js"'
 PAGE_FILES = ("index.html", "main.js")
+# Copied too when a page has them: the embed player's <gaanim-player> element,
+# which other pages load from next to the player.
+PAGE_EXTRAS = ("gaanim-player.js",)
 # The embed player's page, in its folder of the web player.
 EMBED_DIR = "insertar"
 ICONS = ("favicon.ico", "gaanim-icon-512.png")
@@ -114,6 +117,9 @@ def package(wasm: Path, out: Path, page: Path) -> str:
     )
     for name in PAGE_FILES:
         shutil.copy(page / name, out / name)
+    for name in PAGE_EXTRAS:
+        if (page / name).is_file():
+            shutil.copy(page / name, out / name)
 
     module = out / "pkg" / f"{wasm.stem}_bg.wasm"
     size = module.stat().st_size
