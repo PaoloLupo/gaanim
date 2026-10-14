@@ -86,11 +86,6 @@ pub const VERSION: u32 = 5;
 /// entries about 8% smaller and compressed nearly four times slower.
 #[cfg(not(target_arch = "wasm32"))]
 const ZSTD_LEVEL: i32 = 15;
-/// Zstandard level of the playground (Pyodide), which records a bundle on
-/// every run: about 2% larger than level 15 and ten times faster. The
-/// pure-Rust encoder's only level made a playground bundle 1.7 times larger.
-#[cfg(target_os = "emscripten")]
-const ZSTD_LEVEL: i32 = 9;
 /// File extension of playback bundles.
 pub const EXTENSION: &str = "gaanim";
 /// Optional cover image: a PNG stored as-is, which file managers show
@@ -1355,12 +1350,12 @@ fn scene_entry(index: u32) -> String {
     format!("scenes/{index:06}.bin")
 }
 
-#[cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))]
+#[cfg(not(target_arch = "wasm32"))]
 fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(zstd::bulk::compress(bytes, ZSTD_LEVEL)?)
 }
 
-#[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
+#[cfg(target_arch = "wasm32")]
 fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(ruzstd::encoding::compress_to_vec(
         bytes,
