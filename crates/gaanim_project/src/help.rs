@@ -116,6 +116,10 @@ only says whether there is one",
                     "Let an editor move the preview and hear where it is, in\nJSON lines on stdin/stdout or a loopback port",
                 ),
                 (
+                    "--message-format <FORMAT>",
+                    "human (default) or json: messages, reloads and script\nerrors with their line as JSON lines on stdout",
+                ),
+                (
                     "--sections <LIST>",
                     "Play only these segments or Section keys, e.g. intro,results;\na name with commas goes alone or with its commas as \\,",
                 ),
@@ -310,6 +314,10 @@ const EXPORT: Page = Page {
                     "PDF only: after the last page of each slide, a page with\nits scene.segment(notes=...)",
                 ),
                 (
+                    "--message-format <FORMAT>",
+                    "human (default) or json: messages and progress with its\npercent as JSON lines on stdout, without the bar",
+                ),
+                (
                     "--frame <SECONDS|MARKER>[,...]",
                     "Write exactly one PNG at each instant instead of a range.\nOne instant writes --output; several append 1, 2, ...\n(still.png -> still_1.png). Needs a .png output",
                 ),
@@ -367,7 +375,7 @@ const CHECK: Page = Page {
         Block::Lines(
             "Usage",
             &[
-                "gaanim check <SCRIPT_OR_PROJECT> [--strict]",
+                "gaanim check <SCRIPT_OR_PROJECT> [--strict] [--message-format json]",
                 "gaanim check <BUNDLE.gaanim>",
             ],
         ),
@@ -388,6 +396,10 @@ const CHECK: Page = Page {
                 (
                     "--strict",
                     "Also fail when there are warnings (useful in CI)",
+                ),
+                (
+                    "--message-format <FORMAT>",
+                    "human (default) or json: one JSON object per line on\nstdout, each diagnostic with its file and line",
                 ),
                 ("-h, --help", "Print this help"),
             ],

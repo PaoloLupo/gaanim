@@ -225,13 +225,23 @@ fn run_script_thread(
                     headline,
                 )
                 .with_detail(tb.trim_end())
-                .at(location),
+                .at(location.clone()),
             );
-            gaanim_core::console::print_status(
-                gaanim_core::console::Level::Error,
-                "python",
-                "Script failed · fix it and save to reload",
-            );
+            if gaanim_core::console::message_format_json() {
+                // A tool wants the exception and the line it names.
+                gaanim_core::console::print_status_at(
+                    gaanim_core::console::Level::Error,
+                    "python",
+                    headline,
+                    location.as_ref(),
+                );
+            } else {
+                gaanim_core::console::print_status(
+                    gaanim_core::console::Level::Error,
+                    "python",
+                    "Script failed · fix it and save to reload",
+                );
+            }
         }
 
         // Block until the next re-run request (or channel closed).

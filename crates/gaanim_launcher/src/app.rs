@@ -140,8 +140,42 @@ pub fn run() {
     app.run();
 }
 
+/// The command line after the program, without `--message-format
+/// <FORMAT>`, which `check`, `export` and the preview take: it sets how the
+/// console writes (see [`console::set_message_format_json`]).
+fn command_args() -> Vec<String> {
+    match take_message_format(std::env::args().skip(1).collect()) {
+        Ok((args, json)) => {
+            console::set_message_format_json(json);
+            args
+        }
+        Err(error) => {
+            console::error("usage", error);
+            std::process::exit(2);
+        }
+    }
+}
+
+/// `args` without its `--message-format <FORMAT>` (or
+/// `--message-format=<FORMAT>`), and whether the format is JSON.
+fn take_message_format(mut args: Vec<String>) -> Result<(Vec<String>, bool), String> {
+    let mut json = false;
+    while let Some(index) = args
+        .iter()
+        .position(|arg| arg == "--message-format" || arg.starts_with("--message-format="))
+    {
+        let flag = args.remove(index);
+        let value = match flag.split_once('=') {
+            Some((_, value)) => Some(value.to_string()),
+            None => (index < args.len()).then(|| args.remove(index)),
+        };
+        json = console::parse_message_format(value.as_deref())?;
+    }
+    Ok((args, json))
+}
+
 fn dispatch_export_mode() -> bool {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = command_args();
     if args.first().map(String::as_str) != Some("export") {
         return false;
     }
@@ -573,6 +607,17 @@ fn start_script_session(
     attach_script_session(world, ScriptLaunch::start(python, script_path), project)
 }
 
+/// With JSON messages, say that a change made the script run again.
+fn reload_started(cause: &str) {
+    if console::message_format_json() {
+        console::emit_json(&[
+            ("type", "reload".into()),
+            ("phase", "start".into()),
+            ("cause", cause.into()),
+        ]);
+    }
+}
+
 /// Install the persistent primary camera before the Bevy event loop begins.
 ///
 /// Canvas replay reuses this Vello camera; creating it during replay is too
@@ -598,8 +643,12 @@ fn attach_script_session(
         .spawn(move || {
             while !stop.load(Ordering::SeqCst) {
                 match changed_rx.recv_timeout(std::time::Duration::from_millis(250)) {
-                    Ok(crate::file_watcher::ProjectChange::Source) => runner.request_rerun(),
+                    Ok(crate::file_watcher::ProjectChange::Source) => {
+                        reload_started("source");
+                        runner.request_rerun()
+                    }
                     Ok(crate::file_watcher::ProjectChange::Assets(changed)) => {
+                        reload_started("assets");
                         runner.request_asset_reload(changed)
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -662,7 +711,7 @@ struct CheckArgs {
 }
 
 fn dispatch_check_mode() -> bool {
-    let mut args = std::env::args().skip(1);
+    let mut args = command_args().into_iter();
     if args.next().as_deref() != Some("check") {
         return false;
     }
@@ -692,6 +741,9 @@ fn dispatch_check_mode() -> bool {
         console::hint(crate::python::install_hint());
         std::process::exit(2);
     });
+    let json = console::message_format_json();
+    // A diagnostic about a segment points at the line that made it.
+    gaanim_api::canvas::track_script_lines(json);
     let canvas = (python.load_script_canvas)(&script).unwrap_or_else(|error| {
         console::error("check", format!("could not load project: {error}"));
         std::process::exit(2);
@@ -715,6 +767,13 @@ fn dispatch_check_mode() -> bool {
             }));
     }
 
+    if json {
+        print_check_json(&script, &canvas, &report, is_presentation);
+        if !report.errors.is_empty() || (parsed.strict && !report.warnings.is_empty()) {
+            std::process::exit(1);
+        }
+        return true;
+    }
     // The report goes to stdout so it can be captured. Its first line, the
     // `check` status line, marks where it starts (the docs builder relies on it).
     let color = console::color_enabled(console::Stream::Stdout);
@@ -783,6 +842,92 @@ fn dispatch_check_mode() -> bool {
         std::process::exit(1);
     }
     true
+}
+
+/// The `check` report as JSON lines: a `diagnostic` per error and warning,
+/// with the line of the segment it names when there is one, then the
+/// `check` verdict.
+fn print_check_json(
+    script: &Path,
+    canvas: &gaanim_api::canvas::SceneModel,
+    report: &PreflightReport,
+    is_presentation: bool,
+) {
+    let index = canvas.timeline_index();
+    let diagnostics = report
+        .errors
+        .iter()
+        .map(|message| (console::Level::Error, message))
+        .chain(
+            report
+                .warnings
+                .iter()
+                .map(|message| (console::Level::Warn, message)),
+        );
+    for (level, message) in diagnostics {
+        let location = segment_named_in(message)
+            .and_then(|name| index.segments.iter().find(|segment| segment.name == name))
+            .and_then(|segment| segment.location.clone())
+            .or_else(|| script_line_in(message));
+        let mut fields = vec![
+            ("type", console::Json::from("diagnostic")),
+            ("level", console::level_name(level).into()),
+            ("message", message.as_str().into()),
+        ];
+        fields.extend(console::location_fields(location.as_ref()));
+        console::emit_json(&fields);
+    }
+    let kind = if is_presentation {
+        "presentation"
+    } else {
+        "scene"
+    };
+    let result = if report.errors.is_empty() {
+        "pass"
+    } else {
+        "fail"
+    };
+    console::emit_json(&[
+        ("type", "check".into()),
+        (
+            "script",
+            console::plain_path(script)
+                .to_string_lossy()
+                .into_owned()
+                .into(),
+        ),
+        ("kind", kind.into()),
+        ("result", result.into()),
+        ("errors", report.errors.len().into()),
+        ("warnings", report.warnings.len().into()),
+        ("segments", report.segment_count.into()),
+        ("stops", report.stop_count.into()),
+        ("duration", report.duration.into()),
+        ("width", canvas.frame.width.into()),
+        ("height", canvas.frame.height.into()),
+    ]);
+}
+
+/// The segment a diagnostic is about, written as segment `name`.
+fn segment_named_in(message: &str) -> Option<&str> {
+    let start = message.find("segment `")? + "segment `".len();
+    let length = message[start..].find('`')?;
+    Some(&message[start..start + length])
+}
+
+/// The first script line a diagnostic names as `path.py:line`, made
+/// absolute.
+fn script_line_in(message: &str) -> Option<console::ScriptLocation> {
+    message.split_whitespace().find_map(|word| {
+        let word = word.trim_matches(|ch: char| matches!(ch, '(' | ')' | ',' | ';' | '`'));
+        let (path, line) = word.rsplit_once(':')?;
+        let line = line.parse::<u32>().ok()?;
+        if !path.ends_with(".py") {
+            return None;
+        }
+        let path = std::path::absolute(path).unwrap_or_else(|_| PathBuf::from(path));
+        Some(console::ScriptLocation::new(path, line))
+    })
 }
 
 fn parse_check_args(args: &[String]) -> Result<CheckArgs, String> {
@@ -1106,7 +1251,7 @@ fn resolve_project_paths(
 }
 
 fn parse_args() -> LaunchArgs {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = command_args();
     if args.is_empty() {
         return LaunchArgs {
             script_path: None,
@@ -1372,6 +1517,45 @@ mod tests {
                 listen: None,
             }
         );
+    }
+
+    #[test]
+    fn message_format_leaves_the_command_line_wherever_it_is() {
+        let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            take_message_format(args(&["check", "--message-format", "json", "."])),
+            Ok((args(&["check", "."]), true))
+        );
+        assert_eq!(
+            take_message_format(args(&["export", ".", "--message-format=human"])),
+            Ok((args(&["export", "."]), false))
+        );
+        assert_eq!(take_message_format(args(&["."])), Ok((args(&["."]), false)));
+        assert!(take_message_format(args(&["check", "--message-format"])).is_err());
+        assert!(take_message_format(args(&["check", "--message-format", "xml"])).is_err());
+    }
+
+    #[test]
+    fn diagnostics_name_the_segment_they_are_about() {
+        assert_eq!(
+            segment_named_in("segment `Problema`: mark 2 is [stop dto] but stop 2 is `dato`"),
+            Some("Problema")
+        );
+        assert_eq!(
+            segment_named_in("segment `intro` has no speaker notes"),
+            Some("intro")
+        );
+        assert_eq!(
+            segment_named_in("timeline is shorter than one second"),
+            None
+        );
+        let measured = script_line_in(
+            "measuring compiled the scene 1 time: examples/basics/segments.py:52 (1×, 0.13s)",
+        )
+        .unwrap();
+        assert!(measured.file.ends_with("examples/basics/segments.py"));
+        assert_eq!(measured.line, 52);
+        assert_eq!(script_line_in("at 12:30 the clock: stops"), None);
     }
 
     #[test]

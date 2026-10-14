@@ -302,6 +302,16 @@ pub fn reload_ready_system(
         pending.size.1,
     );
     gaanim_core::console::success("ready", &status.last_message);
+    if gaanim_core::console::message_format_json() {
+        gaanim_core::console::emit_json(&[
+            ("type", "reload".into()),
+            ("phase", "end".into()),
+            ("seconds", (pending.python + pending.replay + seek).into()),
+            ("python", pending.python.into()),
+            ("replay", pending.replay.into()),
+            ("seek", seek.into()),
+        ]);
+    }
     status.shown_at = Some(time.elapsed_secs_f64());
     crate::startup::report("first scene ready");
 }
