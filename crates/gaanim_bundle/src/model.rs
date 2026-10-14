@@ -85,8 +85,51 @@ pub fn key_entity(key: u32) -> Result<Entity> {
 // Tables
 // ---------------------------------------------------------------------------
 
+/// How many items of each table a segment holds, or where it starts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TableCounts {
+    pub paths: u32,
+    pub images: u32,
+    pub recipes: u32,
+    pub strings: u32,
+    pub transitions: u32,
+    pub effects: u32,
+}
+
+impl TableCounts {
+    pub(crate) fn add(self, other: Self) -> Self {
+        Self {
+            paths: self.paths + other.paths,
+            images: self.images + other.images,
+            recipes: self.recipes + other.recipes,
+            strings: self.strings + other.strings,
+            transitions: self.transitions + other.transitions,
+            effects: self.effects + other.effects,
+        }
+    }
+
+    fn sub(self, other: Self) -> Self {
+        Self {
+            paths: self.paths - other.paths,
+            images: self.images - other.images,
+            recipes: self.recipes - other.recipes,
+            strings: self.strings - other.strings,
+            transitions: self.transitions - other.transitions,
+            effects: self.effects - other.effects,
+        }
+    }
+
+    fn is_empty(self) -> bool {
+        self == Self::default()
+    }
+}
+
 /// Deduplicated paths, images, recipes and strings built while recording.
-#[derive(Default)]
+///
+/// The tables grow in segments: the items a chunk of frames meets first are
+/// stored with that chunk (`segments/NNNNNN.bin`), and the chunk lists every
+/// segment its frames refer to, so a player that opens or seeks downloads
+/// those segments and not the whole history before them.
 pub struct Tables {
     pub(crate) paths: Vec<Arc<kurbo::BezPath>>,
     path_by_ptr: HashMap<usize, u32>,
@@ -108,10 +151,64 @@ pub struct Tables {
     pub(crate) post_exempt: BTreeSet<u32>,
     /// Whether a frame draws glass, which only a GPU pass composes.
     pub(crate) glass: bool,
+    /// Where each segment starts; the last one is the segment being filled.
+    starts: Vec<TableCounts>,
+    /// Segments the items handed out since [`Tables::take_used`] belong to.
+    used: BTreeSet<u32>,
+    /// Segments each recipe needs: its own and those of its paths and images.
+    recipe_deps: Vec<Box<[u32]>>,
+    /// While a recipe or a Lottie frame is encoded, the segments it refers to.
+    collecting: Option<BTreeSet<u32>>,
+}
+
+impl Default for Tables {
+    fn default() -> Self {
+        Self {
+            paths: Vec::new(),
+            path_by_ptr: HashMap::new(),
+            path_by_hash: HashMap::new(),
+            images: Vec::new(),
+            image_by_id: HashMap::new(),
+            image_by_hash: HashMap::new(),
+            recipes: Vec::new(),
+            recipe_by_ptr: HashMap::new(),
+            recipe_by_hash: HashMap::new(),
+            strings: Vec::new(),
+            string_index: HashMap::new(),
+            transition_shaders: Vec::new(),
+            effect_shaders: Vec::new(),
+            post_exempt: BTreeSet::new(),
+            glass: false,
+            starts: vec![TableCounts::default()],
+            used: BTreeSet::new(),
+            recipe_deps: Vec::new(),
+            collecting: None,
+        }
+    }
+}
+
+/// The segment that holds item `index`, given where each segment starts
+/// (`start` reads one table's start): the last one starting at or before it.
+fn segment_of(starts: &[TableCounts], start: fn(&TableCounts) -> u32, index: u32) -> u32 {
+    (starts.partition_point(|counts| start(counts) <= index) - 1) as u32
 }
 
 impl Interner for Tables {
     fn path(&mut self, path: &Arc<kurbo::BezPath>) -> u32 {
+        let index = self.path_index(path);
+        self.note(segment_of(&self.starts, |c| c.paths, index));
+        index
+    }
+
+    fn image(&mut self, image: &peniko::ImageData) -> u32 {
+        let index = self.image_index(image);
+        self.note(segment_of(&self.starts, |c| c.images, index));
+        index
+    }
+}
+
+impl Tables {
+    fn path_index(&mut self, path: &Arc<kurbo::BezPath>) -> u32 {
         let ptr = Arc::as_ptr(path) as usize;
         if let Some(index) = self.path_by_ptr.get(&ptr) {
             return *index;
@@ -130,7 +227,7 @@ impl Interner for Tables {
         index
     }
 
-    fn image(&mut self, image: &peniko::ImageData) -> u32 {
+    fn image_index(&mut self, image: &peniko::ImageData) -> u32 {
         let id = image.data.id();
         if let Some(index) = self.image_by_id.get(&id) {
             return *index;
@@ -149,9 +246,90 @@ impl Interner for Tables {
         self.image_by_id.insert(id, index);
         index
     }
-}
 
-impl Tables {
+    /// Remember that the chunk being recorded refers to `segment`.
+    fn note(&mut self, segment: u32) {
+        self.used.insert(segment);
+        if let Some(collecting) = &mut self.collecting {
+            collecting.insert(segment);
+        }
+    }
+
+    /// Note that the chunk being recorded refers to each of `segments`.
+    pub(crate) fn note_all(&mut self, segments: &[u32]) {
+        for segment in segments {
+            self.note(*segment);
+        }
+    }
+
+    /// The segments referred to since the last call, in increasing order.
+    pub(crate) fn take_used(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.used).into_iter().collect()
+    }
+
+    /// Run `encode` and return what it returned with the segments it
+    /// referred to, as a recipe or a Lottie frame stores them.
+    pub(crate) fn collect<T>(&mut self, encode: impl FnOnce(&mut Self) -> T) -> (T, Vec<u32>) {
+        let outer = self.collecting.replace(BTreeSet::new());
+        let value = encode(self);
+        let inner = std::mem::replace(&mut self.collecting, outer).unwrap_or_default();
+        if let Some(outer) = &mut self.collecting {
+            outer.extend(&inner);
+        }
+        (value, inner.into_iter().collect())
+    }
+
+    fn counts(&self) -> TableCounts {
+        TableCounts {
+            paths: self.paths.len() as u32,
+            images: self.images.len() as u32,
+            recipes: self.recipes.len() as u32,
+            strings: self.strings.len() as u32,
+            transitions: self.transition_shaders.len() as u32,
+            effects: self.effect_shaders.len() as u32,
+        }
+    }
+
+    /// Close the segment being filled: its encoding and how many items of
+    /// each table it holds, or `None` when nothing was added to it.
+    pub(crate) fn close_segment(&mut self) -> Option<(Vec<u8>, TableCounts)> {
+        let start = *self.starts.last().expect("a segment is open");
+        let end = self.counts();
+        let counts = end.sub(start);
+        if counts.is_empty() {
+            return None;
+        }
+        let range = |from: u32, to: u32| from as usize..to as usize;
+        let mut w = Writer::new();
+        w.u8(PATHS_EXACT);
+        w.len(counts.paths as usize);
+        for path in &self.paths[range(start.paths, end.paths)] {
+            codec::write_path(&mut w, path);
+        }
+        w.len(counts.images as usize);
+        for image in &self.images[range(start.images, end.images)] {
+            codec::write_image_data(&mut w, image);
+        }
+        w.len(counts.strings as usize);
+        for string in &self.strings[range(start.strings, end.strings)] {
+            w.str(string);
+        }
+        w.len(counts.transitions as usize);
+        for shader in &self.transition_shaders[range(start.transitions, end.transitions)] {
+            write_transition_shader(&mut w, shader);
+        }
+        w.len(counts.effects as usize);
+        for shader in &self.effect_shaders[range(start.effects, end.effects)] {
+            write_post_shader(&mut w, shader);
+        }
+        w.len(counts.recipes as usize);
+        for recipe in &self.recipes[range(start.recipes, end.recipes)] {
+            w.bytes(recipe);
+        }
+        self.starts.push(end);
+        Some((w.into_bytes(), counts))
+    }
+
     pub fn transition_shader(&mut self, shader: &Arc<TransitionShader>) -> u32 {
         let index = self
             .transition_shaders
@@ -160,8 +338,9 @@ impl Tables {
             .unwrap_or_else(|| {
                 self.transition_shaders.push(Arc::clone(shader));
                 self.transition_shaders.len() - 1
-            });
-        index as u32
+            }) as u32;
+        self.note(segment_of(&self.starts, |c| c.transitions, index));
+        index
     }
 
     pub fn effect_shader(&mut self, shader: &PostProcessShader) -> u32 {
@@ -172,33 +351,59 @@ impl Tables {
             .unwrap_or_else(|| {
                 self.effect_shaders.push(shader.clone());
                 self.effect_shaders.len() - 1
-            });
-        index as u32
+            }) as u32;
+        self.note(segment_of(&self.starts, |c| c.effects, index));
+        index
     }
 
     pub fn string(&mut self, value: &Arc<str>) -> u32 {
-        if let Some(index) = self.string_index.get(value) {
-            return *index;
-        }
-        self.strings.push(Arc::clone(value));
-        let index = (self.strings.len() - 1) as u32;
-        self.string_index.insert(Arc::clone(value), index);
+        let index = match self.string_index.get(value) {
+            Some(index) => *index,
+            None => {
+                self.strings.push(Arc::clone(value));
+                let index = (self.strings.len() - 1) as u32;
+                self.string_index.insert(Arc::clone(value), index);
+                index
+            }
+        };
+        self.note(segment_of(&self.starts, |c| c.strings, index));
         index
     }
 
     pub fn recipe(&mut self, recipe: &Arc<FragmentRecipe>) -> u32 {
         let ptr = Arc::as_ptr(recipe) as usize;
         if let Some((_, index)) = self.recipe_by_ptr.get(&ptr) {
-            return *index;
+            let index = *index;
+            let deps = self.recipe_deps[index as usize].clone();
+            self.note_all(&deps);
+            return index;
         }
-        let mut w = Writer::new();
-        write_recipe(&mut w, self, recipe);
-        let hash = blake3::hash(&w.buf);
-        let bytes = w.into_bytes();
-        let index = *self.recipe_by_hash.entry(hash).or_insert_with(|| {
-            self.recipes.push(bytes);
-            (self.recipes.len() - 1) as u32
+        let (bytes, mut deps) = self.collect(|tables| {
+            let mut w = Writer::new();
+            write_recipe(&mut w, tables, recipe);
+            w.into_bytes()
         });
+        let hash = blake3::hash(&bytes);
+        let index = match self.recipe_by_hash.get(&hash) {
+            Some(index) => {
+                let index = *index;
+                let deps = self.recipe_deps[index as usize].clone();
+                self.note_all(&deps);
+                index
+            }
+            None => {
+                let index = self.recipes.len() as u32;
+                self.recipes.push(bytes);
+                let own = segment_of(&self.starts, |c| c.recipes, index);
+                if let Err(position) = deps.binary_search(&own) {
+                    deps.insert(position, own);
+                }
+                self.note(own);
+                self.recipe_deps.push(deps.into());
+                self.recipe_by_hash.insert(hash, index);
+                index
+            }
+        };
         // Hold the recipe so its address is not reused by another one.
         self.recipe_by_ptr.insert(ptr, (Arc::clone(recipe), index));
         index
@@ -212,56 +417,241 @@ impl Tables {
     }
 }
 
-/// Decoded tables of an open bundle.
-pub struct DecodedTables {
-    pub paths: Vec<Arc<kurbo::BezPath>>,
-    pub images: Vec<peniko::ImageData>,
-    pub recipes: Vec<Arc<FragmentRecipe>>,
-    pub strings: Vec<Arc<str>>,
+/// Paths of a segment stored exactly, every coordinate's bits.
+pub(crate) const PATHS_EXACT: u8 = 0;
+
+/// The items of one decoded segment.
+#[derive(Default)]
+struct Segment {
+    paths: Vec<Arc<kurbo::BezPath>>,
+    images: Vec<peniko::ImageData>,
+    strings: Vec<Arc<str>>,
     /// Shared by every frame of one transition, so its shader is built once.
-    pub transition_shaders: Vec<Arc<TransitionShader>>,
-    pub effect_shaders: Vec<PostProcessShader>,
+    transition_shaders: Vec<Arc<TransitionShader>>,
+    effect_shaders: Vec<PostProcessShader>,
+    recipes: Vec<Arc<FragmentRecipe>>,
+}
+
+/// Decoded tables of an open bundle, segment by segment as frames need
+/// them (see [`Tables`]).
+pub struct DecodedTables {
+    /// Where each segment starts, then the totals.
+    starts: Vec<TableCounts>,
+    segments: Vec<Option<Segment>>,
     /// Keys of the drawables the post-process leaves out; empty in a bundle
     /// recorded without any.
     pub post_exempt: HashSet<u32>,
 }
 
+/// Item `index` of the table `items` reads from a segment, found through
+/// where each segment starts in that table (`start`).
+fn lookup<'a, T>(
+    tables: &'a DecodedTables,
+    start: fn(&TableCounts) -> u32,
+    items: fn(&Segment) -> &Vec<T>,
+    index: u32,
+    what: &str,
+) -> Result<&'a T> {
+    if index >= start(tables.starts.last().expect("totals")) {
+        return Err(corrupt(&format!("{what} index out of range")));
+    }
+    let segment = segment_of(&tables.starts, start, index) as usize;
+    let loaded = tables.segments[segment].as_ref().ok_or_else(|| {
+        corrupt(&format!(
+            "a frame refers to a {what} of a segment it does not list"
+        ))
+    })?;
+    items(loaded)
+        .get((index - start(&tables.starts[segment])) as usize)
+        .ok_or_else(|| corrupt(&format!("{what} index out of range")))
+}
+
 impl Resolver for DecodedTables {
     fn path(&self, index: u32) -> Result<Arc<kurbo::BezPath>> {
-        self.paths
-            .get(index as usize)
-            .cloned()
-            .ok_or_else(|| corrupt("path index out of range"))
+        lookup(self, |c| c.paths, |s| &s.paths, index, "path").cloned()
     }
 
     fn image(&self, index: u32) -> Result<peniko::ImageData> {
-        self.images
-            .get(index as usize)
-            .cloned()
-            .ok_or_else(|| corrupt("image index out of range"))
+        lookup(self, |c| c.images, |s| &s.images, index, "image").cloned()
     }
 }
 
 impl DecodedTables {
+    /// Tables of `counts.len()` segments, holding `counts[i]` items each,
+    /// none decoded yet.
+    pub fn new(counts: &[TableCounts]) -> Self {
+        let mut starts = vec![TableCounts::default()];
+        for segment in counts {
+            starts.push(starts.last().expect("a start").add(*segment));
+        }
+        // The last start is the totals: no segment starts there.
+        Self {
+            starts,
+            segments: counts.iter().map(|_| None).collect(),
+            post_exempt: HashSet::new(),
+        }
+    }
+
+    pub fn is_loaded(&self, segment: usize) -> bool {
+        self.segments.get(segment).is_some_and(Option::is_some)
+    }
+
+    /// How many items of each table there are, over every segment.
+    pub fn totals(&self) -> TableCounts {
+        *self.starts.last().expect("totals")
+    }
+
+    /// Decode segment `segment` from `bytes`. The segments its recipes refer
+    /// to must be decoded already: every one before it that they use.
+    pub fn load(&mut self, segment: usize, bytes: &[u8]) -> Result<()> {
+        let expected = self.starts[segment + 1].sub(self.starts[segment]);
+        let mut r = Reader::new(bytes);
+        let paths_encoding = r.u8()?;
+        if paths_encoding != PATHS_EXACT {
+            return Err(BundleError::Unsupported(format!(
+                "a segment stores its paths in an encoding this Gaanim does not read ({paths_encoding})"
+            )));
+        }
+        let mut decoded = Segment::default();
+        let count = |r: &mut Reader<'_>, expected: u32, what: &str| -> Result<usize> {
+            let count = r.len()?;
+            if count != expected as usize {
+                return Err(corrupt(&format!(
+                    "a segment holds an unexpected number of {what}"
+                )));
+            }
+            Ok(count)
+        };
+        for _ in 0..count(&mut r, expected.paths, "paths")? {
+            decoded.paths.push(Arc::new(codec::read_path(&mut r)?));
+        }
+        for _ in 0..count(&mut r, expected.images, "images")? {
+            decoded.images.push(codec::read_image_data(&mut r)?);
+        }
+        for _ in 0..count(&mut r, expected.strings, "strings")? {
+            decoded.strings.push(Arc::from(r.str()?));
+        }
+        for _ in 0..count(&mut r, expected.transitions, "transitions")? {
+            decoded
+                .transition_shaders
+                .push(Arc::new(read_transition_shader(&mut r)?));
+        }
+        for _ in 0..count(&mut r, expected.effects, "effects")? {
+            decoded.effect_shaders.push(read_post_shader(&mut r)?);
+        }
+        let recipes = count(&mut r, expected.recipes, "recipes")?;
+        let mut encoded = Vec::with_capacity(recipes.min(1 << 20));
+        for _ in 0..recipes {
+            encoded.push(r.bytes()?);
+        }
+        if !r.is_empty() {
+            return Err(corrupt("a segment has trailing data"));
+        }
+        // Recipes refer to this segment's paths and images too.
+        self.segments[segment] = Some(decoded);
+        let recipes = encoded
+            .iter()
+            .map(|bytes| read_recipe(&mut Reader::new(bytes), self).map(Arc::new))
+            .collect::<Result<Vec<_>>>();
+        match recipes {
+            Ok(recipes) => {
+                self.segments[segment]
+                    .as_mut()
+                    .expect("just loaded")
+                    .recipes = recipes;
+                Ok(())
+            }
+            Err(error) => {
+                self.segments[segment] = None;
+                Err(error)
+            }
+        }
+    }
+
+    /// Tables of a format 5 bundle, which stores each table whole in an
+    /// entry of its own: one segment that every chunk needs.
+    pub fn from_format_5(
+        paths: &[u8],
+        images: &[u8],
+        strings: &[u8],
+        transitions: &[u8],
+        effects: &[u8],
+        recipes: &[u8],
+    ) -> Result<Self> {
+        let mut decoded = Segment::default();
+        let mut r = Reader::new(paths);
+        for _ in 0..r.len()? {
+            decoded.paths.push(Arc::new(codec::read_path(&mut r)?));
+        }
+        let mut r = Reader::new(images);
+        for _ in 0..r.len()? {
+            decoded.images.push(codec::read_image_data(&mut r)?);
+        }
+        let mut r = Reader::new(strings);
+        for _ in 0..r.len()? {
+            decoded.strings.push(Arc::from(r.str()?));
+        }
+        let mut r = Reader::new(transitions);
+        for _ in 0..r.len()? {
+            decoded
+                .transition_shaders
+                .push(Arc::new(read_transition_shader(&mut r)?));
+        }
+        let mut r = Reader::new(effects);
+        for _ in 0..r.len()? {
+            decoded.effect_shaders.push(read_post_shader(&mut r)?);
+        }
+        let mut r = Reader::new(recipes);
+        let mut encoded = Vec::new();
+        for _ in 0..r.len()? {
+            encoded.push(r.bytes()?);
+        }
+        let counts = TableCounts {
+            paths: decoded.paths.len() as u32,
+            images: decoded.images.len() as u32,
+            recipes: encoded.len() as u32,
+            strings: decoded.strings.len() as u32,
+            transitions: decoded.transition_shaders.len() as u32,
+            effects: decoded.effect_shaders.len() as u32,
+        };
+        let mut tables = Self::new(&[counts]);
+        tables.segments[0] = Some(decoded);
+        let recipes = encoded
+            .iter()
+            .map(|bytes| read_recipe(&mut Reader::new(bytes), &tables).map(Arc::new))
+            .collect::<Result<Vec<_>>>()?;
+        tables.segments[0].as_mut().expect("just set").recipes = recipes;
+        Ok(tables)
+    }
+
     fn recipe(&self, index: u32) -> Result<Arc<FragmentRecipe>> {
-        self.recipes
-            .get(index as usize)
-            .cloned()
-            .ok_or_else(|| corrupt("recipe index out of range"))
+        lookup(self, |c| c.recipes, |s| &s.recipes, index, "recipe").cloned()
     }
 
     fn effect_shader(&self, index: u32) -> Result<PostProcessShader> {
-        self.effect_shaders
-            .get(index as usize)
-            .cloned()
-            .ok_or_else(|| corrupt("effect shader index out of range"))
+        lookup(
+            self,
+            |c| c.effects,
+            |s| &s.effect_shaders,
+            index,
+            "effect shader",
+        )
+        .cloned()
+    }
+
+    fn transition_shader(&self, index: u32) -> Result<Arc<TransitionShader>> {
+        lookup(
+            self,
+            |c| c.transitions,
+            |s| &s.transition_shaders,
+            index,
+            "transition shader",
+        )
+        .cloned()
     }
 
     fn string(&self, index: u32) -> Result<Arc<str>> {
-        self.strings
-            .get(index as usize)
-            .cloned()
-            .ok_or_else(|| corrupt("string index out of range"))
+        lookup(self, |c| c.strings, |s| &s.strings, index, "string").cloned()
     }
 }
 
@@ -628,12 +1018,7 @@ fn read_transition(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<Capture
         overlays.push(gaanim_scene::TransitionOverlayLayer { blend, clip, fills });
     }
     let shader = r.option(|r| {
-        let index = r.u32()? as usize;
-        let shader = tables
-            .transition_shaders
-            .get(index)
-            .cloned()
-            .ok_or_else(|| corrupt("transition shader index out of range"))?;
+        let shader = tables.transition_shader(r.u32()?)?;
         let progress = r.f32()?;
         let count = r.len()?;
         let mut values = Vec::with_capacity(count.min(64));
@@ -1501,12 +1886,4 @@ impl DeltaDecoder {
         self.previous = Some(frame.clone());
         Ok(frame)
     }
-}
-
-pub(crate) fn decode_recipes(encoded: &[Vec<u8>], tables: &mut DecodedTables) -> Result<()> {
-    for bytes in encoded {
-        let recipe = read_recipe(&mut Reader::new(bytes), tables)?;
-        tables.recipes.push(Arc::new(recipe));
-    }
-    Ok(())
 }

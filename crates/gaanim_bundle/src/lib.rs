@@ -14,10 +14,13 @@
 //!   other entry.
 //! - `scene.bin`: static data (background, post-process shaders, timeline
 //!   structure, audio tracks).
-//! - `tables/*.bin`: deduplicated paths, images, recipes, strings, shader
-//!   transitions and the passes of shader effects on drawables.
+//! - `segments/NNNNNN.bin`: deduplicated paths, images, recipes, strings,
+//!   shader transitions and the passes of shader effects on drawables, in
+//!   segments: each holds what a chunk of frames met first, and is written
+//!   just before that chunk.
 //! - `frames/NNNNNN.bin`: chunks of frames, each frame encoded against the
-//!   one before it; a chunk starts with a whole frame.
+//!   one before it; a chunk starts with a whole frame, and the manifest lists
+//!   the segments its frames refer to.
 //! - `media/*`: embedded audio files.
 //! - `polls.json`: audience polls, their relay session and the elements
 //!   drawn from live poll data (bars, nicknames, readouts) with the glyphs
@@ -26,8 +29,8 @@
 //!
 //! A bundle opens from its bytes whole or in pieces ([`BundleSource`]): the
 //! web player opens one from the end of the file, which holds the archive's
-//! directory and every table, and downloads frame chunks as playback needs
-//! them.
+//! directory and the manifest, then downloads the first chunk with its
+//! segments, and later chunks with theirs as playback needs them.
 //!
 //! [`FragmentRecipe`]: gaanim_renderer::fragment::FragmentRecipe
 
@@ -59,7 +62,7 @@ use serde::{Deserialize, Serialize};
 use archive::Archive;
 use codec::{Reader, Writer};
 pub use digest::scene_digest;
-use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, Tables};
+use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, TableCounts, Tables};
 pub use model::{EntityKeys, Frame, PostPass};
 pub use source::BundleSource;
 
@@ -80,8 +83,13 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// version 3 (development builds of Gaanim 0.9) had no chalk strokes nor
 /// shader effects on drawables (`tables/effects.bin`), track mattes nor
 /// glass; version 4 (development builds of Gaanim 0.9) had no reactive
-/// uniforms on shader transitions nor shader backgrounds.
-pub const VERSION: u32 = 5;
+/// uniforms on shader transitions nor shader backgrounds; version 5 (Gaanim
+/// 0.9 to 0.12) stored each table whole in `tables/*.bin`, which a player
+/// downloaded before the first frame, and every frame's time as an `f64`.
+pub const VERSION: u32 = 6;
+/// Oldest version this build still reads: bundles published in other pages
+/// keep playing when the hosted players move to a newer version.
+pub const OLDEST_READABLE: u32 = 5;
 /// Zstandard level of data entries, still fast to read. Level 17 made
 /// entries about 8% smaller and compressed nearly four times slower.
 #[cfg(not(target_arch = "wasm32"))]
@@ -134,11 +142,11 @@ pub enum BundleError {
 type Result<T> = std::result::Result<T, BundleError>;
 
 fn version_message(found: u32, generator: &str) -> String {
-    if found < VERSION {
+    if found < OLDEST_READABLE {
         format!(
             "this bundle was recorded by {generator} in format version {found}, which this \
-             Gaanim no longer reads (it reads version {VERSION}). Record it again from its \
-             script with `gaanim export <script> --output <file>.gaanim`"
+             Gaanim no longer reads (it reads versions {OLDEST_READABLE} to {VERSION}). Record \
+             it again from its script with `gaanim export <script> --output <file>.gaanim`"
         )
     } else {
         format!(
@@ -936,6 +944,12 @@ pub struct Manifest {
     pub stops: usize,
     /// Frames per chunk entry and the time of each chunk's first frame.
     pub chunks: Vec<ChunkInfo>,
+    /// Table segments, in the order they were written (from version 6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub table_segments: Vec<TableSegment>,
+    /// Table segments the static data (`scene.bin`) refers to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scene_table_segments: Vec<u32>,
     /// BLAKE3 hash (hex) of every other entry.
     pub entries: std::collections::BTreeMap<String, String>,
 }
@@ -947,6 +961,19 @@ pub struct ChunkInfo {
     pub frames: usize,
     /// Time of the chunk's first frame.
     pub start: f64,
+    /// Table segments its frames refer to, in increasing order (from
+    /// version 6; a version 5 bundle has one table that every chunk needs).
+    #[serde(default)]
+    pub table_segments: Vec<u32>,
+}
+
+/// A segment of the tables: its entry and how many items of each table it
+/// adds.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TableSegment {
+    pub entry: String,
+    #[serde(flatten)]
+    pub counts: TableCounts,
 }
 
 // ---------------------------------------------------------------------------
@@ -972,6 +999,9 @@ pub struct BundleWriter<W: Write + Seek> {
     /// chunk (held so their addresses stay unique).
     scenes: HashMap<blake3::Hash, u32>,
     scene_by_ptr: HashMap<usize, (Arc<vello::Scene>, u32)>,
+    /// Segments each recorded Lottie frame refers to (its images).
+    scene_deps: Vec<Vec<u32>>,
+    table_segments: Vec<TableSegment>,
     generator: String,
 }
 
@@ -1015,6 +1045,8 @@ impl<W: Write + Seek> BundleWriter<W> {
             media: HashMap::new(),
             scenes: HashMap::new(),
             scene_by_ptr: HashMap::new(),
+            scene_deps: Vec::new(),
+            table_segments: Vec::new(),
             generator: generator.into(),
         }
     }
@@ -1087,19 +1119,30 @@ impl<W: Write + Seek> BundleWriter<W> {
     fn intern_scene(&mut self, scene: &Arc<vello::Scene>) -> Result<u32> {
         let ptr = Arc::as_ptr(scene) as usize;
         if let Some((_, index)) = self.scene_by_ptr.get(&ptr) {
-            return Ok(*index);
+            let index = *index;
+            self.tables
+                .note_all(&self.scene_deps[index as usize].clone());
+            return Ok(index);
         }
-        let mut w = Writer::new();
-        codec::write_scene(&mut w, &mut self.tables, scene)
+        let (encoded, deps) = self.tables.collect(|tables| {
+            let mut w = Writer::new();
+            codec::write_scene(&mut w, tables, scene).map(|()| w.into_bytes())
+        });
+        let bytes = encoded
             .map_err(|what| BundleError::Unsupported(format!("a Lottie frame draws {what}")))?;
-        let bytes = w.into_bytes();
         let hash = blake3::hash(&bytes);
         let index = match self.scenes.get(&hash) {
-            Some(index) => *index,
+            Some(index) => {
+                let index = *index;
+                self.tables
+                    .note_all(&self.scene_deps[index as usize].clone());
+                index
+            }
             None => {
                 let index = self.scenes.len() as u32;
                 self.write_entry(&scene_entry(index), &bytes)?;
                 self.scenes.insert(hash, index);
+                self.scene_deps.push(deps);
                 index
             }
         };
@@ -1141,6 +1184,7 @@ impl<W: Write + Seek> BundleWriter<W> {
                 first_frame: self.frames,
                 frames: 0,
                 start: frame.time,
+                table_segments: Vec::new(),
             });
         }
         self.delta.write(&mut self.chunk, record);
@@ -1156,9 +1200,14 @@ impl<W: Write + Seek> BundleWriter<W> {
         if self.chunk_frames == 0 {
             return Ok(());
         }
+        let segments = self.tables.take_used();
+        // The segment of what the chunk met first goes just before it, so
+        // the chunk and its newest items download together.
+        self.close_segment()?;
         let bytes = std::mem::take(&mut self.chunk).into_bytes();
         let info = self.chunks.last_mut().expect("chunk started");
         info.frames = self.chunk_frames;
+        info.table_segments = segments;
         let entry = info.entry.clone();
         self.write_entry(&entry, &bytes)?;
         self.chunk_frames = 0;
@@ -1168,50 +1217,26 @@ impl<W: Write + Seek> BundleWriter<W> {
         Ok(())
     }
 
-    /// Write the tables, the static data and the manifest, and close the file.
+    /// Write the items added to the tables since the last segment, if any.
+    fn close_segment(&mut self) -> Result<()> {
+        if let Some((bytes, counts)) = self.tables.close_segment() {
+            let entry = segment_entry(self.table_segments.len());
+            self.write_entry(&entry, &bytes)?;
+            self.table_segments.push(TableSegment { entry, counts });
+        }
+        Ok(())
+    }
+
+    /// Write the static data, its segment and the manifest, and close the
+    /// file.
     pub fn finish(mut self, scene: &SceneData) -> Result<W> {
         self.flush_chunk()?;
+        self.tables.take_used();
         let mut w = Writer::new();
         scene.write(&mut w, &mut self.tables);
         let scene_bytes = w.into_bytes();
-
-        // Tables last: frames and static data may have added to them.
-        let mut paths = Writer::new();
-        paths.len(self.tables.paths.len());
-        for path in &self.tables.paths {
-            codec::write_path(&mut paths, path);
-        }
-        let mut images = Writer::new();
-        images.len(self.tables.images.len());
-        for image in &self.tables.images {
-            codec::write_image_data(&mut images, image);
-        }
-        let mut recipes = Writer::new();
-        recipes.len(self.tables.recipes.len());
-        for recipe in &self.tables.recipes {
-            recipes.bytes(recipe);
-        }
-        let mut strings = Writer::new();
-        strings.len(self.tables.strings.len());
-        for string in &self.tables.strings {
-            strings.str(string);
-        }
-        self.write_entry("tables/paths.bin", &paths.into_bytes())?;
-        self.write_entry("tables/images.bin", &images.into_bytes())?;
-        self.write_entry("tables/recipes.bin", &recipes.into_bytes())?;
-        self.write_entry("tables/strings.bin", &strings.into_bytes())?;
-        let mut transitions = Writer::new();
-        transitions.len(self.tables.transition_shaders.len());
-        for shader in &self.tables.transition_shaders {
-            model::write_transition_shader(&mut transitions, shader);
-        }
-        self.write_entry("tables/transitions.bin", &transitions.into_bytes())?;
-        let mut effects = Writer::new();
-        effects.len(self.tables.effect_shaders.len());
-        for shader in &self.tables.effect_shaders {
-            model::write_post_shader(&mut effects, shader);
-        }
-        self.write_entry("tables/effects.bin", &effects.into_bytes())?;
+        let scene_table_segments = self.tables.take_used();
+        self.close_segment()?;
         if !self.tables.post_exempt.is_empty() {
             let mut unprocessed = Writer::new();
             unprocessed.len(self.tables.post_exempt.len());
@@ -1224,12 +1249,7 @@ impl<W: Write + Seek> BundleWriter<W> {
             self.write_entry(GLASS, &[1])?;
         }
         self.write_entry("scene.bin", &scene_bytes)?;
-        let mut index = Writer::new();
-        index.len(self.times.len());
-        for time in &self.times {
-            index.f64(*time);
-        }
-        self.write_entry("index.bin", &index.into_bytes())?;
+        self.write_entry("index.bin", &write_index(&self.times, scene.fps))?;
         let mut digests = Vec::with_capacity(self.digests.len() * 32);
         for digest in &self.digests {
             digests.extend_from_slice(digest);
@@ -1276,6 +1296,8 @@ impl<W: Write + Seek> BundleWriter<W> {
                 .map(|segment| segment.stops.len())
                 .sum(),
             chunks: self.chunks.clone(),
+            table_segments: self.table_segments.clone(),
+            scene_table_segments,
             entries: self.entries.clone(),
         };
         let json = serde_json::to_vec_pretty(&manifest)
@@ -1290,7 +1312,8 @@ impl<W: Write + Seek> BundleWriter<W> {
 // Reader
 // ---------------------------------------------------------------------------
 
-/// An open bundle. Frames are decoded chunk by chunk on demand.
+/// An open bundle. Frames are decoded chunk by chunk on demand, and table
+/// segments as the chunks that refer to them are.
 pub struct Bundle {
     archive: Archive,
     pub manifest: Manifest,
@@ -1355,6 +1378,62 @@ fn scene_entry(index: u32) -> String {
     format!("scenes/{index:06}.bin")
 }
 
+fn segment_entry(index: usize) -> String {
+    format!("segments/{index:06}.bin")
+}
+
+/// Frame times as `index.bin` stores them from version 6: the count and the
+/// frame rate, then per frame 0 when it is the next instant of the frame
+/// grid, stepped as an export steps it (`RecordingPlan`), or 1 and its bits.
+/// A long recording's index takes a byte a frame instead of eight.
+fn write_index(times: &[f64], fps: u32) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.len(times.len());
+    w.var(u64::from(fps));
+    let step = 1.0 / f64::from(fps.max(1));
+    let mut grid = 0.0_f64;
+    for time in times {
+        if time.to_bits() == grid.to_bits() {
+            w.u8(0);
+            grid += step;
+        } else {
+            w.u8(1);
+            w.f64(*time);
+        }
+    }
+    w.into_bytes()
+}
+
+/// Read `index.bin` as version `version` wrote it.
+fn read_index(bytes: &[u8], version: u32) -> Result<Vec<f64>> {
+    let mut r = Reader::new(bytes);
+    let count = r.len()?;
+    let mut times = Vec::with_capacity(count.min(1 << 24));
+    if version < 6 {
+        for _ in 0..count {
+            times.push(r.f64()?);
+        }
+    } else {
+        let fps = u32::try_from(r.var()?).map_err(|_| BundleError::Corrupt("frame rate".into()))?;
+        let step = 1.0 / f64::from(fps.max(1));
+        let mut grid = 0.0;
+        for _ in 0..count {
+            match r.u8()? {
+                0 => {
+                    times.push(grid);
+                    grid += step;
+                }
+                1 => times.push(r.f64()?),
+                _ => return Err(BundleError::Corrupt("invalid frame index entry".into())),
+            }
+        }
+    }
+    if !r.is_empty() {
+        return Err(BundleError::Corrupt("index.bin has trailing data".into()));
+    }
+    Ok(times)
+}
+
 #[cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))]
 fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(zstd::bulk::compress(bytes, ZSTD_LEVEL)?)
@@ -1410,16 +1489,23 @@ fn read_entry(archive: &Archive, manifest: Option<&Manifest>, name: &str) -> Res
 /// Frame digests, which only [`Bundle::verify`] reads.
 const DIGESTS: &str = "digests.bin";
 
-/// Entries a bundle reads as it opens: everything but frame chunks, Lottie
-/// frames, media, the cover and the frame digests. The first chunk comes
-/// along, since a player shows it next.
+/// Entries a bundle reads as it opens, whatever its manifest says:
+/// everything but frame chunks, table segments, Lottie frames, media, the
+/// cover and the frame digests. The first chunk comes along, since a player
+/// shows it next; the manifest names the segments it and `scene.bin` need.
 fn read_on_open(name: &str) -> bool {
     name == "frames/000000.bin"
         || !(name.starts_with("frames/")
+            || name.starts_with("segments/")
             || name.starts_with("scenes/")
             || name.starts_with("media/")
             || name == THUMBNAIL
             || name == DIGESTS)
+}
+
+/// The segments of a version 6 bundle's chunk or static data, as indices.
+fn segment_indices(segments: &[u32]) -> Vec<usize> {
+    segments.iter().map(|segment| *segment as usize).collect()
 }
 
 impl Bundle {
@@ -1440,13 +1526,24 @@ impl Bundle {
     /// arrive.
     pub fn from_source(source: BundleSource) -> Result<Self> {
         let archive = Archive::open(source)?;
-        let mut missing: Vec<Range<u64>> = archive
+        let missing_of = |names: &mut dyn Iterator<Item = &str>| -> Vec<Range<u64>> {
+            let mut missing: Vec<Range<u64>> = names
+                .filter_map(|name| archive.span(name))
+                .flat_map(|span| archive.source().missing(span))
+                .collect();
+            missing.sort_by_key(|range| range.start);
+            missing
+        };
+        // The manifest names the segments opening needs. Until it is here,
+        // ask for it with the entries any bundle opens with.
+        let on_open: Vec<String> = archive
             .spans()
             .filter(|(name, _)| read_on_open(name))
-            .flat_map(|(_, span)| archive.source().missing(span))
+            .map(|(name, _)| name.to_owned())
             .collect();
-        if !missing.is_empty() {
-            missing.sort_by_key(|range| range.start);
+        let manifest_missing = missing_of(&mut std::iter::once("manifest.json"));
+        if !manifest_missing.is_empty() {
+            let missing = missing_of(&mut on_open.iter().map(String::as_str));
             return Err(BundleError::Incomplete { missing });
         }
         let manifest: Manifest =
@@ -1458,63 +1555,73 @@ impl Bundle {
                 manifest.format
             )));
         }
-        if manifest.version != VERSION {
+        if !(OLDEST_READABLE..=VERSION).contains(&manifest.version) {
             return Err(BundleError::UnsupportedVersion {
                 found: manifest.version,
                 generator: manifest.generator.clone(),
             });
         }
+        let version = manifest.version;
+        let mut opening: Vec<usize> = Vec::new();
+        if version >= 6 {
+            opening.extend(segment_indices(&manifest.scene_table_segments));
+            if let Some(first) = manifest.chunks.first() {
+                opening.extend(segment_indices(&first.table_segments));
+            }
+            opening.sort_unstable();
+            opening.dedup();
+            if opening
+                .iter()
+                .any(|segment| *segment >= manifest.table_segments.len())
+            {
+                return Err(BundleError::Corrupt(
+                    "a segment index is out of range".into(),
+                ));
+            }
+        }
+        let segment_names: Vec<&str> = opening
+            .iter()
+            .map(|segment| manifest.table_segments[*segment].entry.as_str())
+            .collect();
+        let missing = missing_of(
+            &mut on_open
+                .iter()
+                .map(String::as_str)
+                .chain(segment_names.iter().copied()),
+        );
+        if !missing.is_empty() {
+            return Err(BundleError::Incomplete { missing });
+        }
 
-        let mut tables = DecodedTables {
-            paths: Vec::new(),
-            images: Vec::new(),
-            recipes: Vec::new(),
-            strings: Vec::new(),
-            transition_shaders: Vec::new(),
-            effect_shaders: Vec::new(),
-            post_exempt: Default::default(),
-        };
-        let paths = read_entry(&archive, Some(&manifest), "tables/paths.bin")?;
-        let mut r = Reader::new(&paths);
-        for _ in 0..r.len()? {
-            tables.paths.push(Arc::new(codec::read_path(&mut r)?));
-        }
-        let images = read_entry(&archive, Some(&manifest), "tables/images.bin")?;
-        let mut r = Reader::new(&images);
-        for _ in 0..r.len()? {
-            tables.images.push(codec::read_image_data(&mut r)?);
-        }
-        let strings = read_entry(&archive, Some(&manifest), "tables/strings.bin")?;
-        let mut r = Reader::new(&strings);
-        for _ in 0..r.len()? {
-            tables.strings.push(Arc::from(r.str()?));
-        }
-        let transitions = read_entry(&archive, Some(&manifest), "tables/transitions.bin")?;
-        let mut r = Reader::new(&transitions);
-        for _ in 0..r.len()? {
+        let read = |name: &str| read_entry(&archive, Some(&manifest), name);
+        let mut tables = if version < 6 {
+            DecodedTables::from_format_5(
+                &read("tables/paths.bin")?,
+                &read("tables/images.bin")?,
+                &read("tables/strings.bin")?,
+                &read("tables/transitions.bin")?,
+                &read("tables/effects.bin")?,
+                &read("tables/recipes.bin")?,
+            )?
+        } else {
+            let counts: Vec<TableCounts> = manifest
+                .table_segments
+                .iter()
+                .map(|segment| segment.counts)
+                .collect();
+            let mut tables = DecodedTables::new(&counts);
+            for segment in &opening {
+                tables.load(*segment, &read(&manifest.table_segments[*segment].entry)?)?;
+            }
             tables
-                .transition_shaders
-                .push(Arc::new(model::read_transition_shader(&mut r)?));
-        }
-        let effects = read_entry(&archive, Some(&manifest), "tables/effects.bin")?;
-        let mut r = Reader::new(&effects);
-        for _ in 0..r.len()? {
-            tables.effect_shaders.push(model::read_post_shader(&mut r)?);
-        }
+        };
         if manifest.entries.contains_key(UNPROCESSED) {
-            let unprocessed = read_entry(&archive, Some(&manifest), UNPROCESSED)?;
+            let unprocessed = read(UNPROCESSED)?;
             let mut r = Reader::new(&unprocessed);
             for _ in 0..r.len()? {
                 tables.post_exempt.insert(r.u32()?);
             }
         }
-        let recipes = read_entry(&archive, Some(&manifest), "tables/recipes.bin")?;
-        let mut r = Reader::new(&recipes);
-        let mut encoded = Vec::new();
-        for _ in 0..r.len()? {
-            encoded.push(r.bytes()?.to_vec());
-        }
-        model::decode_recipes(&encoded, &mut tables)?;
         let scene_bytes = read_entry(&archive, Some(&manifest), "scene.bin")?;
         let mut scene = SceneData::read(&mut Reader::new(&scene_bytes), &tables)?;
         if manifest.entries.contains_key(POLLS) {
@@ -1535,13 +1642,10 @@ impl Bundle {
             );
         }
 
-        let index = read_entry(&archive, Some(&manifest), "index.bin")?;
-        let mut r = Reader::new(&index);
-        let count = r.len()?;
-        let mut times = Vec::with_capacity(count.min(1 << 24));
-        for _ in 0..count {
-            times.push(r.f64()?);
-        }
+        let times = read_index(
+            &read_entry(&archive, Some(&manifest), "index.bin")?,
+            version,
+        )?;
         let chunked: usize = manifest.chunks.iter().map(|chunk| chunk.frames).sum();
         let mut by_time: Vec<usize> = (0..times.len()).collect();
         by_time.sort_by(|a, b| times[*a].total_cmp(&times[*b]));
@@ -1572,12 +1676,63 @@ impl Bundle {
         })
     }
 
-    fn open_chunk(&mut self, chunk: usize) -> Result<ChunkCursor> {
-        let info = self
-            .manifest
+    /// The segments chunk `chunk` refers to; a version 5 bundle's single
+    /// table, which every chunk needs.
+    fn chunk_segments(&self, chunk: usize) -> Vec<usize> {
+        if self.manifest.version < 6 {
+            return vec![0];
+        }
+        self.manifest
             .chunks
             .get(chunk)
-            .ok_or_else(|| BundleError::Corrupt("chunk index out of range".into()))?;
+            .map(|info| segment_indices(&info.table_segments))
+            .unwrap_or_default()
+    }
+
+    /// The bytes still missing to decode chunk `chunk`: its own and those of
+    /// the segments it refers to that are not decoded yet.
+    fn missing_for_chunk(&self, chunk: usize) -> Vec<Range<u64>> {
+        let Some(info) = self.manifest.chunks.get(chunk) else {
+            return Vec::new();
+        };
+        let segments = self
+            .chunk_segments(chunk)
+            .into_iter()
+            .filter(|segment| !self.tables.is_loaded(*segment))
+            .filter_map(|segment| self.manifest.table_segments.get(segment))
+            .map(|segment| segment.entry.as_str());
+        std::iter::once(info.entry.as_str())
+            .chain(segments)
+            .filter_map(|name| self.archive.span(name))
+            .flat_map(|span| self.archive.source().missing(span))
+            .collect()
+    }
+
+    fn open_chunk(&mut self, chunk: usize) -> Result<ChunkCursor> {
+        if chunk >= self.manifest.chunks.len() {
+            return Err(BundleError::Corrupt("chunk index out of range".into()));
+        }
+        // One request for the chunk and every segment it still needs.
+        let mut missing = self.missing_for_chunk(chunk);
+        if !missing.is_empty() {
+            missing.sort_by_key(|range| range.start);
+            return Err(BundleError::Incomplete { missing });
+        }
+        for segment in self.chunk_segments(chunk) {
+            if self.tables.is_loaded(segment) {
+                continue;
+            }
+            let entry = self
+                .manifest
+                .table_segments
+                .get(segment)
+                .ok_or_else(|| BundleError::Corrupt("a segment index is out of range".into()))?
+                .entry
+                .clone();
+            let bytes = read_entry(&self.archive, Some(&self.manifest), &entry)?;
+            self.tables.load(segment, &bytes)?;
+        }
+        let info = &self.manifest.chunks[chunk];
         let bytes = read_entry(&self.archive, Some(&self.manifest), &info.entry)?;
         Ok(ChunkCursor {
             chunk,
@@ -1597,13 +1752,13 @@ impl Bundle {
     /// Whether frames blend segments through a shader transition, which
     /// renders in a GPU pass of its own.
     pub fn has_shader_transitions(&self) -> bool {
-        !self.tables.transition_shaders.is_empty()
+        self.tables.totals().transitions > 0
     }
 
     /// Whether drawables are drawn through a shader effect, which renders in
     /// a GPU pass of its own.
     pub fn has_shader_effects(&self) -> bool {
-        !self.tables.effect_shaders.is_empty()
+        self.tables.totals().effects > 0
     }
 
     /// Whether a frame draws glass, which a GPU pass of its own composes.
@@ -1684,21 +1839,18 @@ impl Bundle {
     }
 
     /// Byte ranges still missing to decode frame `index` and the frames of
-    /// the `ahead` chunks recorded after its own, nearest first. Lottie
-    /// frames are left out: a frame names them only once it decodes.
+    /// the `ahead` chunks recorded after its own, nearest first, with the
+    /// segments they refer to. Lottie frames are left out: a frame names
+    /// them only once it decodes.
     pub fn missing_around(&self, index: usize, ahead: usize) -> Vec<Range<u64>> {
         let chunk = self
             .manifest
             .chunks
             .partition_point(|info| info.first_frame <= index)
             .saturating_sub(1);
-        self.manifest
-            .chunks
-            .iter()
-            .skip(chunk)
-            .take(ahead + 1)
-            .filter_map(|info| self.archive.span(&info.entry))
-            .flat_map(|span| self.archive.source().missing(span))
+        let end = (chunk + ahead + 1).min(self.manifest.chunks.len());
+        (chunk..end)
+            .flat_map(|chunk| self.missing_for_chunk(chunk))
             .collect()
     }
 
@@ -2311,5 +2463,149 @@ mod tests {
         assert!(!bundle.manifest.entries.contains_key(POLLS));
         assert!(bundle.scene.polls.is_empty());
         assert!(bundle.scene.poll_session.is_none());
+    }
+
+    /// A bundle where a square stays put and another moves every frame:
+    /// each frame meets a new outline, as an animated shape does.
+    fn moving_square(frames: u32) -> Vec<u8> {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        let still = square(1, -5.0, false);
+        for index in 0..frames {
+            let mut captured = frame(f64::from(index) / 60.0);
+            captured.capture.elements =
+                vec![still.clone(), square(2, f64::from(index) / 10.0, false)];
+            writer.push_frame(&captured, [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: f64::from(frames) / 60.0,
+            ..Default::default()
+        };
+        writer.finish(&scene).unwrap().into_inner()
+    }
+
+    #[test]
+    fn chunks_store_what_they_meet_first_and_list_the_segments_they_use() {
+        let bytes = moving_square(200);
+        let bundle = Bundle::from_bytes(bytes.into()).unwrap();
+        let manifest = &bundle.manifest;
+        assert_eq!(manifest.version, VERSION);
+        // One segment a chunk: the moving outlines it met first.
+        assert_eq!(manifest.chunks.len(), 4);
+        assert_eq!(manifest.table_segments.len(), 4);
+        assert_eq!(manifest.table_segments[1].counts.paths, CHUNK_FRAMES as u32);
+        // The still square was met in the first chunk; every later one
+        // refers to that segment and its own.
+        assert_eq!(manifest.chunks[0].table_segments, vec![0]);
+        for (index, chunk) in manifest.chunks.iter().enumerate().skip(1) {
+            assert_eq!(chunk.table_segments, vec![0, index as u32], "chunk {index}");
+        }
+        assert!(!manifest.entries.contains_key("tables/paths.bin"));
+    }
+
+    #[test]
+    fn opening_downloads_the_first_chunk_with_its_segments_only() {
+        let bytes: Arc<[u8]> = moving_square(200).into();
+        let len = bytes.len() as u64;
+        let source = BundleSource::new(len);
+        let add = |ranges: &[Range<u64>]| {
+            for range in ranges {
+                source.insert(
+                    range.start,
+                    Arc::from(&bytes[range.start as usize..range.end as usize]),
+                );
+            }
+        };
+        add(std::slice::from_ref(&(len - 22..len)));
+        let mut bundle = None;
+        for _ in 0..4 {
+            match Bundle::from_source(source.clone()) {
+                Ok(opened) => {
+                    bundle = Some(opened);
+                    break;
+                }
+                Err(BundleError::Incomplete { missing }) => add(&missing),
+                Err(error) => panic!("{error}"),
+            }
+        }
+        let mut bundle = bundle.expect("opens once the asked bytes arrive");
+        let spans: HashMap<String, Range<u64>> = bundle
+            .archive
+            .spans()
+            .map(|(name, span)| (name.to_owned(), span))
+            .collect();
+        let arrived = |name: &str| source.missing(spans[name].clone()).is_empty();
+        assert!(arrived("segments/000000.bin"));
+        for later in [
+            "segments/000001.bin",
+            "segments/000002.bin",
+            "segments/000003.bin",
+        ] {
+            assert!(!arrived(later), "{later} is not needed to open");
+        }
+        assert_eq!(lefts(&bundle.frame(0).unwrap()), vec![-5.0, 0.0]);
+
+        // The last chunk asks for itself and its own segment, not the ones
+        // between.
+        let last = bundle.frame_count() - 1;
+        let Err(BundleError::Incomplete { missing }) = bundle.frame(last) else {
+            panic!("the last chunk has not arrived");
+        };
+        add(&missing);
+        assert!(arrived("segments/000003.bin"));
+        assert!(!arrived("segments/000001.bin"));
+        assert_eq!(
+            lefts(&bundle.frame(last).unwrap()),
+            vec![-5.0, last as f64 / 10.0]
+        );
+    }
+
+    #[test]
+    fn format_5_bundles_still_open_and_verify() {
+        let bytes = include_bytes!("../tests/fixtures/format5.gaanim");
+        let mut bundle = Bundle::from_bytes(Arc::from(&bytes[..])).unwrap();
+        assert_eq!(bundle.manifest.version, 5);
+        assert_eq!(bundle.frame_count(), 61);
+        assert_eq!(bundle.scene.output_size, (1920, 1920));
+        assert!(bundle.verify().unwrap().is_empty());
+    }
+
+    #[test]
+    fn older_formats_are_refused_by_version() {
+        let mut manifest: serde_json::Value = serde_json::from_slice(
+            &Archive::open(BundleSource::whole(Arc::from(
+                &include_bytes!("../tests/fixtures/format5.gaanim")[..],
+            )))
+            .unwrap()
+            .read("manifest.json")
+            .unwrap(),
+        )
+        .unwrap();
+        manifest["version"] = 4.into();
+        let manifest: Manifest = serde_json::from_value(manifest).unwrap();
+        assert!(!(OLDEST_READABLE..=VERSION).contains(&manifest.version));
+        assert!(version_message(4, "gaanim 0.8.0").contains("no longer reads"));
+    }
+
+    #[test]
+    fn frame_times_read_back_bit_for_bit() {
+        // The export's grid at 30 fps, then instants between its frames, as
+        // a recording in two passes stores them.
+        let step = 1.0 / 30.0;
+        let mut times = Vec::new();
+        let mut time = 0.0;
+        for _ in 0..100 {
+            times.push(time);
+            time += step;
+        }
+        times.extend([0.51, 1.234_567, 3.3]);
+        let bytes = write_index(&times, 30);
+        // A byte a grid frame, and the bits of each other instant.
+        assert!(bytes.len() < 100 + 3 * 9 + 8);
+        let read = read_index(&bytes, VERSION).unwrap();
+        assert_eq!(
+            read.iter().map(|t| t.to_bits()).collect::<Vec<_>>(),
+            times.iter().map(|t| t.to_bits()).collect::<Vec<_>>()
+        );
     }
 }
