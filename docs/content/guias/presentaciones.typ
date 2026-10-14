@@ -60,7 +60,8 @@ Una presentación de Gaanim es una escena normal organizada así:
 - Cada `scene.segment("nombre", ...)` es una *diapositiva*; acepta una
   plantilla (`template=`) y notas (`notes=`). Su nombre y sus notas aparecen en la vista del presentador.
 - Cada `scene.stop("nombre")` dentro de una diapositiva es un *paso*: el
-  punto donde la reproducción espera a que avances.
+  punto donde la reproducción espera a que avances. Un paso escrito mientras
+  la diapositiva aún entra con su transición espera a que termine.
 - `segment.bind(...)` rellena los huecos de la plantilla con tus objetos.
 
 `scene.slides.brand(...)` configura para toda la presentación el logo, el pie,

@@ -6327,8 +6327,11 @@ impl SceneModel {
     /// Insert a named or anonymous interactive stop in the active segment.
     ///
     /// A stop at the segment's end keeps that completed segment active at the
-    /// shared boundary until playback advances into the next segment. After a
-    /// recorded live take started, the stop becomes the pause recorded there.
+    /// shared boundary until playback advances into the next segment. One
+    /// authored while the segment's entry transition still runs waits for
+    /// the transition to end, so a presentation never rests on a slide
+    /// halfway in. After a recorded live take started, the stop becomes the
+    /// pause recorded there.
     pub fn stop(&mut self, name: Option<String>) -> Result<(), SegmentError> {
         let name = match name {
             Some(name) => {
@@ -6340,6 +6343,17 @@ impl SceneModel {
             }
             None => None,
         };
+        let entering = {
+            let state = self.state.lock().expect("canvas state poisoned");
+            let segment = state.active();
+            segment
+                .transition
+                .as_ref()
+                .map_or(0.0, |transition| transition.duration() - segment.cursor)
+        };
+        if entering > 1e-9 {
+            self.wait(entering);
+        }
         if let Some(hold) = self.live_take_hold() {
             self.wait(hold);
             return Ok(());
@@ -11688,6 +11702,34 @@ mod tests {
             .filter(|op| matches!(op, Op::Stop))
             .count();
         assert_eq!(stops, 1);
+    }
+
+    #[test]
+    fn a_stop_inside_the_entry_transition_waits_for_its_end() {
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.segment("cover", None).unwrap();
+        canvas.wait(0.8);
+        canvas.stop(None).unwrap();
+        canvas
+            .segment("plan", Some(TransitionType::CrossFade { duration: 0.5 }))
+            .unwrap();
+        canvas.wait(0.4);
+        canvas.stop(Some("first".to_string())).unwrap();
+        canvas.wait(0.4);
+        canvas.stop(Some("second".to_string())).unwrap();
+
+        // The first stop waits from 1.2 s to the end of the transition; the
+        // second, after it, stays where it was written.
+        let manifest = canvas.segment_manifest();
+        let stops: Vec<f64> = manifest.segments[1]
+            .stops
+            .iter()
+            .map(|stop| stop.time)
+            .collect();
+        assert_eq!(stops.len(), 2);
+        assert!((stops[0] - 1.3).abs() < 1e-9, "{stops:?}");
+        assert!((stops[1] - 1.7).abs() < 1e-9, "{stops:?}");
+        assert!((canvas.current_time() - 1.7).abs() < 1e-9);
     }
 
     #[test]
