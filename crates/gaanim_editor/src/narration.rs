@@ -38,9 +38,7 @@ use gaanim_media::narration::{
 use gaanim_timeline::notes::{mark_line, marks};
 use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 
-use crate::presenter::prompter::{
-    IMPLICIT_SEGMENT, PrompterWords, ScriptPosition, script_lines, show_script,
-};
+use crate::presenter::prompter::{IMPLICIT_SEGMENT, ScriptPosition};
 use scribe::{ScribeConfig, ScribeEvent, ScribeSession, ScribeToken, StopReason, TokenSource};
 
 use crate::export::{ProjectPaths, StashedReplay};
@@ -672,6 +670,16 @@ impl NarrationSession {
     /// Whether the recorder owns playback and the keyboard.
     pub fn capturing(&self) -> bool {
         !matches!(self.phase, Phase::Idle)
+    }
+
+    /// Whether the speaker presents the scene to record a live take or
+    /// dictate the script, which the editor's prompter follows.
+    pub(crate) fn presenting(&self) -> bool {
+        match &self.phase {
+            Phase::Countdown { target, .. } => target.presents(),
+            Phase::Recording(recording) => recording.target.presents(),
+            _ => false,
+        }
     }
 
     /// Stop policy while capturing: a live take pauses at every stop, a
@@ -3063,39 +3071,18 @@ fn teleprompter(
                             );
                         }
                         Target::Live { .. } | Target::Dictation { .. } => {
-                            let position = ScriptPosition::of(timeline);
-                            if let Some(position) = position
+                            // The script reads in the prompter window.
+                            if let Some(position) = ScriptPosition::of(timeline)
                                 && !*compact
                             {
                                 ui.label(
-                                    egui::RichText::new(&timeline.segments[position.slide].name)
-                                        .size(13.0)
-                                        .color(palette::TEXT_MUTED),
+                                    egui::RichText::new(format!(
+                                        "{} · el guion sigue en el Prompter",
+                                        timeline.segments[position.slide].name
+                                    ))
+                                    .size(13.0)
+                                    .color(palette::TEXT_MUTED),
                                 );
-                                let lines = script_lines(
-                                    &timeline.segments,
-                                    position.slide..position.slide + 1,
-                                    Some(position),
-                                    false,
-                                );
-                                let anchor_id = egui::Id::new("live-teleprompter-anchor");
-                                let anchor = (position.slide, position.part);
-                                let follow = ui
-                                    .data(|data| data.get_temp::<(usize, usize)>(anchor_id))
-                                    != Some(anchor);
-                                ui.data_mut(|data| data.insert_temp(anchor_id, anchor));
-                                egui::ScrollArea::vertical()
-                                    .id_salt("live-teleprompter")
-                                    .max_height((screen.height() * 0.35).max(160.0))
-                                    .show(ui, |ui| {
-                                        show_script(
-                                            ui,
-                                            &lines,
-                                            24.0,
-                                            follow,
-                                            &PrompterWords::SPANISH,
-                                        );
-                                    });
                             }
                             let waiting = recording.and_then(|recording| recording.waiting_at);
                             let status = match (waiting, recording) {

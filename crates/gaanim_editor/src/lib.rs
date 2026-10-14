@@ -240,6 +240,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<presenter::PresenterMirror>()
             .init_resource::<presenter::PresenterOverviewState>()
             .init_resource::<presenter::PresenterPreferences>()
+            .init_resource::<presenter::prompter::PrompterSettings>()
             .init_resource::<presenter::AudienceControlsState>()
             .init_resource::<presenter::PresentationTimer>()
             .init_resource::<fps_overlay::FpsOverlay>()
@@ -378,6 +379,7 @@ impl Plugin for GaanimEditorPlugin {
                 (
                     narration::narration_panel_system,
                     narration::narration_overlay_system,
+                    presenter::prompter::editor_prompter_system,
                 )
                     .after(editor_ui_system),
             )
@@ -675,6 +677,7 @@ fn editor_ui_system(
         mut volume,
         audio_tracks,
         controls,
+        mut prompter,
     ): (
         ResMut<export::ExportState>,
         ResMut<narration::NarrationPanel>,
@@ -683,6 +686,7 @@ fn editor_ui_system(
         ResMut<gaanim_media::PreviewVolume>,
         Option<Res<gaanim_media::PreviewAudioTracks>>,
         Res<PlaybackControls>,
+        ResMut<presenter::prompter::PrompterSettings>,
     ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
@@ -1378,6 +1382,12 @@ fn editor_ui_system(
                                             {
                                                 actions.push(PlaybackAction::ToggleNarration);
                                             }
+                                            if ui
+                                                .selectable_label(prompter.editor_open, "Prompter · T")
+                                                .clicked()
+                                            {
+                                                actions.push(PlaybackAction::TogglePrompter);
+                                            }
                                             // The web player neither exports
                                             // nor pins its page.
                                             if !WEB
@@ -1477,6 +1487,9 @@ fn editor_ui_system(
         PlaybackAction::CancelExport => export_state.cancel(),
                                 PlaybackAction::ToggleNarration => {
                                     narration_panel.open = !narration_panel.open;
+                                }
+                                PlaybackAction::TogglePrompter => {
+                                    prompter.editor_open = !prompter.editor_open;
                                 }
                                 PlaybackAction::Present => start_presentation(
                                     &mut presentation_mode,
@@ -2717,6 +2730,7 @@ enum PlaybackAction {
     OpenExport,
     CancelExport,
     ToggleNarration,
+    TogglePrompter,
     Present,
     ToggleFullscreen,
     TogglePin,
@@ -2922,11 +2936,18 @@ fn global_playback_keys_system(
     narration: Option<Res<narration::NarrationSession>>,
     mut state: ResMut<EditorState>,
     mut timeline: ResMut<Timeline>,
+    prompter: Option<ResMut<presenter::prompter::PrompterSettings>>,
 ) {
     if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input())
         || narration.is_some_and(|session| session.capturing())
     {
         return;
+    }
+
+    if keys.just_pressed(KeyCode::KeyT)
+        && let Some(mut prompter) = prompter
+    {
+        prompter.editor_open = !prompter.editor_open;
     }
 
     if keys.just_pressed(KeyCode::KeyL)

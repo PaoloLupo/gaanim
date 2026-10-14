@@ -794,6 +794,11 @@ fn stream(
                 None
             };
             let finishing = stop.is_some() || control.load(Ordering::SeqCst) == FINISHING;
+            if finishing {
+                // The speaker finished: read the take to its last sample.
+                pending.extend(downsampler.push(&source.take()));
+                pending.truncate(max_samples.saturating_sub(sent) as usize);
+            }
             while pending.len() >= FRAME_SAMPLES || (finishing && !pending.is_empty()) {
                 let count = pending.len().min(FRAME_SAMPLES);
                 let frame: Vec<u8> = pending.drain(..count).flat_map(i16::to_le_bytes).collect();

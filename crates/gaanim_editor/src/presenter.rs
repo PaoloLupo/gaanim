@@ -1868,11 +1868,13 @@ fn show_now_panel(
     show_step_strip(ui, timeline, slide, requested_seek);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn show_speaker_column(
     ui: &mut egui::Ui,
     frame: &PresenterFrame,
     segments: &[SegmentMetadata],
     preferences: &mut PresenterPreferences,
+    prompter_settings: &mut prompter::PrompterSettings,
     notes_min_height: f32,
     requests: &mut AudienceRequests,
 ) {
@@ -1929,18 +1931,27 @@ fn show_speaker_column(
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            let size = preferences.notes_size;
-            if small_button(ui, "A+", size < NOTES_SIZE_MAX)
-                .on_hover_text("Larger text")
-                .clicked()
-            {
-                preferences.adjust_notes_size(2.0);
-            }
-            if small_button(ui, "A−", size > NOTES_SIZE_MIN)
-                .on_hover_text("Smaller text")
-                .clicked()
-            {
-                preferences.adjust_notes_size(-2.0);
+            if preferences.prompter {
+                // The editor's prompter reads at the same size and pace.
+                prompter::prompter_controls(
+                    ui,
+                    prompter_settings,
+                    &prompter::PrompterWords::ENGLISH,
+                );
+            } else {
+                let size = preferences.notes_size;
+                if small_button(ui, "A+", size < NOTES_SIZE_MAX)
+                    .on_hover_text("Larger text")
+                    .clicked()
+                {
+                    preferences.adjust_notes_size(2.0);
+                }
+                if small_button(ui, "A−", size > NOTES_SIZE_MIN)
+                    .on_hover_text("Smaller text")
+                    .clicked()
+                {
+                    preferences.adjust_notes_size(-2.0);
+                }
             }
             ui.add_space(6.0);
             let (label, hint) = if preferences.prompter {
@@ -1962,14 +1973,17 @@ fn show_speaker_column(
         (false, None) => 0..0,
     };
     let lines = prompter::script_lines(segments, slides, frame.script, preferences.prompter);
-    // Scroll to the part being said when it changes or the view switches.
-    let anchor = (
-        preferences.prompter,
-        frame.script.map(|script| (script.slide, script.part)),
+    let read = prompter::words_read(
+        ui,
+        egui::Id::new("presenter-prompter"),
+        frame.script,
+        prompter_settings.words_per_minute,
     );
-    let anchor_id = egui::Id::new("presenter-prompter-anchor");
-    let follow = ui.data(|data| data.get_temp::<_>(anchor_id)) != Some(anchor);
-    ui.data_mut(|data| data.insert_temp(anchor_id, anchor));
+    let size = if preferences.prompter {
+        prompter_settings.size
+    } else {
+        preferences.notes_size
+    };
     egui::Frame::new()
         .fill(palette::SURFACE)
         .inner_margin(egui::Margin::same(16))
@@ -1983,8 +1997,9 @@ fn show_speaker_column(
                     prompter::show_script(
                         ui,
                         &lines,
-                        preferences.notes_size,
-                        follow,
+                        size,
+                        true,
+                        Some(read),
                         &prompter::PrompterWords::ENGLISH,
                     );
                 });
@@ -2582,6 +2597,7 @@ pub(crate) fn presenter_view_system(
     mut link: Option<ResMut<crate::presenter_link::PresenterLink>>,
     mut mirror: Option<ResMut<PresenterMirror>>,
     mut talk: Option<ResMut<pace::TalkDuration>>,
+    mut prompter_settings: ResMut<prompter::PrompterSettings>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
@@ -2753,6 +2769,7 @@ pub(crate) fn presenter_view_system(
                     &frame,
                     &timeline.segments,
                     &mut preferences,
+                    &mut prompter_settings,
                     120.0,
                     &mut audience_requests,
                 );
@@ -2784,6 +2801,7 @@ pub(crate) fn presenter_view_system(
                         &frame,
                         &timeline.segments,
                         &mut preferences,
+                        &mut prompter_settings,
                         220.0,
                         &mut audience_requests,
                     );

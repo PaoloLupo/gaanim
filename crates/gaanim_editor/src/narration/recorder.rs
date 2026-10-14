@@ -5,7 +5,7 @@
 //! captured samples is the recording clock: it is what the take will contain,
 //! so markers and holds measured with it line up with the saved audio.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -15,6 +15,13 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 #[derive(Default)]
 struct Shared {
     samples: Mutex<Vec<f32>>,
+    /// A [`MicTap`] streams this recorder.
+    tapped: AtomicBool,
+    /// How many samples of `samples` the tap has read.
+    tap_read: AtomicUsize,
+    /// What the tap had not read when the take ended, so the last instant
+    /// before the speaker finished still reaches it.
+    tap_tail: Mutex<Vec<f32>>,
     /// Peak magnitude of any channel since the last read, as `f32` bits.
     peak: AtomicU32,
     /// Audio buffers (about 10 ms each) with at least one clipped sample.
@@ -97,10 +104,17 @@ impl MicRecorder {
     /// Discard what was captured so far and start the take clock at zero,
     /// e.g. after the level check of the countdown.
     pub(crate) fn restart(&self) {
-        self.shared
+        let mut samples = self
+            .shared
             .samples
             .lock()
-            .expect("microphone buffer poisoned")
+            .expect("microphone buffer poisoned");
+        samples.clear();
+        self.shared.tap_read.store(0, Ordering::SeqCst);
+        self.shared
+            .tap_tail
+            .lock()
+            .expect("microphone tail poisoned")
             .clear();
         self.shared.clipped.store(0, Ordering::Relaxed);
     }
@@ -121,9 +135,9 @@ impl MicRecorder {
     /// A reader of what this recorder captures, to stream it while it
     /// records.
     pub(crate) fn tap(&self) -> MicTap {
+        self.shared.tapped.store(true, Ordering::SeqCst);
         MicTap {
             shared: self.shared.clone(),
-            read: 0,
             sample_rate: self.sample_rate,
         }
     }
@@ -131,14 +145,7 @@ impl MicRecorder {
     /// Stop capturing and return the mono samples and their sample rate.
     pub(crate) fn finish(mut self) -> (Vec<f32>, u32) {
         self.halt();
-        let samples = std::mem::take(
-            &mut *self
-                .shared
-                .samples
-                .lock()
-                .expect("microphone buffer poisoned"),
-        );
-        (samples, self.sample_rate)
+        (self.shared.drain(), self.sample_rate)
     }
 
     fn halt(&mut self) {
@@ -157,10 +164,38 @@ impl Drop for MicRecorder {
     }
 }
 
-/// Reads the samples a [`MicRecorder`] captures as they arrive.
+impl Shared {
+    /// Take every sample captured, keeping what the tap has not read yet
+    /// for it.
+    fn drain(&self) -> Vec<f32> {
+        let mut samples = self.samples.lock().expect("microphone buffer poisoned");
+        let taken = std::mem::take(&mut *samples);
+        if self.tapped.load(Ordering::SeqCst) {
+            let read = self.tap_read.swap(0, Ordering::SeqCst).min(taken.len());
+            self.tap_tail
+                .lock()
+                .expect("microphone tail poisoned")
+                .extend_from_slice(&taken[read..]);
+        }
+        taken
+    }
+
+    /// The samples the tap has not read yet.
+    fn unread(&self) -> Vec<f32> {
+        let samples = self.samples.lock().expect("microphone buffer poisoned");
+        let mut unread =
+            std::mem::take(&mut *self.tap_tail.lock().expect("microphone tail poisoned"));
+        let read = self.tap_read.load(Ordering::SeqCst).min(samples.len());
+        unread.extend_from_slice(&samples[read..]);
+        self.tap_read.store(samples.len(), Ordering::SeqCst);
+        unread
+    }
+}
+
+/// Reads the samples a [`MicRecorder`] captures as they arrive, every one
+/// of them once, up to the end of the take.
 pub(crate) struct MicTap {
     shared: Arc<Shared>,
-    read: usize,
     sample_rate: u32,
 }
 
@@ -170,18 +205,7 @@ impl super::scribe::AudioSource for MicTap {
     }
 
     fn take(&mut self) -> Vec<f32> {
-        let samples = self
-            .shared
-            .samples
-            .lock()
-            .expect("microphone buffer poisoned");
-        // A restart, or the end of the take, empties the buffer.
-        if samples.len() < self.read {
-            self.read = 0;
-        }
-        let new = samples[self.read..].to_vec();
-        self.read = samples.len();
-        new
+        self.shared.unread()
     }
 }
 
@@ -292,6 +316,31 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tap_reads_every_sample_once_even_after_the_take_ends() {
+        let shared = Arc::new(Shared::default());
+        shared.tapped.store(true, Ordering::SeqCst);
+        let mut tap = MicTap {
+            shared: shared.clone(),
+            sample_rate: 16_000,
+        };
+        let push = |values: &[f32]| shared.samples.lock().unwrap().extend_from_slice(values);
+        push(&[1.0, 2.0]);
+        use super::super::scribe::AudioSource;
+        assert_eq!(tap.take(), [1.0, 2.0]);
+        assert!(tap.take().is_empty());
+        push(&[3.0, 4.0]);
+        // The take ends before the tap reads its last samples.
+        assert_eq!(shared.drain(), [1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(tap.take(), [3.0, 4.0]);
+        assert!(tap.take().is_empty());
+        // Without a tap, the end of a take is not kept twice.
+        let untapped = Shared::default();
+        untapped.samples.lock().unwrap().extend_from_slice(&[5.0]);
+        assert_eq!(untapped.drain(), [5.0]);
+        assert!(untapped.tap_tail.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn interleaved_frames_mix_down_to_mono() {
