@@ -49,8 +49,8 @@ bloques de código, cajas escaladas, ecuaciones de varias filas).
   cada `scene.stop()` y otra para el final, con el fotograma que muestra el
   Presenter en esa pausa, sin pérdida y al tamaño de `--width` y `--height`.
   Con `--notes`, tras cada diapositiva va una página con sus notas, en texto
-  que se puede buscar. Sirve para repartir la charla o subirla a una
-  plataforma de cursos sin Gaanim. Un paquete `.gaanim` también se exporta a
+  que se puede buscar. Sirve para repartir la charla a quien no tiene
+  Gaanim. Un paquete `.gaanim` también se exporta a
   PDF, sin Python, y el diálogo del editor suma PDF a sus formatos con una
   casilla para las notas. Ver
   #link("/referencia/cli/#diapositivas-pdf")[Diapositivas en PDF].

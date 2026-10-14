@@ -229,9 +229,9 @@ público dentro de la escena. Todo eso está en
 
 = Repartir las diapositivas en PDF
 
-Para repartir la presentación, subirla a una plataforma de cursos o tener una
-copia que no necesite Gaanim, expórtala a PDF: una página por cada pausa, tal
-como la muestra el Presenter, y otra para el final. Con `--notes`, tras cada
+Para repartir la presentación o tener una copia que no necesite Gaanim,
+expórtala a PDF: una página por cada pausa, tal como la muestra el Presenter,
+y otra para el final. Con `--notes`, tras cada
 diapositiva va una página con sus notas.
 
 ```bash
