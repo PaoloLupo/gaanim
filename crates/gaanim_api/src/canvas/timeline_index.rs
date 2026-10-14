@@ -95,9 +95,11 @@ pub struct TimelineIndex {
 impl TimelineIndex {
     /// The instant the line `line` of `file` stands for: the part authored
     /// on it, or else the closest line above it in the same file that
-    /// authored one. A segment stands for its start, a stop or marker for
-    /// its time, a take for its start, and a `play` for its end, where what
-    /// it animates has arrived. Several parts on one line take the earliest.
+    /// authored one. A segment stands for where it first rests, its first
+    /// stop (else its end), as `gaanim export --frame` shows it; a stop or
+    /// marker for its time, a take for its start, and a `play` for its end,
+    /// where what it animates has arrived. Several parts on one line take
+    /// the earliest.
     pub fn instant_at(&self, file: &Path, line: u32) -> Option<f64> {
         let file = gaanim_core::console::plain_path(file);
         let mut best: Option<(u32, f64)> = None;
@@ -119,7 +121,9 @@ impl TimelineIndex {
             };
         };
         for segment in &self.segments {
-            consider(&segment.location, segment.start);
+            // Where it first rests: its start may still show the slide before.
+            let rest = segment.stops.first().map_or(segment.end, |stop| stop.time);
+            consider(&segment.location, rest);
             for stop in &segment.stops {
                 consider(&stop.location, stop.time);
             }
@@ -289,12 +293,13 @@ mod tests {
             ],
         };
         let file = Path::new("main.py");
-        assert_eq!(index.instant_at(file, 3), Some(0.0));
+        // A segment stands for its first stop, else its end.
+        assert_eq!(index.instant_at(file, 3), Some(2.0));
         // A play stands for its end; a line between parts for the one above.
         assert_eq!(index.instant_at(file, 5), Some(1.5));
         assert_eq!(index.instant_at(file, 6), Some(2.0));
         assert_eq!(index.instant_at(file, 8), Some(2.0));
-        assert_eq!(index.instant_at(file, 12), Some(4.0));
+        assert_eq!(index.instant_at(file, 12), Some(10.0));
         assert_eq!(index.instant_at(file, 99), Some(7.0));
         // Above every part, or in a file without one, there is none.
         assert_eq!(index.instant_at(file, 1), None);
