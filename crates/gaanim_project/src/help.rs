@@ -302,12 +302,12 @@ const EXPORT: Page = Page {
                     "Keep the alpha channel (WebM, MOV, WebP, PNG); the scene\nneeds a transparent background",
                 ),
                 (
-                    "--from <SECONDS|MARKER>",
-                    "Start of the range (default 0); a name uses the time of\nscene.marker(name)",
+                    "--from <SECONDS|NAME>",
+                    "Start of the range (default 0). A name is a scene.marker,\nthen a segment or Section key (its start), then a stop",
                 ),
                 (
-                    "--to <SECONDS|MARKER>",
-                    "End of the range (default: the end of the scene). Audio\nis trimmed to the range and PNG frames start at 0",
+                    "--to <SECONDS|NAME>",
+                    "End of the range (default: the end of the scene); a\nsegment or Section key ends at its end. Audio is trimmed\nto the range and PNG frames start at 0",
                 ),
                 (
                     "--notes",
@@ -318,8 +318,8 @@ const EXPORT: Page = Page {
                     "human (default) or json: messages and progress with its\npercent as JSON lines on stdout, without the bar",
                 ),
                 (
-                    "--frame <SECONDS|MARKER>[,...]",
-                    "Write exactly one PNG at each instant instead of a range.\nOne instant writes --output; several append 1, 2, ...\n(still.png -> still_1.png). Needs a .png output",
+                    "--frame <SECONDS|NAME>[,...]",
+                    "Write exactly one PNG at each instant instead of a range;\na segment shows its first stop, as the PDF does. One\ninstant writes --output; several append 1, 2, ...\n(still.png -> still_1.png). Needs a .png output",
                 ),
                 ("-h, --help", "Print this help"),
             ],
@@ -350,6 +350,10 @@ const EXPORT: Page = Page {
                 (
                     "gaanim export . -o still.png --frame 11.4",
                     "One PNG of the frame shown at 11.4 s",
+                ),
+                (
+                    "gaanim export . -o results.png --frame Results",
+                    "The Results slide where it first rests",
                 ),
                 (
                     "gaanim export . -o talk.pdf --notes",

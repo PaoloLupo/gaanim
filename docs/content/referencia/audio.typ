@@ -498,7 +498,7 @@ este orden: el argumento `text`, su sección del guion y las notas del segmento;
 con un guion cargado, una clave sin sección emite un `UserWarning`. El botón
 *Create script* / *Open and complete* del panel crea el archivo o le añade las
 secciones de los bloques y las diapositivas que faltan, y las marcas de sus
-stops, y lo abre en tu editor. En una toma en vivo, el subtítulo del editor
+stops, y lo abre en el editor de `GAANIM_EDITOR` en lo primero que añadió. En una toma en vivo, el subtítulo del editor
 muestra el tramo del guion que toca decir, con `▶` y el nombre del stop donde
 toca avanzar (ver
 #link("/guias/presentaciones/#prompter")[El prompter]).

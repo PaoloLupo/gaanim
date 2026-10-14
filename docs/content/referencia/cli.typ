@@ -338,9 +338,9 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--fit <MODO>`], [`error`], [Qué hacer si la proporción de salida no coincide con el marco de la escena: `error` falla, `contain` añade bandas y `cover` recorta los bordes.],
   [`--encoder <CODIFICADOR>`], [`auto`], [Solo MP4: `auto`, `libx264`, `nvenc`, `amf`, `qsv` o `vaapi`.],
   [`--transparent`], [desactivado], [Conserva el canal alfa en WebM, MOV, WebP y PNG. MP4 y GIF lo rechazan.],
-  [`--from <SEGUNDOS|MARCADOR>`], [`0`], [Inicio del tramo exportado.],
-  [`--to <SEGUNDOS|MARCADOR>`], [fin de la escena], [Fin del tramo exportado.],
-  [`--frame <SEGUNDOS|MARCADOR>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
+  [`--from <SEGUNDOS|NOMBRE>`], [`0`], [Inicio del tramo exportado: segundos, un marcador, un segmento (su inicio) o una pausa.],
+  [`--to <SEGUNDOS|NOMBRE>`], [fin de la escena], [Fin del tramo exportado; un segmento lo termina en su final.],
+  [`--frame <SEGUNDOS|NOMBRE>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo; un segmento da su primera pausa. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
   [`--notes`], [desactivado], [Solo PDF: añade tras la última página de cada diapositiva una página con sus notas (`scene.segment(notes=...)`).],
   [`--message-format <FORMATO>`], [`human`], [`json`: mensajes y progreso con su porcentaje en JSON por líneas, sin barra (ver #link(<message-format>)[Mensajes para herramientas]).],
 )
@@ -390,12 +390,23 @@ gaanim export rotulo.py --output rotulo.mov --transparent
 gaanim export mi-video --output master.mov --fps 25
 ```
 
-== Tramos y marcadores
+== Tramos y marcadores <tramos-nombres>
 
-`--from` y `--to` aceptan segundos o el nombre de un
-#link("/referencia/scene/#api-scene-marker")[`scene.marker`], y se pueden
-combinar. Los nombres se resuelven después de ejecutar el script; uno que no
-existe produce un error con los marcadores definidos. El audio se recorta al
+`--from` y `--to` aceptan segundos o un nombre, y se pueden combinar. Los
+nombres se resuelven después de ejecutar el script, en este orden:
+
++ un #link("/referencia/scene/#api-scene-marker")[`scene.marker`], con su
+  nombre exacto: su instante;
++ un segmento, la clave de un `Section` (todos sus pasos) o el nombre de un
+  `SectionStep`, sin distinguir mayúsculas, como en `--from` al
+  previsualizar: `--from` empieza en su inicio y `--to` termina en su final;
++ el nombre de una pausa (`scene.stop("nombre")`), sin distinguir
+  mayúsculas: el instante en que descansa.
+
+Un número son siempre segundos. Un nombre que no existe produce un error con
+los marcadores, segmentos y pausas definidos, y el de una pausa que se repite
+en varios segmentos es ambiguo: el error dice dónde está cada una, para pasar
+sus segundos. El audio se recorta al
 mismo tramo, una secuencia PNG numera sus fotogramas desde 0 y un `--to`
 posterior al final se limita a la duración de la escena. `--to` debe quedar
 después de `--from`.
@@ -407,14 +418,20 @@ gaanim export overlay.py --output overlay.webm --transparent
 gaanim export rotulo.py --output rotulo.mov --transparent
 gaanim export mi-video --output exports/tramo.mp4 --from 12 --to 15
 gaanim export mi-video --output exports/climax.mp4 --from climax --to fin
+gaanim export mi-charla --output exports/resultados.mp4 --from resultados --to resultados
 gaanim export mi-video --output frames/f_%04d.png --quality draft
 ```
 
 == Fotogramas sueltos
 
 Para revisar la composición en un instante, `--frame` escribe exactamente un
-PNG con lo que se ve en ese momento, sin exportar un tramo. Acepta segundos o
-marcadores separados por comas. Con un solo instante escribe el archivo de
+PNG con lo que se ve en ese momento, sin exportar un tramo. Acepta segundos y
+nombres separados por comas, con las mismas reglas que
+#link(<tramos-nombres>)[`--from`]; una coma dentro de un nombre se escribe
+`\,`. Un segmento o `Section` da el instante de su primera pausa, el mismo de
+su primera página en el #link(<diapositivas-pdf>)[PDF], o su final si no tiene
+pausas; una pausa, el instante en que descansa, el mismo que captura
+`--diff --capture-stops`. Con un solo instante escribe el archivo de
 `--output`; con varios añade su posición al nombre (`fotos/f.png` escribe
 `f_1.png`, `f_2.png`…). Respeta `--width`, `--height`, `--fit` y
 `--transparent`.
@@ -422,6 +439,7 @@ marcadores separados por comas. Con un solo instante escribe el archivo de
 ```bash
 gaanim export mi-video --output revision.png --frame 11.4
 gaanim export mi-video --output fotos/f.png --frame 3,11.4,climax
+gaanim export mi-charla --output problema.png --frame Problema
 ```
 
 == Diapositivas en PDF <diapositivas-pdf>
@@ -642,7 +660,7 @@ estándar; se distinguen porque llevan `event` en lugar de `type`.
   inset: 7pt,
   [*Variable*], [*Efecto*],
   [`GAANIM_SNAPSHOTS`], [La define `gaanim --diff` con la carpeta donde `scene.snapshots` debe capturar. No la definas a mano.],
-  [`GAANIM_EDITOR`], [Comando con el que el inspector, la consola, las animaciones y el panel de error abren una línea del script, con `{file}` y `{line}` donde van la ruta y el número de línea: `code --goto {file}:{line}`, `zed {file}:{line}`, `idea --line {line} {file}`. Las comillas agrupan palabras con espacios. Sin `{file}`, la ruta se añade al final. Sin la variable, Gaanim prueba `code`, `cursor`, `codium`, `zed` y `subl` en el `PATH`, y si no encuentra ninguno abre el archivo con la aplicación predeterminada.],
+  [`GAANIM_EDITOR`], [Comando con el que el inspector, la consola, las animaciones, el panel de error y *Open and complete* abren una línea del script o del guion, con `{file}` y `{line}` donde van la ruta y el número de línea: `code --goto {file}:{line}`, `zed {file}:{line}`, `idea --line {line} {file}`. Las comillas agrupan palabras con espacios. Sin `{file}`, la ruta se añade al final. Sin la variable, Gaanim prueba `code`, `cursor`, `codium`, `zed` y `subl` en el `PATH`, y si no encuentra ninguno abre el archivo con la aplicación predeterminada.],
   [`GAANIM_INCREMENTAL=0`], [Desactiva la recompilación incremental del hot reload: cada guardado recompila la escena entera.],
   [`GAANIM_RELOAD_PROFILE=1`], [Escribe en la terminal qué costó cada recarga: el tiempo del script y de sus segmentos más lentos, las mediciones con `bounds()` (cuántas se compilaron aparte, cuántas compilaron la escena y en qué línea del script, cuántas reanudaron una compilación anterior, cuántas la reutilizaron), las fases del replay (las huellas que deciden qué segmentos se reutilizan, la limpieza o la restauración de la escena anterior, la compilación), los segmentos que más tardaron en compilarse y la captura del fotograma de t=0. Al abrir un script, también cuánto tardó cada fase del arranque: el entorno de Python, el intérprete, la preparación de la app y de la GPU, el primer fotograma y la primera escena lista.],
   [`GAANIM_PREVIEW_RESOLUTION`], [Resolución de la previsualización del editor. Con `auto` (por defecto), si al reproducir no llega a 60 fps porque dibujar cuesta demasiado, baja al 75 % y luego al 50 % de los píxeles, y vuelve a la resolución completa al pausar. `full` la mantiene siempre completa; una fracción como `0.5` la fija. Nunca afecta a las exportaciones.],

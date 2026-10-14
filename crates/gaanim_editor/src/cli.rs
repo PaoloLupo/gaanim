@@ -12,38 +12,39 @@ use gaanim_export::prelude::{
     AspectRatioPreset, ExportConfig, FrameRate, OutputFit, QualityPreset,
 };
 
-/// One end of an export range: seconds, or a `scene.marker` name resolved
-/// once the markers are known.
+/// One end of an export range, or a `--frame` instant: seconds, or a name
+/// resolved once the scene's markers, segments and stops are known.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportBound {
     Seconds(f64),
-    Marker(String),
+    Name(String),
 }
 
 impl std::fmt::Display for ExportBound {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Seconds(seconds) => write!(formatter, "{seconds}"),
-            Self::Marker(name) => write!(formatter, "{name}"),
+            Self::Name(name) => write!(formatter, "{name}"),
         }
     }
 }
 
-/// `--from` / `--to`: finite non-negative seconds, or a marker name.
+/// `--from` / `--to` / a `--frame` instant: finite non-negative seconds, or
+/// a name.
 pub fn parse_export_seconds(flag: &str, value: Option<&String>) -> Result<ExportBound, String> {
     let value = value
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{flag} requires seconds or a marker name"))?;
+        .ok_or_else(|| format!("{flag} requires seconds or a name"))?;
     match value.parse::<f64>() {
         Ok(seconds) if seconds.is_finite() && seconds >= 0.0 => Ok(ExportBound::Seconds(seconds)),
         Ok(_) => Err(format!(
-            "{flag} requires a non-negative number of seconds or a marker name"
+            "{flag} requires a non-negative number of seconds or a name"
         )),
         Err(_) if value.starts_with('-') => Err(format!(
-            "{flag} requires a non-negative number of seconds or a marker name"
+            "{flag} requires a non-negative number of seconds or a name"
         )),
-        Err(_) => Ok(ExportBound::Marker(value.to_string())),
+        Err(_) => Ok(ExportBound::Name(value.to_string())),
     }
 }
 
@@ -59,33 +60,231 @@ pub fn validate_export_range(
     }
 }
 
-/// Resolve marker bounds against the authored `(name, time)` markers.
+/// Which instant a segment name stands for: `--from` takes its start,
+/// `--to` its end, and `--frame` the first instant it rests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundRole {
+    From,
+    To,
+    Frame,
+}
+
+impl BoundRole {
+    pub fn flag(self) -> &'static str {
+        match self {
+            Self::From => "--from",
+            Self::To => "--to",
+            Self::Frame => "--frame",
+        }
+    }
+}
+
+/// A segment as export names see it: its time range and its stops.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedSegment {
+    pub name: String,
+    pub start: f64,
+    pub end: f64,
+    /// `(name, time)` of each stop, in timeline order.
+    pub stops: Vec<(Option<String>, f64)>,
+}
+
+/// The names an export instant can take, tried in this order: a
+/// `scene.marker` name, a segment name or `Section` key, and a stop name.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TimelineNames {
+    pub markers: Vec<(String, f64)>,
+    pub segments: Vec<NamedSegment>,
+}
+
+impl TimelineNames {
+    /// The names a compiled scene defines.
+    pub fn of_canvas(canvas: &gaanim_api::canvas::SceneModel) -> Self {
+        Self {
+            markers: canvas
+                .markers()
+                .into_iter()
+                .map(|marker| (marker.name, marker.time))
+                .collect(),
+            segments: canvas
+                .segment_manifest()
+                .segments
+                .into_iter()
+                .map(|segment| NamedSegment {
+                    name: segment.name,
+                    start: segment.start_time,
+                    end: segment.end_time,
+                    stops: segment
+                        .stops
+                        .into_iter()
+                        .map(|stop| (stop.name, stop.time))
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// The names a recorded timeline (a playback bundle's) defines.
+    pub fn of_timeline(
+        markers: &[gaanim_timeline::timeline::TimelineMarker],
+        segments: &[gaanim_timeline::timeline::SegmentMetadata],
+    ) -> Self {
+        Self {
+            markers: markers
+                .iter()
+                .map(|marker| (marker.name.clone(), marker.time))
+                .collect(),
+            segments: segments
+                .iter()
+                .map(|segment| NamedSegment {
+                    name: segment.name.clone(),
+                    start: segment.start_time,
+                    end: segment.end_time,
+                    stops: segment
+                        .stops
+                        .iter()
+                        .map(|stop| (stop.name.clone(), stop.time))
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// The time `name` stands for as `role`.
+    ///
+    /// A marker is its time. A segment name or `Section` key (ignoring case,
+    /// as the preview's `--from`) starts a range at its first segment and
+    /// ends it at its last; as a frame it is the first stop among its
+    /// segments, where a deck's first page of it rests, or without stops
+    /// the end of its first segment. A stop name (ignoring case) is the time
+    /// the stop rests; one shared by several stops is ambiguous.
+    pub fn resolve(&self, role: BoundRole, name: &str) -> Result<f64, String> {
+        if let Some((_, time)) = self.markers.iter().find(|(marker, _)| marker == name) {
+            return Ok(*time);
+        }
+        let segments = gaanim_timeline::selection::segments_named(
+            name,
+            self.segments.iter().map(|segment| segment.name.as_str()),
+        );
+        if let (Some(&first), Some(&last)) = (segments.first(), segments.last()) {
+            return Ok(match role {
+                BoundRole::From => self.segments[first].start,
+                BoundRole::To => self.segments[last].end,
+                BoundRole::Frame => segments
+                    .iter()
+                    .find_map(|&index| self.segments[index].stops.first())
+                    .map_or(self.segments[first].end, |(_, time)| *time),
+            });
+        }
+        let lowercase = name.to_lowercase();
+        let stops: Vec<(&str, f64)> = self
+            .segments
+            .iter()
+            .flat_map(|segment| {
+                segment
+                    .stops
+                    .iter()
+                    .filter(|(stop, _)| {
+                        stop.as_ref()
+                            .is_some_and(|stop| stop.to_lowercase() == lowercase)
+                    })
+                    .map(|(_, time)| (segment.name.as_str(), *time))
+            })
+            .collect();
+        match stops.as_slice() {
+            [(_, time)] => Ok(*time),
+            [] => Err(self.unknown(role, name)),
+            several => Err(format!(
+                "{}: {name:?} names {} stops ({}); pass the seconds of the one you mean",
+                role.flag(),
+                several.len(),
+                several
+                    .iter()
+                    .map(|(segment, time)| format!("{time}s in {segment:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
+
+    /// The error for a name that matches nothing, listing every name the
+    /// scene defines.
+    fn unknown(&self, role: BoundRole, name: &str) -> String {
+        let quoted = |names: Vec<String>| {
+            names
+                .iter()
+                .map(|name| format!("{name:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let mut stops: Vec<String> = Vec::new();
+        for stop in self
+            .segments
+            .iter()
+            .flat_map(|segment| &segment.stops)
+            .filter_map(|(stop, _)| stop.clone())
+        {
+            if !stops.contains(&stop) {
+                stops.push(stop);
+            }
+        }
+        let lists = [
+            (
+                "markers",
+                self.markers
+                    .iter()
+                    .map(|(marker, _)| marker.clone())
+                    .collect(),
+            ),
+            (
+                "segments",
+                gaanim_timeline::selection::segment_choices(
+                    self.segments.iter().map(|segment| segment.name.as_str()),
+                ),
+            ),
+            ("stops", stops),
+        ]
+        .into_iter()
+        .filter(|(_, names)| !names.is_empty())
+        .collect::<Vec<_>>();
+        // `--frame` splits its list at commas.
+        let hint = if role == BoundRole::Frame
+            && lists
+                .iter()
+                .any(|(_, names)| names.iter().any(|name| name.contains(',')))
+        {
+            "; write a comma inside a name as \\,"
+        } else {
+            ""
+        };
+        let lists = lists
+            .into_iter()
+            .map(|(kind, names)| format!("{kind}: {}", quoted(names)))
+            .collect::<Vec<_>>();
+        format!(
+            "{}: no marker, segment or stop named {name:?}; {}{hint}",
+            role.flag(),
+            if lists.is_empty() {
+                "the scene defines none (use scene.marker(\"name\"), scene.segment or \
+                 scene.stop(\"name\"))"
+                    .to_string()
+            } else {
+                format!("the scene defines {}", lists.join("; "))
+            }
+        )
+    }
+}
+
+/// Resolve a bound against the names the scene defines.
 pub fn resolve_export_bound(
-    flag: &str,
+    role: BoundRole,
     bound: Option<&ExportBound>,
-    markers: &[(&str, f64)],
+    names: &TimelineNames,
 ) -> Result<Option<f64>, String> {
     match bound {
         None => Ok(None),
         Some(ExportBound::Seconds(seconds)) => Ok(Some(*seconds)),
-        Some(ExportBound::Marker(name)) => markers
-            .iter()
-            .find(|(marker, _)| marker == name)
-            .map(|(_, time)| Some(*time))
-            .ok_or_else(|| {
-                let known = markers
-                    .iter()
-                    .map(|(marker, _)| format!("{marker:?}"))
-                    .collect::<Vec<_>>();
-                format!(
-                    "{flag}: unknown marker {name:?}; the scene defines {}",
-                    if known.is_empty() {
-                        "no markers (use scene.marker(\"name\"))".to_string()
-                    } else {
-                        known.join(", ")
-                    }
-                )
-            }),
+        Some(ExportBound::Name(name)) => names.resolve(role, name).map(Some),
     }
 }
 
@@ -93,10 +292,10 @@ pub fn resolve_export_bound(
 pub fn resolve_export_range(
     from: Option<&ExportBound>,
     to: Option<&ExportBound>,
-    markers: &[(&str, f64)],
+    names: &TimelineNames,
 ) -> Result<(Option<f64>, Option<f64>), String> {
-    let start = resolve_export_bound("--from", from, markers)?;
-    let end = resolve_export_bound("--to", to, markers)?;
+    let start = resolve_export_bound(BoundRole::From, from, names)?;
+    let end = resolve_export_bound(BoundRole::To, to, names)?;
     if let (Some(start), Some(end)) = (start, end)
         && end <= start
     {
@@ -178,16 +377,21 @@ impl ExportCommand {
                 }
                 "--frame" => {
                     index += 1;
+                    // Names may contain commas written as `\,`, as in `--sections`.
                     let list = args
                         .get(index)
-                        .filter(|list| !list.trim().is_empty())
+                        .and_then(|list| {
+                            gaanim_timeline::selection::SegmentSelection::parse_list(list).ok()
+                        })
                         .ok_or_else(|| {
-                            "--frame requires seconds or marker names, e.g. 3,11.4".to_string()
+                            "--frame requires seconds or names separated by commas, e.g. \
+                             3,11.4,Results (write \\, for a comma inside a name)"
+                                .to_string()
                         })?;
-                    for value in list.split(',') {
+                    for value in list {
                         command
                             .frames
-                            .push(parse_export_seconds("--frame", Some(&value.to_string()))?);
+                            .push(parse_export_seconds("--frame", Some(&value))?);
                     }
                 }
                 flag @ ("--from" | "--to") => {
@@ -410,16 +614,12 @@ pub fn export_frames(
     command: &ExportCommand,
     output: &str,
 ) -> Result<Vec<PathBuf>, String> {
-    let markers = canvas.markers();
-    let markers: Vec<(&str, f64)> = markers
-        .iter()
-        .map(|marker| (marker.name.as_str(), marker.time))
-        .collect();
+    let names = TimelineNames::of_canvas(&canvas);
     let times = command
         .frames
         .iter()
         .map(|bound| {
-            resolve_export_bound("--frame", Some(bound), &markers)
+            resolve_export_bound(BoundRole::Frame, Some(bound), &names)
                 .map(|time| time.expect("a --frame bound is present"))
         })
         .collect::<Result<Vec<f64>, String>>()?;
@@ -747,13 +947,8 @@ pub fn export_bundle_video(command: &ExportCommand) -> Result<(), CommandError> 
         .map_err(CommandError::Usage)?;
     let bundle = gaanim_bundle::Bundle::open(input)
         .map_err(|error| CommandError::Failed(format!("{}: {error}", input.display())))?;
-    let markers: Vec<(&str, f64)> = bundle
-        .scene
-        .markers
-        .iter()
-        .map(|marker| (marker.name.as_str(), marker.time))
-        .collect();
-    let range = resolve_export_range(command.from.as_ref(), command.to.as_ref(), &markers)
+    let names = TimelineNames::of_timeline(&bundle.scene.markers, &bundle.scene.segments);
+    let range = resolve_export_range(command.from.as_ref(), command.to.as_ref(), &names)
         .map_err(CommandError::Usage)?;
     // Every frame of the video is a recorded frame.
     let recorded = FrameRate::whole(bundle.scene.fps);
@@ -820,7 +1015,7 @@ mod tests {
             many.frames,
             vec![
                 ExportBound::Seconds(3.0),
-                ExportBound::Marker("climax".into())
+                ExportBound::Name("climax".into())
             ]
         );
         assert_eq!(
@@ -845,29 +1040,146 @@ mod tests {
         assert!(ranged.validate_video("png").is_err());
         assert!(ExportCommand::parse(&args(&["scene.py", "--frame", "-1"])).is_err());
         assert!(ExportCommand::parse(&args(&["scene.py", "--frame"])).is_err());
+        assert!(ExportCommand::parse(&args(&["scene.py", "--frame", "3,,4"])).is_err());
+        // A comma inside a name is written `\,`, as in `--sections`.
+        let comma = ExportCommand::parse(&args(&[
+            "scene.py",
+            "-o",
+            "still.png",
+            "--frame",
+            r"Tiempo\, lugar, 2",
+        ]))
+        .unwrap();
+        assert_eq!(
+            comma.frames,
+            vec![
+                ExportBound::Name("Tiempo, lugar".into()),
+                ExportBound::Seconds(2.0)
+            ]
+        );
+    }
+
+    /// A deck: markers, a plain segment, a `Section` with two steps and a
+    /// segment without stops.
+    fn deck_names() -> TimelineNames {
+        let segment = |name: &str, start, end, stops: &[(Option<&str>, f64)]| NamedSegment {
+            name: name.to_string(),
+            start,
+            end,
+            stops: stops
+                .iter()
+                .map(|(name, time)| (name.map(str::to_string), *time))
+                .collect(),
+        };
+        TimelineNames {
+            markers: vec![("climax".into(), 2.5), ("Problema".into(), 9.0)],
+            segments: vec![
+                segment("Portada", 0.0, 2.0, &[(None, 1.0)]),
+                segment(
+                    "Problema",
+                    2.0,
+                    6.0,
+                    &[(Some("pregunta"), 3.0), (Some("respuesta"), 5.0)],
+                ),
+                segment("results · 1 · 1 · Datos", 6.0, 8.0, &[]),
+                segment(
+                    "results · 1 · 2 · Curvas",
+                    8.0,
+                    10.0,
+                    &[(Some("respuesta"), 9.5)],
+                ),
+                segment("Cierre", 10.0, 12.0, &[]),
+            ],
+        }
     }
 
     #[test]
-    fn export_bounds_resolve_scene_markers() {
-        let markers = [("climax", 2.5)];
-        let climax = ExportBound::Marker("climax".into());
+    fn export_bounds_resolve_markers_segments_and_stops() {
+        let names = deck_names();
+        let resolve = |role, name: &str| names.resolve(role, name);
+        // Markers come first, even over a segment with the same name.
+        assert_eq!(resolve(BoundRole::From, "climax"), Ok(2.5));
+        assert_eq!(resolve(BoundRole::Frame, "Problema"), Ok(9.0));
+        // A segment starts a range, ends it, and as a frame rests at its
+        // first stop; a name ignores case.
+        let without_marker = TimelineNames {
+            markers: Vec::new(),
+            ..deck_names()
+        };
+        assert_eq!(without_marker.resolve(BoundRole::From, "problema"), Ok(2.0));
+        assert_eq!(without_marker.resolve(BoundRole::To, "Problema"), Ok(6.0));
         assert_eq!(
-            resolve_export_bound("--from", Some(&climax), &markers),
-            Ok(Some(2.5))
+            without_marker.resolve(BoundRole::Frame, "Problema"),
+            Ok(3.0)
         );
+        // A Section key spans all its steps; its frame is the first stop
+        // among them, as a deck's first page of it.
+        assert_eq!(resolve(BoundRole::From, "RESULTS"), Ok(6.0));
+        assert_eq!(resolve(BoundRole::To, "results"), Ok(10.0));
+        assert_eq!(resolve(BoundRole::Frame, "results"), Ok(9.5));
+        // A step title names its step; one without stops rests at its end.
+        assert_eq!(resolve(BoundRole::Frame, "datos"), Ok(8.0));
+        assert_eq!(resolve(BoundRole::Frame, "Cierre"), Ok(12.0));
+        // A stop is the instant it rests, whatever the role.
+        assert_eq!(resolve(BoundRole::Frame, "Pregunta"), Ok(3.0));
+        assert_eq!(resolve(BoundRole::To, "pregunta"), Ok(3.0));
+        // A stop name shared by several stops is ambiguous.
+        let error = resolve(BoundRole::Frame, "respuesta").unwrap_err();
+        assert!(
+            error.contains("names 2 stops") && error.contains("5s in \"Problema\""),
+            "{error}"
+        );
+        // An unknown name lists every kind of name, Section keys once.
+        let error = resolve(BoundRole::To, "fin").unwrap_err();
+        assert!(error.starts_with("--to: no marker, segment or stop named \"fin\""));
+        for listed in [
+            "markers: \"climax\", \"Problema\"",
+            "segments: \"Portada\", \"Problema\", \"results\", \"Cierre\"",
+            "stops: \"pregunta\", \"respuesta\"",
+        ] {
+            assert!(error.contains(listed), "{error}");
+        }
+        let error = TimelineNames::default()
+            .resolve(BoundRole::Frame, "fin")
+            .unwrap_err();
+        assert!(error.contains("the scene defines none"), "{error}");
+        // A frame list split inside a name hints at the escape.
+        let comma = TimelineNames {
+            segments: vec![NamedSegment {
+                name: "Tiempo, lugar".into(),
+                start: 0.0,
+                end: 1.0,
+                stops: Vec::new(),
+            }],
+            ..TimelineNames::default()
+        };
+        let error = comma.resolve(BoundRole::Frame, "Tiempo").unwrap_err();
+        assert!(
+            error.ends_with(r"write a comma inside a name as \,"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn export_ranges_resolve_names_in_order() {
+        let names = deck_names();
+        let climax = ExportBound::Name("climax".into());
         assert_eq!(
-            resolve_export_bound("--to", Some(&ExportBound::Seconds(4.0)), &markers),
+            resolve_export_bound(BoundRole::To, Some(&ExportBound::Seconds(4.0)), &names),
             Ok(Some(4.0))
         );
-        let error =
-            resolve_export_bound("--to", Some(&ExportBound::Marker("fin".into())), &markers)
-                .unwrap_err();
-        assert!(error.contains("unknown marker \"fin\"") && error.contains("\"climax\""));
-        // Marker ranges are only ordered once the markers are known.
+        assert_eq!(
+            resolve_export_range(
+                Some(&ExportBound::Name("Portada".into())),
+                Some(&ExportBound::Name("results".into())),
+                &names
+            ),
+            Ok((Some(0.0), Some(10.0)))
+        );
+        // Named ranges are only ordered once the names are known.
         assert!(validate_export_range(Some(&climax), Some(&ExportBound::Seconds(0.1))).is_ok());
         assert!(
-            resolve_export_range(Some(&climax), Some(&ExportBound::Seconds(0.1)), &markers)
-                .is_err()
+            resolve_export_range(Some(&climax), Some(&ExportBound::Seconds(0.1)), &names).is_err()
         );
     }
 
@@ -894,7 +1206,7 @@ mod tests {
             command.output_format().unwrap(),
             ("talk.mp4".to_string(), "mp4".to_string())
         );
-        assert_eq!(command.from, Some(ExportBound::Marker("intro".into())));
+        assert_eq!(command.from, Some(ExportBound::Name("intro".into())));
         assert_eq!(command.to, Some(ExportBound::Seconds(12.0)));
         assert_eq!((command.width, command.height), (1280, 720));
         assert!(command.validate_video("mp4").is_ok());

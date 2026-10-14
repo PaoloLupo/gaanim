@@ -1147,6 +1147,54 @@ fn complete_script(
     Ok(additions)
 }
 
+/// Complete the script at `path` (see [`complete_script`]) and open it in
+/// the code editor, as every other jump to the code, at [`script_line`].
+/// Returns what completing added and whether the editor opened.
+fn complete_and_open(
+    path: &Path,
+    manifest: &NarrationManifest,
+    slides: &[ScriptSlide],
+) -> Result<(ScriptAdditions, std::io::Result<()>), String> {
+    let before = std::fs::read_to_string(path).ok();
+    let added = complete_script(path, manifest, slides)?;
+    let line = std::fs::read_to_string(path)
+        .map_or(1, |completed| script_line(before.as_deref(), &completed));
+    let location =
+        gaanim_core::console::ScriptLocation::new(path, u32::try_from(line).unwrap_or(1));
+    Ok((added, crate::source_link::open(&location)))
+}
+
+/// The 1-based line of `completed` to open the script at: the first line
+/// completing it added to `before` (the script before, `None` when it did
+/// not exist), else the first section with nothing to read, else its first
+/// section.
+fn script_line(before: Option<&str>, completed: &str) -> usize {
+    let sections = parse_script(completed).unwrap_or_default();
+    let first_section = sections.first().map_or(1, |section| section.line);
+    let Some(before) = before else {
+        return first_section;
+    };
+    // Completing only inserts lines, so the first line that differs starts
+    // the first insertion, which opens with a blank line.
+    let after: Vec<&str> = completed.lines().collect();
+    if let Some(changed) = after
+        .iter()
+        .zip(before.lines())
+        .position(|(after, before)| after != &before)
+        .or_else(|| (after.len() > before.lines().count()).then(|| before.lines().count()))
+    {
+        let written = after[changed..]
+            .iter()
+            .position(|line| !line.trim().is_empty())
+            .map_or(changed, |offset| changed + offset);
+        return written + 1;
+    }
+    sections
+        .iter()
+        .find(|section| section.text.trim().is_empty())
+        .map_or(first_section, |section| section.line)
+}
+
 /// What dictating did to the script.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct DictationReport {
@@ -1725,9 +1773,8 @@ pub(crate) fn narration_session_system(
                 Request::OpenScript => {
                     let slides = script_slides(&stash);
                     match script_path(&stash, &manifest) {
-                        Some(path) => match complete_script(&path, &manifest, &slides) {
-                            Ok(added) => {
-                                let opened = crate::platform::open(&path);
+                        Some(path) => match complete_and_open(&path, &manifest, &slides) {
+                            Ok((added, opened)) => {
                                 let mut message = format!("Script: {}", path.display());
                                 let mut news = Vec::new();
                                 if added.sections > 0 {
@@ -4778,6 +4825,52 @@ mod tests {
             complete_script(&path, &manifest, &slides)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_script_opens_at_what_completing_added() {
+        let slides = vec![
+            slide("Portada", None, &[]),
+            slide("Datos", None, &[Some("grafico")]),
+        ];
+        let manifest = NarrationManifest::default();
+        let line_of =
+            |source: &str, text: &str| source.lines().position(|line| line == text).unwrap() + 1;
+        // A new script opens at its first section.
+        let (created, _) = complete_source(None, &manifest, &slides).unwrap();
+        assert_eq!(script_line(None, &created), line_of(&created, "## Portada"));
+
+        // A section added between two others opens at its heading.
+        let before = "# Script\n\n## Portada\n\nHola.\n\n## Datos\n\nMiren.\n\n[stop grafico]\n";
+        let slides = vec![
+            slide("Portada", None, &[]),
+            slide("Método", None, &[]),
+            slide("Datos", None, &[Some("grafico")]),
+        ];
+        let (completed, _) = complete_source(Some(before), &manifest, &slides).unwrap();
+        assert_eq!(
+            script_line(Some(before), &completed),
+            line_of(&completed, "## Método")
+        );
+
+        // A mark added at the end opens at the mark.
+        let slides = vec![
+            slide("Portada", None, &[]),
+            slide("Datos", None, &[Some("grafico"), Some("fin")]),
+        ];
+        let (completed, _) = complete_source(Some(before), &manifest, &slides).unwrap();
+        assert_eq!(
+            script_line(Some(before), &completed),
+            line_of(&completed, "[stop fin]")
+        );
+
+        // Nothing to add: the first section without text, else the first.
+        let empty = "# Script\n\n## Portada\n\nHola.\n\n## Datos\n\n[stop grafico]\n";
+        assert_eq!(script_line(Some(empty), empty), line_of(empty, "## Datos"));
+        assert_eq!(
+            script_line(Some(before), before),
+            line_of(before, "## Portada")
         );
     }
 
