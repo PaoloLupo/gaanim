@@ -40,6 +40,9 @@ pub fn run() {
     if dispatch_check_mode() {
         return;
     }
+    if crate::inspect::dispatch_inspect_mode() {
+        return;
+    }
     if dispatch_diff_mode() {
         return;
     }

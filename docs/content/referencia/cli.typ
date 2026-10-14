@@ -19,6 +19,7 @@ gaanim                                   # abre el Inicio
 gaanim mi-video                          # previsualiza con hot reload
 gaanim init video mi-video               # crea un proyecto
 gaanim check mi-video                    # valida sin abrir ventana
+gaanim inspect mi-charla --json          # la línea de tiempo y sus líneas
 gaanim export mi-video --output exports/video.mp4
 gaanim export mi-charla --output mi-charla.gaanim   # graba un paquete
 gaanim --present --monitor 1 mi-charla   # presenta a pantalla completa
@@ -29,7 +30,7 @@ gaanim --version
 ```
 
 `gaanim --help` resume el uso y `gaanim <comando> --help` lista las opciones de
-`init`, `check`, `export` y `--diff`. `--help`, `--version` y `update`
+`init`, `check`, `inspect`, `export` y `--diff`. `--help`, `--version` y `update`
 funcionan aunque no haya un Python compatible instalado, igual que reproducir,
 presentar y exportar un paquete `.gaanim` (ver
 #link("/guias/compartir/")[Compartir sin Python]); el resto de comandos
@@ -165,6 +166,60 @@ solo hay advertencias. Si el script lanza una excepción o no termina con
 ```bash
 gaanim check mi-charla --strict
 ```
+
+= `gaanim inspect` <gaanim-inspect>
+
+```bash
+gaanim inspect <SCRIPT_O_PROYECTO> [--json]
+```
+
+Ejecuta el script sin abrir ventana y lista su línea de tiempo: cada segmento
+con su inicio y su final, sus pausas, los marcadores, los voiceovers y la toma
+en vivo, cada uno con el archivo y la línea del script que lo creó. Sirve para
+que un editor de código sepa qué diapositiva tiene el cursor sin leer el
+Python.
+
+```text
+charla/main.py · 3 segments · 4 stops · 1 markers · 42.00 s
+   0.00–12.00   Portada                 main.py:8
+   4.50           stop titulo           main.py:14
+  12.00–30.00   resultados · 1 · 1 · Datos
+  20.00           marker climax         main.py:31
+```
+
+La línea es la del script que hizo la llamada: si una función tuya crea el
+segmento, la de la llamada dentro de esa función; un segmento que crea un
+`Section` lleva la línea del `Section`. Lo que no sale de un script, como el
+segmento implícito, no tiene línea.
+
+Con `--json` imprime un solo objeto en una línea, la última de la salida
+estándar: lo que el script escriba con `print` sale antes. `schema` es `1` y
+solo crecerá con campos nuevos. Los tiempos van en segundos, y `file` y `line` son `null` cuando no
+hay línea:
+
+```json
+{
+  "schema": 1,
+  "script": "C:/charla/main.py",
+  "duration": 42.0,
+  "segments": [
+    {"name": "Portada", "section": null, "start": 0.0, "end": 12.0,
+     "file": "C:/charla/main.py", "line": 8,
+     "stops": [{"name": "titulo", "time": 4.5, "file": "C:/charla/main.py", "line": 14}]}
+  ],
+  "sections": [{"key": "resultados", "start": 12.0, "end": 30.0}],
+  "markers": [{"name": "climax", "time": 20.0, "file": "C:/charla/main.py", "line": 31}],
+  "voiceovers": [{"key": "intro", "start": 0.0, "end": 6.2, "file": "C:/charla/main.py", "line": 10}],
+  "live_take": null,
+  "plays": [{"start": 0.0, "end": 1.5, "file": "C:/charla/main.py", "line": 11}]
+}
+```
+
+`section` es la clave del `Section` que generó el segmento, y `sections` da
+cada clave una vez, del inicio de su primer segmento al final del último.
+`plays` tiene cada `play` con su inicio y su final: con ellos un editor pasa
+de una línea al instante que muestra. Un paquete `.gaanim` no guarda líneas,
+así que `inspect` solo acepta scripts y proyectos.
 
 = `gaanim export`
 

@@ -388,6 +388,7 @@ impl SceneModel {
                 0.0,
             )?);
         }
+        self.record_take_site(key);
         let narration = &mut self.narration;
         narration.manifest.voiceovers.push(VoiceoverSpec {
             key: key.to_owned(),
@@ -533,6 +534,7 @@ impl SceneModel {
             }
             _ => (None, Vec::new(), None),
         };
+        self.record_take_site(key);
         self.narration.manifest.live = Some(LiveTakeSpec {
             key: key.to_owned(),
             start_time,

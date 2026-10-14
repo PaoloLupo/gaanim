@@ -152,6 +152,13 @@ fn segment_matches(segment: &str, name: &str) -> bool {
         || step_title(&segment) == Some(name.as_str())
 }
 
+/// The key of the `Section` that generated `segment`, named
+/// `"<key> · <visit> · <step> · <title>"`.
+pub fn section_key(segment: &str) -> Option<&str> {
+    step_title(segment)?;
+    segment.split_once(" · ").map(|(key, _)| key)
+}
+
 /// Title of a generated `Section` step segment (`"<key> · <visit> · <step> ·
 /// <title>"`), which may itself contain ` · `.
 fn step_title(segment: &str) -> Option<&str> {

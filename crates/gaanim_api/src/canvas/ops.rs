@@ -71,6 +71,9 @@ pub(crate) struct CanvasState {
     /// The script lines of each `play`, by [`op_origin`], for the editor's
     /// animation timeline; kept out of the ops for the same reason.
     pub(crate) op_locations: HashMap<u64, Vec<gaanim_core::console::ScriptLocation>>,
+    /// The script lines of segments, stops, markers, takes and plays, for
+    /// [`SceneModel::timeline_index`](super::SceneModel::timeline_index).
+    pub(crate) authored_timeline: super::timeline_index::AuthoredTimeline,
     /// The shared scene that owns this state, which drawables compile to
     /// measure themselves.
     pub(crate) owner: Option<std::sync::Weak<Mutex<crate::canvas::SceneModel>>>,
@@ -136,6 +139,7 @@ impl CanvasState {
             frozen_spawn_specs: HashMap::new(),
             object_locations: HashMap::new(),
             op_locations: HashMap::new(),
+            authored_timeline: Default::default(),
             owner: None,
             polls: Vec::new(),
             poll_session: None,
