@@ -1,6 +1,7 @@
 //! Presenter view hosted in a second native window.
 
 mod mirror;
+pub(crate) mod pace;
 mod thumbnails;
 
 use bevy::platform::time::Instant;
@@ -15,6 +16,7 @@ use bevy::{
 };
 use bevy_egui::{EguiContext, EguiSchedule, egui, input::EguiWantsInput};
 use gaanim_timeline::timeline::{SegmentMetadata, Timeline};
+use std::collections::HashMap;
 use std::time::Duration;
 
 pub(crate) use mirror::{PresenterMirror, fit_mirror_camera_system, presenter_mirror_system};
@@ -140,10 +142,21 @@ pub(crate) struct AudienceControlsState {
 
 /// Wall-clock timer for one presentation session. It survives closing and
 /// reopening Presenter View and resets automatically for the next session.
+/// It also counts the time spent on each segment, which the plan's pace
+/// and the session's rehearsal read (see [`pace`]).
 #[derive(Resource, Default)]
 pub(crate) struct PresentationTimer {
     started_at: Option<Instant>,
     was_active: bool,
+    /// When the session started, in seconds since the Unix epoch: the
+    /// rehearsal it records goes by it.
+    session: u64,
+    /// Time spent on each segment this session, by segment id.
+    spent: HashMap<u32, Duration>,
+    /// The segment on screen and when its time was last counted.
+    counting: Option<(u32, Instant)>,
+    /// The presented file's rehearsals, read when the session starts.
+    rehearsals: Option<pace::Rehearsals>,
 }
 
 impl PresentationTimer {
@@ -153,19 +166,66 @@ impl PresentationTimer {
             .unwrap_or_default()
     }
 
+    /// Start the session again: a new rehearsal, with nothing spent yet.
     fn reset(&mut self) {
         self.started_at = Some(Instant::now());
+        self.session = chrono::Utc::now().timestamp().max(0) as u64;
+        self.spent.clear();
+        self.counting = None;
+    }
+
+    /// Keep this session as a rehearsal of the presented file.
+    fn record_rehearsal(&mut self, segments: &[SegmentMetadata]) {
+        let rehearsal = pace::Rehearsal {
+            started: self.session,
+            total: self.elapsed().as_secs_f64(),
+            segments: pace::spent_by_name(segments, &self.spent),
+        };
+        if let Some(rehearsals) = &mut self.rehearsals {
+            rehearsals.record(rehearsal);
+        }
+    }
+
+    /// The latest rehearsal before this session.
+    fn previous_rehearsal(&self) -> Option<&pace::Rehearsal> {
+        self.rehearsals.as_ref()?.previous(self.session)
     }
 }
 
 pub(crate) fn sync_presentation_timer_system(
     presentation_mode: Res<PresentationMode>,
+    timeline: Res<Timeline>,
+    paths: Option<Res<crate::export::ProjectPaths>>,
+    replay: Option<Res<StashedReplay>>,
     mut timer: ResMut<PresentationTimer>,
 ) {
     if presentation_mode.active && !timer.was_active {
         timer.reset();
+        let source = replay
+            .as_ref()
+            .and_then(|replay| replay.bundle.as_ref().map(|bundle| bundle.path.clone()))
+            .or_else(|| paths.as_ref().map(|paths| paths.script_path.clone()));
+        timer.rehearsals = source.map(|source| pace::Rehearsals::load(&source));
     }
+    let ended = timer.was_active && !presentation_mode.active;
     timer.was_active = presentation_mode.active;
+
+    // The time since the last frame goes to the segment that was on screen.
+    let now = Instant::now();
+    let counted = timer.counting.take();
+    if let Some((segment, since)) = counted {
+        *timer.spent.entry(segment).or_default() += now.saturating_duration_since(since);
+    }
+    let current = presentation_mode
+        .active
+        .then(|| timeline.segment_position_at(timeline.current_time))
+        .flatten()
+        .map(|position| position.segment_id);
+    timer.counting = current.map(|segment| (segment, now));
+    // The rehearsal is saved as each slide is left and when the session ends.
+    if ended || counted.is_some_and(|(segment, _)| Some(segment) != current) {
+        timer.record_rehearsal(&timeline.segments);
+    }
 }
 
 fn format_stopwatch(duration: Duration) -> String {
@@ -775,6 +835,54 @@ fn status_pill(ui: &mut egui::Ui, status: PlaybackStatus) {
 }
 
 /// A labelled monospace value for a right-to-left row, read as `LABEL 00:00`.
+/// The color of a plan going `tone`: `on_time` while it is on time.
+fn tone_color(tone: pace::PaceTone, on_time: egui::Color32) -> egui::Color32 {
+    match tone {
+        pace::PaceTone::OnTime => on_time,
+        pace::PaceTone::Behind => palette::WARN,
+        pace::PaceTone::Late => palette::DANGER,
+    }
+}
+
+/// The time spent on `slide` this session, against its target and what the
+/// last rehearsal spent on it, when there is either to compare with.
+fn slide_time(slide: &SlideView, timer: &PresentationTimer) -> Option<(String, egui::Color32)> {
+    let spent = timer
+        .spent
+        .get(&slide.segment.id)
+        .map_or(0.0, Duration::as_secs_f64);
+    let last = timer
+        .previous_rehearsal()
+        .and_then(|rehearsal| rehearsal.spent_on(&slide.segment.name));
+    let target = slide.segment.target;
+    if target.is_none() && last.is_none() {
+        return None;
+    }
+    let mut text = match target {
+        Some(target) => format!(
+            "{} of {} on this slide",
+            pace::format_span(spent, false),
+            pace::format_span(target, false)
+        ),
+        None => format!("{} on this slide", pace::format_span(spent, false)),
+    };
+    if let Some(last) = last {
+        text.push_str(&format!(
+            " · last rehearsal {}",
+            pace::format_span(last, false)
+        ));
+    }
+    let over = target.is_some_and(|target| spent > target);
+    Some((
+        text,
+        if over {
+            palette::DANGER
+        } else {
+            palette::MUTED
+        },
+    ))
+}
+
 fn readout_rtl(ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color32) {
     ui.label(
         egui::RichText::new(value)
@@ -1331,6 +1439,13 @@ struct PresenterFrame {
     overview_open: bool,
     elapsed: String,
     clock: String,
+    /// Time left of the planned talk, and how the countdown goes.
+    left: Option<(String, pace::PaceTone)>,
+    /// How far behind (`+`) or ahead (`-`) of the plan the speaker is.
+    pace: Option<(String, pace::PaceTone)>,
+    /// Time on the slide on screen, against its target and the last
+    /// rehearsal.
+    slide_time: Option<(String, egui::Color32)>,
     current_time: f64,
     total_time: f64,
     /// The audience, while a presentation with polls runs.
@@ -1392,6 +1507,14 @@ fn show_header(
             timer.reset();
         }
         readout_rtl(ui, "ELAPSED", &frame.elapsed, palette::ACCENT);
+        if let Some((left, tone)) = &frame.left {
+            ui.add_space(14.0);
+            readout_rtl(ui, "LEFT", left, tone_color(*tone, palette::TEXT));
+        }
+        if let Some((pace, tone)) = &frame.pace {
+            ui.add_space(14.0);
+            readout_rtl(ui, "PACE", pace, tone_color(*tone, palette::LIVE));
+        }
     };
 
     if compact {
@@ -1572,6 +1695,9 @@ fn show_now_panel(
                 palette::MUTED
             }),
     );
+    if let Some((text, color)) = &frame.slide_time {
+        ui.label(egui::RichText::new(text).size(15.0).color(*color));
+    }
     ui.add_space(6.0);
     let height = preview_height
         .unwrap_or_else(|| ui.available_height() - STEP_STRIP_HEIGHT)
@@ -2287,6 +2413,7 @@ pub(crate) fn presenter_view_system(
     mut polls: Option<ResMut<crate::polls::AudiencePolls>>,
     mut link: Option<ResMut<crate::presenter_link::PresenterLink>>,
     mut mirror: Option<ResMut<PresenterMirror>>,
+    talk: Option<Res<pace::TalkDuration>>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
@@ -2319,6 +2446,37 @@ pub(crate) fn presenter_view_system(
     );
     thumbnails.sync_textures(ctx, camera_entity, &priority);
 
+    // The plan: the talk's length (or every slide's target) counted down,
+    // and the drift over the slides with a target.
+    let planned = pace::planned_total(&timeline.segments, talk.and_then(|talk| talk.0));
+    let elapsed = presentation_timer.elapsed().as_secs_f64();
+    let left = planned.map(|planned| {
+        let left = planned - elapsed;
+        (
+            pace::format_span(left, false),
+            pace::countdown_tone(left, planned),
+        )
+    });
+    let targets: f64 = timeline
+        .segments
+        .iter()
+        .filter_map(|segment| segment.target)
+        .sum();
+    let drift = pace::drift(
+        &timeline.segments,
+        &presentation_timer.spent,
+        slide.as_ref().map(|slide| slide.index),
+    )
+    .map(|drift| {
+        (
+            pace::format_span(drift, true),
+            pace::tone(drift, planned.unwrap_or(targets)),
+        )
+    });
+    let slide_time = slide
+        .as_ref()
+        .and_then(|slide| slide_time(slide, &presentation_timer));
+
     let frame = PresenterFrame {
         status: PlaybackStatus::of(&timeline),
         current_preview: match mirror.as_deref().and_then(PresenterMirror::live) {
@@ -2343,6 +2501,9 @@ pub(crate) fn presenter_view_system(
         overview_open: overview.open,
         elapsed: format_stopwatch(presentation_timer.elapsed()),
         clock: chrono::Local::now().format("%H:%M").to_string(),
+        left,
+        pace: drift,
+        slide_time,
         current_time,
         total_time: timeline.cached_duration,
         audience: polls
@@ -2574,6 +2735,7 @@ mod tests {
                 id: 1,
                 name: "Reveal in steps".to_string(),
                 notes: Some("Advance once per benefit.".to_string()),
+                target: None,
                 start_time: 0.0,
                 end_time: 2.0,
                 stops: vec![stop(Some("named-segments"), 1.0), stop(None, 2.0)],
@@ -2582,6 +2744,7 @@ mod tests {
                 id: 2,
                 name: "Thank you".to_string(),
                 notes: None,
+                target: None,
                 start_time: 2.0,
                 end_time: 4.0,
                 stops: vec![stop(Some("questions"), 4.0)],
@@ -2621,6 +2784,7 @@ mod tests {
             id: 1,
             name: "demo".to_string(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 2.0,
             stops: vec![stop(Some("cue"), 1.0)],
@@ -2983,6 +3147,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<PresentationTimer>()
             .insert_resource(PresentationMode { active: false })
+            .insert_resource(Timeline::new())
             .add_systems(Update, sync_presentation_timer_system);
         app.update();
         assert!(
@@ -3010,5 +3175,35 @@ mod tests {
         );
         app.world_mut().resource_mut::<PresentationTimer>().reset();
         assert!(app.world().resource::<PresentationTimer>().elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn presentation_timer_counts_the_time_on_each_slide() {
+        let mut app = App::new();
+        let mut timeline = deck();
+        timeline.current_time = 0.5;
+        app.init_resource::<PresentationTimer>()
+            .insert_resource(PresentationMode { active: true })
+            .insert_resource(timeline)
+            .add_systems(Update, sync_presentation_timer_system);
+        app.update();
+        std::thread::sleep(Duration::from_millis(20));
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().current_time = 3.0;
+        std::thread::sleep(Duration::from_millis(20));
+        app.update();
+        app.update();
+        let timer = app.world().resource::<PresentationTimer>();
+        let intro = timer.spent.get(&1).copied().unwrap_or_default();
+        let plan = timer.spent.get(&2).copied().unwrap_or_default();
+        assert!(intro >= Duration::from_millis(30), "{intro:?}");
+        assert!(plan > Duration::ZERO && plan < intro, "{plan:?}");
+        // Leaving the presentation stops the count.
+        app.world_mut().resource_mut::<PresentationMode>().active = false;
+        app.update();
+        let after = app.world().resource::<PresentationTimer>().spent.clone();
+        std::thread::sleep(Duration::from_millis(20));
+        app.update();
+        assert_eq!(app.world().resource::<PresentationTimer>().spent, after);
     }
 }

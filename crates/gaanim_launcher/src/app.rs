@@ -72,6 +72,7 @@ pub fn run() {
         present: launch.present,
         monitor: launch.monitor,
         selection: launch.selection.clone(),
+        duration: launch.duration,
         ..Default::default()
     });
     crate::startup::mark("app setup");
@@ -1034,6 +1035,9 @@ struct LaunchArgs {
     monitor: Option<usize>,
     /// Segments to rehearse with `--sections` / `--from`.
     selection: gaanim_timeline::selection::SegmentSelection,
+    /// Planned length of the talk (`--duration`), which Presenter View
+    /// counts down.
+    duration: Option<std::time::Duration>,
 }
 
 fn resolve_project_paths(
@@ -1077,6 +1081,7 @@ fn parse_args() -> LaunchArgs {
             present: false,
             monitor: None,
             selection: Default::default(),
+            duration: None,
         };
     }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
@@ -1119,6 +1124,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     let mut script_path = None;
     let mut present = false;
     let mut monitor = None;
+    let mut duration = None;
     let mut selection = gaanim_timeline::selection::SegmentSelection::default();
     let mut index = 0;
 
@@ -1137,6 +1143,13 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
                 } else {
                     selection.set_sections(value)?;
                 }
+            }
+            "--duration" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--duration requires a length, e.g. 20m".to_string())?;
+                index += 1;
+                duration = Some(parse_talk_duration(value)?);
             }
             "--monitor" => {
                 let value = args
@@ -1164,13 +1177,58 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     if !selection.is_empty() && script_path.is_none() {
         return Err("--sections and --from require <SCRIPT_OR_PROJECT>".to_string());
     }
+    if duration.is_some() && script_path.is_none() {
+        return Err("--duration requires <SCRIPT_OR_PROJECT>".to_string());
+    }
     Ok(LaunchArgs {
         script_path,
         project: None,
         present,
         monitor,
         selection,
+        duration,
     })
+}
+
+/// A talk's length: hours, minutes and seconds with their units (`20m`,
+/// `90s`, `1h30m`), a clock (`20:00`, `1:15:00`) or a number of minutes.
+fn parse_talk_duration(text: &str) -> Result<std::time::Duration, String> {
+    let invalid =
+        || format!("--duration takes a length such as 20m, 1h30m, 90s or 20:00, not `{text}`");
+    let value = text.trim().to_lowercase();
+    let seconds = if value.contains(':') {
+        let parts: Vec<f64> = value
+            .split(':')
+            .map(|part| part.parse::<f64>().map_err(|_| invalid()))
+            .collect::<Result<_, _>>()?;
+        if parts.len() > 3 {
+            return Err(invalid());
+        }
+        parts.iter().fold(0.0, |total, part| total * 60.0 + part)
+    } else if value.ends_with(['h', 'm', 's']) {
+        let mut total = 0.0;
+        let mut number = String::new();
+        for c in value.chars().filter(|c| !c.is_whitespace()) {
+            let unit = match c {
+                'h' => 3600.0,
+                'm' => 60.0,
+                's' => 1.0,
+                _ => {
+                    number.push(c);
+                    continue;
+                }
+            };
+            total += number.parse::<f64>().map_err(|_| invalid())? * unit;
+            number.clear();
+        }
+        total
+    } else {
+        value.parse::<f64>().map_err(|_| invalid())? * 60.0
+    };
+    if !(seconds.is_finite() && seconds > 0.0) {
+        return Err(invalid());
+    }
+    Ok(std::time::Duration::from_secs_f64(seconds))
 }
 
 #[cfg(test)]
@@ -1298,6 +1356,7 @@ mod tests {
                 present: true,
                 monitor: Some(1),
                 selection: Default::default(),
+                duration: None,
             }
         );
     }
@@ -1320,6 +1379,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_talk_duration() {
+        let minutes =
+            |text: &str| parse_talk_duration(text).map(|duration| duration.as_secs_f64() / 60.0);
+        assert_eq!(minutes("20m"), Ok(20.0));
+        assert_eq!(minutes("1h30m"), Ok(90.0));
+        assert_eq!(minutes("1h 30m"), Ok(90.0));
+        assert_eq!(minutes("90s"), Ok(1.5));
+        assert_eq!(minutes("20:00"), Ok(20.0));
+        assert_eq!(minutes("1:15:00"), Ok(75.0));
+        assert_eq!(minutes("45"), Ok(45.0));
+        for invalid in ["", "0m", "-5m", "20x", "m", "1:2:3:4", "abc"] {
+            assert!(parse_talk_duration(invalid).is_err(), "{invalid}");
+        }
+        let args = ["talk", "--present", "--duration", "20m"].map(str::to_string);
+        assert_eq!(
+            parse_launch_args(&args).unwrap().duration,
+            Some(std::time::Duration::from_secs(1200))
+        );
+        assert!(parse_launch_args(&["--duration".into(), "20m".into()]).is_err());
+    }
+
+    #[test]
     fn rejects_monitor_without_presentation_mode() {
         let args = ["demo.py", "--monitor", "0"].map(str::to_string);
         assert!(parse_launch_args(&args).is_err());
@@ -1335,6 +1416,7 @@ mod tests {
                 present: false,
                 monitor: None,
                 selection: Default::default(),
+                duration: None,
             }
         );
     }

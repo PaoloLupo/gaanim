@@ -10690,6 +10690,7 @@ class Scene:
         template: Optional[Callable[..., Box]] = None,
         background: Optional[BackgroundLike] = None,
         post: Optional[PostProcess | Sequence[PostProcess] | Literal[False]] = None,
+        target: Optional[float] = None,
     ) -> Segment:
         """Create and activate a named structural segment.
 
@@ -10699,8 +10700,11 @@ class Scene:
         post-process while this segment is active (a sequence chains passes, an
         empty one disables it); ``False`` draws the segment without
         post-processing and ``None`` inherits ``scene.canvas.post``. Any other
-        value raises ``TypeError``. Empty or duplicate names, and a transition
-        on the first segment, raise ``ValueError``.
+        value raises ``TypeError``. ``target`` is how many seconds you plan to
+        spend on the segment when presenting: Presenter View compares the time
+        spent on it with the plan. Empty or duplicate names, a transition on
+        the first segment, and a target that is not a positive number of
+        seconds raise ``ValueError``.
 
         Example:
             result = scene.segment("example", background="#0f172a")

@@ -951,6 +951,7 @@ mod tests {
             id: 0,
             name: "intro".into(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 1.05,
             stops: vec![SegmentStop {
@@ -979,6 +980,7 @@ mod tests {
             id: 0,
             name: "s".into(),
             notes: None,
+            target: None,
             start_time: start,
             end_time: end,
             stops: stops

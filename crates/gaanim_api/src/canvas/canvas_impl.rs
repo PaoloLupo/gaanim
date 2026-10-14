@@ -2561,6 +2561,28 @@ impl SceneModel {
         Ok(())
     }
 
+    /// Plan `target` seconds of a presentation for one segment of this
+    /// scene, or none: Presenter View counts the time spent on it against
+    /// the plan.
+    pub fn set_segment_target(
+        &mut self,
+        segment: &SegmentHandle,
+        target: Option<f64>,
+    ) -> Result<(), SegmentError> {
+        if !segment.belongs_to(&self.state) {
+            return Err(SegmentError::ForeignSegment);
+        }
+        let target = super::segment::segment_target(target)?;
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        guard
+            .segments
+            .iter_mut()
+            .find(|candidate| candidate.id == segment.id)
+            .ok_or(SegmentError::UnknownSegment { id: segment.id })?
+            .target = target;
+        Ok(())
+    }
+
     /// Override the motion blur of one segment of this scene: `None` keeps
     /// it sharp, while the scene's blur applies to segments without one.
     pub fn set_segment_motion_blur(
@@ -6477,6 +6499,7 @@ impl SceneModel {
                     id: segment.id,
                     name: segment.name.clone(),
                     notes: segment.notes.clone(),
+                    target: segment.target,
                     template: segment.template.clone(),
                     start_time,
                     end_time,
@@ -11702,6 +11725,30 @@ mod tests {
             .filter(|op| matches!(op, Op::Stop))
             .count();
         assert_eq!(stops, 1);
+    }
+
+    #[test]
+    fn segment_targets_reach_the_manifest_and_bad_ones_are_refused() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let intro = canvas.segment("intro", None).unwrap();
+        canvas.set_segment_target(&intro, Some(90.0)).unwrap();
+        canvas.wait(1.0);
+        let outro = canvas.segment("outro", None).unwrap();
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                canvas.set_segment_target(&outro, Some(bad)),
+                Err(SegmentError::InvalidTarget { .. })
+            ));
+        }
+        let manifest = canvas.segment_manifest();
+        let targets: Vec<_> = manifest
+            .segments
+            .iter()
+            .map(|segment| segment.target)
+            .collect();
+        assert_eq!(targets, [Some(90.0), None]);
+        canvas.set_segment_target(&intro, None).unwrap();
+        assert_eq!(canvas.segment_manifest().segments[0].target, None);
     }
 
     #[test]

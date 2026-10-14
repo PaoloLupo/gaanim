@@ -177,6 +177,7 @@ fn add_segment(
         id,
         name,
         notes,
+        target,
         template,
         background,
         post_process,
@@ -193,6 +194,7 @@ fn add_segment(
     fingerprint.add(id);
     fingerprint.add(name);
     fingerprint.add(notes);
+    fingerprint.add(target);
     fingerprint.add(template);
     fingerprint.add(background);
     fingerprint.add(post_process);

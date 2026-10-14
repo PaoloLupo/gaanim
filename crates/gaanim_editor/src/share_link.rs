@@ -286,6 +286,7 @@ mod tests {
                 start_time: 0.0,
                 end_time: 4.0,
                 notes: None,
+                target: None,
                 stops: vec![stop(1.0), stop(4.0)],
             },
             SegmentMetadata {
@@ -294,6 +295,7 @@ mod tests {
                 start_time: 4.0,
                 end_time: 9.0,
                 notes: None,
+                target: None,
                 stops: vec![stop(6.0), stop(9.0)],
             },
         ]);

@@ -24,6 +24,7 @@ pub use gaanim_layout::{Anchor, Direction};
 pub use gaanim_renderer::object_effects::{Glass, MatteMode};
 pub use gaanim_text::prelude::TextAnchor;
 pub use segment::SceneMarker;
+pub use segment::segment_target;
 pub use segment::{
     PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest, SegmentSpec,
     SegmentStop,

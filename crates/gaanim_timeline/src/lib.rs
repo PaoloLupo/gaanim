@@ -815,6 +815,7 @@ mod tests {
             id: 1,
             name: "slide".to_owned(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 2.0,
             stops: vec![timeline::SegmentStop {
@@ -857,6 +858,7 @@ mod tests {
             id: 1,
             name: "slide".to_owned(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 2.0,
             stops: vec![timeline::SegmentStop {
@@ -896,6 +898,7 @@ mod tests {
                 id: 1,
                 name: "first".to_owned(),
                 notes: None,
+                target: None,
                 start_time: 0.0,
                 end_time: 1.0,
                 stops: Vec::new(),
@@ -904,6 +907,7 @@ mod tests {
                 id: 2,
                 name: "second".to_owned(),
                 notes: None,
+                target: None,
                 start_time: 1.0,
                 end_time: 2.0,
                 stops: vec![timeline::SegmentStop {
@@ -936,6 +940,7 @@ mod tests {
             id: 1,
             name: "segment".to_owned(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 2.0,
             stops: vec![timeline::SegmentStop {
@@ -969,6 +974,7 @@ mod tests {
             id: 1,
             name: "segment".to_owned(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 3.0,
             stops: vec![timeline::SegmentStop {
@@ -997,6 +1003,7 @@ mod tests {
             id,
             name: format!("s{id}"),
             notes: None,
+            target: None,
             start_time: start,
             end_time: end,
             stops: vec![timeline::SegmentStop {
@@ -1035,6 +1042,7 @@ mod tests {
             id: 1,
             name: "slide".to_owned(),
             notes: None,
+            target: None,
             start_time: 0.0,
             end_time: 6.0,
             stops: vec![

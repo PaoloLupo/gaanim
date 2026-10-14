@@ -520,6 +520,7 @@ mod tests {
             id: 7,
             name: "segment".to_owned(),
             notes: None,
+            target: None,
             start_time: 3.0,
             end_time: 8.0,
             stops: Vec::new(),

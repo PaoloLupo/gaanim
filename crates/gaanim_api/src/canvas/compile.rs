@@ -2972,6 +2972,7 @@ impl SceneModel {
                 id: segment.id.raw(),
                 name: segment.name,
                 notes: segment.notes,
+                target: segment.target,
                 start_time: segment.start_time,
                 end_time: segment.end_time,
                 stops: segment
