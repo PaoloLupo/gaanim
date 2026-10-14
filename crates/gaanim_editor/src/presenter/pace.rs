@@ -7,7 +7,7 @@
 //! presents for a while is kept as a rehearsal: the time spent on each
 //! segment, which the next session shows next to the current one.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -245,6 +245,148 @@ impl Rehearsal {
     }
 }
 
+/// The time each slide took when the speaker last recorded it in the
+/// editor, which they record again slide by slide to fit the plan.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TalkTiming {
+    #[serde(default)]
+    pub slides: Vec<SlideTiming>,
+    /// A digest of the text dictated into each part of a slide, by slide
+    /// name, which tells it from text written or edited since.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dictated: BTreeMap<String, Vec<Option<u64>>>,
+}
+
+/// The time one slide took when it was last recorded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SlideTiming {
+    pub name: String,
+    /// Seconds from entering the slide to leaving it.
+    pub seconds: f64,
+    /// Seconds each part of its script took: the one before each stop,
+    /// then the one after the last.
+    pub parts: Vec<f64>,
+    /// Seconds since the Unix epoch.
+    pub recorded: u64,
+}
+
+impl TalkTiming {
+    pub(crate) fn slide(&self, name: &str) -> Option<&SlideTiming> {
+        self.slides.iter().find(|slide| slide.name == name)
+    }
+
+    /// Keep `slide`, replacing the time recorded for it before.
+    pub(crate) fn record(&mut self, slide: SlideTiming) {
+        match self.slides.iter_mut().find(|kept| kept.name == slide.name) {
+            Some(kept) => *kept = slide,
+            None => self.slides.push(slide),
+        }
+    }
+
+    /// Whether the text of part `part` of `slide` is still what was
+    /// dictated into it.
+    pub(crate) fn still_dictated(&self, slide: &str, part: usize, text: &str) -> bool {
+        self.dictated
+            .get(slide)
+            .and_then(|parts| parts.get(part).copied().flatten())
+            .is_some_and(|digest| digest == text_digest(text))
+    }
+
+    /// Remember the text dictated into part `part` of `slide`, or, as
+    /// `None`, that its text is the speaker's own.
+    pub(crate) fn note_dictated(&mut self, slide: &str, part: usize, text: Option<&str>) {
+        let parts = self.dictated.entry(slide.to_owned()).or_default();
+        if parts.len() <= part {
+            parts.resize(part + 1, None);
+        }
+        parts[part] = text.map(text_digest);
+    }
+}
+
+/// A digest of `text`'s words, the same however it is wrapped or spaced:
+/// FNV-1a, which stays the same across Rust versions.
+pub(crate) fn text_digest(text: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |byte: u8| {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    };
+    for (index, word) in text.split_whitespace().enumerate() {
+        if index > 0 {
+            mix(b' ');
+        }
+        word.bytes().for_each(&mut mix);
+    }
+    hash
+}
+
+/// A slide a recording went through from entering it to leaving it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TimedSlide {
+    pub name: String,
+    pub seconds: f64,
+    pub parts: Vec<f64>,
+}
+
+/// Where a recording was in the script: the recording second at which the
+/// part being said changed, with the slide (by name) and part from then on,
+/// or `None` outside any slide.
+pub(crate) type ScriptTrack = [(f64, Option<(String, usize)>)];
+
+/// The slides a recording that ended at `end` went through whole, with
+/// the time each took and each of its parts. The first slide counts when
+/// the recording `entered_first` from its start or came to it from outside
+/// any slide; the last one when the speaker `finished_last` before ending
+/// or left it.
+pub(crate) fn timed_slides(
+    track: &ScriptTrack,
+    end: f64,
+    entered_first: bool,
+    finished_last: bool,
+) -> Vec<TimedSlide> {
+    let outside = |entry: Option<&(f64, Option<(String, usize)>)>| {
+        entry.is_some_and(|(_, position)| position.is_none())
+    };
+    let entered_first = entered_first || outside(track.first());
+    let finished_last = finished_last || outside(track.last());
+    // Consecutive changes within one slide, each with how long it lasted.
+    let mut runs: Vec<(String, Vec<(usize, f64)>)> = Vec::new();
+    let mut breaks = 0;
+    for (index, (time, position)) in track.iter().enumerate() {
+        let until = track.get(index + 1).map_or(end, |(next, _)| *next);
+        let lasted = (until - time).max(0.0);
+        match position {
+            Some((slide, part)) => match runs.last_mut() {
+                Some((name, parts)) if name == slide && breaks == 0 => parts.push((*part, lasted)),
+                _ => {
+                    runs.push((slide.clone(), vec![(*part, lasted)]));
+                    breaks = 0;
+                }
+            },
+            None => breaks += 1,
+        }
+    }
+    let count = runs.len();
+    runs.into_iter()
+        .enumerate()
+        .filter(|(index, _)| (*index > 0 || entered_first) && (*index + 1 < count || finished_last))
+        .map(|(_, (name, changes))| {
+            let mut parts = Vec::new();
+            for (part, lasted) in changes {
+                if parts.len() <= part {
+                    parts.resize(part + 1, 0.0);
+                }
+                parts[part] += lasted;
+            }
+            TimedSlide {
+                seconds: parts.iter().sum(),
+                name,
+                parts,
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct RehearsalLog {
     source: PathBuf,
@@ -253,6 +395,13 @@ struct RehearsalLog {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     duration: Option<f64>,
     rehearsals: Vec<Rehearsal>,
+    /// The talk as last recorded in the editor, slide by slide.
+    #[serde(default, skip_serializing_if = "is_untimed")]
+    timing: TalkTiming,
+}
+
+fn is_untimed(timing: &TalkTiming) -> bool {
+    timing.slides.is_empty() && timing.dictated.is_empty()
 }
 
 /// The rehearsals of the file at `source`, oldest first.
@@ -279,6 +428,20 @@ impl Rehearsals {
                 ..RehearsalLog::default()
             });
         Self { path, log }
+    }
+
+    /// The talk as last recorded in the editor.
+    pub(crate) fn timing(&self) -> &TalkTiming {
+        &self.log.timing
+    }
+
+    /// Change the recorded timing of the file at `source`, read afresh so
+    /// a session presenting meanwhile keeps its rehearsals, and return it.
+    pub(crate) fn update_timing(source: &Path, change: impl FnOnce(&mut TalkTiming)) -> TalkTiming {
+        let mut rehearsals = Self::load(source);
+        change(&mut rehearsals.log.timing);
+        rehearsals.save();
+        rehearsals.log.timing
     }
 
     /// The talk's length planned for this file last time.
@@ -522,6 +685,74 @@ mod tests {
         assert_eq!(rehearsals.duration(), Some(Duration::from_secs(1200)));
         rehearsals.plan(None);
         assert_eq!(rehearsals.duration(), None);
+    }
+
+    fn at(time: f64, slide: Option<(&str, usize)>) -> (f64, Option<(String, usize)>) {
+        (time, slide.map(|(name, part)| (name.to_owned(), part)))
+    }
+
+    #[test]
+    fn a_recording_times_the_slides_it_went_through_whole() {
+        let track = [
+            at(0.0, Some(("Portada", 0))),
+            at(10.0, Some(("Datos", 0))),
+            at(14.0, Some(("Datos", 1))),
+            at(30.0, Some(("Datos", 2))),
+            at(32.0, Some(("Cierre", 0))),
+        ];
+        let names = |slides: &[TimedSlide]| -> Vec<String> {
+            slides.iter().map(|slide| slide.name.clone()).collect()
+        };
+        let slides = timed_slides(&track, 40.0, true, false);
+        // Cierre was still being said when the recording ended.
+        assert_eq!(names(&slides), ["Portada", "Datos"]);
+        assert_eq!(slides[0].seconds, 10.0);
+        assert_eq!(slides[1].parts, [4.0, 16.0, 2.0]);
+        assert_eq!(slides[1].seconds, 22.0);
+        // Finished at its last stop, it counts too.
+        let slides = timed_slides(&track, 40.0, true, true);
+        assert_eq!(names(&slides), ["Portada", "Datos", "Cierre"]);
+        assert_eq!(slides[2].seconds, 8.0);
+        // Started halfway through its first slide, that one does not count.
+        assert_eq!(names(&timed_slides(&track, 40.0, false, false)), ["Datos"]);
+        // Leaving the slides counts as leaving the last one, and coming
+        // from outside them as entering the first from its start.
+        let around = [at(0.0, None), at(1.0, Some(("Portada", 0))), at(5.0, None)];
+        let slides = timed_slides(&around, 6.0, false, false);
+        assert_eq!(names(&slides), ["Portada"]);
+        assert_eq!(slides[0].seconds, 4.0);
+    }
+
+    #[test]
+    fn dictated_text_is_told_from_text_edited_since() {
+        let mut timing = TalkTiming::default();
+        timing.note_dictated("Datos", 1, Some("Miren  el\ngráfico."));
+        assert!(timing.still_dictated("Datos", 1, "Miren el gráfico."));
+        assert!(!timing.still_dictated("Datos", 1, "Miren el gráfico de ventas."));
+        assert!(!timing.still_dictated("Datos", 0, ""));
+        assert_eq!(
+            timing.dictated["Datos"],
+            [None, Some(text_digest("Miren el gráfico."))]
+        );
+        timing.note_dictated("Datos", 1, None);
+        assert!(!timing.still_dictated("Datos", 1, "Miren el gráfico."));
+        // The digest is fixed: it is saved and read by later versions.
+        assert_eq!(text_digest(""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(text_digest("a"), 0xaf63_dc4c_8601_ec8c);
+        timing.record(SlideTiming {
+            name: "Datos".into(),
+            seconds: 20.0,
+            parts: vec![20.0],
+            recorded: 1,
+        });
+        timing.record(SlideTiming {
+            name: "Datos".into(),
+            seconds: 12.0,
+            parts: vec![12.0],
+            recorded: 2,
+        });
+        assert_eq!(timing.slides.len(), 1);
+        assert_eq!(timing.slide("Datos").map(|slide| slide.seconds), Some(12.0));
     }
 
     #[test]

@@ -241,6 +241,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<presenter::PresenterOverviewState>()
             .init_resource::<presenter::PresenterPreferences>()
             .init_resource::<presenter::prompter::PrompterSettings>()
+            .init_resource::<presenter::prompter::PrompterPace>()
             .init_resource::<presenter::AudienceControlsState>()
             .init_resource::<presenter::PresentationTimer>()
             .init_resource::<fps_overlay::FpsOverlay>()
@@ -379,7 +380,6 @@ impl Plugin for GaanimEditorPlugin {
                 (
                     narration::narration_panel_system,
                     narration::narration_overlay_system,
-                    presenter::prompter::editor_prompter_system,
                 )
                     .after(editor_ui_system),
             )

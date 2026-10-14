@@ -1872,9 +1872,10 @@ fn show_now_panel(
 fn show_speaker_column(
     ui: &mut egui::Ui,
     frame: &PresenterFrame,
-    segments: &[SegmentMetadata],
+    timeline: &Timeline,
     preferences: &mut PresenterPreferences,
     prompter_settings: &mut prompter::PrompterSettings,
+    reading_pace: &prompter::PrompterPace,
     notes_min_height: f32,
     requests: &mut AudienceRequests,
 ) {
@@ -1932,12 +1933,8 @@ fn show_speaker_column(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             if preferences.prompter {
-                // The editor's prompter reads at the same size and pace.
-                prompter::prompter_controls(
-                    ui,
-                    prompter_settings,
-                    &prompter::PrompterWords::ENGLISH,
-                );
+                // The editor's prompter reads at the same size.
+                prompter::size_controls(ui, prompter_settings);
             } else {
                 let size = preferences.notes_size;
                 if small_button(ui, "A+", size < NOTES_SIZE_MAX)
@@ -1959,7 +1956,7 @@ fn show_speaker_column(
             } else {
                 (
                     "Prompter",
-                    "Scroll the whole talk's script like a teleprompter · T",
+                    "Show the part being said as a caption, lit at your pace · T",
                 )
             };
             if small_button(ui, label, true).on_hover_text(hint).clicked() {
@@ -1967,23 +1964,21 @@ fn show_speaker_column(
             }
         });
     });
-    let slides = match (preferences.prompter, frame.slide.as_ref()) {
-        (true, _) => 0..segments.len(),
-        (false, Some(slide)) => slide.index..slide.index + 1,
-        (false, None) => 0..0,
+    if preferences.prompter {
+        show_prompter_caption(
+            ui,
+            timeline,
+            prompter_settings.size,
+            reading_pace,
+            notes_min_height,
+        );
+        return;
+    }
+    let slides = match frame.slide.as_ref() {
+        Some(slide) => slide.index..slide.index + 1,
+        None => 0..0,
     };
-    let lines = prompter::script_lines(segments, slides, frame.script, preferences.prompter);
-    let read = prompter::words_read(
-        ui,
-        egui::Id::new("presenter-prompter"),
-        frame.script,
-        prompter_settings.words_per_minute,
-    );
-    let size = if preferences.prompter {
-        prompter_settings.size
-    } else {
-        preferences.notes_size
-    };
+    let lines = prompter::script_lines(&timeline.segments, slides, frame.script, false);
     egui::Frame::new()
         .fill(palette::SURFACE)
         .inner_margin(egui::Margin::same(16))
@@ -1997,12 +1992,57 @@ fn show_speaker_column(
                     prompter::show_script(
                         ui,
                         &lines,
-                        size,
+                        preferences.notes_size,
                         true,
-                        Some(read),
                         &prompter::PrompterWords::ENGLISH,
                     );
                 });
+        });
+}
+
+/// The prompter's caption filling the speaker column: the part being said,
+/// lit at the speaker's pace, and the cue to advance.
+fn show_prompter_caption(
+    ui: &mut egui::Ui,
+    timeline: &Timeline,
+    size: f32,
+    reading_pace: &prompter::PrompterPace,
+    min_height: f32,
+) {
+    egui::Frame::new()
+        .fill(prompter::BAND)
+        .inner_margin(egui::Margin::symmetric(20, 16))
+        .show(ui, |ui| {
+            let height = ui.available_height().max(min_height);
+            ui.set_min_height(height);
+            ui.set_width(ui.available_width());
+            let id = egui::Id::new("presenter-prompter");
+            let Some(caption) = prompter::script_caption(ui.ctx(), id, timeline, reading_pace)
+            else {
+                ui.label(
+                    egui::RichText::new("The script shows here once a slide is on screen")
+                        .size(14.0)
+                        .italics()
+                        .color(palette::MUTED),
+                );
+                return;
+            };
+            let line = (size * 1.3).round();
+            let lines = (((height - 48.0) / line).floor() as usize).clamp(2, 12);
+            prompter::caption_text(ui, caption.id, &caption.text, size, lines);
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(caption.part.slide_name.to_uppercase())
+                        .size(12.0)
+                        .strong()
+                        .color(palette::MUTED),
+                )
+                .on_hover_text(caption.pace.describe());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    prompter::cue_label(ui, &caption.cue, 14.0);
+                });
+            });
         });
 }
 
@@ -2598,6 +2638,7 @@ pub(crate) fn presenter_view_system(
     mut mirror: Option<ResMut<PresenterMirror>>,
     mut talk: Option<ResMut<pace::TalkDuration>>,
     mut prompter_settings: ResMut<prompter::PrompterSettings>,
+    prompter_pace: Option<Res<prompter::PrompterPace>>,
 ) {
     let Ok((camera_entity, mut context)) = contexts.single_mut() else {
         return;
@@ -2705,6 +2746,8 @@ pub(crate) fn presenter_view_system(
     let mut mirror_size = None;
     let mut retry = false;
     let mut audience_requests = AudienceRequests::default();
+    let unpaced = prompter::PrompterPace::default();
+    let reading_pace = prompter_pace.as_deref().unwrap_or(&unpaced);
 
     let mut viewport_ui = egui::Ui::new(
         ctx.clone(),
@@ -2767,9 +2810,10 @@ pub(crate) fn presenter_view_system(
                 show_speaker_column(
                     ui,
                     &frame,
-                    &timeline.segments,
+                    &timeline,
                     &mut preferences,
                     &mut prompter_settings,
+                    reading_pace,
                     120.0,
                     &mut audience_requests,
                 );
@@ -2799,9 +2843,10 @@ pub(crate) fn presenter_view_system(
                     show_speaker_column(
                         ui,
                         &frame,
-                        &timeline.segments,
+                        &timeline,
                         &mut preferences,
                         &mut prompter_settings,
+                        reading_pace,
                         220.0,
                         &mut audience_requests,
                     );

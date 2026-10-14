@@ -45,6 +45,10 @@ pub(crate) struct NarrationSettings {
     /// A dictation ends after this many minutes of audio.
     #[serde(default = "default_scribe_minutes")]
     pub scribe_max_minutes: u32,
+    /// Words per minute the speaker says, measured from their dictations,
+    /// which the prompter lights the script at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaking_wpm: Option<f64>,
 }
 
 fn default_language() -> String {
@@ -80,6 +84,7 @@ impl Default for NarrationSettings {
             scribe_language: default_scribe_language(),
             scribe_vocabulary: false,
             scribe_max_minutes: default_scribe_minutes(),
+            speaking_wpm: None,
         }
     }
 }

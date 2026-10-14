@@ -498,23 +498,25 @@ este orden: el argumento `text`, su sección del guion y las notas del segmento;
 con un guion cargado, una clave sin sección emite un `UserWarning`. El botón
 *Create script* / *Open and complete* del panel crea el archivo o le añade las
 secciones de los bloques y las diapositivas que faltan, y las marcas de sus
-stops, y lo abre en tu editor. En una toma en vivo, el teleprompter muestra el
-guion de la diapositiva actual cortado en sus `[stop]`, con `▶ AVANZA` donde
-toca avanzar.
+stops, y lo abre en tu editor. En una toma en vivo, el subtítulo del editor
+muestra el tramo del guion que toca decir, con `▶` y el nombre del stop donde
+toca avanzar (ver
+#link("/guias/presentaciones/#prompter")[El prompter]).
 
 === Grabar desde el editor
 
 Abre el panel con el botón de micrófono de la barra de reproducción (o
 *More controls → Script & narration*). El panel lista el guion, la toma en vivo y cada
 bloque de voz en off con su estado: *Not recorded* (duración estimada del texto)
-o *Recorded*, su nivel y de dónde sale su texto. El panel y el teleprompter se
-pueden arrastrar desde su asa de puntos, y *Hide script* reduce el
-teleprompter a su línea de estado para ver la escena.
+o *Recorded*, su nivel y de dónde sale su texto. El panel se puede arrastrar
+desde su asa de puntos. Mientras grabas, un subtítulo abajo de la vista previa
+muestra el texto que toca decir y, debajo, el reloj, el medidor de nivel y las
+teclas.
 
 - *Record* posiciona la escena al inicio del bloque y abre el micrófono
   predeterminado durante una cuenta atrás de tres segundos que sirve de prueba
   de nivel (no se guarda). Después graba mientras la escena avanza, con el
-  texto del bloque como teleprompter y la siguiente marca resaltada. Pulsa
+  texto del bloque en el subtítulo y la siguiente marca resaltada. Pulsa
   *Espacio* al decir cada marca, *Enter* para guardar y *Esc* para descartar.
 - *Record live take* recarga la escena con sus paradas originales y graba
   mientras presentas. La reproducción se detiene en cada parada; *→* o
@@ -529,10 +531,10 @@ no se cuele en el micrófono.
 
 === Nivel de la voz
 
-Al grabar, el medidor del teleprompter muestra los picos del micrófono en dBFS.
+Al grabar, el medidor del subtítulo muestra los picos del micrófono en dBFS.
 La zona verde, entre -18 y -6 dBFS, es la ideal. Entre -6 y -3 dBFS el medidor
-pasa a ámbar, y por encima de -3 dBFS el borde del teleprompter se pone rojo con
-el aviso "¡Muy fuerte!": una palabra más fuerte podría saturar, y la saturación
+pasa a ámbar, y por encima de -3 dBFS el borde del subtítulo se pone rojo con
+el aviso "Too loud!": una palabra más fuerte podría saturar, y la saturación
 no se corrige después. Si algún tramo satura, el aviso lo cuenta hasta el final
 de la toma; si durante cuatro segundos nada llega a -30 dBFS, avisa de que la
 voz está muy baja.

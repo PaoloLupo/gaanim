@@ -1,108 +1,156 @@
 //! The speaker's script as a teleprompter: each slide's notes cut at their
-//! stop marks (see `gaanim_timeline::notes`), the part being said lit word
-//! by word at the speaker's reading pace and kept in the top third, and a
-//! cue wherever the speaker advances. Presenter View shows it, as the
-//! current slide's notes or as the whole talk, and the editor shows the same
-//! prompter in a window of its own, which live takes and dictations open.
+//! stop marks (see `gaanim_timeline::notes`), and the part being said shown
+//! as a caption on an opaque band, lit word by word as the speaker should
+//! be saying it, with a cue where they advance. The reading follows the
+//! timeline: the part the playhead crossed, plus the time spent resting at
+//! the stop that ends it, read at the pace the part took when it was
+//! recorded, or the speaker's measured pace. Presenter View shows the
+//! caption in its speaker column, and the editor over the preview, where
+//! recordings and dictations show their status on it too.
+
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_egui::egui;
 use gaanim_timeline::notes::{NotesPart, split_notes};
 use gaanim_timeline::timeline::{SegmentMetadata, Timeline};
 
+use super::pace::TalkTiming;
 use crate::ui_kit::{palette, small_button};
 
-/// Text size and reading pace of the prompter, the same in Presenter View
-/// and in the editor, and whether the editor shows its prompter window.
+/// Text size of the prompter, the same in Presenter View and in the
+/// editor, and whether the editor shows its caption.
 #[derive(Resource, Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PrompterSettings {
     pub(crate) size: f32,
-    /// Words per minute the part being said is lit at.
-    pub(crate) words_per_minute: f32,
     pub(crate) editor_open: bool,
 }
 
 impl Default for PrompterSettings {
     fn default() -> Self {
         Self {
-            size: 30.0,
-            words_per_minute: 150.0,
+            size: 28.0,
             editor_open: false,
         }
     }
 }
 
 const SIZE_RANGE: (f32, f32) = (16.0, 56.0);
-const PACE_RANGE: (f32, f32) = (90.0, 220.0);
 
 impl PrompterSettings {
-    fn adjust_size(&mut self, delta: f32) {
+    pub(crate) fn adjust_size(&mut self, delta: f32) {
         self.size = (self.size + delta).clamp(SIZE_RANGE.0, SIZE_RANGE.1);
     }
 
-    fn adjust_pace(&mut self, delta: f32) {
-        self.words_per_minute = (self.words_per_minute + delta).clamp(PACE_RANGE.0, PACE_RANGE.1);
+    pub(crate) fn can_grow(&self) -> bool {
+        self.size < SIZE_RANGE.1
+    }
+
+    pub(crate) fn can_shrink(&self) -> bool {
+        self.size > SIZE_RANGE.0
     }
 }
 
-/// The prompter's size and pace buttons.
-pub(crate) fn prompter_controls(
-    ui: &mut egui::Ui,
-    settings: &mut PrompterSettings,
-    words: &PrompterWords,
-) {
+/// The prompter's text size buttons.
+pub(crate) fn size_controls(ui: &mut egui::Ui, settings: &mut PrompterSettings) {
     ui.spacing_mut().item_spacing.x = 4.0;
-    if small_button(ui, "A+", settings.size < SIZE_RANGE.1)
-        .on_hover_text(words.larger)
+    if small_button(ui, "A+", settings.can_grow())
+        .on_hover_text("Larger text")
         .clicked()
     {
         settings.adjust_size(2.0);
     }
-    if small_button(ui, "A−", settings.size > SIZE_RANGE.0)
-        .on_hover_text(words.smaller)
+    if small_button(ui, "A−", settings.can_shrink())
+        .on_hover_text("Smaller text")
         .clicked()
     {
         settings.adjust_size(-2.0);
     }
-    ui.add_space(6.0);
-    if small_button(ui, "+", settings.words_per_minute < PACE_RANGE.1)
-        .on_hover_text(words.faster)
-        .clicked()
-    {
-        settings.adjust_pace(10.0);
-    }
-    ui.label(
-        egui::RichText::new(format!("{:.0} {}", settings.words_per_minute, words.pace))
-            .size(12.0)
-            .monospace()
-            .color(palette::TEXT_MUTED),
-    );
-    if small_button(ui, "−", settings.words_per_minute > PACE_RANGE.0)
-        .on_hover_text(words.slower)
-        .clicked()
-    {
-        settings.adjust_pace(-10.0);
+}
+
+/// What the prompter reads at: the talk as last recorded in the editor and
+/// the speaker's pace, measured from their dictations.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PrompterPace {
+    /// The file `timing` belongs to.
+    pub(crate) source: Option<PathBuf>,
+    pub(crate) timing: TalkTiming,
+    /// Words per minute measured from earlier dictations.
+    pub(crate) measured: Option<f64>,
+    /// Words per minute of the dictation running now, once it can tell.
+    pub(crate) live: Option<f64>,
+    /// `measured` was read from the speaker's settings.
+    pub(crate) loaded: bool,
+}
+
+/// The pace of reading aloud when nothing measured it.
+pub(crate) const DEFAULT_WORDS_PER_MINUTE: f64 = 150.0;
+/// Paces outside this range, in words per minute, are not reading.
+pub(crate) const PACE_RANGE: (f64, f64) = (80.0, 240.0);
+
+/// Where a reading pace comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaceSource {
+    /// The time the part took when the talk was recorded.
+    Recorded,
+    /// The dictation running now.
+    Live,
+    /// The speaker's earlier dictations.
+    Measured,
+    Default,
+}
+
+/// How fast a part is read.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Pace {
+    pub(crate) words_per_minute: f64,
+    pub(crate) source: PaceSource,
+}
+
+impl Pace {
+    pub(crate) fn describe(&self) -> String {
+        let source = match self.source {
+            PaceSource::Recorded => "the time you recorded for this part",
+            PaceSource::Live => "what you are dictating now",
+            PaceSource::Measured => "your earlier dictations",
+            PaceSource::Default => "the usual pace; dictate to measure yours",
+        };
+        format!("Reading at {:.0} wpm, from {source}", self.words_per_minute)
     }
 }
 
-/// Words of the part being said that the speaker has read by now, at
-/// `words_per_minute` from the moment the part became the current one. The
-/// clock lives in `ui`'s memory under `id`, one per prompter.
-pub(crate) fn words_read(
-    ui: &egui::Ui,
-    id: egui::Id,
-    position: Option<ScriptPosition>,
-    words_per_minute: f32,
-) -> f64 {
-    let now = ui.input(|input| input.time);
-    let key = id.with("prompter-reading");
-    let anchor = position.map(|position| (position.slide, position.part));
-    let since = match ui.data(|data| data.get_temp::<(Option<(usize, usize)>, f64)>(key)) {
-        Some((kept, since)) if kept == anchor => since,
-        _ => now,
-    };
-    ui.data_mut(|data| data.insert_temp(key, (anchor, since)));
-    (now - since).max(0.0) * f64::from(words_per_minute) / 60.0
+/// The pace of a part of `words` words: from the `recorded` seconds it
+/// took, else the speaker's pace measured `live` or from earlier
+/// dictations, else the usual one.
+pub(crate) fn pace_for(
+    words: usize,
+    recorded: Option<f64>,
+    live: Option<f64>,
+    measured: Option<f64>,
+) -> Pace {
+    let clamp = |wpm: f64| wpm.clamp(PACE_RANGE.0, PACE_RANGE.1);
+    if let Some(seconds) = recorded.filter(|seconds| *seconds > 0.5)
+        && words > 0
+    {
+        return Pace {
+            words_per_minute: clamp(words as f64 * 60.0 / seconds),
+            source: PaceSource::Recorded,
+        };
+    }
+    match (live, measured) {
+        (Some(live), _) => Pace {
+            words_per_minute: clamp(live),
+            source: PaceSource::Live,
+        },
+        (None, Some(measured)) => Pace {
+            words_per_minute: clamp(measured),
+            source: PaceSource::Measured,
+        },
+        (None, None) => Pace {
+            words_per_minute: DEFAULT_WORDS_PER_MINUTE,
+            source: PaceSource::Default,
+        },
+    }
 }
 
 /// The byte and character index where `text` splits after its first
@@ -173,6 +221,343 @@ impl ScriptPosition {
             resting,
         })
     }
+
+    /// Whether every part of the slide is said or being said last: the
+    /// slide rests at its last stop, or its stops are behind.
+    pub(crate) fn finishes_slide(&self, segments: &[SegmentMetadata]) -> bool {
+        let stops = segments
+            .get(self.slide)
+            .map_or(0, |segment| segment.stops.len());
+        self.part >= stops || (self.resting && self.part + 1 == stops)
+    }
+}
+
+/// The span of the timeline the part at `position` covers: from where it
+/// begins to the stop that ends it, or the end of its slide.
+pub(crate) fn part_span(timeline: &Timeline, position: ScriptPosition) -> (f64, f64) {
+    let Some(segment) = timeline.segments.get(position.slide) else {
+        return (timeline.current_time, timeline.current_time);
+    };
+    let start = match position.part.checked_sub(1) {
+        Some(previous) => segment
+            .stops
+            .get(previous)
+            .map_or(segment.end_time, |stop| stop.time),
+        None => super::segment_entry_time(timeline, segment),
+    };
+    let end = segment
+        .stops
+        .get(position.part)
+        .map_or(segment.end_time, |stop| stop.time);
+    (start, end.max(start))
+}
+
+/// Seconds the speaker has spent on a part spanning `span`: the stretch of
+/// it the playhead at `time` crossed, plus `rested` seconds resting at the
+/// stop that ends it.
+pub(crate) fn part_elapsed(span: (f64, f64), time: f64, rested: f64) -> f64 {
+    (time - span.0).clamp(0.0, span.1 - span.0) + rested.max(0.0)
+}
+
+/// Seconds the presentation has rested at the stop of `position`, on a
+/// clock kept in `ctx`'s memory under `id`.
+fn rested(ctx: &egui::Context, id: egui::Id, position: ScriptPosition) -> f64 {
+    let now = ctx.input(|input| input.time);
+    let key = id.with("prompter-rest");
+    let resting = position.resting.then_some((position.slide, position.part));
+    let since = match ctx.data(|data| data.get_temp::<(Option<(usize, usize)>, f64)>(key)) {
+        Some((kept, since)) if kept == resting => since,
+        _ => now,
+    };
+    ctx.data_mut(|data| data.insert_temp(key, (resting, since)));
+    if resting.is_some() { now - since } else { 0.0 }
+}
+
+/// The part the speaker is saying.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PartView {
+    pub(crate) slide_name: String,
+    /// What the speaker says, without its mark.
+    pub(crate) text: String,
+    /// Where they advance once it is said: the stop's name, else the next
+    /// slide's.
+    pub(crate) cue: String,
+}
+
+impl PartView {
+    pub(crate) fn words(&self) -> usize {
+        gaanim_media::narration::text_words(&self.text).len()
+    }
+}
+
+/// The part of `segments`' script at `position`.
+pub(crate) fn part_view(
+    segments: &[SegmentMetadata],
+    position: ScriptPosition,
+) -> Option<PartView> {
+    let segment = segments.get(position.slide)?;
+    let parts = segment
+        .notes
+        .as_deref()
+        .map(split_notes)
+        .unwrap_or_default();
+    let notes_part = parts.get(position.part);
+    let cue = match segment.stops.get(position.part) {
+        Some(stop) => stop
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .or(notes_part.and_then(|part| part.mark.as_ref()?.name.as_deref()))
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("Step {}", position.part + 1)),
+        None => segments[position.slide + 1..]
+            .iter()
+            .find(|next| next.name != IMPLICIT_SEGMENT)
+            .map_or_else(|| "End".to_owned(), |next| next.name.clone()),
+    };
+    Some(PartView {
+        slide_name: segment.name.clone(),
+        text: notes_part.map(|part| part.text.clone()).unwrap_or_default(),
+        cue,
+    })
+}
+
+/// How far through the part at `position` the speaker should be, in words
+/// of `part`, and the pace that says so.
+pub(crate) fn reading(
+    ctx: &egui::Context,
+    id: egui::Id,
+    timeline: &Timeline,
+    position: ScriptPosition,
+    part: &PartView,
+    pace: &PrompterPace,
+) -> (f64, Pace) {
+    let recorded = pace
+        .timing
+        .slide(&part.slide_name)
+        .and_then(|slide| slide.parts.get(position.part).copied());
+    let pace = pace_for(part.words(), recorded, pace.live, pace.measured);
+    let elapsed = part_elapsed(
+        part_span(timeline, position),
+        timeline.current_time,
+        rested(ctx, id, position),
+    );
+    (elapsed * pace.words_per_minute / 60.0, pace)
+}
+
+/// What a caption shows.
+#[derive(Debug, Clone)]
+pub(crate) enum CaptionText {
+    /// The part of the script being said, lit up to `read` words.
+    Script { text: String, read: f64 },
+    /// What has been transcribed of the part so far; `listening` while
+    /// the speaker talks.
+    Live { text: String, listening: bool },
+    /// Nothing to read, and why.
+    Hint(String),
+    /// Text already laid out, such as a voiceover's with its markers.
+    Job(egui::text::LayoutJob),
+}
+
+/// Where the speaker advances, on the right of the caption's status line.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Cue {
+    pub(crate) label: String,
+    /// The slide waits there now.
+    pub(crate) resting: bool,
+    /// The part is said: it is time to advance.
+    pub(crate) due: bool,
+}
+
+/// Words of the part already said, dimmed so the next ones stand out.
+const SAID: egui::Color32 = egui::Color32::from_rgb(118, 122, 134);
+/// The caption's band, opaque so the text reads over any slide.
+pub(crate) const BAND: egui::Color32 = egui::Color32::from_rgb(7, 7, 9);
+
+/// The caption's text at `size` points, `lines` rows at most: the rows
+/// around the reading point, sliding up as it moves on. Its scroll lives in
+/// `ui`'s memory under `id`, one per part.
+pub(crate) fn caption_text(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    text: &CaptionText,
+    size: f32,
+    lines: usize,
+) {
+    let width = ui.available_width();
+    let line_height = (size * 1.3).round();
+    let format = |color, size: f32, italics: bool| egui::TextFormat {
+        font_id: egui::FontId::proportional(size),
+        color,
+        italics,
+        line_height: Some(line_height),
+        ..Default::default()
+    };
+    // The character the reading point is at, or the end for live text.
+    let (mut job, focus) = match text {
+        CaptionText::Script { text, read } => {
+            let (byte, character) = split_after_words(text, read.max(0.0).floor() as usize);
+            let mut job = egui::text::LayoutJob::default();
+            job.append(&text[..byte], 0.0, format(SAID, size, false));
+            job.append(&text[byte..], 0.0, format(palette::TEXT, size, false));
+            (job, Some(character))
+        }
+        CaptionText::Live { text, listening } => {
+            let mut job = egui::text::LayoutJob::default();
+            job.append(text, 0.0, format(palette::TEXT, size, false));
+            if *listening {
+                let dots = if text.is_empty() { "…" } else { " …" };
+                job.append(dots, 0.0, format(palette::TEXT_MUTED, size, false));
+            }
+            (job, Some(usize::MAX))
+        }
+        CaptionText::Hint(hint) => {
+            let mut job = egui::text::LayoutJob::default();
+            job.append(hint, 0.0, format(palette::TEXT_MUTED, size * 0.75, true));
+            (job, None)
+        }
+        CaptionText::Job(job) => (job.clone(), None),
+    };
+    job.wrap.max_width = width;
+    job.halign = egui::Align::Center;
+    let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+    let rows = galley.rows.len().max(1);
+    let shown = rows.min(lines.max(1));
+    let row_of = |y: f32| {
+        galley
+            .rows
+            .iter()
+            .position(|row| y < row.rect().bottom())
+            .unwrap_or(rows - 1)
+    };
+    let focus_row = match focus {
+        Some(usize::MAX) => rows - 1,
+        Some(character) => row_of(
+            galley
+                .pos_from_cursor(egui::text::CCursor::new(character))
+                .center()
+                .y,
+        ),
+        None => 0,
+    };
+    let first = focus_row.min(rows - shown);
+    let target = galley.rows.get(first).map_or(0.0, |row| row.rect().top());
+    let offset = ui.ctx().animate_value_with_time(id, target, 0.25);
+    let height = galley
+        .rows
+        .get(first + shown - 1)
+        .map_or(line_height, |row| row.rect().bottom() - target)
+        .max(line_height);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    ui.painter().with_clip_rect(rect).galley(
+        egui::pos2(rect.center().x, rect.top() - offset),
+        galley,
+        palette::TEXT,
+    );
+}
+
+/// The editor's caption: an opaque band centered over the preview, its
+/// bottom `gap` points above the window's, outlined in `outline` when
+/// something needs the speaker's attention. Right-clicking it opens `menu`.
+pub(crate) fn show_band(
+    ctx: &egui::Context,
+    gap: f32,
+    outline: Option<egui::Color32>,
+    contents: impl FnOnce(&mut egui::Ui),
+    menu: impl FnOnce(&mut egui::Ui),
+) {
+    let screen = ctx.viewport_rect();
+    let margin = egui::Margin::symmetric(24, 12);
+    let width = (screen.width() - 48.0).clamp(280.0, 980.0) - margin.sum().x;
+    egui::Area::new(egui::Id::new("editor_caption"))
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -gap))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            let band = egui::Frame::new()
+                .fill(BAND)
+                .inner_margin(margin)
+                .stroke(outline.map_or(egui::Stroke::NONE, |color| egui::Stroke::new(2.0, color)))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    contents(ui);
+                });
+            band.response
+                .interact(egui::Sense::click())
+                .context_menu(menu);
+        });
+}
+
+/// The cue to advance, which pulses once the part is said and the slide
+/// waits for the speaker.
+pub(crate) fn cue_label(ui: &mut egui::Ui, cue: &Cue, size: f32) {
+    let pulse =
+        (ui.input(|input| input.time) * std::f64::consts::TAU * 0.8).sin() as f32 * 0.5 + 0.5;
+    let color = match (cue.resting, cue.due) {
+        (true, true) => {
+            ui.ctx().request_repaint();
+            palette::STOP.gamma_multiply(0.55 + 0.45 * pulse)
+        }
+        (true, false) => palette::STOP.gamma_multiply(0.7),
+        (false, _) => palette::TEXT_FAINT,
+    };
+    ui.label(
+        egui::RichText::new(format!("▶ {}", cue.label))
+            .size(size)
+            .strong()
+            .color(color),
+    );
+}
+
+/// The script's caption at the playhead.
+pub(crate) struct ScriptCaption {
+    pub(crate) text: CaptionText,
+    pub(crate) cue: Cue,
+    pub(crate) part: PartView,
+    pub(crate) position: ScriptPosition,
+    pub(crate) pace: Pace,
+    /// The caption's own memory: one per part.
+    pub(crate) id: egui::Id,
+}
+
+/// The caption for the script at `timeline`'s playhead, or `None` outside
+/// the slides.
+pub(crate) fn script_caption(
+    ctx: &egui::Context,
+    id: egui::Id,
+    timeline: &Timeline,
+    pace: &PrompterPace,
+) -> Option<ScriptCaption> {
+    let position = ScriptPosition::of(timeline)?;
+    let part = part_view(&timeline.segments, position)?;
+    let (read, pace) = reading(ctx, id, timeline, position, &part, pace);
+    let words = part.words();
+    let cue = Cue {
+        label: part.cue.clone(),
+        resting: position.resting,
+        due: read >= words as f64,
+    };
+    let text = if part.text.trim().is_empty() {
+        CaptionText::Hint(format!("No script for this part of {}", part.slide_name))
+    } else {
+        if position.resting && read < words as f64 {
+            // Resting at the stop, the words light up as time goes by;
+            // playing, the playhead moves them.
+            ctx.request_repaint_after(std::time::Duration::from_millis(60));
+        }
+        CaptionText::Script {
+            text: part.text.clone(),
+            read,
+        }
+    };
+    Some(ScriptCaption {
+        text,
+        cue,
+        part,
+        position,
+        pace,
+        id: id.with((position.slide, position.part)),
+    })
 }
 
 /// How far the speaker is through a part of the script.
@@ -183,7 +568,7 @@ pub(crate) enum PartState {
     Ahead,
 }
 
-/// A line of the teleprompter.
+/// A line of a slide's notes.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ScriptLine {
     /// A slide's heading, in the whole talk's script.
@@ -361,17 +746,11 @@ fn reading_seconds(text: &str) -> Option<f64> {
     (words > 0).then(|| words as f64 / gaanim_media::narration::ESTIMATED_WORDS_PER_SECOND)
 }
 
-/// The words the teleprompter writes.
+/// The words a slide's notes write.
 pub(crate) struct PrompterWords {
     pub(crate) advance: &'static str,
     pub(crate) silent: &'static str,
     pub(crate) unmatched: &'static str,
-    pub(crate) larger: &'static str,
-    pub(crate) smaller: &'static str,
-    pub(crate) faster: &'static str,
-    pub(crate) slower: &'static str,
-    /// The unit of the reading pace.
-    pub(crate) pace: &'static str,
 }
 
 impl PrompterWords {
@@ -379,31 +758,22 @@ impl PrompterWords {
         advance: "ADVANCE",
         silent: "No notes for this slide",
         unmatched: "no such stop",
-        larger: "Larger text",
-        smaller: "Smaller text",
-        faster: "Read faster",
-        slower: "Read slower",
-        pace: "wpm",
     };
 }
 
-/// Draw `lines` with their text at `size` points. The part being said
-/// lights up word by word as `read` words of it go by; with `follow`, the
-/// view scrolls smoothly to keep that point in the top third, as on a
-/// teleprompter.
+/// Draw `lines` with their text at `size` points, the part being said
+/// marked; with `follow`, the view scrolls smoothly to keep it in the top
+/// third.
 pub(crate) fn show_script(
     ui: &mut egui::Ui,
     lines: &[ScriptLine],
     size: f32,
     follow: bool,
-    read: Option<f64>,
     words: &PrompterWords,
 ) {
     let small = (size * 0.6).max(12.0);
     let content_top = ui.min_rect().top();
-    // Where the reading point is: inside the part being said, or its line.
     let mut reading: Option<egui::Rect> = None;
-    let mut still_reading = false;
     let pulse =
         (ui.input(|input| input.time) * std::f64::consts::TAU * 0.8).sin() as f32 * 0.5 + 0.5;
     if lines
@@ -436,6 +806,11 @@ pub(crate) fn show_script(
                 .rect
             }
             ScriptLine::Text { text, state } => {
+                let color = match state {
+                    PartState::Now => palette::TEXT,
+                    PartState::Said => palette::TEXT_FAINT,
+                    PartState::Ahead => palette::TEXT_MUTED,
+                };
                 let response = egui::Frame::new()
                     .inner_margin(egui::Margin {
                         left: 14,
@@ -443,45 +818,16 @@ pub(crate) fn show_script(
                         top: 2,
                         bottom: 2,
                     })
-                    .show(ui, |ui| match (state, read) {
-                        (PartState::Now, Some(read)) => {
-                            let (byte, character) =
-                                split_after_words(text, read.max(0.0).floor() as usize);
-                            still_reading |= byte < text.len();
-                            let format = |color| egui::TextFormat {
-                                font_id: egui::FontId::proportional(size),
-                                color,
-                                line_height: Some(size * 1.4),
-                                ..Default::default()
-                            };
-                            let mut job = egui::text::LayoutJob::default();
-                            job.append(&text[..byte], 0.0, format(palette::TEXT));
-                            job.append(&text[byte..], 0.0, format(UNREAD));
-                            job.wrap.max_width = ui.available_width();
-                            let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
-                            let label =
-                                ui.add(egui::Label::new(egui::WidgetText::Galley(galley.clone())));
-                            let point = galley
-                                .pos_from_cursor(egui::text::CCursor::new(character))
-                                .translate(label.rect.min.to_vec2());
-                            reading.get_or_insert(point);
-                        }
-                        _ => {
-                            let color = match state {
-                                PartState::Now => palette::TEXT,
-                                PartState::Said => palette::TEXT_FAINT,
-                                PartState::Ahead => palette::TEXT_MUTED,
-                            };
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(text)
-                                        .size(size)
-                                        .color(color)
-                                        .line_height(Some(size * 1.4)),
-                                )
-                                .wrap(),
-                            );
-                        }
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(text)
+                                    .size(size)
+                                    .color(color)
+                                    .line_height(Some(size * 1.4)),
+                            )
+                            .wrap(),
+                        );
                     })
                     .response;
                 if *state == PartState::Now {
@@ -548,18 +894,10 @@ pub(crate) fn show_script(
             reading = Some(rect);
         }
     }
-    if still_reading {
-        // The words light up as time goes by.
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(60));
-    }
     if follow && let Some(point) = reading {
         follow_reading(ui, point, content_top);
     }
 }
-
-/// The part being said, before it is read.
-const UNREAD: egui::Color32 = egui::Color32::from_rgb(178, 182, 194);
 
 /// Scroll so `point` sits in the top third, smoothly, whenever it moves
 /// within the content (whose top is `content_top` on screen).
@@ -583,93 +921,6 @@ fn follow_reading(ui: &mut egui::Ui, point: egui::Rect, content_top: f32) {
         Some(egui::Align::TOP),
         egui::style::ScrollAnimation::duration(0.35),
     );
-}
-
-/// The editor's prompter: the same as Presenter View's, in a window over
-/// the preview. It shows while the speaker opens it (`Shift+T`) or presents
-/// to record a live take or dictate the script.
-pub(crate) fn editor_prompter_system(
-    mut contexts: bevy_egui::EguiContexts,
-    timeline: Option<Res<Timeline>>,
-    mut settings: ResMut<PrompterSettings>,
-    presentation: Res<crate::PresentationMode>,
-    session: Res<crate::narration::NarrationSession>,
-    hub: Option<Res<crate::project_hub::ProjectHubState>>,
-) {
-    let presenting = session.presenting();
-    if !(settings.editor_open || presenting)
-        || presentation.active
-        || hub.is_some_and(|hub| hub.active)
-    {
-        return;
-    }
-    let Some(timeline) = timeline else {
-        return;
-    };
-    let Ok(ctx) = contexts.ctx_mut() else {
-        return;
-    };
-    let screen = ctx.viewport_rect();
-    let mut open = true;
-    let mut window = egui::Window::new("Prompter")
-        .id(egui::Id::new("editor_prompter"))
-        .collapsible(false)
-        .resizable(true)
-        .default_size([520.0, 380.0])
-        .default_pos(egui::pos2(screen.max.x - 560.0, screen.min.y + 60.0))
-        .frame(
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgb(16, 17, 22))
-                .stroke(egui::Stroke::new(1.0, palette::PANEL_STROKE))
-                .inner_margin(egui::Margin::same(14)),
-        );
-    // While presenting for a capture, it stays open.
-    if !presenting {
-        window = window.open(&mut open);
-    }
-    window.show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("PROMPTER")
-                    .size(11.5)
-                    .strong()
-                    .color(palette::TEXT_MUTED),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                prompter_controls(ui, &mut settings, &PrompterWords::ENGLISH);
-            });
-        });
-        ui.add_space(6.0);
-        let position = ScriptPosition::of(&timeline);
-        let lines = script_lines(
-            &timeline.segments,
-            0..timeline.segments.len(),
-            position,
-            true,
-        );
-        let read = words_read(
-            ui,
-            egui::Id::new("editor_prompter"),
-            position,
-            settings.words_per_minute,
-        );
-        egui::ScrollArea::vertical()
-            .id_salt("editor_prompter_script")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                show_script(
-                    ui,
-                    &lines,
-                    settings.size,
-                    true,
-                    Some(read),
-                    &PrompterWords::ENGLISH,
-                );
-            });
-    });
-    if !open {
-        settings.editor_open = false;
-    }
 }
 
 /// `seconds` as `0:12`.
@@ -761,6 +1012,105 @@ mod tests {
                 resting: false
             })
         );
+        // Resting at the last stop finishes the slide; before it, not yet.
+        let segments = deck();
+        assert!(at(6.0, false).unwrap().finishes_slide(&segments));
+        assert!(!at(5.0, true).unwrap().finishes_slide(&segments));
+        assert!(at(6.5, true).unwrap().finishes_slide(&segments));
+    }
+
+    #[test]
+    fn the_reading_follows_the_playhead_and_the_rest_at_the_stop() {
+        let deck = timeline(
+            vec![
+                slide(1, "Portada", None, &[(1.0, None)]),
+                slide(2, "Datos", None, &[(4.0, None), (6.0, None)]),
+            ],
+            5.0,
+            true,
+        );
+        let at = |part, resting| ScriptPosition {
+            slide: 1,
+            part,
+            resting,
+        };
+        // The first part runs from where the slide is entered to its stop.
+        assert_eq!(part_span(&deck, at(0, false)), (3.0, 4.0));
+        assert_eq!(part_span(&deck, at(1, false)), (4.0, 6.0));
+        // After the last stop, to the end of the slide.
+        assert_eq!(part_span(&deck, at(2, false)), (6.0, 7.0));
+        // Halfway through its animation, half its span has gone by.
+        assert_eq!(part_elapsed((4.0, 6.0), 5.0, 0.0), 1.0);
+        // Seeking back goes back with it.
+        assert_eq!(part_elapsed((4.0, 6.0), 3.0, 0.0), 0.0);
+        // Resting at its stop, the rest adds up.
+        assert_eq!(part_elapsed((4.0, 6.0), 6.0, 3.5), 5.5);
+    }
+
+    #[test]
+    fn the_pace_comes_from_the_recording_then_the_speaker_then_the_usual_one() {
+        // 20 words in the 10 seconds the part took when recorded.
+        let recorded = pace_for(20, Some(10.0), Some(130.0), Some(140.0));
+        assert_eq!(
+            (recorded.words_per_minute, recorded.source),
+            (120.0, PaceSource::Recorded)
+        );
+        // Too fast to be reading: clamped.
+        assert_eq!(
+            pace_for(100, Some(10.0), None, None).words_per_minute,
+            PACE_RANGE.1
+        );
+        // Without a recording, the dictation running now, then earlier ones.
+        assert_eq!(
+            pace_for(20, None, Some(130.0), Some(140.0)).source,
+            PaceSource::Live
+        );
+        assert_eq!(
+            pace_for(20, Some(0.1), None, Some(140.0)).source,
+            PaceSource::Measured
+        );
+        assert_eq!(
+            pace_for(0, Some(10.0), None, None),
+            Pace {
+                words_per_minute: DEFAULT_WORDS_PER_MINUTE,
+                source: PaceSource::Default
+            }
+        );
+    }
+
+    #[test]
+    fn a_part_cues_its_stop_or_the_next_slide() {
+        let segments = vec![
+            slide(
+                1,
+                "Datos",
+                Some("Miren el gráfico.\n\n[stop barras]\n\nCrece."),
+                &[(4.0, None), (6.0, Some("fin"))],
+            ),
+            slide(2, IMPLICIT_SEGMENT, None, &[]),
+            slide(3, "Cierre", None, &[]),
+        ];
+        let view = |slide, part| {
+            part_view(
+                &segments,
+                ScriptPosition {
+                    slide,
+                    part,
+                    resting: false,
+                },
+            )
+            .unwrap()
+        };
+        // A bare stop takes the mark's name; a named stop keeps its own.
+        assert_eq!(view(0, 0).cue, "barras");
+        assert_eq!(view(0, 0).text, "Miren el gráfico.");
+        assert_eq!(view(0, 0).words(), 3);
+        assert_eq!(view(0, 1).cue, "fin");
+        assert_eq!(view(0, 1).text, "Crece.");
+        // Past the last stop, the next named slide.
+        assert_eq!(view(0, 2).cue, "Cierre");
+        assert_eq!(view(0, 2).text, "");
+        assert_eq!(view(2, 0).cue, "End");
     }
 
     #[test]
@@ -871,12 +1221,9 @@ mod tests {
             (text.len(), text.chars().count())
         );
         let mut settings = PrompterSettings::default();
-        settings.adjust_pace(500.0);
         settings.adjust_size(-100.0);
-        assert_eq!(
-            (settings.words_per_minute, settings.size),
-            (PACE_RANGE.1, SIZE_RANGE.0)
-        );
+        assert_eq!(settings.size, SIZE_RANGE.0);
+        assert!(!settings.can_shrink() && settings.can_grow());
     }
 
     #[test]

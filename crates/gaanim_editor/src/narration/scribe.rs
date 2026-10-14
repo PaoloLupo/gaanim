@@ -488,23 +488,38 @@ impl Downsampler {
     }
 }
 
+/// A phrase Scribe transcribed, in seconds of the recording.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Turn {
+    pub(crate) start: f64,
+    pub(crate) end: f64,
+    pub(crate) text: String,
+}
+
+/// The slide part being said when `turn` started: `positions` holds the
+/// recording seconds at which the part changed, with the slide (by name)
+/// and part from then on, or `None` outside any slide.
+fn part_of<'a>(
+    positions: &'a [(f64, Option<(String, usize)>)],
+    turn: &Turn,
+) -> Option<&'a (String, usize)> {
+    // A turn that starts a breath before the advance belongs after it.
+    positions
+        .iter()
+        .rev()
+        .find(|(time, _)| *time <= turn.start + 0.05)
+        .and_then(|(_, position)| position.as_ref())
+}
+
 /// The text of each slide part, in the order first heard: a turn joins the
-/// part being said when it started. `positions` holds the recording
-/// seconds at which the part changed, with the slide (by name) and part
-/// from then on, or `None` outside any slide.
+/// part being said when it started (see [`part_of`]).
 pub(crate) fn dictated_parts(
     positions: &[(f64, Option<(String, usize)>)],
-    turns: &[(f64, String)],
+    turns: &[Turn],
 ) -> Vec<(String, usize, String)> {
     let mut parts: Vec<(String, usize, String)> = Vec::new();
-    for (start, text) in turns {
-        // A turn that starts a breath before the advance belongs after it.
-        let Some(Some((slide, part))) = positions
-            .iter()
-            .rev()
-            .find(|(time, _)| *time <= start + 0.05)
-            .map(|(_, position)| position)
-        else {
+    for turn in turns {
+        let Some((slide, part)) = part_of(positions, turn) else {
             continue;
         };
         match parts
@@ -513,12 +528,46 @@ pub(crate) fn dictated_parts(
         {
             Some((_, _, joined)) => {
                 joined.push(' ');
-                joined.push_str(text);
+                joined.push_str(&turn.text);
             }
-            None => parts.push((slide.clone(), *part, text.clone())),
+            None => parts.push((slide.clone(), *part, turn.text.clone())),
         }
     }
     parts
+}
+
+/// Fewer words than this do not tell a speaker's pace.
+const PACE_WORDS: usize = 12;
+
+/// Words per minute the speaker said: every part's words over the time from
+/// its first phrase's start to its last one's end, which keeps the pauses
+/// within a part and leaves out the waits between parts.
+pub(crate) fn speaking_rate(
+    positions: &[(f64, Option<(String, usize)>)],
+    turns: &[Turn],
+) -> Option<f64> {
+    // Words, first start and last end of each part.
+    let mut parts: Vec<(&(String, usize), usize, f64, f64)> = Vec::new();
+    for turn in turns {
+        let Some(part) = part_of(positions, turn) else {
+            continue;
+        };
+        let words = turn.text.split_whitespace().count();
+        match parts.iter_mut().find(|(kept, ..)| *kept == part) {
+            Some((_, total, first, last)) => {
+                *total += words;
+                *first = first.min(turn.start);
+                *last = last.max(turn.end);
+            }
+            None => parts.push((part, words, turn.start, turn.end)),
+        }
+    }
+    let words: usize = parts.iter().map(|(_, words, ..)| words).sum();
+    let seconds: f64 = parts
+        .iter()
+        .map(|(_, _, first, last)| (last - first).max(0.0))
+        .sum();
+    (words >= PACE_WORDS && seconds >= 2.0).then(|| words as f64 * 60.0 / seconds)
 }
 
 const RUNNING: u8 = 0;
@@ -1012,13 +1061,18 @@ mod tests {
             (9.0, Some(("Datos".to_owned(), 1))),
             (12.0, None),
         ];
+        let turn = |start: f64, text: &str| Turn {
+            start,
+            end: start + 1.0,
+            text: text.to_owned(),
+        };
         let turns = vec![
-            (0.5, "Hola.".to_owned()),
-            (3.97, "Vamos a los datos.".to_owned()),
-            (5.0, "Miren el gráfico.".to_owned()),
-            (9.5, "Crece.".to_owned()),
-            (6.0, "Sube.".to_owned()),
-            (13.0, "Fuera.".to_owned()),
+            turn(0.5, "Hola."),
+            turn(3.97, "Vamos a los datos."),
+            turn(5.0, "Miren el gráfico."),
+            turn(9.5, "Crece."),
+            turn(6.0, "Sube."),
+            turn(13.0, "Fuera."),
         ];
         assert_eq!(
             dictated_parts(&positions, &turns),
@@ -1032,6 +1086,34 @@ mod tests {
                 ("Datos".to_owned(), 1, "Crece.".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn the_pace_counts_the_time_each_part_was_spoken() {
+        let positions = vec![
+            (0.0, Some(("Portada".to_owned(), 0))),
+            (20.0, Some(("Datos".to_owned(), 0))),
+        ];
+        let turn = |start: f64, end: f64, text: &str| Turn {
+            start,
+            end,
+            text: text.to_owned(),
+        };
+        // Six words from 1 to 4 s, a pause within the part, then six more
+        // until 7 s; the wait before Datos does not count.
+        let turns = [
+            turn(1.0, 4.0, "uno dos tres cuatro cinco seis"),
+            turn(5.0, 7.0, "siete ocho nueve diez once doce"),
+            turn(
+                22.0,
+                25.0,
+                "trece catorce quince dieciséis diecisiete dieciocho",
+            ),
+        ];
+        // 18 words in 6 + 3 seconds.
+        assert_eq!(speaking_rate(&positions, &turns), Some(120.0));
+        // Too few words to tell.
+        assert_eq!(speaking_rate(&positions, &turns[..1]), None);
     }
 
     /// A local stand-in for Scribe Live: it checks the handshake and the
