@@ -594,6 +594,55 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    /// Whether a segment loop is on: the `L` key's, the loop button's or an
+    /// editor's (`--listen`). `Timeline::loop_range` holds what it repeats.
+    pub fn segment_loop_active(&self) -> bool {
+        self.segment_loop.is_active()
+    }
+
+    /// Loop `range` as the `L` key does, but always on: looping the range
+    /// already looped keeps it. With `restart`, play it from its start.
+    pub fn set_segment_loop(
+        &mut self,
+        timeline: &mut Timeline,
+        range: (f64, f64),
+        restart: bool,
+    ) -> Result<(), String> {
+        const EPSILON: f64 = 1e-6;
+        let (start, end) = range;
+        if !start.is_finite() || !end.is_finite() || end - start <= EPSILON {
+            return Err(format!(
+                "a loop needs an end after its start, not {start}..{end}"
+            ));
+        }
+        let same = self
+            .segment_loop
+            .segment_bounds
+            .is_some_and(|(active_start, active_end)| {
+                (active_start - start).abs() <= EPSILON && (active_end - end).abs() <= EPSILON
+            });
+        if !same {
+            let (seek, playing) = (timeline.seek_request, timeline.is_playing);
+            toggle_scene_loop_range(&mut self.segment_loop, timeline, (start, end));
+            if !restart {
+                timeline.seek_request = seek;
+                timeline.is_playing = playing;
+            }
+        }
+        if restart {
+            timeline.seek_request = Some(start);
+            timeline.is_playing = true;
+        }
+        Ok(())
+    }
+
+    /// End the segment loop, restoring the range it replaced.
+    pub fn clear_segment_loop(&mut self, timeline: &mut Timeline) {
+        if self.segment_loop.is_active() {
+            self.segment_loop.deactivate(timeline);
+        }
+    }
+
     /// Re-resolve an active editor segment loop after a script hot reload.
     /// The timeline engine remains independent from this editor-only state.
     pub fn reconcile_segment_loop_after_reload(
@@ -3910,6 +3959,44 @@ mod tests {
         timeline.add_clip(track, 5.0, 0.0, ClipPayload::SceneEnd(scene));
 
         assert_eq!(scene_loop_range_at(&timeline, 3.0), Some((2.0, 5.0)));
+    }
+
+    #[test]
+    fn a_set_segment_loop_stays_on_and_clears_to_the_previous_range() {
+        let mut timeline = Timeline::default();
+        timeline.cached_duration = 4.0;
+        timeline.loop_range = Some((0.0, 4.0));
+        let mut state = EditorState::default();
+        state
+            .set_segment_loop(&mut timeline, (1.0, 2.0), true)
+            .unwrap();
+        assert!(state.segment_loop_active());
+        assert_eq!(timeline.loop_range, Some((1.0, 2.0)));
+        assert_eq!(timeline.seek_request, Some(1.0));
+        assert!(timeline.is_playing);
+        // The same range again keeps it on, unlike the `L` key.
+        timeline.seek_request = None;
+        state
+            .set_segment_loop(&mut timeline, (1.0, 2.0), false)
+            .unwrap();
+        assert!(state.segment_loop_active());
+        assert_eq!(timeline.seek_request, None);
+        // Another range without restart moves the loop, not the playhead.
+        timeline.is_playing = false;
+        state
+            .set_segment_loop(&mut timeline, (2.0, 3.0), false)
+            .unwrap();
+        assert_eq!(timeline.loop_range, Some((2.0, 3.0)));
+        assert_eq!(timeline.seek_request, None);
+        assert!(!timeline.is_playing);
+        assert!(
+            state
+                .set_segment_loop(&mut timeline, (3.0, 3.0), true)
+                .is_err()
+        );
+        state.clear_segment_loop(&mut timeline);
+        assert!(!state.segment_loop_active());
+        assert_eq!(timeline.loop_range, Some((0.0, 4.0)));
     }
 
     #[test]

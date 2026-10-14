@@ -120,6 +120,9 @@ qué segmento y pausa está. Cada mensaje es un objeto JSON en una línea.
 {"cmd": "follow", "file": "C:/charla/main.py", "line": 42}
 {"cmd": "play"}
 {"cmd": "pause"}
+{"cmd": "loop", "segment": "Problema"}
+{"cmd": "loop", "start": 1.2, "end": 3.4}
+{"cmd": "unloop"}
 ```
 
 `seek` se detiene en un instante, en un segmento o un `Section` (por su
@@ -134,12 +137,24 @@ en la línea más cercana por encima en el mismo archivo. Un segmento cuenta
 como en `seek`, una pausa o un marcador por su instante, un voiceover por su
 inicio y un `play` por su final, cuando lo que anima ya llegó.
 
+`loop` repite un segmento o un `Section` (desde el inicio de su primer
+segmento hasta el final del último, con los mismos nombres que `seek`) o el
+tramo de `start` a `end` en segundos, como la tecla `L` y el botón de bucle
+de la barra de reproducción, que lo muestran encendido. Empieza desde el
+principio del tramo y reproduce, sin detenerse en las pausas. A diferencia de
+la tecla, no alterna: repetir el bucle que ya está activo lo deja encendido.
+Sobrevive a las recargas: un segmento se vuelve a buscar por su nombre y un
+tramo conserva sus tiempos, hasta que el bucle se cambia o se apaga desde la
+vista previa. `unloop` lo apaga y devuelve el tramo que había antes. Un
+segmento que no existe o un tramo inválido responde con `error`, y una
+presentación (`--present`) no repite tramos.
+
 Eventos:
 
 ```json
 {"event": "reload"}
 {"event": "ready", "duration": 42.0, "timeline": {"schema": 1, "segments": [...], ...}}
-{"event": "playhead", "time": 12.5, "segment": "Resultados", "stop": "grafico", "playing": false}
+{"event": "playhead", "time": 12.5, "segment": "Resultados", "stop": "grafico", "playing": false, "loop": null}
 {"event": "failed", "message": "NameError: name 'cirlce' is not defined", "file": "C:/charla/main.py", "line": 17}
 {"event": "error", "message": "seek: no segment or section named \"Cierre\""}
 ```
@@ -152,7 +167,9 @@ segmentos, pausas y líneas sin volver a ejecutar el script; al reproducir un
 paquete `.gaanim` es `null`. `playhead` llega al moverse: enseguida
 tras un salto, una pausa o al cambiar de segmento o de pausa, y como mucho
 diez veces por segundo mientras se reproduce. `stop` es `null` antes de la
-primera pausa del segmento y `""` en una pausa sin nombre. `failed` trae la
+primera pausa del segmento y `""` en una pausa sin nombre. `loop` es
+`[inicio, final]` mientras un bucle está encendido, lo haya puesto un editor o
+la vista previa, y `null` si no. `failed` trae la
 línea del error del script cuando el traceback la da, y `error`, por qué no
 se pudo cumplir una orden.
 
