@@ -69,6 +69,10 @@ const GENERAL: Page = Page {
                     "Compare snapshots with approved baselines",
                 ),
                 (
+                    "pack <BUNDLE> <OUTPUT> [--web]",
+                    "Write a .gaanim file again in the current format; --web\nalso makes it lighter to publish in other pages",
+                ),
+                (
                     "thumbnail <BUNDLE> <PNG> [SIZE]",
                     "Write the cover image of a .gaanim file, at most SIZE\npixels on its longest edge (default 512)",
                 ),

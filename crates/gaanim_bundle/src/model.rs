@@ -67,10 +67,17 @@ pub struct Frame {
 #[derive(Default)]
 pub struct EntityKeys {
     keys: HashMap<Entity, u32>,
+    /// The entities are stand-ins for keys already ([`key_entity`]), as the
+    /// frames of a bundle being written again are: they keep their keys, so
+    /// the static data that names drawables by key stays right.
+    pub(crate) keep: bool,
 }
 
 impl EntityKeys {
     pub fn key(&mut self, entity: Entity) -> u32 {
+        if self.keep {
+            return entity.index_u32();
+        }
         let next = self.keys.len() as u32;
         *self.keys.entry(entity).or_insert(next)
     }
@@ -159,6 +166,12 @@ pub struct Tables {
     recipe_deps: Vec<Box<[u32]>>,
     /// While a recipe or a Lottie frame is encoded, the segments it refers to.
     collecting: Option<BTreeSet<u32>>,
+    /// About how many bytes the segment being filled holds, encoded.
+    pending_bytes: usize,
+    /// For a bundle packed for the web, the most output pixels per unit each
+    /// path is drawn at, by its address: segments store paths on a grid
+    /// fine enough for that (see [`grid_exponent`]) instead of exactly.
+    pub(crate) grid: Option<HashMap<usize, f64>>,
 }
 
 impl Default for Tables {
@@ -183,8 +196,47 @@ impl Default for Tables {
             used: BTreeSet::new(),
             recipe_deps: Vec::new(),
             collecting: None,
+            pending_bytes: 0,
+            grid: None,
         }
     }
+}
+
+/// Largest error, in pixels of a 4K export, that a path packed for the web
+/// may have: half its grid step. A shift this small changes an edge pixel's
+/// coverage by under 2%.
+pub(crate) const GRID_PIXELS: f64 = 1.0 / 32.0;
+
+/// Exponent of the grid (2^exponent units) for `path`, drawn at most at
+/// `pixels_per_unit` output pixels per unit of its own coordinates: the
+/// coarsest power of two finer than [`GRID_PIXELS`] there. A path whose
+/// scale is unknown takes a grid of a millionth of its size. Every grid
+/// coordinate stays an integer an `f64` holds exactly.
+pub(crate) fn grid_exponent(path: &kurbo::BezPath, pixels_per_unit: Option<f64>) -> i32 {
+    use kurbo::Shape;
+    let bounds = path.bounding_box();
+    let fine = match pixels_per_unit.filter(|scale| scale.is_finite() && *scale > 0.0) {
+        Some(scale) => (GRID_PIXELS / scale).log2().floor(),
+        None => {
+            let size = bounds.width().max(bounds.height());
+            if size > 0.0 && size.is_finite() {
+                (size / f64::from(1 << 20)).log2().floor()
+            } else {
+                -30.0
+            }
+        }
+    };
+    let reach = [bounds.x0, bounds.y0, bounds.x1, bounds.y1]
+        .into_iter()
+        .map(f64::abs)
+        .filter(|value| value.is_finite())
+        .fold(0.0, f64::max);
+    let coarsest_exact = if reach > 0.0 {
+        reach.log2().ceil() - 52.0
+    } else {
+        -1074.0
+    };
+    (fine.max(coarsest_exact) as i32).clamp(-1000, 1000)
 }
 
 /// The segment that holds item `index`, given where each segment starts
@@ -216,8 +268,10 @@ impl Tables {
         let mut w = Writer::new();
         codec::write_path(&mut w, path);
         let hash = blake3::hash(&w.buf);
+        let encoded = w.buf.len();
         let index = *self.path_by_hash.entry(hash).or_insert_with(|| {
             self.paths.push(Arc::clone(path));
+            self.pending_bytes += encoded;
             (self.paths.len() - 1) as u32
         });
         // Keep the pointer key valid: the table holds the path alive.
@@ -240,6 +294,7 @@ impl Tables {
         let hash = hasher.finalize();
         let index = *self.image_by_hash.entry(hash).or_insert_with(|| {
             self.images.push(image.clone());
+            self.pending_bytes += image.data.data().len();
             (self.images.len() - 1) as u32
         });
         // The table keeps the blob alive, so its id stays unique.
@@ -279,6 +334,11 @@ impl Tables {
         (value, inner.into_iter().collect())
     }
 
+    /// About how many bytes the segment being filled holds, encoded.
+    pub(crate) fn pending_bytes(&self) -> usize {
+        self.pending_bytes
+    }
+
     fn counts(&self) -> TableCounts {
         TableCounts {
             paths: self.paths.len() as u32,
@@ -301,10 +361,42 @@ impl Tables {
         }
         let range = |from: u32, to: u32| from as usize..to as usize;
         let mut w = Writer::new();
-        w.u8(PATHS_EXACT);
-        w.len(counts.paths as usize);
-        for path in &self.paths[range(start.paths, end.paths)] {
-            codec::write_path(&mut w, path);
+        let paths = &self.paths[range(start.paths, end.paths)];
+        match &self.grid {
+            None => {
+                w.u8(PATHS_EXACT);
+                w.len(paths.len());
+                for path in paths {
+                    codec::write_path(&mut w, path);
+                }
+            }
+            Some(scales) => {
+                // Curves compress best point after point, meshes (whose
+                // vertices repeat) with every point where it is: keep the
+                // smaller once compressed.
+                let encode = |relative: bool| {
+                    let mut w = Writer::new();
+                    w.u8(if relative {
+                        PATHS_GRID
+                    } else {
+                        PATHS_GRID_ABSOLUTE
+                    });
+                    w.len(paths.len());
+                    for path in paths {
+                        let scale = scales.get(&(Arc::as_ptr(path) as usize)).copied();
+                        codec::write_grid_path(&mut w, path, grid_exponent(path, scale), relative);
+                    }
+                    w.into_bytes()
+                };
+                let (relative, absolute) = (encode(true), encode(false));
+                let size = |bytes: &[u8]| crate::compress(bytes).map_or(usize::MAX, |c| c.len());
+                let smaller = if size(&absolute) < size(&relative) {
+                    absolute
+                } else {
+                    relative
+                };
+                w.buf.extend_from_slice(&smaller);
+            }
         }
         w.len(counts.images as usize);
         for image in &self.images[range(start.images, end.images)] {
@@ -327,6 +419,7 @@ impl Tables {
             w.bytes(recipe);
         }
         self.starts.push(end);
+        self.pending_bytes = 0;
         Some((w.into_bytes(), counts))
     }
 
@@ -361,6 +454,7 @@ impl Tables {
             Some(index) => *index,
             None => {
                 self.strings.push(Arc::clone(value));
+                self.pending_bytes += value.len();
                 let index = (self.strings.len() - 1) as u32;
                 self.string_index.insert(Arc::clone(value), index);
                 index
@@ -393,6 +487,7 @@ impl Tables {
             }
             None => {
                 let index = self.recipes.len() as u32;
+                self.pending_bytes += bytes.len();
                 self.recipes.push(bytes);
                 let own = segment_of(&self.starts, |c| c.recipes, index);
                 if let Err(position) = deps.binary_search(&own) {
@@ -419,6 +514,11 @@ impl Tables {
 
 /// Paths of a segment stored exactly, every coordinate's bits.
 pub(crate) const PATHS_EXACT: u8 = 0;
+/// Paths of a segment stored on a grid each, point after point
+/// ([`codec::write_grid_path`]), in a bundle packed for the web.
+pub(crate) const PATHS_GRID: u8 = 1;
+/// Paths of a segment stored on a grid each, every point where it is.
+pub(crate) const PATHS_GRID_ABSOLUTE: u8 = 2;
 
 /// The items of one decoded segment.
 #[derive(Default)]
@@ -506,12 +606,16 @@ impl DecodedTables {
     pub fn load(&mut self, segment: usize, bytes: &[u8]) -> Result<()> {
         let expected = self.starts[segment + 1].sub(self.starts[segment]);
         let mut r = Reader::new(bytes);
-        let paths_encoding = r.u8()?;
-        if paths_encoding != PATHS_EXACT {
-            return Err(BundleError::Unsupported(format!(
-                "a segment stores its paths in an encoding this Gaanim does not read ({paths_encoding})"
-            )));
-        }
+        let read_path = match r.u8()? {
+            PATHS_EXACT => codec::read_path,
+            PATHS_GRID => codec::read_grid_path,
+            PATHS_GRID_ABSOLUTE => codec::read_absolute_grid_path,
+            other => {
+                return Err(BundleError::Unsupported(format!(
+                    "a segment stores its paths in an encoding this Gaanim does not read ({other})"
+                )));
+            }
+        };
         let mut decoded = Segment::default();
         let count = |r: &mut Reader<'_>, expected: u32, what: &str| -> Result<usize> {
             let count = r.len()?;
@@ -523,7 +627,7 @@ impl DecodedTables {
             Ok(count)
         };
         for _ in 0..count(&mut r, expected.paths, "paths")? {
-            decoded.paths.push(Arc::new(codec::read_path(&mut r)?));
+            decoded.paths.push(Arc::new(read_path(&mut r)?));
         }
         for _ in 0..count(&mut r, expected.images, "images")? {
             decoded.images.push(codec::read_image_data(&mut r)?);

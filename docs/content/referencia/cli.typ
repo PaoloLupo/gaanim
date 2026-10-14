@@ -340,6 +340,18 @@ gaanim export mi-charla --output mi-charla.gaanim --fps 30
 gaanim export mi-charla.gaanim --output mi-charla.mp4 --quality production
 ```
 
+`gaanim pack` vuelve a escribir un paquete en el formato actual, sin Python
+ni GPU. Un paquete grabado con una versión anterior pasa así al formato que
+los reproductores abren con su primer bloque. Con `--web`, además, guarda los
+trazados en una rejilla y deja fuera lo que solo usan `gaanim check` y el
+desenfoque de movimiento al exportar vídeo. Queda más ligero para
+#link("/guias/compartir/#insertar")[insertarlo en otras páginas]:
+
+```bash
+gaanim pack mi-charla.gaanim mi-charla.gaanim       # al formato actual
+gaanim pack mi-charla.gaanim web/charla.gaanim --web
+```
+
 La guía #link("/guias/compartir/")[Compartir sin Python] explica qué guarda
 un paquete, cómo se reproducen los callbacks y sus límites.
 

@@ -38,6 +38,7 @@ mod archive;
 mod codec;
 mod digest;
 mod model;
+mod repack;
 mod source;
 
 use std::collections::HashMap;
@@ -64,6 +65,7 @@ use codec::{Reader, Writer};
 pub use digest::scene_digest;
 use model::{DecodedTables, DeltaDecoder, DeltaEncoder, FrameRecord, TableCounts, Tables};
 pub use model::{EntityKeys, Frame, PostPass};
+pub use repack::{RepackOptions, repack, repack_with};
 pub use source::BundleSource;
 
 /// The entity that stands for element key `key` in decoded frames.
@@ -121,6 +123,12 @@ const UNPROCESSED: &str = "tables/unprocessed.bin";
 const GLASS: &str = "tables/glass.bin";
 /// Frames per chunk: one second at the default rate.
 const CHUNK_FRAMES: usize = 60;
+/// A table segment closes once it holds about this many encoded bytes, at
+/// the end of a chunk: a short bundle keeps its tables in one segment, which
+/// compresses as well as one table, and a long one opens after downloading a
+/// megabyte or two of them at most. Smaller segments open sooner but
+/// compress worse: animated shapes repeat their coordinates over seconds.
+const SEGMENT_BYTES: usize = 2 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BundleError {
@@ -950,6 +958,11 @@ pub struct Manifest {
     /// Table segments the static data (`scene.bin`) refers to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scene_table_segments: Vec<u32>,
+    /// Packed for the web (`gaanim pack --web`): paths are stored on a grid,
+    /// so frames compose within a fraction of a pixel of the recording but
+    /// not bit for bit, and there are no frame digests to check.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub approximate: bool,
     /// BLAKE3 hash (hex) of every other entry.
     pub entries: std::collections::BTreeMap<String, String>,
 }
@@ -1002,6 +1015,10 @@ pub struct BundleWriter<W: Write + Seek> {
     /// Segments each recorded Lottie frame refers to (its images).
     scene_deps: Vec<Vec<u32>>,
     table_segments: Vec<TableSegment>,
+    /// Packed for the web: see [`Manifest::approximate`].
+    approximate: bool,
+    /// Encoded bytes at which a table segment closes ([`SEGMENT_BYTES`]).
+    segment_bytes: usize,
     generator: String,
 }
 
@@ -1047,6 +1064,8 @@ impl<W: Write + Seek> BundleWriter<W> {
             scene_by_ptr: HashMap::new(),
             scene_deps: Vec::new(),
             table_segments: Vec::new(),
+            approximate: false,
+            segment_bytes: SEGMENT_BYTES,
             generator: generator.into(),
         }
     }
@@ -1072,20 +1091,30 @@ impl<W: Write + Seek> BundleWriter<W> {
     /// stored once.
     pub fn add_media(&mut self, source: &Path) -> Result<String> {
         let bytes = std::fs::read(source)?;
-        let hash = blake3::hash(&bytes);
-        if let Some(entry) = self.media.get(&hash) {
-            return Ok(entry.clone());
-        }
         let extension = source
             .extension()
             .and_then(|extension| extension.to_str())
-            .filter(|extension| extension.chars().all(|c| c.is_ascii_alphanumeric()))
+            .unwrap_or_default();
+        self.add_media_bytes(&bytes, extension)
+    }
+
+    /// Embed the bytes of a media file whose name ends in `extension` and
+    /// return its entry name, as [`Self::add_media`] does.
+    pub fn add_media_bytes(&mut self, bytes: &[u8], extension: &str) -> Result<String> {
+        let hash = blake3::hash(bytes);
+        if let Some(entry) = self.media.get(&hash) {
+            return Ok(entry.clone());
+        }
+        let extension = Some(extension)
+            .filter(|extension| {
+                !extension.is_empty() && extension.chars().all(|c| c.is_ascii_alphanumeric())
+            })
             .map(|extension| format!(".{}", extension.to_ascii_lowercase()))
             .unwrap_or_default();
         let entry = format!("media/{}{extension}", &hash.to_hex()[..32]);
         // Media is usually compressed already.
         self.zip.start_file(&entry, stored_options())?;
-        self.zip.write_all(&bytes)?;
+        self.zip.write_all(bytes)?;
         self.entries
             .insert(entry.clone(), hash.to_hex().to_string());
         self.media.insert(hash, entry.clone());
@@ -1201,9 +1230,11 @@ impl<W: Write + Seek> BundleWriter<W> {
             return Ok(());
         }
         let segments = self.tables.take_used();
-        // The segment of what the chunk met first goes just before it, so
-        // the chunk and its newest items download together.
-        self.close_segment()?;
+        // A full segment goes just before the chunk that filled it, so the
+        // chunk and its newest items download together.
+        if self.tables.pending_bytes() >= self.segment_bytes {
+            self.close_segment()?;
+        }
         let bytes = std::mem::take(&mut self.chunk).into_bytes();
         let info = self.chunks.last_mut().expect("chunk started");
         info.frames = self.chunk_frames;
@@ -1250,11 +1281,13 @@ impl<W: Write + Seek> BundleWriter<W> {
         }
         self.write_entry("scene.bin", &scene_bytes)?;
         self.write_entry("index.bin", &write_index(&self.times, scene.fps))?;
-        let mut digests = Vec::with_capacity(self.digests.len() * 32);
-        for digest in &self.digests {
-            digests.extend_from_slice(digest);
+        if !self.approximate {
+            let mut digests = Vec::with_capacity(self.digests.len() * 32);
+            for digest in &self.digests {
+                digests.extend_from_slice(digest);
+            }
+            self.write_entry(DIGESTS, &digests)?;
         }
-        self.write_entry(DIGESTS, &digests)?;
         // A scene can take its audience without a poll: a lobby, a gate.
         if !scene.polls.is_empty() || scene.poll_session.is_some() || !scene.stop_gates.is_empty() {
             self.write_entry(POLLS, &write_polls(scene)?)?;
@@ -1298,6 +1331,7 @@ impl<W: Write + Seek> BundleWriter<W> {
             chunks: self.chunks.clone(),
             table_segments: self.table_segments.clone(),
             scene_table_segments,
+            approximate: self.approximate,
             entries: self.entries.clone(),
         };
         let json = serde_json::to_vec_pretty(&manifest)
@@ -1658,7 +1692,7 @@ impl Bundle {
         {
             return Err(BundleError::Corrupt("frame index is inconsistent".into()));
         }
-        if !manifest.entries.contains_key(DIGESTS) {
+        if !manifest.approximate && !manifest.entries.contains_key(DIGESTS) {
             return Err(BundleError::Corrupt(format!(
                 "entry {DIGESTS} is not in the manifest"
             )));
@@ -1858,6 +1892,13 @@ impl Bundle {
     fn digests(&self) -> Result<&[[u8; 32]]> {
         if let Some(digests) = self.digests.get() {
             return Ok(digests);
+        }
+        if self.manifest.approximate {
+            return Err(BundleError::Unsupported(
+                "this bundle was packed for the web: its frames are approximate and it keeps no \
+                 digests to check them against"
+                    .into(),
+            ));
         }
         let bytes = read_entry(&self.archive, Some(&self.manifest), DIGESTS)?;
         if bytes.len() != self.times.len() * 32 {
@@ -2466,9 +2507,11 @@ mod tests {
     }
 
     /// A bundle where a square stays put and another moves every frame:
-    /// each frame meets a new outline, as an animated shape does.
-    fn moving_square(frames: u32) -> Vec<u8> {
+    /// each frame meets a new outline, as an animated shape does. Its table
+    /// segments close at `segment_bytes`.
+    fn moving_square_in_segments(frames: u32, segment_bytes: usize) -> Vec<u8> {
         let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        writer.segment_bytes = segment_bytes;
         let still = square(1, -5.0, false);
         for index in 0..frames {
             let mut captured = frame(f64::from(index) / 60.0);
@@ -2484,9 +2527,23 @@ mod tests {
         writer.finish(&scene).unwrap().into_inner()
     }
 
+    fn moving_square(frames: u32) -> Vec<u8> {
+        moving_square_in_segments(frames, SEGMENT_BYTES)
+    }
+
+    #[test]
+    fn a_short_bundle_keeps_its_tables_in_one_segment() {
+        let bundle = Bundle::from_bytes(moving_square(200).into()).unwrap();
+        assert_eq!(bundle.manifest.table_segments.len(), 1);
+        for chunk in &bundle.manifest.chunks {
+            assert_eq!(chunk.table_segments, vec![0]);
+        }
+    }
+
     #[test]
     fn chunks_store_what_they_meet_first_and_list_the_segments_they_use() {
-        let bytes = moving_square(200);
+        // Every chunk fills a segment.
+        let bytes = moving_square_in_segments(200, 1);
         let bundle = Bundle::from_bytes(bytes.into()).unwrap();
         let manifest = &bundle.manifest;
         assert_eq!(manifest.version, VERSION);
@@ -2505,7 +2562,7 @@ mod tests {
 
     #[test]
     fn opening_downloads_the_first_chunk_with_its_segments_only() {
-        let bytes: Arc<[u8]> = moving_square(200).into();
+        let bytes: Arc<[u8]> = moving_square_in_segments(200, 1).into();
         let len = bytes.len() as u64;
         let source = BundleSource::new(len);
         let add = |ranges: &[Range<u64>]| {
@@ -2607,5 +2664,217 @@ mod tests {
             read.iter().map(|t| t.to_bits()).collect::<Vec<_>>(),
             times.iter().map(|t| t.to_bits()).collect::<Vec<_>>()
         );
+    }
+
+    /// Bytes of `bundle`'s file that opening it needs: what `from_source`
+    /// waits for.
+    fn opening_bytes(bundle: &Bundle) -> u64 {
+        let mut names: Vec<String> = bundle
+            .archive
+            .spans()
+            .filter(|(name, _)| read_on_open(name))
+            .map(|(name, _)| name.to_owned())
+            .collect();
+        if bundle.manifest.version >= 6 {
+            let mut segments = bundle.manifest.scene_table_segments.clone();
+            segments.extend(&bundle.manifest.chunks[0].table_segments);
+            segments.sort_unstable();
+            segments.dedup();
+            names.extend(segments.iter().map(|segment| {
+                bundle.manifest.table_segments[*segment as usize]
+                    .entry
+                    .clone()
+            }));
+        }
+        names
+            .iter()
+            .filter_map(|name| bundle.archive.span(name))
+            .map(|span| span.end - span.start)
+            .sum()
+    }
+
+    #[test]
+    fn a_format_5_bundle_repacks_into_the_current_format_frame_for_frame() {
+        let bytes = include_bytes!("../tests/fixtures/format5.gaanim");
+        let mut old = Bundle::from_bytes(Arc::from(&bytes[..])).unwrap();
+        let repacked = repack(&mut old, std::io::Cursor::new(Vec::new()), "test")
+            .unwrap()
+            .into_inner();
+        let mut new = Bundle::from_bytes(repacked.into()).unwrap();
+        assert_eq!(new.manifest.version, VERSION);
+        assert_eq!(new.times(), old.times());
+        assert_eq!(new.scene.segments, old.scene.segments);
+        assert!(new.verify().unwrap().is_empty());
+    }
+
+    /// Write every bundle of the folder `GAANIM_BUNDLES` again in the current
+    /// format, check that each frame composes as it was recorded, and print
+    /// how many bytes opening each one needs before and after.
+    #[test]
+    #[ignore = "reads the bundles of the folder GAANIM_BUNDLES"]
+    fn bundles_of_a_folder_repack_frame_for_frame() {
+        let Ok(folder) = std::env::var("GAANIM_BUNDLES") else {
+            return;
+        };
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == EXTENSION)
+            })
+            .collect();
+        paths.sort();
+        // `GAANIM_BUNDLES_PART=i/n` takes every n-th bundle from the i-th, so
+        // several processes share a folder.
+        if let Some((part, parts)) = std::env::var("GAANIM_BUNDLES_PART").ok().and_then(|part| {
+            let (part, parts) = part.split_once('/')?;
+            Some((part.parse::<usize>().ok()?, parts.parse::<usize>().ok()?))
+        }) {
+            paths = paths.into_iter().skip(part).step_by(parts.max(1)).collect();
+        }
+        let (mut total_before, mut total_after, mut open_before, mut open_after) = (0, 0, 0, 0);
+        let (mut total_web, mut open_web) = (0, 0);
+        for path in &paths {
+            let bytes = std::fs::read(path).unwrap();
+            let mut old = Bundle::from_bytes(bytes.clone().into()).unwrap();
+            let repacked = repack(&mut old, std::io::Cursor::new(Vec::new()), "test")
+                .unwrap()
+                .into_inner();
+            let size = repacked.len();
+            let mut new = Bundle::from_bytes(repacked.into()).unwrap();
+            // `GAANIM_BUNDLES_QUICK` only measures the repacked sizes.
+            if std::env::var_os("GAANIM_BUNDLES_QUICK").is_some() {
+                println!(
+                    "{:48} {:>10} -> {:>10} bytes, opening {:>10} -> {:>10}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    bytes.len(),
+                    size,
+                    opening_bytes(&old),
+                    opening_bytes(&new)
+                );
+                continue;
+            }
+            // Frame for frame: the repacked bundle composes what the original
+            // does (some recordings differ from their own digests already).
+            let background = old.scene.background.clone();
+            let mut store = FragmentStore::default();
+            for index in 0..old.frame_count() {
+                let before =
+                    frame_digest(&old.frame(index).unwrap(), background.as_ref(), &mut store);
+                store.end_frame();
+                let after =
+                    frame_digest(&new.frame(index).unwrap(), background.as_ref(), &mut store);
+                store.end_frame();
+                assert_eq!(before, after, "{}: frame {index}", path.display());
+            }
+            let (before, after) = (opening_bytes(&old), opening_bytes(&new));
+            let options = RepackOptions { web: true };
+            let packed = repack_with(&mut old, std::io::Cursor::new(Vec::new()), "test", &options)
+                .unwrap()
+                .into_inner();
+            let web_size = packed.len();
+            let mut web = Bundle::from_bytes(packed.into()).unwrap();
+            let web_open = opening_bytes(&web);
+            for index in 0..web.frame_count() {
+                web.frame(index).unwrap();
+            }
+            println!(
+                "{:48} {:>10} -> {:>10} (web {:>10}) bytes, opening {:>10} -> {:>10} (web {:>10})",
+                path.file_name().unwrap().to_string_lossy(),
+                bytes.len(),
+                size,
+                web_size,
+                before,
+                after,
+                web_open
+            );
+            total_before += bytes.len() as u64;
+            total_after += size as u64;
+            total_web += web_size as u64;
+            open_before += before;
+            open_after += after;
+            open_web += web_open;
+        }
+        println!(
+            "{} bundles: {total_before} -> {total_after} (web {total_web}) bytes; opening {open_before} -> {open_after} (web {open_web})",
+            paths.len()
+        );
+    }
+
+    #[test]
+    fn a_bundle_packed_for_the_web_is_smaller_and_within_its_grid() {
+        let exact = moving_square(200);
+        let mut original = Bundle::from_bytes(exact.clone().into()).unwrap();
+        let options = RepackOptions { web: true };
+        let packed = repack_with(
+            &mut original,
+            std::io::Cursor::new(Vec::new()),
+            "test",
+            &options,
+        )
+        .unwrap()
+        .into_inner();
+        assert!(
+            packed.len() < exact.len(),
+            "{} >= {}",
+            packed.len(),
+            exact.len()
+        );
+        let mut web = Bundle::from_bytes(packed.into()).unwrap();
+        assert!(web.manifest.approximate);
+        assert!(!web.manifest.entries.contains_key(DIGESTS));
+        assert!(matches!(web.verify(), Err(BundleError::Unsupported(_))));
+        // A 1280-unit-wide camera is 3 pixels a unit in a 4K export: points
+        // stay within 1/64 of a pixel, a 192nd of a unit.
+        for index in 0..original.frame_count() {
+            let before = lefts(&original.frame(index).unwrap());
+            let after = lefts(&web.frame(index).unwrap());
+            for (b, a) in before.iter().zip(&after) {
+                assert!((b - a).abs() <= 1.0 / 192.0, "frame {index}: {b} -> {a}");
+            }
+        }
+    }
+
+    #[test]
+    fn grid_paths_read_back_on_their_grid() {
+        let mut path = gaanim_core::kurbo::BezPath::new();
+        path.move_to((0.123_456_789, -7.5));
+        path.curve_to((1.0, 2.0), (3.333_333, 4.0), (5.0, 6.000_001));
+        path.close_path();
+        for (exponent, relative) in [
+            (-20, true),
+            (-10, true),
+            (0, true),
+            (-20, false),
+            (-4, false),
+        ] {
+            let mut w = codec::Writer::new();
+            codec::write_grid_path(&mut w, &path, exponent, relative);
+            let bytes = w.into_bytes();
+            let mut r = codec::Reader::new(&bytes);
+            let read = if relative {
+                codec::read_grid_path(&mut r)
+            } else {
+                codec::read_absolute_grid_path(&mut r)
+            }
+            .unwrap();
+            assert!(r.is_empty());
+            let grid = 2f64.powi(exponent);
+            assert_eq!(read.elements().len(), path.elements().len());
+            for (a, b) in path.elements().iter().zip(read.elements()) {
+                let points = |element: &gaanim_core::kurbo::PathEl| match *element {
+                    gaanim_core::kurbo::PathEl::MoveTo(p)
+                    | gaanim_core::kurbo::PathEl::LineTo(p) => vec![p],
+                    gaanim_core::kurbo::PathEl::QuadTo(p, q) => vec![p, q],
+                    gaanim_core::kurbo::PathEl::CurveTo(p, q, r) => vec![p, q, r],
+                    gaanim_core::kurbo::PathEl::ClosePath => vec![],
+                };
+                for (p, q) in points(a).into_iter().zip(points(b)) {
+                    assert!((p.x - q.x).abs() <= grid / 2.0 && (p.y - q.y).abs() <= grid / 2.0);
+                    assert_eq!((q.x / grid).fract(), 0.0);
+                }
+            }
+        }
     }
 }
