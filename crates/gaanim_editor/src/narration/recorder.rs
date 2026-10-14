@@ -118,6 +118,16 @@ impl MicRecorder {
         &self.device
     }
 
+    /// A reader of what this recorder captures, to stream it while it
+    /// records.
+    pub(crate) fn tap(&self) -> MicTap {
+        MicTap {
+            shared: self.shared.clone(),
+            read: 0,
+            sample_rate: self.sample_rate,
+        }
+    }
+
     /// Stop capturing and return the mono samples and their sample rate.
     pub(crate) fn finish(mut self) -> (Vec<f32>, u32) {
         self.halt();
@@ -144,6 +154,34 @@ impl MicRecorder {
 impl Drop for MicRecorder {
     fn drop(&mut self) {
         self.halt();
+    }
+}
+
+/// Reads the samples a [`MicRecorder`] captures as they arrive.
+pub(crate) struct MicTap {
+    shared: Arc<Shared>,
+    read: usize,
+    sample_rate: u32,
+}
+
+impl super::scribe::AudioSource for MicTap {
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn take(&mut self) -> Vec<f32> {
+        let samples = self
+            .shared
+            .samples
+            .lock()
+            .expect("microphone buffer poisoned");
+        // A restart, or the end of the take, empties the buffer.
+        if samples.len() < self.read {
+            self.read = 0;
+        }
+        let new = samples[self.read..].to_vec();
+        self.read = samples.len();
+        new
     }
 }
 

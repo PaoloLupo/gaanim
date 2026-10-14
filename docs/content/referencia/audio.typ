@@ -518,7 +518,10 @@ teleprompter a su línea de estado para ver la escena.
   *Espacio* al decir cada marca, *Enter* para guardar y *Esc* para descartar.
 - *Grabar toma en vivo* recarga la escena con sus paradas originales y graba
   mientras presentas. La reproducción se detiene en cada parada; *→* o
-  *Espacio* continúa, *Enter* termina y *Esc* descarta.
+  *Espacio* continúa, *Enter* termina y *Esc* descarta. Con *Dictar también el
+  guion con Scribe*, Scribe de Zoom transcribe a la vez lo que dices y lo
+  escribe en el guion (ver
+  #link("/guias/presentaciones/#dictar")[Dictar el guion con Scribe]).
 - *Oír* reproduce el bloque desde su inicio.
 - *Nivelar* lleva una toma ya grabada al nivel configurado.
 

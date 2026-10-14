@@ -7,10 +7,14 @@
 //! the time spent there becomes a hold that replaces the stop. Takes and
 //! their sidecars land in the scene's `narration/` folder, leveled to a
 //! standard voice loudness, and the file watcher reloads the scene with the
-//! new timing. Texts can live in a Markdown script edited outside the code.
+//! new timing. Texts can live in a Markdown script edited outside the code,
+//! which Scribe can dictate while the speaker presents (see [`scribe`]).
 
 mod level;
 mod recorder;
+// The web cannot open Scribe's socket: its session only reports that.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+mod scribe;
 mod settings;
 mod whisper;
 
@@ -37,6 +41,7 @@ use gaanim_timeline::timeline::{PlaybackStopPolicy, Timeline};
 use crate::presenter::prompter::{
     IMPLICIT_SEGMENT, PrompterWords, ScriptPosition, script_lines, show_script,
 };
+use scribe::{ScribeConfig, ScribeEvent, ScribeSession, ScribeToken, StopReason, TokenSource};
 
 use crate::export::StashedReplay;
 use crate::ui_kit::{
@@ -251,6 +256,12 @@ pub struct NarrationPanel {
     request: Option<Request>,
     /// The teleprompter shows only its status line.
     compact: bool,
+    /// A Scribe token typed for this session. It is never saved or shown.
+    scribe_token: String,
+    /// Whether the credential store holds a token, once looked up.
+    token_stored: Option<bool>,
+    /// Dictate the script with Scribe while recording the live take.
+    dictate_live: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -263,7 +274,11 @@ enum NoticeKind {
 #[derive(Debug, Clone, PartialEq)]
 enum Request {
     RecordVoiceover(String),
-    RecordLive,
+    RecordLive {
+        dictate: bool,
+    },
+    /// Present the scene and dictate its script with Scribe.
+    Dictate,
     Listen(f64),
     Transcribe(String),
     Level(String),
@@ -437,6 +452,8 @@ enum Target {
         start_time: f64,
         files: TakeFiles,
     },
+    /// Present the scene to dictate its script; no take is recorded.
+    Dictation { start_time: f64 },
 }
 
 impl Target {
@@ -466,23 +483,126 @@ impl Target {
     fn key(&self) -> &str {
         match self {
             Self::Voiceover { key, .. } | Self::Live { key, .. } => key,
+            Self::Dictation { .. } => "guion",
         }
     }
 
     fn start_time(&self) -> f64 {
         match self {
-            Self::Voiceover { start_time, .. } | Self::Live { start_time, .. } => *start_time,
+            Self::Voiceover { start_time, .. }
+            | Self::Live { start_time, .. }
+            | Self::Dictation { start_time } => *start_time,
         }
     }
 
-    fn files(&self) -> &TakeFiles {
+    fn files(&self) -> Option<&TakeFiles> {
         match self {
-            Self::Voiceover { files, .. } | Self::Live { files, .. } => files,
+            Self::Voiceover { files, .. } | Self::Live { files, .. } => Some(files),
+            Self::Dictation { .. } => None,
         }
     }
 
     fn is_live(&self) -> bool {
         matches!(self, Self::Live { .. })
+    }
+
+    /// Whether the speaker presents the scene, pausing at every stop.
+    fn presents(&self) -> bool {
+        matches!(self, Self::Live { .. } | Self::Dictation { .. })
+    }
+}
+
+/// What a capture does besides recording: dictate the script with Scribe,
+/// and whether the take is kept.
+struct CapturePlan {
+    scribe: Option<(ScribeToken, ScribeConfig)>,
+    keep_take: bool,
+}
+
+impl CapturePlan {
+    const TAKE: Self = Self {
+        scribe: None,
+        keep_take: true,
+    };
+}
+
+/// The script Scribe dictates during a capture.
+struct Dictation {
+    session: ScribeSession,
+    /// Recording seconds at which the slide part being said changed, with
+    /// the slide (by name) and part from then on.
+    positions: Vec<(f64, Option<(String, usize)>)>,
+    /// Transcribed turns: when they started, in recording seconds, and
+    /// their text.
+    turns: Vec<(f64, String)>,
+    ready: bool,
+    speaking: bool,
+    /// A warning from Scribe, or why the session stopped or failed.
+    note: Option<(String, bool)>,
+    closed: bool,
+}
+
+impl Dictation {
+    fn new(session: ScribeSession) -> Self {
+        Self {
+            session,
+            positions: Vec::new(),
+            turns: Vec::new(),
+            ready: false,
+            speaking: false,
+            note: None,
+            closed: false,
+        }
+    }
+
+    /// Take in what the session reported.
+    fn absorb(&mut self) {
+        for event in self.session.poll() {
+            match event {
+                ScribeEvent::Ready => self.ready = true,
+                ScribeEvent::Speech(speaking) => self.speaking = speaking,
+                ScribeEvent::Turn { start, text, .. } => {
+                    self.speaking = false;
+                    self.turns.push((start, text));
+                }
+                ScribeEvent::Warning(message) => self.note = Some((message, false)),
+                ScribeEvent::Stopping(reason) => {
+                    self.note = Some((
+                        match reason {
+                            StopReason::Limit => {
+                                "Scribe se detuvo: se alcanzó el límite de minutos".to_owned()
+                            }
+                            StopReason::Silence => {
+                                "Scribe se detuvo tras dos minutos sin voz".to_owned()
+                            }
+                            StopReason::NoAudio => {
+                                "Scribe se detuvo: el micrófono dejó de enviar audio".to_owned()
+                            }
+                        },
+                        false,
+                    ));
+                }
+                ScribeEvent::Failed(message) => self.note = Some((message, true)),
+                ScribeEvent::Closed => {
+                    self.closed = true;
+                    self.speaking = false;
+                }
+            }
+        }
+    }
+
+    /// Note where the speaker is in the script, `elapsed` seconds into the
+    /// recording.
+    fn track(&mut self, timeline: &Timeline, elapsed: f64) {
+        let position = ScriptPosition::of(timeline).map(|position| {
+            (
+                timeline.segments[position.slide].name.clone(),
+                position.part,
+            )
+        });
+        if self.positions.last().map(|(_, last)| last) != Some(&position) {
+            self.positions.push((elapsed, position));
+        }
     }
 }
 
@@ -495,13 +615,17 @@ struct Recording {
     holds: Vec<f64>,
     /// Live take: timeline time of the stop playback is waiting at.
     waiting_at: Option<f64>,
+    /// The script Scribe dictates meanwhile.
+    dictation: Option<Dictation>,
+    /// Save the take when the speaker finishes.
+    keep_take: bool,
 }
 
 impl Recording {
     fn next_marker(&self) -> Option<&str> {
         match &self.target {
             Target::Voiceover { markers, .. } => markers.get(self.taps.len()).map(String::as_str),
-            Target::Live { .. } => None,
+            Target::Live { .. } | Target::Dictation { .. } => None,
         }
     }
 }
@@ -514,14 +638,22 @@ enum Phase {
     AwaitingLiveReload {
         requested: Instant,
         revision: u64,
+        plan: CapturePlan,
     },
     /// The microphone is already open, so the speaker can check the level.
     Countdown {
         target: Target,
         until: Instant,
         input: Box<Input>,
+        plan: CapturePlan,
     },
     Recording(Box<Recording>),
+    /// The capture ended; Scribe sends its last turns before they go into
+    /// the script.
+    Finishing {
+        dictation: Box<Dictation>,
+        since: Instant,
+    },
 }
 
 /// The recording in progress, if any.
@@ -541,9 +673,9 @@ impl NarrationSession {
     pub fn stop_policy(&self) -> Option<PlaybackStopPolicy> {
         let live = match &self.phase {
             Phase::Idle => return None,
-            Phase::AwaitingLiveReload { .. } => true,
-            Phase::Countdown { target, .. } => target.is_live(),
-            Phase::Recording(recording) => recording.target.is_live(),
+            Phase::AwaitingLiveReload { .. } | Phase::Finishing { .. } => true,
+            Phase::Countdown { target, .. } => target.presents(),
+            Phase::Recording(recording) => recording.target.presents(),
         };
         Some(capture_stop_policy(live))
     }
@@ -714,22 +846,24 @@ fn complete_source(
             .join("\n\n");
         // After the section of the closest slide before it that has one,
         // else before the first later slide's section, else at the end.
-        let after = slides[..index]
+        let earlier = slides[..index]
             .iter()
             .rev()
             .find_map(|earlier| section_of(&earlier.name))
-            .map(|section| section.end)
-            .or_else(|| {
-                slides[index + 1..]
-                    .iter()
-                    .find_map(|later| section_of(&later.name))
-                    .map(|section| section.line - 1)
-            })
-            .unwrap_or(line_count);
+            .map(|section| section.end);
+        let later = slides[index + 1..]
+            .iter()
+            .find_map(|later| section_of(&later.name))
+            .map(|section| section.line - 1);
+        let after = earlier.or(later).unwrap_or(line_count);
         let mut lines = vec![String::new(), format!("## {}", slide.name)];
         if !body.is_empty() {
             lines.push(String::new());
             lines.extend(body.lines().map(str::to_owned));
+        }
+        if earlier.is_none() && later.is_some() {
+            // Keep a blank line before the section that follows.
+            lines.push(String::new());
         }
         insertions.push((after, lines));
         fresh.push((slide.name.clone(), body));
@@ -801,6 +935,210 @@ fn complete_script(
         write_atomically(path, source.as_bytes()).map_err(|error| error.to_string())?;
     }
     Ok(additions)
+}
+
+/// What dictating added to the script.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct DictationReport {
+    /// Slide parts that received dictated text.
+    parts: usize,
+    /// Of those, parts that already had text, where it went as a comment.
+    commented: usize,
+}
+
+/// The script `existing` completed (see [`complete_source`]) with the
+/// dictated text of each `(slide, part, text)`: before the part's stop
+/// mark, or at the end of the section for the text after the last one. A
+/// part that already has text keeps it, and the dictation goes beside it as
+/// an HTML comment, which the script ignores.
+fn merge_dictation(
+    existing: Option<&str>,
+    slides: &[ScriptSlide],
+    dictated: &[(String, usize, String)],
+) -> Result<(String, DictationReport), String> {
+    let (completed, _) = complete_source(existing, &NarrationManifest::default(), slides)?;
+    let sections = parse_script(&completed)?;
+    let mut report = DictationReport::default();
+    // Lines to insert before a 1-based line (one past the last: the end).
+    let mut insertions: Vec<(usize, Vec<String>)> = Vec::new();
+    for (slide, part, text) in dictated {
+        let Some(section) = sections.iter().find(|section| section.is_named(slide)) else {
+            continue;
+        };
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let written = gaanim_timeline::notes::split_notes(&section.notes)
+            .get(*part)
+            .is_some_and(|written| !written.text.trim().is_empty());
+        let paragraph = if written {
+            report.commented += 1;
+            // A comment ends at the first `-->`.
+            format!("<!-- dictado: {} -->", text.replace("--", "–"))
+        } else {
+            text.to_owned()
+        };
+        report.parts += 1;
+        match section.marks.get(*part) {
+            Some(&mark) => insertions.push((mark, vec![paragraph, String::new()])),
+            None => insertions.push((section.end + 1, vec![String::new(), paragraph])),
+        }
+    }
+    let newline = if completed.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let lines: Vec<&str> = completed.lines().collect();
+    let mut output: Vec<String> = Vec::with_capacity(lines.len() + insertions.len() * 2);
+    for line in 1..=lines.len() + 1 {
+        for (_, inserted) in insertions.iter().filter(|(before, _)| *before == line) {
+            output.extend(inserted.iter().cloned());
+        }
+        if let Some(text) = lines.get(line - 1) {
+            output.push((*text).to_owned());
+        }
+    }
+    let mut source = output.join(newline);
+    source.push_str(newline);
+    Ok((source, report))
+}
+
+/// The plan of a dictation: the token and what to ask Scribe, from the
+/// speaker's preferences.
+fn dictation_plan(
+    panel: &mut NarrationPanel,
+    slides: &[ScriptSlide],
+    keep_take: bool,
+) -> Result<CapturePlan, String> {
+    if slides.is_empty() {
+        return Err(
+            "La escena no tiene diapositivas: crea segmentos con scene.segment(...)".to_owned(),
+        );
+    }
+    let (token, _) = ScribeToken::resolve(&panel.scribe_token, scribe::vault::load, |name| {
+        std::env::var(name).ok()
+    })
+    .ok_or_else(|| {
+        "Falta el token de Scribe: guárdalo o pégalo en Ajustes → Scribe de Zoom".to_owned()
+    })?;
+    let settings = panel.settings();
+    let language = if scribe::LANGUAGES.contains(&settings.scribe_language.as_str()) {
+        settings.scribe_language.clone()
+    } else {
+        scribe::LANGUAGES[0].to_owned()
+    };
+    let phrases = if settings.scribe_vocabulary {
+        vocabulary(slides)
+    } else {
+        Vec::new()
+    };
+    let config = ScribeConfig {
+        language,
+        phrases,
+        max_minutes: settings
+            .scribe_max_minutes
+            .clamp(1, scribe::MAX_SESSION_MINUTES),
+    };
+    Ok(CapturePlan {
+        scribe: Some((token, config)),
+        keep_take,
+    })
+}
+
+/// The slides' and stops' names, once each, as vocabulary for Scribe.
+fn vocabulary(slides: &[ScriptSlide]) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    let names = slides.iter().flat_map(|slide| {
+        std::iter::once(slide.name.as_str()).chain(slide.stops.iter().flatten().map(String::as_str))
+    });
+    for name in names {
+        let name = name.trim();
+        if !name.is_empty() && !words.iter().any(|word| word.eq_ignore_ascii_case(name)) {
+            words.push(name.to_owned());
+        }
+    }
+    words.truncate(100);
+    words
+}
+
+/// Where a dictation starts: the slide under the playhead.
+fn dictation_start(timeline: &Timeline) -> f64 {
+    ScriptPosition::of(timeline)
+        .map(|position| {
+            crate::presenter::segment_entry_time(timeline, &timeline.segments[position.slide])
+        })
+        .unwrap_or(0.0)
+}
+
+/// Write what Scribe dictated into the script and say how it went.
+fn write_dictation(dictation: Dictation, stash: &StashedReplay, panel: &mut NarrationPanel) {
+    let parts = scribe::dictated_parts(&dictation.positions, &dictation.turns);
+    let failure = dictation
+        .note
+        .as_ref()
+        .filter(|(_, failed)| *failed)
+        .map(|(message, _)| message.clone());
+    drop(dictation);
+    if parts.is_empty() {
+        let message = match failure {
+            Some(failure) => format!("Scribe no dictó nada: {failure}"),
+            None => "Scribe no transcribió ninguna frase".to_owned(),
+        };
+        panel.notify(NoticeKind::Error, message);
+        return;
+    }
+    let manifest = manifest(stash);
+    let slides = script_slides(stash);
+    let Some(path) = script_path(stash, &manifest) else {
+        panel.notify(NoticeKind::Error, "la escena aún no se cargó");
+        return;
+    };
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(source) => Some(source),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            panel.notify(
+                NoticeKind::Error,
+                format!("no se pudo leer el guion: {error}"),
+            );
+            return;
+        }
+    };
+    let written =
+        merge_dictation(existing.as_deref(), &slides, &parts).and_then(|(source, report)| {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            write_atomically(&path, source.as_bytes())
+                .map(|()| report)
+                .map_err(|error| error.to_string())
+        });
+    match written {
+        Ok(report) => {
+            // Counts only: the dictated words stay in the script.
+            let mut message = format!(
+                "Guion dictado: {} tramo(s) en {}",
+                report.parts,
+                file_name(&path)
+            );
+            if report.commented > 0 {
+                message.push_str(&format!(
+                    "; {} junto a texto que ya tenías, como comentario",
+                    report.commented
+                ));
+            }
+            if let Some(failure) = failure {
+                message.push_str(&format!(". Scribe se cortó: {failure}"));
+            }
+            panel.notify(NoticeKind::Success, message);
+        }
+        Err(error) => panel.notify(
+            NoticeKind::Error,
+            format!("no se pudo escribir el guion: {error}"),
+        ),
+    }
 }
 
 /// Seconds a live take spent at a stop: the take time at which playback
@@ -928,6 +1266,7 @@ pub(crate) fn narration_session_system(
                             );
                             start_countdown(
                                 target,
+                                CapturePlan::TAKE,
                                 &mut panel,
                                 &mut timeline,
                                 &mut preview_audio,
@@ -943,49 +1282,82 @@ pub(crate) fn narration_session_system(
                         }
                     }
                 }
-                Request::RecordLive => match (Target::live(&manifest), &manifest.live) {
-                    (Some(target), Some(live)) => {
-                        if panel.busy(target.key()) {
-                            panel.notify(
-                                NoticeKind::Info,
-                                format!(
-                                    "espera a que termine el trabajo en curso de «{}»",
-                                    target.key()
-                                ),
-                            );
+                Request::RecordLive { dictate } => {
+                    let plan = if dictate {
+                        match dictation_plan(&mut panel, &script_slides(&stash), true) {
+                            Ok(plan) => plan,
+                            Err(error) => {
+                                panel.notify(NoticeKind::Error, error);
+                                return;
+                            }
+                        }
+                    } else {
+                        CapturePlan::TAKE
+                    };
+                    match (Target::live(&manifest), &manifest.live) {
+                        (Some(target), Some(live)) => start_live(
+                            target,
+                            live.applied,
+                            plan,
+                            &mut panel,
+                            &mut timeline,
+                            &mut editor,
+                            &mut preview_audio,
+                            reload.as_ref(),
+                            stash.revision,
+                        ),
+                        _ => Phase::Idle,
+                    }
+                }
+                Request::Dictate => {
+                    let plan = match dictation_plan(&mut panel, &script_slides(&stash), false) {
+                        Ok(plan) => plan,
+                        Err(error) => {
+                            panel.notify(NoticeKind::Error, error);
                             return;
                         }
-                        set_live_take_recording(true);
-                        prepare_capture(&target, &mut timeline, &mut editor, &mut preview_audio);
-                        if !live.applied {
-                            // Its stops are already interactive.
+                    };
+                    match (Target::live(&manifest), &manifest.live) {
+                        // A live take replaces the stops: present with its
+                        // stops restored, and keep the take as it was.
+                        (Some(target), Some(live)) => start_live(
+                            target,
+                            live.applied,
+                            plan,
+                            &mut panel,
+                            &mut timeline,
+                            &mut editor,
+                            &mut preview_audio,
+                            reload.as_ref(),
+                            stash.revision,
+                        ),
+                        _ => {
+                            let target = Target::Dictation {
+                                start_time: dictation_start(&timeline),
+                            };
+                            prepare_capture(
+                                &target,
+                                &mut timeline,
+                                &mut editor,
+                                &mut preview_audio,
+                            );
                             start_countdown(
                                 target,
+                                plan,
                                 &mut panel,
                                 &mut timeline,
                                 &mut preview_audio,
                                 reload.as_deref(),
                             )
-                        } else if let Some(reload) = &reload {
-                            reload();
-                            Phase::AwaitingLiveReload {
-                                requested: Instant::now(),
-                                revision: stash.revision,
-                            }
-                        } else {
-                            set_live_take_recording(false);
-                            preview_audio.0 = true;
-                            panel.notify(NoticeKind::Error, "no se puede recargar la escena");
-                            Phase::Idle
                         }
                     }
-                    _ => Phase::Idle,
-                },
+                }
             }
         }
         Phase::AwaitingLiveReload {
             requested,
             revision,
+            plan,
         } => {
             let reloaded = (stash.revision != revision)
                 .then(|| manifest(&stash))
@@ -999,6 +1371,7 @@ pub(crate) fn narration_session_system(
                 timeline.seek_request = Some(target.start_time());
                 start_countdown(
                     target,
+                    plan,
                     &mut panel,
                     &mut timeline,
                     &mut preview_audio,
@@ -1016,6 +1389,7 @@ pub(crate) fn narration_session_system(
                 Phase::AwaitingLiveReload {
                     requested,
                     revision,
+                    plan,
                 }
             }
         }
@@ -1023,6 +1397,7 @@ pub(crate) fn narration_session_system(
             target,
             until,
             mut input,
+            plan,
         } => {
             input.update(Instant::now());
             if pressed(KeyCode::Escape) {
@@ -1033,18 +1408,68 @@ pub(crate) fn narration_session_system(
                 }
                 Phase::Idle
             } else if Instant::now() >= until {
-                begin_recording(target, *input, &mut timeline)
+                // The take starts now: drop what the level check captured.
+                input.recorder.restart();
+                let CapturePlan {
+                    scribe: dictate,
+                    keep_take,
+                } = plan;
+                let dictation = match dictate {
+                    None => None,
+                    // Scribe streams from the start of the take, so its
+                    // clock is the recording's.
+                    Some((token, config)) => {
+                        match ScribeSession::start(token, config, input.recorder.tap()) {
+                            Ok(session) => Some(Dictation::new(session)),
+                            Err(error) if keep_take => {
+                                panel.notify(
+                                    NoticeKind::Error,
+                                    format!("La toma se graba sin dictado: {error}"),
+                                );
+                                None
+                            }
+                            Err(error) => {
+                                drop(input);
+                                finish_capture(&target, &mut timeline, &mut preview_audio);
+                                if target.is_live() {
+                                    abort_live(&mut panel, reload.as_deref(), None);
+                                }
+                                panel.notify(NoticeKind::Error, error);
+                                return;
+                            }
+                        }
+                    }
+                };
+                begin_recording(target, *input, &mut timeline, dictation, keep_take)
             } else {
                 Phase::Countdown {
                     target,
                     until,
                     input,
+                    plan,
                 }
+            }
+        }
+        Phase::Finishing {
+            mut dictation,
+            since,
+        } => {
+            dictation.absorb();
+            // Esc stops waiting; what arrived still goes into the script.
+            if dictation.closed || pressed(KeyCode::Escape) || since.elapsed() > FINISH_WAIT {
+                write_dictation(*dictation, &stash, &mut panel);
+                Phase::Idle
+            } else {
+                Phase::Finishing { dictation, since }
             }
         }
         Phase::Recording(mut recording) => {
             recording.input.update(Instant::now());
             let elapsed = recording.input.recorder.elapsed();
+            if let Some(dictation) = &mut recording.dictation {
+                dictation.absorb();
+                dictation.track(&timeline, elapsed);
+            }
             if let Some(error) = recording.input.recorder.error() {
                 let target = recording.target.clone();
                 drop(recording);
@@ -1057,15 +1482,21 @@ pub(crate) fn narration_session_system(
             }
             if pressed(KeyCode::Escape) {
                 let target = recording.target.clone();
+                let message = if recording.keep_take {
+                    "Grabación descartada"
+                } else {
+                    "Dictado descartado"
+                };
+                // Dropping the dictation ends its Scribe session at once.
                 drop(recording);
                 finish_capture(&target, &mut timeline, &mut preview_audio);
                 if target.is_live() {
                     abort_live(&mut panel, reload.as_deref(), None);
                 }
-                panel.notify(NoticeKind::Info, "Grabación descartada");
+                panel.notify(NoticeKind::Info, message);
                 return;
             }
-            if recording.target.is_live()
+            if recording.target.presents()
                 && recording.waiting_at.is_none()
                 && !timeline.is_playing
                 && timeline.seek_request.is_none()
@@ -1083,7 +1514,25 @@ pub(crate) fn narration_session_system(
                     );
                     recording.holds.push(hold);
                 }
-                save_recording(*recording, &mut timeline, &mut panel, &mut preview_audio);
+                let dictation = recording.dictation.take();
+                if recording.keep_take {
+                    save_recording(*recording, &mut timeline, &mut panel, &mut preview_audio);
+                } else {
+                    let target = recording.target.clone();
+                    drop(recording);
+                    finish_capture(&target, &mut timeline, &mut preview_audio);
+                    if target.is_live() {
+                        // Back to the take as it was recorded.
+                        abort_live(&mut panel, reload.as_deref(), None);
+                    }
+                }
+                if let Some(dictation) = dictation {
+                    dictation.session.finish();
+                    session.phase = Phase::Finishing {
+                        dictation: Box::new(dictation),
+                        since: Instant::now(),
+                    };
+                }
                 return;
             }
             let advance = pressed(KeyCode::Space)
@@ -1097,7 +1546,7 @@ pub(crate) fn narration_session_system(
                         recording.taps.push((marker, elapsed));
                     }
                 }
-                Target::Live { start_time, .. } => {
+                Target::Live { start_time, .. } | Target::Dictation { start_time } => {
                     if advance && let Some(stop_time) = recording.waiting_at.take() {
                         let hold = live_hold(elapsed, stop_time, *start_time, &recording.holds);
                         recording.holds.push(hold);
@@ -1109,6 +1558,9 @@ pub(crate) fn narration_session_system(
         }
     };
 }
+
+/// The longest wait for Scribe's last turns after a dictation.
+const FINISH_WAIT: Duration = Duration::from_secs(12);
 
 fn take_files(manifest: &NarrationManifest, key: &str) -> Option<TakeFiles> {
     manifest
@@ -1127,8 +1579,60 @@ fn take_files(manifest: &NarrationManifest, key: &str) -> Option<TakeFiles> {
 
 /// Open the microphone and count down; the countdown doubles as a level
 /// check and is not part of the take.
+/// Present the scene's live take: at once when its stops are interactive,
+/// else after the script re-runs with them restored.
+#[allow(clippy::too_many_arguments)]
+fn start_live(
+    target: Target,
+    applied: bool,
+    plan: CapturePlan,
+    panel: &mut NarrationPanel,
+    timeline: &mut Timeline,
+    editor: &mut EditorState,
+    preview_audio: &mut gaanim_media::PreviewAudioEnabled,
+    reload: Option<&Arc<dyn Fn() + Send + Sync>>,
+    revision: u64,
+) -> Phase {
+    if panel.busy(target.key()) {
+        panel.notify(
+            NoticeKind::Info,
+            format!(
+                "espera a que termine el trabajo en curso de «{}»",
+                target.key()
+            ),
+        );
+        return Phase::Idle;
+    }
+    set_live_take_recording(true);
+    prepare_capture(&target, timeline, editor, preview_audio);
+    if !applied {
+        // Its stops are already interactive.
+        start_countdown(
+            target,
+            plan,
+            panel,
+            timeline,
+            preview_audio,
+            reload.map(|reload| &**reload),
+        )
+    } else if let Some(reload) = reload {
+        reload();
+        Phase::AwaitingLiveReload {
+            requested: Instant::now(),
+            revision,
+            plan,
+        }
+    } else {
+        set_live_take_recording(false);
+        preview_audio.0 = true;
+        panel.notify(NoticeKind::Error, "no se puede recargar la escena");
+        Phase::Idle
+    }
+}
+
 fn start_countdown(
     target: Target,
+    plan: CapturePlan,
     panel: &mut NarrationPanel,
     timeline: &mut Timeline,
     preview_audio: &mut gaanim_media::PreviewAudioEnabled,
@@ -1159,6 +1663,7 @@ fn start_countdown(
             recorder,
             level: InputLevel::new(now),
         }),
+        plan,
     }
 }
 
@@ -1204,12 +1709,16 @@ fn abort_live(
     }
 }
 
-fn begin_recording(target: Target, input: Input, timeline: &mut Timeline) -> Phase {
-    // The take starts now: drop what the level check captured.
-    input.recorder.restart();
+fn begin_recording(
+    target: Target,
+    input: Input,
+    timeline: &mut Timeline,
+    dictation: Option<Dictation>,
+    keep_take: bool,
+) -> Phase {
     let start = target.start_time();
-    // A live take that starts on a stop waits there first.
-    let waiting_at = (target.is_live()
+    // A presentation that starts on a stop waits there first.
+    let waiting_at = (target.presents()
         && timeline
             .segments
             .iter()
@@ -1224,6 +1733,8 @@ fn begin_recording(target: Target, input: Input, timeline: &mut Timeline) -> Pha
         taps: Vec::new(),
         holds: Vec::new(),
         waiting_at,
+        dictation,
+        keep_take,
     }))
 }
 
@@ -1256,13 +1767,15 @@ fn save_recording(
         );
         return;
     }
-    let files = target.files().clone();
+    let Some(files) = target.files().cloned() else {
+        return;
+    };
     let sidecar = match &target {
         Target::Voiceover { .. } => TakeSidecar {
             markers: taps.into_iter().collect::<BTreeMap<_, _>>(),
             ..TakeSidecar::default()
         },
-        Target::Live { .. } => TakeSidecar {
+        Target::Live { .. } | Target::Dictation { .. } => TakeSidecar {
             holds,
             ..TakeSidecar::default()
         },
@@ -1400,6 +1913,7 @@ pub(crate) fn narration_panel_system(
     let mut close = false;
     let mut request = None;
     let mut settings_changed = false;
+    let mut vault_action = None;
     let screen = ctx.viewport_rect();
     let max_height = (screen.height() - 120.0).max(240.0);
 
@@ -1446,7 +1960,8 @@ pub(crate) fn narration_panel_system(
                             script_card(ui, &manifest, &slides, script.as_deref(), &mut request);
                             if let Some(live) = &manifest.live {
                                 ui.label(caption("TOMA EN VIVO"));
-                                live_card(ui, live, panel.busy(&live.key), &mut request);
+                                let busy = panel.busy(&live.key);
+                                live_card(ui, live, busy, &mut panel.dictate_live, &mut request);
                             }
                             if !manifest.voiceovers.is_empty() {
                                 ui.label(caption("VOZ EN OFF"));
@@ -1462,6 +1977,19 @@ pub(crate) fn narration_panel_system(
                             }
                             ui.add_space(4.0);
                             settings_changed = settings_form(ui, panel.settings());
+                            let NarrationPanel {
+                                settings,
+                                scribe_token,
+                                token_stored,
+                                ..
+                            } = &mut *panel;
+                            let settings = settings.get_or_insert_with(NarrationSettings::load);
+                            let stored = *token_stored
+                                .get_or_insert_with(|| scribe::vault::load().is_some());
+                            let (changed, action) =
+                                scribe_settings(ui, settings, scribe_token, stored);
+                            settings_changed |= changed;
+                            vault_action = action;
                         });
 
                     if let Some((message, kind)) = &panel.notice {
@@ -1489,6 +2017,39 @@ pub(crate) fn narration_panel_system(
     if let Some(request) = request {
         panel.request = Some(request);
     }
+    match vault_action {
+        Some(VaultAction::Save) => {
+            let saved = ScribeToken::new(&panel.scribe_token)
+                .ok_or_else(|| "pega el token antes de guardarlo".to_owned())
+                .and_then(|token| scribe::vault::save(&token));
+            match saved {
+                Ok(()) => {
+                    panel.scribe_token.clear();
+                    panel.token_stored = Some(true);
+                    panel.notify(
+                        NoticeKind::Success,
+                        "Token de Scribe guardado en el Administrador de credenciales de Windows",
+                    );
+                }
+                Err(error) => panel.notify(NoticeKind::Error, error),
+            }
+        }
+        Some(VaultAction::Forget) => match scribe::vault::forget() {
+            Ok(()) => {
+                panel.token_stored = Some(false);
+                panel.notify(NoticeKind::Info, "Token de Scribe quitado del almacén");
+            }
+            Err(error) => panel.notify(NoticeKind::Error, error),
+        },
+        None => {}
+    }
+}
+
+/// What the Scribe settings ask of the credential store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VaultAction {
+    Save,
+    Forget,
 }
 
 fn paint_mic_badge(ui: &mut egui::Ui) {
@@ -1592,15 +2153,28 @@ fn script_card(
             (Some(_), 0) => "Abrir guion".to_string(),
             (Some(_), missing) => format!("Abrir y completar ({missing})"),
         };
-        if secondary_button(ui, &label, path.is_some())
-            .on_hover_text(
-                "Escribe bajo \"## nombre\" lo que dices en cada diapositiva o bloque de \
-                 voz, con [stop] donde avanzas; al guardar, la escena se actualiza",
-            )
-            .clicked()
-        {
-            *request = Some(Request::OpenScript);
-        }
+        ui.horizontal_wrapped(|ui| {
+            if secondary_button(ui, &label, path.is_some())
+                .on_hover_text(
+                    "Escribe bajo \"## nombre\" lo que dices en cada diapositiva o bloque de \
+                     voz, con [stop] donde avanzas; al guardar, la escena se actualiza",
+                )
+                .clicked()
+            {
+                *request = Some(Request::OpenScript);
+            }
+            if !slides.is_empty()
+                && secondary_button(ui, "Dictar con Scribe", path.is_some())
+                    .on_hover_text(
+                        "Presenta desde la diapositiva actual hablando: Scribe de Zoom \
+                         transcribe tu voz y cada frase va a su diapositiva y su tramo del \
+                         guion, sin pisar lo que ya escribiste",
+                    )
+                    .clicked()
+            {
+                *request = Some(Request::Dictate);
+            }
+        });
     });
 }
 
@@ -1657,6 +2231,7 @@ fn live_card(
     ui: &mut egui::Ui,
     live: &gaanim_api::canvas::LiveTakeSpec,
     busy: bool,
+    dictate: &mut bool,
     request: &mut Option<Request>,
 ) {
     field_frame().show(ui, |ui| {
@@ -1696,7 +2271,7 @@ fn live_card(
                 "Grabar toma en vivo"
             };
             if primary_button(ui, label, Some(Icon::Record), !busy).clicked() {
-                *request = Some(Request::RecordLive);
+                *request = Some(Request::RecordLive { dictate: *dictate });
             }
             if live.applied {
                 if secondary_button(ui, "Oír", true).clicked() {
@@ -1710,6 +2285,11 @@ fn live_card(
                 }
             }
         });
+        ui.checkbox(dictate, "Dictar también el guion con Scribe")
+            .on_hover_text(
+                "Mientras grabas, Scribe de Zoom transcribe tu voz y cada frase va a su \
+                 diapositiva en el guion (Ajustes → Scribe de Zoom)",
+            );
     });
 }
 
@@ -1920,6 +2500,131 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
     *settings != before
 }
 
+/// Scribe's preferences, saved with the others, and the token for this
+/// session, which is not.
+fn scribe_settings(
+    ui: &mut egui::Ui,
+    settings: &mut NarrationSettings,
+    typed_token: &mut String,
+    stored: bool,
+) -> (bool, Option<VaultAction>) {
+    let before = settings.clone();
+    let mut action = None;
+    egui::CollapsingHeader::new(
+        egui::RichText::new("Scribe de Zoom (dictado)")
+            .size(12.5)
+            .color(palette::TEXT_MUTED),
+    )
+    .id_salt("narration_scribe_settings")
+    .show(ui, |ui| {
+        let faint = |text: String| {
+            egui::RichText::new(text)
+                .size(11.5)
+                .color(palette::TEXT_FAINT)
+        };
+        ui.add(
+            egui::Label::new(faint(
+                "Dicta el guion presentando: Scribe Live de Zoom transcribe tu voz y cada \
+                 frase va a la diapositiva y el tramo que presentabas."
+                    .to_owned(),
+            ))
+            .wrap(),
+        );
+        // The stored token is looked up once, not every frame.
+        let resolved = ScribeToken::resolve(
+            typed_token,
+            || stored.then(|| ScribeToken::new("stored")).flatten(),
+            |name| std::env::var(name).ok(),
+        );
+        let (color, status) = match resolved.map(|(_, source)| source) {
+            Some(TokenSource::Typed) => (palette::LOOP, "Token pegado para esta sesión".to_owned()),
+            Some(TokenSource::Vault) => (
+                palette::LOOP,
+                "Token guardado en el Administrador de credenciales de Windows".to_owned(),
+            ),
+            Some(TokenSource::Environment) => (
+                palette::LOOP,
+                format!("Token de la variable {}", scribe::TOKEN_VARIABLE),
+            ),
+            None => (palette::TEXT_FAINT, "Sin token: pégalo aquí".to_owned()),
+        };
+        ui.label(egui::RichText::new(status).size(11.5).color(color));
+        ui.horizontal_wrapped(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(typed_token)
+                    .password(true)
+                    .hint_text("Pegar token")
+                    .desired_width(180.0),
+            );
+            if !typed_token.is_empty() {
+                if scribe::vault::AVAILABLE
+                    && small_button(ui, "Guardar en Windows", true)
+                        .on_hover_text(
+                            "Lo cifra el Administrador de credenciales de Windows para tu \
+                             usuario; nunca va a la carpeta del proyecto",
+                        )
+                        .clicked()
+                {
+                    action = Some(VaultAction::Save);
+                }
+                if small_button(ui, "Olvidar", true)
+                    .on_hover_text("Lo quita de esta sesión")
+                    .clicked()
+                {
+                    typed_token.clear();
+                }
+            } else if stored
+                && small_button(ui, "Quitar el guardado", true)
+                    .on_hover_text("Lo borra del Administrador de credenciales de Windows")
+                    .clicked()
+            {
+                action = Some(VaultAction::Forget);
+            }
+        });
+        ui.horizontal(|ui| {
+            section_label(ui, "Idioma");
+            egui::ComboBox::from_id_salt("narration_scribe_language")
+                .selected_text(settings.scribe_language.clone())
+                .show_ui(ui, |ui| {
+                    for language in scribe::LANGUAGES {
+                        ui.selectable_value(
+                            &mut settings.scribe_language,
+                            language.to_owned(),
+                            language,
+                        );
+                    }
+                });
+        });
+        ui.horizontal(|ui| {
+            section_label(ui, "Minutos máximos por sesión");
+            ui.add(
+                egui::DragValue::new(&mut settings.scribe_max_minutes)
+                    .range(1..=scribe::MAX_SESSION_MINUTES)
+                    .suffix(" min"),
+            );
+        });
+        ui.checkbox(
+            &mut settings.scribe_vocabulary,
+            "Enviar los nombres de diapositivas y stops como vocabulario",
+        );
+        ui.add(
+            egui::Label::new(faint(format!(
+                "Mientras dictas, tu voz se envía a Zoom{}. El token nunca va a la carpeta \
+                 del proyecto ni aparece en mensajes: pegado vive solo en esta sesión, y \
+                 guardado lo cifra Windows. La sesión se corta sola al llegar al límite de \
+                 minutos o tras dos minutos sin voz, y nunca se reconecta sola.",
+                if settings.scribe_vocabulary {
+                    ", con los nombres de las diapositivas"
+                } else {
+                    ""
+                }
+            )))
+            .wrap(),
+        );
+    });
+    (*settings != before, action)
+}
+
 fn path_field(ui: &mut egui::Ui, value: &mut String, title: &str, extensions: &[&str]) {
     ui.horizontal(|ui| {
         let browse_width = 34.0;
@@ -1975,6 +2680,7 @@ pub(crate) fn narration_overlay_system(
             target,
             until,
             input,
+            plan,
         } => {
             let remaining = until
                 .saturating_duration_since(Instant::now())
@@ -1986,8 +2692,13 @@ pub(crate) fn narration_overlay_system(
                         .strong()
                         .color(palette::DANGER),
                 );
+                let starting = match (target, plan.scribe.is_some()) {
+                    (Target::Dictation { .. }, _) => "Dictando el guion en un momento".to_owned(),
+                    (_, true) => format!("Grabando «{}» y dictando en un momento", target.key()),
+                    (_, false) => format!("Grabando «{}» en un momento", target.key()),
+                };
                 ui.label(
-                    egui::RichText::new(format!("Grabando «{}» en un momento", target.key()))
+                    egui::RichText::new(starting)
                         .size(14.0)
                         .color(palette::TEXT),
                 );
@@ -2013,6 +2724,23 @@ pub(crate) fn narration_overlay_system(
                 &timeline,
                 &mut panel.compact,
             );
+        }
+        Phase::Finishing { dictation, .. } => {
+            centered_card(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new("Terminando el dictado…")
+                        .size(16.0)
+                        .color(palette::TEXT),
+                );
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} frase(s) recibida(s) · Esc deja de esperar",
+                        dictation.turns.len()
+                    ))
+                    .size(12.0)
+                    .color(palette::TEXT_MUTED),
+                );
+            });
         }
     }
 }
@@ -2077,10 +2805,10 @@ fn teleprompter(
                             palette::DANGER.gamma_multiply(0.35)
                         };
                         ui.painter().circle_filled(dot.center(), 6.0, color);
-                        let title = if recording_now {
-                            "GRABANDO"
-                        } else {
-                            "PREPARADO"
+                        let title = match (recording_now, target) {
+                            (true, Target::Dictation { .. }) => "DICTANDO",
+                            (true, _) => "GRABANDO",
+                            (false, _) => "PREPARADO",
                         };
                         ui.label(
                             egui::RichText::new(format!("{title} · {}", target.key()))
@@ -2152,7 +2880,7 @@ fn teleprompter(
                                     .color(palette::ACCENT),
                             );
                         }
-                        Target::Live { .. } => {
+                        Target::Live { .. } | Target::Dictation { .. } => {
                             let position = ScriptPosition::of(timeline);
                             if let Some(position) = position
                                 && !*compact
@@ -2229,7 +2957,12 @@ fn teleprompter(
                         }
                         None => {}
                     }
-                    let hints = if target.is_live() {
+                    if let Some(dictation) =
+                        recording.and_then(|recording| recording.dictation.as_ref())
+                    {
+                        dictation_status(ui, dictation);
+                    }
+                    let hints = if target.presents() {
                         "→/Espacio: seguir · Enter: terminar · Esc: descartar"
                     } else {
                         "Espacio: marca · Enter: terminar · Esc: descartar"
@@ -2241,6 +2974,44 @@ fn teleprompter(
                     );
                 });
         });
+}
+
+/// How the dictation goes: Scribe's state and the last turn it heard.
+fn dictation_status(ui: &mut egui::Ui, dictation: &Dictation) {
+    let (color, state) = match (&dictation.note, dictation.closed, dictation.ready) {
+        (Some((note, true)), ..) => (palette::DANGER, note.clone()),
+        (Some((note, false)), ..) => (palette::STOP, note.clone()),
+        (None, true, _) => (palette::TEXT_MUTED, "Scribe terminó".to_owned()),
+        (None, false, false) => (palette::TEXT_MUTED, "Scribe: conectando…".to_owned()),
+        (None, false, true) if dictation.speaking => {
+            (palette::LOOP, "Scribe: te escucha…".to_owned())
+        }
+        (None, false, true) => (palette::LOOP, "Scribe: listo".to_owned()),
+    };
+    ui.label(
+        egui::RichText::new(format!("{state} · {} frase(s)", dictation.turns.len()))
+            .size(13.0)
+            .color(color),
+    );
+    if let Some((_, text)) = dictation.turns.last() {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!("«{}»", truncate_chars(text, 140)))
+                    .size(13.0)
+                    .italics()
+                    .color(palette::TEXT_FAINT),
+            )
+            .wrap(),
+        );
+    }
+}
+
+/// `text` cut to `limit` characters, with an ellipsis when cut.
+fn truncate_chars(text: &str, limit: usize) -> String {
+    match text.char_indices().nth(limit) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_owned(),
+    }
 }
 
 /// Input meter in dBFS with the ideal zone in green, the edge of clipping
@@ -2430,6 +3201,7 @@ mod tests {
         session.phase = Phase::AwaitingLiveReload {
             requested: Instant::now(),
             revision: 0,
+            plan: CapturePlan::TAKE,
         };
         assert_eq!(session.stop_policy(), Some(PlaybackStopPolicy::Respect));
         assert!(session.capturing());
@@ -2579,5 +3351,71 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn dictation_fills_empty_parts_and_comments_beside_written_ones() {
+        let slides = vec![
+            slide("Portada", None, &[Some("titulo")]),
+            slide("Datos", None, &[Some("grafico"), None]),
+        ];
+        let existing = "# Guion\n\n## Datos\n\nYa escrito.\n\n[stop grafico]\n\n[stop]\n";
+        let dictated = vec![
+            ("Portada".to_owned(), 0, "Hola a todos.".to_owned()),
+            ("datos".to_owned(), 0, "Miren --> esto.".to_owned()),
+            ("Datos".to_owned(), 1, "Crece.".to_owned()),
+            ("Datos".to_owned(), 2, "Gracias.".to_owned()),
+            ("Otra".to_owned(), 0, "Nada.".to_owned()),
+        ];
+        let (source, report) = merge_dictation(Some(existing), &slides, &dictated).unwrap();
+        assert_eq!(
+            report,
+            DictationReport {
+                parts: 4,
+                commented: 1
+            }
+        );
+        let notes: Vec<(String, String)> = parse_script(&source)
+            .unwrap()
+            .into_iter()
+            .map(|section| (section.key, section.notes))
+            .collect();
+        assert_eq!(
+            notes,
+            [
+                (
+                    "Portada".to_owned(),
+                    "Hola a todos.\n\n[stop titulo]".to_owned()
+                ),
+                (
+                    "Datos".to_owned(),
+                    "Ya escrito.\n\n[stop grafico]\n\nCrece.\n\n[stop]\n\nGracias.".to_owned()
+                ),
+            ]
+        );
+        // The written text stays; the dictation sits beside it, closed once.
+        assert!(
+            source.contains("<!-- dictado: Miren –> esto. -->"),
+            "{source}"
+        );
+        assert!(source.contains("[stop titulo]\n\n## Datos"), "{source}");
+    }
+
+    #[test]
+    fn the_scribe_token_is_never_part_of_the_saved_settings() {
+        let mut panel = NarrationPanel {
+            scribe_token: "secret-token".to_owned(),
+            ..NarrationPanel::default()
+        };
+        let saved = serde_json::to_string(panel.settings()).unwrap();
+        assert!(
+            !saved.contains("secret-token") && !saved.contains("token"),
+            "{saved}"
+        );
+        let vocabulary = vocabulary(&[
+            slide("Portada", None, &[Some("titulo"), None]),
+            slide("portada", None, &[Some(" Titulo ")]),
+        ]);
+        assert_eq!(vocabulary, ["Portada", "titulo"]);
     }
 }

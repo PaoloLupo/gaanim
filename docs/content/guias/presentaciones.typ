@@ -134,6 +134,65 @@ stops, el botón pasa a *Abrir y completar*: añade las secciones nuevas detrás
 de la diapositiva anterior y las marcas que faltan al final de cada sección,
 sin tocar lo que escribiste.
 
+== Dictar el guion con Scribe <dictar>
+
+En lugar de escribir el guion, puedes dictarlo presentando: Scribe Live, el
+servicio de transcripción de Zoom, convierte tu voz en texto mientras avanzas
+y cada frase va a la diapositiva y al tramo que estabas presentando.
+
++ Consigue un token de Scribe en Zoom Platform Studio (*View JWT Token*). Elige
+  la caducidad más corta que te sirva: si se filtrara, deja de valer antes.
++ En *Guion y narración*, abre *Scribe de Zoom (dictado)*, pega el token y
+  pulsa *Guardar en Windows* (ver #link(<token-scribe>)[El token]).
++ Lleva el cabezal a la diapositiva desde la que quieres dictar y pulsa
+  *Dictar con Scribe*. Tras la cuenta atrás, presenta hablando: `→` o
+  `Espacio` avanzan en cada stop, `Enter` termina y `Esc` descarta.
++ Al terminar, Gaanim espera las últimas frases (como mucho 12 segundos;
+  `Esc` deja de esperar) y las escribe en el guion. Un tramo vacío recibe lo
+  dictado; uno que ya tenía texto lo conserva y lo dictado se añade a su lado
+  como comentario (`<!-- dictado: … -->`), que el guion ignora.
+
+Durante el dictado, el teleprompter muestra el guion de la diapositiva, el
+estado de Scribe y la última frase que oyó. Si la escena tiene una toma en vivo
+(`scene.live_take`), se dicta con sus paradas originales y la toma grabada no
+cambia; para grabarla y dictar a la vez, marca *Dictar también el guion con
+Scribe* junto a *Grabar toma en vivo*.
+
+- Idiomas: `es-ES`, `en-US`, `pt-BR`, `pt-PT`, `fr-FR`, `de-DE`, `it-IT`,
+  `ja-JP`, `zh-CN`, `ar-SA` y `ar-AE`. Se elige en los ajustes; el español de
+  Scribe es `es-ES`.
+- Scribe asigna cada frase completa al tramo en el que empezó a decirse: haz
+  una pausa breve al avanzar para que la frase siguiente caiga en su tramo.
+- *Enviar los nombres de diapositivas y stops como vocabulario* ayuda a
+  Scribe con nombres propios y términos; está desactivado, porque envía esos
+  nombres a Zoom.
+
+Scribe Live cobra por minuto de audio recibido, así que Gaanim lo limita: una
+sola sesión a la vez, sin reconexiones automáticas si falla, y la sesión se
+corta sola al llegar a los *Minutos máximos por sesión* de los ajustes (60 por
+defecto, nunca más de los 120 de Zoom), tras dos minutos sin voz o si el
+micrófono deja de enviar audio, aunque el editor esté en segundo plano.
+
+=== El token <token-scribe>
+
+El token de Scribe es de tu cuenta de Zoom, no del proyecto, y Gaanim nunca lo
+guarda en la carpeta del proyecto: no puede acabar en un repositorio. Gaanim
+lo busca en este orden:
+
++ *Pegado en el panel:* vive solo en la memoria de esta sesión del editor.
++ *Guardado en Windows* (recomendado): el Administrador de credenciales de
+  Windows lo cifra para tu usuario, como `gaanim/scribe-token`. Puedes verlo o
+  borrarlo allí, o con *Quitar el guardado*.
++ *La variable de entorno `GAANIM_SCRIBE_TOKEN`* de tu usuario. Es cómoda en
+  otros sistemas, pero cualquier programa que ejecutes la puede leer, incluido
+  el código Python de las escenas.
+
+No lo escribas en el script, en `gaanim.toml` ni en un archivo `.env` del
+proyecto. Gaanim no lo muestra en el panel, en los mensajes ni en la consola,
+y solo lo envía en la cabecera de la conexión cifrada con Zoom. Si crees que
+se filtró, genera otra clave en Zoom Platform Studio: la anterior deja de
+valer.
+
 = Comprobar y presentar
 
 ```bash

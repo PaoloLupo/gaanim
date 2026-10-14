@@ -493,6 +493,8 @@ pub struct ScriptSection {
     pub line: usize,
     /// 1-based last line of the section with anything written on it.
     pub end: usize,
+    /// 1-based line of each stop mark, in order.
+    pub marks: Vec<usize>,
 }
 
 impl ScriptSection {
@@ -513,6 +515,7 @@ struct OpenSection {
     key: String,
     line: usize,
     end: usize,
+    marks: Vec<usize>,
     paragraphs: Vec<Paragraph>,
 }
 
@@ -564,6 +567,7 @@ pub fn parse_script(source: &str) -> Result<Vec<ScriptSection>, String> {
             notes: notes.join("\n\n"),
             line: section.line,
             end: section.end,
+            marks: section.marks,
         });
     }
 
@@ -642,6 +646,7 @@ pub fn parse_script(source: &str) -> Result<Vec<ScriptSection>, String> {
                 key: key.to_owned(),
                 line: line_number,
                 end: line_number,
+                marks: Vec::new(),
                 paragraphs: Vec::new(),
             });
         } else if trimmed.is_empty() {
@@ -649,6 +654,7 @@ pub fn parse_script(source: &str) -> Result<Vec<ScriptSection>, String> {
         } else if let Some(name) = gaanim_timeline::notes::stop_mark(trimmed) {
             flush_paragraph(&mut paragraph, &mut current);
             if let Some(section) = &mut current {
+                section.marks.push(line_number);
                 section
                     .paragraphs
                     .push(Paragraph::Mark(name.map(str::to_owned)));
@@ -947,6 +953,7 @@ mod tests {
             "Primero miren el gráfico.\n\n[stop grafico]\n\nComo ven, crece.\n\n[stop]\n\nY la conclusión."
         );
         assert_eq!((results.line, results.end), (3, 9));
+        assert_eq!(results.marks, [6, 8]);
         assert_eq!((sections[1].line, sections[1].end), (12, 12));
         assert_eq!(sections[1].notes, "");
     }
