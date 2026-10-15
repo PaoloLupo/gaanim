@@ -451,7 +451,7 @@ pub fn animation_timeline_panel_system(
         ruler(ui, from, to, now, &mut actions);
 
         ui_kit::field_frame()
-            .fill(palette::INK)
+            .fill(palette::GRAPHITE)
             .inner_margin(egui::Margin::ZERO)
             .show(ui, |ui| {
                 if rows.is_empty() {

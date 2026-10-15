@@ -458,8 +458,11 @@ editor de video externo. Hay dos formas de trabajar:
   `scene.live_take(...)` se convierte en una pausa tan larga como la que hiciste
   al grabar.
 
-Las tomas viven en `narration/` dentro de la carpeta de assets (o junto al
-script si la escena no tiene assets): `narration/<clave>.wav` y, al lado,
+Las tomas viven en `narration/` dentro de la carpeta de assets: la de
+`scene.assets.load_project(...)` o, sin esa llamada, la del proyecto al que
+pertenece el script (el `gaanim.toml` más cercano hacia arriba). Fuera de un
+proyecto, o si un proyecto anterior ya tiene `narration/` junto al script y
+no en sus assets, van junto al script: `narration/<clave>.wav` y, al lado,
 `narration/<clave>.json` con las marcas. Al grabar o editar esos archivos, el
 editor recarga la escena con los tiempos nuevos. `render()` y la exportación
 alargan el timeline para que ninguna toma quede cortada, y MP4/WebM mezclan las
@@ -495,8 +498,8 @@ que no se leen, los comentarios HTML se ignoran y una línea `[stop]` o
 unen y una línea en blanco separa párrafos. Un `##` vacío o repetido (sin
 distinguir mayúsculas) produce `ValueError`. El texto de un bloque se busca en
 este orden: el argumento `text`, su sección del guion y las notas del segmento;
-con un guion cargado, una clave sin sección emite un `UserWarning`. El botón
-*Create script* / *Open and complete* del panel crea el archivo o le añade las
+con un guion cargado, una clave sin sección emite un `UserWarning`. El icono
+del guion en la cabecera del panel crea el archivo o le añade las
 secciones de los bloques y las diapositivas que faltan, y las marcas de sus
 stops, y lo abre en el editor de `GAANIM_EDITOR` en lo primero que añadió. En una toma en vivo, el subtítulo del editor
 muestra el tramo del guion que toca decir, con `▶` y el nombre del stop donde
@@ -506,10 +509,11 @@ toca avanzar (ver
 === Grabar desde el editor
 
 Abre el panel con el botón de micrófono de la barra de reproducción (o
-*More controls → Script & narration*). El panel lista el guion, la toma en vivo y cada
-bloque de voz en off con su estado: *Not recorded* (duración estimada del texto)
-o *Recorded*, su nivel y de dónde sale su texto. El panel se puede arrastrar
-desde su asa de puntos. Mientras grabas, un subtítulo abajo de la vista previa
+*More controls → Script & narration*). El panel se acopla a la derecha (ver
+#link("/guias/presentaciones/#panel-narracion")[El panel Script & narration]);
+al final lista la toma en vivo y cada bloque de voz en off con su estado:
+*Not recorded* (duración estimada del texto) o *Recorded*, su nivel y de
+dónde sale su texto. Mientras grabas, un subtítulo abajo de la vista previa
 muestra el texto que toca decir y, debajo, el reloj, el medidor de nivel y las
 teclas.
 
@@ -543,15 +547,15 @@ Cada toma nueva se nivela al guardarla a -16 LUFS integrados, el nivel
 recomendado para voz en video online (YouTube reproduce a -14 y la televisión
 usa -23). FFmpeg mide la toma y le aplica una ganancia constante, con un pico
 real máximo de -1.5 dBTP y un filtro paso alto a 80 Hz. La grabación original
-se conserva en `narration/.originals/`. En *Voice and recording* puedes cambiar el
-nivel final: el panel avisa si eliges más de -14 LUFS o menos de -20, o
-desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
+se conserva en `narration/.originals/`. En *Settings → Recording* (`Ctrl+,`)
+puedes cambiar el nivel final, y avisa si eliges más de -14 LUFS o menos de
+-20, o desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
 
 === Whisper (opcional)
 
 En lugar de pulsar Espacio, whisper.cpp puede detectar cuándo dices cada
 palabra. Instala `whisper-cli` y un modelo `ggml-*.bin`, e indícalos en
-*Whisper (optional)* dentro del panel (vacío busca `whisper-cli` en el `PATH`).
+*Settings → Transcription* (vacío busca `whisper-cli` en el `PATH`).
 *Transcribe* guarda en el JSON de la toma el tiempo de cada palabra; también
 puede hacerse automáticamente al guardar cada toma. Requiere FFmpeg. Para que
 una marca se resuelva por transcripción, su nombre debe ser la palabra o frase

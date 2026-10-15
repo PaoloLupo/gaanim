@@ -27,7 +27,22 @@ desde cualquier directorio. Hay dos tipos:
 
 `gaanim` sin argumentos abre el Inicio, desde donde puedes crear un proyecto,
 abrir una carpeta o volver a uno de los diez proyectos recientes. Los scripts
-sueltos no se añaden a esa lista.
+sueltos no se añaden a esa lista. Los botones junto a *Clear list* cambian
+entre la lista y una cuadrícula de tarjetas con la imagen de cada proyecto, y
+Gaanim recuerda la elección. La imagen de un proyecto la guarda el editor al
+abrirlo: el fotograma de `scene.thumbnail(t)` si el script lo elige, si no el
+de la primera pausa, y sin pausas el más lleno de unos pocos instantes del
+primer segmento, el que menos fondo vacío deja ver. Se renueva como mucho cada cinco minutos
+mientras editas y se guarda en la carpeta de datos de Gaanim, no en el
+proyecto. Un paquete `.gaanim` muestra su portada.
+
+Un paquete exportado dentro de la carpeta de un proyecto reciente no aparece
+aparte: va con su proyecto, que dice hace cuánto se grabó el último y lo
+reproduce con su botón, y presta su portada al proyecto mientras el editor no
+le haya guardado una. El buscador junto a *Clear list* filtra por nombre o
+ruta. La chincheta fija un proyecto arriba de la lista: los fijados no salen
+de ella por antigüedad ni con *Clear list*, solo al quitarlos. Para volver al Inicio desde
+el editor, usa el botón de la casa de la barra de reproducción.
 
 = El manifiesto `gaanim.toml`
 
@@ -202,7 +217,7 @@ continuo.
 El botón *Export* de la barra de reproducción abre las mismas opciones. Al
 pulsar *Export*, el diálogo se cierra y la exportación sigue en segundo plano:
 puedes seguir reproduciendo y navegando la escena. La barra de tiempo marca en
-verde, bajo cada segmento, la parte ya exportada; la barra de reproducción
+violeta, bajo cada segmento, la parte ya exportada; la barra de reproducción
 muestra el porcentaje (pasa el cursor para ver fotogramas y tiempo restante) y
 una X para cancelar. La terminal desde la que abriste `gaanim` muestra la misma
 barra de progreso que `gaanim export` y el resultado. Al terminar aparece un

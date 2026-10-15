@@ -73,6 +73,10 @@ pub fn window_title(detail: Option<&str>) -> String {
 /// a playback bundle, or show the project hub.
 pub fn host_app(options: &HostOptions) -> App {
     let mut app = App::new();
+    // A presentation fills its monitor; the editor opens where it was left.
+    let remembered = (!options.present && !crate::WEB)
+        .then(crate::window_memory::WindowPreferences::load)
+        .unwrap_or_default();
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut gpu = bevy::render::settings::WgpuSettings::default();
     #[cfg(not(target_arch = "wasm32"))]
@@ -94,7 +98,16 @@ pub fn host_app(options: &HostOptions) -> App {
                     } else {
                         None
                     }),
-                    resolution: (1280, 720).into(),
+                    resolution: (
+                        remembered.width.round() as u32,
+                        remembered.height.round() as u32,
+                    )
+                        .into(),
+                    position: if options.present || crate::WEB {
+                        bevy::window::WindowPosition::Automatic
+                    } else {
+                        remembered.window_position()
+                    },
                     present_mode: bevy::window::PresentMode::AutoVsync,
                     // One frame in flight: a scrubbed or dragged frame shows
                     // a vsync sooner.
@@ -136,11 +149,7 @@ pub fn host_app(options: &HostOptions) -> App {
     .insert_resource(gaanim_media::PreviewAudioEnabled(true))
     .insert_resource(crate::volume::load())
     // Only the interactive preview may lower its resolution while playing.
-    .insert_resource(gaanim_renderer::prelude::PreviewResolution::from_setting(
-        std::env::var(gaanim_renderer::prelude::PREVIEW_RESOLUTION_ENV)
-            .ok()
-            .as_deref(),
-    ))
+    .insert_resource(crate::settings::preview_resolution())
     .insert_resource(crate::PresentationMode {
         active: options.present || options.presenter_page,
     })

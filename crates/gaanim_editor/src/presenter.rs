@@ -21,10 +21,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 pub(crate) use mirror::{PresenterMirror, fit_mirror_camera_system, presenter_mirror_system};
-pub(crate) use thumbnails::{PresenterThumbnailCache, render_previews_in_world_system};
-use thumbnails::{
-    PreviewStatus, ThumbnailKey, ThumbnailMoment, desired_thumbnail_edge, entry_segment_time,
+pub(crate) use thumbnails::{
+    PresenterThumbnailCache, ThumbnailKey, ThumbnailMoment, render_previews_in_world_system,
 };
+use thumbnails::{PreviewStatus, desired_thumbnail_edge, entry_segment_time};
 
 use crate::ui_kit::{
     ButtonTone, Icon, PRIMARY_SIZE, caption, chip, divider, icon_button, icon_button_sized,
@@ -273,17 +273,18 @@ mod palette {
     use crate::ui_kit::palette as kit;
     use bevy_egui::egui::Color32;
 
-    pub(super) const BACKGROUND: Color32 = Color32::from_rgb(11, 12, 16);
-    pub(super) const PANEL: Color32 = Color32::from_rgb(16, 17, 22);
+    pub(super) const BACKGROUND: Color32 = kit::GRAPHITE;
+    pub(super) const PANEL: Color32 = Color32::from_rgb(23, 23, 23);
     pub(super) const SURFACE: Color32 = kit::SURFACE;
-    pub(super) const RAISED: Color32 = Color32::from_rgb(31, 33, 41);
-    pub(super) const BORDER: Color32 = Color32::from_rgb(38, 40, 50);
-    pub(super) const PREVIEW: Color32 = Color32::from_rgb(5, 6, 9);
+    pub(super) const RAISED: Color32 = Color32::from_rgb(36, 36, 38);
+    pub(super) const BORDER: Color32 = Color32::from_rgb(44, 44, 46);
+    pub(super) const PREVIEW: Color32 = Color32::from_rgb(8, 8, 8);
     pub(super) const TEXT: Color32 = kit::TEXT;
-    pub(super) const MUTED: Color32 = Color32::from_rgb(162, 167, 180);
-    pub(super) const FAINT: Color32 = Color32::from_rgb(112, 117, 130);
+    pub(super) const MUTED: Color32 = kit::TEXT_MUTED;
+    pub(super) const FAINT: Color32 = Color32::from_rgb(116, 114, 126);
     pub(super) const ACCENT: Color32 = kit::ACCENT;
-    pub(super) const ACCENT_FILL: Color32 = Color32::from_rgb(66, 116, 222);
+    /// Deep violet `#5B4AF0`, which white text reads on.
+    pub(super) const ACCENT_FILL: Color32 = Color32::from_rgb(91, 74, 240);
     pub(super) const LIVE: Color32 = kit::LOOP;
     pub(super) const WARN: Color32 = kit::STOP;
     pub(super) const DANGER: Color32 = kit::DANGER;
@@ -521,7 +522,7 @@ fn apply_presenter_style(ctx: &egui::Context) {
     style.visuals.panel_fill = palette::BACKGROUND;
     style.visuals.window_fill = palette::PANEL;
     style.visuals.window_stroke = egui::Stroke::new(1.0, palette::BORDER);
-    style.visuals.extreme_bg_color = Color32::from_rgb(8, 9, 12);
+    style.visuals.extreme_bg_color = Color32::from_rgb(10, 10, 10);
     style.visuals.faint_bg_color = palette::SURFACE;
     style.visuals.widgets.noninteractive.fg_stroke.color = palette::TEXT;
     style.visuals.widgets.noninteractive.bg_stroke.color = palette::BORDER;
@@ -530,12 +531,12 @@ fn apply_presenter_style(ctx: &egui::Context) {
     style.visuals.widgets.inactive.weak_bg_fill = palette::RAISED;
     style.visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
     style.visuals.widgets.hovered.fg_stroke.color = Color32::WHITE;
-    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(42, 45, 56);
-    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(42, 45, 56);
+    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(44, 44, 48);
+    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(44, 44, 48);
     style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
     style.visuals.widgets.active.fg_stroke.color = Color32::WHITE;
-    style.visuals.widgets.active.bg_fill = Color32::from_rgb(52, 56, 70);
-    style.visuals.widgets.active.weak_bg_fill = Color32::from_rgb(52, 56, 70);
+    style.visuals.widgets.active.bg_fill = Color32::from_rgb(56, 54, 66);
+    style.visuals.widgets.active.weak_bg_fill = Color32::from_rgb(56, 54, 66);
     style.visuals.selection.bg_fill = palette::ACCENT_FILL;
     style.visuals.selection.stroke.color = Color32::WHITE;
     style.visuals.hyperlink_color = palette::ACCENT;
@@ -1260,7 +1261,7 @@ fn show_preview(
     };
     painter.rect_stroke(rect, 0.0, hover_stroke, egui::StrokeKind::Inside);
 
-    let badge_fill = egui::Color32::from_rgba_premultiplied(6, 7, 10, 225);
+    let badge_fill = egui::Color32::from_rgba_premultiplied(7, 7, 7, 225);
     if overlay.playing {
         paint_badge(
             &painter,

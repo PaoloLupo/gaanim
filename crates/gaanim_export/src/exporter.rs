@@ -2192,6 +2192,7 @@ mod tests {
         let viewport = gaanim_math::CameraViewport {
             scale: 0.8,
             offset_y: -30.0,
+            offset_x: 0.0,
         };
         let resolved = gaanim_math::ResolvedCamera::new(camera, viewport);
         for fit in [
@@ -2236,6 +2237,7 @@ mod tests {
         let viewport = gaanim_math::CameraViewport {
             scale: 0.8,
             offset_y: 24.0,
+            offset_x: 0.0,
         };
         let expected = camera.to_vello_transform_with_viewport(viewport);
         let resolved = gaanim_math::ResolvedCamera::new(camera, viewport);

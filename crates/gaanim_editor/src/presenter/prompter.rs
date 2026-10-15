@@ -14,6 +14,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use gaanim_timeline::notes::{NotesPart, split_notes};
 use gaanim_timeline::timeline::{SegmentMetadata, Timeline};
+use serde::{Deserialize, Serialize};
 
 use super::pace::TalkTiming;
 use crate::ui_kit::{palette, small_button};
@@ -35,9 +36,17 @@ impl Default for PrompterSettings {
     }
 }
 
-const SIZE_RANGE: (f32, f32) = (16.0, 56.0);
+pub(crate) const SIZE_RANGE: (f32, f32) = (16.0, 56.0);
 
 impl PrompterSettings {
+    /// The default settings with the text size the speaker saved.
+    pub(crate) fn load() -> Self {
+        Self {
+            size: PrompterPreferences::load().size,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn adjust_size(&mut self, delta: f32) {
         self.size = (self.size + delta).clamp(SIZE_RANGE.0, SIZE_RANGE.1);
     }
@@ -68,8 +77,88 @@ pub(crate) fn size_controls(ui: &mut egui::Ui, settings: &mut PrompterSettings) 
     }
 }
 
+/// How the prompter chooses the pace it reads at.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum PaceMode {
+    /// From the recordings and dictations, see [`pace_for`].
+    #[default]
+    Auto,
+    /// Always [`PrompterPreferences::wpm`].
+    Fixed,
+}
+
+/// The `prompter` section of the user's settings.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PrompterPreferences {
+    #[serde(default)]
+    pub(crate) pace: PaceMode,
+    /// Words per minute of a fixed pace.
+    #[serde(default = "default_fixed_pace")]
+    pub(crate) wpm: f64,
+    /// Text size, the same in Presenter View and in the editor.
+    #[serde(default = "default_size")]
+    pub(crate) size: f32,
+}
+
+fn default_fixed_pace() -> f64 {
+    DEFAULT_WORDS_PER_MINUTE
+}
+
+fn default_size() -> f32 {
+    PrompterSettings::default().size
+}
+
+impl Default for PrompterPreferences {
+    fn default() -> Self {
+        Self {
+            pace: PaceMode::Auto,
+            wpm: default_fixed_pace(),
+            size: default_size(),
+        }
+    }
+}
+
+impl PrompterPreferences {
+    const SECTION: &str = "prompter";
+
+    pub(crate) fn load() -> Self {
+        let mut preferences: Self = gaanim_project::settings::load(Self::SECTION);
+        preferences.wpm = preferences.wpm.clamp(PACE_RANGE.0, PACE_RANGE.1);
+        preferences.size = preferences.size.clamp(SIZE_RANGE.0, SIZE_RANGE.1);
+        preferences
+    }
+
+    pub(crate) fn save(&self) -> Result<(), String> {
+        gaanim_project::settings::save(Self::SECTION, self)
+    }
+
+    /// The pace every part is read at, when it is fixed.
+    pub(crate) fn fixed(&self) -> Option<f64> {
+        (self.pace == PaceMode::Fixed).then_some(self.wpm)
+    }
+}
+
+/// Saves the prompter's text size when the speaker changes it, from
+/// Presenter View, the editor's caption or Settings.
+pub(crate) fn persist_prompter_size_system(
+    settings: Res<PrompterSettings>,
+    mut saved: Local<Option<f32>>,
+) {
+    let saved = saved.get_or_insert(settings.size);
+    if !settings.is_changed() || *saved == settings.size {
+        return;
+    }
+    *saved = settings.size;
+    let mut preferences = PrompterPreferences::load();
+    preferences.size = settings.size;
+    if let Err(error) = preferences.save() {
+        gaanim_core::console::warn("prompter", format!("the text size was not saved: {error}"));
+    }
+}
+
 /// What the prompter reads at: the talk as last recorded in the editor and
-/// the speaker's pace, measured from their dictations.
+/// the speaker's pace, measured from their dictations or fixed in Settings.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct PrompterPace {
     /// The file `timing` belongs to.
@@ -79,7 +168,9 @@ pub(crate) struct PrompterPace {
     pub(crate) measured: Option<f64>,
     /// Words per minute of the dictation running now, once it can tell.
     pub(crate) live: Option<f64>,
-    /// `measured` was read from the speaker's settings.
+    /// The pace fixed in Settings, which every part is read at.
+    pub(crate) fixed: Option<f64>,
+    /// `measured` and `fixed` were read from the speaker's settings.
     pub(crate) loaded: bool,
 }
 
@@ -97,6 +188,8 @@ pub(crate) enum PaceSource {
     Live,
     /// The speaker's earlier dictations.
     Measured,
+    /// The pace fixed in Settings.
+    Fixed,
     Default,
 }
 
@@ -113,9 +206,18 @@ impl Pace {
             PaceSource::Recorded => "the time you recorded for this part",
             PaceSource::Live => "what you are dictating now",
             PaceSource::Measured => "your earlier dictations",
+            PaceSource::Fixed => "the pace fixed in Settings",
             PaceSource::Default => "the usual pace; dictate to measure yours",
         };
         format!("Reading at {:.0} wpm, from {source}", self.words_per_minute)
+    }
+}
+
+/// The pace fixed in Settings, for every part.
+pub(crate) fn fixed_pace(words_per_minute: f64) -> Pace {
+    Pace {
+        words_per_minute: words_per_minute.clamp(PACE_RANGE.0, PACE_RANGE.1),
+        source: PaceSource::Fixed,
     }
 }
 
@@ -337,7 +439,10 @@ pub(crate) fn reading(
         .timing
         .slide(&part.slide_name)
         .and_then(|slide| slide.parts.get(position.part).copied());
-    let pace = pace_for(part.words(), recorded, pace.live, pace.measured);
+    let pace = match pace.fixed {
+        Some(fixed) => fixed_pace(fixed),
+        None => pace_for(part.words(), recorded, pace.live, pace.measured),
+    };
     let elapsed = part_elapsed(
         part_span(timeline, position),
         timeline.current_time,
@@ -371,7 +476,7 @@ pub(crate) struct Cue {
 }
 
 /// Words of the part already said, dimmed so the next ones stand out.
-const SAID: egui::Color32 = egui::Color32::from_rgb(118, 122, 134);
+const SAID: egui::Color32 = egui::Color32::from_rgb(120, 118, 130);
 /// The caption's band, opaque so the text reads over any slide.
 pub(crate) const BAND: egui::Color32 = egui::Color32::from_rgb(7, 7, 9);
 
@@ -460,18 +565,21 @@ pub(crate) fn caption_text(
 /// The editor's caption: an opaque band centered over the preview, its
 /// bottom `gap` points above the window's, outlined in `outline` when
 /// something needs the speaker's attention. Right-clicking it opens `menu`.
+/// `docked` points on the right belong to a panel; the band centres in the
+/// rest.
 pub(crate) fn show_band(
     ctx: &egui::Context,
     gap: f32,
+    docked: f32,
     outline: Option<egui::Color32>,
     contents: impl FnOnce(&mut egui::Ui),
     menu: impl FnOnce(&mut egui::Ui),
 ) {
     let screen = ctx.viewport_rect();
     let margin = egui::Margin::symmetric(24, 12);
-    let width = (screen.width() - 48.0).clamp(280.0, 980.0) - margin.sum().x;
+    let width = (screen.width() - docked - 48.0).clamp(280.0, 980.0) - margin.sum().x;
     egui::Area::new(egui::Id::new("editor_caption"))
-        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -gap))
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(-docked / 2.0, -gap))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             let band = egui::Frame::new()
@@ -1079,6 +1187,19 @@ mod tests {
                 source: PaceSource::Default
             }
         );
+    }
+
+    #[test]
+    fn a_fixed_pace_is_kept_in_range_and_saved_with_the_text_size() {
+        assert_eq!(fixed_pace(130.0).words_per_minute, 130.0);
+        assert_eq!(fixed_pace(400.0).words_per_minute, PACE_RANGE.1);
+        let preferences: PrompterPreferences = serde_json::from_str("{}").unwrap();
+        assert_eq!(preferences, PrompterPreferences::default());
+        assert_eq!(preferences.fixed(), None);
+        let fixed: PrompterPreferences =
+            serde_json::from_str(r#"{"pace": "fixed", "wpm": 120}"#).unwrap();
+        assert_eq!(fixed.fixed(), Some(120.0));
+        assert_eq!(fixed.size, PrompterSettings::default().size);
     }
 
     #[test]

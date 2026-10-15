@@ -1010,9 +1010,12 @@ pub fn camera_to_output(
     };
     let scale = pixels_per_unit * zoom * fit_scale * viewport.scale;
     let offset_y = viewport.offset_y * fit_scale;
+    let offset_x = viewport.offset_x * fit_scale;
 
-    kurbo::Affine::translate((f64::from(width) / 2.0, f64::from(height) / 2.0 + offset_y))
-        * kurbo::Affine::scale_non_uniform(scale, -scale)
+    kurbo::Affine::translate((
+        f64::from(width) / 2.0 + offset_x,
+        f64::from(height) / 2.0 + offset_y,
+    )) * kurbo::Affine::scale_non_uniform(scale, -scale)
         * kurbo::Affine::rotate(-angle)
         * kurbo::Affine::translate((-cam_x, -cam_y))
 }
@@ -2479,14 +2482,20 @@ pub(crate) fn canvas_camera_pose(cam: &gaanim_math::ResolvedCamera) -> CanvasCam
     // The viewport scale keeps the scene's aspect ratio when the window's
     // differs from the scene's native resolution.
     let effective = cam.pixels_per_unit() * orthographic.unwrap_or(1.0) * cam.viewport.scale;
-    let (scale, offset) = if effective > 0.0 {
-        (1.0 / effective as f32, cam.viewport.offset_y / effective)
+    // The offsets in world units along the camera's own axes: the picture
+    // moves right and down, so the camera moves left and up.
+    let (scale, across, offset) = if effective > 0.0 {
+        (
+            1.0 / effective as f32,
+            -cam.viewport.offset_x / effective,
+            cam.viewport.offset_y / effective,
+        )
     } else {
-        (1.0, 0.0)
+        (1.0, 0.0, 0.0)
     };
     if orthographic.is_none() {
         return CanvasCameraPose {
-            translation: Vec2::new(0.0, offset as f32),
+            translation: Vec2::new(across as f32, offset as f32),
             rotation: Quat::IDENTITY,
             scale,
         };
@@ -2495,8 +2504,8 @@ pub(crate) fn canvas_camera_pose(cam: &gaanim_math::ResolvedCamera) -> CanvasCam
     let (sin, cos) = angle.sin_cos();
     CanvasCameraPose {
         translation: Vec2::new(
-            (cam.position.x - offset * sin) as f32,
-            (cam.position.y + offset * cos) as f32,
+            (cam.position.x + across * cos - offset * sin) as f32,
+            (cam.position.y + across * sin + offset * cos) as f32,
         ),
         rotation: Quat::from_rotation_z(angle as f32),
         scale,
@@ -2523,7 +2532,8 @@ pub(crate) fn fitted_canvas_viewport(
 
     let viewport_width = (cam.viewport_width as f64 * fit).min(window_width);
     let viewport_height = (cam.viewport_height as f64 * fit).min(window_height);
-    let left = ((window_width - viewport_width) * 0.5).max(0.0);
+    let left = ((window_width - viewport_width) * 0.5 + viewport.offset_x)
+        .clamp(0.0, (window_width - viewport_width).max(0.0));
     let center_y = window_height * 0.5 + viewport.offset_y;
     let top =
         (center_y - viewport_height * 0.5).clamp(0.0, (window_height - viewport_height).max(0.0));
@@ -7903,6 +7913,7 @@ mod tests {
             gaanim_math::CameraViewport {
                 scale: 0.5,
                 offset_y: 0.0,
+                offset_x: 0.0,
             },
         );
 
@@ -7916,6 +7927,7 @@ mod tests {
             gaanim_math::CameraViewport {
                 scale: 8.0,
                 offset_y: 0.0,
+                offset_x: 0.0,
             },
         );
         assert_eq!(
@@ -8303,6 +8315,7 @@ mod tests {
         let viewport = gaanim_math::CameraViewport {
             scale: 0.5,
             offset_y: 0.0,
+            offset_x: 0.0,
         };
 
         let viewport = fitted_canvas_viewport(&cam, viewport, &window(640, 500)).unwrap();
@@ -8317,6 +8330,7 @@ mod tests {
         let mapping = gaanim_math::CameraViewport {
             scale: 0.5,
             offset_y: -100.0,
+            offset_x: 0.0,
         };
         let viewport = fitted_canvas_viewport(&cam, mapping, &window(1280, 720)).unwrap();
 

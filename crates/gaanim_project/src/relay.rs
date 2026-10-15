@@ -135,34 +135,33 @@ pub fn normalize(url: &str) -> Result<String, String> {
     Ok(url.to_string())
 }
 
-fn saved_path() -> Option<PathBuf> {
-    crate::user_data_dir().map(|dir| dir.join("poll-relay.txt"))
+/// The `polls` section of the user's settings.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct PollSettings {
+    /// The relay saved with `gaanim relay use` or in Settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<String>,
 }
 
-/// The relay saved with `gaanim relay use`.
+/// The settings section polls are saved in.
+pub const SETTINGS_SECTION: &str = "polls";
+
+/// The relay saved with `gaanim relay use` or in Settings.
 pub fn saved() -> Option<String> {
-    let source = std::fs::read_to_string(saved_path()?).ok()?;
-    normalize(&source).ok()
+    let settings: PollSettings = crate::settings::load(SETTINGS_SECTION);
+    normalize(&settings.relay?).ok()
 }
 
 /// Save `url` as this user's relay; `None` forgets it.
 pub fn save(url: Option<&str>) -> Result<Option<String>, String> {
-    let path = saved_path().ok_or("could not find the user data directory")?;
-    let Some(url) = url else {
-        match std::fs::remove_file(&path) {
-            Ok(()) => return Ok(None),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("could not remove {}: {error}", path.display())),
-        }
-    };
-    let url = normalize(url)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
-    }
-    std::fs::write(&path, format!("{url}\n"))
-        .map_err(|error| format!("could not write {}: {error}", path.display()))?;
-    Ok(Some(url))
+    let relay = url.map(normalize).transpose()?;
+    crate::settings::save(
+        SETTINGS_SECTION,
+        &PollSettings {
+            relay: relay.clone(),
+        },
+    )?;
+    Ok(relay)
 }
 
 /// Where a relay address came from.

@@ -95,6 +95,25 @@ gaanim --present --monitor 1 mi-charla --from resultados
 Los atajos de teclado del modo presentación y de Presenter View están en
 #link("/guias/presentaciones/")[Presentaciones].
 
+== Comandos y atajos del editor <comandos>
+
+La barra de reproducción se esconde mientras no la usas. Al abrir un proyecto
+y tras cada recarga se queda unos segundos a la vista; después, una línea corta
+en el borde inferior indica dónde está, y basta con bajar el puntero para que
+vuelva.
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Atajo*], [*Qué abre*],
+  [`Ctrl+Shift+P`], [La paleta de comandos: todas las acciones del editor en una lista que se filtra al escribir (reproducir, exportar, presentar, pantalla completa, overlays, consola, guardar el fotograma, cada sección de #link(<ajustes>)[Settings], volver al Inicio, abrir un proyecto reciente). Cada fila muestra su atajo. Las flechas eligen, `Enter` ejecuta y `Esc` cierra.],
+  [`Ctrl+P`], [Ir a un segmento o a una pausa por su nombre. Las pausas aparecen bajo su segmento y se encuentran también por el nombre de este. Al lado se ve la diapositiva tal como queda en ese punto, la misma vista previa de Presenter View, y las notas que se dicen desde allí. `Enter` salta y deja la reproducción en pausa allí.],
+  [`?`], [La hoja de atajos: todos los atajos del editor agrupados, sacados de la misma lista que la paleta.],
+)
+
+`Cmd` sustituye a `Ctrl` en macOS. Mientras escribes en un campo, los atajos de
+una sola tecla no actúan.
+
 == Controlar la vista previa desde un editor <listen>
 
 Con `--listen`, un editor de código mueve la vista previa y sabe dónde está:
@@ -529,7 +548,7 @@ explica el despliegue.
 ```bash
 gaanim relay                          # muestra el relay en uso y de dónde sale
 gaanim relay init [CARPETA] [--force] # escribe el relay (por defecto ./gaanim-relay)
-gaanim relay use https://…workers.dev # lo guarda para todas tus presentaciones
+gaanim relay use https://…workers.dev # lo guarda para todas tus presentaciones (también en Settings)
 gaanim relay forget                   # olvida el relay guardado
 gaanim relay reset [RUTA]             # partida nueva en la sesión del proyecto de RUTA
 gaanim relay results [RUTA] [--output CARPETA]  # guarda los resultados de la partida
@@ -582,8 +601,11 @@ Un `gaanim` compilado desde el código (en la carpeta `target/` de Cargo) no se
 actualiza así: actualízalo con `git pull` y vuelve a compilar.
 
 La pantalla de inicio consulta GitHub como mucho una vez al día y, si hay una
-versión nueva, ofrece instalarla con el mismo proceso. Desactiva esa consulta
-con la variable `GAANIM_NO_UPDATE_CHECK=1`.
+versión nueva, ofrece instalarla con el mismo proceso. Para no esperarla,
+*Check now* en #link(<ajustes>)[*Settings → Updates*] consulta en el momento,
+también desde el editor. Desactiva esa consulta
+en #link(<ajustes>)[*Settings → Updates*] o con la variable
+`GAANIM_NO_UPDATE_CHECK=1`.
 
 = `gaanim --diff`
 
@@ -674,6 +696,43 @@ gaanim mi-charla --message-format json --listen stdio
 Con `--listen stdio`, los eventos del canal de control comparten la salida
 estándar; se distinguen porque llevan `event` en lugar de `type`.
 
+= Ajustes <ajustes>
+
+*Settings* reúne las preferencias que Gaanim guarda para ti, las mismas en
+todos tus proyectos. Se abre igual en la pantalla de inicio (*Settings* en la
+barra lateral) y en el editor (el botón de ajustes a la derecha de la barra de
+reproducción, o *More controls → Settings* si la ventana es estrecha), y en
+los dos con `Ctrl+,`; `Esc` la cierra. Cada cambio se guarda al momento. A su
+lado, el botón de la casa (*Back to Home*) cierra el proyecto y vuelve a la
+pantalla de inicio: Gaanim se abre de nuevo sin él.
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Sección*], [*Qué ajusta*],
+  [*Recording*], [El nivelado de cada toma nueva y su volumen final en LUFS (−16 por defecto), la cuenta atrás de 3 s antes de grabar y si se guarda el audio de cada grabación de la charla para volver a escucharlo.],
+  [*Transcription*], [whisper.cpp: el ejecutable `whisper-cli` (vacío: lo busca en el `PATH`), el modelo `ggml-*.bin`, el idioma y si cada toma nueva se transcribe al guardarla.],
+  [*Dictation*], [Zoom Scribe: el token (pegado para la sesión, o guardado en el Administrador de credenciales de Windows), el idioma, que en el editor se puede fijar en el `gaanim.toml` del proyecto, el máximo de minutos por sesión y si se envían los nombres de diapositivas y stops como vocabulario.],
+  [*Prompter*], [El ritmo al que se ilumina el guion: *Automatic* (el de tus grabaciones, si no tu ritmo medido al dictar, si no 150 palabras por minuto) o *Fixed*, el mismo para todos los tramos, entre 80 y 240 palabras por minuto. También el tamaño del texto. Ver #link("/guias/presentaciones/#prompter")[El prompter].],
+  [*Preview*], [La resolución de la previsualización del editor: *Automatic* la baja mientras la reproducción no llega a 60 fps, *Full* dibuja siempre todos los píxeles y *Fixed* dibuja una fracción. Se aplica al momento y nunca afecta a las exportaciones.],
+  [*Integrations*], [El comando del editor de código que abre una línea del script, con `{file}` y `{line}` (vacío: prueba `code`, `cursor`, `codium`, `zed` y `subl`), y el relay de las encuestas, el mismo que guarda `gaanim relay use`.],
+  [*Updates*], [*Check now* consulta GitHub en el momento, aunque la consulta diaria esté desactivada, y si hay una versión nueva la instala y reinicia Gaanim como `gaanim update`. Debajo, si la pantalla de inicio consulta GitHub una vez al día para avisar de versiones nuevas.],
+)
+
+Todo se guarda en `settings.json`, en la carpeta de datos de Gaanim
+(`%LOCALAPPDATA%\Gaanim\Gaanim\data` en Windows, `~/.local/share/gaanim` en
+Linux), con una sección por área: `narration`, `prompter`, `preview`,
+`integrations`, `polls`, `updates` y `home` (la vista de los recientes en el
+Inicio). El pie de la ventana muestra la ruta y
+*Show folder* la abre. Las versiones anteriores guardaban parte de esto en
+`narration.json` y `poll-relay.txt`; la primera vez que Gaanim lee los ajustes
+los pasa a `settings.json` y borra esos archivos.
+
+Las variables de entorno siguen mandando sobre lo guardado: si
+`GAANIM_EDITOR`, `GAANIM_PREVIEW_RESOLUTION`, `GAANIM_POLL_RELAY` o
+`GAANIM_NO_UPDATE_CHECK` están definidas, su ajuste aparece bloqueado y dice
+qué variable lo fija.
+
 = Variables de entorno
 
 #table(
@@ -681,14 +740,14 @@ estándar; se distinguen porque llevan `event` en lugar de `type`.
   inset: 7pt,
   [*Variable*], [*Efecto*],
   [`GAANIM_SNAPSHOTS`], [La define `gaanim --diff` con la carpeta donde `scene.snapshots` debe capturar. No la definas a mano.],
-  [`GAANIM_EDITOR`], [Comando con el que el inspector, la consola, las animaciones, el panel de error y *Open and complete* abren una línea del script o del guion, con `{file}` y `{line}` donde van la ruta y el número de línea: `code --goto {file}:{line}`, `zed {file}:{line}`, `idea --line {line} {file}`. Las comillas agrupan palabras con espacios. Sin `{file}`, la ruta se añade al final. Sin la variable, Gaanim prueba `code`, `cursor`, `codium`, `zed` y `subl` en el `PATH`, y si no encuentra ninguno abre el archivo con la aplicación predeterminada.],
+  [`GAANIM_EDITOR`], [Comando con el que el inspector, la consola, las animaciones, el panel de error y el icono del guion de *Script & narration* abren una línea del script o del guion, con `{file}` y `{line}` donde van la ruta y el número de línea: `code --goto {file}:{line}`, `zed {file}:{line}`, `idea --line {line} {file}`. Las comillas agrupan palabras con espacios. Sin `{file}`, la ruta se añade al final. Sin la variable, Gaanim usa el comando de *Settings → Integrations* y, si está vacío, prueba `code`, `cursor`, `codium`, `zed` y `subl` en el `PATH`; si no encuentra ninguno abre el archivo con la aplicación predeterminada.],
   [`GAANIM_INCREMENTAL=0`], [Desactiva la recompilación incremental del hot reload: cada guardado recompila la escena entera.],
   [`GAANIM_RELOAD_PROFILE=1`], [Escribe en la terminal qué costó cada recarga: el tiempo del script y de sus segmentos más lentos, las mediciones con `bounds()` (cuántas se compilaron aparte, cuántas compilaron la escena y en qué línea del script, cuántas reanudaron una compilación anterior, cuántas la reutilizaron), las fases del replay (las huellas que deciden qué segmentos se reutilizan, la limpieza o la restauración de la escena anterior, la compilación), los segmentos que más tardaron en compilarse y la captura del fotograma de t=0. Al abrir un script, también cuánto tardó cada fase del arranque: el entorno de Python, el intérprete, la preparación de la app y de la GPU, el primer fotograma y la primera escena lista.],
-  [`GAANIM_PREVIEW_RESOLUTION`], [Resolución de la previsualización del editor. Con `auto` (por defecto), si al reproducir no llega a 60 fps porque dibujar cuesta demasiado, baja al 75 % y luego al 50 % de los píxeles, y vuelve a la resolución completa al pausar. `full` la mantiene siempre completa; una fracción como `0.5` la fija. Nunca afecta a las exportaciones.],
+  [`GAANIM_PREVIEW_RESOLUTION`], [Resolución de la previsualización del editor. Con `auto` (por defecto), si al reproducir no llega a 60 fps porque dibujar cuesta demasiado, baja al 75 % y luego al 50 % de los píxeles, y vuelve a la resolución completa al pausar. `full` la mantiene siempre completa; una fracción como `0.5` la fija. Nunca afecta a las exportaciones. Sin la variable manda *Settings → Preview*.],
   [`GAANIM_FRAME_PROFILE=1`], [Reproduce la línea de tiempo entera sin detenerse en las pausas y escribe en la terminal, una vez por segundo, el coste del seek, de la composición y del render, la resolución de la previsualización, el tamaño de la escena de Vello (caminos, segmentos y recortes, el mayor del segundo; un número alto de recortes suele venir de sombras o máscaras por glifo) y cuántos objetos están visibles. Al terminar lista los segundos más lentos y cierra el editor.],
   [`GAANIM_SEGMENT_CHECKPOINTS=0`], [Desactiva los puntos de control por segmento. Por defecto, al reproducir o recorrer un segmento, Gaanim guarda el estado de la escena en su inicio y cada fotograma parte de ahí, así que el coste de un fotograma no crece a lo largo de la presentación. Con `0`, cada fotograma se reconstruye desde el principio de la escena. El resultado es idéntico en ambos casos.],
   [`GAANIM_CHECKPOINT_TIMINGS=1`], [Escribe en la terminal cuánto tarda cada punto de control por segmento en guardarse.],
-  [`GAANIM_POLL_RELAY`], [Dirección del relay de las encuestas. Tiene prioridad sobre `[polls] relay` y `gaanim relay use`.],
-  [`GAANIM_NO_UPDATE_CHECK=1`], [La pantalla de inicio no consulta GitHub para avisar de versiones nuevas. `gaanim update` sigue funcionando.],
+  [`GAANIM_POLL_RELAY`], [Dirección del relay de las encuestas. Tiene prioridad sobre `[polls] relay` y sobre el relay guardado con `gaanim relay use` o en *Settings*.],
+  [`GAANIM_NO_UPDATE_CHECK=1`], [La pantalla de inicio no consulta GitHub para avisar de versiones nuevas, como al desmarcarlo en *Settings → Updates*. `gaanim update` sigue funcionando.],
   [`GAANIM_POLL_SESSION`], [Código de seis caracteres que usan las encuestas en lugar del que Gaanim guarda para el proyecto, por ejemplo para que varias personas presenten el mismo proyecto o para capturas reproducibles.],
 )

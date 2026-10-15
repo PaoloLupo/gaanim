@@ -1,6 +1,6 @@
 [package]
 name = "gaanim_editor"
-version = "0.13.1"
+version = "0.14.0"
 license = "MIT OR Apache-2.0"
 edition = "2024"
 description = "Gaanim application: interactive viewer with hot-reload of animation scripts"
@@ -23,6 +23,8 @@ gaanim_diff = { path = "../gaanim_diff" }
 gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_text = { path = "../gaanim_text" }
 gaanim_project = { path = "../gaanim_project" }
+# Bundle covers and project thumbnails on Home.
+gaanim_thumbnail = { path = "../gaanim_thumbnail" }
 
 bevy = { workspace = true, features = [
     "bevy_winit",

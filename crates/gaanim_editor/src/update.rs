@@ -104,8 +104,14 @@ pub fn newest_release(releases: &serde_json::Value, suffix: &str) -> Option<Rele
     })
 }
 
-/// Whether the Home's daily check is turned off with [`DISABLE_VARIABLE`].
+/// Whether the Home's daily check is turned off with [`DISABLE_VARIABLE`]
+/// or in Settings.
 pub fn check_disabled() -> bool {
+    disabled_by_variable() || !crate::settings::UpdatePreferences::load().check
+}
+
+/// Whether [`DISABLE_VARIABLE`] turns the daily check off.
+pub fn disabled_by_variable() -> bool {
     std::env::var_os(DISABLE_VARIABLE).is_some_and(|value| !value.is_empty() && value != "0")
 }
 

@@ -211,7 +211,7 @@ fn cursor_label_position(cursor: egui::Pos2, viewport: egui::Rect) -> egui::Pos2
 /// Window pixel of the output frame's center, where the camera looks.
 fn window_center(cam: &ResolvedCamera, window: &Window) -> glam::DVec2 {
     glam::DVec2::new(
-        window.width() as f64 * 0.5,
+        window.width() as f64 * 0.5 + cam.viewport.offset_x,
         window.height() as f64 * 0.5 + cam.viewport.offset_y,
     )
 }
@@ -279,7 +279,7 @@ pub(crate) fn world_to_egui(
         return clip_to_window(cam, window, clip);
     }
     let eff = effective_zoom(cam);
-    let hw = window.width() as f64 * 0.5;
+    let hw = window.width() as f64 * 0.5 + cam.viewport.offset_x;
     let hh = window.height() as f64 * 0.5 + cam.viewport.offset_y;
     let angle = cam.z_angle();
     let cos = (-angle).cos();
@@ -306,7 +306,7 @@ pub(crate) fn egui_to_world(
         return cam.screen_to_world(output);
     }
     let eff = effective_zoom(cam);
-    let hw = window.width() as f64 * 0.5;
+    let hw = window.width() as f64 * 0.5 + cam.viewport.offset_x;
     let hh = window.height() as f64 * 0.5 + cam.viewport.offset_y;
     let angle = cam.z_angle();
     // screen -> rotated
@@ -1129,7 +1129,7 @@ pub fn scene_overlays_system(
         let h = window.height();
         let vp_w = cam.viewport_width as f32 * cam.viewport.scale as f32;
         let vp_h = cam.viewport_height as f32 * cam.viewport.scale as f32;
-        let cx = w * 0.5;
+        let cx = w * 0.5 + cam.viewport.offset_x as f32;
         let cy = h * 0.5 + cam.viewport.offset_y as f32;
         vec![
             egui::pos2(cx - vp_w * 0.5, cy - vp_h * 0.5),
@@ -1685,6 +1685,7 @@ mod tests {
         let viewport = gaanim_math::CameraViewport {
             scale: 0.5,
             offset_y: -30.0,
+            offset_x: 0.0,
         };
         (ResolvedCamera::new(camera, viewport), window)
     }
@@ -1730,6 +1731,7 @@ mod tests {
             gaanim_math::CameraViewport {
                 scale: 1280.0 / 1920.0 * 0.5,
                 offset_y: 0.0,
+                offset_x: 0.0,
             },
         );
         camera.camera.position = glam::DVec3::new(3.0, 1.0, 0.0);

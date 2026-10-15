@@ -12,6 +12,7 @@ use ui_kit::{
 pub mod alsa_errors;
 pub mod animation_timeline;
 mod app_icon;
+mod brand;
 pub mod bundle_player;
 pub mod cli;
 pub mod console_panel;
@@ -41,11 +42,14 @@ pub use polls::{relay_version, reset_relay_session, save_relay_results};
 /// Built for the web player: no native windows, file system or FFmpeg, so
 /// pinning, exporting and the separate Presenter View window are left out.
 pub(crate) const WEB: bool = cfg!(target_arch = "wasm32");
+mod command_palette;
 mod presenter;
 pub mod presenter_link;
 pub mod project_hub;
+mod project_thumbnail;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod python_plugin;
+mod settings;
 pub mod share_link;
 pub mod source_link;
 mod touch;
@@ -53,6 +57,7 @@ mod ui_kit;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod update;
 pub mod volume;
+mod window_memory;
 
 /// Whether the timeline ignores its keys and its advancing click. The
 /// pointer over a panel (such as the playback bar) only blocks the click;
@@ -110,11 +115,17 @@ fn sync_editor_input_ignore_system(
 pub struct ViewportInset {
     /// Space consumed by the bottom timeline panel (pixels).
     pub bottom: f32,
+    /// Space consumed by a panel docked on the right, such as the
+    /// narration panel (pixels).
+    pub right: f32,
 }
 
 impl Default for ViewportInset {
     fn default() -> Self {
-        Self { bottom: 0.0 }
+        Self {
+            bottom: 0.0,
+            right: 0.0,
+        }
     }
 }
 
@@ -214,13 +225,31 @@ impl ViewportFrame {
 
 pub struct GaanimEditorPlugin;
 
-/// Every egui context (main window, presenter) draws square corners, like
-/// the controls painted by [`ui_kit`].
+/// Every egui context (main window, presenter) draws square corners in the
+/// brand's colours, like the controls painted by [`ui_kit`], and writes
+/// monospaced text in JetBrains Mono, the brand's code face.
 fn square_egui_corners_system(
     mut contexts: Query<&mut bevy_egui::EguiContext, Added<bevy_egui::EguiContext>>,
 ) {
     for mut context in &mut contexts {
-        context.get_mut().all_styles_mut(ui_kit::square_corners);
+        let ctx = context.get_mut();
+        ctx.all_styles_mut(ui_kit::square_corners);
+        ctx.add_font(egui::epaint::text::FontInsert::new(
+            "JetBrains Mono",
+            egui::FontData::from_static(gaanim_text::font::JETBRAINS_MONO),
+            vec![
+                egui::epaint::text::InsertFontFamily {
+                    family: egui::FontFamily::Monospace,
+                    priority: egui::epaint::text::FontPriority::Highest,
+                },
+                // The text font has no arrows (→ ←) and few symbols: they
+                // come from here.
+                egui::epaint::text::InsertFontFamily {
+                    family: egui::FontFamily::Proportional,
+                    priority: egui::epaint::text::FontPriority::Lowest,
+                },
+            ],
+        ));
     }
 }
 
@@ -231,6 +260,12 @@ impl Plugin for GaanimEditorPlugin {
             .add_plugins(bundle_player::BundlePlayerPlugin)
             .add_plugins(project_hub::ProjectHubPlugin)
             .add_plugins(presenter_link::PresenterLinkPlugin)
+            .add_plugins(settings::SettingsPlugin)
+            .add_plugins(command_palette::CommandPalettePlugin)
+            .init_resource::<window_memory::WindowMemory>()
+            .add_systems(Update, window_memory::window_memory_system)
+            .init_resource::<project_thumbnail::ProjectThumbnail>()
+            .add_systems(Update, project_thumbnail::project_thumbnail_system)
             .add_systems(PreUpdate, square_egui_corners_system)
             .init_resource::<EditorState>()
             .init_resource::<touch::TouchControls>()
@@ -240,7 +275,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<presenter::PresenterMirror>()
             .init_resource::<presenter::PresenterOverviewState>()
             .init_resource::<presenter::PresenterPreferences>()
-            .init_resource::<presenter::prompter::PrompterSettings>()
+            .insert_resource(presenter::prompter::PrompterSettings::load())
             .init_resource::<presenter::prompter::PrompterPace>()
             .init_resource::<presenter::AudienceControlsState>()
             .init_resource::<presenter::PresentationTimer>()
@@ -526,6 +561,37 @@ enum PlaybackDensity {
     Minimal,
 }
 
+/// Controls a compact playback bar shows beside its menu, most used first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompactControl {
+    Export,
+    Present,
+    FullScreen,
+    Settings,
+    Narration,
+    Home,
+}
+
+/// The controls a bar of `density` shows beside its menu at `width`: none
+/// in the minimal bar, the full set in the wide one (which lays them out
+/// itself), and in between one more per 40 pixels past the compact bar's
+/// least width.
+fn compact_controls(density: PlaybackDensity, width: f32) -> &'static [CompactControl] {
+    const ORDER: [CompactControl; 6] = [
+        CompactControl::Export,
+        CompactControl::Present,
+        CompactControl::FullScreen,
+        CompactControl::Settings,
+        CompactControl::Narration,
+        CompactControl::Home,
+    ];
+    if density != PlaybackDensity::Compact {
+        return &[];
+    }
+    let room = ((width - 620.0) / 40.0).floor().max(0.0) as usize;
+    &ORDER[..room.min(ORDER.len())]
+}
+
 impl PlaybackDensity {
     fn for_width(width: f32) -> Self {
         if width >= 1080.0 {
@@ -571,6 +637,11 @@ pub struct EditorState {
     pub(crate) touch_reveal: bool,
     /// Where the playback bar was drawn last frame, in egui points.
     pub(crate) bar_rect: Option<egui::Rect>,
+    /// The bar stays on screen until this egui time, so a project that
+    /// opens or reloads shows its controls before they hide.
+    bar_reveal_until: f64,
+    /// The replay the bar last revealed itself for.
+    bar_revealed_revision: Option<u64>,
 }
 
 impl Default for EditorState {
@@ -589,6 +660,8 @@ impl Default for EditorState {
             segment_loop: SegmentLoopState::default(),
             touch_reveal: false,
             bar_rect: None,
+            bar_reveal_until: 0.0,
+            bar_revealed_revision: None,
         }
     }
 }
@@ -727,6 +800,8 @@ fn editor_ui_system(
         audio_tracks,
         controls,
         mut prompter,
+        mut settings_window,
+        mut palette,
     ): (
         ResMut<export::ExportState>,
         ResMut<narration::NarrationPanel>,
@@ -736,6 +811,8 @@ fn editor_ui_system(
         Option<Res<gaanim_media::PreviewAudioTracks>>,
         Res<PlaybackControls>,
         ResMut<presenter::prompter::PrompterSettings>,
+        ResMut<settings::SettingsWindow>,
+        ResMut<command_palette::CommandPalette>,
     ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
@@ -752,10 +829,12 @@ fn editor_ui_system(
     ),
     interactive: Res<PreviewInteractive>,
     viewport_frame: Res<ViewportFrame>,
-    hub: Option<Res<project_hub::ProjectHubState>>,
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))] mut hub: Option<
+        ResMut<project_hub::ProjectHubState>,
+    >,
     presenter_windows: Query<(), With<presenter::PresenterWindow>>,
 ) {
-    if hub.is_some_and(|hub| hub.active) {
+    if hub.as_ref().is_some_and(|hub| hub.active) {
         inset.bottom = 0.0;
         return;
     }
@@ -809,14 +888,38 @@ fn editor_ui_system(
     let current = timeline.current_time.clamp(0.0, total);
 
     // Auto-hide: compacto, no tapa contenido (usa ViewportInset)
-    let vp = ctx.viewport_rect();
+    // The bar stays left of a panel docked on the right, whose width the
+    // inset gives in window pixels.
+    let docked = inset.right / ctx.zoom_factor();
+    let vp = {
+        let mut vp = ctx.viewport_rect();
+        vp.max.x = (vp.max.x - docked).max(vp.min.x + 320.0);
+        vp
+    };
+    let centre_shift = vp.center().x - ctx.viewport_rect().center().x;
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let pointer_near_bottom = pointer.map(|p| p.y > vp.height() - 60.0).unwrap_or(false);
+    // A project that opens or reloads shows its controls for a moment.
+    let now = ctx.input(|i| i.time);
+    if state.bar_revealed_revision != Some(replay_stash.revision) {
+        state.bar_revealed_revision = Some(replay_stash.revision);
+        state.bar_reveal_until = now + BAR_REVEAL_SECONDS;
+    }
+    let revealing = now < state.bar_reveal_until;
+    if revealing {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+            state.bar_reveal_until - now,
+        ));
+    }
+    // An action chosen in the command palette runs where the bar's do.
+    let forwarded = palette.take_forwarded();
     // A menu opened from the bar keeps it, and so itself, on screen while the
     // pointer travels to it above the bar.
     let should_show = pointer_near_bottom
         || state.bar_hovered
         || state.touch_reveal
+        || revealing
+        || forwarded.is_some()
         || egui::Popup::is_any_open(ctx);
     let dt = ctx.input(|i| i.unstable_dt);
     let target_vis = if should_show { 1.0_f32 } else { 0.0_f32 };
@@ -826,6 +929,9 @@ fn editor_ui_system(
         state.bar_visibility = target_vis;
     }
     let vis = state.bar_visibility;
+    if vis < 0.99 && controls.shown {
+        paint_bar_hint(ctx, vp, 1.0 - vis);
+    }
     // El playback es un overlay flotante y nunca reduce el viewport.
     inset.bottom = 0.0;
     state.bar_rect = None;
@@ -844,7 +950,7 @@ fn editor_ui_system(
         let area_resp = egui::Area::new("playback_overlay".into())
             .anchor(
                 egui::Align2::CENTER_BOTTOM,
-                egui::vec2(0.0, slide_offset - bottom_gap),
+                egui::vec2(centre_shift, slide_offset - bottom_gap),
             )
             .order(egui::Order::Foreground)
             .interactable(true)
@@ -1211,6 +1317,26 @@ fn editor_ui_system(
                                     let mut actions = Vec::new();
                                     ui.spacing_mut().item_spacing.x = 2.0;
                                     if density == PlaybackDensity::Wide {
+                                        if !WEB {
+                                            if icon_button(
+                                                ui,
+                                                Icon::Settings,
+                                                ButtonTone::Ghost,
+                                                true,
+                                            )
+                                            .on_hover_text("Settings · Ctrl+,")
+                                            .clicked()
+                                            {
+                                                actions.push(PlaybackAction::OpenSettings);
+                                            }
+                                            if icon_button(ui, Icon::Home, ButtonTone::Ghost, true)
+                                                .on_hover_text("Back to Home: closes this project")
+                                                .clicked()
+                                            {
+                                                actions.push(PlaybackAction::GoHome);
+                                            }
+                                            divider(ui);
+                                        }
                                         let pin_tone = if pinned {
                                             ButtonTone::On(ToggleColor::Stop)
                                         } else {
@@ -1343,8 +1469,71 @@ fn editor_ui_system(
                                             actions.push(PlaybackAction::ToggleContinuous);
                                         }
                                     } else {
+                                        // The menu holds every control; beside it, as many
+                                        // of the most used as the width leaves room for.
                                         let more = icon_button(ui, Icon::More, ButtonTone::Ghost, true)
                                             .on_hover_text("More controls");
+                                        let shown = compact_controls(density, screen_w);
+                                        for control in shown {
+                                            match control {
+                                                CompactControl::Export
+                                                    if !WEB && export_status.is_none() =>
+                                                {
+                                                    if icon_button(ui, Icon::Export, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Export animation")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::OpenExport);
+                                                    }
+                                                }
+                                                CompactControl::Present => {
+                                                    if icon_button(ui, Icon::Present, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Present in full screen")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::Present);
+                                                    }
+                                                }
+                                                CompactControl::FullScreen => {
+                                                    if icon_button(ui, Icon::Fullscreen, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Full screen · F11")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::ToggleFullscreen);
+                                                    }
+                                                }
+                                                CompactControl::Settings if !WEB => {
+                                                    if icon_button(ui, Icon::Settings, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Settings · Ctrl+,")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::OpenSettings);
+                                                    }
+                                                }
+                                                CompactControl::Narration if narration_available => {
+                                                    let tone = if narration_open {
+                                                        ButtonTone::On(ToggleColor::Accent)
+                                                    } else {
+                                                        ButtonTone::Ghost
+                                                    };
+                                                    if icon_button(ui, Icon::Mic, tone, true)
+                                                        .on_hover_text("Script & narration")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::ToggleNarration);
+                                                    }
+                                                }
+                                                CompactControl::Home
+                                                    if !WEB
+                                                        && icon_button(ui, Icon::Home, ButtonTone::Ghost, true)
+                                                            .on_hover_text("Back to Home: closes this project")
+                                                            .clicked() =>
+                                                {
+                                                    actions.push(PlaybackAction::GoHome);
+                                                }
+                                                _ => {}
+                                            }
+                                        }
                                         egui::Popup::menu(&more).show(|ui| {
                                             ui.set_min_width(180.0);
                                             if density == PlaybackDensity::Minimal {
@@ -1408,6 +1597,19 @@ fn editor_ui_system(
  }
                                             if ui.button("Present").clicked() {
                                                 actions.push(PlaybackAction::Present);
+                                            }
+                                            if !WEB && ui.button("Settings · Ctrl+,").clicked() {
+                                                actions.push(PlaybackAction::OpenSettings);
+                                            }
+                                            if !WEB
+                                                && ui
+                                                    .button("Back to Home")
+                                                    .on_hover_text(
+                                                        "Closes this project and opens Home",
+                                                    )
+                                                    .clicked()
+                                            {
+                                                actions.push(PlaybackAction::GoHome);
                                             }
                                             if has_audio {
                                                 ui.separator();
@@ -1513,7 +1715,7 @@ fn editor_ui_system(
                         state.segment_query = segment_query;
                         state.segment_list_open = segment_list_open;
                         state.segment_highlight = segment_highlight;
-                        for action in left_actions.into_iter().chain(right_actions) {
+                        for action in left_actions.into_iter().chain(right_actions).chain(forwarded) {
                             match action {
                                 PlaybackAction::TogglePlay => {
                                     timeline.is_playing = !timeline.is_playing;
@@ -1539,6 +1741,13 @@ fn editor_ui_system(
                                 }
                                 PlaybackAction::TogglePrompter => {
                                     prompter.editor_open = !prompter.editor_open;
+                                }
+                                PlaybackAction::OpenSettings => settings_window.open(),
+                                PlaybackAction::GoHome => {
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    if let Some(hub) = hub.as_mut() {
+                                        hub.request_home();
+                                    }
                                 }
                                 PlaybackAction::Present => start_presentation(
                                     &mut presentation_mode,
@@ -1611,6 +1820,27 @@ fn format_time(seconds: f64) -> String {
     let secs = (total_cs % 6000) / 100;
     let cs = total_cs % 100;
     format!("{}:{:02}.{:02}", mins, secs, cs)
+}
+
+/// Seconds the playback bar stays up when a project opens or reloads.
+const BAR_REVEAL_SECONDS: f64 = 3.0;
+
+/// While the playback bar hides, a short line at the bottom edge says it is
+/// there: moving the pointer down brings it back.
+fn paint_bar_hint(ctx: &egui::Context, viewport: egui::Rect, strength: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("playback_hint"),
+    ));
+    let line = egui::Rect::from_center_size(
+        egui::pos2(viewport.center().x, viewport.max.y - 5.0),
+        egui::vec2(72.0, 3.0),
+    );
+    painter.rect_filled(
+        line,
+        0.0,
+        palette::TEXT_FAINT.gamma_multiply(0.8 * strength),
+    );
 }
 
 fn current_scene_loop_range(timeline: &Timeline) -> Option<(f64, f64)> {
@@ -1975,7 +2205,10 @@ struct SeekMarker {
     name: String,
 }
 
-const MARKER_COLOR: egui::Color32 = egui::Color32::from_rgb(214, 140, 255);
+/// `scene.marker` flags: the brand's light violet.
+const MARKER_COLOR: egui::Color32 = palette::ACCENT;
+/// Segment boundaries inside a section.
+const TICK_COLOR: egui::Color32 = egui::Color32::from_rgb(64, 64, 70);
 const MARKER_HIT_RADIUS: f32 = 5.0;
 
 /// Index of the marker under `x`, preferring the closest one.
@@ -2043,7 +2276,7 @@ fn snap_seek_fraction(
 /// gaps instead of ornaments, a label is drawn only when it fits its chip,
 /// and the full name of any chapter is shown in the hover tooltip.
 /// Line between two scenes in the timeline.
-const SCENE_DIVIDER: egui::Color32 = egui::Color32::from_rgba_premultiplied(88, 92, 104, 150);
+const SCENE_DIVIDER: egui::Color32 = egui::Color32::from_rgba_premultiplied(92, 92, 100, 150);
 
 /// How a scene chip in the timeline lane is drawn.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2100,17 +2333,33 @@ fn paint_seek_bar(
     const LANE_GAP: f32 = 6.0;
     const TRACK_ZONE_H: f32 = 18.0;
     const CHAPTER_GAP: f32 = 3.0;
+    const SECTION_H: f32 = 16.0;
+    const SECTION_GAP: f32 = 3.0;
 
     let has_scenes = !scenes.is_empty();
+    // Segments named "Section · part" get a row of their sections above
+    // them; a talk without such names keeps a single row.
+    let sections = section_spans(scenes);
+    let has_sections = has_scenes && sections.len() < scenes.len();
+    let section_h = if has_sections {
+        SECTION_H + SECTION_GAP
+    } else {
+        0.0
+    };
     let lane_h = if has_scenes { LANE_H + LANE_GAP } else { 0.0 };
     let (response, painter) = ui.allocate_painter(
-        egui::vec2(ui.available_width(), lane_h + TRACK_ZONE_H),
+        egui::vec2(ui.available_width(), section_h + lane_h + TRACK_ZONE_H),
         egui::Sense::click_and_drag(),
     );
     let rect = response.rect;
     let x_at = |f: f32| rect.min.x + f * rect.width();
-    let lane_rect = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + LANE_H));
-    let bar_y = rect.min.y + lane_h + TRACK_ZONE_H / 2.0;
+    let section_rect =
+        egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + SECTION_H));
+    let lane_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x, rect.min.y + section_h),
+        egui::pos2(rect.max.x, rect.min.y + section_h + LANE_H),
+    );
+    let bar_y = rect.min.y + section_h + lane_h + TRACK_ZONE_H / 2.0;
     let is_hovering = response.hovered();
     let is_dragging = response.dragged();
     let active = is_hovering || is_dragging;
@@ -2138,8 +2387,45 @@ fn paint_seek_bar(
     // the exact time, so only the lane shows a scene as the click target.
     let pointer_in_lane = has_scenes && pointer.is_some_and(|pos| lane_rect.contains(pos));
 
-    // ── Chapter lane ────────────────────────────────────────────────────
+    // ── Section row: the sections the segments' names group them in ───────
     let label_font = egui::FontId::proportional(11.5);
+    if has_sections {
+        for (index, section) in sections.iter().enumerate() {
+            let first = &scenes[section.members.start];
+            let last = &scenes[section.members.end - 1];
+            let (sx, ex) = (x_at(first.start_frac), x_at(last.end_frac));
+            let inset = if index > 0 && ex - sx > 6.0 { 1.0 } else { 0.0 };
+            let cell = egui::Rect::from_min_max(
+                egui::pos2(sx + inset, section_rect.min.y),
+                egui::pos2(ex - inset, section_rect.max.y),
+            );
+            let current = active_scene_idx.is_some_and(|i| section.members.contains(&i));
+            painter.rect_filled(
+                cell,
+                0.0,
+                if current {
+                    palette::ACCENT.gamma_multiply(0.16)
+                } else {
+                    egui::Color32::from_rgb(25, 25, 25)
+                },
+            );
+            let color = if current {
+                palette::TEXT
+            } else {
+                palette::TEXT_MUTED
+            };
+            let galley = painter.layout_no_wrap(
+                section.label.to_owned(),
+                egui::FontId::proportional(11.0),
+                color,
+            );
+            if galley.size().x <= cell.width() - 8.0 {
+                painter.galley(cell.center() - galley.size() / 2.0, galley, color);
+            }
+        }
+    }
+
+    // ── Chapter lane: segments told apart by alternating shades ──────────
     let mut chips = Vec::with_capacity(scenes.len());
     let mut labeled = vec![false; scenes.len()];
     for (i, seg) in scenes.iter().enumerate() {
@@ -2148,20 +2434,28 @@ fn paint_seek_bar(
             chips.push(None);
             continue;
         }
-        let inset = if ex - sx > 4.0 * CHAPTER_GAP {
-            CHAPTER_GAP / 2.0
-        } else {
-            0.0
-        };
         let chip = egui::Rect::from_min_max(
-            egui::pos2(sx + inset, lane_rect.min.y),
-            egui::pos2(ex - inset, lane_rect.max.y),
+            egui::pos2(sx, lane_rect.min.y),
+            egui::pos2(ex, lane_rect.max.y),
         );
         chips.push(Some(chip));
         let is_active = active_scene_idx == Some(i);
         let is_hovered = hovered_scene_idx == Some(i);
         let style = chip_style(is_active, is_hovered, pointer_in_lane);
-        painter.rect_filled(chip, 0.0, style.fill);
+        // Neighbours alternate two graphite shades, so a boundary shows
+        // without a line however many segments there are.
+        painter.rect_filled(
+            chip,
+            0.0,
+            if i % 2 == 0 {
+                egui::Color32::from_rgb(24, 24, 24)
+            } else {
+                egui::Color32::from_rgb(38, 38, 40)
+            },
+        );
+        if is_active || is_hovered {
+            painter.rect_filled(chip, 0.0, style.fill);
+        }
         if is_active {
             // Progress inside the current chapter.
             let progress_x = playhead_x.clamp(chip.min.x, chip.max.x);
@@ -2177,24 +2471,23 @@ fn paint_seek_bar(
         if let Some(stroke) = style.outline {
             painter.rect_stroke(chip, 0.0, stroke, egui::StrokeKind::Inside);
         }
-        // A square in the corner: the slide's script is complete (green)
-        // or partly written or dictated (amber).
-        let script_mark = match seg.script {
-            Some(presenter::prompter::ScriptCoverage::Complete) => Some(palette::LOOP),
-            Some(presenter::prompter::ScriptCoverage::Partial) => Some(palette::STOP),
+        // A line along the top: the slide's script is complete (violet,
+        // the whole width) or partly written or dictated (gold, half).
+        let script_line = match seg.script {
+            Some(presenter::prompter::ScriptCoverage::Complete) => Some((palette::LOOP, 1.0)),
+            Some(presenter::prompter::ScriptCoverage::Partial) => Some((palette::STOP, 0.5)),
             _ => None,
         };
-        if let Some(color) = script_mark
-            && chip.width() >= 10.0
-        {
-            let mark = egui::Rect::from_center_size(
-                egui::pos2(chip.max.x - 5.0, chip.min.y + 5.0),
-                egui::Vec2::splat(4.0),
+        if let Some((color, share)) = script_line {
+            let line = egui::Rect::from_min_size(
+                chip.min + egui::vec2(1.0, 0.0),
+                egui::vec2(((chip.width() - 2.0) * share).max(1.0), 2.0),
             );
-            painter.rect_filled(mark, 0.0, color);
+            painter.rect_filled(line, 0.0, color);
         }
 
-        let name = scene_display_name(&seg.name);
+        // Under a section row, a segment shows only its part's name.
+        let name = segment_label(&seg.name, has_sections);
         if name.is_empty() || chip.width() < 24.0 {
             continue;
         }
@@ -2211,8 +2504,9 @@ fn paint_seek_bar(
     }
 
     // Dense timelines: chapters too short for their own names are labeled
-    // by the group they share a leading name with ("Fundamentos · …").
-    for group in scene_groups(scenes) {
+    // by the group they share a leading name with ("Fundamentos · …"),
+    // unless the section row already names it.
+    for group in scene_groups(scenes).into_iter().filter(|_| !has_sections) {
         if group.members.clone().any(|i| labeled[i]) {
             continue;
         }
@@ -2282,36 +2576,15 @@ fn paint_seek_bar(
         .chain(cuts)
         .chain(std::iter::once(1.0))
         .collect();
+    // One continuous rail, filled violet up to the playhead.
     let track_color = egui::Color32::from_white_alpha(if active { 34 } else { 26 });
-    for piece in bounds.windows(2) {
-        let x0 = x_at(piece[0])
-            + if piece[0] > 0.0 {
-                CHAPTER_GAP / 2.0
-            } else {
-                0.0
-            };
-        let x1 = x_at(piece[1])
-            - if piece[1] < 1.0 {
-                CHAPTER_GAP / 2.0
-            } else {
-                0.0
-            };
-        if x1 - x0 < 1.0 {
-            continue;
-        }
-        let piece_rect = egui::Rect::from_min_max(
-            egui::pos2(x0, bar_rect.min.y),
-            egui::pos2(x1, bar_rect.max.y),
+    painter.rect_filled(bar_rect, 0.0, track_color);
+    if playhead_x > bar_rect.min.x {
+        painter.rect_filled(
+            egui::Rect::from_min_max(bar_rect.min, egui::pos2(playhead_x, bar_rect.max.y)),
+            0.0,
+            palette::LOOP,
         );
-        painter.rect_filled(piece_rect, 0.0, track_color);
-        let fill_x = playhead_x.min(x1);
-        if fill_x > x0 {
-            let clip =
-                egui::Rect::from_min_max(piece_rect.min, egui::pos2(fill_x, piece_rect.max.y));
-            painter
-                .with_clip_rect(clip.intersect(painter.clip_rect()))
-                .rect_filled(piece_rect, 0.0, palette::ACCENT);
-        }
     }
 
     // A running export fills the timeline as it writes it: under each chapter
@@ -2348,17 +2621,20 @@ fn paint_seek_bar(
         );
     }
 
-    // Scene boundaries: a divider across the lane and the track, so where one
-    // scene ends and the next begins reads at a glance.
+    // Segment boundaries: short ticks across the rail, and longer ones where
+    // a section ends.
     if has_scenes {
+        let section_ends: Vec<f32> = sections
+            .iter()
+            .map(|section| scenes[section.members.start].start_frac)
+            .collect();
         for &cut in &bounds[1..bounds.len() - 1] {
             let x = x_at(cut);
+            let major = has_sections && section_ends.iter().any(|end| (end - cut).abs() < 1e-4);
+            let reach = if major { 6.0 } else { 4.0 };
             painter.line_segment(
-                [
-                    egui::pos2(x, lane_rect.min.y),
-                    egui::pos2(x, bar_y + TRACK_ZONE_H / 2.0 - 1.0),
-                ],
-                egui::Stroke::new(1.5, SCENE_DIVIDER),
+                [egui::pos2(x, bar_y - reach), egui::pos2(x, bar_y + reach)],
+                egui::Stroke::new(1.0, if major { SCENE_DIVIDER } else { TICK_COLOR }),
             );
         }
     }
@@ -2402,24 +2678,53 @@ fn paint_seek_bar(
         }
     }
 
-    // ── Stops: quiet squares under the track ───────────────────────────────
-    let stop_y = bar_y + TRACK_ZONE_H / 2.0 - 2.0;
+    // ── Stops: keyframe diamonds on the rail, hollow until reached ─────────
+    // Packed too tight for diamonds, they become short gold ticks.
+    let stop_gap = bp_fracs
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]) * rect.width())
+        .fold(f32::INFINITY, f32::min);
+    let diamonds = stop_gap >= 7.0;
     for &bp in bp_fracs {
         let bx = x_at(bp);
         let near_pointer = pointer.is_some_and(|pos| (pos.x - bx).abs() < 4.0);
-        let color = if bp <= frac + 1e-4 {
-            palette::STOP.gamma_multiply(0.45)
+        let reached = bp <= frac + 1e-4;
+        if diamonds {
+            let r = if near_pointer { 5.0 } else { 3.5 };
+            let points = vec![
+                egui::pos2(bx, bar_y - r),
+                egui::pos2(bx + r, bar_y),
+                egui::pos2(bx, bar_y + r),
+                egui::pos2(bx - r, bar_y),
+            ];
+            let shape = if reached {
+                egui::Shape::convex_polygon(
+                    points,
+                    palette::STOP.gamma_multiply(0.5),
+                    egui::Stroke::NONE,
+                )
+            } else {
+                egui::Shape::convex_polygon(
+                    points,
+                    palette::GRAPHITE,
+                    egui::Stroke::new(1.2, palette::STOP),
+                )
+            };
+            painter.add(shape);
         } else {
-            palette::STOP.gamma_multiply(0.9)
-        };
-        painter.rect_filled(
-            egui::Rect::from_center_size(
-                egui::pos2(bx, stop_y),
-                egui::Vec2::splat(if near_pointer { 5.0 } else { 3.0 }),
-            ),
-            0.0,
-            color,
-        );
+            let reach = if near_pointer { 5.0 } else { 3.0 };
+            painter.line_segment(
+                [egui::pos2(bx, bar_y - reach), egui::pos2(bx, bar_y + reach)],
+                egui::Stroke::new(
+                    if near_pointer { 2.0 } else { 1.0 },
+                    if reached {
+                        palette::STOP.gamma_multiply(0.35)
+                    } else {
+                        palette::STOP.gamma_multiply(0.8)
+                    },
+                ),
+            );
+        }
     }
 
     // ── Markers: small downward triangles above the track ─────────────────
@@ -2440,11 +2745,17 @@ fn paint_seek_bar(
         } else {
             MARKER_COLOR
         };
+        // A flag on a staff that stands on the rail.
+        let foot = bar_rect.min.y - 1.0;
+        painter.line_segment(
+            [egui::pos2(mx, marker_top), egui::pos2(mx, foot)],
+            egui::Stroke::new(1.2, color),
+        );
         painter.add(egui::Shape::convex_polygon(
             vec![
-                egui::pos2(mx - half, marker_top),
-                egui::pos2(mx + half, marker_top),
-                egui::pos2(mx, marker_top + half * 1.3),
+                egui::pos2(mx, marker_top),
+                egui::pos2(mx + half * 1.6, marker_top + half * 0.6),
+                egui::pos2(mx, marker_top + half * 1.2),
             ],
             color,
             egui::Stroke::NONE,
@@ -2509,13 +2820,15 @@ fn paint_seek_bar(
     }
 
     // ── Playhead ────────────────────────────────────────────────────────
+    // The current frame is gold, as in the brand: a line through the rows
+    // and a square on the rail.
     if has_scenes {
         painter.line_segment(
             [
-                egui::pos2(playhead_x, lane_rect.min.y),
+                egui::pos2(playhead_x, rect.min.y),
                 egui::pos2(playhead_x, bar_y),
             ],
-            egui::Stroke::new(1.5, egui::Color32::from_white_alpha(150)),
+            egui::Stroke::new(1.5, palette::STOP),
         );
     }
     let knob_side = if active { 12.0 } else { 10.0 };
@@ -2526,19 +2839,19 @@ fn paint_seek_bar(
         0.0,
         egui::Color32::from_black_alpha(90),
     );
-    painter.rect_filled(knob, 0.0, egui::Color32::WHITE);
+    painter.rect_filled(knob, 0.0, palette::STOP);
     if is_dragging {
         painter.rect_stroke(
             knob.expand(3.0),
             0.0,
-            egui::Stroke::new(2.0, palette::ACCENT.gamma_multiply(0.5)),
+            egui::Stroke::new(2.0, palette::STOP.gamma_multiply(0.5)),
             egui::StrokeKind::Outside,
         );
     }
 
     if has_scenes
         && let Some(pos) = pointer
-        && lane_rect.contains(pos)
+        && (lane_rect.contains(pos) || (has_sections && section_rect.contains(pos)))
         && hovered_scene_idx.is_some()
     {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -2560,9 +2873,21 @@ fn paint_seek_bar(
             if let Some(index) = clicked_marker {
                 marker_jump = Some(markers[index].time);
             } else if !on_loop_handle {
-                let chapter = (has_scenes && lane_rect.contains(pos))
-                    .then(|| scene_at(frac_at(pos.x)))
+                // A section jumps to its first segment, a segment to its start.
+                let section = (has_sections && section_rect.contains(pos))
+                    .then(|| {
+                        let at = scene_at(frac_at(pos.x))?;
+                        sections
+                            .iter()
+                            .find(|section| section.members.contains(&at))
+                            .map(|section| section.members.start)
+                    })
                     .flatten();
+                let chapter = section.or_else(|| {
+                    (has_scenes && lane_rect.contains(pos))
+                        .then(|| scene_at(frac_at(pos.x)))
+                        .flatten()
+                });
                 seek_to = Some(chapter.map_or(frac_at(pos.x), |i| scenes[i].start_frac));
             }
         }
@@ -2678,7 +3003,7 @@ fn paint_hover_card(
         0.0,
         egui::Color32::from_black_alpha(90),
     );
-    painter.rect_filled(frame, 0.0, egui::Color32::from_rgb(30, 32, 40));
+    painter.rect_filled(frame, 0.0, egui::Color32::from_rgb(32, 32, 34));
     painter.rect_stroke(
         frame,
         0.0,
@@ -2723,6 +3048,37 @@ fn scene_display_name(name: &str) -> &str {
             rest
         }
         _ => name,
+    }
+}
+
+/// The sections of a timeline: consecutive segments that share a leading
+/// `"Section · "`, and each segment without one as its own section.
+fn section_spans(scenes: &[SceneSegment]) -> Vec<SceneGroup<'_>> {
+    let mut sections: Vec<SceneGroup<'_>> = Vec::new();
+    for (index, scene) in scenes.iter().enumerate() {
+        let name = scene_display_name(&scene.name);
+        let label = name.split_once(" · ").map_or(name, |(lead, _)| lead);
+        match sections.last_mut() {
+            Some(section) if section.label == label && name != label => {
+                section.members.end = index + 1;
+            }
+            _ => sections.push(SceneGroup {
+                label,
+                members: index..index + 1,
+            }),
+        }
+    }
+    sections
+}
+
+/// A segment's label in the lane: under a section row, only the part after
+/// its section's name.
+fn segment_label(name: &str, under_sections: bool) -> &str {
+    let name = scene_display_name(name);
+    if under_sections {
+        name.split_once(" · ").map_or(name, |(_, part)| part)
+    } else {
+        name
     }
 }
 
@@ -2783,6 +3139,8 @@ enum PlaybackAction {
     Present,
     ToggleFullscreen,
     TogglePin,
+    OpenSettings,
+    GoHome,
     /// Copy a link to the file (web player), at the moment shown when set.
     CopyLink(bool),
 }
@@ -2959,7 +3317,14 @@ fn editor_fullscreen_keys_system(
     if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input()) {
         return;
     }
-    if !WEB && keys.just_pressed(KeyCode::KeyP) {
+    // Ctrl+P and Ctrl+Shift+P open the jump list and the command palette.
+    let command = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
+    if !WEB && keys.just_pressed(KeyCode::KeyP) && !command {
         toggle_pinned_on_top(&mut editor_state, &mut windows);
     }
     if let Ok(mut window) = windows.single_mut() {
@@ -3233,7 +3598,10 @@ fn pan_for_zoom_at_cursor(
     cursor: glam::DVec2,
     ratio: f64,
 ) -> glam::DVec2 {
-    let center = glam::DVec2::new(window_size.x * 0.5, window_size.y * 0.5 + viewport.offset_y);
+    let center = glam::DVec2::new(
+        window_size.x * 0.5 + viewport.offset_x,
+        window_size.y * 0.5 + viewport.offset_y,
+    );
     // A drag by `d` moves the camera by the world span of `-d`, so the span of
     // the cursor offset shrinking by `1 / ratio` is a drag of that difference.
     pan_for_screen_delta(camera, viewport, (cursor - center) * (1.0 / ratio - 1.0))
@@ -3746,10 +4114,12 @@ fn viewport_adjust_system(
         view_override.0 = None;
         camera_viewport.scale = fit_scale;
         camera_viewport.offset_y = 0.0;
+        camera_viewport.offset_x = 0.0;
         return;
     }
 
     let available_h = window_h - inset.bottom as f64;
+    let available_w = (window_w - inset.right as f64).max(1.0);
 
     let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
     if available_h < 1.0 {
@@ -3758,12 +4128,12 @@ fn viewport_adjust_system(
     }
 
     // Always fit animation into the available area while preserving aspect ratio.
-    let scale_x = window_w / anim_w;
+    let scale_x = available_w / anim_w;
     let scale_y = available_h / anim_h;
     let fit_scale = scale_x.min(scale_y);
     let frame_size = glam::DVec2::new(anim_w * fit_scale, anim_h * fit_scale);
     viewport_frame.origin = glam::DVec2::new(
-        (window_w - frame_size.x) * 0.5,
+        (available_w - frame_size.x) * 0.5,
         (available_h - frame_size.y) * 0.5,
     );
     viewport_frame.size = frame_size;
@@ -3783,6 +4153,8 @@ fn viewport_adjust_system(
     // Shift the Vello centre upward so the animation sits above the timeline.
     // When there is no timeline panel (inset.bottom == 0) the offset is 0.
     camera_viewport.offset_y = -(inset.bottom as f64) / 2.0;
+    // Left of a panel docked on the right.
+    camera_viewport.offset_x = -(inset.right as f64) / 2.0;
     view_override.0 = interactive.enabled.then_some(cam);
 }
 
@@ -4139,6 +4511,18 @@ mod tests {
         assert_eq!(PlaybackDensity::for_width(900.0), PlaybackDensity::Compact);
         assert_eq!(PlaybackDensity::for_width(560.0), PlaybackDensity::Compact);
         assert_eq!(PlaybackDensity::for_width(559.0), PlaybackDensity::Minimal);
+        // Between them the compact bar shows more controls as it widens.
+        assert!(compact_controls(PlaybackDensity::Compact, 600.0).is_empty());
+        assert_eq!(
+            compact_controls(PlaybackDensity::Compact, 760.0),
+            [
+                CompactControl::Export,
+                CompactControl::Present,
+                CompactControl::FullScreen
+            ]
+        );
+        assert_eq!(compact_controls(PlaybackDensity::Compact, 1079.0).len(), 6);
+        assert!(compact_controls(PlaybackDensity::Minimal, 500.0).is_empty());
 
         for width in [1280.0, 800.0, 480.0, 320.0] {
             let density = PlaybackDensity::for_width(width);
@@ -4327,6 +4711,31 @@ mod tests {
             .map(|group| (group.label, group.members))
             .collect();
         assert_eq!(groups, vec![("Problemática", 1..3), ("Fundamentos", 3..6)]);
+
+        // The section row holds every segment: grouped ones by their
+        // section, the rest each as its own.
+        let sections: Vec<_> = section_spans(&scenes)
+            .into_iter()
+            .map(|section| (section.label, section.members))
+            .collect();
+        assert_eq!(
+            sections,
+            vec![
+                ("Portada", 0..1),
+                ("Problemática", 1..3),
+                ("Fundamentos", 3..6),
+                ("Cierre", 6..7)
+            ]
+        );
+        assert_eq!(segment_label(&scenes[4].name, true), "resistencia");
+        assert_eq!(
+            segment_label(&scenes[4].name, false),
+            "Fundamentos · resistencia"
+        );
+        assert_eq!(segment_label("Portada", true), "Portada");
+        // Without shared names there is no section row.
+        let plain = [scene("Intro"), scene("Results")];
+        assert_eq!(section_spans(&plain).len(), plain.len());
     }
 
     #[test]
@@ -4417,15 +4826,18 @@ mod tests {
         let mut export_state = export::ExportState::default();
         export_state.active = true;
         let mut app = App::new();
-        app.insert_resource(ViewportInset { bottom: 120.0 })
-            .insert_resource(PreviewInteractive::default())
-            .insert_resource(Camera::ortho_2d(1280, 720))
-            .insert_resource(CameraViewOverride::default())
-            .insert_resource(CameraViewport::default())
-            .insert_resource(ViewportFrame::default())
-            .insert_resource(PresentationMode::default())
-            .insert_resource(export_state)
-            .add_systems(Update, viewport_adjust_system);
+        app.insert_resource(ViewportInset {
+            bottom: 120.0,
+            right: 0.0,
+        })
+        .insert_resource(PreviewInteractive::default())
+        .insert_resource(Camera::ortho_2d(1280, 720))
+        .insert_resource(CameraViewOverride::default())
+        .insert_resource(CameraViewport::default())
+        .insert_resource(ViewportFrame::default())
+        .insert_resource(PresentationMode::default())
+        .insert_resource(export_state)
+        .add_systems(Update, viewport_adjust_system);
         app.world_mut().spawn((
             Window {
                 resolution: bevy::window::WindowResolution::new(1280, 720),
@@ -4589,6 +5001,7 @@ mod tests {
         let viewport = CameraViewport {
             scale: 2.0 / 3.0,
             offset_y: -40.0,
+            offset_x: 0.0,
         };
         let cursor = egui::pos2(1000.0, 150.0);
         let before =

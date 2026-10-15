@@ -135,7 +135,7 @@ pub fn frame_capture_system(
     let spawned = std::thread::Builder::new()
         .name("gaanim-frame-capture".to_owned())
         .spawn(move || {
-            let _ = sender.send(render_frame(source, at, &path).map(|()| path));
+            let _ = sender.send(render_frame(source, at, &path, None).map(|()| path));
         });
     match spawned {
         Ok(_) => capture.job = Some(receiver),
@@ -149,14 +149,20 @@ pub fn frame_capture_system(
 }
 
 /// What a capture renders from.
-enum Source {
+pub(crate) enum Source {
     Scene(Box<gaanim_api::canvas::SceneModel>),
     /// A playback bundle and its recorded size.
     Bundle(PathBuf, (u32, u32)),
 }
 
-/// Render `source` at `at` seconds into a PNG at `path`.
-fn render_frame(source: Source, at: f64, path: &Path) -> Result<(), String> {
+/// Render `source` at `at` seconds into a PNG at `path`: a scene at the
+/// size an export would use, or `long_edge` pixels on its longest side.
+pub(crate) fn render_frame(
+    source: Source,
+    at: f64,
+    path: &Path,
+    long_edge: Option<u32>,
+) -> Result<(), String> {
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder)
             .map_err(|error| format!("could not create {}: {error}", folder.display()))?;
@@ -173,6 +179,10 @@ fn render_frame(source: Source, at: f64, path: &Path) -> Result<(), String> {
     match source {
         Source::Scene(canvas) => {
             let (width, height) = canvas.frame.preview_pixel_size();
+            let (width, height) = match long_edge {
+                Some(edge) => gaanim_thumbnail::fit(width, height, edge),
+                None => (width, height),
+            };
             let mut config = ExportConfig::new(&path.to_string_lossy());
             config.width = width;
             config.height = height;

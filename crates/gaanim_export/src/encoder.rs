@@ -145,6 +145,7 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
 
     let Ok(mut child) = Command::new("ffmpeg")
         .args(["-hide_banner", "-encoders"])
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()

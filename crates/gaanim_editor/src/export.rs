@@ -350,6 +350,7 @@ pub fn export_dialog_system(
     let mut trigger_cancel = false;
     let mut trigger_ok = false;
     let mut trigger_open = false;
+    let mut trigger_retry = false;
 
     if state.show_complete {
         let cancelled = state.message.starts_with("export cancelled");
@@ -451,6 +452,26 @@ pub fn export_dialog_system(
                             if secondary_button(ui, "Close", true).clicked() {
                                 trigger_ok = true;
                             }
+                        } else if !state.completed_successfully && !cancelled {
+                            // A failure says what to do next: try again with the
+                            // same settings, copy the error, or install FFmpeg.
+                            if primary_button(ui, "Try again", None, true)
+                                .on_hover_text("Opens the export with the same settings")
+                                .clicked()
+                            {
+                                trigger_retry = true;
+                            }
+                            if secondary_button(ui, "Close", true).clicked() {
+                                trigger_ok = true;
+                            }
+                            if secondary_button(ui, "Copy error", true).clicked() {
+                                ui.ctx().copy_text(state.message.clone());
+                            }
+                            if mentions_ffmpeg(&state.message)
+                                && secondary_button(ui, "How to install FFmpeg", true).clicked()
+                            {
+                                let _ = crate::platform::open_detached(FFMPEG_HELP_URL);
+                            }
                         } else if primary_button(ui, "Close", None, true).clicked() {
                             trigger_ok = true;
                         }
@@ -472,6 +493,10 @@ pub fn export_dialog_system(
 
     if trigger_ok {
         state.show_complete = false;
+    }
+    if trigger_retry {
+        state.show_complete = false;
+        state.dialog_open = true;
     }
 
     if state.active {
@@ -709,7 +734,7 @@ pub fn export_dialog_system(
                     )
                     .wrap(),
                 );
-                ui.checkbox(&mut current_notes, "Include speaker notes")
+                crate::ui_kit::checkbox(ui, &mut current_notes, "Include speaker notes")
                     .on_hover_text(
                         "Adds, after each slide's last page, a page with the notes from scene.segment(notes=...).",
                     );
@@ -719,7 +744,7 @@ pub fn export_dialog_system(
             if let FormatChoice::Video(format) = current_choice
                 && keeps_alpha(format)
             {
-                ui.checkbox(&mut current_transparent, "Keep transparency")
+                crate::ui_kit::checkbox(ui, &mut current_transparent, "Keep transparency")
                     .on_hover_text(
                         "Saves the alpha channel. The scene needs a transparent background, for example Scene(background=\"#00000000\").",
                     );
@@ -1276,6 +1301,7 @@ fn terminate_export_worker(child: &mut Child) {
         let process_group = format!("-{}", child.id());
         let _ = Command::new("kill")
             .args(["-KILL", "--", &process_group])
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
@@ -1285,6 +1311,7 @@ fn terminate_export_worker(child: &mut Child) {
         let pid = child.id().to_string();
         let _ = Command::new("taskkill")
             .args(["/PID", &pid, "/T", "/F"])
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
@@ -1372,6 +1399,11 @@ fn run_export_worker(
     command
         .env("GAANIM_EXPORT_WORKER", "1")
         .current_dir(project_dir)
+        // Never the editor's stdin: under `--listen stdio` a thread here
+        // blocks reading it, and on Windows the worker's startup queries
+        // of that same pipe wait behind the read, so it hung before its
+        // first frame.
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_export_worker(&mut command);
@@ -1408,6 +1440,8 @@ fn run_export_worker(
             EXPORT_WORKER_STALL_TIMEOUT,
         ) {
             terminate_export_worker(&mut child);
+            // A worker stopped mid-recording cannot clean up after itself.
+            remove_partial(output_path);
             let summary = match reason {
                 WorkerStopReason::Cancelled => "export cancelled",
                 WorkerStopReason::Stalled => {
@@ -1433,12 +1467,27 @@ fn run_export_worker(
     if status.success() {
         Ok(())
     } else {
+        remove_partial(output_path);
         Err(worker_error_context(
             &format!("export worker exited with {status}"),
             output_path,
             &telemetry,
         ))
     }
+}
+
+/// Remove the `.partial` file a bundle export leaves while it records.
+fn remove_partial(output_path: &str) {
+    let partial = gaanim_export::bundle::partial_path(Path::new(output_path));
+    let _ = std::fs::remove_file(partial);
+}
+
+/// Where the docs explain installing FFmpeg.
+const FFMPEG_HELP_URL: &str = "https://paololupo.github.io/gaanim/empezar/instalacion/";
+
+/// Whether an export error is about FFmpeg, missing or failing.
+fn mentions_ffmpeg(message: &str) -> bool {
+    message.to_lowercase().contains("ffmpeg")
 }
 
 const RESOLUTION_PRESETS: [(&str, u32, u32); 4] = [

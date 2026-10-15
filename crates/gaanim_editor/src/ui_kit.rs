@@ -13,26 +13,38 @@ use bevy_egui::egui::{
     self, Align2, Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2,
 };
 
-/// Colors shared by the editor overlays.
+/// Colors shared by the editor overlays: Gaanim's brand palette
+/// (`docs/assets/brand/README.md`) on graphite without a blue tint.
 pub(crate) mod palette {
     use super::Color32;
 
-    pub const PANEL: Color32 = Color32::from_rgba_premultiplied(15, 16, 21, 238);
-    pub const PANEL_STROKE: Color32 = Color32::from_rgba_premultiplied(20, 21, 26, 24);
-    pub const TEXT: Color32 = Color32::from_rgb(236, 238, 243);
-    pub const TEXT_MUTED: Color32 = Color32::from_rgb(148, 153, 166);
-    pub const TEXT_FAINT: Color32 = Color32::from_rgb(92, 97, 110);
-    pub const ACCENT: Color32 = Color32::from_rgb(112, 170, 255);
-    pub const LOOP: Color32 = Color32::from_rgb(96, 206, 152);
-    pub const STOP: Color32 = Color32::from_rgb(245, 192, 86);
-    pub const HOVER: Color32 = Color32::from_rgba_premultiplied(22, 22, 24, 22);
-    pub const PRESSED: Color32 = Color32::from_rgba_premultiplied(34, 34, 36, 34);
-    pub const DIVIDER: Color32 = Color32::from_rgba_premultiplied(24, 24, 26, 26);
-    pub const SURFACE: Color32 = Color32::from_rgb(22, 23, 30);
-    pub const FIELD: Color32 = Color32::from_rgba_premultiplied(10, 10, 11, 10);
-    pub const SELECTED: Color32 = Color32::from_rgba_premultiplied(30, 31, 34, 32);
+    /// Graphite `#121212` at 93 %: floating bars and panels.
+    pub const PANEL: Color32 = Color32::from_rgba_premultiplied(17, 17, 17, 238);
+    pub const PANEL_STROKE: Color32 = Color32::from_rgba_premultiplied(22, 22, 22, 24);
+    /// Paper `#F7F6FF`.
+    pub const TEXT: Color32 = Color32::from_rgb(247, 246, 255);
+    pub const TEXT_MUTED: Color32 = Color32::from_rgb(160, 158, 170);
+    pub const TEXT_FAINT: Color32 = Color32::from_rgb(104, 102, 114);
+    /// Light violet `#A99FFF`: links, selection and the primary action.
+    pub const ACCENT: Color32 = Color32::from_rgb(169, 159, 255);
+    /// Haze `#CBC6FF`: the primary action under the pointer.
+    pub const ACCENT_HOVER: Color32 = Color32::from_rgb(203, 198, 255);
+    /// Violet `#7C6CFF`: loops, progress and what is ready.
+    pub const LOOP: Color32 = Color32::from_rgb(124, 108, 255);
+    /// Gold `#FFC933`: the current frame (stops, the playhead).
+    pub const STOP: Color32 = Color32::from_rgb(255, 201, 51);
+    pub const HOVER: Color32 = Color32::from_rgba_premultiplied(22, 22, 22, 22);
+    pub const PRESSED: Color32 = Color32::from_rgba_premultiplied(34, 34, 34, 34);
+    pub const DIVIDER: Color32 = Color32::from_rgba_premultiplied(26, 26, 26, 26);
+    /// Graphite `#1A1A1A`: cards and dialogs.
+    pub const SURFACE: Color32 = Color32::from_rgb(26, 26, 26);
+    pub const FIELD: Color32 = Color32::from_rgba_premultiplied(10, 10, 10, 10);
+    pub const SELECTED: Color32 = Color32::from_rgba_premultiplied(32, 32, 32, 32);
     pub const DANGER: Color32 = Color32::from_rgb(255, 118, 118);
-    pub const INK: Color32 = Color32::from_rgb(15, 16, 21);
+    /// Graphite `#121212`: the window behind everything.
+    pub const GRAPHITE: Color32 = Color32::from_rgb(18, 18, 18);
+    /// Ink `#14112E`: text on violet.
+    pub const INK: Color32 = Color32::from_rgb(20, 17, 46);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +103,12 @@ pub(crate) enum Icon {
     Grip,
     /// Staggered bars on tracks: the animation timeline.
     Timeline,
+    /// Three sliders with square knobs: settings.
+    Settings,
+    /// A house: back to Home.
+    Home,
+    /// Three rows, each with a square: a list.
+    List,
 }
 
 /// How an icon button presents its state.
@@ -158,11 +176,11 @@ pub(crate) fn icon_button_sized(
     let icon_color = match tone {
         ButtonTone::Primary => {
             let fill = if pressed {
-                Color32::from_rgb(200, 204, 214)
+                palette::LOOP
             } else if hovered {
-                Color32::WHITE
+                palette::ACCENT_HOVER
             } else {
-                palette::TEXT
+                palette::ACCENT
             };
             let body = Rect::from_center_size(
                 rect.center(),
@@ -174,7 +192,7 @@ pub(crate) fn icon_button_sized(
                 Color32::from_black_alpha(70),
             );
             painter.rect_filled(body, 0.0, fill);
-            Color32::from_rgb(15, 16, 21)
+            palette::INK
         }
         ButtonTone::On(toggle) => {
             let color = toggle.color();
@@ -672,6 +690,44 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
             painter.circle_stroke(p(-0.08, -0.08), s * 0.26, stroke);
             painter.line_segment([p(0.12, 0.12), p(0.40, 0.40)], stroke);
         }
+        Icon::Settings => {
+            let thin = Stroke::new(stroke.width * 0.8, color);
+            for (y, knob) in [(-0.28, 0.16), (0.0, -0.18), (0.28, 0.06)] {
+                painter.line_segment([p(-0.42, y), p(0.42, y)], thin);
+                painter.rect_filled(
+                    Rect::from_center_size(p(knob, y), Vec2::splat(s * 0.2)),
+                    0.0,
+                    color,
+                );
+            }
+        }
+        Icon::List => {
+            for y in [-0.28, 0.0, 0.28] {
+                painter.rect_filled(
+                    Rect::from_center_size(p(-0.30, y), Vec2::splat(s * 0.14)),
+                    0.0,
+                    color,
+                );
+                painter.line_segment([p(-0.12, y), p(0.42, y)], stroke);
+            }
+        }
+        Icon::Home => {
+            painter.line(vec![p(-0.42, -0.02), p(0.0, -0.40), p(0.42, -0.02)], stroke);
+            painter.line(
+                vec![
+                    p(-0.28, -0.14),
+                    p(-0.28, 0.38),
+                    p(0.28, 0.38),
+                    p(0.28, -0.14),
+                ],
+                stroke,
+            );
+            painter.rect_filled(
+                Rect::from_min_max(p(-0.08, 0.12), p(0.08, 0.38)),
+                0.0,
+                color,
+            );
+        }
         Icon::Grip => {
             for x in [-0.14, 0.14] {
                 for y in [-0.28, 0.0, 0.28] {
@@ -720,6 +776,45 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
 /// buttons, scroll bars, slider handles) to match the painted controls.
 pub(crate) fn square_corners(style: &mut egui::Style) {
     let visuals = &mut style.visuals;
+    // egui's own widgets in the brand's colours: violet selection and links,
+    // graphite fields without egui's blue tint.
+    visuals.selection.bg_fill = palette::LOOP.gamma_multiply(0.55);
+    visuals.selection.stroke = Stroke::new(1.0, palette::ACCENT);
+    visuals.hyperlink_color = palette::ACCENT;
+    visuals.extreme_bg_color = Color32::from_rgb(12, 12, 12);
+    visuals.text_edit_bg_color = Some(Color32::from_rgb(12, 12, 12));
+    visuals.faint_bg_color = Color32::from_rgb(24, 24, 24);
+    visuals.window_fill = palette::SURFACE;
+    visuals.panel_fill = palette::GRAPHITE;
+    visuals.widgets.inactive.bg_fill = Color32::from_rgb(40, 40, 42);
+    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(34, 34, 36);
+    visuals.widgets.hovered.bg_fill = Color32::from_rgb(52, 52, 56);
+    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(46, 46, 50);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, palette::ACCENT.gamma_multiply(0.6));
+    visuals.widgets.active.bg_fill = Color32::from_rgb(62, 60, 72);
+    visuals.widgets.active.weak_bg_fill = Color32::from_rgb(56, 54, 66);
+    visuals.widgets.open.weak_bg_fill = Color32::from_rgb(40, 40, 42);
+    // Fields, sliders and drop-downs: a faint frame at rest, violet under
+    // the pointer and while open, paper text when touched.
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(52, 52, 56));
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, palette::TEXT_MUTED);
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.5, palette::TEXT);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette::ACCENT);
+    visuals.widgets.active.fg_stroke = Stroke::new(2.0, palette::TEXT);
+    visuals.widgets.open.bg_stroke = Stroke::new(1.0, palette::ACCENT);
+    visuals.widgets.open.fg_stroke = Stroke::new(1.0, palette::TEXT);
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, palette::DIVIDER);
+    // A slider fills its rail in violet up to the knob, like a seek track.
+    visuals.slider_trailing_fill = true;
+    style.spacing.slider_rail_height = 4.0;
+    // Drop-down lists and menus: a graphite card with a hairline.
+    visuals.window_stroke = Stroke::new(1.0, Color32::from_rgb(44, 44, 46));
+    visuals.popup_shadow = egui::Shadow {
+        offset: [0, 8],
+        blur: 24,
+        spread: 0,
+        color: Color32::from_black_alpha(130),
+    };
     visuals.window_corner_radius = egui::CornerRadius::ZERO;
     visuals.menu_corner_radius = egui::CornerRadius::ZERO;
     visuals.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.5 };
@@ -761,11 +856,93 @@ pub(crate) fn section_label(ui: &mut Ui, text: &str) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)
+                .monospace()
                 .size(11.5)
                 .color(palette::TEXT_MUTED),
         )
         .selectable(false),
     );
+}
+
+/// A check box in the brand's style: a square that fills violet with an
+/// ink check when on, framed violet under the pointer.
+pub(crate) fn checkbox(
+    ui: &mut Ui,
+    checked: &mut bool,
+    text: impl Into<egui::WidgetText>,
+) -> Response {
+    const SIDE: f32 = 16.0;
+    const GAP: f32 = 8.0;
+    let galley = text.into().into_galley(
+        ui,
+        Some(egui::TextWrapMode::Wrap),
+        (ui.available_width() - SIDE - GAP).max(40.0),
+        egui::TextStyle::Body,
+    );
+    let size = vec2(SIDE + GAP + galley.size().x, SIDE.max(galley.size().y));
+    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+    if response.clicked() {
+        *checked = !*checked;
+        response.mark_changed();
+    }
+    let enabled = ui.is_enabled();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, *checked, galley.text())
+    });
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let hovered = enabled && response.hovered();
+    let dim = |color: Color32| {
+        if enabled {
+            color
+        } else {
+            color.gamma_multiply(0.45)
+        }
+    };
+    let square = Rect::from_min_size(
+        pos2(
+            rect.min.x,
+            rect.min.y + (galley.size().y.max(SIDE) - SIDE) / 2.0,
+        ),
+        Vec2::splat(SIDE),
+    );
+    let painter = ui.painter();
+    let (fill, stroke) = match (*checked, hovered) {
+        (true, true) => (palette::ACCENT, palette::ACCENT),
+        (true, false) => (palette::LOOP, palette::LOOP),
+        (false, true) => (Color32::from_rgb(12, 12, 12), palette::ACCENT),
+        (false, false) => (Color32::from_rgb(12, 12, 12), Color32::from_rgb(78, 76, 88)),
+    };
+    painter.rect_filled(square, 0.0, dim(fill));
+    painter.rect_stroke(
+        square,
+        0.0,
+        Stroke::new(1.0, dim(stroke)),
+        egui::StrokeKind::Inside,
+    );
+    if *checked {
+        let at = |x: f32, y: f32| square.min + vec2(x, y) * SIDE;
+        painter.line(
+            vec![at(0.24, 0.52), at(0.43, 0.70), at(0.78, 0.31)],
+            Stroke::new(2.0, dim(palette::INK)),
+        );
+    }
+    let text_color = if enabled {
+        palette::TEXT
+    } else {
+        palette::TEXT_FAINT
+    };
+    painter.galley(
+        pos2(square.max.x + GAP, rect.center().y - galley.size().y / 2.0),
+        galley,
+        text_color,
+    );
+    response.on_hover_cursor(if enabled {
+        egui::CursorIcon::PointingHand
+    } else {
+        egui::CursorIcon::Default
+    })
 }
 
 /// A segmented control. Each option is `(value, title, detail)`; an empty
@@ -929,6 +1106,38 @@ pub(crate) fn secondary_button_sized(
     text_button(ui, label, None, enabled, false, size)
 }
 
+/// The brand's hover (`--frames` on the docs site): under the pointer the
+/// element steps 3 px to the right in three frames over 0.15 s, leaving two
+/// violet ghosts of its edge behind, as onion-skin frames of a tween. Returns
+/// where to draw the element now.
+pub(crate) fn frame_hover(ui: &Ui, id: egui::Id, rect: Rect, hovered: bool) -> Rect {
+    let t = ui
+        .ctx()
+        .animate_bool_with_time(id.with("frame-hover"), hovered, 0.15);
+    // steps(3): whole pixels, never in between.
+    let shift = (t * 3.0).floor().min(3.0);
+    if shift >= 1.0 {
+        let strip = |from: f32, to: f32| {
+            Rect::from_min_max(
+                pos2(rect.min.x + from, rect.min.y),
+                pos2(rect.min.x + to, rect.max.y),
+            )
+        };
+        let painter = ui.painter();
+        painter.rect_filled(
+            strip(shift - 6.0, shift - 3.0),
+            0.0,
+            palette::ACCENT.gamma_multiply(0.2),
+        );
+        painter.rect_filled(
+            strip(shift - 3.0, shift),
+            0.0,
+            palette::ACCENT.gamma_multiply(0.45),
+        );
+    }
+    rect.translate(vec2(shift, 0.0))
+}
+
 fn text_button(
     ui: &mut Ui,
     label: &str,
@@ -952,13 +1161,14 @@ fn text_button(
     let (rect, response) = ui.allocate_exact_size(size, sense);
     let hovered = enabled && response.hovered();
     let pressed = enabled && response.is_pointer_button_down_on();
+    let rect = frame_hover(ui, response.id, rect, hovered);
     let painter = ui.painter();
     let (fill, text) = match (primary, enabled) {
         (true, true) => (
             if pressed {
                 palette::ACCENT.gamma_multiply(0.85)
             } else if hovered {
-                Color32::from_rgb(140, 188, 255)
+                palette::ACCENT_HOVER
             } else {
                 palette::ACCENT
             },
@@ -1099,6 +1309,7 @@ pub(crate) fn small_button_sized(ui: &mut Ui, label: &str, enabled: bool, font: 
 /// Letter-spaced caption used as a section heading.
 pub(crate) fn caption(text: &str) -> egui::RichText {
     egui::RichText::new(text)
+        .monospace()
         .size(11.0)
         .strong()
         .extra_letter_spacing(1.2)
