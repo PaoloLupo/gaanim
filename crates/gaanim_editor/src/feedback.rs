@@ -35,6 +35,10 @@ pub(crate) fn location_label(location: &ScriptLocation) -> String {
 /// Badge confirming a reload, faded by `opacity` while it disappears.
 /// `top` moves it below other top-anchored bars.
 pub fn reload_badge(ctx: &egui::Context, message: &str, opacity: f32, top: f32) {
+    // Turned off in Settings → Preview.
+    if !crate::settings::reload_notice_shown() {
+        return;
+    }
     egui::Area::new("reload_status".into())
         .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, top))
         .order(egui::Order::Foreground)

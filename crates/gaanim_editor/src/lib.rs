@@ -547,6 +547,37 @@ enum PlaybackDensity {
     Minimal,
 }
 
+/// Controls a compact playback bar shows beside its menu, most used first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompactControl {
+    Export,
+    Present,
+    FullScreen,
+    Settings,
+    Narration,
+    Home,
+}
+
+/// The controls a bar of `density` shows beside its menu at `width`: none
+/// in the minimal bar, the full set in the wide one (which lays them out
+/// itself), and in between one more per 40 pixels past the compact bar's
+/// least width.
+fn compact_controls(density: PlaybackDensity, width: f32) -> &'static [CompactControl] {
+    const ORDER: [CompactControl; 6] = [
+        CompactControl::Export,
+        CompactControl::Present,
+        CompactControl::FullScreen,
+        CompactControl::Settings,
+        CompactControl::Narration,
+        CompactControl::Home,
+    ];
+    if density != PlaybackDensity::Compact {
+        return &[];
+    }
+    let room = ((width - 620.0) / 40.0).floor().max(0.0) as usize;
+    &ORDER[..room.min(ORDER.len())]
+}
+
 impl PlaybackDensity {
     fn for_width(width: f32) -> Self {
         if width >= 1080.0 {
@@ -784,7 +815,9 @@ fn editor_ui_system(
     ),
     interactive: Res<PreviewInteractive>,
     viewport_frame: Res<ViewportFrame>,
-    mut hub: Option<ResMut<project_hub::ProjectHubState>>,
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))] mut hub: Option<
+        ResMut<project_hub::ProjectHubState>,
+    >,
     presenter_windows: Query<(), With<presenter::PresenterWindow>>,
 ) {
     if hub.as_ref().is_some_and(|hub| hub.active) {
@@ -1414,8 +1447,71 @@ fn editor_ui_system(
                                             actions.push(PlaybackAction::ToggleContinuous);
                                         }
                                     } else {
+                                        // The menu holds every control; beside it, as many
+                                        // of the most used as the width leaves room for.
                                         let more = icon_button(ui, Icon::More, ButtonTone::Ghost, true)
                                             .on_hover_text("More controls");
+                                        let shown = compact_controls(density, screen_w);
+                                        for control in shown {
+                                            match control {
+                                                CompactControl::Export
+                                                    if !WEB && export_status.is_none() =>
+                                                {
+                                                    if icon_button(ui, Icon::Export, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Export animation")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::OpenExport);
+                                                    }
+                                                }
+                                                CompactControl::Present => {
+                                                    if icon_button(ui, Icon::Present, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Present in full screen")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::Present);
+                                                    }
+                                                }
+                                                CompactControl::FullScreen => {
+                                                    if icon_button(ui, Icon::Fullscreen, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Full screen · F11")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::ToggleFullscreen);
+                                                    }
+                                                }
+                                                CompactControl::Settings if !WEB => {
+                                                    if icon_button(ui, Icon::Settings, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Settings · Ctrl+,")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::OpenSettings);
+                                                    }
+                                                }
+                                                CompactControl::Narration if narration_available => {
+                                                    let tone = if narration_open {
+                                                        ButtonTone::On(ToggleColor::Accent)
+                                                    } else {
+                                                        ButtonTone::Ghost
+                                                    };
+                                                    if icon_button(ui, Icon::Mic, tone, true)
+                                                        .on_hover_text("Script & narration")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::ToggleNarration);
+                                                    }
+                                                }
+                                                CompactControl::Home if !WEB => {
+                                                    if icon_button(ui, Icon::Home, ButtonTone::Ghost, true)
+                                                        .on_hover_text("Back to Home: closes this project")
+                                                        .clicked()
+                                                    {
+                                                        actions.push(PlaybackAction::GoHome);
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
                                         egui::Popup::menu(&more).show(|ui| {
                                             ui.set_min_width(180.0);
                                             if density == PlaybackDensity::Minimal {
@@ -4260,6 +4356,18 @@ mod tests {
         assert_eq!(PlaybackDensity::for_width(900.0), PlaybackDensity::Compact);
         assert_eq!(PlaybackDensity::for_width(560.0), PlaybackDensity::Compact);
         assert_eq!(PlaybackDensity::for_width(559.0), PlaybackDensity::Minimal);
+        // Between them the compact bar shows more controls as it widens.
+        assert!(compact_controls(PlaybackDensity::Compact, 600.0).is_empty());
+        assert_eq!(
+            compact_controls(PlaybackDensity::Compact, 760.0),
+            [
+                CompactControl::Export,
+                CompactControl::Present,
+                CompactControl::FullScreen
+            ]
+        );
+        assert_eq!(compact_controls(PlaybackDensity::Compact, 1079.0).len(), 6);
+        assert!(compact_controls(PlaybackDensity::Minimal, 500.0).is_empty());
 
         for width in [1280.0, 800.0, 480.0, 320.0] {
             let density = PlaybackDensity::for_width(width);

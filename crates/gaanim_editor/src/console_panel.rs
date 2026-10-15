@@ -189,8 +189,28 @@ pub fn console_panel_system(
     let run = console::current_run();
     let counts = panel.counts(run);
     if !panel.open {
-        if counts.errors + counts.warnings > 0 && problems_badge(ctx, counts) {
-            panel.open = true;
+        let counts = match crate::settings::problems_badge() {
+            crate::settings::ProblemsBadge::All => counts,
+            crate::settings::ProblemsBadge::Errors => Counts {
+                warnings: 0,
+                ..counts
+            },
+            crate::settings::ProblemsBadge::Hidden => Counts {
+                warnings: 0,
+                errors: 0,
+                ..counts
+            },
+        };
+        if counts.errors + counts.warnings > 0 {
+            match problems_badge(ctx, counts) {
+                BadgeAction::Open => panel.open = true,
+                BadgeAction::Hide => {
+                    if let Err(error) = crate::settings::hide_problems_badge() {
+                        gaanim_core::console::warn("console", format!("not saved: {error}"));
+                    }
+                }
+                BadgeAction::None => {}
+            }
         }
         return;
     }
@@ -338,15 +358,23 @@ pub fn console_panel_system(
     }
 }
 
-/// The hidden console's badge; returns whether it was clicked.
-fn problems_badge(ctx: &egui::Context, counts: Counts) -> bool {
+/// What the hidden console's badge was asked for.
+enum BadgeAction {
+    None,
+    Open,
+    /// Hide the badge from now on.
+    Hide,
+}
+
+/// The hidden console's badge, with a button that hides it for good.
+fn problems_badge(ctx: &egui::Context, counts: Counts) -> BadgeAction {
     let color = if counts.errors > 0 {
         palette::DANGER
     } else {
         palette::STOP
     };
     let text = badge_text(counts);
-    let mut clicked = false;
+    let mut action = BadgeAction::None;
     egui::Area::new("console_badge".into())
         .anchor(egui::Align2::LEFT_TOP, egui::vec2(12.0, 12.0))
         .order(egui::Order::Foreground)
@@ -366,9 +394,43 @@ fn problems_badge(ctx: &egui::Context, counts: Counts) -> bool {
                 .response
                 .interact(egui::Sense::click())
                 .on_hover_text("Open the console · J");
-            clicked = response.clicked();
+            if response.clicked() {
+                action = BadgeAction::Open;
+            }
+            // Beside it, out of the badge's own click.
+            let close = egui::Rect::from_min_size(
+                egui::pos2(response.rect.max.x + 2.0, response.rect.min.y),
+                egui::vec2(response.rect.height(), response.rect.height()),
+            );
+            let hide = ui
+                .interact(close, ui.id().with("hide-badge"), egui::Sense::click())
+                .on_hover_text(
+                    "Hide this badge after every reload; show it again in Settings → Preview",
+                );
+            ui.painter().rect_filled(
+                close,
+                0.0,
+                if hide.hovered() {
+                    palette::SURFACE
+                } else {
+                    palette::PANEL
+                },
+            );
+            ui_kit::paint_icon(
+                ui.painter(),
+                egui::Rect::from_center_size(close.center(), egui::Vec2::splat(10.0)),
+                Icon::Close,
+                if hide.hovered() {
+                    palette::TEXT
+                } else {
+                    palette::TEXT_FAINT
+                },
+            );
+            if hide.clicked() {
+                action = BadgeAction::Hide;
+            }
         });
-    clicked
+    action
 }
 
 /// `1 error · 2 warnings`.

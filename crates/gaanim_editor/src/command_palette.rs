@@ -464,6 +464,7 @@ fn command_palette_system(
     mut thumbnails: ResMut<crate::presenter::PresenterThumbnailCache>,
     stash: Res<crate::export::StashedReplay>,
 ) {
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let Some(mut hub) = hub else {
         return;
     };

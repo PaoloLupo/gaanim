@@ -55,6 +55,81 @@ impl PreviewPreferences {
     }
 }
 
+/// Which problems the corner badge counts while the console is hidden.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ProblemsBadge {
+    /// Warnings and errors.
+    #[default]
+    All,
+    Errors,
+    /// None: the console (`J`) still lists them.
+    Hidden,
+}
+
+/// The `notices` section: what the editor shows on its own after a reload.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct NoticePreferences {
+    #[serde(default)]
+    pub(crate) problems: ProblemsBadge,
+    /// The "Scene ready" notice after each reload.
+    #[serde(default = "enabled")]
+    pub(crate) reload: bool,
+}
+
+impl Default for NoticePreferences {
+    fn default() -> Self {
+        Self {
+            problems: ProblemsBadge::All,
+            reload: true,
+        }
+    }
+}
+
+impl NoticePreferences {
+    const SECTION: &str = "notices";
+
+    fn load() -> Self {
+        gaanim_project::settings::load(Self::SECTION)
+    }
+
+    fn save(&self) -> Result<(), String> {
+        gaanim_project::settings::save(Self::SECTION, self)
+    }
+}
+
+/// The notice preferences in force, read every frame without the file.
+static PROBLEMS_BADGE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+static RELOAD_NOTICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+fn apply_notices(preferences: NoticePreferences) {
+    use std::sync::atomic::Ordering;
+    PROBLEMS_BADGE.store(preferences.problems as u8, Ordering::Relaxed);
+    RELOAD_NOTICE.store(preferences.reload, Ordering::Relaxed);
+}
+
+/// Which problems the console's corner badge counts.
+pub(crate) fn problems_badge() -> ProblemsBadge {
+    match PROBLEMS_BADGE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => ProblemsBadge::Errors,
+        2 => ProblemsBadge::Hidden,
+        _ => ProblemsBadge::All,
+    }
+}
+
+/// Hide the console's corner badge from now on, as its close button asks.
+pub(crate) fn hide_problems_badge() -> Result<(), String> {
+    let mut preferences = NoticePreferences::load();
+    preferences.problems = ProblemsBadge::Hidden;
+    apply_notices(preferences);
+    preferences.save()
+}
+
+/// Whether the "Scene ready" notice shows after a reload.
+pub fn reload_notice_shown() -> bool {
+    RELOAD_NOTICE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The preview's resolution: [`PREVIEW_RESOLUTION_ENV`], else Settings.
 pub(crate) fn preview_resolution() -> PreviewResolution {
     let variable = std::env::var(PREVIEW_RESOLUTION_ENV).ok();
@@ -108,6 +183,8 @@ impl UpdatePreferences {
         gaanim_project::settings::load(Self::SECTION)
     }
 
+    // Settings, the only caller, never opens on the web.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn save(&self) -> Result<(), String> {
         gaanim_project::settings::save(Self::SECTION, self)
     }
@@ -199,7 +276,9 @@ impl SettingsWindow {
 struct Drafts {
     prompter: PrompterPreferences,
     preview: PreviewPreferences,
+    notices: NoticePreferences,
     integrations: IntegrationPreferences,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     updates: UpdatePreferences,
     /// The relay address as typed, saved with its button.
     relay: String,
@@ -212,6 +291,7 @@ impl Drafts {
         Self {
             prompter: PrompterPreferences::load(),
             preview: PreviewPreferences::load(),
+            notices: NoticePreferences::load(),
             integrations: IntegrationPreferences::load(),
             updates: UpdatePreferences::load(),
             relay: gaanim_project::relay::saved().unwrap_or_default(),
@@ -230,6 +310,9 @@ pub(crate) struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
+        if !crate::WEB {
+            apply_notices(NoticePreferences::load());
+        }
         app.init_resource::<SettingsWindow>()
             .add_systems(
                 Update,
@@ -692,6 +775,36 @@ fn preview_section(
         let result = drafts.preview.save();
         drafts.saved(result);
     }
+
+    ui.add_space(12.0);
+    section_label(ui, "PROBLEMS BADGE");
+    let before = drafts.notices;
+    segmented(
+        ui,
+        "settings-problems",
+        &mut drafts.notices.problems,
+        &[
+            (ProblemsBadge::All, "Warnings and errors", ""),
+            (ProblemsBadge::Errors, "Errors only", ""),
+            (ProblemsBadge::Hidden, "Hidden", ""),
+        ],
+    );
+    note(
+        ui,
+        "The corner badge that counts the script's problems after each reload while the \
+         console is closed. Hidden or not, the console (J) lists them, and an error that \
+         stops the scene still opens its panel.",
+    );
+    crate::ui_kit::checkbox(
+        ui,
+        &mut drafts.notices.reload,
+        "Show \"Scene ready\" after each reload",
+    );
+    if drafts.notices != before {
+        apply_notices(drafts.notices);
+        let result = drafts.notices.save();
+        drafts.saved(result);
+    }
 }
 
 fn integrations_section(ui: &mut egui::Ui, drafts: &mut Drafts) {
@@ -771,12 +884,21 @@ fn integrations_section(ui: &mut egui::Ui, drafts: &mut Drafts) {
     );
 }
 
+/// The web player has no updates to check; Settings never opens there.
+#[cfg(target_arch = "wasm32")]
+fn updates_section(
+    _ui: &mut egui::Ui,
+    _drafts: &mut Drafts,
+    _hub: Option<&mut crate::project_hub::ProjectHubState>,
+) {
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn updates_section(
     ui: &mut egui::Ui,
     drafts: &mut Drafts,
     hub: Option<&mut crate::project_hub::ProjectHubState>,
 ) {
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(hub) = hub {
         section_label(ui, "NOW");
         crate::project_hub::update_settings_ui(ui, hub);
@@ -787,8 +909,6 @@ fn updates_section(
         );
         ui.add_space(12.0);
     }
-    #[cfg(target_arch = "wasm32")]
-    let _ = hub;
     section_label(ui, "DAILY CHECK");
     let variable = crate::update::disabled_by_variable()
         .then(|| std::env::var(crate::update::DISABLE_VARIABLE).unwrap_or_default());

@@ -1086,7 +1086,7 @@ fn project_hub_ui_system(
     mut state: ResMut<ProjectHubState>,
     mut pending: ResMut<PendingProjectOpen>,
     mut settings: ResMut<crate::settings::SettingsWindow>,
-    narration: Option<Res<crate::narration::NarrationSession>>,
+    #[cfg(not(target_arch = "wasm32"))] narration: Option<Res<crate::narration::NarrationSession>>,
     #[cfg(not(target_arch = "wasm32"))] mut exit: MessageWriter<AppExit>,
 ) {
     // Leaving starts Gaanim again; a recording or dictation in progress
