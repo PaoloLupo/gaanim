@@ -389,6 +389,9 @@ pub struct ProjectHubState {
     /// Go back to Home from a project: start Gaanim again without one.
     #[cfg(not(target_arch = "wasm32"))]
     home_requested: bool,
+    /// A recent project or bundle to switch to: Gaanim starts again with it.
+    #[cfg(not(target_arch = "wasm32"))]
+    switch_requested: Option<PathBuf>,
     /// Recent entries as rows or as cards with their covers.
     recent_view: RecentView,
     thumbnails: Thumbnails,
@@ -532,6 +535,8 @@ impl Default for ProjectHubState {
             update: UpdateOffer::default(),
             #[cfg(not(target_arch = "wasm32"))]
             home_requested: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            switch_requested: None,
             recent_view: HomePreferences::load().recent_view,
             thumbnails: Thumbnails::default(),
             covered: false,
@@ -553,6 +558,13 @@ impl ProjectHubState {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn request_home(&mut self) {
         self.home_requested = true;
+    }
+
+    /// Leave the open project for another one, or a bundle, as
+    /// [`Self::request_home`] leaves it for Home.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn request_switch(&mut self, path: PathBuf) {
+        self.switch_requested = Some(path);
     }
 
     pub fn report_open_error(&mut self, error: String) {
@@ -1054,9 +1066,14 @@ fn project_hub_ui_system(
     // The new version starts before this one closes, so the window
     // seems to restart. Settings can ask for it from the editor too.
     #[cfg(not(target_arch = "wasm32"))]
-    if std::mem::take(&mut state.home_requested) {
-        let started = std::env::current_exe()
-            .and_then(|executable| std::process::Command::new(executable).spawn());
+    let switch = state.switch_requested.take();
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::mem::take(&mut state.home_requested) || switch.is_some() {
+        let started = std::env::current_exe().and_then(|executable| {
+            let mut command = std::process::Command::new(executable);
+            command.args(switch.iter());
+            command.spawn()
+        });
         match started {
             Ok(_) => {
                 exit.write(AppExit::Success);

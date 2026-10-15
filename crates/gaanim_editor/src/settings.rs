@@ -129,7 +129,7 @@ pub(crate) enum Section {
 }
 
 impl Section {
-    const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Recording,
         Self::Transcription,
         Self::Dictation,
@@ -139,7 +139,7 @@ impl Section {
         Self::Updates,
     ];
 
-    fn title(self) -> &'static str {
+    pub(crate) fn title(self) -> &'static str {
         match self {
             Self::Recording => "Recording",
             Self::Transcription => "Transcription",

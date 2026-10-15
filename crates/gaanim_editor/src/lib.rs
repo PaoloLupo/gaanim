@@ -42,6 +42,7 @@ pub use polls::{relay_version, reset_relay_session, save_relay_results};
 /// Built for the web player: no native windows, file system or FFmpeg, so
 /// pinning, exporting and the separate Presenter View window are left out.
 pub(crate) const WEB: bool = cfg!(target_arch = "wasm32");
+mod command_palette;
 mod presenter;
 pub mod presenter_link;
 pub mod project_hub;
@@ -245,6 +246,7 @@ impl Plugin for GaanimEditorPlugin {
             .add_plugins(project_hub::ProjectHubPlugin)
             .add_plugins(presenter_link::PresenterLinkPlugin)
             .add_plugins(settings::SettingsPlugin)
+            .add_plugins(command_palette::CommandPalettePlugin)
             .init_resource::<project_thumbnail::ProjectThumbnail>()
             .add_systems(Update, project_thumbnail::project_thumbnail_system)
             .add_systems(PreUpdate, square_egui_corners_system)
@@ -587,6 +589,11 @@ pub struct EditorState {
     pub(crate) touch_reveal: bool,
     /// Where the playback bar was drawn last frame, in egui points.
     pub(crate) bar_rect: Option<egui::Rect>,
+    /// The bar stays on screen until this egui time, so a project that
+    /// opens or reloads shows its controls before they hide.
+    bar_reveal_until: f64,
+    /// The replay the bar last revealed itself for.
+    bar_revealed_revision: Option<u64>,
 }
 
 impl Default for EditorState {
@@ -605,6 +612,8 @@ impl Default for EditorState {
             segment_loop: SegmentLoopState::default(),
             touch_reveal: false,
             bar_rect: None,
+            bar_reveal_until: 0.0,
+            bar_revealed_revision: None,
         }
     }
 }
@@ -744,6 +753,7 @@ fn editor_ui_system(
         controls,
         mut prompter,
         mut settings_window,
+        mut palette,
     ): (
         ResMut<export::ExportState>,
         ResMut<narration::NarrationPanel>,
@@ -754,6 +764,7 @@ fn editor_ui_system(
         Res<PlaybackControls>,
         ResMut<presenter::prompter::PrompterSettings>,
         ResMut<settings::SettingsWindow>,
+        ResMut<command_palette::CommandPalette>,
     ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
@@ -830,11 +841,27 @@ fn editor_ui_system(
     let vp = ctx.viewport_rect();
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let pointer_near_bottom = pointer.map(|p| p.y > vp.height() - 60.0).unwrap_or(false);
+    // A project that opens or reloads shows its controls for a moment.
+    let now = ctx.input(|i| i.time);
+    if state.bar_revealed_revision != Some(replay_stash.revision) {
+        state.bar_revealed_revision = Some(replay_stash.revision);
+        state.bar_reveal_until = now + BAR_REVEAL_SECONDS;
+    }
+    let revealing = now < state.bar_reveal_until;
+    if revealing {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+            state.bar_reveal_until - now,
+        ));
+    }
+    // An action chosen in the command palette runs where the bar's do.
+    let forwarded = palette.take_forwarded();
     // A menu opened from the bar keeps it, and so itself, on screen while the
     // pointer travels to it above the bar.
     let should_show = pointer_near_bottom
         || state.bar_hovered
         || state.touch_reveal
+        || revealing
+        || forwarded.is_some()
         || egui::Popup::is_any_open(ctx);
     let dt = ctx.input(|i| i.unstable_dt);
     let target_vis = if should_show { 1.0_f32 } else { 0.0_f32 };
@@ -844,6 +871,9 @@ fn editor_ui_system(
         state.bar_visibility = target_vis;
     }
     let vis = state.bar_visibility;
+    if vis < 0.99 && controls.shown {
+        paint_bar_hint(ctx, vp, 1.0 - vis);
+    }
     // El playback es un overlay flotante y nunca reduce el viewport.
     inset.bottom = 0.0;
     state.bar_rect = None;
@@ -1564,7 +1594,7 @@ fn editor_ui_system(
                         state.segment_query = segment_query;
                         state.segment_list_open = segment_list_open;
                         state.segment_highlight = segment_highlight;
-                        for action in left_actions.into_iter().chain(right_actions) {
+                        for action in left_actions.into_iter().chain(right_actions).chain(forwarded) {
                             match action {
                                 PlaybackAction::TogglePlay => {
                                     timeline.is_playing = !timeline.is_playing;
@@ -1669,6 +1699,27 @@ fn format_time(seconds: f64) -> String {
     let secs = (total_cs % 6000) / 100;
     let cs = total_cs % 100;
     format!("{}:{:02}.{:02}", mins, secs, cs)
+}
+
+/// Seconds the playback bar stays up when a project opens or reloads.
+const BAR_REVEAL_SECONDS: f64 = 3.0;
+
+/// While the playback bar hides, a short line at the bottom edge says it is
+/// there: moving the pointer down brings it back.
+fn paint_bar_hint(ctx: &egui::Context, viewport: egui::Rect, strength: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("playback_hint"),
+    ));
+    let line = egui::Rect::from_center_size(
+        egui::pos2(viewport.center().x, viewport.max.y - 5.0),
+        egui::vec2(72.0, 3.0),
+    );
+    painter.rect_filled(
+        line,
+        0.0,
+        palette::TEXT_FAINT.gamma_multiply(0.8 * strength),
+    );
 }
 
 fn current_scene_loop_range(timeline: &Timeline) -> Option<(f64, f64)> {
@@ -3019,7 +3070,14 @@ fn editor_fullscreen_keys_system(
     if !editor_shortcuts_allowed(presentation_mode.active, egui_wants.wants_keyboard_input()) {
         return;
     }
-    if !WEB && keys.just_pressed(KeyCode::KeyP) {
+    // Ctrl+P and Ctrl+Shift+P open the jump list and the command palette.
+    let command = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
+    if !WEB && keys.just_pressed(KeyCode::KeyP) && !command {
         toggle_pinned_on_top(&mut editor_state, &mut windows);
     }
     if let Ok(mut window) = windows.single_mut() {

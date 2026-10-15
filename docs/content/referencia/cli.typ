@@ -95,6 +95,25 @@ gaanim --present --monitor 1 mi-charla --from resultados
 Los atajos de teclado del modo presentación y de Presenter View están en
 #link("/guias/presentaciones/")[Presentaciones].
 
+== Comandos y atajos del editor <comandos>
+
+La barra de reproducción se esconde mientras no la usas. Al abrir un proyecto
+y tras cada recarga se queda unos segundos a la vista; después, una línea corta
+en el borde inferior indica dónde está, y basta con bajar el puntero para que
+vuelva.
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Atajo*], [*Qué abre*],
+  [`Ctrl+Shift+P`], [La paleta de comandos: todas las acciones del editor en una lista que se filtra al escribir (reproducir, exportar, presentar, pantalla completa, overlays, consola, guardar el fotograma, cada sección de #link(<ajustes>)[Settings], volver al Inicio, abrir un proyecto reciente). Cada fila muestra su atajo. Las flechas eligen, `Enter` ejecuta y `Esc` cierra.],
+  [`Ctrl+P`], [Ir a un segmento o a una pausa por su nombre. Las pausas aparecen bajo su segmento y se encuentran también por el nombre de este. Al lado se ve la diapositiva tal como queda en ese punto, la misma vista previa de Presenter View, y las notas que se dicen desde allí. `Enter` salta y deja la reproducción en pausa allí.],
+  [`?`], [La hoja de atajos: todos los atajos del editor agrupados, sacados de la misma lista que la paleta.],
+)
+
+`Cmd` sustituye a `Ctrl` en macOS. Mientras escribes en un campo, los atajos de
+una sola tecla no actúan.
+
 == Controlar la vista previa desde un editor <listen>
 
 Con `--listen`, un editor de código mueve la vista previa y sabe dónde está:
