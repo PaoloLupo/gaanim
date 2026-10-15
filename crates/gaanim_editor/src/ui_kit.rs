@@ -105,6 +105,8 @@ pub(crate) enum Icon {
     Timeline,
     /// Three sliders with square knobs: settings.
     Settings,
+    /// A house: back to Home.
+    Home,
 }
 
 /// How an icon button presents its state.
@@ -696,6 +698,23 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                     color,
                 );
             }
+        }
+        Icon::Home => {
+            painter.line(vec![p(-0.42, -0.02), p(0.0, -0.40), p(0.42, -0.02)], stroke);
+            painter.line(
+                vec![
+                    p(-0.28, -0.14),
+                    p(-0.28, 0.38),
+                    p(0.28, 0.38),
+                    p(0.28, -0.14),
+                ],
+                stroke,
+            );
+            painter.rect_filled(
+                Rect::from_min_max(p(-0.08, 0.12), p(0.08, 0.38)),
+                0.0,
+                color,
+            );
         }
         Icon::Grip => {
             for x in [-0.14, 0.14] {

@@ -767,10 +767,10 @@ fn editor_ui_system(
     ),
     interactive: Res<PreviewInteractive>,
     viewport_frame: Res<ViewportFrame>,
-    hub: Option<Res<project_hub::ProjectHubState>>,
+    mut hub: Option<ResMut<project_hub::ProjectHubState>>,
     presenter_windows: Query<(), With<presenter::PresenterWindow>>,
 ) {
-    if hub.is_some_and(|hub| hub.active) {
+    if hub.as_ref().is_some_and(|hub| hub.active) {
         inset.bottom = 0.0;
         return;
     }
@@ -1226,6 +1226,26 @@ fn editor_ui_system(
                                     let mut actions = Vec::new();
                                     ui.spacing_mut().item_spacing.x = 2.0;
                                     if density == PlaybackDensity::Wide {
+                                        if !WEB {
+                                            if icon_button(
+                                                ui,
+                                                Icon::Settings,
+                                                ButtonTone::Ghost,
+                                                true,
+                                            )
+                                            .on_hover_text("Settings · Ctrl+,")
+                                            .clicked()
+                                            {
+                                                actions.push(PlaybackAction::OpenSettings);
+                                            }
+                                            if icon_button(ui, Icon::Home, ButtonTone::Ghost, true)
+                                                .on_hover_text("Back to Home: closes this project")
+                                                .clicked()
+                                            {
+                                                actions.push(PlaybackAction::GoHome);
+                                            }
+                                            divider(ui);
+                                        }
                                         let pin_tone = if pinned {
                                             ButtonTone::On(ToggleColor::Stop)
                                         } else {
@@ -1427,6 +1447,16 @@ fn editor_ui_system(
                                             if !WEB && ui.button("Settings · Ctrl+,").clicked() {
                                                 actions.push(PlaybackAction::OpenSettings);
                                             }
+                                            if !WEB
+                                                && ui
+                                                    .button("Back to Home")
+                                                    .on_hover_text(
+                                                        "Closes this project and opens Home",
+                                                    )
+                                                    .clicked()
+                                            {
+                                                actions.push(PlaybackAction::GoHome);
+                                            }
                                             if has_audio {
                                                 ui.separator();
                                                 ui.horizontal(|ui| {
@@ -1559,6 +1589,12 @@ fn editor_ui_system(
                                     prompter.editor_open = !prompter.editor_open;
                                 }
                                 PlaybackAction::OpenSettings => settings_window.open(),
+                                PlaybackAction::GoHome => {
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    if let Some(hub) = hub.as_mut() {
+                                        hub.request_home();
+                                    }
+                                }
                                 PlaybackAction::Present => start_presentation(
                                     &mut presentation_mode,
                                     &mut fullscreen_state,
@@ -2803,6 +2839,7 @@ enum PlaybackAction {
     ToggleFullscreen,
     TogglePin,
     OpenSettings,
+    GoHome,
     /// Copy a link to the file (web player), at the moment shown when set.
     CopyLink(bool),
 }

@@ -582,7 +582,9 @@ Un `gaanim` compilado desde el código (en la carpeta `target/` de Cargo) no se
 actualiza así: actualízalo con `git pull` y vuelve a compilar.
 
 La pantalla de inicio consulta GitHub como mucho una vez al día y, si hay una
-versión nueva, ofrece instalarla con el mismo proceso. Desactiva esa consulta
+versión nueva, ofrece instalarla con el mismo proceso. Para no esperarla,
+*Check now* en #link(<ajustes>)[*Settings → Updates*] consulta en el momento,
+también desde el editor. Desactiva esa consulta
 en #link(<ajustes>)[*Settings → Updates*] o con la variable
 `GAANIM_NO_UPDATE_CHECK=1`.
 
@@ -679,8 +681,11 @@ estándar; se distinguen porque llevan `event` en lugar de `type`.
 
 *Settings* reúne las preferencias que Gaanim guarda para ti, las mismas en
 todos tus proyectos. Se abre igual en la pantalla de inicio (*Settings* en la
-barra lateral) y en el editor (*More controls → Settings*), y en los dos con
-`Ctrl+,`; `Esc` la cierra. Cada cambio se guarda al momento.
+barra lateral) y en el editor (el botón de ajustes a la derecha de la barra de
+reproducción, o *More controls → Settings* si la ventana es estrecha), y en
+los dos con `Ctrl+,`; `Esc` la cierra. Cada cambio se guarda al momento. A su
+lado, el botón de la casa (*Back to Home*) cierra el proyecto y vuelve a la
+pantalla de inicio: Gaanim se abre de nuevo sin él.
 
 #table(
   columns: (auto, 1fr),
@@ -692,7 +697,7 @@ barra lateral) y en el editor (*More controls → Settings*), y en los dos con
   [*Prompter*], [El ritmo al que se ilumina el guion: *Automatic* (el de tus grabaciones, si no tu ritmo medido al dictar, si no 150 palabras por minuto) o *Fixed*, el mismo para todos los tramos, entre 80 y 240 palabras por minuto. También el tamaño del texto. Ver #link("/guias/presentaciones/#prompter")[El prompter].],
   [*Preview*], [La resolución de la previsualización del editor: *Automatic* la baja mientras la reproducción no llega a 60 fps, *Full* dibuja siempre todos los píxeles y *Fixed* dibuja una fracción. Se aplica al momento y nunca afecta a las exportaciones.],
   [*Integrations*], [El comando del editor de código que abre una línea del script, con `{file}` y `{line}` (vacío: prueba `code`, `cursor`, `codium`, `zed` y `subl`), y el relay de las encuestas, el mismo que guarda `gaanim relay use`.],
-  [*Updates*], [Si la pantalla de inicio consulta GitHub una vez al día para avisar de versiones nuevas.],
+  [*Updates*], [*Check now* consulta GitHub en el momento, aunque la consulta diaria esté desactivada, y si hay una versión nueva la instala y reinicia Gaanim como `gaanim update`. Debajo, si la pantalla de inicio consulta GitHub una vez al día para avisar de versiones nuevas.],
 )
 
 Todo se guarda en `settings.json`, en la carpeta de datos de Gaanim

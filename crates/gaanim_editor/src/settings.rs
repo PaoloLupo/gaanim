@@ -249,7 +249,7 @@ fn settings_window_system(
     mut prompter: ResMut<PrompterSettings>,
     mut pace: ResMut<PrompterPace>,
     preview: Option<ResMut<PreviewResolution>>,
-    hub: Option<Res<crate::project_hub::ProjectHubState>>,
+    mut hub: Option<ResMut<crate::project_hub::ProjectHubState>>,
     paths: Option<Res<ProjectPaths>>,
 ) {
     if crate::WEB {
@@ -333,7 +333,9 @@ fn settings_window_system(
                                         ),
                                         Section::Preview => preview_section(ui, drafts, preview),
                                         Section::Integrations => integrations_section(ui, drafts),
-                                        Section::Updates => updates_section(ui, drafts),
+                                        Section::Updates => {
+                                            updates_section(ui, drafts, hub.as_deref_mut())
+                                        }
                                     }
                                     if let Some((message, failed)) = &drafts.notice {
                                         ui.add_space(4.0);
@@ -759,7 +761,25 @@ fn integrations_section(ui: &mut egui::Ui, drafts: &mut Drafts) {
     );
 }
 
-fn updates_section(ui: &mut egui::Ui, drafts: &mut Drafts) {
+fn updates_section(
+    ui: &mut egui::Ui,
+    drafts: &mut Drafts,
+    hub: Option<&mut crate::project_hub::ProjectHubState>,
+) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(hub) = hub {
+        section_label(ui, "NOW");
+        crate::project_hub::update_settings_ui(ui, hub);
+        note(
+            ui,
+            "Asks GitHub right away, even with the daily check off, and installs the new \
+             version over this one as gaanim update does.",
+        );
+        ui.add_space(12.0);
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = hub;
+    section_label(ui, "DAILY CHECK");
     let variable = crate::update::disabled_by_variable()
         .then(|| std::env::var(crate::update::DISABLE_VARIABLE).unwrap_or_default());
     let locked = locked_by(ui, crate::update::DISABLE_VARIABLE, variable);

@@ -95,8 +95,13 @@ struct Preparation {
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct UpdateOffer {
-    checking: Option<Receiver<Option<crate::update::Release>>>,
+    checking: Option<Receiver<Result<Option<crate::update::Release>, String>>>,
     checked: bool,
+    /// The last check was asked for in Settings, so its answer is shown
+    /// even when there is nothing new or it failed.
+    manual: bool,
+    /// Why the last check asked for in Settings failed.
+    check_error: Option<String>,
     /// A newer release with a package for this system.
     available: Option<crate::update::Release>,
     installing: Option<Receiver<InstallEvent>>,
@@ -129,10 +134,32 @@ impl UpdateOffer {
         let spawned = std::thread::Builder::new()
             .name("gaanim-update-check".into())
             .spawn(move || {
-                let _ = tx.send(crate::update::check(false).ok().flatten());
+                let _ = tx.send(crate::update::check(false));
             });
         if spawned.is_ok() {
             self.checking = Some(rx);
+        }
+    }
+
+    /// Ask GitHub now, whatever the last check said and even when the
+    /// daily check is off; Settings shows the answer.
+    fn check_now(&mut self) {
+        if self.working() {
+            return;
+        }
+        self.checked = true;
+        self.manual = true;
+        self.dismissed = false;
+        self.check_error = None;
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let spawned = std::thread::Builder::new()
+            .name("gaanim-update-check".into())
+            .spawn(move || {
+                let _ = tx.send(crate::update::check(true));
+            });
+        match spawned {
+            Ok(_) => self.checking = Some(rx),
+            Err(error) => self.check_error = Some(error.to_string()),
         }
     }
 
@@ -162,8 +189,13 @@ impl UpdateOffer {
     fn poll(&mut self) {
         if let Some(rx) = &self.checking {
             match rx.try_recv() {
-                Ok(release) => {
+                // A failed daily check stays silent; one asked for says why.
+                Ok(Ok(release)) => {
                     self.available = release;
+                    self.checking = None;
+                }
+                Ok(Err(error)) => {
+                    self.check_error = Some(error);
                     self.checking = None;
                 }
                 Err(TryRecvError::Disconnected) => self.checking = None,
@@ -200,6 +232,127 @@ impl UpdateOffer {
     fn working(&self) -> bool {
         self.checking.is_some() || self.installing.is_some()
     }
+
+    /// What the offer of `release` says, in its colour and icon.
+    fn status(&self, release: &crate::update::Release) -> (Color32, Icon, String) {
+        if let Some(error) = &self.error {
+            return (
+                palette::DANGER,
+                Icon::Warning,
+                format!("Could not update to Gaanim {}: {error}", release.version),
+            );
+        }
+        if self.installed.is_some() {
+            return (
+                palette::LOOP,
+                Icon::Check,
+                format!(
+                    "Gaanim {} is installed. Restart to use it.",
+                    release.version
+                ),
+            );
+        }
+        let doing = match self.step {
+            Some(crate::update::Step::Downloading { done, total }) if total > 0 => format!(
+                "Downloading Gaanim {}… {}%",
+                release.version,
+                done * 100 / total
+            ),
+            Some(crate::update::Step::Downloading { .. }) => {
+                format!("Downloading Gaanim {}…", release.version)
+            }
+            Some(crate::update::Step::Verifying) => "Verifying the download…".to_owned(),
+            Some(crate::update::Step::Unpacking) => "Unpacking…".to_owned(),
+            Some(crate::update::Step::Installing) => "Installing…".to_owned(),
+            None => format!(
+                "Gaanim {} is available; you have {}.",
+                release.version,
+                env!("CARGO_PKG_VERSION")
+            ),
+        };
+        (palette::ACCENT, Icon::Package, doing)
+    }
+}
+
+/// Settings → Updates: check now, without waiting for the daily check, and
+/// update and restart as Home's banner does.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn update_settings_ui(ui: &mut Ui, state: &mut ProjectHubState) {
+    let offer = &mut state.update;
+    offer.poll();
+    let checking = offer.checking.is_some();
+    let installing = offer.installing.is_some();
+    ui.horizontal(|ui| {
+        let label = if checking { "Checking…" } else { "Check now" };
+        if secondary_button(ui, label, !offer.working()).clicked() {
+            offer.check_now();
+        }
+        ui.label(
+            egui::RichText::new(concat!("You have Gaanim ", env!("CARGO_PKG_VERSION")))
+                .size(13.0)
+                .color(palette::TEXT_MUTED),
+        );
+    });
+    let (mut notes, mut install, mut restart) = (false, false, false);
+    if let Some(release) = offer.available.clone() {
+        let (color, icon, text) = offer.status(&release);
+        ui.horizontal_wrapped(|ui| {
+            let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+            ui_kit::paint_icon(ui.painter(), icon_rect, icon, color);
+            ui.label(egui::RichText::new(text).size(13.0).color(palette::TEXT));
+        });
+        ui.horizontal(|ui| {
+            if offer.installed.is_some() {
+                restart = primary_button(ui, "Restart", None, true).clicked();
+            } else if !installing {
+                let label = if offer.error.is_some() {
+                    "Retry"
+                } else {
+                    "Update"
+                };
+                install = primary_button(ui, label, None, true).clicked();
+            }
+            if !release.page.is_empty() {
+                notes = secondary_button(ui, "What's new", true).clicked();
+            }
+        });
+    } else if let Some(error) = &offer.check_error {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!("Could not check: {error}"))
+                    .size(13.0)
+                    .color(palette::DANGER),
+            )
+            .wrap(),
+        );
+    } else if offer.manual && !checking {
+        ui.label(
+            egui::RichText::new("This is the latest version.")
+                .size(13.0)
+                .color(palette::LOOP),
+        );
+    }
+    if offer.working() {
+        ui.ctx().request_repaint_after(Duration::from_millis(100));
+    }
+    if notes {
+        let _ = crate::platform::open_detached(&release_page(offer));
+    }
+    if install {
+        offer.install();
+    }
+    if restart {
+        offer.restart = offer.installed.clone();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn release_page(offer: &UpdateOffer) -> String {
+    offer
+        .available
+        .as_ref()
+        .map(|release| release.page.clone())
+        .unwrap_or_default()
 }
 
 enum Notice {
@@ -232,6 +385,9 @@ pub struct ProjectHubState {
     associated: Option<bool>,
     #[cfg(not(target_arch = "wasm32"))]
     update: UpdateOffer,
+    /// Go back to Home from a project: start Gaanim again without one.
+    #[cfg(not(target_arch = "wasm32"))]
+    home_requested: bool,
 }
 
 impl Default for ProjectHubState {
@@ -254,6 +410,8 @@ impl Default for ProjectHubState {
             associated: None,
             #[cfg(not(target_arch = "wasm32"))]
             update: UpdateOffer::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            home_requested: false,
         }
     }
 }
@@ -264,6 +422,14 @@ impl ProjectHubState {
         self.check_tools();
         #[cfg(not(target_arch = "wasm32"))]
         self.update.check();
+    }
+
+    /// Leave the open project or bundle for Home. A project loads Python and
+    /// its scene into this process, so Gaanim starts again without one, as
+    /// after an update, rather than unloading it in place.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn request_home(&mut self) {
+        self.home_requested = true;
     }
 
     pub fn report_open_error(&mut self, error: String) {
@@ -762,6 +928,35 @@ fn project_hub_ui_system(
     mut settings: ResMut<crate::settings::SettingsWindow>,
     #[cfg(not(target_arch = "wasm32"))] mut exit: MessageWriter<AppExit>,
 ) {
+    // The new version starts before this one closes, so the window
+    // seems to restart. Settings can ask for it from the editor too.
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::mem::take(&mut state.home_requested) {
+        let started = std::env::current_exe()
+            .and_then(|executable| std::process::Command::new(executable).spawn());
+        match started {
+            Ok(_) => {
+                exit.write(AppExit::Success);
+            }
+            Err(error) => {
+                gaanim_core::console::error("home", format!("could not open Home: {error}"));
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(executable) = state.update.restart.take() {
+        match std::process::Command::new(&executable).spawn() {
+            Ok(_) => {
+                exit.write(AppExit::Success);
+            }
+            Err(error) => {
+                state.notice = Some(Notice::Error(format!(
+                    "Could not open the new version ({}): {error}. Open it yourself.",
+                    executable.display()
+                )));
+            }
+        }
+    }
     if !state.active {
         return;
     }
@@ -816,23 +1011,6 @@ fn project_hub_ui_system(
         ctx.request_repaint();
     }
     state.opening_shown = state.opening.is_some();
-
-    // The new version starts before this one closes, so the window
-    // seems to restart.
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(executable) = state.update.restart.take() {
-        match std::process::Command::new(&executable).spawn() {
-            Ok(_) => {
-                exit.write(AppExit::Success);
-            }
-            Err(error) => {
-                state.notice = Some(Notice::Error(format!(
-                    "Could not open the new version ({}): {error}. Open it yourself.",
-                    executable.display()
-                )));
-            }
-        }
-    }
 }
 
 fn handle_shortcuts(ctx: &egui::Context, state: &mut ProjectHubState) {
@@ -1104,42 +1282,7 @@ fn update_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         return;
     }
     let installing = offer.installing.is_some();
-    let (color, icon, text) = if let Some(error) = &offer.error {
-        (
-            palette::DANGER,
-            Icon::Warning,
-            format!("Could not update to Gaanim {}: {error}", release.version),
-        )
-    } else if offer.installed.is_some() {
-        (
-            palette::LOOP,
-            Icon::Check,
-            format!(
-                "Gaanim {} is installed. Restart to use it.",
-                release.version
-            ),
-        )
-    } else {
-        let doing = match offer.step {
-            Some(crate::update::Step::Downloading { done, total }) if total > 0 => format!(
-                "Downloading Gaanim {}… {}%",
-                release.version,
-                done * 100 / total
-            ),
-            Some(crate::update::Step::Downloading { .. }) => {
-                format!("Downloading Gaanim {}…", release.version)
-            }
-            Some(crate::update::Step::Verifying) => "Verifying the download…".to_owned(),
-            Some(crate::update::Step::Unpacking) => "Unpacking…".to_owned(),
-            Some(crate::update::Step::Installing) => "Installing…".to_owned(),
-            None => format!(
-                "Gaanim {} is available; you have {}.",
-                release.version,
-                env!("CARGO_PKG_VERSION")
-            ),
-        };
-        (palette::ACCENT, Icon::Package, doing)
-    };
+    let (color, icon, text) = offer.status(&release);
     let (mut notes, mut install, mut restart, mut dismiss) = (false, false, false, false);
     egui::Frame::new()
         .fill(color.gamma_multiply(0.12))
