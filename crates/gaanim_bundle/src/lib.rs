@@ -2664,6 +2664,55 @@ mod tests {
         );
     }
 
+    /// A segment holds the recipes of every chunk that met them first, so it
+    /// can hold another chunk's recipe that refers to an earlier segment this
+    /// chunk does not list. Seeking straight to the chunk still decodes it.
+    #[test]
+    fn a_chunk_decodes_without_the_segments_of_recipes_it_does_not_draw() {
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        // Every chunk closes a segment of its own.
+        writer.segment_bytes = 1;
+        let earlier = square(2, 3.0, false);
+        // The earlier outline in a recipe of its own.
+        let mut again = square(3, 3.0, false);
+        again.recipe = Arc::new(gaanim_renderer::fragment::FragmentRecipe {
+            path: earlier.recipe.path.clone(),
+            fill_progress: Some(0.5),
+            ..Default::default()
+        });
+        let later = square(4, 7.0, false);
+        let chunks = [
+            vec![square(1, -5.0, false)],
+            vec![earlier],
+            vec![again, later.clone()],
+            vec![later],
+        ];
+        let mut index = 0;
+        for elements in chunks {
+            for _ in 0..CHUNK_FRAMES {
+                let mut captured = frame(f64::from(index) / 60.0);
+                captured.capture.elements = elements.clone();
+                writer.push_frame(&captured, [0; 32]).unwrap();
+                index += 1;
+            }
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: f64::from(index) / 60.0,
+            ..Default::default()
+        };
+        let bytes = writer.finish(&scene).unwrap().into_inner();
+        let mut bundle = Bundle::from_bytes(bytes.into()).unwrap();
+        // The last chunk draws only the later square, from segment 2, where
+        // the other recipe refers to segment 1's outline.
+        assert_eq!(bundle.manifest.chunks[3].table_segments, vec![2]);
+        let last = bundle.frame_count() - 1;
+        assert_eq!(lefts(&bundle.frame(last).unwrap()), vec![7.0]);
+        // Segment 1 loads with chunk 1, and the recipe that needs it decodes.
+        let third = 2 * CHUNK_FRAMES;
+        assert_eq!(lefts(&bundle.frame(third).unwrap()), vec![3.0, 7.0]);
+    }
+
     #[test]
     fn format_5_bundles_still_open_and_verify() {
         let bytes = include_bytes!("../tests/fixtures/format5.gaanim");

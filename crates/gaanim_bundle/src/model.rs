@@ -600,9 +600,27 @@ struct Segment {
     /// Shared by every frame of one transition, so its shader is built once.
     transition_shaders: Vec<Arc<TransitionShader>>,
     effect_shaders: Vec<PostProcessShader>,
-    recipes: Vec<Arc<FragmentRecipe>>,
+    recipes: Vec<SegmentRecipe>,
     meshes: Vec<Arc<gaanim_scene::TriangleMeshData>>,
     lines: Vec<Arc<gaanim_scene::LineListData>>,
+}
+
+/// A recipe of a loaded segment, decoded the first time a frame draws it.
+/// A segment holds the recipes of every chunk that met them first, and a
+/// chunk lists only the segments of the recipes it draws: decoding the
+/// others as the segment loads would need segments the chunk does not list.
+struct SegmentRecipe {
+    bytes: Vec<u8>,
+    decoded: std::sync::OnceLock<Arc<FragmentRecipe>>,
+}
+
+impl SegmentRecipe {
+    fn new(bytes: &[u8]) -> Self {
+        Self {
+            bytes: bytes.to_vec(),
+            decoded: std::sync::OnceLock::new(),
+        }
+    }
 }
 
 /// Decoded tables of an open bundle, segment by segment as frames need
@@ -674,8 +692,9 @@ impl DecodedTables {
         *self.starts.last().expect("totals")
     }
 
-    /// Decode segment `segment` from `bytes`. The segments its recipes refer
-    /// to must be decoded already: every one before it that they use.
+    /// Decode segment `segment` from `bytes`. Its recipes decode the first
+    /// time a frame draws one, so the segments a recipe refers to must be
+    /// loaded by then: the chunk drawing it lists them.
     pub fn load(&mut self, segment: usize, bytes: &[u8]) -> Result<()> {
         let expected = self.starts[segment + 1].sub(self.starts[segment]);
         let mut r = Reader::new(bytes);
@@ -717,9 +736,9 @@ impl DecodedTables {
             decoded.effect_shaders.push(read_post_shader(&mut r)?);
         }
         let recipes = count(&mut r, expected.recipes, "recipes")?;
-        let mut encoded = Vec::with_capacity(recipes.min(1 << 20));
+        decoded.recipes.reserve(recipes.min(1 << 20));
         for _ in 0..recipes {
-            encoded.push(r.bytes()?);
+            decoded.recipes.push(SegmentRecipe::new(r.bytes()?));
         }
         for _ in 0..count(&mut r, expected.meshes, "meshes")? {
             decoded.meshes.push(Arc::new(codec::read_mesh(&mut r)?));
@@ -730,25 +749,8 @@ impl DecodedTables {
         if !r.is_empty() {
             return Err(corrupt("a segment has trailing data"));
         }
-        // Recipes refer to this segment's paths and images too.
         self.segments[segment] = Some(decoded);
-        let recipes = encoded
-            .iter()
-            .map(|bytes| read_recipe(&mut Reader::new(bytes), self).map(Arc::new))
-            .collect::<Result<Vec<_>>>();
-        match recipes {
-            Ok(recipes) => {
-                self.segments[segment]
-                    .as_mut()
-                    .expect("just loaded")
-                    .recipes = recipes;
-                Ok(())
-            }
-            Err(error) => {
-                self.segments[segment] = None;
-                Err(error)
-            }
-        }
+        Ok(())
     }
 
     /// Tables of a format 5 bundle, which stores each table whole in an
@@ -785,14 +787,13 @@ impl DecodedTables {
             decoded.effect_shaders.push(read_post_shader(&mut r)?);
         }
         let mut r = Reader::new(recipes);
-        let mut encoded = Vec::new();
         for _ in 0..r.len()? {
-            encoded.push(r.bytes()?);
+            decoded.recipes.push(SegmentRecipe::new(r.bytes()?));
         }
         let counts = TableCounts {
             paths: decoded.paths.len() as u32,
             images: decoded.images.len() as u32,
-            recipes: encoded.len() as u32,
+            recipes: decoded.recipes.len() as u32,
             strings: decoded.strings.len() as u32,
             transitions: decoded.transition_shaders.len() as u32,
             effects: decoded.effect_shaders.len() as u32,
@@ -801,16 +802,17 @@ impl DecodedTables {
         };
         let mut tables = Self::new(&[counts]);
         tables.segments[0] = Some(decoded);
-        let recipes = encoded
-            .iter()
-            .map(|bytes| read_recipe(&mut Reader::new(bytes), &tables).map(Arc::new))
-            .collect::<Result<Vec<_>>>()?;
-        tables.segments[0].as_mut().expect("just set").recipes = recipes;
         Ok(tables)
     }
 
     fn recipe(&self, index: u32) -> Result<Arc<FragmentRecipe>> {
-        lookup(self, |c| c.recipes, |s| &s.recipes, index, "recipe").cloned()
+        let recipe = lookup(self, |c| c.recipes, |s| &s.recipes, index, "recipe")?;
+        if let Some(decoded) = recipe.decoded.get() {
+            return Ok(Arc::clone(decoded));
+        }
+        // Recipes refer to their own segment's paths and images too.
+        let decoded = Arc::new(read_recipe(&mut Reader::new(&recipe.bytes), self)?);
+        Ok(Arc::clone(recipe.decoded.get_or_init(|| decoded)))
     }
 
     fn effect_shader(&self, index: u32) -> Result<PostProcessShader> {

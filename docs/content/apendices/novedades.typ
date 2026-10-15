@@ -11,6 +11,29 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.13.1
+
+Publicada el 14 de octubre de 2026. Corrige el reproductor de los paquetes
+`.gaanim` en formato 6: uno largo, con las tablas en varios segmentos, se
+quedaba congelado en la primera pausa o en el primer salto de la línea de
+tiempo. No hace falta volver a exportar nada.
+
+== Cambios
+
+- Los paquetes en formato 6 se reproducen enteros y saltan a cualquier
+  instante. Un segmento guarda las recetas de dibujo de todos los bloques que
+  las usaron primero, y al cargarlo el reproductor las leía todas, también
+  las que remiten a segmentos que el bloque abierto no carga; fallaba con
+  «a frame refers to a path of a segment it does not list» y se quedaba en el
+  último fotograma. Ahora cada receta se lee la primera vez que un fotograma
+  la dibuja. `gaanim check` no lo detectaba porque recorre los fotogramas en
+  orden.
+
+== Al actualizar
+
+- Los paquetes grabados con 0.13.0 son correctos: 0.13.1 los reproduce tal
+  cual, sin `gaanim pack` ni una nueva exportación.
+
 = 0.13.0
 
 Publicada el 14 de octubre de 2026. El guion de la charla pasa a un archivo
