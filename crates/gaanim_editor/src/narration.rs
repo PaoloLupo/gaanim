@@ -3370,7 +3370,7 @@ fn timing_card(
             .on_disabled_hover_text(
                 "Paste or save a Scribe token under Zoom Scribe (dictation) below to dictate",
             );
-            ui.checkbox(audio.keep, "Keep the audio, to listen back")
+            crate::ui_kit::checkbox(ui, audio.keep, "Keep the audio, to listen back")
                 .on_hover_text(
                     "Each recording keeps the audio of every slide and stop it times, in \
                      Gaanim's data folder on this computer, never in the project; recording \
@@ -3617,11 +3617,10 @@ fn live_card(
                 }
             }
         });
-        ui.checkbox(dictate, "Also dictate the script with Scribe")
-            .on_hover_text(
-                "While you record, Zoom Scribe transcribes your voice and each phrase goes to \
+        crate::ui_kit::checkbox(ui, dictate, "Also dictate the script with Scribe").on_hover_text(
+            "While you record, Zoom Scribe transcribes your voice and each phrase goes to \
                  its slide in the script (set it up under Zoom Scribe (dictation) below)",
-            );
+        );
     });
 }
 
@@ -3742,7 +3741,8 @@ fn voiceover_card(
 fn recording_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
     let before = settings.clone();
     {
-        ui.checkbox(
+        crate::ui_kit::checkbox(
+            ui,
             &mut settings.level_voice,
             "Level each new take when saving it",
         );
@@ -3788,8 +3788,13 @@ fn recording_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
             .size(13.5)
             .color(palette::TEXT_FAINT),
         );
-        ui.checkbox(&mut settings.countdown, "Countdown of 3 s before recording");
-        ui.checkbox(
+        crate::ui_kit::checkbox(
+            ui,
+            &mut settings.countdown,
+            "Countdown of 3 s before recording",
+        );
+        crate::ui_kit::checkbox(
+            ui,
             &mut settings.keep_talk_audio,
             "Keep the audio of each recording of the talk, to listen back to it",
         );
@@ -3822,7 +3827,8 @@ fn whisper_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
                     .font(egui::FontId::monospace(12.0)),
             );
         });
-        ui.checkbox(
+        crate::ui_kit::checkbox(
+            ui,
             &mut settings.auto_transcribe,
             "Transcribe each new take when saving it",
         );
@@ -4001,7 +4007,8 @@ fn scribe_settings(
                     .suffix(" min"),
             );
         });
-        ui.checkbox(
+        crate::ui_kit::checkbox(
+            ui,
             &mut settings.scribe_vocabulary,
             "Send the names of slides and stops as vocabulary",
         );

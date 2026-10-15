@@ -709,7 +709,7 @@ pub fn export_dialog_system(
                     )
                     .wrap(),
                 );
-                ui.checkbox(&mut current_notes, "Include speaker notes")
+                crate::ui_kit::checkbox(ui, &mut current_notes, "Include speaker notes")
                     .on_hover_text(
                         "Adds, after each slide's last page, a page with the notes from scene.segment(notes=...).",
                     );
@@ -719,7 +719,7 @@ pub fn export_dialog_system(
             if let FormatChoice::Video(format) = current_choice
                 && keeps_alpha(format)
             {
-                ui.checkbox(&mut current_transparent, "Keep transparency")
+                crate::ui_kit::checkbox(ui, &mut current_transparent, "Keep transparency")
                     .on_hover_text(
                         "Saves the alpha channel. The scene needs a transparent background, for example Scene(background=\"#00000000\").",
                     );

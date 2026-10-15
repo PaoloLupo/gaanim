@@ -795,7 +795,8 @@ fn updates_section(
     let locked = locked_by(ui, crate::update::DISABLE_VARIABLE, variable);
     let before = drafts.updates.clone();
     ui.add_enabled_ui(!locked, |ui| {
-        ui.checkbox(
+        crate::ui_kit::checkbox(
+            ui,
             &mut drafts.updates.check,
             "Check for new versions once a day on Home",
         );

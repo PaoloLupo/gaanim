@@ -794,6 +794,27 @@ pub(crate) fn square_corners(style: &mut egui::Style) {
     visuals.widgets.active.bg_fill = Color32::from_rgb(62, 60, 72);
     visuals.widgets.active.weak_bg_fill = Color32::from_rgb(56, 54, 66);
     visuals.widgets.open.weak_bg_fill = Color32::from_rgb(40, 40, 42);
+    // Fields, sliders and drop-downs: a faint frame at rest, violet under
+    // the pointer and while open, paper text when touched.
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(52, 52, 56));
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, palette::TEXT_MUTED);
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.5, palette::TEXT);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, palette::ACCENT);
+    visuals.widgets.active.fg_stroke = Stroke::new(2.0, palette::TEXT);
+    visuals.widgets.open.bg_stroke = Stroke::new(1.0, palette::ACCENT);
+    visuals.widgets.open.fg_stroke = Stroke::new(1.0, palette::TEXT);
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, palette::DIVIDER);
+    // A slider fills its rail in violet up to the knob, like a seek track.
+    visuals.slider_trailing_fill = true;
+    style.spacing.slider_rail_height = 4.0;
+    // Drop-down lists and menus: a graphite card with a hairline.
+    visuals.window_stroke = Stroke::new(1.0, Color32::from_rgb(44, 44, 46));
+    visuals.popup_shadow = egui::Shadow {
+        offset: [0, 8],
+        blur: 24,
+        spread: 0,
+        color: Color32::from_black_alpha(130),
+    };
     visuals.window_corner_radius = egui::CornerRadius::ZERO;
     visuals.menu_corner_radius = egui::CornerRadius::ZERO;
     visuals.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.5 };
@@ -841,6 +862,87 @@ pub(crate) fn section_label(ui: &mut Ui, text: &str) {
         )
         .selectable(false),
     );
+}
+
+/// A check box in the brand's style: a square that fills violet with an
+/// ink check when on, framed violet under the pointer.
+pub(crate) fn checkbox(
+    ui: &mut Ui,
+    checked: &mut bool,
+    text: impl Into<egui::WidgetText>,
+) -> Response {
+    const SIDE: f32 = 16.0;
+    const GAP: f32 = 8.0;
+    let galley = text.into().into_galley(
+        ui,
+        Some(egui::TextWrapMode::Wrap),
+        (ui.available_width() - SIDE - GAP).max(40.0),
+        egui::TextStyle::Body,
+    );
+    let size = vec2(SIDE + GAP + galley.size().x, SIDE.max(galley.size().y));
+    let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
+    if response.clicked() {
+        *checked = !*checked;
+        response.mark_changed();
+    }
+    let enabled = ui.is_enabled();
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, *checked, galley.text())
+    });
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let hovered = enabled && response.hovered();
+    let dim = |color: Color32| {
+        if enabled {
+            color
+        } else {
+            color.gamma_multiply(0.45)
+        }
+    };
+    let square = Rect::from_min_size(
+        pos2(
+            rect.min.x,
+            rect.min.y + (galley.size().y.max(SIDE) - SIDE) / 2.0,
+        ),
+        Vec2::splat(SIDE),
+    );
+    let painter = ui.painter();
+    let (fill, stroke) = match (*checked, hovered) {
+        (true, true) => (palette::ACCENT, palette::ACCENT),
+        (true, false) => (palette::LOOP, palette::LOOP),
+        (false, true) => (Color32::from_rgb(12, 12, 12), palette::ACCENT),
+        (false, false) => (Color32::from_rgb(12, 12, 12), Color32::from_rgb(78, 76, 88)),
+    };
+    painter.rect_filled(square, 0.0, dim(fill));
+    painter.rect_stroke(
+        square,
+        0.0,
+        Stroke::new(1.0, dim(stroke)),
+        egui::StrokeKind::Inside,
+    );
+    if *checked {
+        let at = |x: f32, y: f32| square.min + vec2(x, y) * SIDE;
+        painter.line(
+            vec![at(0.24, 0.52), at(0.43, 0.70), at(0.78, 0.31)],
+            Stroke::new(2.0, dim(palette::INK)),
+        );
+    }
+    let text_color = if enabled {
+        palette::TEXT
+    } else {
+        palette::TEXT_FAINT
+    };
+    painter.galley(
+        pos2(square.max.x + GAP, rect.center().y - galley.size().y / 2.0),
+        galley,
+        text_color,
+    );
+    response.on_hover_cursor(if enabled {
+        egui::CursorIcon::PointingHand
+    } else {
+        egui::CursorIcon::Default
+    })
 }
 
 /// A segmented control. Each option is `(value, title, detail)`; an empty
