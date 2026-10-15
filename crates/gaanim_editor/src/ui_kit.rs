@@ -1106,6 +1106,38 @@ pub(crate) fn secondary_button_sized(
     text_button(ui, label, None, enabled, false, size)
 }
 
+/// The brand's hover (`--frames` on the docs site): under the pointer the
+/// element steps 3 px to the right in three frames over 0.15 s, leaving two
+/// violet ghosts of its edge behind, as onion-skin frames of a tween. Returns
+/// where to draw the element now.
+pub(crate) fn frame_hover(ui: &Ui, id: egui::Id, rect: Rect, hovered: bool) -> Rect {
+    let t = ui
+        .ctx()
+        .animate_bool_with_time(id.with("frame-hover"), hovered, 0.15);
+    // steps(3): whole pixels, never in between.
+    let shift = (t * 3.0).floor().min(3.0);
+    if shift >= 1.0 {
+        let strip = |from: f32, to: f32| {
+            Rect::from_min_max(
+                pos2(rect.min.x + from, rect.min.y),
+                pos2(rect.min.x + to, rect.max.y),
+            )
+        };
+        let painter = ui.painter();
+        painter.rect_filled(
+            strip(shift - 6.0, shift - 3.0),
+            0.0,
+            palette::ACCENT.gamma_multiply(0.2),
+        );
+        painter.rect_filled(
+            strip(shift - 3.0, shift),
+            0.0,
+            palette::ACCENT.gamma_multiply(0.45),
+        );
+    }
+    rect.translate(vec2(shift, 0.0))
+}
+
 fn text_button(
     ui: &mut Ui,
     label: &str,
@@ -1129,6 +1161,7 @@ fn text_button(
     let (rect, response) = ui.allocate_exact_size(size, sense);
     let hovered = enabled && response.hovered();
     let pressed = enabled && response.is_pointer_button_down_on();
+    let rect = frame_hover(ui, response.id, rect, hovered);
     let painter = ui.painter();
     let (fill, text) = match (primary, enabled) {
         (true, true) => (

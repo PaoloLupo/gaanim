@@ -56,6 +56,9 @@ pub(crate) struct NarrationSettings {
     /// Gaanim's data folder, to listen back to it.
     #[serde(default)]
     pub keep_talk_audio: bool,
+    /// Sections of the narration panel the speaker folded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folded_sections: Vec<String>,
 }
 
 fn default_language() -> String {
@@ -93,6 +96,7 @@ impl Default for NarrationSettings {
             scribe_max_minutes: default_scribe_minutes(),
             speaking_wpm: None,
             keep_talk_audio: false,
+            folded_sections: Vec::new(),
         }
     }
 }

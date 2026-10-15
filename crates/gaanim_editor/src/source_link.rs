@@ -140,6 +140,18 @@ fn split_words(command: &str) -> Vec<String> {
 }
 
 /// The executable `name` in one of the folders of `path`.
+/// The program a code editor `command` runs, when it is neither a file nor
+/// on the `PATH`; `None` for an empty command or one that is found.
+pub(crate) fn missing_program(command: &str) -> Option<String> {
+    let program = split_words(command).into_iter().next()?;
+    let as_path = Path::new(&program);
+    if as_path.is_file() {
+        return None;
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    find_program(&program, &path).is_none().then_some(program)
+}
+
 fn find_program(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
     let names: Vec<String> = if cfg!(windows) {
         ["cmd", "exe"]

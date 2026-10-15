@@ -615,7 +615,13 @@ where
     {
         std::fs::create_dir_all(parent)?;
     }
-    let temporary = temporary_path(&config.output_path);
+    let temporary = partial_path(&config.output_path);
+    // Removed on any way out but a finished recording: an error, a cancel
+    // or a panic never leaves a `.partial` file beside the output.
+    let mut partial = PartialFile {
+        path: temporary.clone(),
+        kept: false,
+    };
     let mut writer =
         BundleWriter::create(&temporary, format!("gaanim {}", env!("CARGO_PKG_VERSION")))
             .map_err(bundle_error)?;
@@ -753,6 +759,7 @@ where
     }
     writer.finish(&scene).map_err(bundle_error)?;
     std::fs::rename(&temporary, &config.output_path)?;
+    partial.kept = true;
     console::success(
         "done",
         format!(
@@ -927,7 +934,24 @@ fn render_thumbnail(scene: &SceneData, frame: &Frame) -> Result<Vec<u8>> {
     Ok(png)
 }
 
-fn temporary_path(path: &Path) -> PathBuf {
+/// A bundle being written beside its final path, removed when dropped
+/// unless the recording finished and moved it into place.
+struct PartialFile {
+    path: PathBuf,
+    kept: bool,
+}
+
+impl Drop for PartialFile {
+    fn drop(&mut self) {
+        if !self.kept {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Where a bundle is written until it is complete: `name.gaanim.partial`
+/// beside `path`. An export the editor stops removes it.
+pub fn partial_path(path: &Path) -> PathBuf {
     let mut name = path
         .file_name()
         .map(|name| name.to_os_string())
@@ -944,6 +968,28 @@ fn bundle_error(error: gaanim_bundle::BundleError) -> ExportError {
 mod tests {
     use super::*;
     use gaanim_timeline::timeline::{SegmentMetadata, SegmentStop, TimelineMarker};
+
+    #[test]
+    fn an_unfinished_recording_leaves_no_partial_file() {
+        let dir = std::env::temp_dir().join(format!("gaanim-partial-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let output = dir.join("talk.gaanim");
+        let partial = partial_path(&output);
+        assert_eq!(partial, dir.join("talk.gaanim.partial"));
+        std::fs::write(&partial, b"half").unwrap();
+        drop(PartialFile {
+            path: partial.clone(),
+            kept: false,
+        });
+        assert!(!partial.exists());
+        std::fs::write(&partial, b"whole").unwrap();
+        drop(PartialFile {
+            path: partial.clone(),
+            kept: true,
+        });
+        assert!(partial.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn recordings_cover_the_grid_and_every_resting_instant() {

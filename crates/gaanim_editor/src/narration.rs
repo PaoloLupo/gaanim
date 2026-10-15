@@ -54,8 +54,8 @@ use scribe::{
 
 use crate::export::{ProjectPaths, StashedReplay};
 use crate::ui_kit::{
-    ButtonSize, ButtonTone, Icon, caption, card_frame, field_frame, icon_button, paint_icon,
-    palette, primary_button_sized, secondary_button_sized, section_label, small_button_sized,
+    ButtonSize, ButtonTone, Icon, card_frame, field_frame, icon_button, paint_icon, palette,
+    primary_button_sized, secondary_button_sized, section_label, small_button_sized,
 };
 use crate::{EditorState, PresentationMode};
 use level::{Leveling, start_leveling};
@@ -115,8 +115,65 @@ fn small(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
 }
 
 /// A section's heading.
-fn heading(text: &str) -> egui::RichText {
-    caption(text).size(12.5)
+/// A section's heading that folds it: a chevron and the name, the whole row
+/// a click target. Returns whether the section is open; a click changes
+/// `folded`, which the panel saves.
+fn section_heading(ui: &mut egui::Ui, title: &str, folded: &mut Vec<String>) -> bool {
+    let open = !folded.iter().any(|name| name == title);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::click());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, 0.0, palette::HOVER);
+    }
+    let color = if response.hovered() {
+        palette::TEXT
+    } else {
+        palette::TEXT_FAINT
+    };
+    // A chevron: down while open, right while folded.
+    let c = egui::pos2(rect.min.x + 8.0, rect.center().y);
+    let points = if open {
+        vec![
+            c + egui::vec2(-4.0, -2.0),
+            c + egui::vec2(4.0, -2.0),
+            c + egui::vec2(0.0, 3.0),
+        ]
+    } else {
+        vec![
+            c + egui::vec2(-2.0, -4.0),
+            c + egui::vec2(3.0, 0.0),
+            c + egui::vec2(-2.0, 4.0),
+        ]
+    };
+    painter.add(egui::Shape::convex_polygon(
+        points,
+        color,
+        egui::Stroke::NONE,
+    ));
+    let galley = painter.layout_no_wrap(
+        title.to_owned(),
+        egui::FontId::monospace(12.5),
+        if response.hovered() {
+            palette::TEXT
+        } else {
+            palette::TEXT_FAINT
+        },
+    );
+    painter.galley(
+        egui::pos2(rect.min.x + 20.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        palette::TEXT_FAINT,
+    );
+    if response.clicked() {
+        if open {
+            folded.push(title.to_owned());
+        } else {
+            folded.retain(|name| name != title);
+        }
+    }
+    open
 }
 
 fn to_db(linear: f32) -> f32 {
@@ -451,6 +508,35 @@ impl NarrationPanel {
                 .wrap(),
             );
         }
+    }
+
+    /// Put one section of Settings back to its defaults, and save.
+    pub(crate) fn reset_settings(
+        &mut self,
+        section: NarrationSettingsSection,
+    ) -> Result<(), String> {
+        let defaults = NarrationSettings::default();
+        let settings = self.settings();
+        match section {
+            NarrationSettingsSection::Recording => {
+                settings.level_voice = defaults.level_voice;
+                settings.loudness = defaults.loudness;
+                settings.countdown = defaults.countdown;
+                settings.keep_talk_audio = defaults.keep_talk_audio;
+            }
+            NarrationSettingsSection::Transcription => {
+                settings.whisper_cli = defaults.whisper_cli;
+                settings.whisper_model = defaults.whisper_model;
+                settings.language = defaults.language;
+                settings.auto_transcribe = defaults.auto_transcribe;
+            }
+            NarrationSettingsSection::Dictation => {
+                settings.scribe_language = defaults.scribe_language;
+                settings.scribe_vocabulary = defaults.scribe_vocabulary;
+                settings.scribe_max_minutes = defaults.scribe_max_minutes;
+            }
+        }
+        self.settings().save()
     }
 
     /// The speaker's pace measured from their dictations.
@@ -2751,6 +2837,9 @@ pub(crate) fn narration_panel_system(
     let mut request = None;
     let mut settings_changed = false;
     let mut open_settings = false;
+    // Which sections are folded, saved with the speaker's preferences.
+    let folded_before = panel.settings().folded_sections.clone();
+    let mut folded = folded_before.clone();
     let screen = ctx.viewport_rect();
     let max_height = (screen.height() - 120.0).max(240.0);
     let can_dictate = panel.token_available();
@@ -2804,9 +2893,16 @@ pub(crate) fn narration_panel_system(
                             } else if manifest.is_empty() {
                                 empty_state(ui);
                             }
-                            script_card(ui, &manifest, &slides, script.as_deref(), &mut request);
-                            if !slides.is_empty() {
-                                ui.label(heading("TIMING"));
+                            if section_heading(ui, "SCRIPT", &mut folded) {
+                                script_card(
+                                    ui,
+                                    &manifest,
+                                    &slides,
+                                    script.as_deref(),
+                                    &mut request,
+                                );
+                            }
+                            if !slides.is_empty() && section_heading(ui, "TIMING", &mut folded) {
                                 let mut audio = TalkAudio {
                                     keep: &mut keep_audio,
                                     dir: clips_dir.as_deref(),
@@ -2825,13 +2921,15 @@ pub(crate) fn narration_panel_system(
                                     &mut request,
                                 );
                             }
-                            if let Some(live) = &manifest.live {
-                                ui.label(heading("LIVE TAKE"));
+                            if let Some(live) = &manifest.live
+                                && section_heading(ui, "LIVE TAKE", &mut folded)
+                            {
                                 let busy = panel.busy(&live.key);
                                 live_card(ui, live, busy, &mut dictate, &mut request);
                             }
-                            if !manifest.voiceovers.is_empty() {
-                                ui.label(heading("VOICEOVER"));
+                            if !manifest.voiceovers.is_empty()
+                                && section_heading(ui, "VOICEOVER", &mut folded)
+                            {
                                 for voice in &manifest.voiceovers {
                                     voiceover_card(
                                         ui,
@@ -2870,6 +2968,10 @@ pub(crate) fn narration_panel_system(
     panel.expanded = expanded;
     if keep_audio != keeping {
         panel.settings().keep_talk_audio = keep_audio;
+        settings_changed = true;
+    }
+    if folded != folded_before {
+        panel.settings().folded_sections = folded;
         settings_changed = true;
     }
     if settings_changed && let Err(error) = panel.settings().save() {
@@ -3832,8 +3934,13 @@ fn whisper_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
             &mut settings.auto_transcribe,
             "Transcribe each new take when saving it",
         );
+        // A path typed that does not lead anywhere is an error; with
+        // nothing typed yet it is only what is left to do.
+        let typed =
+            !settings.whisper_cli.trim().is_empty() || !settings.whisper_model.trim().is_empty();
         let status = match settings.whisper() {
             Ok((cli, _)) => (palette::LOOP, format!("Ready · {}", cli.display())),
+            Err(error) if typed => (palette::DANGER, error),
             Err(error) => (palette::TEXT_FAINT, error),
         };
         ui.add(egui::Label::new(egui::RichText::new(status.1).size(13.5).color(status.0)).wrap());

@@ -1591,7 +1591,12 @@ fn notice_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         Notice::Error(text) => (palette::DANGER, Icon::Warning, text.clone()),
         Notice::Info(text) => (palette::ACCENT, Icon::Check, text.clone()),
     };
+    let fix = matches!(notice, Notice::Error(_))
+        .then(|| notice_fix(&text))
+        .flatten();
+    let is_error = matches!(notice, Notice::Error(_));
     let mut dismiss = false;
+    let mut go_fix = false;
     egui::Frame::new()
         .fill(color.gamma_multiply(0.12))
         .stroke(Stroke::new(1.0, color.gamma_multiply(0.35)))
@@ -1605,7 +1610,21 @@ fn notice_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                 let text_w = ui.available_width() - 40.0;
                 ui.vertical(|ui| {
                     ui.set_width(text_w);
-                    ui.label(egui::RichText::new(text).size(13.0).color(palette::TEXT));
+                    ui.label(egui::RichText::new(&text).size(13.0).color(palette::TEXT));
+                    // An error says what to do about it.
+                    if is_error {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if let Some(fix) = fix
+                                && secondary_button(ui, fix.label(), true).clicked()
+                            {
+                                go_fix = true;
+                            }
+                            if secondary_button(ui, "Copy", true).clicked() {
+                                ui.ctx().copy_text(text.clone());
+                            }
+                        });
+                    }
                 });
                 if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
                     .on_hover_text("Close")
@@ -1618,7 +1637,50 @@ fn notice_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     if dismiss {
         state.notice = None;
     }
+    if go_fix {
+        state.section = Section::Environment;
+        state.check_tools();
+        state.notice = None;
+    }
     ui.add_space(20.0);
+}
+
+/// What a Home error can lead to: the tool it is missing, which the
+/// Environment page explains how to install.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoticeFix {
+    Python,
+    Uv,
+    Ffmpeg,
+}
+
+impl NoticeFix {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Python => "Set up Python",
+            Self::Uv => "Install uv",
+            Self::Ffmpeg => "Install FFmpeg",
+        }
+    }
+}
+
+/// The tool an error is about, if it names one.
+fn notice_fix(text: &str) -> Option<NoticeFix> {
+    let lower = text.to_lowercase();
+    let word = |name: &str| {
+        lower
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|token| token == name)
+    };
+    if word("ffmpeg") || word("ffprobe") {
+        Some(NoticeFix::Ffmpeg)
+    } else if word("uv") {
+        Some(NoticeFix::Uv)
+    } else if word("python") || word("pyo3") || word("venv") {
+        Some(NoticeFix::Python)
+    } else {
+        None
+    }
 }
 
 // ---- Projects --------------------------------------------------------------------------
@@ -1714,6 +1776,7 @@ fn start_card(
     let (rect, response) = ui.allocate_exact_size(vec2(width, 192.0), sense);
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     let hovered = enabled && response.hovered();
+    let rect = ui_kit::frame_hover(ui, response.id, rect, hovered);
     let painter = ui.painter();
     let accent = match start {
         Start::Video => palette::ACCENT,
@@ -1721,13 +1784,6 @@ fn start_card(
         Start::Open => palette::TEXT,
         Start::Bundle => palette::LOOP,
     };
-    if hovered {
-        painter.rect_filled(
-            rect.translate(vec2(0.0, 6.0)),
-            0.0,
-            Color32::from_black_alpha(60),
-        );
-    }
     painter.rect_filled(
         rect,
         0.0,
@@ -2426,6 +2482,7 @@ fn recent_card(
         },
     );
     let hovered = enabled && ui.rect_contains_pointer(rect);
+    let rect = ui_kit::frame_hover(ui, response.id, rect, hovered);
     let color = row.color;
     let painter = ui.painter();
     painter.rect_filled(
@@ -3377,6 +3434,24 @@ fn paint_backdrop_grid(painter: &egui::Painter, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_error_names_the_tool_to_install() {
+        assert_eq!(
+            notice_fix("Could not open the project: uv was not found"),
+            Some(NoticeFix::Uv)
+        );
+        assert_eq!(
+            notice_fix("ffprobe failed: no such file"),
+            Some(NoticeFix::Ffmpeg)
+        );
+        assert_eq!(
+            notice_fix("Python 3.12 is required"),
+            Some(NoticeFix::Python)
+        );
+        // "uv" inside another word is not uv.
+        assert_eq!(notice_fix("Could not move the file"), None);
+    }
 
     #[test]
     fn empty_folders_become_the_project() {

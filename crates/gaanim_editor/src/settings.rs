@@ -193,7 +193,8 @@ impl UpdatePreferences {
 // ---- Window ---------------------------------------------------------------------------------
 
 /// The areas of Settings, in the order the window lists them.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum Section {
     #[default]
     Recording,
@@ -248,6 +249,20 @@ pub(crate) struct SettingsWindow {
     section: Section,
     /// Read when the window opens.
     drafts: Option<Drafts>,
+    /// The section shown last was read back from the settings, or one was
+    /// asked for, this session.
+    section_known: bool,
+}
+
+/// The `settings_window` section: where Settings opens next time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+struct WindowState {
+    #[serde(default)]
+    section: Section,
+}
+
+impl WindowState {
+    const SECTION: &str = "settings_window";
 }
 
 impl SettingsWindow {
@@ -255,6 +270,7 @@ impl SettingsWindow {
     pub(crate) fn show(&mut self, section: Section) {
         self.open = true;
         self.section = section;
+        self.section_known = true;
     }
 
     pub(crate) fn is_open(&self) -> bool {
@@ -335,7 +351,7 @@ fn settings_window_system(
     mut narration: ResMut<NarrationPanel>,
     mut prompter: ResMut<PrompterSettings>,
     mut pace: ResMut<PrompterPace>,
-    preview: Option<ResMut<PreviewResolution>>,
+    mut preview: Option<ResMut<PreviewResolution>>,
     mut hub: Option<ResMut<crate::project_hub::ProjectHubState>>,
     paths: Option<Res<ProjectPaths>>,
 ) {
@@ -355,6 +371,13 @@ fn settings_window_system(
         return;
     }
     let window = &mut *window;
+    if !window.section_known {
+        window.section_known = true;
+        window.section =
+            gaanim_project::settings::load::<WindowState>(WindowState::SECTION).section;
+    }
+    let shown_before = window.section;
+    let mut reset = false;
     let drafts = window.drafts.get_or_insert_with(|| {
         narration.forget_settings_project();
         Drafts::load()
@@ -424,7 +447,9 @@ fn settings_window_system(
                                             &mut pace,
                                             &mut narration,
                                         ),
-                                        Section::Preview => preview_section(ui, drafts, preview),
+                                        Section::Preview => {
+                                            preview_section(ui, drafts, preview.as_deref_mut())
+                                        }
                                         Section::Integrations => integrations_section(ui, drafts),
                                         Section::Updates => {
                                             updates_section(ui, drafts, hub.as_deref_mut())
@@ -448,10 +473,81 @@ fn settings_window_system(
                 });
             });
             rule(ui);
-            footer(ui);
+            footer(ui, window.section, &mut reset);
         });
+    if reset {
+        let result = reset_section(
+            window.section,
+            drafts,
+            &mut narration,
+            &mut prompter,
+            &mut pace,
+            preview.as_deref_mut(),
+        );
+        drafts.notice = Some(match result {
+            Ok(()) => (
+                format!("{} is back to its defaults.", window.section.title()),
+                false,
+            ),
+            Err(error) => (format!("Not saved: {error}"), true),
+        });
+    }
+    if window.section != shown_before {
+        drafts.notice = None;
+        let saved = gaanim_project::settings::save(
+            WindowState::SECTION,
+            &WindowState {
+                section: window.section,
+            },
+        );
+        if let Err(error) = saved {
+            gaanim_core::console::warn("settings", format!("not saved: {error}"));
+        }
+    }
     if close || modal.should_close() {
         window.open = false;
+    }
+}
+
+/// Put `section` back to its defaults. The Scribe token and the saved relay
+/// keep their own buttons, so a reset never forgets them.
+fn reset_section(
+    section: Section,
+    drafts: &mut Drafts,
+    narration: &mut NarrationPanel,
+    prompter: &mut PrompterSettings,
+    pace: &mut PrompterPace,
+    preview: Option<&mut PreviewResolution>,
+) -> Result<(), String> {
+    match section {
+        Section::Recording => narration.reset_settings(NarrationSettingsSection::Recording),
+        Section::Transcription => narration.reset_settings(NarrationSettingsSection::Transcription),
+        Section::Dictation => narration.reset_settings(NarrationSettingsSection::Dictation),
+        Section::Prompter => {
+            drafts.prompter = PrompterPreferences::default();
+            prompter.size = drafts.prompter.size;
+            pace.fixed = None;
+            drafts.prompter.save()
+        }
+        Section::Preview => {
+            drafts.preview = PreviewPreferences::default();
+            drafts.notices = NoticePreferences::default();
+            apply_notices(drafts.notices);
+            if let Some(preview) = preview
+                && std::env::var_os(PREVIEW_RESOLUTION_ENV).is_none()
+            {
+                *preview = PreviewResolution::from_setting(Some(&drafts.preview.resolution));
+            }
+            drafts.preview.save().and(drafts.notices.save())
+        }
+        Section::Integrations => {
+            drafts.integrations = IntegrationPreferences::default();
+            drafts.integrations.save()
+        }
+        Section::Updates => {
+            drafts.updates = UpdatePreferences::default();
+            drafts.updates.save()
+        }
     }
 }
 
@@ -563,7 +659,7 @@ fn section_heading(ui: &mut egui::Ui, section: Section) {
     ui.add_space(6.0);
 }
 
-fn footer(ui: &mut egui::Ui) {
+fn footer(ui: &mut egui::Ui, section: Section, reset: &mut bool) {
     let Some(path) = gaanim_project::settings::path() else {
         return;
     };
@@ -582,6 +678,12 @@ fn footer(ui: &mut egui::Ui) {
                         && let Some(folder) = path.parent()
                     {
                         let _ = crate::platform::open_detached(folder);
+                    }
+                    if small_button(ui, "Reset section", true)
+                        .on_hover_text(format!("Puts {} back to its defaults", section.title()))
+                        .clicked()
+                    {
+                        *reset = true;
                     }
                 });
             });
@@ -712,7 +814,7 @@ enum ResolutionMode {
 fn preview_section(
     ui: &mut egui::Ui,
     drafts: &mut Drafts,
-    preview: Option<ResMut<PreviewResolution>>,
+    preview: Option<&mut PreviewResolution>,
 ) {
     let variable = std::env::var(PREVIEW_RESOLUTION_ENV).ok();
     let locked = locked_by(ui, PREVIEW_RESOLUTION_ENV, variable);
@@ -769,7 +871,7 @@ fn preview_section(
          changes exports.",
     );
     if drafts.preview != before && !locked {
-        if let Some(mut preview) = preview {
+        if let Some(preview) = preview {
             *preview = PreviewResolution::from_setting(Some(&drafts.preview.resolution));
         }
         let result = drafts.preview.save();
@@ -832,6 +934,15 @@ fn integrations_section(ui: &mut egui::Ui, drafts: &mut Drafts) {
          group words with spaces, and without {file} the path goes at the end. Empty, Gaanim \
          tries code, cursor, codium, zed and subl on the PATH, and else the default app.",
     );
+    if !locked
+        && let Some(missing) = crate::source_link::missing_program(&drafts.integrations.code_editor)
+    {
+        ui.label(
+            egui::RichText::new(format!("{missing} was not found on the PATH."))
+                .size(13.0)
+                .color(palette::DANGER),
+        );
+    }
     if drafts.integrations != before && !locked {
         let result = drafts.integrations.save();
         drafts.saved(result);

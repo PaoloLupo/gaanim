@@ -350,6 +350,7 @@ pub fn export_dialog_system(
     let mut trigger_cancel = false;
     let mut trigger_ok = false;
     let mut trigger_open = false;
+    let mut trigger_retry = false;
 
     if state.show_complete {
         let cancelled = state.message.starts_with("export cancelled");
@@ -451,6 +452,26 @@ pub fn export_dialog_system(
                             if secondary_button(ui, "Close", true).clicked() {
                                 trigger_ok = true;
                             }
+                        } else if !state.completed_successfully && !cancelled {
+                            // A failure says what to do next: try again with the
+                            // same settings, copy the error, or install FFmpeg.
+                            if primary_button(ui, "Try again", None, true)
+                                .on_hover_text("Opens the export with the same settings")
+                                .clicked()
+                            {
+                                trigger_retry = true;
+                            }
+                            if secondary_button(ui, "Close", true).clicked() {
+                                trigger_ok = true;
+                            }
+                            if secondary_button(ui, "Copy error", true).clicked() {
+                                ui.ctx().copy_text(state.message.clone());
+                            }
+                            if mentions_ffmpeg(&state.message)
+                                && secondary_button(ui, "How to install FFmpeg", true).clicked()
+                            {
+                                let _ = crate::platform::open_detached(FFMPEG_HELP_URL);
+                            }
                         } else if primary_button(ui, "Close", None, true).clicked() {
                             trigger_ok = true;
                         }
@@ -472,6 +493,10 @@ pub fn export_dialog_system(
 
     if trigger_ok {
         state.show_complete = false;
+    }
+    if trigger_retry {
+        state.show_complete = false;
+        state.dialog_open = true;
     }
 
     if state.active {
@@ -1415,6 +1440,8 @@ fn run_export_worker(
             EXPORT_WORKER_STALL_TIMEOUT,
         ) {
             terminate_export_worker(&mut child);
+            // A worker stopped mid-recording cannot clean up after itself.
+            remove_partial(output_path);
             let summary = match reason {
                 WorkerStopReason::Cancelled => "export cancelled",
                 WorkerStopReason::Stalled => {
@@ -1440,12 +1467,27 @@ fn run_export_worker(
     if status.success() {
         Ok(())
     } else {
+        remove_partial(output_path);
         Err(worker_error_context(
             &format!("export worker exited with {status}"),
             output_path,
             &telemetry,
         ))
     }
+}
+
+/// Remove the `.partial` file a bundle export leaves while it records.
+fn remove_partial(output_path: &str) {
+    let partial = gaanim_export::bundle::partial_path(Path::new(output_path));
+    let _ = std::fs::remove_file(partial);
+}
+
+/// Where the docs explain installing FFmpeg.
+const FFMPEG_HELP_URL: &str = "https://paololupo.github.io/gaanim/empezar/instalacion/";
+
+/// Whether an export error is about FFmpeg, missing or failing.
+fn mentions_ffmpeg(message: &str) -> bool {
+    message.to_lowercase().contains("ffmpeg")
 }
 
 const RESOLUTION_PRESETS: [(&str, u32, u32); 4] = [
