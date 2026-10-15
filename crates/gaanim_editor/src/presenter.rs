@@ -21,10 +21,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 pub(crate) use mirror::{PresenterMirror, fit_mirror_camera_system, presenter_mirror_system};
-pub(crate) use thumbnails::{PresenterThumbnailCache, render_previews_in_world_system};
-use thumbnails::{
-    PreviewStatus, ThumbnailKey, ThumbnailMoment, desired_thumbnail_edge, entry_segment_time,
+pub(crate) use thumbnails::{
+    PresenterThumbnailCache, ThumbnailKey, ThumbnailMoment, render_previews_in_world_system,
 };
+use thumbnails::{PreviewStatus, desired_thumbnail_edge, entry_segment_time};
 
 use crate::ui_kit::{
     ButtonTone, Icon, PRIMARY_SIZE, caption, chip, divider, icon_button, icon_button_sized,

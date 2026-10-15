@@ -230,6 +230,9 @@ struct Item {
     nested: bool,
     /// The preview's heading when it says more than the title.
     heading: Option<String>,
+    /// The cue preview of a jump: its segment's entry or one of its stops,
+    /// as Presenter View keys them.
+    cue: Option<crate::presenter::ThumbnailKey>,
 }
 
 /// The palette's entries: every command, each Settings section, and the
@@ -246,6 +249,7 @@ fn items(recents: &[RecentEntry]) -> Vec<Item> {
             preview: None,
             nested: false,
             heading: None,
+            cue: None,
         })
         .collect();
     items.extend(Section::ALL.iter().map(|&section| Item {
@@ -257,6 +261,7 @@ fn items(recents: &[RecentEntry]) -> Vec<Item> {
         preview: None,
         nested: false,
         heading: None,
+        cue: None,
     }));
     items.extend(recents.iter().map(|entry| {
         let (name, kind) = match entry {
@@ -272,6 +277,7 @@ fn items(recents: &[RecentEntry]) -> Vec<Item> {
             preview: None,
             nested: false,
             heading: None,
+            cue: None,
         }
     }));
     items
@@ -306,6 +312,7 @@ fn jump_items(timeline: &Timeline) -> Vec<Item> {
             preview: said(0),
             nested: false,
             heading: None,
+            cue: Some((segment.id, crate::presenter::ThumbnailMoment::Entry)),
         });
         for (index, stop) in segment.stops.iter().enumerate() {
             let stop_name = stop
@@ -323,6 +330,10 @@ fn jump_items(timeline: &Timeline) -> Vec<Item> {
                 time: Some(stop.time),
                 preview: said(index + 1),
                 nested: true,
+                cue: Some((
+                    segment.id,
+                    crate::presenter::ThumbnailMoment::Stop(index as u32),
+                )),
             });
         }
     }
@@ -572,8 +583,12 @@ struct Covers<'a> {
 impl Covers<'_> {
     /// The preview of the frame shown at `time`, asked for first; `None`
     /// until it is rendered.
-    fn at(&mut self, ctx: &egui::Context, time: f64, edge: u32) -> Option<egui::TextureHandle> {
-        let key = crate::presenter::cue_key_at(self.timeline, time)?;
+    fn of(
+        &mut self,
+        ctx: &egui::Context,
+        key: crate::presenter::ThumbnailKey,
+        edge: u32,
+    ) -> Option<egui::TextureHandle> {
         self.thumbnails.update(
             self.stash,
             self.timeline,
@@ -626,10 +641,12 @@ fn palette_ui(
     let preview_width = width - list_width;
     let preview = matches.get(state.highlight).map(|item| {
         let heading = item.heading.clone().unwrap_or_else(|| item.title.clone());
-        let cover = match (jumping, item.time) {
-            (true, Some(time)) => {
+        // By its key, not its time: a segment's entry instant can still
+        // belong to the stop that ends the segment before.
+        let cover = match (jumping, item.cue) {
+            (true, Some(key)) => {
                 let edge = ((preview_width - 32.0) * ctx.pixels_per_point()) as u32;
-                covers.at(ctx, time, edge)
+                covers.of(ctx, key, edge)
             }
             _ => None,
         };
@@ -900,8 +917,13 @@ fn jump_preview(ui: &mut egui::Ui, width: f32, preview: Option<JumpPreview>) {
         );
     }
     child.add_space(8.0);
+    // Long notes scroll inside the column instead of running below it.
+    child.set_clip_rect(rect);
+    let room = (rect.max.y - 14.0 - child.cursor().min.y).max(0.0);
     egui::ScrollArea::vertical()
         .id_salt("jump-preview")
+        .max_height(room)
+        .min_scrolled_height(room)
         .auto_shrink([false, false])
         .show(&mut child, |ui| {
             let (text, color) = match notes {
@@ -1081,6 +1103,10 @@ mod tests {
         assert_eq!(items[0].preview.as_deref(), Some("Hello."));
         assert_eq!(items[1].preview.as_deref(), Some("The chart."));
         assert_eq!(items[1].command, Command::Seek(2.0));
+        use crate::presenter::ThumbnailMoment;
+        assert_eq!(items[0].cue, Some((0, ThumbnailMoment::Entry)));
+        assert_eq!(items[1].cue, Some((0, ThumbnailMoment::Stop(0))));
+        assert_eq!(items[2].cue, Some((1, ThumbnailMoment::Entry)));
         assert_eq!(current_jump(&items, 3.0), 1);
         assert_eq!(current_jump(&items, 4.0), 2);
         assert_eq!(filter(&items, "res")[0].title, "results");
