@@ -11,6 +11,218 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.13.0
+
+Publicada el 14 de octubre de 2026. El guion de la charla pasa a un archivo
+Markdown con una sección por diapositiva y marcas donde avanzas, que
+Presenter View y el editor muestran en un prompter. La charla se dicta con
+Scribe y se graba diapositiva a diapositiva para ajustar sus tiempos, y
+Presenter View cuenta hacia atrás la duración prevista y dice si vas
+adelantado o retrasado. Un editor de código puede manejar la vista previa
+(`--listen`) y leer los mensajes de Gaanim en JSON, y `gaanim inspect` da la
+línea del script de cada parte de la escena. Los paquetes `.gaanim` pasan al
+formato 6, que se abre con mucho menos y guarda el 3D como mallas, y
+`gaanim pack --web` los aligera para publicarlos. El reproductor ligero se
+maneja desde la página que lo inserta, con el elemento `<gaanim-player>`, y
+el playground descarga una página HTML con la animación dentro. Toda la
+interfaz del editor está en inglés. Lee «Al actualizar»: un `scene.stop()`
+dentro de la transición de entrada de su diapositiva cambia de momento, y el
+guion manda sobre las `notes=`.
+
+== Guion y prompter
+
+- El guion de la charla vive en un archivo Markdown, el mismo de la
+  narración (`narration/script.md`, o el que nombra
+  `scene.narration_script(...)`): una sección `## nombre` por diapositiva,
+  con el nombre de su segmento, y una línea `[stop]` o `[stop nombre]`
+  (también `[stop: nombre]`) donde avanzas. El texto antes de la n-ésima
+  marca se dice mientras la diapositiva espera en su n-ésimo stop. La
+  sección de una diapositiva sustituye a sus `notes=`; las diapositivas sin
+  sección conservan las suyas, que también admiten marcas. Los encabezados
+  pueden ser cualquier nombre de diapositiva (antes debían ser una clave de
+  toma válida), los `###` son notas que no se muestran y los comentarios HTML
+  se ignoran. Ver #link("/guias/presentaciones/#guion")[El guion de la
+  charla].
+- *Script & narration → Create script* escribe el archivo con una sección por
+  diapositiva, a partir de sus `notes=`, y una marca por stop. Cuando el
+  código gana diapositivas o stops, *Open and complete* añade lo que falta
+  sin tocar lo escrito (los archivos CRLF siguen en CRLF) y abre el guion en
+  tu editor de código (`GAANIM_EDITOR`, o uno conocido en el `PATH`) en lo
+  primero que añadió.
+- `gaanim check` avisa cuando una diapositiva tiene más o menos marcas que
+  stops, cuando una marca con nombre no coincide con su stop y cuando una
+  sección no corresponde a ninguna diapositiva ni bloque de voz.
+- Al guardar el guion, el editor actualiza las notas sin volver a compilar la
+  escena, y los paquetes `.gaanim` lo llevan dentro con sus marcas. La
+  exportación a PDF con `--notes` imprime cada marca como una flecha
+  (`→ grafico`).
+- El prompter muestra el tramo que toca decir como un subtítulo, palabra a
+  palabra y siguiendo la línea de tiempo, con el aviso de avanzar (`▶ stop`,
+  o el nombre de la siguiente diapositiva), que late cuando la diapositiva ya
+  espera allí. En Presenter View, `T` llena con él la columna del orador; en
+  el editor va sobre la barra de reproducción, con `Shift+T` o *More controls
+  → Prompter*. Lee al ritmo con que grabaste ese tramo, o al tuyo medido en
+  tus dictados, o a 150 palabras por minuto. Ver
+  #link("/guias/presentaciones/#prompter")[El prompter].
+- En la barra de tiempo del editor, un cuadrado en la esquina de cada
+  diapositiva dice cómo va su guion: verde si todos sus tramos tienen texto,
+  ámbar si solo algunos.
+
+== Dictar y cronometrar la charla
+
+- *Script & narration → Record the talk* presenta la charla desde la primera
+  diapositiva y guarda el tiempo de cada una y de cada tramo. *TIMING* los
+  compara con sus objetivos y el total con la duración prevista, con un
+  veredicto: cuánto queda, cuánto sobra o que cabe. *Re-record* vuelve a
+  grabar una diapositiva o un solo stop, y *Keep the audio, to listen back*
+  guarda el audio de cada tramo para escucharlo desde su fila. Los tiempos y
+  el audio se guardan en la carpeta de datos de Gaanim, nunca en el
+  proyecto. Ver #link("/guias/presentaciones/#grabar-charla")[Grabar la
+  charla y ajustar sus tiempos].
+- Mientras grabas, el micrófono puede ir a Scribe Live, de Zoom, y cada frase
+  que transcribe pasa al tramo del guion que estabas diciendo; el texto
+  anterior queda debajo en un comentario `<!-- previous: … -->`. El token se
+  escribe en el panel, se guarda en el Administrador de credenciales de
+  Windows o se lee de `GAANIM_SCRIBE_TOKEN`, y nunca entra en el proyecto. A
+  Zoom solo le llegan el audio y los ajustes de la sesión. Una sesión a la
+  vez, sin reconectar tras un fallo, y se cierra sola en su límite de
+  minutos (60 por defecto), tras 2 minutos sin voz o al pulsar `Esc`. Ver
+  #link("/guias/presentaciones/#dictar")[Dictar el guion con Scribe].
+- La clave `language` de `gaanim.toml` (`es-ES`, `es`, `es-PE`…) dice en qué
+  idioma se da la charla, para Scribe y otras herramientas de voz; *Pin in
+  gaanim.toml* la escribe sin tocar el resto del archivo. `gaanim check`
+  avisa de las claves que parecen credenciales (`token`, `secret`,
+  `password`, `api_key`), que Gaanim nunca lee. Ver
+  #link("/referencia/gaanim-toml/#language")[`language`].
+
+== Presenter View
+
+- `scene.slides.target(20 * 60)` fija la duración de la charla y
+  `scene.segment(..., target=120)` la de cada diapositiva, en segundos. La
+  de la charla también se elige en Presenter View, con el botón junto a
+  `LEFT`, o con `gaanim --present --duration 20m` (`1h30m`, `90s`, `20:00` o
+  minutos). `LEFT` cuenta hacia atrás lo que queda, `PACE` dice cuánto vas
+  adelantado o retrasado según los objetivos, y bajo el nombre de la
+  diapositiva se lee `0:45 of 1:30 on this slide` y lo que tardaste en el
+  ensayo anterior. Cada presentación de más de 30 segundos se guarda como
+  ensayo (los 20 últimos por archivo; en el reproductor web, durante la
+  sesión). Los paquetes `.gaanim` guardan los objetivos. Ver
+  #link("/guias/presentaciones/#tiempo-de-la-charla")[El tiempo de la
+  charla].
+
+== Editores de código
+
+- `gaanim --listen stdio` (o `--listen 127.0.0.1:PUERTO`) deja que un editor
+  maneje la vista previa con JSON por líneas: `seek` a un tiempo, segmento,
+  `Section` o stop; `follow` a una línea del script; `play`, `pause`, `loop`
+  de un segmento o un tramo y `unloop`. Gaanim responde con los eventos
+  `ready` (con la línea de tiempo de la escena), `reload`, `playhead`
+  (tiempo, segmento, stop, si reproduce y el bucle), `failed` (el error del
+  script con su línea) y `error`. Solo escucha en la propia máquina. Ver
+  #link("/referencia/cli/#listen")[Controlar la vista previa desde un
+  editor].
+- `gaanim inspect mi-charla [--json]` lista los segmentos, `Section`, stops,
+  marcadores, bloques de voz, la toma en directo y cada `play` con su tiempo
+  y la línea del script que los crea. Ver
+  #link("/referencia/cli/#gaanim-inspect")[`gaanim inspect`].
+- `--message-format json` en `gaanim check`, `gaanim export` y la vista
+  previa escribe cada mensaje como un objeto JSON por línea: mensajes con su
+  archivo y línea, diagnósticos y veredicto de `check`, progreso por
+  porcentaje y recargas con sus tiempos. Ver
+  #link("/referencia/cli/#message-format")[Mensajes para herramientas].
+- Todo es opcional: sin estas opciones, la vista previa y la CLI se
+  comportan como antes, y `gaanim init` no añade nada propio de ningún
+  editor.
+
+== Exportación
+
+- `gaanim export --frame`, `--from` y `--to` aceptan, además de segundos y
+  marcadores, el nombre de un segmento, una clave de `Section` o el nombre
+  de un stop. `--frame` de una diapositiva toma su primer stop, el mismo
+  fotograma que su página del PDF; `--from` empieza en su comienzo y `--to`
+  acaba en su final. Un nombre compartido por varios stops es ambiguo y el
+  error los lista con su tiempo. Ver
+  #link("/referencia/cli/#tramos-nombres")[Tramos y marcadores].
+
+== Paquetes
+
+- Formato 6: las tablas (trazados, imágenes, recetas, textos, shaders y
+  mallas 3D) van en segmentos de unos 2 MB, y abrir un paquete solo lee su
+  manifiesto, la escena, el primer bloque y los segmentos que usa. En los
+  170 ejemplos, lo que hace falta para abrirlos baja un 74 %. Gaanim y los
+  reproductores siguen abriendo los paquetes en formato 5.
+- Las escenas 3D se guardan como mallas, matrices y luces, una sola vez, y se
+  proyectan de nuevo al leerlas: `gallery/surface_plot` pasa de 54 MB a
+  1,1 MB y `3d/camera_3d` de 15 MB a 0,16 MB.
+- `gaanim pack entrada.gaanim salida.gaanim` reescribe un paquete en el
+  formato actual, fotograma a fotograma. Con `--web`, guarda los trazados en
+  una rejilla de menos de 1/32 de píxel en 4K y deja fuera lo que solo usan
+  `gaanim check` y el desenfoque de movimiento: los ejemplos ocupan un 39 %
+  menos y abrirlos necesita un 89 % menos. Ver
+  #link("/referencia/cli/#exportar-paquetes")[Paquetes].
+- Abrir un paquete ya no espera a las huellas de los fotogramas, que solo usa
+  `gaanim check`, y la portada se guarda con la mejor compresión (la mitad
+  de tamaño).
+
+== Reproductor web
+
+- El reproductor ligero se maneja desde la página que lo inserta, en
+  cualquier sitio: recibe `gaanim:command` (`play`, `pause`, `toggle`,
+  `seek`, `loop`, `mute`) y envía `gaanim:status` con el tiempo, la
+  duración y su estado; el reproductor completo responde a los mismos
+  mensajes. Ver #link("/guias/compartir/#controlar-desde-la-pagina")[Controlarlo
+  desde la página].
+- El elemento `<gaanim-player>` (`insertar/gaanim-player.js`) inserta el
+  reproductor con la proporción de la escena, sin escribir `aspect-ratio`, y
+  ofrece `play()`, `pause()`, `seek()`, `currentTime`, `duration`, `paused`,
+  `ended`, `loop` y `muted`, con sus eventos.
+- Arranca antes: descarga el archivo mientras compila el módulo, y un
+  archivo grande que se lee por partes solo baja el resto mientras se
+  reproduce; `preload=auto` lo descarga entero como antes.
+- Cuando el reproductor no tiene la forma de la escena, oscurece lo que la
+  rodea y marca su borde, como la vista previa del editor.
+- El playground descarga la grabación como una página `.html` con el
+  reproductor ligero dentro, que se abre con doble clic, sin servidor, o va
+  en un `<iframe>`: en *Insertar* o en el menú *Descargar*. Ver
+  #link("/guias/compartir/#pagina-html")[Una página HTML].
+
+== Editor
+
+- Toda la interfaz del editor está en inglés, como ya lo estaba Presenter
+  View: la pantalla de inicio, la barra de reproducción, la exportación, el
+  inspector, la consola, la línea de tiempo de animaciones, las encuestas,
+  *Script & narration* y los mensajes del reproductor web. Las claves de los
+  enlaces (`segmento=`, `pausa=`) y los nombres de los archivos de
+  resultados no cambian.
+
+== Correcciones
+
+- Un `scene.stop()` escrito mientras la transición de entrada de su
+  diapositiva aún corre espera a que termine. Antes, Presenter View, el PDF y
+  `--capture-stops` mostraban la diapositiva a medio entrar.
+- `gaanim check` verifica los paquetes con grupos que comparten un brillo, un
+  desenfoque o una sombra; antes rechazaba sus fotogramas (92 de 307 en
+  `effects/glow_blur_shadow`).
+
+== Al actualizar
+
+- Un `scene.stop()` dentro de la transición de entrada de su diapositiva se
+  mueve al final de la transición, y lo que viene después se retrasa lo
+  mismo. Los enlaces y las capturas tomadas en ese stop cambian de momento.
+- Si tu proyecto ya tiene `narration/script.md`, una sección con el nombre
+  de una diapositiva sustituye a sus `notes=`. Un guion que no se puede leer
+  (un encabezado vacío o repetido) hace que `scene.segment` lance
+  `ValueError`, como ya hacía `scene.voiceover`.
+- Los paquetes grabados con 0.13.0 están en formato 6, que las versiones
+  anteriores de Gaanim no abren. `gaanim pack` pasa los de formato 5 al
+  actual, más rápidos de abrir en la web.
+- Vuelve a grabar los paquetes con efectos compartidos (brillo, desenfoque o
+  sombra en varios objetos iguales) grabados antes para que `gaanim check`
+  los verifique.
+- Los menús y botones del editor tienen sus nombres en inglés: el panel
+  *Narración* es ahora *Script & narration*, y *Más controles*, *More
+  controls*.
+
 = 0.12.0
 
 Publicada el 13 de octubre de 2026. Los ejemplos se ordenan por temas, con
