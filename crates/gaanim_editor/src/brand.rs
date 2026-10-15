@@ -105,7 +105,7 @@ fn rasterize(shapes: &[&[&[[f32; 2]]]], scale: f32) -> (usize, usize, Vec<f32>) 
                 }
             }
             crossings.sort_by(f32::total_cmp);
-            for span in crossings.chunks_exact(2) {
+            for span in crossings.as_chunks::<2>().0 {
                 // Sample columns whose centres fall inside the span.
                 let first = (span[0] - 0.5).ceil().max(0.0) as usize;
                 let last = ((span[1] - 0.5).ceil().max(0.0) as usize).min(width * SUPERSAMPLE);

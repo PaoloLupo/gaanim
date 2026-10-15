@@ -565,18 +565,21 @@ pub(crate) fn caption_text(
 /// The editor's caption: an opaque band centered over the preview, its
 /// bottom `gap` points above the window's, outlined in `outline` when
 /// something needs the speaker's attention. Right-clicking it opens `menu`.
+/// `docked` points on the right belong to a panel; the band centres in the
+/// rest.
 pub(crate) fn show_band(
     ctx: &egui::Context,
     gap: f32,
+    docked: f32,
     outline: Option<egui::Color32>,
     contents: impl FnOnce(&mut egui::Ui),
     menu: impl FnOnce(&mut egui::Ui),
 ) {
     let screen = ctx.viewport_rect();
     let margin = egui::Margin::symmetric(24, 12);
-    let width = (screen.width() - 48.0).clamp(280.0, 980.0) - margin.sum().x;
+    let width = (screen.width() - docked - 48.0).clamp(280.0, 980.0) - margin.sum().x;
     egui::Area::new(egui::Id::new("editor_caption"))
-        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -gap))
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(-docked / 2.0, -gap))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             let band = egui::Frame::new()

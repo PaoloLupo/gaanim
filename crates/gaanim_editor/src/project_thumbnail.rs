@@ -136,7 +136,9 @@ fn content(rgba: &[u8]) -> usize {
     let Some(background) = rgba.get(..4) else {
         return 0;
     };
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .filter(|pixel| {
             pixel
                 .iter()

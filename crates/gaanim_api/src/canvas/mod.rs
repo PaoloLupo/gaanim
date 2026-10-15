@@ -110,7 +110,7 @@ pub use canvas_impl::{
 };
 pub use canvas_impl::{InsertPosition, ScheduleLabel};
 pub use canvas_impl::{clear_asset_caches, forget_assets};
-pub use gaanim_media::narration::{MarkerSource, ScriptSection, TakeFiles};
+pub use gaanim_media::narration::{MarkerSource, NARRATION_DIR, ScriptSection, TakeFiles};
 pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,
     VoiceoverHandle, VoiceoverSpec, live_take_recording, set_live_take_recording,

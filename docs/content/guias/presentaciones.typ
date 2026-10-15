@@ -113,9 +113,11 @@ scene.stop()
 - `[stop grafico]` nombra el stop. `gaanim check` avisa si no coincide con el
   de `scene.stop("grafico")`, si una diapositiva tiene más o menos marcas que
   stops y si una sección no corresponde a ninguna diapositiva ni bloque de voz.
-- El archivo es `narration/script.md`, dentro de la carpeta de assets o junto
-  al script si la escena no tiene; `scene.narration_script("guion.md")` elige
-  otro. Es el mismo guion de la
+- El archivo es `narration/script.md` dentro de la carpeta de assets del
+  proyecto (`assets_dir` de su `gaanim.toml`, `assets` por defecto); fuera de
+  un proyecto, o si un proyecto anterior ya tiene `narration/` junto al script
+  y no en sus assets, junto al script. `scene.narration_script("guion.md")`
+  elige otro. Es el mismo guion de la
   #link("/referencia/audio/#narracion")[narración]: una sección puede ser
   también el texto de un `scene.voiceover(...)`.
 - La sección de una diapositiva manda sobre su `notes=`; sin sección, se usan
@@ -135,15 +137,59 @@ scene.stop()
 
 Gaanim escribe el guion por ti y lo mantiene al día con el código. En el
 editor, abre *Script & narration* (el botón de micrófono de la barra de
-reproducción, o *More controls*) y pulsa *Create script*: el archivo nace con
-una sección por diapositiva, con sus `notes=` como punto de partida, y una
-marca `[stop nombre]` por cada stop. Cuando el código gana diapositivas o
-stops, el botón pasa a *Open and complete*: añade las secciones nuevas detrás
+reproducción, *More controls* o la paleta de comandos) y pulsa el icono del
+libro de su cabecera: el archivo nace con una sección por diapositiva, con sus
+`notes=` como punto de partida, y una marca `[stop nombre]` por cada stop.
+Cuando el código gana diapositivas o stops, la cabecera lo avisa
+(`script.md · 3 to write`) y el mismo icono añade las secciones nuevas detrás
 de la diapositiva anterior y las marcas que faltan al final de cada sección,
 sin tocar lo que escribiste. El guion se abre en tu editor de código, como el
 resto de los saltos al código (ver `GAANIM_EDITOR` en
 #link("/referencia/cli/")[la CLI]), en lo primero que añadió o, si no faltaba
 nada, en la primera sección sin texto.
+
+== El panel Script & narration <panel-narracion>
+
+El panel se acopla a la derecha del editor y la escena se encoge a su lado,
+sin quedar tapada. De arriba abajo:
+
+- *TARGET* es la duración de la charla (`15:00`, `15m`, `1h30m`). Es la misma
+  que fija Presenter View: cambiarla en un sitio la cambia en el otro, y
+  Gaanim la recuerda para ese archivo. A su lado dice de dónde viene
+  (`set here`, `from scene.slides.target`…). Vaciarla quita la fijada en el
+  panel.
+- *TAKES* suma los tiempos grabados de las diapositivas y *LAST PRACTICE* da
+  la última práctica, cada uno frente al objetivo (`7:40 left`, `0:35 over`).
+  La barra de debajo muestra lo grabado, una marca blanca para la última
+  práctica y una dorada para el objetivo; con dos prácticas o más, *PRACTICE
+  RUNS* dibuja las últimas doce como columnas.
+- *TALK MAP* tiene un bloque por diapositiva, tan ancho como su parte del
+  objetivo y lleno según lo que tardó frente a ella. La diapositiva actual
+  lleva un borde blanco, y un clic lleva el cabezal a cualquiera.
+- *SCRIPT* es el guion de la diapositiva en pantalla: cuántas palabras dice y
+  cuánto se tarda en leerlas a tu ritmo (el medido al dictar o el fijado en
+  *Settings → Prompter*), su parte del objetivo (*Share*), su toma y su
+  práctica, y `Script 0:05 too long` si el texto no cabe en su parte. *Rehearse
+  with the prompter* abre el prompter sobre la vista previa y *Open in the
+  editor* abre el guion en su sección.
+- La lista de diapositivas enseña los tiempos de las tomas (*Takes*) o los de
+  la última práctica (*Last practice*). *No time* deja solo las que aún no
+  tienen tiempo y *Over* las que se pasan de su parte, y *Filter slides*
+  busca por nombre. Cada fila tiene una barra con su parte marcada, el tiempo,
+  y los botones de escuchar y regrabar (o de practicar desde ahí).
+- Abajo quedan los controles: *Record* para grabar o *Practice* para
+  practicar.
+
+La parte de cada diapositiva sale de su `target=`, si lo tiene. Lo que esos
+objetivos dejan del total se reparte entre las demás según cuántas palabras
+dice su guion, y una diapositiva sin texto recibe como mínimo la parte de 15
+palabras, porque también se ve un momento. Los colores son los de toda la
+app: violeta si cabe, ámbar si se pasa un poco (un 10 %, al menos 10 segundos)
+y rojo si se pasa más.
+
+Para recorrer el flujo completo con un proyecto de ejemplo y capturas
+(practicar, recortar, grabar y convertirlo en vídeo o presentación), ver
+#link("/guias/ensayar-y-grabar/")[Ensayar y grabar una charla].
 
 == Grabar la charla y ajustar sus tiempos <grabar-charla>
 
@@ -154,35 +200,31 @@ charla cabe. Funciona aunque el guion esté vacío: si además dictas con
 Scribe, la misma grabación lo escribe (ver #link(<dictar>)[Dictar el guion
 con Scribe]).
 
-En *Script & narration*, la tarjeta *TIMING* tiene una fila por diapositiva
-con el tiempo grabado, su objetivo y un botón, y arriba el total frente a la
-duración prevista. `▸` despliega los stops de una diapositiva, cada uno con su
-tiempo y su botón, y un clic en el nombre de una diapositiva o de un stop
-lleva el cabezal allí.
+Con la lista en *Takes*, cada fila muestra el tiempo grabado de la
+diapositiva; `▸` despliega sus stops, cada uno con su tiempo y sus botones, y
+un clic en un nombre lleva el cabezal allí.
 
-+ Planifica la charla con `scene.slides.target(...)` o con un `target=` en
-  cada diapositiva (ver #link(<tiempo-de-la-charla>)[El tiempo de la
-  charla]). Sin plan también se graban los tiempos, pero no hay con qué
-  compararlos.
-+ Pulsa *Record the talk*. Tras la cuenta atrás, presenta hablando desde la
-  primera diapositiva: `→` o `Espacio` avanzan en cada stop, `Enter` termina y
-  `Esc` lo descarta todo.
++ Fija la duración en *TARGET*, o planifica la charla con
+  `scene.slides.target(...)` o con un `target=` en cada diapositiva (ver
+  #link(<tiempo-de-la-charla>)[El tiempo de la charla]). Sin plan también se
+  graban los tiempos, pero no hay con qué compararlos.
++ En *Record*, *Test level* abre el micrófono y muestra su nivel sin grabar.
++ *From the start* presenta desde la primera diapositiva y *Record from here*
+  desde la que está en pantalla. Tras la cuenta atrás, presenta hablando: `→`
+  o `Espacio` avanzan en cada stop, `Enter` termina y `Esc` lo descarta todo.
 + Cada diapositiva que recorres entera guarda su tiempo, desde que entras
   hasta que sales, y el de cada tramo entre stops. La diapositiva en la que
   pulsas `Enter` cuenta si ya estabas en su último stop.
-+ Mira la tarjeta: cada tiempo va en verde si cabe en su objetivo, en ámbar si
-  se pasa un poco (un 10 %, al menos 10 segundos) y en rojo si se pasa más.
-  Debajo, Gaanim dice cuánto te sobra (`Fits the plan with 0:08 to spare`),
-  cuánto te pasas o, si faltan diapositivas por grabar, cuánto tiempo les
-  queda.
-+ *Re-record* vuelve a presentar solo esa diapositiva: la grabación termina
-  sola cuando sales de ella y su tiempo sustituye al anterior. En una
-  diapositiva sin tiempo, *Record* presenta desde ahí hasta que pulsas
-  `Enter`.
-+ Para ajustar menos, despliega la diapositiva y pulsa *Re-record* en un
-  stop: la grabación arranca justo al dejar el stop anterior (o al entrar en
-  la diapositiva, para el primero) y termina sola cuando avanzas en ese stop.
-  Su tiempo sustituye al del tramo, y el de la diapositiva se recalcula.
++ Mira el panel: *TAKES* dice cuánto te queda o te pasas, y *Over* deja las
+  diapositivas que se salen de su parte.
++ *This slide*, o el botón de grabar de una fila que ya tiene tiempo, vuelve a
+  presentar solo esa diapositiva: la grabación termina sola cuando sales de
+  ella y su tiempo sustituye al anterior. En una fila sin tiempo, el botón
+  presenta desde ahí hasta que pulsas `Enter`.
++ Para ajustar menos, despliega la diapositiva y pulsa grabar en un stop: la
+  grabación arranca justo al dejar el stop anterior (o al entrar en la
+  diapositiva, para el primero) y termina sola cuando avanzas en ese stop. Su
+  tiempo sustituye al del tramo, y el de la diapositiva se recalcula.
 
 Mientras grabas, el subtítulo del editor (ver #link(<prompter>)[El
 prompter]) muestra, además del guion, el reloj de la grabación, el nivel del
@@ -190,18 +232,46 @@ micrófono, el tiempo que llevas en la diapositiva frente a su objetivo y
 `talk ≈ 3:40 of 4:00`: lo que duraría la charla con lo que llevas grabado y
 los tiempos guardados del resto de diapositivas.
 
-Con *Keep the audio, to listen back* marcado, cada grabación guarda además el
-audio de cada diapositiva y stop que cronometra, y regrabar uno sustituye su
-audio. El botón de reproducir de cada fila lo escucha: la diapositiva entera,
-tramo tras tramo, o solo ese stop. Para que tu voz forme parte del vídeo
-exportado, graba en cambio una toma en vivo (ver
-#link("/referencia/audio/#narracion")[Narración]).
+Con *Keep the audio* marcado, cada grabación guarda además el audio de cada
+tramo que cronometra: un archivo WAV por tramo entre stops, nombrado por su
+diapositiva y su número. Regrabar una diapositiva sustituye todos sus tramos,
+y regrabar un stop solo el suyo. El botón de reproducir de cada fila lo
+escucha: la diapositiva entera, tramo tras tramo, o solo ese stop.
 
-Los tiempos y el audio se guardan en la carpeta de datos de Gaanim, junto a
-los ensayos de ese archivo, nunca en el proyecto: no acaban en un
-repositorio. Si la escena tiene una toma en vivo
-(`scene.live_take`), se graba siempre entera: las filas no se regraban por
-separado.
+Ese audio sirve para escucharte y corregir, no para el vídeo: los tiempos y el
+audio se guardan en la carpeta de datos de Gaanim (en Windows,
+`%LOCALAPPDATA%\Gaanim\Gaanim\data\rehearsals`), junto a los ensayos de ese
+archivo, nunca en el proyecto, así que no acaban en un repositorio ni en una
+exportación. Para que tu voz forme parte del vídeo exportado, graba en cambio
+una toma en vivo o bloques de voz en off, que sí se guardan en la carpeta
+`narration/` del proyecto (ver #link("/referencia/audio/#narracion")[Narración]).
+Si la escena tiene una toma en vivo (`scene.live_take`), se graba siempre
+entera: las filas no se regraban por separado.
+
+== Practicar contra un objetivo <practicar>
+
+Practicar es presentar la charla cronometrada sin grabar nada: ni audio, ni
+guion, ni los tiempos de las tomas. Cada práctica se guarda como un ensayo, y
+el panel la compara con el objetivo y con las anteriores.
+
++ Fija la duración en *TARGET*.
++ En los controles de abajo, elige *Practice* y pulsa *Practise from the
+  start*, o *From here* para empezar en la diapositiva en pantalla (el botón
+  de cada fila, con la lista en *Last practice*, también empieza ahí).
++ Tras la cuenta atrás, presenta como en la charla: `→` o `Espacio` avanzan,
+  `Enter` termina y `Esc` la descarta. El prompter muestra el guion y, en su
+  línea de estado, `PRACTICE`, el tiempo en la diapositiva frente a su parte
+  del objetivo, `0:12 behind` o `0:08 ahead`, y el reloj frente al objetivo
+  (`4:12 / 15:00`). Adelantado o retrasado cuenta enteras las diapositivas ya
+  dejadas, y la actual solo cuando se pasa de su parte.
++ Al terminar, el panel dice cómo fue (`Practice: 14:52 of 15:00 · 0:08 to
+  spare`). *LAST PRACTICE* y *PRACTICE RUNS* se actualizan, y la lista en
+  *Last practice*, con el filtro *Over*, señala dónde recortar.
+
+Funciona en los dos sentidos: las presentaciones en Presenter View también
+cuentan como prácticas, y el objetivo que fijas en el panel es el que usa
+Presenter View. Como todo ensayo, una práctica de menos de 30 segundos no se
+guarda.
 
 == Dictar el guion con Scribe <dictar>
 
@@ -211,11 +281,11 @@ cada frase va a la diapositiva y al tramo que estabas presentando.
 
 + Consigue un token de Scribe en Zoom Platform Studio (*View JWT Token*). Elige
   la caducidad más corta que te sirva: si se filtrara, deja de valer antes.
-+ En *Settings → Dictation* (`Ctrl+,`, o *Recording, transcription and
-  dictation settings…* al pie de *Script & narration*), pega el token y pulsa
-  *Save in Windows* (ver #link(<token-scribe>)[El token]).
-+ En la tarjeta *TIMING*, deja marcado *Write what I say into the script
-  (Zoom Scribe)*, que se activa solo en cuanto hay un token, y graba la charla
++ En *Settings → Dictation* (`Ctrl+,`, o el icono de ajustes de la cabecera
+  de *Script & narration*), pega el token y pulsa *Save in Windows* (ver
+  #link(<token-scribe>)[El token]).
++ En los controles *Record* del panel, deja marcado *Dictate into the script*,
+  que se activa solo en cuanto hay un token, y graba la charla
   o una diapositiva (ver #link(<grabar-charla>)[Grabar la charla]).
 + Al terminar con `Enter`, el cabezal se queda donde llegaste. Si Scribe se
   cortó antes (un error, el límite de minutos o dos minutos sin voz), se queda
@@ -352,19 +422,21 @@ scene.segment("Portada", template=title_slide, target=30)    # cada diapositiva
 scene.segment("Resultados", Transition.slide(0.5, "left"), target=120)
 ```
 
-La duración de la charla entera también se fija al presentar, sin tocar el
-script: en Presenter View, con el botón que la muestra junto a `LEFT` (o
-`Plan time` si aún no hay ninguna), eliges `10m` a `60m`, escribes otra
-(`25m`, `1h10m`, `25:00`) o la quitas; o desde la línea de comandos:
+La duración de la charla entera también se fija sin tocar el script: en
+*TARGET* del panel *Script & narration* (ver #link(<panel-narracion>)[El
+panel Script & narration]); en Presenter View, con el botón que la muestra
+junto a `LEFT` (o `Plan time` si aún no hay ninguna), donde eliges `10m` a
+`60m`, escribes otra (`25m`, `1h10m`, `25:00`) o la quitas; o desde la línea
+de comandos:
 
 ```bash
 gaanim --present --duration 20m mi-charla
 ```
 
 - `--duration` acepta `20m`, `1h30m`, `90s`, `20:00` o un número de minutos.
-- Si hay varias, manda la que fijes en Presenter View durante la sesión,
-  luego `--duration`, luego la del script y por último la que fijaste en la
-  vista la vez anterior para ese archivo, que Gaanim recuerda. Sin ninguna,
+- Si hay varias, manda la que fijes en Presenter View o en el panel durante
+  la sesión, luego `--duration`, luego la del script y por último la que
+  fijaste la vez anterior para ese archivo, que Gaanim recuerda. Sin ninguna,
   la duración es la suma de los objetivos (`target=`), si todas las
   diapositivas tienen uno. El popup del botón dice de dónde viene.
 - `LEFT` cuenta hacia atrás lo que queda de esa duración desde que empezó la
@@ -381,7 +453,8 @@ gaanim --present --duration 20m mi-charla
 
 Para ajustar la charla a esa duración antes de presentarla, grábala en el
 editor diapositiva a diapositiva (ver #link(<grabar-charla>)[Grabar la charla
-y ajustar sus tiempos]).
+y ajustar sus tiempos]) o practícala contra ella (ver
+#link(<practicar>)[Practicar contra un objetivo]).
 
 Cada presentación que dura más de 30 segundos se guarda como un ensayo, con
 el tiempo de cada diapositiva, en la carpeta de datos de Gaanim. En el

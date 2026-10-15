@@ -7,7 +7,7 @@
 //!
 //! [`MainVelloScene`]: crate::pipeline::MainVelloScene
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bevy::asset::RenderAssetUsages;
@@ -418,6 +418,165 @@ impl CanvasFrame {
     }
 }
 
+/// Frames Vello skipped in the preview. Vello sizes its GPU buffers from an
+/// estimate of the scene, and when a scene outgrows them it writes no pixel
+/// and reports nothing: the canvas keeps its last frame, which the
+/// post-process then processes again, so a bloom grows into a white blob.
+/// Like the exporter, the canvas writes sentinel pixels before a render and
+/// reads them back after it, here a frame later so the preview never waits;
+/// a frame whose probes kept the sentinel doubles Vello's buffers and is
+/// drawn again.
+#[derive(Resource)]
+struct CanvasOverflow {
+    /// Multiplier of Vello's bump buffers, from 1 to [`MAX_BUMP_SCALE`].
+    scale: u32,
+    /// Where the probe pixels are copied, kept between frames.
+    buffer: Option<vello::wgpu::Buffer>,
+    /// The readback in flight: [`PROBE_PENDING`], [`PROBE_MAPPED`] or
+    /// [`PROBE_FAILED`].
+    pending: Option<Arc<AtomicU8>>,
+}
+
+/// Written to the probe pixels before a render; Vello overwrites every pixel
+/// of the region it draws unless a stage ran out of buffer.
+const PROBE_SENTINEL: [u8; 4] = [0x5a, 0xc3, 0x17, 0x01];
+/// Byte stride of the probes in the readback buffer (copy row alignment).
+const PROBE_STRIDE: u64 = 256;
+const PROBE_COUNT: usize = 5;
+const PROBE_PENDING: u8 = 0;
+const PROBE_MAPPED: u8 = 1;
+const PROBE_FAILED: u8 = 2;
+/// Largest multiplier of Vello's buffers, as in the exporter.
+const MAX_BUMP_SCALE: u32 = 8;
+
+impl Default for CanvasOverflow {
+    fn default() -> Self {
+        Self {
+            scale: 1,
+            buffer: None,
+            pending: None,
+        }
+    }
+}
+
+impl CanvasOverflow {
+    /// Whether Vello skipped the last probed frame, once its readback is in.
+    fn skipped(&mut self, device: &vello::wgpu::Device) -> Option<bool> {
+        let state = self.pending.as_ref()?;
+        let _ = device.poll(vello::wgpu::PollType::Poll);
+        let skipped = match state.load(Ordering::Acquire) {
+            PROBE_PENDING => return None,
+            PROBE_MAPPED => self.buffer.as_ref().map(|buffer| {
+                let skipped = buffer
+                    .slice(..)
+                    .get_mapped_range()
+                    .chunks(PROBE_STRIDE as usize)
+                    .all(|probe| probe[..4] == PROBE_SENTINEL);
+                buffer.unmap();
+                skipped
+            }),
+            _ => None,
+        };
+        self.pending = None;
+        skipped
+    }
+
+    /// The pixels probed in a `size` region, or `None` while the last
+    /// readback is in flight.
+    fn probe_points(&self, size: UVec2) -> Option<[(u32, u32); PROBE_COUNT]> {
+        if self.pending.is_some() || size.x == 0 || size.y == 0 {
+            return None;
+        }
+        let (right, bottom) = (size.x - 1, size.y - 1);
+        Some([
+            (0, 0),
+            (right, 0),
+            (0, bottom),
+            (right, bottom),
+            (size.x / 2, size.y / 2),
+        ])
+    }
+
+    /// Write the sentinel into `points` of `texture`.
+    fn arm(queue: &vello::wgpu::Queue, texture: &vello::wgpu::Texture, points: &[(u32, u32)]) {
+        for &(x, y) in points {
+            queue.write_texture(
+                vello::wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: 0,
+                    origin: vello::wgpu::Origin3d { x, y, z: 0 },
+                    aspect: vello::wgpu::TextureAspect::All,
+                },
+                &PROBE_SENTINEL,
+                vello::wgpu::TexelCopyBufferLayout::default(),
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+    }
+
+    /// Copy `points` of the rendered `texture` and start reading them back.
+    fn read_back(
+        &mut self,
+        device: &vello::wgpu::Device,
+        queue: &vello::wgpu::Queue,
+        texture: &vello::wgpu::Texture,
+        points: &[(u32, u32)],
+    ) {
+        let buffer = self.buffer.get_or_insert_with(|| {
+            device.create_buffer(&vello::wgpu::BufferDescriptor {
+                label: Some("gaanim-canvas-probes"),
+                size: PROBE_STRIDE * PROBE_COUNT as u64,
+                usage: vello::wgpu::BufferUsages::MAP_READ | vello::wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let mut encoder = device.create_command_encoder(&vello::wgpu::CommandEncoderDescriptor {
+            label: Some("gaanim-canvas-probes"),
+        });
+        for (index, &(x, y)) in points.iter().enumerate() {
+            encoder.copy_texture_to_buffer(
+                vello::wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: 0,
+                    origin: vello::wgpu::Origin3d { x, y, z: 0 },
+                    aspect: vello::wgpu::TextureAspect::All,
+                },
+                vello::wgpu::TexelCopyBufferInfo {
+                    buffer,
+                    layout: vello::wgpu::TexelCopyBufferLayout {
+                        offset: index as u64 * PROBE_STRIDE,
+                        bytes_per_row: None,
+                        rows_per_image: None,
+                    },
+                },
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        queue.submit(Some(encoder.finish()));
+        let state = Arc::new(AtomicU8::new(PROBE_PENDING));
+        let mapped = Arc::clone(&state);
+        buffer
+            .slice(..)
+            .map_async(vello::wgpu::MapMode::Read, move |result| {
+                let outcome = if result.is_ok() {
+                    PROBE_MAPPED
+                } else {
+                    PROBE_FAILED
+                };
+                mapped.store(outcome, Ordering::Release);
+            });
+        self.pending = Some(state);
+    }
+}
+
 #[derive(Resource)]
 struct CompositePipelines {
     layout: BindGroupLayout,
@@ -450,6 +609,7 @@ impl Plugin for VelloCanvasPlugin {
             .insert_resource(stats)
             .init_resource::<ExtractedCanvas>()
             .init_resource::<RenderedCanvas>()
+            .init_resource::<CanvasOverflow>()
             .init_resource::<ExtractedMirror>()
             .init_resource::<CanvasObjectEffects>()
             .add_systems(ExtractSchedule, (extract_canvas, extract_mirror))
@@ -531,8 +691,11 @@ fn resize_canvas_target(
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
-    image.texture_descriptor.usage =
-        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING;
+    // COPY_SRC lets `CanvasOverflow` read back its probe pixels.
+    image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING
+        | TextureUsages::COPY_DST
+        | TextureUsages::COPY_SRC
+        | TextureUsages::STORAGE_BINDING;
     canvas.image = images.add(image);
     canvas.size = size;
 }
@@ -648,10 +811,22 @@ fn render_canvas(
     effects: CanvasEffects,
     mut object_effects: ResMut<CanvasObjectEffects>,
     mut rendered: ResMut<RenderedCanvas>,
+    mut overflow: ResMut<CanvasOverflow>,
 ) {
     let Some(target) = extracted.image.and_then(|image| images.get(image)) else {
         return;
     };
+    if overflow.skipped(device.wgpu_device()) == Some(true) {
+        // Draw the skipped frame again, with larger buffers while allowed.
+        rendered.0 = None;
+        if overflow.scale < MAX_BUMP_SCALE {
+            overflow.scale *= 2;
+            info!(
+                "the scene outgrew Vello's buffers; drawing it with {}x buffers",
+                overflow.scale
+            );
+        }
+    }
 
     let full = target.texture_descriptor.size;
     let full = UVec2::new(full.width, full.height);
@@ -719,6 +894,18 @@ fn render_canvas(
     let Ok(mut renderer) = renderer.lock() else {
         return;
     };
+    // Vello reads these on the thread that renders.
+    vello_encoding::set_bump_buffer_scale(overflow.scale);
+    vello_encoding::set_max_bump_buffer_bytes(
+        device
+            .wgpu_device()
+            .limits()
+            .max_storage_buffer_binding_size,
+    );
+    let probes = overflow.probe_points(pixels);
+    if let Some(points) = &probes {
+        CanvasOverflow::arm(&queue, &target.texture, points);
+    }
     let placement = current.scene.as_ref().map(|(_, affine)| *affine);
     // Effects fill the images the frame draws, so they render first.
     if (!extracted.effects.is_empty() || object_effects.0.is_active())
@@ -745,7 +932,12 @@ fn render_canvas(
             antialiasing_method: CANVAS_ANTIALIASING,
         },
     ) {
-        Ok(()) => rendered.0 = (!volatile).then_some(current),
+        Ok(()) => {
+            rendered.0 = (!volatile).then_some(current);
+            if let Some(points) = &probes {
+                overflow.read_back(device.wgpu_device(), &queue, &target.texture, points);
+            }
+        }
         Err(error) => error!("Vello failed to render the canvas: {error}"),
     }
 
@@ -1128,6 +1320,7 @@ mod tests {
         let shifted = CameraViewport {
             scale: 0.8,
             offset_y: -120.0,
+            offset_x: -210.0,
         };
         for (angle, (x, y), zoom, viewport) in [
             (0.0, (0.0, 0.0), 1.0, CameraViewport::default()),

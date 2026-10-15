@@ -1484,12 +1484,32 @@ fn calling_script_dir(py: Python<'_>) -> PyResult<PathBuf> {
 }
 
 /// Takes live in `narration/` under the asset directory; scenes without one
-/// keep them beside their script.
+/// keep them where [`narration_root`] says.
 fn prepare_narration_directory(py: Python<'_>, scene: &mut ApiCanvas) -> PyResult<()> {
     if scene.asset_root.is_none() {
-        scene.set_narration_fallback_root(calling_script_dir(py)?);
+        scene.set_narration_fallback_root(narration_root(&calling_script_dir(py)?));
     }
     Ok(())
+}
+
+/// Where `narration/` (the script and the takes) lives for a scene whose
+/// script is in `script_dir` and that set no asset folder: the asset folder
+/// of the project it belongs to (the nearest `gaanim.toml` above it), as in
+/// `gaanim init` projects, unless an older project keeps `narration/` beside
+/// the script and not there; outside a project, beside the script.
+fn narration_root(script_dir: &std::path::Path) -> PathBuf {
+    let assets = find_manifest_upward(script_dir).and_then(|manifest| {
+        let source = std::fs::read_to_string(&manifest).ok()?;
+        let assets_dir = manifest_assets_dir(&source).ok()?;
+        Some(manifest.parent()?.join(assets_dir))
+    });
+    let narration = gaanim_api::canvas::NARRATION_DIR;
+    match assets {
+        Some(assets) if assets.join(narration).is_dir() || !script_dir.join(narration).is_dir() => {
+            assets
+        }
+        _ => script_dir.to_path_buf(),
+    }
 }
 
 impl PyVoiceover {
@@ -6856,7 +6876,7 @@ impl PyScene {
             if canvas.asset_root.is_none()
                 && let Ok(directory) = calling_script_dir(slf.py())
             {
-                canvas.set_narration_fallback_root(directory);
+                canvas.set_narration_fallback_root(narration_root(&directory));
             }
             let handle = canvas
                 .segment_with_background(
@@ -8880,6 +8900,22 @@ mod tests {
             find_manifest_upward(&chapter),
             Some(chapter.join("gaanim.toml"))
         );
+        std::fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn narration_lives_in_the_projects_asset_folder() {
+        let project = scratch_dir("narration-root");
+        let source = project.join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(project.join("gaanim.toml"), "assets_dir = \"media\"\n").unwrap();
+        assert_eq!(narration_root(&source), project.join("media"));
+        // An older project keeps narration/ beside its script.
+        std::fs::create_dir_all(source.join("narration")).unwrap();
+        assert_eq!(narration_root(&source), source);
+        // Once the asset folder has one, it wins.
+        std::fs::create_dir_all(project.join("media").join("narration")).unwrap();
+        assert_eq!(narration_root(&source), project.join("media"));
         std::fs::remove_dir_all(project).unwrap();
     }
 

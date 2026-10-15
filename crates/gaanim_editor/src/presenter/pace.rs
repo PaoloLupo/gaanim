@@ -468,6 +468,11 @@ impl Rehearsals {
         }
     }
 
+    /// The practice runs kept, oldest first.
+    pub(crate) fn all(&self) -> &[Rehearsal] {
+        &self.log.rehearsals
+    }
+
     /// The talk as last recorded in the editor.
     pub(crate) fn timing(&self) -> &TalkTiming {
         &self.log.timing

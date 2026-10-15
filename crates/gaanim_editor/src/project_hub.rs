@@ -337,7 +337,7 @@ pub(crate) fn update_settings_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         ui.ctx().request_repaint_after(Duration::from_millis(100));
     }
     if notes {
-        let _ = crate::platform::open_detached(&release_page(offer));
+        let _ = crate::platform::open_detached(release_page(offer));
     }
     if install {
         offer.install();

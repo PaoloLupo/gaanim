@@ -34,6 +34,9 @@ pub struct CameraViewport {
     pub scale: f64,
     /// Vertical host-pixel offset of the logical canvas centre.
     pub offset_y: f64,
+    /// Horizontal host-pixel offset of the logical canvas centre, left of
+    /// a side panel when negative.
+    pub offset_x: f64,
 }
 
 impl Default for CameraViewport {
@@ -41,6 +44,7 @@ impl Default for CameraViewport {
         Self {
             scale: 1.0,
             offset_y: 0.0,
+            offset_x: 0.0,
         }
     }
 }
@@ -50,7 +54,7 @@ impl CameraViewport {
         if !self.scale.is_finite() || self.scale <= 0.0 {
             return Err(CameraValidationError::InvalidViewportScale);
         }
-        if !self.offset_y.is_finite() {
+        if !self.offset_y.is_finite() || !self.offset_x.is_finite() {
             return Err(CameraValidationError::NonFinite);
         }
         Ok(())
@@ -675,7 +679,7 @@ impl Camera {
         };
         let effective_zoom = self.pixels_per_unit() * zoom * viewport.scale;
         let z_angle = self.z_angle();
-        let hw = (self.viewport_width as f64) / 2.0;
+        let hw = (self.viewport_width as f64) / 2.0 + viewport.offset_x;
         let hh = (self.viewport_height as f64) / 2.0 + viewport.offset_y;
 
         Affine::translate((hw, hh))
@@ -707,7 +711,9 @@ impl Camera {
             self.viewport_width as f64 * 0.5,
             self.viewport_height as f64 * 0.5,
         );
-        center + DVec2::new(0.0, viewport.offset_y) + (logical - center) * viewport.scale
+        center
+            + DVec2::new(viewport.offset_x, viewport.offset_y)
+            + (logical - center) * viewport.scale
     }
 
     /// Converts screen pixel coordinates (measured from top-left corner) back into a world coordinate on the Z = 0 plane.
@@ -741,8 +747,8 @@ impl Camera {
             self.viewport_width as f64 * 0.5,
             self.viewport_height as f64 * 0.5,
         );
-        let logical =
-            center + (screen - center - DVec2::new(0.0, viewport.offset_y)) / viewport.scale;
+        let logical = center
+            + (screen - center - DVec2::new(viewport.offset_x, viewport.offset_y)) / viewport.scale;
         self.screen_to_world(logical)
     }
 
@@ -768,8 +774,8 @@ impl Camera {
             self.viewport_width as f64 * 0.5,
             self.viewport_height as f64 * 0.5,
         );
-        let logical =
-            center + (screen - center - DVec2::new(0.0, viewport.offset_y)) / viewport.scale;
+        let logical = center
+            + (screen - center - DVec2::new(viewport.offset_x, viewport.offset_y)) / viewport.scale;
         self.screen_to_ray(logical)
     }
 }
@@ -951,6 +957,7 @@ mod tests {
         let viewport = CameraViewport {
             scale: 0.73,
             offset_y: 41.0,
+            offset_x: 0.0,
         };
         let world = DVec3::new(137.0, -88.0, 0.0);
         let screen = cam.world_to_screen_with_viewport(world, viewport);
@@ -966,6 +973,7 @@ mod tests {
         let viewport = CameraViewport {
             scale: 0.8,
             offset_y: -26.0,
+            offset_x: 0.0,
         };
         let world = DVec3::new(1.0, -0.5, 0.0);
         let screen = cam.world_to_screen_with_viewport(world, viewport);

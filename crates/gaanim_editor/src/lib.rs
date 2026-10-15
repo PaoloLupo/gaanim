@@ -115,11 +115,17 @@ fn sync_editor_input_ignore_system(
 pub struct ViewportInset {
     /// Space consumed by the bottom timeline panel (pixels).
     pub bottom: f32,
+    /// Space consumed by a panel docked on the right, such as the
+    /// narration panel (pixels).
+    pub right: f32,
 }
 
 impl Default for ViewportInset {
     fn default() -> Self {
-        Self { bottom: 0.0 }
+        Self {
+            bottom: 0.0,
+            right: 0.0,
+        }
     }
 }
 
@@ -231,10 +237,18 @@ fn square_egui_corners_system(
         ctx.add_font(egui::epaint::text::FontInsert::new(
             "JetBrains Mono",
             egui::FontData::from_static(gaanim_text::font::JETBRAINS_MONO),
-            vec![egui::epaint::text::InsertFontFamily {
-                family: egui::FontFamily::Monospace,
-                priority: egui::epaint::text::FontPriority::Highest,
-            }],
+            vec![
+                egui::epaint::text::InsertFontFamily {
+                    family: egui::FontFamily::Monospace,
+                    priority: egui::epaint::text::FontPriority::Highest,
+                },
+                // The text font has no arrows (→ ←) and few symbols: they
+                // come from here.
+                egui::epaint::text::InsertFontFamily {
+                    family: egui::FontFamily::Proportional,
+                    priority: egui::epaint::text::FontPriority::Lowest,
+                },
+            ],
         ));
     }
 }
@@ -874,7 +888,15 @@ fn editor_ui_system(
     let current = timeline.current_time.clamp(0.0, total);
 
     // Auto-hide: compacto, no tapa contenido (usa ViewportInset)
-    let vp = ctx.viewport_rect();
+    // The bar stays left of a panel docked on the right, whose width the
+    // inset gives in window pixels.
+    let docked = inset.right / ctx.zoom_factor();
+    let vp = {
+        let mut vp = ctx.viewport_rect();
+        vp.max.x = (vp.max.x - docked).max(vp.min.x + 320.0);
+        vp
+    };
+    let centre_shift = vp.center().x - ctx.viewport_rect().center().x;
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let pointer_near_bottom = pointer.map(|p| p.y > vp.height() - 60.0).unwrap_or(false);
     // A project that opens or reloads shows its controls for a moment.
@@ -928,7 +950,7 @@ fn editor_ui_system(
         let area_resp = egui::Area::new("playback_overlay".into())
             .anchor(
                 egui::Align2::CENTER_BOTTOM,
-                egui::vec2(0.0, slide_offset - bottom_gap),
+                egui::vec2(centre_shift, slide_offset - bottom_gap),
             )
             .order(egui::Order::Foreground)
             .interactable(true)
@@ -1501,13 +1523,13 @@ fn editor_ui_system(
                                                         actions.push(PlaybackAction::ToggleNarration);
                                                     }
                                                 }
-                                                CompactControl::Home if !WEB => {
-                                                    if icon_button(ui, Icon::Home, ButtonTone::Ghost, true)
-                                                        .on_hover_text("Back to Home: closes this project")
-                                                        .clicked()
-                                                    {
-                                                        actions.push(PlaybackAction::GoHome);
-                                                    }
+                                                CompactControl::Home
+                                                    if !WEB
+                                                        && icon_button(ui, Icon::Home, ButtonTone::Ghost, true)
+                                                            .on_hover_text("Back to Home: closes this project")
+                                                            .clicked() =>
+                                                {
+                                                    actions.push(PlaybackAction::GoHome);
                                                 }
                                                 _ => {}
                                             }
@@ -3576,7 +3598,10 @@ fn pan_for_zoom_at_cursor(
     cursor: glam::DVec2,
     ratio: f64,
 ) -> glam::DVec2 {
-    let center = glam::DVec2::new(window_size.x * 0.5, window_size.y * 0.5 + viewport.offset_y);
+    let center = glam::DVec2::new(
+        window_size.x * 0.5 + viewport.offset_x,
+        window_size.y * 0.5 + viewport.offset_y,
+    );
     // A drag by `d` moves the camera by the world span of `-d`, so the span of
     // the cursor offset shrinking by `1 / ratio` is a drag of that difference.
     pan_for_screen_delta(camera, viewport, (cursor - center) * (1.0 / ratio - 1.0))
@@ -4089,10 +4114,12 @@ fn viewport_adjust_system(
         view_override.0 = None;
         camera_viewport.scale = fit_scale;
         camera_viewport.offset_y = 0.0;
+        camera_viewport.offset_x = 0.0;
         return;
     }
 
     let available_h = window_h - inset.bottom as f64;
+    let available_w = (window_w - inset.right as f64).max(1.0);
 
     let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
     if available_h < 1.0 {
@@ -4101,12 +4128,12 @@ fn viewport_adjust_system(
     }
 
     // Always fit animation into the available area while preserving aspect ratio.
-    let scale_x = window_w / anim_w;
+    let scale_x = available_w / anim_w;
     let scale_y = available_h / anim_h;
     let fit_scale = scale_x.min(scale_y);
     let frame_size = glam::DVec2::new(anim_w * fit_scale, anim_h * fit_scale);
     viewport_frame.origin = glam::DVec2::new(
-        (window_w - frame_size.x) * 0.5,
+        (available_w - frame_size.x) * 0.5,
         (available_h - frame_size.y) * 0.5,
     );
     viewport_frame.size = frame_size;
@@ -4126,6 +4153,8 @@ fn viewport_adjust_system(
     // Shift the Vello centre upward so the animation sits above the timeline.
     // When there is no timeline panel (inset.bottom == 0) the offset is 0.
     camera_viewport.offset_y = -(inset.bottom as f64) / 2.0;
+    // Left of a panel docked on the right.
+    camera_viewport.offset_x = -(inset.right as f64) / 2.0;
     view_override.0 = interactive.enabled.then_some(cam);
 }
 
@@ -4797,15 +4826,18 @@ mod tests {
         let mut export_state = export::ExportState::default();
         export_state.active = true;
         let mut app = App::new();
-        app.insert_resource(ViewportInset { bottom: 120.0 })
-            .insert_resource(PreviewInteractive::default())
-            .insert_resource(Camera::ortho_2d(1280, 720))
-            .insert_resource(CameraViewOverride::default())
-            .insert_resource(CameraViewport::default())
-            .insert_resource(ViewportFrame::default())
-            .insert_resource(PresentationMode::default())
-            .insert_resource(export_state)
-            .add_systems(Update, viewport_adjust_system);
+        app.insert_resource(ViewportInset {
+            bottom: 120.0,
+            right: 0.0,
+        })
+        .insert_resource(PreviewInteractive::default())
+        .insert_resource(Camera::ortho_2d(1280, 720))
+        .insert_resource(CameraViewOverride::default())
+        .insert_resource(CameraViewport::default())
+        .insert_resource(ViewportFrame::default())
+        .insert_resource(PresentationMode::default())
+        .insert_resource(export_state)
+        .add_systems(Update, viewport_adjust_system);
         app.world_mut().spawn((
             Window {
                 resolution: bevy::window::WindowResolution::new(1280, 720),
@@ -4969,6 +5001,7 @@ mod tests {
         let viewport = CameraViewport {
             scale: 2.0 / 3.0,
             offset_y: -40.0,
+            offset_x: 0.0,
         };
         let cursor = egui::pos2(1000.0, 150.0);
         let before =
