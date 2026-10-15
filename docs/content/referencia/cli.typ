@@ -488,7 +488,7 @@ Un paquete se exporta a PDF igual, sin ejecutar Python. El diálogo
 *Export* del editor también ofrece el formato PDF, con una casilla para las
 notas.
 
-== Paquetes
+== Paquetes <exportar-paquetes>
 
 Con `--output` terminado en `.gaanim`, `export` graba un paquete de la escena
 completa; `--from`, `--to`, `--transparent`, `--notes` y `--encoder` no se aplican, y
