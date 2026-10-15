@@ -12,6 +12,7 @@ use ui_kit::{
 pub mod alsa_errors;
 pub mod animation_timeline;
 mod app_icon;
+mod brand;
 pub mod bundle_player;
 pub mod cli;
 pub mod console_panel;
@@ -46,6 +47,7 @@ pub mod presenter_link;
 pub mod project_hub;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod python_plugin;
+mod settings;
 pub mod share_link;
 pub mod source_link;
 mod touch;
@@ -214,13 +216,23 @@ impl ViewportFrame {
 
 pub struct GaanimEditorPlugin;
 
-/// Every egui context (main window, presenter) draws square corners, like
-/// the controls painted by [`ui_kit`].
+/// Every egui context (main window, presenter) draws square corners in the
+/// brand's colours, like the controls painted by [`ui_kit`], and writes
+/// monospaced text in JetBrains Mono, the brand's code face.
 fn square_egui_corners_system(
     mut contexts: Query<&mut bevy_egui::EguiContext, Added<bevy_egui::EguiContext>>,
 ) {
     for mut context in &mut contexts {
-        context.get_mut().all_styles_mut(ui_kit::square_corners);
+        let ctx = context.get_mut();
+        ctx.all_styles_mut(ui_kit::square_corners);
+        ctx.add_font(egui::epaint::text::FontInsert::new(
+            "JetBrains Mono",
+            egui::FontData::from_static(gaanim_text::font::JETBRAINS_MONO),
+            vec![egui::epaint::text::InsertFontFamily {
+                family: egui::FontFamily::Monospace,
+                priority: egui::epaint::text::FontPriority::Highest,
+            }],
+        ));
     }
 }
 
@@ -231,6 +243,7 @@ impl Plugin for GaanimEditorPlugin {
             .add_plugins(bundle_player::BundlePlayerPlugin)
             .add_plugins(project_hub::ProjectHubPlugin)
             .add_plugins(presenter_link::PresenterLinkPlugin)
+            .add_plugins(settings::SettingsPlugin)
             .add_systems(PreUpdate, square_egui_corners_system)
             .init_resource::<EditorState>()
             .init_resource::<touch::TouchControls>()
@@ -240,7 +253,7 @@ impl Plugin for GaanimEditorPlugin {
             .init_resource::<presenter::PresenterMirror>()
             .init_resource::<presenter::PresenterOverviewState>()
             .init_resource::<presenter::PresenterPreferences>()
-            .init_resource::<presenter::prompter::PrompterSettings>()
+            .insert_resource(presenter::prompter::PrompterSettings::load())
             .init_resource::<presenter::prompter::PrompterPace>()
             .init_resource::<presenter::AudienceControlsState>()
             .init_resource::<presenter::PresentationTimer>()
@@ -727,6 +740,7 @@ fn editor_ui_system(
         audio_tracks,
         controls,
         mut prompter,
+        mut settings_window,
     ): (
         ResMut<export::ExportState>,
         ResMut<narration::NarrationPanel>,
@@ -736,6 +750,7 @@ fn editor_ui_system(
         Option<Res<gaanim_media::PreviewAudioTracks>>,
         Res<PlaybackControls>,
         ResMut<presenter::prompter::PrompterSettings>,
+        ResMut<settings::SettingsWindow>,
     ),
     mut fullscreen_state: ResMut<EditorFullscreenState>,
     mut timeline: ResMut<Timeline>,
@@ -1409,6 +1424,9 @@ fn editor_ui_system(
                                             if ui.button("Present").clicked() {
                                                 actions.push(PlaybackAction::Present);
                                             }
+                                            if !WEB && ui.button("Settings · Ctrl+,").clicked() {
+                                                actions.push(PlaybackAction::OpenSettings);
+                                            }
                                             if has_audio {
                                                 ui.separator();
                                                 ui.horizontal(|ui| {
@@ -1540,6 +1558,7 @@ fn editor_ui_system(
                                 PlaybackAction::TogglePrompter => {
                                     prompter.editor_open = !prompter.editor_open;
                                 }
+                                PlaybackAction::OpenSettings => settings_window.open(),
                                 PlaybackAction::Present => start_presentation(
                                     &mut presentation_mode,
                                     &mut fullscreen_state,
@@ -2043,7 +2062,7 @@ fn snap_seek_fraction(
 /// gaps instead of ornaments, a label is drawn only when it fits its chip,
 /// and the full name of any chapter is shown in the hover tooltip.
 /// Line between two scenes in the timeline.
-const SCENE_DIVIDER: egui::Color32 = egui::Color32::from_rgba_premultiplied(88, 92, 104, 150);
+const SCENE_DIVIDER: egui::Color32 = egui::Color32::from_rgba_premultiplied(92, 92, 100, 150);
 
 /// How a scene chip in the timeline lane is drawn.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2678,7 +2697,7 @@ fn paint_hover_card(
         0.0,
         egui::Color32::from_black_alpha(90),
     );
-    painter.rect_filled(frame, 0.0, egui::Color32::from_rgb(30, 32, 40));
+    painter.rect_filled(frame, 0.0, egui::Color32::from_rgb(32, 32, 34));
     painter.rect_stroke(
         frame,
         0.0,
@@ -2783,6 +2802,7 @@ enum PlaybackAction {
     Present,
     ToggleFullscreen,
     TogglePin,
+    OpenSettings,
     /// Copy a link to the file (web player), at the moment shown when set.
     CopyLink(bool),
 }

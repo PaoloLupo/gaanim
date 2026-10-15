@@ -543,15 +543,15 @@ Cada toma nueva se nivela al guardarla a -16 LUFS integrados, el nivel
 recomendado para voz en video online (YouTube reproduce a -14 y la televisión
 usa -23). FFmpeg mide la toma y le aplica una ganancia constante, con un pico
 real máximo de -1.5 dBTP y un filtro paso alto a 80 Hz. La grabación original
-se conserva en `narration/.originals/`. En *Voice and recording* puedes cambiar el
-nivel final: el panel avisa si eliges más de -14 LUFS o menos de -20, o
-desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
+se conserva en `narration/.originals/`. En *Settings → Recording* (`Ctrl+,`)
+puedes cambiar el nivel final, y avisa si eliges más de -14 LUFS o menos de
+-20, o desactivar la nivelación. Las tomas sin nivelar aparecen marcadas en el panel.
 
 === Whisper (opcional)
 
 En lugar de pulsar Espacio, whisper.cpp puede detectar cuándo dices cada
 palabra. Instala `whisper-cli` y un modelo `ggml-*.bin`, e indícalos en
-*Whisper (optional)* dentro del panel (vacío busca `whisper-cli` en el `PATH`).
+*Settings → Transcription* (vacío busca `whisper-cli` en el `PATH`).
 *Transcribe* guarda en el JSON de la toma el tiempo de cada palabra; también
 puede hacerse automáticamente al guardar cada toma. Requiere FFmpeg. Para que
 una marca se resuelva por transcripción, su nombre debe ser la palabra o frase

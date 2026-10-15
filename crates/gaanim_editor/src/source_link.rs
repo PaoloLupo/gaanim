@@ -30,7 +30,7 @@ pub const AVAILABLE: bool = !crate::WEB;
 
 /// Open `location` in the person's code editor.
 pub fn open(location: &ScriptLocation) -> io::Result<()> {
-    let configured = std::env::var(EDITOR_VARIABLE).ok();
+    let configured = configured_command().map(|(command, _)| command);
     if let Some(command) = configured
         .as_deref()
         .and_then(|template| editor_command(template, &location.file, location.line))
@@ -53,6 +53,21 @@ pub fn open(location: &ScriptLocation) -> io::Result<()> {
 }
 
 /// [`open`], reporting a failure in the console.
+/// The code editor command: [`EDITOR_VARIABLE`], else the one saved in
+/// Settings, and whether it came from the variable.
+pub fn configured_command() -> Option<(String, bool)> {
+    let variable = std::env::var(EDITOR_VARIABLE)
+        .ok()
+        .filter(|command| !command.trim().is_empty());
+    match variable {
+        Some(command) => Some((command, true)),
+        None => {
+            let saved = crate::settings::IntegrationPreferences::load().code_editor;
+            (!saved.trim().is_empty()).then_some((saved, false))
+        }
+    }
+}
+
 pub fn open_or_report(location: &ScriptLocation) {
     if let Err(error) = open(location) {
         gaanim_core::console::warn("editor", format!("could not open {location} · {error}"));
@@ -62,7 +77,8 @@ pub fn open_or_report(location: &ScriptLocation) {
 /// How a person learns to choose the editor, for tooltips.
 pub fn hint() -> String {
     format!(
-        "Choose the editor with {EDITOR_VARIABLE}, for example \"code --goto {{file}}:{{line}}\"."
+        "Choose the editor in Settings → Integrations (Ctrl+,) or with {EDITOR_VARIABLE}, for \
+         example \"code --goto {{file}}:{{line}}\"."
     )
 }
 

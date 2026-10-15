@@ -206,8 +206,9 @@ cada frase va a la diapositiva y al tramo que estabas presentando.
 
 + Consigue un token de Scribe en Zoom Platform Studio (*View JWT Token*). Elige
   la caducidad más corta que te sirva: si se filtrara, deja de valer antes.
-+ En *Script & narration*, abre *Zoom Scribe (dictation)*, pega el token y
-  pulsa *Save in Windows* (ver #link(<token-scribe>)[El token]).
++ En *Settings → Dictation* (`Ctrl+,`, o *Recording, transcription and
+  dictation settings…* al pie de *Script & narration*), pega el token y pulsa
+  *Save in Windows* (ver #link(<token-scribe>)[El token]).
 + En la tarjeta *TIMING*, deja marcado *Write what I say into the script
   (Zoom Scribe)*, que se activa solo en cuanto hay un token, y graba la charla
   o una diapositiva (ver #link(<grabar-charla>)[Grabar la charla]).
@@ -234,9 +235,10 @@ with Scribe* junto a *Record live take*.
 
 - Idiomas: `es-ES`, `en-US`, `pt-BR`, `pt-PT`, `fr-FR`, `de-DE`, `it-IT`,
   `ja-JP`, `zh-CN`, `ar-SA` y `ar-AE`; el español de Scribe es `es-ES`. Se
-  elige en los ajustes del panel o, para todo el proyecto, con
+  elige en *Settings → Dictation* o, para todo el proyecto, con
   #link("/referencia/gaanim-toml/#language")[`language`] en `gaanim.toml`
-  (*Pin in gaanim.toml*), que manda sobre el de los ajustes.
+  (*Pin in gaanim.toml*, con el proyecto abierto en el editor), que manda
+  sobre el de los ajustes.
 - Scribe asigna cada frase completa al tramo en el que empezó a decirse: haz
   una pausa breve al avanzar para que la frase siguiente caiga en su tramo.
 - *Send the names of slides and stops as vocabulary* ayuda a
@@ -255,7 +257,8 @@ El token de Scribe es de tu cuenta de Zoom, no del proyecto, y Gaanim nunca lo
 guarda en la carpeta del proyecto: no puede acabar en un repositorio. Gaanim
 lo busca en este orden:
 
-+ *Pegado en el panel:* vive solo en la memoria de esta sesión del editor.
++ *Pegado en Settings → Dictation:* vive solo en la memoria de esta sesión
+  del editor.
 + *Guardado en Windows* (recomendado): el Administrador de credenciales de
   Windows lo cifra para tu usuario, como `gaanim/scribe-token`. Puedes verlo o
   borrarlo allí, o con *Remove saved token*.
@@ -410,7 +413,11 @@ Cómo se lee:
   stop. Si retrocedes, las palabras vuelven atrás con él.
 - El ritmo sale de tus grabaciones: el tiempo que tardaste en ese tramo
   cuando grabaste la charla, si lo grabaste; si no, tu ritmo medido al
-  dictar con Scribe; y si nunca dictaste, 150 palabras por minuto.
+  dictar con Scribe; y si nunca dictaste, 150 palabras por minuto. Para leer
+  siempre al mismo ritmo, elige *Fixed* en *Settings → Prompter* (`Ctrl+,`) y
+  fija las palabras por minuto; ahí también se olvida el ritmo medido y se
+  cambia el tamaño del texto, que Gaanim recuerda (ver
+  #link("/referencia/cli/#ajustes")[Ajustes]).
 - A la derecha, `▶ grafico` dice dónde avanzas: el nombre del stop o, al
   final de la diapositiva, el de la siguiente. Late cuando la diapositiva ya
   espera en ese stop y el tramo está dicho: toca avanzar.

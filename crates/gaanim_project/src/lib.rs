@@ -10,6 +10,7 @@ use std::process::{Command, Output};
 pub mod association;
 pub mod help;
 pub mod relay;
+pub mod settings;
 
 const VIDEO_PROJECT_TEMPLATE: &str = include_str!("../../../templates/video_project.py");
 const SLIDES_PROJECT_TEMPLATE: &str = include_str!("../../../templates/slides_project.py");

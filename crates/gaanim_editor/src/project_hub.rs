@@ -759,6 +759,7 @@ fn project_hub_ui_system(
     mut contexts: bevy_egui::EguiContexts,
     mut state: ResMut<ProjectHubState>,
     mut pending: ResMut<PendingProjectOpen>,
+    mut settings: ResMut<crate::settings::SettingsWindow>,
     #[cfg(not(target_arch = "wasm32"))] mut exit: MessageWriter<AppExit>,
 ) {
     if !state.active {
@@ -796,12 +797,12 @@ fn project_hub_ui_system(
             .layer_id(egui::LayerId::background())
             .max_rect(screen),
     );
-    root.painter().rect_filled(screen, 0.0, palette::INK);
+    root.painter().rect_filled(screen, 0.0, palette::GRAPHITE);
     let sidebar = Rect::from_min_max(screen.min, pos2(screen.min.x + SIDEBAR_W, screen.max.y));
     let content = Rect::from_min_max(pos2(sidebar.max.x, screen.min.y), screen.max);
     paint_backdrop_grid(root.painter(), content);
     root.scope_builder(egui::UiBuilder::new().max_rect(sidebar), |ui| {
-        sidebar_ui(ui, state)
+        sidebar_ui(ui, state, &mut settings)
     });
     root.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
         content_ui(ui, state)
@@ -863,7 +864,11 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut ProjectHubState) {
 
 // ---- Sidebar ---------------------------------------------------------------------------
 
-fn sidebar_ui(ui: &mut Ui, state: &mut ProjectHubState) {
+fn sidebar_ui(
+    ui: &mut Ui,
+    state: &mut ProjectHubState,
+    settings: &mut crate::settings::SettingsWindow,
+) {
     let rect = ui.max_rect();
     let painter = ui.painter();
     painter.rect_filled(rect, 0.0, palette::SURFACE);
@@ -874,22 +879,16 @@ fn sidebar_ui(ui: &mut Ui, state: &mut ProjectHubState) {
 
     let inner = rect.shrink2(vec2(16.0, 22.0));
     ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-        // Brand: the pixel mark at 2 px per unit, then the name.
+        // Brand: the logo at 2 px per unit (142 × 32), as the brand asks.
         let (brand, _) = ui.allocate_exact_size(vec2(inner.width(), 40.0), Sense::hover());
-        let mark = Rect::from_min_size(
-            pos2(brand.min.x + 4.0, brand.center().y - 16.0).round(),
-            Vec2::splat(32.0),
-        );
-        paint_pixel_mark(ui.painter(), mark.min, 2.0);
-        ui.painter().text(
-            pos2(mark.max.x + 12.0, brand.center().y - 1.0),
-            Align2::LEFT_CENTER,
-            "gaanim",
-            FontId::proportional(22.0),
-            palette::TEXT,
+        let logo = crate::brand::logo_size(2.0);
+        crate::brand::paint_logo(
+            ui,
+            pos2(brand.min.x + 4.0, brand.center().y - logo.y / 2.0),
+            2.0,
         );
         ui.painter().text(
-            pos2(brand.max.x, brand.center().y),
+            pos2(brand.max.x, brand.center().y + 4.0),
             Align2::RIGHT_CENTER,
             concat!("v", env!("CARGO_PKG_VERSION")),
             FontId::monospace(10.5),
@@ -913,6 +912,12 @@ fn sidebar_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                 state.section = section;
             }
             ui.add_space(2.0);
+        }
+        if nav_item(ui, Icon::Settings, "Settings", false, None)
+            .on_hover_text("Ctrl+,")
+            .clicked()
+        {
+            settings.open();
         }
 
         // Environment status, pinned to the bottom.
@@ -1340,7 +1345,7 @@ fn start_card(
         rect,
         0.0,
         if hovered {
-            Color32::from_rgb(27, 28, 36)
+            Color32::from_rgb(30, 30, 30)
         } else {
             palette::SURFACE
         },
@@ -1363,7 +1368,7 @@ fn start_card(
         rect.min + vec2(14.0, 14.0),
         pos2(rect.max.x - 14.0, rect.min.y + 110.0),
     );
-    painter.rect_filled(stage, 0.0, Color32::from_rgb(11, 12, 16));
+    painter.rect_filled(stage, 0.0, Color32::from_rgb(14, 14, 14));
     let time = ui.input(|input| input.time);
     // Narrow cards must not let a scene spill onto their neighbours.
     let stage_painter = painter.with_clip_rect(stage.intersect(painter.clip_rect()));
@@ -1748,7 +1753,7 @@ fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> 
         rect,
         0.0,
         if hovered {
-            Color32::from_rgb(27, 28, 36)
+            Color32::from_rgb(30, 30, 30)
         } else {
             palette::SURFACE
         },
@@ -2233,7 +2238,7 @@ fn install_steps(ui: &mut Ui, name: &str, help: &ToolHelp, after: &[&str]) {
     step(ui, 1, &format!("Open {}.", help.terminal));
     step(ui, 2, "Copy this command, paste it and press Enter:");
     egui::Frame::new()
-        .fill(Color32::from_rgb(11, 12, 16))
+        .fill(Color32::from_rgb(14, 14, 14))
         .inner_margin(egui::Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -2396,7 +2401,7 @@ fn link_card(ui: &mut Ui, icon: Icon, title: &str, detail: &str, width: f32) -> 
         rect,
         0.0,
         if hovered {
-            Color32::from_rgb(27, 28, 36)
+            Color32::from_rgb(30, 30, 30)
         } else {
             palette::SURFACE
         },

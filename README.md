@@ -367,8 +367,8 @@ del seek, la compilación de fragmentos, el render (incluida la espera de
 vsync), la resolución del preview y los objetos visibles y, al terminar, cierra
 la ventana tras listar las ventanas más lentas. La previsualización baja su
 resolución al reproducir si el render no llega a 60 fps y la recupera al
-pausar; para medir siempre a resolución completa, añade
-`GAANIM_PREVIEW_RESOLUTION=full`.
+pausar; para medir siempre a resolución completa, elige *Full* en
+*Settings → Preview* o añade `GAANIM_PREVIEW_RESOLUTION=full`.
 
 Los seeks parten del inicio del segmento en que caen: cuando la reproducción
 entra en un segmento, o la segunda vez que un seek cae en él, el timeline

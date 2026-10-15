@@ -307,6 +307,8 @@ pub struct NarrationPanel {
     token_stored: Option<bool>,
     /// What the project's gaanim.toml says, read again on every replay.
     speech: Option<(u64, ProjectSpeech)>,
+    /// The same, for Settings: read when it opens.
+    settings_speech: Option<ProjectSpeech>,
     /// Write what the speaker says into the script with Scribe while
     /// recording; unset, whenever a token is at hand.
     dictate: Option<bool>,
@@ -314,6 +316,14 @@ pub struct NarrationPanel {
     expanded: std::collections::BTreeSet<String>,
     /// The kept audio files of the talk, and when they were listed.
     clip_files: Option<(Instant, Vec<String>)>,
+}
+
+/// The sections of Settings the narration preferences fill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NarrationSettingsSection {
+    Recording,
+    Transcription,
+    Dictation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,6 +399,69 @@ impl NarrationPanel {
             Some(dictate) => dictate,
             None => self.token_available(),
         }
+    }
+
+    /// Read the project's gaanim.toml again the next time Settings shows it.
+    pub(crate) fn forget_settings_project(&mut self) {
+        self.settings_speech = None;
+    }
+
+    /// A section of Settings: the preferences, saved as soon as they change.
+    pub(crate) fn settings_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        section: NarrationSettingsSection,
+        paths: Option<&ProjectPaths>,
+    ) {
+        let changed = match section {
+            NarrationSettingsSection::Recording => recording_form(ui, self.settings()),
+            NarrationSettingsSection::Transcription => whisper_form(ui, self.settings()),
+            NarrationSettingsSection::Dictation => {
+                let project = self
+                    .settings_speech
+                    .get_or_insert_with(|| ProjectSpeech::read(paths))
+                    .clone();
+                let stored = *self
+                    .token_stored
+                    .get_or_insert_with(|| scribe::vault::load().is_some());
+                let settings = self.settings.get_or_insert_with(NarrationSettings::load);
+                let (changed, action) =
+                    scribe_settings(ui, settings, &mut self.scribe_token, stored, &project);
+                if let Some(action) = action {
+                    apply_vault_action(self, &project, action);
+                    self.settings_speech = None;
+                }
+                changed
+            }
+        };
+        if changed && let Err(error) = self.settings().save() {
+            self.notify(
+                NoticeKind::Error,
+                format!("the settings were not saved: {error}"),
+            );
+        }
+        if let Some((message, kind)) = &self.notice {
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(message)
+                        .size(14.0)
+                        .color(notice_color(*kind)),
+                )
+                .wrap(),
+            );
+        }
+    }
+
+    /// The speaker's pace measured from their dictations.
+    pub(crate) fn measured_pace(&mut self) -> Option<f64> {
+        self.settings().speaking_wpm
+    }
+
+    /// Forget the measured pace; the next dictation measures it again.
+    pub(crate) fn forget_measured_pace(&mut self) -> Result<(), String> {
+        self.settings().speaking_wpm = None;
+        self.settings().save()
     }
 
     fn notify(&mut self, kind: NoticeKind, message: impl Into<String>) {
@@ -1734,6 +1807,7 @@ pub(crate) fn narration_session_system(
     }
     if !pace.loaded {
         pace.measured = panel.settings().speaking_wpm;
+        pace.fixed = crate::presenter::prompter::PrompterPreferences::load().fixed();
         pace.loaded = true;
     }
     pace.live = None;
@@ -2650,6 +2724,7 @@ pub(crate) fn narration_panel_system(
     timeline: Res<Timeline>,
     pace: Res<PrompterPace>,
     mut clip_playback: Option<ResMut<gaanim_media::ClipPlayback>>,
+    mut settings_window: ResMut<crate::settings::SettingsWindow>,
 ) {
     if !panel.open
         || session.capturing()
@@ -2672,15 +2747,10 @@ pub(crate) fn narration_panel_system(
     {
         panel.speech = Some((stash.revision, ProjectSpeech::read(paths.as_deref())));
     }
-    let project = panel
-        .speech
-        .as_ref()
-        .map(|(_, speech)| speech.clone())
-        .unwrap_or_default();
     let mut close = false;
     let mut request = None;
     let mut settings_changed = false;
-    let mut vault_action = None;
+    let mut open_settings = false;
     let screen = ctx.viewport_rect();
     let max_height = (screen.height() - 120.0).max(240.0);
     let can_dictate = panel.token_available();
@@ -2773,20 +2843,12 @@ pub(crate) fn narration_panel_system(
                                 }
                             }
                             ui.add_space(4.0);
-                            settings_changed = settings_form(ui, panel.settings());
-                            let NarrationPanel {
-                                settings,
-                                scribe_token,
-                                token_stored,
-                                ..
-                            } = &mut *panel;
-                            let settings = settings.get_or_insert_with(NarrationSettings::load);
-                            let stored = *token_stored
-                                .get_or_insert_with(|| scribe::vault::load().is_some());
-                            let (changed, action) =
-                                scribe_settings(ui, settings, scribe_token, stored, &project);
-                            settings_changed |= changed;
-                            vault_action = action;
+                            if small(ui, "Recording, transcription and dictation settings…", true)
+                                .on_hover_text("Opens Settings · Ctrl+,")
+                                .clicked()
+                            {
+                                open_settings = true;
+                            }
                         });
 
                     if let Some((message, kind)) = &panel.notice {
@@ -2822,8 +2884,15 @@ pub(crate) fn narration_panel_system(
     if let Some(request) = request {
         panel.request = Some(request);
     }
-    match vault_action {
-        Some(VaultAction::Save) => {
+    if open_settings {
+        settings_window.show(crate::settings::Section::Recording);
+    }
+}
+
+/// Carry out what the Scribe settings asked for, and say how it went.
+fn apply_vault_action(panel: &mut NarrationPanel, project: &ProjectSpeech, action: VaultAction) {
+    match action {
+        VaultAction::Save => {
             let saved = ScribeToken::new(&panel.scribe_token)
                 .ok_or_else(|| "paste the token before saving it".to_owned())
                 .and_then(|token| scribe::vault::save(&token));
@@ -2839,7 +2908,7 @@ pub(crate) fn narration_panel_system(
                 Err(error) => panel.notify(NoticeKind::Error, error),
             }
         }
-        Some(VaultAction::Forget) => match scribe::vault::forget() {
+        VaultAction::Forget => match scribe::vault::forget() {
             Ok(()) => {
                 panel.token_stored = Some(false);
                 panel.notify(
@@ -2849,18 +2918,17 @@ pub(crate) fn narration_panel_system(
             }
             Err(error) => panel.notify(NoticeKind::Error, error),
         },
-        Some(VaultAction::Pin(language)) => {
+        VaultAction::Pin(language) => {
             let pinned = language.clone();
-            write_project_language(&mut panel, &project, Some(language), move || {
+            write_project_language(panel, project, Some(language), move || {
                 format!("Language pinned in gaanim.toml: language = \"{pinned}\"")
             });
         }
-        Some(VaultAction::Unpin) => {
-            write_project_language(&mut panel, &project, None, || {
+        VaultAction::Unpin => {
+            write_project_language(panel, project, None, || {
                 "gaanim.toml no longer pins the language: yours is used".to_owned()
             });
         }
-        None => {}
     }
 }
 
@@ -3670,15 +3738,10 @@ fn voiceover_card(
 }
 
 /// Recorder, voice level and Whisper preferences. Returns whether they changed.
-fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
+/// The recording preferences, in Settings.
+fn recording_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
     let before = settings.clone();
-    egui::CollapsingHeader::new(
-        egui::RichText::new("Voice and recording")
-            .size(14.5)
-            .color(palette::TEXT_MUTED),
-    )
-    .id_salt("narration_voice_settings")
-    .show(ui, |ui| {
+    {
         ui.checkbox(
             &mut settings.level_voice,
             "Level each new take when saving it",
@@ -3726,14 +3789,18 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
             .color(palette::TEXT_FAINT),
         );
         ui.checkbox(&mut settings.countdown, "Countdown of 3 s before recording");
-    });
-    egui::CollapsingHeader::new(
-        egui::RichText::new("Whisper (optional)")
-            .size(14.5)
-            .color(palette::TEXT_MUTED),
-    )
-    .id_salt("narration_whisper_settings")
-    .show(ui, |ui| {
+        ui.checkbox(
+            &mut settings.keep_talk_audio,
+            "Keep the audio of each recording of the talk, to listen back to it",
+        );
+    }
+    *settings != before
+}
+
+/// The whisper.cpp preferences, in Settings.
+fn whisper_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
+    let before = settings.clone();
+    {
         ui.label(
             egui::RichText::new(
                 "whisper.cpp finds the markers by word so you do not have to \
@@ -3764,7 +3831,7 @@ fn settings_form(ui: &mut egui::Ui, settings: &mut NarrationSettings) -> bool {
             Err(error) => (palette::TEXT_FAINT, error),
         };
         ui.add(egui::Label::new(egui::RichText::new(status.1).size(13.5).color(status.0)).wrap());
-    });
+    }
     *settings != before
 }
 
@@ -3779,13 +3846,7 @@ fn scribe_settings(
 ) -> (bool, Option<VaultAction>) {
     let before = settings.clone();
     let mut action = None;
-    egui::CollapsingHeader::new(
-        egui::RichText::new("Zoom Scribe (dictation)")
-            .size(14.5)
-            .color(palette::TEXT_MUTED),
-    )
-    .id_salt("narration_scribe_settings")
-    .show(ui, |ui| {
+    {
         let faint = |text: String| {
             egui::RichText::new(text)
                 .size(13.5)
@@ -3959,7 +4020,7 @@ fn scribe_settings(
             )))
             .wrap(),
         );
-    });
+    }
     (*settings != before, action)
 }
 
@@ -5110,8 +5171,10 @@ mod tests {
 
     #[test]
     fn the_scribe_token_is_never_part_of_the_saved_settings() {
+        // Settings given here: loading them would read the user's own file.
         let mut panel = NarrationPanel {
             scribe_token: "secret-token".to_owned(),
+            settings: Some(NarrationSettings::default()),
             ..NarrationPanel::default()
         };
         let saved = serde_json::to_string(panel.settings()).unwrap();

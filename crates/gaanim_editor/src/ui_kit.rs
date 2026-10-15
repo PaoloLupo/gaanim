@@ -13,26 +13,38 @@ use bevy_egui::egui::{
     self, Align2, Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, pos2, vec2,
 };
 
-/// Colors shared by the editor overlays.
+/// Colors shared by the editor overlays: Gaanim's brand palette
+/// (`docs/assets/brand/README.md`) on graphite without a blue tint.
 pub(crate) mod palette {
     use super::Color32;
 
-    pub const PANEL: Color32 = Color32::from_rgba_premultiplied(15, 16, 21, 238);
-    pub const PANEL_STROKE: Color32 = Color32::from_rgba_premultiplied(20, 21, 26, 24);
-    pub const TEXT: Color32 = Color32::from_rgb(236, 238, 243);
-    pub const TEXT_MUTED: Color32 = Color32::from_rgb(148, 153, 166);
-    pub const TEXT_FAINT: Color32 = Color32::from_rgb(92, 97, 110);
-    pub const ACCENT: Color32 = Color32::from_rgb(112, 170, 255);
-    pub const LOOP: Color32 = Color32::from_rgb(96, 206, 152);
-    pub const STOP: Color32 = Color32::from_rgb(245, 192, 86);
-    pub const HOVER: Color32 = Color32::from_rgba_premultiplied(22, 22, 24, 22);
-    pub const PRESSED: Color32 = Color32::from_rgba_premultiplied(34, 34, 36, 34);
-    pub const DIVIDER: Color32 = Color32::from_rgba_premultiplied(24, 24, 26, 26);
-    pub const SURFACE: Color32 = Color32::from_rgb(22, 23, 30);
-    pub const FIELD: Color32 = Color32::from_rgba_premultiplied(10, 10, 11, 10);
-    pub const SELECTED: Color32 = Color32::from_rgba_premultiplied(30, 31, 34, 32);
+    /// Graphite `#121212` at 93 %: floating bars and panels.
+    pub const PANEL: Color32 = Color32::from_rgba_premultiplied(17, 17, 17, 238);
+    pub const PANEL_STROKE: Color32 = Color32::from_rgba_premultiplied(22, 22, 22, 24);
+    /// Paper `#F7F6FF`.
+    pub const TEXT: Color32 = Color32::from_rgb(247, 246, 255);
+    pub const TEXT_MUTED: Color32 = Color32::from_rgb(160, 158, 170);
+    pub const TEXT_FAINT: Color32 = Color32::from_rgb(104, 102, 114);
+    /// Light violet `#A99FFF`: links, selection and the primary action.
+    pub const ACCENT: Color32 = Color32::from_rgb(169, 159, 255);
+    /// Haze `#CBC6FF`: the primary action under the pointer.
+    pub const ACCENT_HOVER: Color32 = Color32::from_rgb(203, 198, 255);
+    /// Violet `#7C6CFF`: loops, progress and what is ready.
+    pub const LOOP: Color32 = Color32::from_rgb(124, 108, 255);
+    /// Gold `#FFC933`: the current frame (stops, the playhead).
+    pub const STOP: Color32 = Color32::from_rgb(255, 201, 51);
+    pub const HOVER: Color32 = Color32::from_rgba_premultiplied(22, 22, 22, 22);
+    pub const PRESSED: Color32 = Color32::from_rgba_premultiplied(34, 34, 34, 34);
+    pub const DIVIDER: Color32 = Color32::from_rgba_premultiplied(26, 26, 26, 26);
+    /// Graphite `#1A1A1A`: cards and dialogs.
+    pub const SURFACE: Color32 = Color32::from_rgb(26, 26, 26);
+    pub const FIELD: Color32 = Color32::from_rgba_premultiplied(10, 10, 10, 10);
+    pub const SELECTED: Color32 = Color32::from_rgba_premultiplied(32, 32, 32, 32);
     pub const DANGER: Color32 = Color32::from_rgb(255, 118, 118);
-    pub const INK: Color32 = Color32::from_rgb(15, 16, 21);
+    /// Graphite `#121212`: the window behind everything.
+    pub const GRAPHITE: Color32 = Color32::from_rgb(18, 18, 18);
+    /// Ink `#14112E`: text on violet.
+    pub const INK: Color32 = Color32::from_rgb(20, 17, 46);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +103,8 @@ pub(crate) enum Icon {
     Grip,
     /// Staggered bars on tracks: the animation timeline.
     Timeline,
+    /// Three sliders with square knobs: settings.
+    Settings,
 }
 
 /// How an icon button presents its state.
@@ -158,11 +172,11 @@ pub(crate) fn icon_button_sized(
     let icon_color = match tone {
         ButtonTone::Primary => {
             let fill = if pressed {
-                Color32::from_rgb(200, 204, 214)
+                palette::LOOP
             } else if hovered {
-                Color32::WHITE
+                palette::ACCENT_HOVER
             } else {
-                palette::TEXT
+                palette::ACCENT
             };
             let body = Rect::from_center_size(
                 rect.center(),
@@ -174,7 +188,7 @@ pub(crate) fn icon_button_sized(
                 Color32::from_black_alpha(70),
             );
             painter.rect_filled(body, 0.0, fill);
-            Color32::from_rgb(15, 16, 21)
+            palette::INK
         }
         ButtonTone::On(toggle) => {
             let color = toggle.color();
@@ -672,6 +686,17 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
             painter.circle_stroke(p(-0.08, -0.08), s * 0.26, stroke);
             painter.line_segment([p(0.12, 0.12), p(0.40, 0.40)], stroke);
         }
+        Icon::Settings => {
+            let thin = Stroke::new(stroke.width * 0.8, color);
+            for (y, knob) in [(-0.28, 0.16), (0.0, -0.18), (0.28, 0.06)] {
+                painter.line_segment([p(-0.42, y), p(0.42, y)], thin);
+                painter.rect_filled(
+                    Rect::from_center_size(p(knob, y), Vec2::splat(s * 0.2)),
+                    0.0,
+                    color,
+                );
+            }
+        }
         Icon::Grip => {
             for x in [-0.14, 0.14] {
                 for y in [-0.28, 0.0, 0.28] {
@@ -720,6 +745,24 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
 /// buttons, scroll bars, slider handles) to match the painted controls.
 pub(crate) fn square_corners(style: &mut egui::Style) {
     let visuals = &mut style.visuals;
+    // egui's own widgets in the brand's colours: violet selection and links,
+    // graphite fields without egui's blue tint.
+    visuals.selection.bg_fill = palette::LOOP.gamma_multiply(0.55);
+    visuals.selection.stroke = Stroke::new(1.0, palette::ACCENT);
+    visuals.hyperlink_color = palette::ACCENT;
+    visuals.extreme_bg_color = Color32::from_rgb(12, 12, 12);
+    visuals.text_edit_bg_color = Some(Color32::from_rgb(12, 12, 12));
+    visuals.faint_bg_color = Color32::from_rgb(24, 24, 24);
+    visuals.window_fill = palette::SURFACE;
+    visuals.panel_fill = palette::GRAPHITE;
+    visuals.widgets.inactive.bg_fill = Color32::from_rgb(40, 40, 42);
+    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(34, 34, 36);
+    visuals.widgets.hovered.bg_fill = Color32::from_rgb(52, 52, 56);
+    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(46, 46, 50);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, palette::ACCENT.gamma_multiply(0.6));
+    visuals.widgets.active.bg_fill = Color32::from_rgb(62, 60, 72);
+    visuals.widgets.active.weak_bg_fill = Color32::from_rgb(56, 54, 66);
+    visuals.widgets.open.weak_bg_fill = Color32::from_rgb(40, 40, 42);
     visuals.window_corner_radius = egui::CornerRadius::ZERO;
     visuals.menu_corner_radius = egui::CornerRadius::ZERO;
     visuals.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.5 };
@@ -761,6 +804,7 @@ pub(crate) fn section_label(ui: &mut Ui, text: &str) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)
+                .monospace()
                 .size(11.5)
                 .color(palette::TEXT_MUTED),
         )
@@ -958,7 +1002,7 @@ fn text_button(
             if pressed {
                 palette::ACCENT.gamma_multiply(0.85)
             } else if hovered {
-                Color32::from_rgb(140, 188, 255)
+                palette::ACCENT_HOVER
             } else {
                 palette::ACCENT
             },
@@ -1099,6 +1143,7 @@ pub(crate) fn small_button_sized(ui: &mut Ui, label: &str, enabled: bool, font: 
 /// Letter-spaced caption used as a section heading.
 pub(crate) fn caption(text: &str) -> egui::RichText {
     egui::RichText::new(text)
+        .monospace()
         .size(11.0)
         .strong()
         .extra_letter_spacing(1.2)

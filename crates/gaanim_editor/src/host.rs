@@ -136,11 +136,7 @@ pub fn host_app(options: &HostOptions) -> App {
     .insert_resource(gaanim_media::PreviewAudioEnabled(true))
     .insert_resource(crate::volume::load())
     // Only the interactive preview may lower its resolution while playing.
-    .insert_resource(gaanim_renderer::prelude::PreviewResolution::from_setting(
-        std::env::var(gaanim_renderer::prelude::PREVIEW_RESOLUTION_ENV)
-            .ok()
-            .as_deref(),
-    ))
+    .insert_resource(crate::settings::preview_resolution())
     .insert_resource(crate::PresentationMode {
         active: options.present || options.presenter_page,
     })

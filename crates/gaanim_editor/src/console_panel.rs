@@ -284,37 +284,39 @@ pub fn console_panel_system(
             });
             let mut toggled = None;
             // Opaque, so the scene behind never shows through the text.
-            ui_kit::field_frame().fill(palette::INK).show(ui, |ui| {
-                if visible.is_empty() {
-                    ui.set_min_height(LIST_HEIGHT);
-                    ui.label(
-                        egui::RichText::new(if panel.entries.is_empty() {
-                            "No messages yet."
-                        } else {
-                            "No message matches the filter."
-                        })
-                        .size(12.0)
-                        .color(palette::TEXT_FAINT),
-                    );
-                    return;
-                }
-                // Only the rows in view are laid out, however long the log.
-                // Rows touch: show_rows sizes the list with this spacing.
-                ui.spacing_mut().item_spacing.y = 0.0;
-                egui::ScrollArea::vertical()
-                    .max_height(LIST_HEIGHT)
-                    .auto_shrink([false, false])
-                    .stick_to_bottom(true)
-                    .show_rows(ui, ROW_HEIGHT, visible.len(), |ui, rows| {
-                        for &index in &visible[rows] {
-                            let entry = &panel.entries[index];
-                            let selected = panel.selected == Some(entry.seq);
-                            if entry_row(ui, entry, selected, entry.run != run) {
-                                toggled = Some(entry.seq);
+            ui_kit::field_frame()
+                .fill(palette::GRAPHITE)
+                .show(ui, |ui| {
+                    if visible.is_empty() {
+                        ui.set_min_height(LIST_HEIGHT);
+                        ui.label(
+                            egui::RichText::new(if panel.entries.is_empty() {
+                                "No messages yet."
+                            } else {
+                                "No message matches the filter."
+                            })
+                            .size(12.0)
+                            .color(palette::TEXT_FAINT),
+                        );
+                        return;
+                    }
+                    // Only the rows in view are laid out, however long the log.
+                    // Rows touch: show_rows sizes the list with this spacing.
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    egui::ScrollArea::vertical()
+                        .max_height(LIST_HEIGHT)
+                        .auto_shrink([false, false])
+                        .stick_to_bottom(true)
+                        .show_rows(ui, ROW_HEIGHT, visible.len(), |ui, rows| {
+                            for &index in &visible[rows] {
+                                let entry = &panel.entries[index];
+                                let selected = panel.selected == Some(entry.seq);
+                                if entry_row(ui, entry, selected, entry.run != run) {
+                                    toggled = Some(entry.seq);
+                                }
                             }
-                        }
-                    });
-            });
+                        });
+                });
             if let Some(seq) = toggled {
                 panel.selected = (panel.selected != Some(seq)).then_some(seq);
             }
@@ -518,51 +520,53 @@ const LABEL_WIDTH: f32 = 104.0;
 
 /// The whole message and detail of the selected entry, under the list.
 fn entry_detail(ui: &mut egui::Ui, entry: &LogEntry) {
-    ui_kit::field_frame().fill(palette::INK).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        egui::ScrollArea::vertical()
-            .id_salt("console_entry_detail")
-            .max_height(160.0)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(display_message(&entry.message))
-                            .size(12.5)
-                            .color(palette::TEXT),
-                    )
-                    .wrap(),
-                );
-                if let Some(detail) = &entry.detail {
-                    ui.add_space(4.0);
+    ui_kit::field_frame()
+        .fill(palette::GRAPHITE)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            egui::ScrollArea::vertical()
+                .id_salt("console_entry_detail")
+                .max_height(160.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(detail)
-                                .monospace()
-                                .size(11.0)
-                                .color(palette::TEXT_MUTED),
+                            egui::RichText::new(display_message(&entry.message))
+                                .size(12.5)
+                                .color(palette::TEXT),
                         )
                         .wrap(),
                     );
+                    if let Some(detail) = &entry.detail {
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(detail)
+                                    .monospace()
+                                    .size(11.0)
+                                    .color(palette::TEXT_MUTED),
+                            )
+                            .wrap(),
+                        );
+                    }
+                });
+            ui.horizontal(|ui| {
+                if ui_kit::small_button(ui, "Copy", true)
+                    .on_hover_text("Copy this message")
+                    .clicked()
+                {
+                    ui.ctx().copy_text(plain_text(&[entry]));
+                }
+                if let Some(location) = &entry.location
+                    && crate::source_link::AVAILABLE
+                    && ui_kit::small_button(ui, "Open", true)
+                        .on_hover_text(format!("{location}\n{}", crate::source_link::hint()))
+                        .clicked()
+                {
+                    crate::source_link::open_or_report(location);
                 }
             });
-        ui.horizontal(|ui| {
-            if ui_kit::small_button(ui, "Copy", true)
-                .on_hover_text("Copy this message")
-                .clicked()
-            {
-                ui.ctx().copy_text(plain_text(&[entry]));
-            }
-            if let Some(location) = &entry.location
-                && crate::source_link::AVAILABLE
-                && ui_kit::small_button(ui, "Open", true)
-                    .on_hover_text(format!("{location}\n{}", crate::source_link::hint()))
-                    .clicked()
-            {
-                crate::source_link::open_or_report(location);
-            }
         });
-    });
 }
 
 /// Most characters of a message the list shows; copying keeps them all.

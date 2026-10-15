@@ -251,7 +251,7 @@ impl FontRegistry {
         static EMBEDDED: OnceLock<[Arc<[u8]>; 2]> = OnceLock::new();
         let [upright, italic] = EMBEDDED.get_or_init(|| {
             [
-                Arc::from(&include_bytes!("../assets/fonts/JetBrainsMono-Variable.ttf")[..]),
+                Arc::from(JETBRAINS_MONO),
                 Arc::from(&include_bytes!("../assets/fonts/JetBrainsMono-Italic-Variable.ttf")[..]),
             ]
         });
@@ -399,6 +399,10 @@ impl FontFile {
 
 /// Font file extensions recognised by [`scan_font_dir`].
 pub const FONT_FILE_EXTENSIONS: &[&str] = &["ttf", "otf", "ttc", "otc"];
+
+/// JetBrains Mono, upright and variable: the face of the `code` role, and of
+/// the editor's labels and code fields, as Gaanim's brand asks.
+pub const JETBRAINS_MONO: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Variable.ttf");
 
 /// Read every `.ttf`, `.otf`, `.ttc` and `.otc` file directly inside `dir`
 /// (not in subdirectories), sorted by path, with the family, weight and style

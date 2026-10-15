@@ -1,10 +1,13 @@
-//! Recorder preferences shared by every project of this user.
+//! Recorder preferences shared by every project of this user: the
+//! `narration` section of the user's settings (see
+//! [`gaanim_project::settings`]).
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-const SETTINGS_FILE: &str = "narration.json";
+/// The section of the user's settings these preferences are saved in.
+const SETTINGS_SECTION: &str = "narration";
 
 /// Integrated loudness for voice in online video. YouTube plays at −14 LUFS
 /// and podcasts use −16; −16 keeps speech clear without being pushed down.
@@ -95,22 +98,12 @@ impl Default for NarrationSettings {
 }
 
 impl NarrationSettings {
-    fn path() -> Option<PathBuf> {
-        gaanim_project::user_data_dir().map(|dir| dir.join(SETTINGS_FILE))
-    }
-
     pub(crate) fn load() -> Self {
-        Self::path()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|source| serde_json::from_str(&source).ok())
-            .unwrap_or_default()
+        gaanim_project::settings::load(SETTINGS_SECTION)
     }
 
     pub(crate) fn save(&self) -> Result<(), String> {
-        let path = Self::path().ok_or("Gaanim's data folder was not found")?;
-        let source = serde_json::to_string_pretty(self).map_err(|error| error.to_string())?;
-        gaanim_media::narration::write_atomically(&path, source.as_bytes())
-            .map_err(|error| error.to_string())
+        gaanim_project::settings::save(SETTINGS_SECTION, self)
     }
 
     /// The executable and model to run, or why transcription is unavailable.

@@ -102,7 +102,7 @@ equipo. Scribe usa la misma etiqueta si la tiene y, si no, la primera de ese
 idioma: `"es"` y `"es-PE"` se dictan como `es-ES`, y `"pt"` como `pt-BR`. Si
 Scribe no transcribe ese idioma, se usa el del editor y el panel lo avisa.
 
-En *Script & narration → Zoom Scribe (dictation)*, *Pin in gaanim.toml* escribe el
+En *Settings → Dictation*, con el proyecto abierto en el editor, *Pin in gaanim.toml* escribe el
 idioma elegido y *Unpin* lo quita; el resto del archivo, comentarios
 incluidos, queda como estaba.
 
