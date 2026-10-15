@@ -22,6 +22,7 @@ use gaanim_project::{
     RecentProjects, ResolvedProject, create_project, default_project_parent,
     find_project_for_script, is_bundle_path, resolve_project,
 };
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -388,6 +389,125 @@ pub struct ProjectHubState {
     /// Go back to Home from a project: start Gaanim again without one.
     #[cfg(not(target_arch = "wasm32"))]
     home_requested: bool,
+    /// Recent entries as rows or as cards with their covers.
+    recent_view: RecentView,
+    thumbnails: Thumbnails,
+    /// Settings is open over Home, which then ignores the pointer.
+    covered: bool,
+}
+
+/// How Home shows its recent entries; saved in the `home` section of the
+/// user's settings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RecentView {
+    #[default]
+    List,
+    Grid,
+}
+
+/// The `home` section of the user's settings.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct HomePreferences {
+    #[serde(default)]
+    recent_view: RecentView,
+}
+
+impl HomePreferences {
+    const SECTION: &str = "home";
+
+    fn load() -> Self {
+        gaanim_project::settings::load(Self::SECTION)
+    }
+
+    fn save(&self) -> Result<(), String> {
+        gaanim_project::settings::save(Self::SECTION, self)
+    }
+}
+
+/// Covers of recent entries: a project's from the editor's cache, a
+/// bundle's from its `thumbnail.png`. Each is decoded on a worker thread
+/// and kept as a texture for the session, or as `None` when there is none.
+#[derive(Default)]
+struct Thumbnails {
+    textures: HashMap<PathBuf, Option<egui::TextureHandle>>,
+    loading: HashMap<PathBuf, Receiver<Option<egui::ColorImage>>>,
+}
+
+/// Longest side covers are decoded at, in pixels.
+const COVER_EDGE: u32 = 480;
+
+impl Thumbnails {
+    /// The cover of `entry`, once loaded; the first call starts loading it.
+    fn get(&mut self, ctx: &egui::Context, entry: &RecentEntry) -> Option<egui::TextureHandle> {
+        let key = entry.path().to_path_buf();
+        if let Some(texture) = self.textures.get(&key) {
+            return texture.clone();
+        }
+        if let Some(receiver) = self.loading.get(&key) {
+            let image = match receiver.try_recv() {
+                Ok(image) => image,
+                Err(TryRecvError::Empty) => {
+                    ctx.request_repaint_after(Duration::from_millis(100));
+                    return None;
+                }
+                Err(TryRecvError::Disconnected) => None,
+            };
+            self.loading.remove(&key);
+            let texture = image.map(|image| {
+                ctx.load_texture(
+                    format!("recent-cover:{}", key.display()),
+                    image,
+                    egui::TextureOptions::LINEAR,
+                )
+            });
+            self.textures.insert(key, texture.clone());
+            return texture;
+        }
+        let cover = match entry {
+            RecentEntry::Project(project) => {
+                gaanim_project::project_thumbnail_path(&project.root).map(Cover::File)
+            }
+            RecentEntry::Bundle(bundle) => Some(Cover::Bundle(bundle.path.clone())),
+        };
+        let (sender, receiver) = crossbeam_channel::bounded(1);
+        let spawned = std::thread::Builder::new()
+            .name("gaanim-recent-cover".into())
+            .spawn(move || {
+                let _ = sender.send(cover.and_then(Cover::decode));
+            });
+        match spawned {
+            Ok(_) => {
+                self.loading.insert(key, receiver);
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            Err(_) => {
+                self.textures.insert(key, None);
+            }
+        }
+        None
+    }
+}
+
+/// Where a cover comes from.
+enum Cover {
+    File(PathBuf),
+    Bundle(PathBuf),
+}
+
+impl Cover {
+    fn decode(self) -> Option<egui::ColorImage> {
+        let png = match self {
+            Self::File(path) => std::fs::read(path).ok()?,
+            Self::Bundle(path) => gaanim_thumbnail::read_file(&path).ok()??,
+        };
+        let image = gaanim_thumbnail::scaled(&png, COVER_EDGE).ok()?;
+        let (width, height) = image.dimensions();
+        Some(egui::ColorImage::from_rgba_unmultiplied(
+            [width as usize, height as usize],
+            image.as_raw(),
+        ))
+    }
 }
 
 impl Default for ProjectHubState {
@@ -412,6 +532,9 @@ impl Default for ProjectHubState {
             update: UpdateOffer::default(),
             #[cfg(not(target_arch = "wasm32"))]
             home_requested: false,
+            recent_view: HomePreferences::load().recent_view,
+            thumbnails: Thumbnails::default(),
+            covered: false,
         }
     }
 }
@@ -965,6 +1088,7 @@ fn project_hub_ui_system(
     };
     let ctx = ctx.clone();
     let state = &mut *state;
+    state.covered = settings.is_open();
     state.poll_workers(&mut pending);
 
     // Re-check the tools when the window comes back into focus: people install
@@ -1784,6 +1908,29 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                     .color(palette::TEXT_FAINT),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                for (view, icon, hint) in [
+                    (RecentView::Grid, Icon::Grid, "Cards with their covers"),
+                    (RecentView::List, Icon::List, "A list"),
+                ] {
+                    let tone = if state.recent_view == view {
+                        ButtonTone::On(ui_kit::ToggleColor::Accent)
+                    } else {
+                        ButtonTone::Ghost
+                    };
+                    if icon_button(ui, icon, tone, true)
+                        .on_hover_text(hint)
+                        .clicked()
+                        && state.recent_view != view
+                    {
+                        state.recent_view = view;
+                        let saved = HomePreferences { recent_view: view }.save();
+                        if let Err(error) = saved {
+                            state.notice =
+                                Some(Notice::Error(format!("Could not save the view: {error}")));
+                        }
+                    }
+                }
+                ui.add_space(10.0);
                 if ui
                     .add(
                         egui::Label::new(
@@ -1808,13 +1955,39 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         empty_recents(ui, state);
         return;
     }
-    let busy = state.busy();
+    let busy = state.busy() || state.covered;
     let mut action = None;
-    for entry in &entries {
-        if let Some(chosen) = recent_row(ui, &RecentRow::of(entry), !busy) {
-            action = Some((chosen, entry.clone()));
+    match state.recent_view {
+        RecentView::List => {
+            for entry in &entries {
+                if let Some(chosen) = recent_row(ui, &RecentRow::of(entry), !busy) {
+                    action = Some((chosen, entry.clone()));
+                }
+                ui.add_space(8.0);
+            }
         }
-        ui.add_space(8.0);
+        RecentView::Grid => {
+            const GAP: f32 = 14.0;
+            const MIN_CARD: f32 = 220.0;
+            let width = ui.available_width();
+            let columns = (((width + GAP) / (MIN_CARD + GAP)).floor() as usize).max(1);
+            let card = (width - GAP * (columns - 1) as f32) / columns as f32;
+            let ctx = ui.ctx().clone();
+            for row in entries.chunks(columns) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = GAP;
+                    for entry in row {
+                        let cover = state.thumbnails.get(&ctx, entry);
+                        if let Some(chosen) =
+                            recent_card(ui, &RecentRow::of(entry), cover.as_ref(), card, !busy)
+                        {
+                            action = Some((chosen, entry.clone()));
+                        }
+                    }
+                });
+                ui.add_space(GAP);
+            }
+        }
     }
     match action {
         Some((RowAction::Open, RecentEntry::Project(project))) => {
@@ -1987,6 +2160,135 @@ fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> 
     if action.is_none()
         && response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+    {
+        action = Some(RowAction::Open);
+    }
+    action
+}
+
+/// A recent entry as a card: its cover, or its kind's icon while it has
+/// none, over its name, kind and age.
+fn recent_card(
+    ui: &mut Ui,
+    row: &RecentRow,
+    cover: Option<&egui::TextureHandle>,
+    width: f32,
+    enabled: bool,
+) -> Option<RowAction> {
+    let stage_h = (width * 9.0 / 16.0).round();
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(width, stage_h + 56.0),
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    let hovered = enabled && ui.rect_contains_pointer(rect);
+    let color = row.color;
+    let painter = ui.painter();
+    painter.rect_filled(
+        rect,
+        0.0,
+        if hovered {
+            Color32::from_rgb(30, 30, 30)
+        } else {
+            palette::SURFACE
+        },
+    );
+    let stage = Rect::from_min_size(rect.min, vec2(width, stage_h));
+    painter.rect_filled(stage, 0.0, Color32::from_rgb(14, 14, 14));
+    match cover {
+        Some(texture) => {
+            // Contained in the 16:9 stage, whatever the scene's shape.
+            let size = texture.size_vec2();
+            let scale = (stage.width() / size.x).min(stage.height() / size.y);
+            painter.image(
+                texture.id(),
+                Rect::from_center_size(stage.center(), size * scale),
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        None => {
+            let tile = Rect::from_center_size(stage.center(), Vec2::splat(44.0));
+            painter.rect_filled(tile, 0.0, color.gamma_multiply(0.16));
+            ui_kit::paint_icon(
+                painter,
+                Rect::from_center_size(tile.center(), Vec2::splat(18.0)),
+                row.icon,
+                color,
+            );
+        }
+    }
+    if hovered {
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, color.gamma_multiply(0.45)),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    let text_left = rect.min.x + 12.0;
+    let text_w = width - 24.0;
+    let name = painter.layout_no_wrap(row.name.clone(), FontId::proportional(14.5), palette::TEXT);
+    let name_clip = Rect::from_min_size(pos2(text_left, stage.max.y + 10.0), vec2(text_w, 20.0));
+    painter
+        .with_clip_rect(name_clip)
+        .galley(name_clip.min, name, palette::TEXT);
+    let meta_y = stage.max.y + 38.0;
+    let label = painter.text(
+        pos2(text_left, meta_y),
+        Align2::LEFT_CENTER,
+        row.label,
+        FontId::proportional(11.5),
+        color,
+    );
+    if let Some(age) = &row.age {
+        painter.text(
+            pos2(label.max.x + 8.0, meta_y),
+            Align2::LEFT_CENTER,
+            age,
+            FontId::proportional(11.5),
+            palette::TEXT_FAINT,
+        );
+    }
+
+    let mut action = None;
+    if hovered {
+        let actions = Rect::from_min_max(
+            pos2(stage.max.x - 80.0, stage.min.y + 6.0),
+            pos2(stage.max.x - 6.0, stage.min.y + 40.0),
+        );
+        // A child that takes no room in the row, so the cards beside this
+        // one stay where they are.
+        let ui = &mut ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(actions)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.painter().rect_filled(ui.max_rect(), 0.0, palette::PANEL);
+        if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
+            .on_hover_text("Remove from recent (does not delete files)")
+            .clicked()
+        {
+            action = Some(RowAction::Remove);
+        }
+        if icon_button(ui, Icon::Folder, ButtonTone::Ghost, true)
+            .on_hover_text("Show folder")
+            .clicked()
+        {
+            action = Some(RowAction::ShowFolder);
+        }
+    }
+    if enabled
+        && action.is_none()
+        && response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(display_path(&row.path))
             .clicked()
     {
         action = Some(RowAction::Open);

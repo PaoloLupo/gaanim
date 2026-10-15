@@ -703,7 +703,8 @@ pantalla de inicio: Gaanim se abre de nuevo sin él.
 Todo se guarda en `settings.json`, en la carpeta de datos de Gaanim
 (`%LOCALAPPDATA%\Gaanim\Gaanim\data` en Windows, `~/.local/share/gaanim` en
 Linux), con una sección por área: `narration`, `prompter`, `preview`,
-`integrations`, `polls` y `updates`. El pie de la ventana muestra la ruta y
+`integrations`, `polls`, `updates` y `home` (la vista de los recientes en el
+Inicio). El pie de la ventana muestra la ruta y
 *Show folder* la abre. Las versiones anteriores guardaban parte de esto en
 `narration.json` y `poll-relay.txt`; la primera vez que Gaanim lee los ajustes
 los pasa a `settings.json` y borra esos archivos.

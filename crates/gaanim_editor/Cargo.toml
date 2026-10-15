@@ -23,6 +23,8 @@ gaanim_diff = { path = "../gaanim_diff" }
 gaanim_renderer = { path = "../gaanim_renderer" }
 gaanim_text = { path = "../gaanim_text" }
 gaanim_project = { path = "../gaanim_project" }
+# Bundle covers and project thumbnails on Home.
+gaanim_thumbnail = { path = "../gaanim_thumbnail" }
 
 bevy = { workspace = true, features = [
     "bevy_winit",

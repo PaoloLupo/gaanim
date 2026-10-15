@@ -4025,20 +4025,25 @@ fn scribe_settings(
 }
 
 fn path_field(ui: &mut egui::Ui, value: &mut String, title: &str, extensions: &[&str]) {
-    ui.horizontal(|ui| {
-        let browse_width = 34.0;
-        ui.add(
-            egui::TextEdit::singleline(value)
-                .desired_width((ui.available_width() - browse_width - 8.0).max(80.0))
-                .font(egui::FontId::monospace(11.5)),
-        );
-        if small(ui, "…", true).on_hover_text("Browse").clicked()
-            && let Some(path) =
-                crate::platform::pick_file(title, None, &[(title, extensions), ("All", &["*"])])
-        {
-            *value = path.to_string_lossy().into_owned();
-        }
-    });
+    // The button first, from the right, so the field takes exactly what is
+    // left and the row never grows past its room.
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), 0.0),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            if small(ui, "…", true).on_hover_text("Browse").clicked()
+                && let Some(path) =
+                    crate::platform::pick_file(title, None, &[(title, extensions), ("All", &["*"])])
+            {
+                *value = path.to_string_lossy().into_owned();
+            }
+            ui.add(
+                egui::TextEdit::singleline(value)
+                    .desired_width(ui.available_width().max(80.0))
+                    .font(egui::FontId::monospace(11.5)),
+            );
+        },
+    );
 }
 
 /// The editor's caption, the prompter and the recorder's display in one:

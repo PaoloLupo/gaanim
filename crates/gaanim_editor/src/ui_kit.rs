@@ -107,6 +107,8 @@ pub(crate) enum Icon {
     Settings,
     /// A house: back to Home.
     Home,
+    /// Three rows, each with a square: a list.
+    List,
 }
 
 /// How an icon button presents its state.
@@ -697,6 +699,16 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color:
                     0.0,
                     color,
                 );
+            }
+        }
+        Icon::List => {
+            for y in [-0.28, 0.0, 0.28] {
+                painter.rect_filled(
+                    Rect::from_center_size(p(-0.30, y), Vec2::splat(s * 0.14)),
+                    0.0,
+                    color,
+                );
+                painter.line_segment([p(-0.12, y), p(0.42, y)], stroke);
             }
         }
         Icon::Home => {

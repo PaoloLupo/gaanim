@@ -180,6 +180,10 @@ impl SettingsWindow {
         self.section = section;
     }
 
+    pub(crate) fn is_open(&self) -> bool {
+        self.open
+    }
+
     /// Open Settings on the section it showed last.
     pub(crate) fn open(&mut self) {
         self.open = true;
@@ -284,7 +288,11 @@ fn settings_window_system(
         .frame(card_frame().inner_margin(egui::Margin::same(0)))
         .backdrop_color(egui::Color32::from_black_alpha(150))
         .show(&ctx, |ui| {
-            ui.set_width(WINDOW_WIDTH.min(screen.width() - 32.0));
+            let width = WINDOW_WIDTH.min(screen.width() - 32.0);
+            // Fixed widths: fields that fill the room they get would
+            // otherwise widen the window a little more every frame.
+            let body_width = (width - NAV_WIDTH - 1.0).max(240.0);
+            ui.set_width(width);
             header(ui, &mut close);
             rule(ui);
             ui.horizontal_top(|ui| {
@@ -292,6 +300,7 @@ fn settings_window_system(
                 nav(ui, &mut window.section, body_height);
                 ui.add_space(1.0);
                 ui.vertical(|ui| {
+                    ui.set_width(body_width);
                     egui::ScrollArea::vertical()
                         .id_salt(("settings-body", window.section as u8))
                         .max_height(body_height)
@@ -306,6 +315,7 @@ fn settings_window_system(
                                     bottom: 22,
                                 })
                                 .show(ui, |ui| {
+                                    ui.set_width(body_width - 48.0);
                                     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                                     section_heading(ui, window.section);
                                     match window.section {

@@ -45,6 +45,7 @@ pub(crate) const WEB: bool = cfg!(target_arch = "wasm32");
 mod presenter;
 pub mod presenter_link;
 pub mod project_hub;
+mod project_thumbnail;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod python_plugin;
 mod settings;
@@ -244,6 +245,8 @@ impl Plugin for GaanimEditorPlugin {
             .add_plugins(project_hub::ProjectHubPlugin)
             .add_plugins(presenter_link::PresenterLinkPlugin)
             .add_plugins(settings::SettingsPlugin)
+            .init_resource::<project_thumbnail::ProjectThumbnail>()
+            .add_systems(Update, project_thumbnail::project_thumbnail_system)
             .add_systems(PreUpdate, square_egui_corners_system)
             .init_resource::<EditorState>()
             .init_resource::<touch::TouchControls>()

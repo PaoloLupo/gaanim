@@ -559,6 +559,33 @@ pub fn user_data_dir() -> Option<PathBuf> {
     ProjectDirs::from("dev", "Gaanim", "Gaanim").map(|dirs| dirs.data_local_dir().to_path_buf())
 }
 
+/// Where the editor keeps the cover Home shows for the project at `root`: a
+/// PNG in Gaanim's data folder, never in the project, so repositories stay
+/// clean.
+pub fn project_thumbnail_path(root: &Path) -> Option<PathBuf> {
+    user_data_dir().map(|dir| thumbnail_in(&dir, root))
+}
+
+fn thumbnail_in(dir: &Path, root: &Path) -> PathBuf {
+    dir.join("thumbnails")
+        .join(format!("{:016x}.png", project_key(root)))
+}
+
+/// A stable name for the project at `root`, the same however the path is
+/// written: FNV-1a of its canonical form (lowercase on Windows, whose paths
+/// ignore case).
+fn project_key(root: &Path) -> u64 {
+    let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut text = canonical.to_string_lossy().into_owned();
+    if cfg!(windows) {
+        text = text.to_lowercase();
+    }
+    let text = text.trim_end_matches(['/', '\\']);
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 pub fn default_project_parent() -> PathBuf {
     UserDirs::new()
         .and_then(|dirs| dirs.document_dir().map(Path::to_path_buf))
@@ -1148,6 +1175,22 @@ fn prepend_to_path(path: impl AsRef<Path>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_project_keeps_its_thumbnail_however_its_path_is_written() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let path = thumbnail_in(data.path(), project.path());
+        assert_eq!(
+            path.parent(),
+            Some(data.path().join("thumbnails").as_path())
+        );
+        assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("png"));
+        let trailing = PathBuf::from(format!("{}/", project.path().display()));
+        assert_eq!(thumbnail_in(data.path(), &trailing), path);
+        let other = tempfile::tempdir().unwrap();
+        assert_ne!(thumbnail_in(data.path(), other.path()), path);
+    }
 
     #[test]
     fn probes_that_block_are_abandoned() {
