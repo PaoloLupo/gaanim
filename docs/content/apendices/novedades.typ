@@ -11,6 +11,129 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.14.0
+
+Publicada el 15 de octubre de 2026. El editor reúne tus preferencias en una
+ventana *Settings*, se maneja entero desde el teclado con una paleta de
+comandos y una lista de saltos con vista previa, y redibuja la línea de
+tiempo con secciones, rombos en las pausas y un cabezal dorado. Home muestra
+los recientes como tarjetas con portada. El panel *Script & narration* se
+acopla a la derecha con un objetivo para la charla, compartido con Presenter
+View, y prácticas cronometradas contra él (ver
+#link("/guias/ensayar-y-grabar/")[Ensayar y grabar una charla]). Corrige
+las exportaciones que se quedaban en 0 % al abrir Gaanim desde Neovim o VS
+Code y el bloom que se convertía en una mancha blanca con la ventana grande.
+
+== Ajustes
+
+- *Settings* (`Ctrl+,`, la barra lateral de Home o *More controls*) reúne en
+  una ventana lo que antes estaba repartido: *Recording*, *Transcription* y
+  *Dictation* (antes plegables del panel de narración), *Prompter*,
+  *Preview*, *Integrations* y *Updates*. Cada cambio se guarda al momento en
+  un solo `settings.json` en la carpeta de datos de Gaanim, y la ventana
+  reabre en la última sección. *Reset section* devuelve la sección a sus
+  valores por defecto; el token de Scribe y el relay guardado conservan sus
+  botones.
+- El prompter lee a un ritmo automático (el de la grabación, si no el medido
+  al dictar, si no 150 palabras por minuto) o a uno fijo, de 80 a 240, y
+  recuerda el tamaño del texto.
+- La resolución de la vista previa, el comando del editor de código y la
+  comprobación diaria de actualizaciones, que solo eran variables de entorno,
+  tienen su ajuste. Las variables siguen mandando, y *Settings* muestra el
+  ajuste bloqueado con su nombre. El comando del editor avisa si su programa
+  no está en el `PATH`, y las rutas de Whisper que no llevan a nada salen en
+  rojo.
+- *Updates → Check now* busca una versión nueva al instante, aunque la
+  comprobación diaria esté apagada, y actualiza también desde el editor.
+- *Preview* elige qué cuenta la insignia de la esquina tras cada recarga
+  (avisos y errores, solo errores o nada) y si aparece el aviso «Scene
+  ready». La `✕` de la insignia la oculta desde entonces.
+
+== Editor
+
+- `Ctrl+Shift+P` abre una paleta de comandos: cada acción del editor, cada
+  sección de *Settings*, *Back to Home* y los proyectos recientes, filtrados
+  al escribir y con su atajo. `Ctrl+P` lista los segmentos y sus stops por
+  nombre, con la diapositiva tal como se ve allí y sus notas, y `Enter` salta.
+  `?` muestra todos los atajos.
+- La barra de reproducción ancha trae *Settings* y *Back to Home*, que vuelve
+  a Home sin cerrar Gaanim; la intermedia muestra tantos botones como caben.
+  Al abrir o recargar un proyecto se queda visible unos segundos.
+- La línea de tiempo nombra las secciones de los segmentos llamados
+  `Sección · parte` en una fila encima, alterna dos grises entre segmentos,
+  dibuja los stops como rombos (huecos hasta llegar a ellos) y los marcadores
+  de `scene.marker` en violeta. Una línea sobre cada diapositiva dice cómo va
+  su guion, y el cabezal es dorado.
+- La ventana reabre con el tamaño y la posición que tenía, y *Back to Home* o
+  cambiar de proyecto preguntan antes si hay una grabación en curso.
+- La interfaz sigue la paleta de la marca: grafito, violeta para acentos y
+  selección, dorado para las pausas, casillas, deslizadores y desplegables a
+  juego, y JetBrains Mono en el texto monoespaciado. Home muestra el logo.
+- Una exportación que falla ofrece *Try again*, *Copy error* y, si falta
+  FFmpeg, cómo instalarlo; un error de Home que nombra Python, uv o FFmpeg
+  lleva a la página del entorno.
+
+== Home
+
+- *Recent* alterna entre la lista y una cuadrícula de tarjetas con la portada
+  de cada entrada, y recuerda la elección. El editor guarda la portada de un
+  proyecto al cargar la escena: `scene.thumbnail(t)`, si no el primer stop, si
+  no el instante del primer segmento que más muestra; siempre en la carpeta
+  de datos de Gaanim, nunca en el proyecto.
+- Un paquete `.gaanim` exportado dentro de la carpeta de un proyecto
+  reciente va con él, con un botón que lo reproduce. Un campo busca por
+  nombre o ruta, y una chincheta fija una entrada arriba, también tras
+  *Clear list*.
+
+== Script & narration y prácticas
+
+- El panel se acopla a la derecha y la escena se encoge a su lado. Muestra
+  el objetivo de la charla (*TARGET*), que es el mismo que fija Presenter
+  View, lo que suman las tomas y la última práctica frente a él, las últimas
+  prácticas, un mapa de la charla, el guion de la diapositiva en pantalla con
+  sus palabras y su tiempo de lectura, una lista de diapositivas filtrable
+  (*No time*, *Over*, por nombre) y los controles para grabar o practicar
+  (ver #link("/guias/presentaciones/#panel-narracion")[El panel Script &
+  narration]).
+- Cada diapositiva recibe su parte del objetivo: su `target=`, si no lo que
+  dejan los objetivos, repartido según cuánto dice su guion.
+- *Practice* presenta la charla cronometrada sin grabar nada y la guarda como
+  un ensayo, el mismo registro que llena Presenter View. El prompter dice en
+  cada momento si vas adelantado o retrasado (ver
+  #link("/guias/presentaciones/#practicar")[Practicar contra un objetivo]).
+- *Test level* abre el micrófono para ver su nivel sin grabar, y el
+  medidor y el guion de la diapositiva actual están siempre a mano.
+- Nueva guía, #link("/guias/ensayar-y-grabar/")[Ensayar y grabar una charla],
+  con un proyecto de ejemplo y capturas: del guion a una charla que cabe en
+  su tiempo, y de ahí al vídeo o a la presentación.
+
+== Correcciones
+
+- Las exportaciones desde el editor abierto por un plugin de Neovim o VS Code
+  (`--listen stdio`) se quedaban en 0 % y fallaban a los 120 segundos: el
+  proceso de exportación heredaba la tubería de entrada del plugin. Ya no
+  hereda la entrada estándar.
+- Con la ventana grande, una escena con muchos objetos y post-proceso
+  (bloom, aberración cromática) se llenaba de una mancha blanca: Vello se
+  saltaba el fotograma por falta de memoria en la GPU y el post-proceso se
+  aplicaba una y otra vez sobre el anterior. La vista previa detecta ahora
+  esos fotogramas y los repite con más memoria, como ya hacía la exportación.
+- Una grabación `.gaanim` que falla o se cancela ya no deja
+  `nombre.gaanim.partial`.
+- Las flechas (`→`) se dibujan en el texto de la interfaz, y la línea de
+  estado del prompter recorta el nombre de la diapositiva en lugar de
+  montarse sobre el aviso de avance.
+
+== Al actualizar
+
+- Las preferencias de `narration.json` y `poll-relay.txt` pasan solas a
+  `settings.json` la primera vez, y esos archivos se borran.
+- `narration/` (el guion y las tomas) vive en la carpeta de assets del
+  proyecto aunque el script no llame a `scene.assets.load_project(...)`. Un
+  proyecto que ya guardaba `narration/` junto al script, y no en sus assets,
+  sigue igual. Una ruta relativa de `scene.narration_script(...)` se busca
+  entonces en esos assets.
+
 = 0.13.1
 
 Publicada el 14 de octubre de 2026. Corrige el reproductor de los paquetes
