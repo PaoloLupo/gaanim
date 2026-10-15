@@ -1276,6 +1276,7 @@ fn terminate_export_worker(child: &mut Child) {
         let process_group = format!("-{}", child.id());
         let _ = Command::new("kill")
             .args(["-KILL", "--", &process_group])
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
@@ -1285,6 +1286,7 @@ fn terminate_export_worker(child: &mut Child) {
         let pid = child.id().to_string();
         let _ = Command::new("taskkill")
             .args(["/PID", &pid, "/T", "/F"])
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
@@ -1372,6 +1374,11 @@ fn run_export_worker(
     command
         .env("GAANIM_EXPORT_WORKER", "1")
         .current_dir(project_dir)
+        // Never the editor's stdin: under `--listen stdio` a thread here
+        // blocks reading it, and on Windows the worker's startup queries
+        // of that same pipe wait behind the read, so it hung before its
+        // first frame.
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_export_worker(&mut command);
