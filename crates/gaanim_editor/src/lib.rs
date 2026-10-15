@@ -57,6 +57,7 @@ mod ui_kit;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod update;
 pub mod volume;
+mod window_memory;
 
 /// Whether the timeline ignores its keys and its advancing click. The
 /// pointer over a panel (such as the playback bar) only blocks the click;
@@ -247,6 +248,8 @@ impl Plugin for GaanimEditorPlugin {
             .add_plugins(presenter_link::PresenterLinkPlugin)
             .add_plugins(settings::SettingsPlugin)
             .add_plugins(command_palette::CommandPalettePlugin)
+            .init_resource::<window_memory::WindowMemory>()
+            .add_systems(Update, window_memory::window_memory_system)
             .init_resource::<project_thumbnail::ProjectThumbnail>()
             .add_systems(Update, project_thumbnail::project_thumbnail_system)
             .add_systems(PreUpdate, square_egui_corners_system)

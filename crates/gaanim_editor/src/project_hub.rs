@@ -392,6 +392,10 @@ pub struct ProjectHubState {
     /// A recent project or bundle to switch to: Gaanim starts again with it.
     #[cfg(not(target_arch = "wasm32"))]
     switch_requested: Option<PathBuf>,
+    /// Leaving was asked for while recording: where to go once confirmed
+    /// (`None` is Home).
+    #[cfg(not(target_arch = "wasm32"))]
+    leave_pending: Option<Option<PathBuf>>,
     /// Recent entries as rows or as cards with their covers.
     recent_view: RecentView,
     thumbnails: Thumbnails,
@@ -537,6 +541,8 @@ impl Default for ProjectHubState {
             home_requested: false,
             #[cfg(not(target_arch = "wasm32"))]
             switch_requested: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            leave_pending: None,
             recent_view: HomePreferences::load().recent_view,
             thumbnails: Thumbnails::default(),
             covered: false,
@@ -1061,17 +1067,49 @@ fn project_hub_ui_system(
     mut state: ResMut<ProjectHubState>,
     mut pending: ResMut<PendingProjectOpen>,
     mut settings: ResMut<crate::settings::SettingsWindow>,
+    narration: Option<Res<crate::narration::NarrationSession>>,
     #[cfg(not(target_arch = "wasm32"))] mut exit: MessageWriter<AppExit>,
 ) {
+    // Leaving starts Gaanim again; a recording or dictation in progress
+    // would be lost, so that asks first.
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let asked = std::mem::take(&mut state.home_requested);
+        let switch = state.switch_requested.take();
+        if asked || switch.is_some() {
+            state.leave_pending = Some(switch);
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut leave = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(target) = state.leave_pending.clone() {
+        let recording = narration.is_some_and(|session| session.capturing());
+        if !recording {
+            leave = Some(target);
+            state.leave_pending = None;
+        } else if let Ok(ctx) = contexts.ctx_mut() {
+            match confirm_leave(ctx) {
+                Some(true) => {
+                    leave = Some(target);
+                    state.leave_pending = None;
+                }
+                Some(false) => state.leave_pending = None,
+                None => {}
+            }
+        }
+    }
     // The new version starts before this one closes, so the window
     // seems to restart. Settings can ask for it from the editor too.
     #[cfg(not(target_arch = "wasm32"))]
-    let switch = state.switch_requested.take();
-    #[cfg(not(target_arch = "wasm32"))]
-    if std::mem::take(&mut state.home_requested) || switch.is_some() {
+    if let Some(switch) = leave {
         let started = std::env::current_exe().and_then(|executable| {
             let mut command = std::process::Command::new(executable);
-            command.args(switch.iter());
+            // Not the editor's stdin: a plugin's `--listen stdio` pipe
+            // belongs to this process, not the one that replaces it.
+            command
+                .args(switch.iter())
+                .stdin(std::process::Stdio::null());
             command.spawn()
         });
         match started {
@@ -1085,7 +1123,10 @@ fn project_hub_ui_system(
     }
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(executable) = state.update.restart.take() {
-        match std::process::Command::new(&executable).spawn() {
+        match std::process::Command::new(&executable)
+            .stdin(std::process::Stdio::null())
+            .spawn()
+        {
             Ok(_) => {
                 exit.write(AppExit::Success);
             }
@@ -1152,6 +1193,49 @@ fn project_hub_ui_system(
         ctx.request_repaint();
     }
     state.opening_shown = state.opening.is_some();
+}
+
+/// Asks whether to leave while a recording runs: `Some(true)` leaves,
+/// `Some(false)` stays, `None` while it waits for an answer.
+#[cfg(not(target_arch = "wasm32"))]
+fn confirm_leave(ctx: &egui::Context) -> Option<bool> {
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::new("gaanim-confirm-leave"))
+        .frame(ui_kit::card_frame())
+        .show(ctx, |ui| {
+            ui.set_width(380.0);
+            ui.label(
+                egui::RichText::new("A recording is in progress")
+                    .size(17.0)
+                    .strong()
+                    .color(palette::TEXT),
+            );
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(
+                        "Leaving closes this project and loses the recording or dictation \
+                         that has not finished. Finish it with Enter first to keep it.",
+                    )
+                    .size(13.5)
+                    .color(palette::TEXT_MUTED),
+                )
+                .wrap(),
+            );
+            ui.add_space(14.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if primary_button(ui, "Stay", None, true).clicked() {
+                    answer = Some(false);
+                }
+                if secondary_button(ui, "Leave anyway", true).clicked() {
+                    answer = Some(true);
+                }
+            });
+        });
+    if modal.should_close() && answer.is_none() {
+        answer = Some(false);
+    }
+    answer
 }
 
 fn handle_shortcuts(ctx: &egui::Context, state: &mut ProjectHubState) {
