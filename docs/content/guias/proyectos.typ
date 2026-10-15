@@ -217,7 +217,7 @@ continuo.
 El botón *Export* de la barra de reproducción abre las mismas opciones. Al
 pulsar *Export*, el diálogo se cierra y la exportación sigue en segundo plano:
 puedes seguir reproduciendo y navegando la escena. La barra de tiempo marca en
-verde, bajo cada segmento, la parte ya exportada; la barra de reproducción
+violeta, bajo cada segmento, la parte ya exportada; la barra de reproducción
 muestra el porcentaje (pasa el cursor para ver fotogramas y tiempo restante) y
 una X para cancelar. La terminal desde la que abriste `gaanim` muestra la misma
 barra de progreso que `gaanim export` y el resultado. Al terminar aparece un

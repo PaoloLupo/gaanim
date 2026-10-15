@@ -354,7 +354,7 @@ reveal_time = scene.cursor  # 0.8
   kind: "method",
   params: ((name: "name", type: "str", default: none, desc: [Nombre único del instante; se recortan los espacios.]),),
   returns: (type: "None", desc: [No añade duración ni mueve el cursor.]),
-  desc: [Da nombre al instante actual de la línea de tiempo global. Es solo un metadato: no pausa la reproducción. El editor lo dibuja como un triángulo sobre la barra de tiempo (al pasar el cursor muestra el nombre y un clic salta a él), y `gaanim export --from` / `--to` lo aceptan en lugar de segundos. Un nombre vacío, repetido o que se lee como número lanza `ValueError`. Para instantes dentro de una `Composition`, usa #link("/referencia/animations/#api-label")[`label`].],
+  desc: [Da nombre al instante actual de la línea de tiempo global. Es solo un metadato: no pausa la reproducción. El editor lo dibuja como una banderita violeta sobre la barra de tiempo (al pasar el cursor muestra el nombre y un clic salta a él), y `gaanim export --from` / `--to` lo aceptan en lugar de segundos. Un nombre vacío, repetido o que se lee como número lanza `ValueError`. Para instantes dentro de una `Composition`, usa #link("/referencia/animations/#api-label")[`label`].],
 )[
 ```python
 >>>from gaanim import *

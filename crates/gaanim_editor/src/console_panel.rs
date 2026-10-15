@@ -407,23 +407,18 @@ fn problems_badge(ctx: &egui::Context, counts: Counts) -> BadgeAction {
                 .on_hover_text(
                     "Hide this badge after every reload; show it again in Settings → Preview",
                 );
-            ui.painter().rect_filled(
-                close,
-                0.0,
-                if hide.hovered() {
-                    palette::SURFACE
-                } else {
-                    palette::PANEL
-                },
-            );
+            // Quiet until the pointer reaches it.
+            if hide.hovered() {
+                ui.painter().rect_filled(close, 0.0, palette::PANEL);
+            }
             ui_kit::paint_icon(
                 ui.painter(),
-                egui::Rect::from_center_size(close.center(), egui::Vec2::splat(10.0)),
+                egui::Rect::from_center_size(close.center(), egui::Vec2::splat(7.0)),
                 Icon::Close,
                 if hide.hovered() {
-                    palette::TEXT
+                    palette::TEXT_MUTED
                 } else {
-                    palette::TEXT_FAINT
+                    palette::TEXT_FAINT.gamma_multiply(0.6)
                 },
             );
             if hide.clicked() {

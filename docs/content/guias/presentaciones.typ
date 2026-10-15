@@ -124,9 +124,14 @@ scene.stop()
   muestran y los comentarios HTML se ignoran.
 - Al guardar el archivo, el editor actualiza las notas sin volver a compilar
   la escena.
-- En la barra de tiempo del editor, un cuadrado en la esquina de cada
-  diapositiva dice cómo va su guion: verde si todos sus tramos tienen texto,
-  escrito o dictado, y ámbar si solo algunos. Sin cuadrado, está pendiente.
+- En la barra de tiempo del editor, una línea sobre cada diapositiva dice
+  cómo va su guion: violeta a todo lo ancho si todos sus tramos tienen texto,
+  escrito o dictado, y dorada hasta la mitad si solo algunos. Sin línea, está
+  pendiente. Las pausas son rombos sobre la pista, huecos hasta que llegas a
+  ellas (marcas finas cuando hay demasiadas para verlas como rombos), y
+  cuando los nombres de los segmentos comparten sección
+  (`Fundamentos · densidad`), una fila encima nombra cada sección; un clic en
+  ella salta a su primer segmento.
 
 Gaanim escribe el guion por ti y lo mantiene al día con el código. En el
 editor, abre *Script & narration* (el botón de micrófono de la barra de
