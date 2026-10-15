@@ -19,7 +19,7 @@ use crossbeam_channel::{Receiver, TryRecvError};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use gaanim_project::{
     CreateProjectOptions, EnvironmentProbe, ProjectKind, PythonSource, RecentBundle, RecentEntry,
-    RecentProjects, ResolvedProject, create_project, default_project_parent,
+    RecentGroup, RecentProjects, ResolvedProject, create_project, default_project_parent,
     find_project_for_script, is_bundle_path, resolve_project,
 };
 use std::collections::HashMap;
@@ -401,6 +401,8 @@ pub struct ProjectHubState {
     thumbnails: Thumbnails,
     /// Settings is open over Home, which then ignores the pointer.
     covered: bool,
+    /// What the recent list is filtered by: part of a name or a path.
+    recent_query: String,
 }
 
 /// How Home shows its recent entries; saved in the `home` section of the
@@ -446,7 +448,8 @@ const COVER_EDGE: u32 = 480;
 
 impl Thumbnails {
     /// The cover of `entry`, once loaded; the first call starts loading it.
-    fn get(&mut self, ctx: &egui::Context, entry: &RecentEntry) -> Option<egui::TextureHandle> {
+    fn get(&mut self, ctx: &egui::Context, group: &RecentGroup) -> Option<egui::TextureHandle> {
+        let entry = &group.entry;
         let key = entry.path().to_path_buf();
         if let Some(texture) = self.textures.get(&key) {
             return texture.clone();
@@ -472,9 +475,11 @@ impl Thumbnails {
             return texture;
         }
         let cover = match entry {
-            RecentEntry::Project(project) => {
-                gaanim_project::project_thumbnail_path(&project.root).map(Cover::File)
-            }
+            // A project the editor has not covered yet shows its bundle's.
+            RecentEntry::Project(project) => Some(Cover::Project(
+                gaanim_project::project_thumbnail_path(&project.root),
+                group.bundle.as_ref().map(|bundle| bundle.path.clone()),
+            )),
             RecentEntry::Bundle(bundle) => Some(Cover::Bundle(bundle.path.clone())),
         };
         let (sender, receiver) = crossbeam_channel::bounded(1);
@@ -498,15 +503,19 @@ impl Thumbnails {
 
 /// Where a cover comes from.
 enum Cover {
-    File(PathBuf),
+    /// A project's: the editor's cache, else its newest bundle's cover.
+    Project(Option<PathBuf>, Option<PathBuf>),
     Bundle(PathBuf),
 }
 
 impl Cover {
     fn decode(self) -> Option<egui::ColorImage> {
+        let bundle_cover = |path: &Path| gaanim_thumbnail::read_file(path).ok().flatten();
         let png = match self {
-            Self::File(path) => std::fs::read(path).ok()?,
-            Self::Bundle(path) => gaanim_thumbnail::read_file(&path).ok()??,
+            Self::Project(file, bundle) => file
+                .and_then(|file| std::fs::read(file).ok())
+                .or_else(|| bundle.as_deref().and_then(bundle_cover))?,
+            Self::Bundle(path) => bundle_cover(&path)?,
         };
         let image = gaanim_thumbnail::scaled(&png, COVER_EDGE).ok()?;
         let (width, height) = image.dimensions();
@@ -546,6 +555,7 @@ impl Default for ProjectHubState {
             recent_view: HomePreferences::load().recent_view,
             thumbnails: Thumbnails::default(),
             covered: false,
+            recent_query: String::new(),
         }
     }
 }
@@ -899,6 +909,15 @@ fn recorded_ago(bundle: &RecentBundle) -> Option<String> {
         .duration_since(modified)
         .unwrap_or_default();
     Some(format!("Recorded {}", relative_age(elapsed)))
+}
+
+/// "11 h ago": how long ago a bundle was recorded, for a project's line.
+fn bundle_age(bundle: &RecentBundle) -> Option<String> {
+    let modified = std::fs::metadata(&bundle.path).ok()?.modified().ok()?;
+    let elapsed = SystemTime::now()
+        .duration_since(modified)
+        .unwrap_or_default();
+    Some(relative_age(elapsed))
 }
 
 fn edited_ago(project: &ResolvedProject) -> Option<String> {
@@ -1997,13 +2016,19 @@ fn paint_bundle_scene(painter: &egui::Painter, stage: Rect, playing: bool, time:
 }
 
 fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
-    let entries = state.recents.entries();
+    let all = state.recents.groups();
+    let query = state.recent_query.trim().to_lowercase();
+    let entries: Vec<RecentGroup> = all
+        .iter()
+        .filter(|group| query.is_empty() || recent_matches(group, &query))
+        .cloned()
+        .collect();
     ui.horizontal(|ui| {
         ui.label(caption("RECENT"));
-        if !entries.is_empty() {
+        if !all.is_empty() {
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new(entries.len().to_string())
+                egui::RichText::new(all.len().to_string())
                     .monospace()
                     .size(11.0)
                     .color(palette::TEXT_FAINT),
@@ -2032,6 +2057,17 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                     }
                 }
                 ui.add_space(10.0);
+                ui_kit::field_frame()
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut state.recent_query)
+                                .hint_text("Search")
+                                .desired_width(150.0)
+                                .frame(egui::Frame::NONE),
+                        );
+                    });
+                ui.add_space(10.0);
                 if ui
                     .add(
                         egui::Label::new(
@@ -2042,6 +2078,7 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                         .sense(Sense::click()),
                     )
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("Forgets every entry that is not pinned")
                     .clicked()
                 {
                     state.recents.clear();
@@ -2052,17 +2089,28 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     });
     ui.add_space(12.0);
 
-    if entries.is_empty() {
+    if all.is_empty() {
         empty_recents(ui, state);
+        return;
+    }
+    if entries.is_empty() {
+        ui.label(
+            egui::RichText::new(format!(
+                "Nothing recent matches \"{}\".",
+                state.recent_query.trim()
+            ))
+            .size(13.5)
+            .color(palette::TEXT_FAINT),
+        );
         return;
     }
     let busy = state.busy() || state.covered;
     let mut action = None;
     match state.recent_view {
         RecentView::List => {
-            for entry in &entries {
-                if let Some(chosen) = recent_row(ui, &RecentRow::of(entry), !busy) {
-                    action = Some((chosen, entry.clone()));
+            for group in &entries {
+                if let Some(chosen) = recent_row(ui, &RecentRow::of(group), !busy) {
+                    action = Some((chosen, group.entry.clone()));
                 }
                 ui.add_space(8.0);
             }
@@ -2077,12 +2125,12 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
             for row in entries.chunks(columns) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = GAP;
-                    for entry in row {
-                        let cover = state.thumbnails.get(&ctx, entry);
+                    for group in row {
+                        let cover = state.thumbnails.get(&ctx, group);
                         if let Some(chosen) =
-                            recent_card(ui, &RecentRow::of(entry), cover.as_ref(), card, !busy)
+                            recent_card(ui, &RecentRow::of(group), cover.as_ref(), card, !busy)
                         {
-                            action = Some((chosen, entry.clone()));
+                            action = Some((chosen, group.entry.clone()));
                         }
                     }
                 });
@@ -2108,14 +2156,35 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
             state.recents.remove(entry.path());
             let _ = state.recents.save();
         }
+        Some((RowAction::Pin(pinned), entry)) => {
+            state.recents.set_pinned(entry.path(), pinned);
+            let _ = state.recents.save();
+        }
+        Some((RowAction::PlayBundle(path), _)) => state.open_bundle(&path),
         None => {}
     }
+}
+
+/// Whether `group` matches the lowercase `query`: its name, its path, or
+/// its bundle's name.
+fn recent_matches(group: &RecentGroup, query: &str) -> bool {
+    let row = RecentRow::of(group);
+    row.name.to_lowercase().contains(query)
+        || row.path.to_string_lossy().to_lowercase().contains(query)
+        || group
+            .bundle
+            .as_ref()
+            .is_some_and(|bundle| bundle.name.to_lowercase().contains(query))
 }
 
 enum RowAction {
     Open,
     ShowFolder,
     Remove,
+    /// Pin to the top, or unpin.
+    Pin(bool),
+    /// Play the project's newest bundle.
+    PlayBundle(PathBuf),
 }
 
 /// What a recent row shows for a project or a bundle.
@@ -2126,11 +2195,19 @@ struct RecentRow {
     color: Color32,
     label: &'static str,
     age: Option<String>,
+    pinned: bool,
+    /// The project's newest bundle, and how long ago it was recorded.
+    bundle: Option<(PathBuf, Option<String>)>,
 }
 
 impl RecentRow {
-    fn of(entry: &RecentEntry) -> Self {
-        match entry {
+    fn of(group: &RecentGroup) -> Self {
+        let pinned = group.pinned;
+        let bundle = group
+            .bundle
+            .as_ref()
+            .map(|bundle| (bundle.path.clone(), bundle_age(bundle)));
+        match &group.entry {
             RecentEntry::Project(project) => Self {
                 name: project.manifest.name.clone(),
                 path: project.root.clone(),
@@ -2141,6 +2218,8 @@ impl RecentRow {
                 color: kind_color(project.manifest.kind),
                 label: kind_label(project.manifest.kind),
                 age: edited_ago(project),
+                pinned,
+                bundle,
             },
             RecentEntry::Bundle(bundle) => Self {
                 name: bundle.name.clone(),
@@ -2149,9 +2228,73 @@ impl RecentRow {
                 color: palette::LOOP,
                 label: ".gaanim",
                 age: recorded_ago(bundle),
+                pinned,
+                bundle: None,
             },
         }
     }
+
+    /// The age line: when it was edited, and its bundle's age.
+    fn ages(&self) -> Option<String> {
+        let bundle = self.bundle.as_ref().map(|(_, age)| match age {
+            Some(age) => format!("bundle {age}"),
+            None => "bundle".to_owned(),
+        });
+        match (&self.age, bundle) {
+            (Some(age), Some(bundle)) => Some(format!("{age} · {bundle}")),
+            (Some(age), None) => Some(age.clone()),
+            (None, bundle) => bundle,
+        }
+    }
+}
+
+/// The hover buttons every recent entry has, right to left: remove, show
+/// the folder, pin, and play the project's bundle.
+fn recent_actions(ui: &mut Ui, row: &RecentRow, action: &mut Option<RowAction>) {
+    if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
+        .on_hover_text("Remove from recent (does not delete files)")
+        .clicked()
+    {
+        *action = Some(RowAction::Remove);
+    }
+    if icon_button(ui, Icon::Folder, ButtonTone::Ghost, true)
+        .on_hover_text("Show folder")
+        .clicked()
+    {
+        *action = Some(RowAction::ShowFolder);
+    }
+    let pin_tone = if row.pinned {
+        ButtonTone::On(ui_kit::ToggleColor::Stop)
+    } else {
+        ButtonTone::Ghost
+    };
+    if icon_button(ui, Icon::Pin, pin_tone, true)
+        .on_hover_text(if row.pinned {
+            "Unpin"
+        } else {
+            "Pin to the top"
+        })
+        .clicked()
+    {
+        *action = Some(RowAction::Pin(!row.pinned));
+    }
+    if let Some((bundle, _)) = &row.bundle
+        && icon_button(ui, Icon::Package, ButtonTone::Ghost, true)
+            .on_hover_text("Play its newest bundle")
+            .clicked()
+    {
+        *action = Some(RowAction::PlayBundle(bundle.clone()));
+    }
+}
+
+/// A pinned entry's mark: a small gold pin.
+fn paint_pin(painter: &egui::Painter, center: Pos2) {
+    ui_kit::paint_icon(
+        painter,
+        Rect::from_center_size(center, Vec2::splat(12.0)),
+        Icon::Pin,
+        palette::STOP,
+    );
 }
 
 fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> {
@@ -2194,10 +2337,17 @@ fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> 
     );
 
     let text_left = tile.max.x + 14.0;
-    let actions_w = if hovered { 200.0 } else { 150.0 };
+    let actions_w = if hovered { 290.0 } else { 220.0 };
     let text_w = (rect.max.x - actions_w - text_left).max(80.0);
     let name = painter.layout_no_wrap(row.name.clone(), FontId::proportional(15.0), palette::TEXT);
+    let name_width = name.size().x;
     painter.galley(pos2(text_left, rect.center().y - 19.0), name, palette::TEXT);
+    if row.pinned {
+        paint_pin(
+            painter,
+            pos2(text_left + name_width + 12.0, rect.center().y - 10.0),
+        );
+    }
     let path = painter.layout(
         display_path(&row.path),
         FontId::proportional(11.5),
@@ -2225,18 +2375,7 @@ fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> 
                     action = Some(RowAction::Open);
                 }
                 ui.add_space(6.0);
-                if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
-                    .on_hover_text("Remove from recent (does not delete files)")
-                    .clicked()
-                {
-                    action = Some(RowAction::Remove);
-                }
-                if icon_button(ui, Icon::Folder, ButtonTone::Ghost, true)
-                    .on_hover_text("Show folder")
-                    .clicked()
-                {
-                    action = Some(RowAction::ShowFolder);
-                }
+                recent_actions(ui, row, &mut action);
             },
         );
     } else {
@@ -2248,11 +2387,11 @@ fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> 
             FontId::proportional(12.0),
             color,
         );
-        if let Some(age) = &row.age {
+        if let Some(ages) = row.ages() {
             painter.text(
                 pos2(meta_x, rect.center().y + 10.0),
                 Align2::RIGHT_CENTER,
-                age,
+                ages,
                 FontId::proportional(11.5),
                 palette::TEXT_FAINT,
             );
@@ -2347,20 +2486,31 @@ fn recent_card(
         FontId::proportional(11.5),
         color,
     );
-    if let Some(age) = &row.age {
-        painter.text(
-            pos2(label.max.x + 8.0, meta_y),
-            Align2::LEFT_CENTER,
-            age,
-            FontId::proportional(11.5),
-            palette::TEXT_FAINT,
-        );
+    if let Some(ages) = row.ages() {
+        painter
+            .with_clip_rect(Rect::from_min_max(
+                pos2(label.max.x + 8.0, stage.max.y),
+                pos2(rect.max.x - 10.0, rect.max.y),
+            ))
+            .text(
+                pos2(label.max.x + 8.0, meta_y),
+                Align2::LEFT_CENTER,
+                ages,
+                FontId::proportional(11.5),
+                palette::TEXT_FAINT,
+            );
+    }
+    if row.pinned {
+        let mark = Rect::from_min_size(stage.min + vec2(6.0, 6.0), Vec2::splat(22.0));
+        painter.rect_filled(mark, 0.0, palette::PANEL);
+        paint_pin(painter, mark.center());
     }
 
     let mut action = None;
     if hovered {
+        let buttons = if row.bundle.is_some() { 4.0 } else { 3.0 };
         let actions = Rect::from_min_max(
-            pos2(stage.max.x - 80.0, stage.min.y + 6.0),
+            pos2(stage.max.x - 10.0 - buttons * 34.0, stage.min.y + 6.0),
             pos2(stage.max.x - 6.0, stage.min.y + 40.0),
         );
         // A child that takes no room in the row, so the cards beside this
@@ -2372,18 +2522,7 @@ fn recent_card(
         );
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.painter().rect_filled(ui.max_rect(), 0.0, palette::PANEL);
-        if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
-            .on_hover_text("Remove from recent (does not delete files)")
-            .clicked()
-        {
-            action = Some(RowAction::Remove);
-        }
-        if icon_button(ui, Icon::Folder, ButtonTone::Ghost, true)
-            .on_hover_text("Show folder")
-            .clicked()
-        {
-            action = Some(RowAction::ShowFolder);
-        }
+        recent_actions(ui, row, &mut action);
     }
     if enabled
         && action.is_none()

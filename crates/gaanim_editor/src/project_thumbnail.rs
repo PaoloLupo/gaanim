@@ -70,38 +70,89 @@ pub(crate) fn project_thumbnail_system(
     let Some(path) = gaanim_project::project_thumbnail_path(&paths.project_dir) else {
         return;
     };
-    let at = canvas
-        .thumbnail_time()
-        .unwrap_or_else(|| automatic_time(&timeline));
-    let source = Source::Scene(Box::new(canvas.clone()));
+    let times = match canvas.thumbnail_time() {
+        Some(at) => vec![at],
+        None => cover_times(&timeline),
+    };
+    let canvas = canvas.clone();
     state.revision = Some(stash.revision);
     state.rendered_at = Some(Instant::now());
     let (sender, receiver) = crossbeam_channel::bounded(1);
     let spawned = std::thread::Builder::new()
         .name("gaanim-project-thumbnail".to_owned())
         .spawn(move || {
-            let _ = sender.send(render_cover(source, at, &path));
+            let _ = sender.send(render_cover(canvas, &times, &path));
         });
     if spawned.is_ok() {
         state.job = Some(receiver);
     }
 }
 
-/// Render the cover beside its file and move it in, so Home never reads half
-/// a PNG.
-fn render_cover(source: Source, at: f64, path: &std::path::Path) -> Result<(), String> {
-    let temporary: PathBuf = path.with_extension("tmp.png");
-    render_frame(source, at, &temporary, Some(LONG_EDGE))?;
-    std::fs::rename(&temporary, path)
+/// Render each of `times` beside the cover's file, keep the one that shows
+/// the most, and move it in, so Home never reads half a PNG.
+fn render_cover(
+    canvas: gaanim_api::canvas::SceneModel,
+    times: &[f64],
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let mut best: Option<(usize, PathBuf)> = None;
+    for (index, &at) in times.iter().enumerate() {
+        let candidate: PathBuf = path.with_extension(format!("{index}.tmp.png"));
+        render_frame(
+            Source::Scene(Box::new(canvas.clone())),
+            at,
+            &candidate,
+            Some(LONG_EDGE),
+        )?;
+        // A single instant needs no judging.
+        let shown = if times.len() == 1 {
+            0
+        } else {
+            std::fs::read(&candidate)
+                .ok()
+                .and_then(|png| gaanim_thumbnail::scaled(&png, 96).ok())
+                .map(|image| content(image.as_raw()))
+                .unwrap_or(0)
+        };
+        match &best {
+            Some((most, _)) if *most >= shown => {
+                let _ = std::fs::remove_file(&candidate);
+            }
+            _ => {
+                if let Some((_, previous)) = best.replace((shown, candidate)) {
+                    let _ = std::fs::remove_file(previous);
+                }
+            }
+        }
+    }
+    let (_, chosen) = best.ok_or("no instant to render the thumbnail at")?;
+    std::fs::rename(&chosen, path)
         .map_err(|error| format!("could not save the project's thumbnail: {error}"))
 }
 
-/// The instant a cover shows when the script does not choose one: the
-/// first stop, as a bundle's cover, where a talk's first slide is complete.
-/// Without stops a bundle picks the fullest frame of the first segment,
-/// which takes rendering all of it; this takes the segment's end instead, or
-/// for a video in one segment its middle, since many end on a fade.
-fn automatic_time(timeline: &Timeline) -> f64 {
+/// How much of an RGBA image is not its background: the pixels that differ
+/// clearly from the top-left one.
+fn content(rgba: &[u8]) -> usize {
+    let Some(background) = rgba.get(..4) else {
+        return 0;
+    };
+    rgba.chunks_exact(4)
+        .filter(|pixel| {
+            pixel
+                .iter()
+                .zip(background)
+                .take(3)
+                .any(|(channel, back)| channel.abs_diff(*back) > 24)
+        })
+        .count()
+}
+
+/// The instants a cover may show when the script does not choose one: the
+/// first stop, as a bundle's cover, where a talk's first slide is
+/// complete; without stops, a few instants through the first segment (and
+/// its end, when more follow), of which the one that shows the most wins,
+/// as a bundle picks the fullest frame of its first segment.
+fn cover_times(timeline: &Timeline) -> Vec<f64> {
     let first_stop = timeline
         .segments
         .iter()
@@ -109,15 +160,20 @@ fn automatic_time(timeline: &Timeline) -> f64 {
         .filter(|time| time.is_finite())
         .min_by(f64::total_cmp);
     if let Some(stop) = first_stop {
-        return stop;
+        return vec![stop];
     }
     let Some(first) = timeline.segments.first() else {
-        return 0.0;
+        return vec![0.0];
     };
+    let span = first.end_time - first.start_time;
+    let mut times: Vec<f64> = [0.35, 0.6, 0.85]
+        .iter()
+        .map(|share| first.start_time + span * share)
+        .collect();
     if timeline.segments.len() > 1 {
-        return first.end_time;
+        times.push(first.end_time);
     }
-    (first.start_time + first.end_time) / 2.0
+    times
 }
 
 #[cfg(test)]
@@ -145,17 +201,33 @@ mod tests {
     }
 
     #[test]
-    fn the_automatic_cover_is_the_first_stop_then_the_first_segment() {
+    fn the_automatic_cover_is_the_first_stop_else_instants_of_the_first_segment() {
         let mut timeline = Timeline::default();
-        assert_eq!(automatic_time(&timeline), 0.0);
+        assert_eq!(cover_times(&timeline), [0.0]);
         timeline.segments = vec![segment(0, 0.0, 8.0, &[])];
-        assert_eq!(automatic_time(&timeline), 4.0);
-        timeline.segments = vec![segment(0, 0.0, 3.0, &[]), segment(1, 3.0, 9.0, &[])];
-        assert_eq!(automatic_time(&timeline), 3.0);
+        assert_eq!(cover_times(&timeline), [2.8, 4.8, 6.8]);
+        timeline.segments = vec![segment(0, 0.0, 4.0, &[]), segment(1, 4.0, 9.0, &[])];
+        assert_eq!(cover_times(&timeline), [1.4, 2.4, 3.4, 4.0]);
         timeline.segments = vec![segment(0, 0.0, 3.0, &[1.5]), segment(1, 3.0, 9.0, &[])];
-        assert_eq!(automatic_time(&timeline), 1.5);
+        assert_eq!(cover_times(&timeline), [1.5]);
         // A talk whose first slide does not stop rests first on a later one.
         timeline.segments = vec![segment(0, 0.0, 3.0, &[]), segment(1, 3.0, 9.0, &[4.0])];
-        assert_eq!(automatic_time(&timeline), 4.0);
+        assert_eq!(cover_times(&timeline), [4.0]);
+    }
+
+    #[test]
+    fn content_counts_what_differs_from_the_background() {
+        let dark = [10, 10, 10, 255];
+        let ink = [240, 200, 60, 255];
+        let empty: Vec<u8> = dark.repeat(16);
+        assert_eq!(content(&empty), 0);
+        let mut drawn = empty.clone();
+        drawn[20..24].copy_from_slice(&ink);
+        drawn[40..44].copy_from_slice(&ink);
+        assert_eq!(content(&drawn), 2);
+        // Noise below the threshold is background.
+        let mut faint = empty;
+        faint[20..24].copy_from_slice(&[20, 20, 20, 255]);
+        assert_eq!(content(&faint), 0);
     }
 }

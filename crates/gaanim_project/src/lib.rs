@@ -2,7 +2,7 @@
 
 use directories::{ProjectDirs, UserDirs};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
@@ -392,6 +392,40 @@ pub struct RecentProjects {
     /// order. Versions that only know projects skip the bundle entries.
     #[serde(default)]
     paths: Vec<PathBuf>,
+    /// Entries pinned to the top, in the order they were pinned. They stay
+    /// past the limit of recent entries and through *Clear list*.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pinned: Vec<PathBuf>,
+}
+
+/// A recent entry as Home lists it: a project shows the newest bundle
+/// exported inside its folder instead of listing it apart.
+#[derive(Debug, Clone)]
+pub struct RecentGroup {
+    pub entry: RecentEntry,
+    pub bundle: Option<RecentBundle>,
+    pub pinned: bool,
+}
+
+/// Whether `path` lies inside `folder`, ignoring case on Windows.
+fn is_inside(path: &Path, folder: &Path) -> bool {
+    if cfg!(windows) {
+        // Canonical paths carry a verbatim prefix plain ones lack.
+        let lower = |path: &Path| {
+            let text = path.to_string_lossy().to_lowercase().replace('/', "\\");
+            text.strip_prefix(r"\\?\")
+                .map(str::to_owned)
+                .unwrap_or(text)
+        };
+        let folder = lower(folder);
+        let folder = folder.trim_end_matches('\\');
+        let path = lower(path);
+        path.len() > folder.len()
+            && path.starts_with(folder)
+            && path[folder.len()..].starts_with('\\')
+    } else {
+        path.starts_with(folder) && path != folder
+    }
 }
 
 /// A playback bundle (`.gaanim`) opened recently.
@@ -464,27 +498,58 @@ impl RecentProjects {
         let source = std::fs::read_to_string(path)
             .map_err(|error| format!("could not read {}: {error}", path.display()))?;
         let stored: Self = serde_json::from_str(&source).unwrap_or_default();
-        let mut valid = Vec::new();
         let mut seen = HashSet::new();
+        let pinned: Vec<PathBuf> = stored
+            .pinned
+            .into_iter()
+            .filter_map(|candidate| resolve_entry_path(&candidate))
+            .map(|entry| entry.path().to_path_buf())
+            .filter(|path| seen.insert(path.clone()))
+            .collect();
+        let mut valid = Vec::new();
         for candidate in stored.paths {
+            if valid.len() == RECENTS_LIMIT {
+                break;
+            }
             if let Some(entry) = resolve_entry_path(&candidate)
                 && seen.insert(entry.path().to_path_buf())
             {
                 valid.push(entry.path().to_path_buf());
             }
-            if valid.len() == RECENTS_LIMIT {
-                break;
-            }
         }
-        Ok(Self { paths: valid })
+        Ok(Self {
+            paths: valid,
+            pinned,
+        })
     }
 
-    /// Projects and bundles that still exist, newest first.
+    /// Projects and bundles that still exist: the pinned ones, then the
+    /// rest newest first.
     pub fn entries(&self) -> Vec<RecentEntry> {
-        self.paths
+        self.pinned
             .iter()
+            .chain(self.paths.iter().filter(|path| !self.pinned.contains(path)))
             .filter_map(|path| resolve_entry_path(path))
             .collect()
+    }
+
+    /// [`Self::entries`] as Home lists them: a bundle inside a listed
+    /// project's folder goes with that project, the newest one only, and is
+    /// not listed apart.
+    pub fn groups(&self) -> Vec<RecentGroup> {
+        group_entries(self.entries(), &self.pinned)
+    }
+
+    pub fn is_pinned(&self, path: &Path) -> bool {
+        self.pinned.iter().any(|pinned| pinned == path)
+    }
+
+    /// Pin `path` to the top of the list, or unpin it.
+    pub fn set_pinned(&mut self, path: &Path, pinned: bool) {
+        self.pinned.retain(|existing| existing != path);
+        if pinned {
+            self.pinned.push(path.to_path_buf());
+        }
     }
 
     /// The recent projects, newest first, without bundles.
@@ -515,11 +580,13 @@ impl RecentProjects {
         self.paths.truncate(RECENTS_LIMIT);
     }
 
-    /// Forget a project root or bundle file.
+    /// Forget a project root or bundle file, pinned or not.
     pub fn remove(&mut self, path: &Path) {
         self.paths.retain(|existing| existing != path);
+        self.pinned.retain(|existing| existing != path);
     }
 
+    /// Forget every entry that is not pinned.
     pub fn clear(&mut self) {
         self.paths.clear();
     }
@@ -540,6 +607,46 @@ impl RecentProjects {
         std::fs::write(path, source)
             .map_err(|error| format!("could not write {}: {error}", path.display()))
     }
+}
+
+/// Fold each bundle inside a listed project's folder into that project:
+/// the newest such bundle (the first in `entries`) goes with the first
+/// project that holds it, and no bundle that went with a project is listed
+/// apart.
+fn group_entries(entries: Vec<RecentEntry>, pinned: &[PathBuf]) -> Vec<RecentGroup> {
+    let roots: Vec<PathBuf> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            RecentEntry::Project(project) => Some(project.root.clone()),
+            RecentEntry::Bundle(_) => None,
+        })
+        .collect();
+    let mut newest: HashMap<PathBuf, RecentBundle> = HashMap::new();
+    let mut folded = HashSet::new();
+    for entry in &entries {
+        if let RecentEntry::Bundle(bundle) = entry
+            && let Some(root) = roots.iter().find(|root| is_inside(&bundle.path, root))
+        {
+            folded.insert(bundle.path.clone());
+            newest.entry(root.clone()).or_insert_with(|| bundle.clone());
+        }
+    }
+    entries
+        .into_iter()
+        .filter(|entry| !folded.contains(entry.path()))
+        .map(|entry| {
+            let bundle = match &entry {
+                RecentEntry::Project(project) => newest.remove(&project.root),
+                RecentEntry::Bundle(_) => None,
+            };
+            let pinned = pinned.iter().any(|path| path == entry.path());
+            RecentGroup {
+                entry,
+                bundle,
+                pinned,
+            }
+        })
+        .collect()
 }
 
 /// Record the playback bundle at `path` in the saved recent list.
@@ -1410,6 +1517,94 @@ language = \"es\"
             RecentProjects::load_from(&storage).unwrap().entries().len(),
             1
         );
+    }
+
+    #[test]
+    fn a_project_lists_the_newest_bundle_exported_inside_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = create_project(&CreateProjectOptions {
+            kind: ProjectKind::Slides,
+            directory: temp.path().join("talk"),
+            force: false,
+        })
+        .unwrap();
+        let exports = project.root.join("exports");
+        std::fs::create_dir_all(&exports).unwrap();
+        let (old, new) = (exports.join("old.gaanim"), exports.join("new.gaanim"));
+        let outside = temp.path().join("shared.gaanim");
+        for bundle in [&old, &new, &outside] {
+            std::fs::write(bundle, b"bundle").unwrap();
+        }
+
+        let mut recents = RecentProjects::default();
+        recents.record_bundle(&old);
+        recents.record(&project);
+        recents.record_bundle(&outside);
+        recents.record_bundle(&new);
+        let groups = recents.groups();
+        let names: Vec<String> = groups
+            .iter()
+            .map(|group| group.entry.path().display().to_string())
+            .collect();
+        assert_eq!(groups.len(), 2, "{names:?}");
+        // Recorded bundle paths are canonical: compare their names.
+        assert!(groups[0].entry.path().ends_with("shared.gaanim"));
+        assert!(
+            matches!(&groups[1].entry, RecentEntry::Project(found) if found.root == project.root)
+        );
+        assert!(
+            groups[1]
+                .bundle
+                .as_ref()
+                .is_some_and(|bundle| bundle.path.ends_with("new.gaanim"))
+        );
+        // A canonical path (`\\?\` on Windows) is inside its plain folder.
+        let canonical = std::fs::canonicalize(&new).unwrap();
+        let plain = PathBuf::from(
+            project
+                .root
+                .to_string_lossy()
+                .trim_start_matches(r"\\?\")
+                .to_owned(),
+        );
+        assert!(is_inside(&canonical, &plain));
+        assert!(is_inside(&exports.join("x.gaanim"), &project.root));
+        assert!(!is_inside(&project.root, &project.root));
+        assert!(!is_inside(
+            &temp.path().join("talk2/x.gaanim"),
+            &project.root
+        ));
+    }
+
+    #[test]
+    fn pinned_entries_lead_and_outlast_the_limit_and_clearing() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut recents = RecentProjects::default();
+        for index in 0..=RECENTS_LIMIT {
+            let bundle = temp.path().join(format!("b{index}.gaanim"));
+            std::fs::write(&bundle, b"bundle").unwrap();
+            recents.record_bundle(&bundle);
+        }
+        // The oldest fell past the limit; pinning keeps the second oldest,
+        // by the path its entry carries, as Home pins it.
+        let pinned = recents.entries().last().unwrap().path().to_path_buf();
+        assert!(pinned.ends_with("b1.gaanim"));
+        recents.set_pinned(&pinned, true);
+        assert!(recents.is_pinned(&pinned));
+        let more = temp.path().join("more.gaanim");
+        std::fs::write(&more, b"bundle").unwrap();
+        recents.record_bundle(&more);
+        let storage = temp.path().join("recent.json");
+        recents.save_to(&storage).unwrap();
+        let mut loaded = RecentProjects::load_from(&storage).unwrap();
+        let entries = loaded.entries();
+        assert_eq!(entries[0].path(), pinned.as_path());
+        assert!(entries[1].path().ends_with("more.gaanim"));
+        assert!(loaded.groups()[0].pinned);
+        loaded.clear();
+        assert_eq!(loaded.entries().len(), 1);
+        loaded.set_pinned(&pinned, false);
+        assert!(loaded.entries().is_empty());
     }
 
     #[test]
