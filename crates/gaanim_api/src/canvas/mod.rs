@@ -46,9 +46,7 @@ pub use audio_signals::{AUDIO_SHADER_FUNCTIONS, AUDIO_TIME_UNIFORM, SpectrumScal
 pub use gaanim_media::analysis::AnalysisError as AudioAnalysisError;
 pub use gaanim_media::analysis::{AudioAnalysis, TempoEstimate};
 mod bar_race;
-pub use bar_race::{
-    BAR_RACE_PALETTE, BarRace, BarRaceBar, BarRaceLabels, BarRaceOptions, MAX_AUTO_FONT_FRACTION,
-};
+pub use bar_race::{BarRace, BarRaceBar, BarRaceLabels, BarRaceOptions, MAX_AUTO_FONT_FRACTION};
 pub use gaanim_visualization::{BarRaceModel, ValueFormat};
 mod camera_view;
 mod drawable;

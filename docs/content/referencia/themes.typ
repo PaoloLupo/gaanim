@@ -787,6 +787,21 @@ panel = scene.geometry.rounded_rect(5.25, 2.25, 0.3) \
 ]
 
 #api-entry(
+  name: "Canvas.palette",
+  kind: "method",
+  returns: (type: "Palette", desc: [La paleta categórica del tema activo; `gaanim` sin tema.]),
+  desc: [Sirve para colorear tus propias categorías como las colorean los gráficos.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+teams = ["Norte", "Sur", "Este"]
+colors = scene.canvas.palette().colors(len(teams))
+dots = [scene.geometry.dot(0.3).fill(color).move_to(index - 1, 0) for index, color in enumerate(colors)]
+```
+]
+
+#api-entry(
   name: "Canvas.layout_token",
   kind: "method",
   params: ((name: "name", type: "str", default: none, desc: [Nombre del token.]),),
@@ -826,7 +841,7 @@ if warnings:
 #api-entry(
   name: "Theme",
   kind: "class",
-  signature: "Theme(base: ThemeName | Theme | None = None, *, name=None, colors=None, fonts=None, sizes=None, text=None, styles=None, series=None, heatmap=None, layout=None, font_files=None, font_dir=None, text_markup=None)",
+  signature: "Theme(base: ThemeName | Theme | None = None, *, name=None, colors=None, fonts=None, sizes=None, text=None, styles=None, series=None, heatmap=None, palette=None, layout=None, font_files=None, font_dir=None, text_markup=None)",
   params: (
     (name: "base", type: "ThemeName | Theme | None", default: "None", desc: [Tema del que se deriva; solo se sustituye lo que pasas. Sin él, se parte de la paleta de `technical` con el nombre `custom`.]),
     (name: "name", type: "str | None", default: "None", desc: [Nombre del tema nuevo.]),
@@ -835,8 +850,9 @@ if warnings:
     (name: "sizes", type: "dict[str, float] | None", default: "None", desc: [Tamaños por rol de texto, en unidades lógicas.]),
     (name: "text", type: "dict[TextRole, TextStyle] | None", default: "None", desc: [`TextStyle` por rol, como capa sobre el rol semántico.]),
     (name: "styles", type: "dict[str, Style | AxesStyle] | None", default: "None", desc: [Reglas por selector (ver abajo).]),
-    (name: "series", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores categóricos de las gráficas.]),
+    (name: "series", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores de serie: el primero colorea los gráficos sin canal `color`.]),
     (name: "heatmap", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores continuos de los mapas de calor. Un heatmap cuyo campo `color` lleva `Scale.colors` usa los de su escala.]),
+    (name: "palette", type: "PaletteLike | None", default: "None", desc: [Paleta categórica de la escena: colorea las categorías de todos los gráficos, leyendas, tartas y carreras de barras. Una `Palette`, un nombre (`"okabe_ito"`) o una lista de colores; por defecto, `gaanim`. `Scale.category().colors(...)` la sustituye en un campo concreto.]),
     (name: "layout", type: "dict[str, float] | None", default: "None", desc: [Tokens de espaciado, nuevos o sustituidos.]),
     (name: "font_files", type: "dict[str, str] | None", default: "None", desc: [Familia → archivo de fuente.]),
     (name: "font_dir", type: "str | os.PathLike | None", default: "None", desc: [Carpeta cuyos `.ttf`, `.otf`, `.ttc` y `.otc` se registran (sin subcarpetas).]),
@@ -1113,6 +1129,99 @@ print(ColorMap.names("scientific")[:5])
   kind: "method",
   params: ((name: "alpha", type: "float", default: none, desc: [Opacidad en `[0, 1]`.]),),
   returns: (type: "ColorMap", desc: [El mapa con esa opacidad.]),
+  none,
+)
+
+== Paletas categóricas
+
+Una `Palette` es una lista ordenada de colores que se reparten entre las
+categorías por turno: las de un campo `color` de texto, las porciones de una
+tarta o las barras de una carrera. La del tema (`Theme(palette=...)`) colorea
+toda la escena, y `Scale.category().colors(...)` la sustituye en un campo
+concreto. Cuando hay más categorías que colores, la paleta vuelve a empezar y
+cada vuelta aclara u oscurece un poco sus colores, así que dos categorías nunca
+comparten color. Donde un parámetro acepta `PaletteLike`, también vale el
+nombre de una paleta o una lista de colores.
+
+Incluidas: `gaanim` (la predeterminada, de diez colores), `tableau10`,
+`okabe_ito` (siete colores distinguibles con daltonismo; sin el negro, que
+desaparece sobre un fondo oscuro), `set2`, `dark2`, `paired` y los mapas
+categóricos `tab10`, `tab20`, `tab20b` y `tab20c`. Los nombres no distinguen
+mayúsculas.
+
+#api-entry(
+  name: "Palette",
+  kind: "class",
+  signature: "Palette(colors: PaletteLike)",
+  params: ((name: "colors", type: "Palette | str | Sequence[ColorLike]", default: none, desc: [Una paleta, el nombre de una incluida o al menos un color.]),),
+  returns: (type: "Palette", desc: [Una paleta inmutable.]),
+  desc: [Un nombre desconocido o una lista vacía lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+okabe = Palette("okabe_ito")
+brand = Palette(["#7c6cff", GOLD, (40, 180, 160)])
+scene = Scene(frame=(16, 9), theme=Theme("gaanim", palette=okabe.rotate(1)))
+```
+]
+
+#api-entry(
+  name: "Palette.names",
+  kind: "method",
+  returns: (type: "list[str]", desc: [Nombres de las paletas incluidas.]),
+  none,
+)
+
+#api-entry(
+  name: "Palette.from_colormap",
+  kind: "factory",
+  params: (
+    (name: "colormap", type: "ColorMapLike", default: none, desc: [Mapa del que se toman los colores.]),
+    (name: "count", type: "int", default: none, desc: [Número de colores, al menos uno.]),
+  ),
+  returns: (type: "Palette", desc: [`count` colores repartidos de un extremo al otro del mapa.]),
+)[
+```python
+>>>from gaanim import *
+ramp = Palette.from_colormap("viridis", 5)
+```
+]
+
+#api-entry(
+  name: "Palette.name",
+  kind: "property",
+  returns: (type: "str | None", desc: [Nombre de una paleta incluida; `None` en una propia o derivada.]),
+  none,
+)
+
+#api-entry(
+  name: "Palette.colors",
+  kind: "method",
+  params: ((name: "count", type: "int | None", default: "None", desc: [Número de categorías; sin él, los colores propios de la paleta.]),),
+  returns: (type: "list[Color]", desc: [Los colores de las primeras `count` categorías, con las vueltas incluidas.]),
+  none,
+)
+
+#api-entry(
+  name: "Palette.color",
+  kind: "method",
+  params: ((name: "index", type: "int", default: none, desc: [Posición de la categoría, desde 0.]),),
+  returns: (type: "Color", desc: [Su color; `palette[index]` hace lo mismo y `len(palette)` cuenta los colores propios.]),
+  none,
+)
+
+#api-entry(
+  name: "Palette.reversed",
+  kind: "method",
+  returns: (type: "Palette", desc: [Los mismos colores en orden inverso.]),
+  none,
+)
+
+#api-entry(
+  name: "Palette.rotate",
+  kind: "method",
+  params: ((name: "steps", type: "int", default: none, desc: [Posiciones que avanza; negativo, hacia atrás.]),),
+  returns: (type: "Palette", desc: [Los mismos colores empezando `steps` más tarde: `rotate(1)` pone el segundo primero.]),
   none,
 )
 

@@ -462,6 +462,13 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
+    /// Sweep a pie or donut slice between two states, interpolating its
+    /// angles and radii. Writes `Path2D` and `PathSource`; `t = 1.0` is
+    /// exactly the `to` slice.
+    ArcSweep {
+        from: gaanim_math::ArcSlice,
+        to: gaanim_math::ArcSlice,
+    },
     /// Grow a solid arrow from its tail: the tip travels along the spine
     /// while the head keeps its authored proportions. Writes `Path2D` and
     /// `PathSource`; progress `1.0` is exactly the complete arrow.
@@ -782,6 +789,10 @@ impl PropertyLensSpec {
             },
             Self::ArrowGrow { shape, from, to } => PropertyLens::ArrowGrow {
                 shape: shape.clone(),
+                from: *from,
+                to: *to,
+            },
+            Self::ArcSweep { from, to } => PropertyLens::ArcSweep {
                 from: *from,
                 to: *to,
             },

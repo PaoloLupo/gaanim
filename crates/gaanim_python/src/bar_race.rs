@@ -1,5 +1,5 @@
 //! Bar chart races driven by one keyframe-position Parameter.
-use gaanim_api::canvas::{BAR_RACE_PALETTE, BarRace, BarRaceLabels, BarRaceOptions, ValueFormat};
+use gaanim_api::canvas::{BarRace, BarRaceLabels, BarRaceOptions, ValueFormat};
 use pyo3::{
     exceptions::{PyKeyError, PyTypeError, PyValueError},
     prelude::*,
@@ -277,6 +277,12 @@ impl PyVisualization {
                 let colors = colors
                     .cast::<PyMapping>()
                     .map_err(|_| PyTypeError::new_err("colors must be a mapping or a sequence"))?;
+                // Names the mapping leaves out take the theme's palette.
+                let palette = self
+                    .inner
+                    .lock()
+                    .expect("scene canvas poisoned")
+                    .categorical_palette();
                 names
                     .iter()
                     .enumerate()
@@ -284,7 +290,7 @@ impl PyVisualization {
                         Ok(match colors.get_item(name) {
                             Ok(color) => color.extract::<PyColor>()?.0,
                             Err(error) if error.is_instance_of::<PyKeyError>(py) => {
-                                BAR_RACE_PALETTE[index % BAR_RACE_PALETTE.len()]
+                                palette.color(index)
                             }
                             Err(error) => return Err(error),
                         })

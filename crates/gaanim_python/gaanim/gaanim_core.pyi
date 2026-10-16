@@ -280,6 +280,51 @@ class ColorMap:
 
 ColorMapLike: TypeAlias = ColorMap | str
 
+class Palette:
+    """Categorical colors handed to categories in turn: legends, chart series, slices, bar races.
+
+    ``Palette("okabe_ito")`` takes a built-in palette (``Palette.names()``:
+    ``gaanim``, the default, ``tableau10``, ``okabe_ito``, which suits
+    color-blind viewers, ``set2``, ``dark2``, ``paired`` and the categorical
+    colormaps ``tab10``, ``tab20``, ``tab20b`` and ``tab20c``);
+    ``Palette([RED, "#22c55e", (40, 90, 200)])`` takes your own colors.
+    When categories outnumber the colors, the palette goes round again, each
+    lap a little lighter or darker, so no two categories share a color. An
+    unknown name or an empty list raises ``ValueError``.
+
+    Example:
+        theme = Theme("gaanim", palette=Palette("okabe_ito").rotate(2))
+    """
+    def __init__(self, colors: PaletteLike) -> None: ...
+    @staticmethod
+    def names() -> list[str]:
+        """The built-in palette names."""
+        ...
+    @staticmethod
+    def from_colormap(colormap: ColorMapLike, count: int) -> Palette:
+        """``count`` colors spread evenly along ``colormap``, end to end."""
+        ...
+    @property
+    def name(self) -> Optional[str]:
+        """The built-in name, or ``None`` for custom or derived palettes."""
+        ...
+    def colors(self, count: Optional[int] = None) -> list[Color]:
+        """The palette's own colors, or those of the first ``count`` categories, laps included."""
+        ...
+    def color(self, index: int) -> Color:
+        """The color of the category at ``index``, laps included."""
+        ...
+    def __getitem__(self, index: int) -> Color: ...
+    def __len__(self) -> int: ...
+    def reversed(self) -> Palette:
+        """The same colors in the opposite order."""
+        ...
+    def rotate(self, steps: int) -> Palette:
+        """The same colors starting ``steps`` later; negative steps turn the other way."""
+        ...
+
+PaletteLike: TypeAlias = Palette | str | Sequence[ColorLike]
+
 class Brush:
     @staticmethod
     def solid(color: ColorLike) -> Brush:
@@ -768,6 +813,7 @@ class Theme:
         styles: Optional[dict[str, Style | AxesStyle]] = None,
         series: Optional[Sequence[ColorLike]] = None,
         heatmap: Optional[Sequence[ColorLike]] = None,
+        palette: Optional[PaletteLike] = None,
         layout: Optional[dict[str, float]] = None,
         font_files: Optional[dict[str, str]] = None,
         font_dir: Optional[str | os.PathLike[str]] = None,
@@ -779,6 +825,13 @@ class Theme:
         Theme. Without ``base`` the theme starts from the ``technical``
         palette. Rules use family/type/part selectors or ``.classes``. Text
         values reuse the structured ``TextStyle`` overlay.
+
+        ``palette`` colors categories in every chart, legend, arc chart and
+        bar race of the scene: a ``Palette``, a palette name or a list of
+        colors; ``gaanim`` by default. A field's
+        ``Scale.category().colors(...)`` overrides it for that chart.
+        ``series`` colors charts without a ``color`` encoding (its first
+        color) and ``heatmap`` the cells of heatmaps.
 
         ``font_dir`` embeds every ``.ttf``, ``.otf``, ``.ttc`` and ``.otc``
         file directly inside the directory (not subdirectories). Each face is
@@ -5788,6 +5841,13 @@ class Canvas:
         Raises ``ValueError`` for unknown roles or after ``set_theme(None)``.
         """
         ...
+    def palette(self) -> Palette:
+        """The active theme's categorical palette, to color your own categories like the charts.
+
+        Example:
+            colors = scene.canvas.palette().colors(len(teams))
+        """
+        ...
     def layout_token(self, name: str) -> float:
         """Resolve a spacing/layout token from the theme or default scale."""
         ...
@@ -6646,11 +6706,14 @@ class Scale:
     def category(values: Optional[Sequence[str]] = None) -> Scale:
         """Create a categorical scale; omitted values are inferred from data order."""
         ...
-    def colors(self, colors: Sequence[ColorLike]) -> Scale:
+    def colors(self, colors: PaletteLike) -> Scale:
         """Return a copy with an explicit ordered color range.
 
-        Entries accept Color, CSS/hex strings, and RGB/RGBA byte tuples.
-        Mixed representations are allowed; invalid colors raise ValueError.
+        Takes a ``Palette``, a palette name (``"okabe_ito"``) or colors:
+        Color, CSS/hex strings, and RGB/RGBA byte tuples, mixed if you like.
+        Invalid colors, unknown names and empty lists raise ValueError. On a
+        text field the colors go to the categories in turn, going round like
+        a palette; on a numeric field they form a ramp.
         On a heatmap's ``color`` field, the scale's colors and domain replace
         the theme's ``heatmap`` palette for that chart, and ``bands=``
         quantizes over them.
@@ -6690,7 +6753,7 @@ class Guide:
         ...
 
 EncodingLike: TypeAlias = str | Field | Value
-ChartMark: TypeAlias = Literal["point", "line", "step", "area", "bar", "histogram", "box", "violin", "error_bar", "heatmap", "surface"]
+ChartMark: TypeAlias = Literal["point", "line", "step", "area", "bar", "histogram", "box", "violin", "error_bar", "heatmap", "surface", "arc"]
 
 class ChartSpec:
     """Immutable declarative chart spec that snapshots its input data eagerly."""
@@ -6698,15 +6761,35 @@ class ChartSpec:
         """Capture data and validate a non-null unique key when supplied."""
         ...
     def mark(self, kind: ChartMark, **options: float | str | Color) -> ChartSpec:
-        """Return a copy using mark options; bars accept ``label_position`` (``outside``/``inside``), non-negative local ``label_offset``, and ``label_color``."""
+        """Return a copy using mark options; bars accept ``label_position`` (``outside``/``inside``), non-negative local ``label_offset``, and ``label_color``.
+
+        ``"arc"`` draws a pie, one slice per row sized by its share of the
+        ``theta`` total, clockwise from 12 o'clock. Its options are
+        ``inner_radius`` (the fraction of the radius left empty, in
+        ``[0, 1)``: a donut above 0), ``pad_angle`` (radians left empty
+        between slices), ``start_angle`` (radians, counterclockwise from the
+        positive x axis; ``math.pi / 2`` by default), ``radius`` (scene
+        units) and ``label_color``. An arc chart has no axes: its ``axes``
+        layer is empty.
+
+        Example:
+            spec = ChartSpec(data, key="region").mark("arc", inner_radius=0.55).encode(theta="sales", color="region", label="region")
+        """
         ...
-    def encode(self, *, x: Optional[EncodingLike] = None, y: Optional[EncodingLike] = None, z: Optional[EncodingLike] = None, color: Optional[EncodingLike] = None, size: Optional[EncodingLike] = None, opacity: Optional[EncodingLike] = None, label: Optional[EncodingLike] = None) -> ChartSpec:
+    def encode(self, *, x: Optional[EncodingLike] = None, y: Optional[EncodingLike] = None, z: Optional[EncodingLike] = None, color: Optional[EncodingLike] = None, size: Optional[EncodingLike] = None, opacity: Optional[EncodingLike] = None, label: Optional[EncodingLike] = None, theta: Optional[EncodingLike] = None, radius: Optional[EncodingLike] = None) -> ChartSpec:
         """Return a copy with validated positional and visual channel encodings.
 
         For ``point`` marks ``size`` is the radius in scene units in 2D and 3D:
         ``Value(0.1)`` draws radius-0.1 points and the default is 0.06. A
         numeric ``Field`` maps its domain onto radii 0.03 to 0.12 with area
         proportional to the value. A ``radius`` mark option overrides ``size``.
+
+        ``theta`` and ``radius`` belong to ``"arc"`` marks: ``theta`` (required)
+        gives each row its share of the circle, and must not be negative;
+        missing values take no share. A ``radius`` field draws a rose chart:
+        each slice reaches from the inner radius toward the outer one in
+        proportion to its value, from 0 to the column's maximum (or over the
+        domain of its scale).
         """
         ...
     def axes(self, *, x: Optional[Axis] = None, y: Optional[Axis] = None, z: Optional[Axis] = None) -> ChartSpec:
@@ -7606,7 +7689,22 @@ class ChartAnimation:
 
         Same-dimension 2D charts morph their matching marks, axes, and labels
         and fade the rest; 2D↔3D and crossfade transitions fade between the
-        charts.
+        charts. Between two arc charts each slice sweeps its angles and radii
+        to the slice with its key (its row with ``match_="index"``); a slice
+        without a partner closes on, or opens from, its middle angle.
+        """
+        ...
+    def grow(self) -> Composition:
+        """The entry of an arc chart: a hand turns clockwise from the start angle.
+
+        Each slice opens in its place as the hand crosses it, the hand easing
+        in and out over the whole entry. A slice's label fades in from when
+        the hand passes its middle until the slice is complete; the guides
+        fade in over the whole entry. Returns a ``Composition`` for
+        ``scene.play``; any other chart raises ``ValueError``.
+
+        Example:
+            scene.play([chart.animate.grow()], duration=1.5)
         """
         ...
 
@@ -7619,8 +7717,8 @@ class Chart:
         """Return one semantic layer; ``axes`` includes grid, axes, ticks, numbers, and axis labels.
 
         ``grid`` exists when the axes draw one, ``guides`` when the spec has a
-        legend or a guide title, and ``labels`` for bar charts with a ``label``
-        encoding. Raise ValueError naming the chart's layers when it lacks the
+        legend or a guide title, and ``labels`` for bar and arc charts with a
+        ``label`` encoding. Raise ValueError naming the chart's layers when it lacks the
         requested one.
         """
         ...
@@ -9541,8 +9639,8 @@ class Visualization:
         ``label_width`` (default 22% of ``width``) is the name column; a
         name wider than it is drawn at a smaller size that fits. ``bar_gap``
         is the empty fraction of each slot. ``colors`` maps names to
-        colors or lists colors to cycle; other bars use a ten-color
-        categorical palette. ``label_color`` defaults to the theme
+        colors or lists colors that go round like a palette; other bars take
+        the theme's palette (``Theme(palette=...)``). ``label_color`` defaults to the theme
         foreground, ``font_size`` to 55% of the bar thickness but at most 12%
         of ``height`` (so races with few ranks stay readable), ``ticker_size``
         to 15% of ``height`` and ``ticker_color`` to the theme's muted color.

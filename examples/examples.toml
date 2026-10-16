@@ -546,15 +546,15 @@ description = "Function, parametric and implicit curves, log axes, Riemann sums 
 
 [[example]]
 path = "visualization/chart_marks.py"
-description = "Every chart mark: points, lines, steps, areas, bars, histograms, box plots, violins, error bars and heatmaps."
+description = "Every chart mark: points, lines, steps, areas, bars, histograms, box plots, violins, error bars, heatmaps, and pies, donuts and roses."
 
 [[example]]
 path = "visualization/chart_encodings.py"
-description = "Color, size, opacity and label channels, scales, legends and color bars, and explicit axes."
+description = "Color, size, opacity and label channels, scales, categorical palettes, legends and color bars, and explicit axes."
 
 [[example]]
 path = "visualization/chart_transitions.py"
-description = "Charts that morph between specs by key or index, change mark family or data, and grow from 2D into 3D."
+description = "Charts that morph between specs by key or index, change mark family or data, grow from 2D into 3D, and pies that share out their slices anew."
 
 [[example]]
 path = "visualization/bar_race.py"

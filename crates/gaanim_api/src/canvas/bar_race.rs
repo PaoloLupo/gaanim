@@ -16,20 +16,6 @@ use gaanim_visualization::{BarRaceModel, BarRaceSlots, BarRaceState, ValueFormat
 use super::visualization::{Parameter, rounded_label_value};
 use super::{Anchor, DrawableHandle, SceneModel};
 
-/// Default categorical colors of the bars, cycled in data order.
-pub const BAR_RACE_PALETTE: [Color; 10] = [
-    Color::from_rgb8(0x4E, 0x79, 0xA7),
-    Color::from_rgb8(0xF2, 0x8E, 0x2B),
-    Color::from_rgb8(0xE1, 0x57, 0x59),
-    Color::from_rgb8(0x76, 0xB7, 0xB2),
-    Color::from_rgb8(0x59, 0xA1, 0x4F),
-    Color::from_rgb8(0xED, 0xC9, 0x48),
-    Color::from_rgb8(0xB0, 0x7A, 0xA1),
-    Color::from_rgb8(0xFF, 0x9D, 0xA7),
-    Color::from_rgb8(0x9C, 0x75, 0x5F),
-    Color::from_rgb8(0xBA, 0xB0, 0xAC),
-];
-
 /// Largest automatic name and value size, as a fraction of the race height.
 pub const MAX_AUTO_FONT_FRACTION: f64 = 0.12;
 
@@ -67,7 +53,8 @@ pub struct BarRaceOptions {
     pub label_width: Option<f64>,
     /// Fraction of each slot left empty between bars, in `[0, 0.9]`.
     pub bar_gap: f64,
-    /// Bar colors in data order, cycled; empty uses [`BAR_RACE_PALETTE`].
+    /// Bar colors in data order, going round like a palette; empty uses the
+    /// theme's categorical palette.
     pub colors: Vec<Color>,
     /// Name and value color; `None` uses the theme foreground or white.
     pub label_color: Option<Color>,
@@ -310,13 +297,11 @@ impl SceneModel {
             )
         };
 
+        let palette = gaanim_core::Palette::new(options.colors.clone())
+            .unwrap_or_else(|_| self.categorical_palette());
         let mut bars = Vec::with_capacity(model.bar_count());
         for (index, name) in model.names().iter().enumerate() {
-            let color = if options.colors.is_empty() {
-                BAR_RACE_PALETTE[index % BAR_RACE_PALETTE.len()]
-            } else {
-                options.colors[index % options.colors.len()]
-            };
+            let color = palette.color(index);
             let bar = self.rect(bar_length, thickness).no_stroke().fill(color);
             let fraction = {
                 let cache = cache.clone();

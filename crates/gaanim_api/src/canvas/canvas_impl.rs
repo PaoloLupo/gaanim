@@ -2730,6 +2730,14 @@ impl SceneModel {
     }
 
     /// Resolve a semantic token from the active theme.
+    /// The categorical palette of the active theme (`gaanim` without one).
+    pub fn categorical_palette(&self) -> gaanim_core::Palette {
+        self.theme_style
+            .as_ref()
+            .map(|theme| theme.categorical.clone())
+            .unwrap_or_default()
+    }
+
     pub fn theme_color(&self, role: &str) -> Result<Color, String> {
         self.theme_style
             .as_ref()

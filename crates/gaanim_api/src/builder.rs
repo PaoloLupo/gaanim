@@ -1086,6 +1086,16 @@ pub(crate) const DEFAULT_EMPHASIS_CONTRAST: Color = Color::WHITE;
 ///
 /// Manages auto-incrementing ObjectId generation, relative layouts, active states,
 /// and sequential/parallel animation clip registration on the Timeline clock.
+/// A pie or donut slice drawn by a chart: its geometry, which a transition
+/// sweeps instead of morphing the outline, and the key that pairs it with a
+/// slice of another chart (its row when the chart has no key).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArcSliceMark {
+    pub slice: gaanim_math::ArcSlice,
+    pub key: Option<String>,
+    pub row: usize,
+}
+
 pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) property_source_cursors: HashMap<
         (ObjectId, gaanim_animation::PropertyChannel),
@@ -1157,6 +1167,7 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     /// Authored local geometry of solid arrows, used by `GrowArrow`.
     pub(crate) arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    pub(crate) arc_slices: HashMap<ObjectId, ArcSliceMark>,
     /// Reactive connectors, which `GrowArrow` grows through their progress.
     pub(crate) connectors: HashSet<ObjectId>,
     /// Objects a clip mask cuts: their content may leave their box.
@@ -1264,6 +1275,7 @@ pub(crate) struct SceneBuilderState {
     effects: HashMap<ObjectId, crate::effect_lens::EffectState>,
     media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
+    arc_slices: HashMap<ObjectId, ArcSliceMark>,
     connectors: HashSet<ObjectId>,
     clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
@@ -1314,6 +1326,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             effects: self.effects.clone(),
             media_frames: self.media_frames.clone(),
             arrow_shapes: self.arrow_shapes.clone(),
+            arc_slices: self.arc_slices.clone(),
             connectors: self.connectors.clone(),
             clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
@@ -1365,6 +1378,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             effects,
             media_frames,
             arrow_shapes,
+            arc_slices,
             connectors,
             clipped,
             text_tracking,
@@ -1419,6 +1433,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path_arc: None,
             media_frames,
             arrow_shapes,
+            arc_slices,
             connectors,
             clipped,
             text_tracking,
@@ -1873,6 +1888,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             path_arc: None,
             media_frames: HashMap::new(),
             arrow_shapes: HashMap::new(),
+            arc_slices: HashMap::new(),
             connectors: HashSet::new(),
             clipped: HashSet::new(),
             text_tracking: HashMap::new(),
@@ -2114,6 +2130,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::Material3DTo { .. } => "Material3D",
             AnimationType::MediaFrameTo { .. } => "MediaFrame",
             AnimationType::FillLevelTo { .. } => "FillLevel",
+            AnimationType::ArcSweepTo { .. } => "ArcSweep",
             AnimationType::PathTrim { .. } => "Trim",
             AnimationType::EffectsTo { .. } => "Effects",
             AnimationType::DashOffsetTo { .. } => "DashOffset",
@@ -4209,6 +4226,15 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 }
                 PropertyLensSpec::FillLevel { from, to }
             }
+            AnimationType::ArcSweepTo { from, to } => {
+                if let Some(state) = self.states.get_mut(anim.target) {
+                    state.path = std::sync::Arc::new(to.path());
+                }
+                if let Some(mark) = self.arc_slices.get_mut(&anim.target) {
+                    mark.slice = to;
+                }
+                PropertyLensSpec::ArcSweep { from, to }
+            }
             AnimationType::SurroundingRectRetarget { .. } => {
                 unreachable!(
                     "surrounding-rectangle retargeting is dispatched before lens resolution"
@@ -6078,7 +6104,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             mode,
             ..Default::default()
         };
-        let result = gaanim_math::matching::match_items(&src_items, &dst_items, &config);
+        let mut result = gaanim_math::matching::match_items(&src_items, &dst_items, &config);
+        self.pair_arc_slices(&src_ids, &dst_ids, &mut result);
 
         // Hide all dst leaves at start (zero-duration) — they will be revealed
         // via morph or fade-in. This prevents them being visible before morph.
@@ -6129,6 +6156,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
             if let Some(state) = self.states.get(src_id).cloned() {
                 let track = self.ensure_track(src_id);
+                // A pie slice that leaves closes on its middle angle.
+                if let Some(mark) = self.arc_slices.get(&src_id).cloned() {
+                    let closed = mark.slice.collapsed_at(mark.slice.mid_angle());
+                    self.add_arc_sweep(
+                        track, src_id, mark.slice, closed, start, duration, &rate_func,
+                    );
+                }
                 self.timeline.add_clip(
                     track,
                     start,
@@ -6158,6 +6192,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             if let Some(state) = self.states.get(dst_id).cloned() {
                 let track = self.ensure_track(dst_id);
                 let target_opacity = state.opacity.max(1.0);
+                // A pie slice that arrives opens from its middle angle.
+                if let Some(mark) = self.arc_slices.get(&dst_id).cloned() {
+                    let closed = mark.slice.collapsed_at(mark.slice.mid_angle());
+                    self.add_arc_sweep(
+                        track, dst_id, closed, mark.slice, start, duration, &rate_func,
+                    );
+                }
                 self.timeline.add_clip(
                     track,
                     start,
@@ -6179,6 +6220,68 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 // Also ensure they become visible at end via schedule_show? opacity clip suffices
             }
         }
+    }
+
+    /// Pair the pie and donut slices of a transition by key (by row when the
+    /// charts have none), replacing what shape matching chose for them: a
+    /// slice whose share changed keeps its identity instead of pairing with
+    /// whichever slice now sits where it was.
+    fn pair_arc_slices(
+        &self,
+        src_ids: &[ObjectId],
+        dst_ids: &[ObjectId],
+        result: &mut gaanim_math::matching::MatchingResult,
+    ) {
+        let key = |id: &ObjectId| {
+            self.arc_slices
+                .get(id)
+                .map(|mark| mark.key.clone().unwrap_or_else(|| format!("#{}", mark.row)))
+        };
+        let src_keys: Vec<Option<String>> = src_ids.iter().map(key).collect();
+        let dst_keys: Vec<Option<String>> = dst_ids.iter().map(key).collect();
+        if src_keys.iter().all(Option::is_none) || dst_keys.iter().all(Option::is_none) {
+            return;
+        }
+        result
+            .pairs
+            .retain(|(src, dst)| src_keys[*src].is_none() && dst_keys[*dst].is_none());
+        for (src, key) in src_keys.iter().enumerate() {
+            let Some(key) = key else {
+                continue;
+            };
+            if let Some(dst) = dst_keys
+                .iter()
+                .position(|candidate| candidate.as_ref() == Some(key))
+            {
+                result.pairs.push((src, dst));
+            }
+        }
+    }
+
+    /// A clip sweeping the slice `target` from `from` to `to`.
+    #[allow(clippy::too_many_arguments)]
+    fn add_arc_sweep(
+        &mut self,
+        track: TrackId,
+        target: ObjectId,
+        from: gaanim_math::ArcSlice,
+        to: gaanim_math::ArcSlice,
+        start: f64,
+        duration: f64,
+        rate_func: &gaanim_math::RateFunc,
+    ) {
+        self.timeline.add_clip(
+            track,
+            start,
+            duration,
+            ClipPayload::Animation(AnimationSpec {
+                target,
+                lens: PropertyLensSpec::ArcSweep { from, to },
+                rate_func: rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            }),
+        );
     }
 
     /// Schedule the morph of the leaf `src_id` into the leaf `dst_id` over
@@ -6213,18 +6316,31 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         let target_local_affine = src_parent_affine.inverse() * dst_world_affine;
         let target_transform = SpatialTransform::from_affine_2d(&target_local_affine);
 
-        // PathMorph
+        // Two pie slices sweep their angles and radii; other shapes morph
+        // their outlines.
+        let arcs = self
+            .arc_slices
+            .get(&src_id)
+            .zip(self.arc_slices.get(&dst_id))
+            .map(|(from, to)| (from.clone(), to.clone()));
+        let shape_lens = |from: &kurbo::BezPath, to: &kurbo::BezPath| match &arcs {
+            Some((from, to)) => PropertyLensSpec::ArcSweep {
+                from: from.slice,
+                to: to.slice,
+            },
+            None => PropertyLensSpec::PathMorph {
+                from: from.clone(),
+                to: to.clone(),
+                table: Default::default(),
+            },
+        };
         self.timeline.add_clip(
             track,
             start,
             duration,
             ClipPayload::Animation(AnimationSpec {
                 target: src_id,
-                lens: PropertyLensSpec::PathMorph {
-                    from: (*src_state.path).clone(),
-                    to: (*dst_state.path).clone(),
-                    table: Default::default(),
-                },
+                lens: shape_lens(&src_state.path, &dst_state.path),
                 rate_func: rate_func.clone(),
                 delay: 0.0,
                 label: Some("TransformMatching".to_string()),
@@ -6317,22 +6433,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
 
         // Lock path at end (continuous seek)
+        let locked = match &arcs {
+            Some((_, to)) => PropertyLensSpec::ArcSweep {
+                from: to.slice,
+                to: to.slice,
+            },
+            None => PropertyLensSpec::PathMorph {
+                from: (*dst_state.path).clone(),
+                to: (*dst_state.path).clone(),
+                table: Default::default(),
+            },
+        };
         self.timeline.add_clip(
             track,
             end,
             0.0,
             ClipPayload::Animation(AnimationSpec {
                 target: src_id,
-                lens: PropertyLensSpec::PathMorph {
-                    from: (*dst_state.path).clone(),
-                    to: (*dst_state.path).clone(),
-                    table: Default::default(),
-                },
+                lens: locked,
                 rate_func: gaanim_math::RateFunc::Linear,
                 delay: 0.0,
                 label: None,
             }),
         );
+        if let Some((_, to)) = arcs {
+            self.arc_slices.insert(src_id, to);
+        }
 
         // Update hot state for source leaf to target's final appearance
         if let Some(state) = self.states.get_mut(src_id) {

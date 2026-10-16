@@ -767,7 +767,7 @@ fotograma clave, así que un seek muestra lo mismo que la reproducción continua
     (name: "value_format", type: "str", default: "\"{:,.0f}\"", desc: [Campo de formato de Python con texto opcional alrededor: `"{}"`, `"{:,.0f}"`, `"{:_.2f}"` o `"${:,.1f} M"`, hasta 6 decimales.]),
     (name: "width / height", type: "float", default: "10.0 / 6.0", desc: [Tamaño de toda la carrera, centrada en su origen, en unidades de escena.]),
     (name: "label_width / bar_gap", type: "float | None / float", default: "None / 0.18", desc: [Ancho de la columna de nombres (por defecto el 22% de `width`) y fracción vacía de cada puesto. Un nombre más ancho que la columna se dibuja más pequeño, hasta que cabe.]),
-    (name: "colors", type: "Mapping[str, Color] | Sequence[Color] | None", default: "None", desc: [Colores por nombre o una lista que se repite; el resto usa una paleta categórica de diez colores.]),
+    (name: "colors", type: "Mapping[str, Color] | Sequence[Color] | None", default: "None", desc: [Colores por nombre o una lista que vuelve a empezar como una paleta; el resto toma la paleta del tema (`Theme(palette=...)`).]),
     (name: "label_color / font_size", type: "Color | None / float | None", default: "None / None", desc: [Color y tamaño de nombres y valores; por defecto el color de texto del tema y el 55% del grosor de la barra, sin pasar del 12% de `height` para que las carreras de pocos puestos sigan legibles.]),
     (name: "ticker / ticker_size / ticker_color", type: "bool / float | None / Color | None", default: "True / None / None", desc: [Etiqueta del fotograma clave abajo a la derecha, por defecto al 15% de `height` y con el color atenuado del tema.]),
   ),
@@ -953,7 +953,7 @@ points = base.mark("point").encode(x="time", y="value")
 #api-entry(
   name: "ChartSpec.mark",
   kind: "method",
-  desc: [Tipo de marca: `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`, `violin`, `error_bar`, `heatmap` o `surface`. Las opciones dependen de la marca: las barras aceptan `width` (fracción de la banda en ejes categóricos), `label_position` (`"outside"` o `"inside"`), `label_offset` y `label_color`; los puntos, `radius`. Las marcas rellenas (`bar`, `histogram`, `area`, `point`, `box`, `violin` y las celdas de `heatmap`) se dibujan sin borde; para trazarlo, usa `chart.layer("marks").stroke(...)`.],
+  desc: [Tipo de marca: `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`, `violin`, `error_bar`, `heatmap`, `surface` o `arc`. Las opciones dependen de la marca: las barras aceptan `width` (fracción de la banda en ejes categóricos), `label_position` (`"outside"` o `"inside"`), `label_offset` y `label_color`; los puntos, `radius`. `arc` dibuja una tarta sin ejes, una porción por fila según su parte del total de `theta`, en el sentido del reloj desde las 12; acepta `inner_radius` (fracción del radio que queda vacía, en `[0, 1)`: un donut si es mayor que 0), `pad_angle` (radianes vacíos entre porciones), `start_angle` (radianes en sentido antihorario desde el eje x; `math.pi / 2` por defecto), `radius` (unidades de escena) y `label_color`. Las marcas rellenas (`bar`, `histogram`, `area`, `point`, `box`, `violin` y las celdas de `heatmap`) se dibujan sin borde; para trazarlo, usa `chart.layer("marks").stroke(...)`.],
 )[
 ```python
 >>>from gaanim import *
@@ -971,7 +971,7 @@ bars = (
 #api-entry(
   name: "ChartSpec.encode",
   kind: "method",
-  desc: [Asigna canales (`x`, `y`, `z`, `color`, `size`, `opacity`, `label`). Cada canal acepta un nombre de columna, `Field(columna, scale=...)` o `Value(constante)`. En `point`, `size` es el radio en unidades de escena (0.06 por defecto); un `Field` numérico lo reparte entre 0.03 y 0.12 con área proporcional. `color` y `opacity` con `Field` valen por fila; en `line`, `step` y `area`, un `color` categórico dibuja una serie por categoría.],
+  desc: [Asigna canales (`x`, `y`, `z`, `color`, `size`, `opacity`, `label`, `theta`, `radius`). Cada canal acepta un nombre de columna, `Field(columna, scale=...)` o `Value(constante)`. En `point`, `size` es el radio en unidades de escena (0.06 por defecto); un `Field` numérico lo reparte entre 0.03 y 0.12 con área proporcional. `color` y `opacity` con `Field` valen por fila; en `line`, `step` y `area`, un `color` categórico dibuja una serie por categoría. `theta` y `radius` son de `arc`: `theta` (obligatorio, no negativo; un valor ausente no ocupa sitio) da a cada fila su parte del círculo, y un campo `radius` dibuja un gráfico de rosa, con cada porción desde el radio interior hacia el exterior en proporción a su valor.],
   none,
 )
 
@@ -1019,7 +1019,7 @@ kind = Field("kind", scale=Scale.category(["new", "old"]).colors(["#38bdf8", "#f
 #api-entry(
   name: "Scale.colors",
   kind: "method",
-  desc: [Copia de la escala con un rango ordenado de colores: `Color`, cadenas CSS/hex o tuplas RGB(A), incluso mezclados. Colores inválidos lanzan `ValueError`. En un `heatmap`, los colores y el dominio de la escala del canal `color` sustituyen a la paleta `heatmap` del tema solo en ese gráfico, y `bands=` cuantiza sobre ellos.],
+  desc: [Copia de la escala con un rango ordenado de colores: una `Palette`, el nombre de una paleta (`"okabe_ito"`) o colores (`Color`, cadenas CSS/hex o tuplas RGB(A), incluso mezclados). Colores inválidos, nombres desconocidos o una lista vacía lanzan `ValueError`. En un campo de texto, los colores se reparten entre las categorías por turno y vuelven a empezar como una paleta; sin ellos, las categorías toman la paleta del tema. En un campo numérico forman una rampa. En un `heatmap`, los colores y el dominio de la escala del canal `color` sustituyen a la paleta `heatmap` del tema solo en ese gráfico, y `bands=` cuantiza sobre ellos.],
   none,
 )
 
@@ -1072,7 +1072,7 @@ after = ChartSpec(source).mark("line").encode(x="x", y="y")
 #api-entry(
   name: "Chart.layer",
   kind: "method",
-  desc: [Capa estable como `Drawable`: `marks`, `axes`, `grid`, `guides` o `labels`. La capa `axes` reúne rejilla, ejes, marcas, números y títulos, así que `chart.layer("axes").animate.create()` la mantiene oculta hasta su entrada. Las tres últimas son opcionales: `grid` existe si los ejes dibujan rejilla, `guides` si la especificación tiene leyenda o título de guía (`ChartSpec.guides`) y `labels` en gráficos de barras con el canal `label`. Pedir una que el gráfico no tiene lanza `ValueError` con las capas que sí tiene.],
+  desc: [Capa estable como `Drawable`: `marks`, `axes`, `grid`, `guides` o `labels`. La capa `axes` reúne rejilla, ejes, marcas, números y títulos, así que `chart.layer("axes").animate.create()` la mantiene oculta hasta su entrada. Las tres últimas son opcionales: `grid` existe si los ejes dibujan rejilla, `guides` si la especificación tiene leyenda o título de guía (`ChartSpec.guides`) y `labels` en gráficos de barras o de arcos con el canal `label`. La capa `axes` de un gráfico de arcos está vacía. Pedir una que el gráfico no tiene lanza `ValueError` con las capas que sí tiene.],
 )[
 ```python
 >>>from gaanim import *
@@ -1090,10 +1090,28 @@ scene.play([chart.layer("axes").animate.create(), chart.layer("marks").animate.f
 )
 
 #api-entry(
+  name: "ChartAnimation.grow",
+  kind: "method",
+  returns: (type: "Composition", desc: [Las animaciones de la entrada, en paralelo.]),
+  desc: [Entrada de un gráfico de arcos, desde `chart.animate.grow()`: una manecilla gira en el sentido del reloj desde el ángulo inicial, acelerando y frenando, y cada porción se abre en su sitio cuando la manecilla la cruza. La etiqueta de una porción aparece desde que la manecilla pasa por su centro hasta que la porción se completa; las guías aparecen a lo largo de toda la entrada. En otro tipo de gráfico lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+sales = {"region": ["North", "South", "East"], "sales": [42, 28, 18]}
+spec = ChartSpec(sales, key="region").mark("arc", inner_radius=0.55).encode(theta="sales", color="region", label="region")
+chart = scene.viz.chart(spec)
+scene.play([chart.animate.grow()], duration=1.5)
+later = ChartSpec({"region": ["North", "South", "West"], "sales": [30, 35, 20]}, key="region")
+scene.play([chart.animate.to(later.mark("arc", inner_radius=0.55).encode(theta="sales", color="region", label="region"))])
+```
+]
+
+#api-entry(
   name: "ChartAnimation.to",
   kind: "method",
   params: ((name: "target", type: "ChartSpec", default: none, desc: [Receta de destino.]), (name: "match_", type: "str", default: "\"key\"", desc: [`"key"` relaciona elementos por la columna de identidad (ambas recetas deben declararla); sin clave, pide `"index"`.]), (name: "fallback", type: "str", default: "\"error\"", desc: [Con familias de marca incompatibles: `"error"` o `"crossfade"`.])),
-  desc: [Transición accesible desde `chart.animate.to(...)`. Entre gráficos 2D, las marcas, ejes y etiquetas que se corresponden se transforman y el resto se funde; al terminar, el gráfico de destino sustituye al original. `point`, `line` y `bar` pueden pasar entre 2D y 3D (con un fundido), y `heatmap` y `surface` comparten rejilla. Nunca mueve la cámara global.],
+  desc: [Transición accesible desde `chart.animate.to(...)`. Entre gráficos 2D, las marcas, ejes y etiquetas que se corresponden se transforman y el resto se funde; al terminar, el gráfico de destino sustituye al original. `point`, `line` y `bar` pueden pasar entre 2D y 3D (con un fundido), y `heatmap` y `surface` comparten rejilla. Entre dos gráficos de arcos, cada porción barre sus ángulos y radios hasta la porción con su clave (su fila con `match_="index"`); una porción sin pareja se cierra sobre su ángulo medio o se abre desde él. Nunca mueve la cámara global.],
 )[
 ```python
 >>>from gaanim import *

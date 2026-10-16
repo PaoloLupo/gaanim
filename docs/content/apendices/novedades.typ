@@ -11,6 +11,45 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.15.0
+
+Sin publicar. Los gráficos declarativos dibujan tartas y donuts con la marca
+`arc`, que se abren porción a porción al entrar y reparten sus porciones por
+clave al cambiar de datos, y la paleta categórica se elige: el tema la fija
+para toda la escena y cada campo puede tener la suya.
+
+== Gráficos
+
+- `ChartSpec.mark("arc")` dibuja una porción por fila según su parte del
+  total del canal `theta`, en el sentido del reloj desde las 12. Sus opciones
+  son `inner_radius` (un donut), `pad_angle` (la separación entre
+  porciones), `start_angle`, `radius` y `label_color`; el canal `label`
+  escribe cada fila en el centro de su porción y un campo `radius` dibuja un
+  gráfico de rosa.
+- `chart.animate.grow()` hace crecer la tarta: una manecilla gira desde el
+  ángulo inicial, cada porción se abre en su sitio cuando la manecilla la
+  cruza y su etiqueta aparece al completarse.
+- `chart.animate.to(...)` entre dos gráficos de arcos lleva cada porción a la
+  de su clave barriendo sus ángulos, en lugar de deformar su contorno; las
+  porciones que salen se cierran y las que llegan se abren.
+- `Palette` reparte colores entre categorías: una incluida por nombre
+  (`gaanim`, `tableau10`, `okabe_ito`, `set2`, `dark2`, `paired`, `tab10`…),
+  tus propios colores o los de un `ColorMap`, con `reversed()` y `rotate()`.
+- `Theme(palette=...)` colorea las categorías de todos los gráficos, leyendas,
+  tartas y carreras de barras, y `scene.canvas.palette()` la devuelve para
+  tus propios objetos. `Scale.category().colors(...)` acepta también una
+  `Palette` o un nombre.
+- Con más categorías que colores, la paleta vuelve a empezar algo más clara
+  u oscura en cada vuelta, en lugar de repetir colores.
+
+== Al actualizar
+
+- Un gráfico de más de cuatro categorías sin colores propios usa ahora diez
+  colores en lugar de repetir los cuatro primeros, y una carrera de barras
+  sin `colors` toma la paleta del tema (`gaanim`) en lugar de `tableau10`.
+  Para recuperar sus colores, pasa `colors=Palette("tableau10").colors()` o
+  usa `Theme(palette="tableau10")`.
+
 = 0.14.0
 
 Publicada el 15 de octubre de 2026. El editor reúne tus preferencias en una

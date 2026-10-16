@@ -1,4 +1,4 @@
-"""Chart encodings: color, size, opacity and label channels, scales, guides and explicit axes.
+"""Chart encodings: color, size, opacity and label channels, scales, palettes, guides and explicit axes.
 
 ``ChartSpec.encode`` maps columns to channels. A channel takes a column
 name, ``Field(column, scale=...)`` when the scale matters, or ``Value(...)``
@@ -44,6 +44,11 @@ CHANGES = {
     "year": ["2019", "2020", "2021", "2022", "2023"],
     "change": [12, -18, 7, 15, -4],
     "kind": ["gain", "loss", "gain", "gain", "loss"],
+}
+# Visitors of eight regions, one bar each.
+REGIONS = {
+    "region": ["Amazonas", "Ancash", "Arequipa", "Cusco", "Ica", "Junin", "Lima", "Piura"],
+    "visitors": [18, 26, 41, 63, 22, 15, 88, 30],
 }
 # Populations over four orders of magnitude.
 TOWNS = {"population": [40, 220, 900, 3100, 12000, 34000, 81000], "share": [0.12, 0.25, 0.31, 0.46, 0.58, 0.71, 0.86]}
@@ -148,8 +153,20 @@ show(
     guides=False,
 )
 
+# colors() also takes a Palette or a palette's name. Categories take its
+# colors in turn; past the last one it goes round again a shade lighter, so
+# the eighth region differs from the first. Theme(palette=...) sets the
+# palette of every chart in the scene.
+scene.segment("palette")
+show(
+    'ChartSpec(REGIONS).mark("bar").encode(x="region", y="visitors",\n'
+    '    color=Field("region", scale=Scale.category().colors("okabe_ito")))',
+    ChartSpec(REGIONS).mark("bar").encode(x="region", y="visitors", color=Field("region", scale=Scale.category().colors("okabe_ito"))),
+    guides=False,
+)
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # Every chart once its marks and guides are in.
-    scene.snapshots(snapshots, [STEP * index + 2.4 for index in range(7)])
+    scene.snapshots(snapshots, [STEP * index + 2.4 for index in range(8)])
 else:
     scene.render()

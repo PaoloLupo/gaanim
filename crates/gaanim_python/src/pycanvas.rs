@@ -841,6 +841,7 @@ impl PyTheme {
         styles=None,
         series=None,
         heatmap=None,
+        palette=None,
         layout=None,
         font_files=None,
         font_dir=None,
@@ -858,6 +859,7 @@ impl PyTheme {
         styles: Option<&Bound<'_, PyDict>>,
         series: Option<Vec<PyColor>>,
         heatmap: Option<Vec<PyColor>>,
+        palette: Option<crate::color::PyPaletteArg>,
         layout: Option<HashMap<String, f64>>,
         font_files: Option<HashMap<String, String>>,
         font_dir: Option<std::path::PathBuf>,
@@ -962,6 +964,9 @@ impl PyTheme {
                 ));
             }
             theme.heatmap = heatmap.into_iter().map(|color| color.0).collect();
+        }
+        if let Some(palette) = palette {
+            theme.categorical = palette.0;
         }
         if let Some(layout) = layout {
             theme
@@ -1945,6 +1950,17 @@ impl PyCanvas {
     }
 
     /// Resolve a semantic token from the active theme.
+    /// The active theme's categorical palette.
+    fn palette(&self) -> PyResult<crate::color::PyPalette> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(crate::color::PyPalette(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .categorical_palette(),
+        ))
+    }
+
     fn color(&self, role: &str) -> PyResult<PyColor> {
         crate::custom::ensure_authoring_allowed()?;
         self.inner

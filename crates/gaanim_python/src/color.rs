@@ -23,6 +23,102 @@ pub struct PyColorMap(pub gaanim_core::ColorMap);
 #[derive(Clone, Debug)]
 pub struct PyColorMapArg(pub gaanim_core::ColorMap);
 
+/// Categorical colors handed to categories in turn; see `gaanim_core::Palette`.
+#[pyclass(name = "Palette", module = "gaanim_core", skip_from_py_object)]
+#[derive(Clone, Debug)]
+pub struct PyPalette(pub gaanim_core::Palette);
+
+/// A palette argument: a `Palette`, a built-in palette name, or colors.
+#[derive(Clone, Debug)]
+pub struct PyPaletteArg(pub gaanim_core::Palette);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for PyPaletteArg {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(palette) = obj.cast::<PyPalette>() {
+            return Ok(Self(palette.borrow().0.clone()));
+        }
+        let invalid = |error: gaanim_core::PaletteError| PyValueError::new_err(error.to_string());
+        if let Ok(name) = obj.extract::<&str>() {
+            return gaanim_core::Palette::named(name).map(Self).map_err(invalid);
+        }
+        let colors = obj.extract::<Vec<PyColor>>().map_err(|_| {
+            PyValueError::new_err("expected a Palette, a palette name, or a sequence of colors")
+        })?;
+        gaanim_core::Palette::new(colors.into_iter().map(|color| color.0).collect())
+            .map(Self)
+            .map_err(invalid)
+    }
+}
+
+#[pymethods]
+impl PyPalette {
+    #[new]
+    fn new(colors: PyPaletteArg) -> Self {
+        Self(colors.0)
+    }
+
+    #[staticmethod]
+    fn names() -> Vec<&'static str> {
+        gaanim_core::Palette::names()
+    }
+
+    #[staticmethod]
+    fn from_colormap(colormap: PyColorMapArg, count: usize) -> PyResult<Self> {
+        gaanim_core::Palette::from_colormap(&colormap.0, count)
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
+    #[getter]
+    fn name(&self) -> Option<&str> {
+        self.0.name()
+    }
+
+    #[pyo3(signature = (count=None))]
+    fn colors(&self, count: Option<usize>) -> Vec<PyColor> {
+        let colors = match count {
+            Some(count) => self.0.colors(count),
+            None => self.0.base_colors().to_vec(),
+        };
+        colors.into_iter().map(PyColor).collect()
+    }
+
+    fn color(&self, index: usize) -> PyColor {
+        PyColor(self.0.color(index))
+    }
+
+    fn __getitem__(&self, index: usize) -> PyColor {
+        self.color(index)
+    }
+
+    fn __len__(&self) -> usize {
+        self.0.len()
+    }
+
+    fn reversed(&self) -> Self {
+        Self(self.0.reversed())
+    }
+
+    fn rotate(&self, steps: isize) -> Self {
+        Self(self.0.rotate(steps))
+    }
+
+    fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
+        other
+            .cast::<PyPalette>()
+            .is_ok_and(|other| other.borrow().0 == self.0)
+    }
+
+    fn __repr__(&self) -> String {
+        match self.0.name() {
+            Some(name) => format!("Palette('{name}')"),
+            None => format!("Palette({} colors)", self.0.len()),
+        }
+    }
+}
+
 impl<'a, 'py> FromPyObject<'a, 'py> for PyColorMapArg {
     type Error = PyErr;
 

@@ -977,6 +977,8 @@ pub struct ObjectSpec {
     /// Full kurbo stroke geometry when cap/join/dash options are configured.
     pub stroke_style: Option<gaanim_core::kurbo::Stroke>,
     pub stroke_overridden: bool,
+    /// The pie or donut slice this path draws, for chart transitions.
+    pub arc_slice: Option<crate::builder::ArcSliceMark>,
     /// Stroke placement relative to closed contours; `None` keeps the
     /// renderer default (inside closed shapes).
     pub stroke_align: Option<gaanim_renderer::effects::StrokeAlign>,
@@ -1195,6 +1197,7 @@ impl ObjectSpec {
             stroke: None,
             stroke_style: None,
             stroke_overridden: false,
+            arc_slice: None,
             stroke_align: None,
             stroke_scales_with_object: None,
             chalk: None,
