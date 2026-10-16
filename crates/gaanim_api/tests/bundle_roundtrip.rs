@@ -195,7 +195,7 @@ fn a_damaged_bundle_is_rejected() {
         let mut target = zip::ZipWriter::new(std::fs::File::create(&damaged).unwrap());
         for index in 0..source.len() {
             let mut entry = source.by_index(index).unwrap();
-            let name = entry.name().to_owned();
+            let name = entry.name().unwrap().into_owned();
             let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes).unwrap();
             if name == "frames/000000.bin" {
@@ -238,7 +238,7 @@ fn data_entries_are_zstd_frames_and_version_1_bundles_are_refused() {
         let mut target = zip::ZipWriter::new(std::fs::File::create(&legacy).unwrap());
         for index in 0..source.len() {
             let mut entry = source.by_index(index).unwrap();
-            let name = entry.name().to_owned();
+            let name = entry.name().unwrap().into_owned();
             let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes).unwrap();
             if name == "manifest.json" {
@@ -297,7 +297,7 @@ fn a_bundle_from_a_newer_format_names_its_generator() {
         let mut target = zip::ZipWriter::new(std::fs::File::create(&future).unwrap());
         for index in 0..source.len() {
             let mut entry = source.by_index(index).unwrap();
-            let name = entry.name().to_owned();
+            let name = entry.name().unwrap().into_owned();
             let mut bytes = Vec::new();
             entry.read_to_end(&mut bytes).unwrap();
             if name == "manifest.json" {
