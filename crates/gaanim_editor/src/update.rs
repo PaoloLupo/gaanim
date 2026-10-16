@@ -405,9 +405,10 @@ fn unpack(package: &Path, folder: &Path) -> Result<(), String> {
             let mut entry = archive
                 .by_index(index)
                 .map_err(|error| format!("the package is damaged: {error}"))?;
-            let relative = entry
-                .enclosed_name()
-                .ok_or_else(|| format!("the package holds an unsafe path: {}", entry.name()))?;
+            let relative = entry.enclosed_name().ok_or_else(|| match entry.name() {
+                Ok(name) => format!("the package holds an unsafe path: {name}"),
+                Err(error) => format!("the package holds an unreadable path: {error}"),
+            })?;
             let target = folder.join(relative);
             if entry.is_dir() {
                 std::fs::create_dir_all(&target)
