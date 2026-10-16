@@ -1,4 +1,4 @@
-"""Chart marks: points, lines, steps, areas, bars, histograms, box plots, violins, error bars and heatmaps.
+"""Chart marks: points, lines, steps, areas, bars, histograms, box plots, violins, error bars, heatmaps and arcs.
 
 ``ChartSpec`` is an immutable recipe of data, a mark, encodings, axes and
 guides; ``scene.viz.chart(spec)`` draws it, inferring the axes it is not
@@ -10,7 +10,7 @@ import math
 import os
 import random
 
-from gaanim import Axis, ChartSpec, Scene, Zones
+from gaanim import Axis, ChartSpec, Scene, Value, Zones
 
 DRAW = 0.8
 HOLD = 0.8
@@ -36,6 +36,13 @@ SAMPLES = {"value": [draws.gauss(5, 1.5) for _ in range(200)]}
 # A 9 x 6 grid of cells with a value each, for the heatmap.
 GRID = [(x, y, math.sin(x / 2) * math.cos(y / 2)) for y in range(6) for x in range(9)]
 CELLS = {"x": [x for x, _, _ in GRID], "y": [y for _, y, _ in GRID], "value": [v for _, _, v in GRID]}
+# The share of each source in a power grid, and how much each one grew, for
+# the arcs.
+ENERGY = {
+    "source": ["Solar", "Wind", "Hydro", "Gas"],
+    "share": [36, 27, 20, 17],
+    "growth": [9, 6, 2, 3],
+}
 
 series = ChartSpec(SERIES)
 
@@ -52,6 +59,15 @@ def show(label, spec, style=None):
         style(chart.layer("marks"))
     scene.play([chart.layer("axes").animate.create(), text.animate.fade_in()], duration=DRAW)
     scene.play([chart.layer("marks").animate.fade_in()], duration=DRAW)
+    scene.wait(HOLD)
+
+
+def show_arc(label, spec):
+    """Grow the arc chart ``spec`` around its center, its label above it."""
+    top, _ = scene.layout.zones(Zones.rows(["1fr", "8fr"], padding="page_padding"))
+    text = scene.text(label, role="code").place(top, anchor="bottom")
+    chart = scene.viz.chart(spec)
+    scene.play([chart.animate.grow(), text.animate.fade_in()], duration=2 * DRAW)
     scene.wait(HOLD)
 
 
@@ -118,8 +134,33 @@ show(
     ChartSpec(CELLS).mark("heatmap", bands=8).encode(x="x", y="y", color="value"),
 )
 
+# An arc gives each row its share of the theta total, clockwise from 12
+# o'clock, with no axes; grow() turns a hand from there and opens each
+# slice, then its label, as the hand crosses it.
+# inner_radius leaves the middle empty for a donut and pad_angle separates
+# the slices; a radius field draws a rose, each slice reaching out in
+# proportion to its value.
+scene.segment("arc")
+show_arc(
+    'ChartSpec(ENERGY).mark("arc")\n    .encode(theta="share", color="source", label="source")',
+    ChartSpec(ENERGY).mark("arc").encode(theta="share", color="source", label="source"),
+)
+
+scene.segment("donut")
+show_arc(
+    'ChartSpec(ENERGY).mark("arc", inner_radius=0.6, pad_angle=0.03)\n    .encode(theta="share", color="source", label="share")',
+    ChartSpec(ENERGY).mark("arc", inner_radius=0.6, pad_angle=0.03).encode(theta="share", color="source", label="share"),
+)
+
+scene.segment("rose")
+show_arc(
+    'ChartSpec(ENERGY).mark("arc", inner_radius=0.2)\n    .encode(theta=Value(1), radius="growth", color="source")',
+    ChartSpec(ENERGY).mark("arc", inner_radius=0.2).encode(theta=Value(1), radius="growth", color="source"),
+)
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # The first chart while its marks fade in, then every chart drawn.
-    scene.snapshots(snapshots, [1.2] + [STEP * index + 2.2 for index in range(10)])
+    # The first chart while its marks fade in, then every chart drawn, and
+    # the first arc halfway through its growth.
+    scene.snapshots(snapshots, [1.2] + [STEP * index + 2.2 for index in range(13)] + [STEP * 10 + 0.8])
 else:
     scene.render()

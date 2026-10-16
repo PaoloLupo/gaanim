@@ -18,7 +18,7 @@ pub use bar_race::{
     interpolate_label, label_opacity,
 };
 pub use chart::{
-    BatchDatum, Channel, ChartError, ChartSpec, ColorRowGroups, ConstantValue,
+    ArcDatum, BatchDatum, Channel, ChartError, ChartSpec, ColorRowGroups, ConstantValue,
     DEFAULT_POINT_RADIUS, DatumKey, DatumMatch, Encoding, GuideSpec, MarkBatch, MarkKind, MarkSpec,
     MarkTransition, MatchPolicy, POINT_RADIUS_RANGE, ScaleKind, ScaleSpec, TransitionFallback,
     TransitionKind,

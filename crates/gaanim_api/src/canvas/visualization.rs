@@ -44,6 +44,8 @@ pub enum VisualizationError {
     InvalidParameter,
     #[error("mark {0:?} does not have a 3D batch materializer")]
     UnsupportedChartMark3D(MarkKind),
+    #[error("grow() animates the slices of an arc chart")]
+    NotAnArcChart,
 }
 
 fn axis_title_coordinate(position: AxisLabelPosition, extent: f64, gap: f64) -> f64 {
@@ -566,6 +568,15 @@ pub struct ChartHandle {
     pub(crate) guides: Option<DrawableHandle>,
     pub(crate) labels: Option<DrawableHandle>,
     pub(crate) spec: ChartSpec,
+    /// The slices of an arc chart, in row order, with their geometry and
+    /// their label.
+    pub(crate) arcs: Vec<(
+        DrawableHandle,
+        gaanim_math::ArcSlice,
+        Option<DrawableHandle>,
+    )>,
+    /// The angle an arc chart's slices start from, in radians.
+    pub(crate) arc_origin: f64,
 }
 
 impl ChartHandle {
@@ -603,6 +614,39 @@ impl ChartHandle {
         self
     }
 
+    /// The entry of an arc chart: a hand turns clockwise from the chart's
+    /// start angle, easing in and out, and each slice opens in its place as
+    /// the hand crosses it. A slice's label fades in from when the hand
+    /// passes its middle to when the slice is complete; the guides fade in
+    /// over the whole entry.
+    pub fn grow(&self) -> Result<super::Composition, VisualizationError> {
+        if self.arcs.is_empty() {
+            return Err(VisualizationError::NotAnArcChart);
+        }
+        // How far round the hand is, from 0 to 1, at an angle of the chart.
+        let turn = |angle: f64| ((self.arc_origin - angle) / std::f64::consts::TAU).clamp(0.0, 1.0);
+        let mut children = Vec::new();
+        for (slice, geometry, label) in &self.arcs {
+            let (opens, closes) = (turn(geometry.end), turn(geometry.start));
+            children.push(super::Composition::leaf(
+                slice
+                    .arc_sweep(geometry.collapsed_at(geometry.end), *geometry)
+                    .rate_func(hand_window(opens, closes)),
+            ));
+            if let Some(label) = label {
+                children.push(super::Composition::leaf(
+                    label
+                        .fade_in(())
+                        .rate_func(hand_window((opens + closes) * 0.5, closes)),
+                ));
+            }
+        }
+        if let Some(guides) = &self.guides {
+            children.push(super::Composition::leaf(guides.fade_in(())));
+        }
+        Ok(super::Composition::parallel(children).expect("an arc chart has at least one slice"))
+    }
+
     pub fn transition_to(
         &self,
         target: &ChartHandle,
@@ -631,6 +675,23 @@ impl ChartHandle {
             }
         })
     }
+}
+
+/// Progress of a part of an arc chart's entry that runs while the hand turns
+/// from `start` to `end` (fractions of the turn): 0 before, 1 after, and in
+/// between how far the hand is through it. The hand eases in and out over
+/// the whole entry, so every part of the entry shares one motion.
+fn hand_window(start: f64, end: f64) -> gaanim_math::RateFunc {
+    const SAMPLES: usize = 512;
+    let span = (end - start).max(f64::EPSILON);
+    gaanim_math::RateFunc::Sampled(
+        (0..=SAMPLES)
+            .map(|index| {
+                let hand = gaanim_math::RateFunc::Smooth.evaluate(index as f64 / SAMPLES as f64);
+                ((hand - start) / span).clamp(0.0, 1.0)
+            })
+            .collect(),
+    )
 }
 
 fn chart_field(spec: &ChartSpec, channel: Channel) -> Result<String, VisualizationError> {
@@ -1202,6 +1263,9 @@ impl SceneModel {
     /// Materialize an immutable declarative chart into stable semantic layers.
     pub fn chart(&mut self, spec: ChartSpec) -> Result<ChartHandle, VisualizationError> {
         spec.validate()?;
+        if spec.mark_spec().kind == MarkKind::Arc {
+            return self.materialize_arc_chart(spec);
+        }
         let mut axes = spec.resolved_axes()?;
         if spec.mark_spec().kind == MarkKind::Histogram && !axes.contains_key(&Channel::Y) {
             let column =
@@ -1270,6 +1334,8 @@ impl SceneModel {
                     guides,
                     labels,
                     spec,
+                    arcs: Vec::new(),
+                    arc_origin: 0.0,
                 });
             }
             let default_color =
@@ -1308,6 +1374,8 @@ impl SceneModel {
                 guides,
                 spec,
                 labels: None,
+                arcs: Vec::new(),
+                arc_origin: 0.0,
             })
         } else {
             self.materialize_chart_3d(spec, axes, guides)
@@ -1363,6 +1431,98 @@ impl SceneModel {
         }
         let refs: Vec<_> = items.iter().collect();
         Ok(Some(self.group_no_center(&refs)))
+    }
+
+    /// A pie or donut: one filled slice per row, with no axes. Slices are
+    /// colored by the `color` encoding, else by the theme's series colors in
+    /// turn; a `label` encoding writes each row's text at its slice's middle.
+    fn materialize_arc_chart(
+        &mut self,
+        spec: ChartSpec,
+    ) -> Result<ChartHandle, VisualizationError> {
+        let height = (self.frame.height * 0.62).max(3.0);
+        let data = spec.arc_data(height * 0.45)?;
+        let palette: Vec<Color> = self
+            .theme_style
+            .as_ref()
+            .map(|theme| theme.series.clone())
+            .filter(|series| !series.is_empty())
+            .unwrap_or_else(|| vec![chart_series_color(self)]);
+        let label_color = match spec.mark_spec().options.get("label_color") {
+            Some(ConstantValue::Color(color)) => Some(*color),
+            _ => None,
+        };
+        let mut arcs = Vec::with_capacity(data.len());
+        let mut labels = Vec::new();
+        let mut radius: f64 = 0.0;
+        for (index, datum) in data.iter().enumerate() {
+            let color = color_with_opacity(
+                datum.color.unwrap_or(palette[index % palette.len()]),
+                datum.opacity,
+            );
+            let outer = datum.slice.outer;
+            radius = radius.max(outer);
+            let slice = self
+                .visualization_path(
+                    datum.slice.path(),
+                    gaanim_math::Bounds3D::new_2d(-outer, -outer, outer, outer),
+                    color,
+                    0.0,
+                    "ChartArc",
+                )
+                .fill(color)
+                .no_stroke()
+                .z_index(0);
+            slice.spec.lock().expect("arc spec poisoned").arc_slice =
+                Some(crate::builder::ArcSliceMark {
+                    slice: datum.slice,
+                    key: datum.key.as_ref().map(|key| match key {
+                        gaanim_visualization::DatumKey::Text(text) => text.clone(),
+                        gaanim_visualization::DatumKey::Number(bits) => {
+                            f64::from_bits(*bits).to_string()
+                        }
+                    }),
+                    row: datum.source_row,
+                });
+            let label = datum.label.as_ref().map(|text| {
+                let at = datum.slice.centroid();
+                let label = self.text(text).move_to(at.x, at.y).z_index(10);
+                match label_color {
+                    Some(color) => label.fill(color),
+                    None => label,
+                }
+            });
+            labels.extend(label.clone());
+            arcs.push((slice, datum.slice, label));
+        }
+        let refs: Vec<&DrawableHandle> = arcs.iter().map(|(slice, _, _)| slice).collect();
+        let marks = self.group_no_center(&refs);
+        let labels = (!labels.is_empty()).then(|| {
+            let refs: Vec<&DrawableHandle> = labels.iter().collect();
+            self.group_no_center(&refs)
+        });
+        let guides = self.chart_guides(&spec, radius * 2.0, radius * 2.0)?;
+        // An arc chart has no axes; the layer exists, empty, like every chart's.
+        let axes = self.group_no_center(&[]);
+        let mut members = vec![&marks, &axes];
+        members.extend(labels.iter());
+        members.extend(guides.iter());
+        let root = self.group_no_center(&members);
+        let arc_origin = match spec.mark_spec().options.get("start_angle") {
+            Some(ConstantValue::Number(angle)) if angle.is_finite() => *angle,
+            _ => std::f64::consts::FRAC_PI_2,
+        };
+        Ok(ChartHandle {
+            root,
+            marks,
+            axes,
+            grid: None,
+            guides,
+            labels,
+            spec,
+            arcs,
+            arc_origin,
+        })
     }
 
     /// One data mark for every row of a 2D chart, in a single fill or stroke.
@@ -1486,6 +1646,7 @@ impl SceneModel {
                         MarkKind::Surface,
                     ));
                 }
+                MarkKind::Arc => unreachable!("arc charts materialize without axes"),
             };
             let mark = match spec.mark_spec().kind {
                 // A chart without an explicit color encoding still needs a
@@ -1744,6 +1905,8 @@ impl SceneModel {
                 guides,
                 spec,
                 labels: None,
+                arcs: Vec::new(),
+                arc_origin: 0.0,
             })
         }
     }
@@ -7071,6 +7234,128 @@ mod tests {
             24.0,
             "the negative label moves by twice its offset",
         );
+    }
+
+    use std::f64::consts::{FRAC_PI_2, TAU};
+
+    /// The arc sweeps an arc chart's compiled timeline holds.
+    fn arc_sweeps(canvas: &SceneModel) -> Vec<(gaanim_math::ArcSlice, gaanim_math::ArcSlice)> {
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        world
+            .resource::<gaanim_timeline::timeline::Timeline>()
+            .clips
+            .values()
+            .filter_map(|clip| match &clip.payload {
+                gaanim_timeline::clip::ClipPayload::Animation(animation) => match animation.lens {
+                    gaanim_timeline::clip::PropertyLensSpec::ArcSweep { from, to } => {
+                        Some((from, to))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn pie(ids: &[&str], shares: &[f64]) -> ChartSpec {
+        let table = gaanim_visualization::DataTable::new([
+            (
+                "id".to_owned(),
+                gaanim_visualization::Column::Text(
+                    ids.iter().map(|id| Some((*id).to_owned())).collect(),
+                ),
+            ),
+            (
+                "share".to_owned(),
+                gaanim_visualization::Column::Numeric(
+                    shares.iter().map(|share| Some(*share)).collect(),
+                ),
+            ),
+        ])
+        .unwrap();
+        ChartSpec::new(table, Some("id".to_owned()))
+            .unwrap()
+            .mark(MarkKind::Arc, BTreeMap::new())
+            .encode(Channel::Theta, Encoding::field("share"))
+            .unwrap()
+    }
+
+    #[test]
+    fn an_arc_chart_grows_every_slice_from_its_start_angle() {
+        let mut canvas = SceneModel::new(640, 360);
+        let chart = canvas
+            .chart(pie(&["a", "b", "c"], &[1.0, 1.0, 2.0]))
+            .unwrap();
+        canvas
+            .play_composition_configured(chart.grow().unwrap(), Some(1.0), None)
+            .unwrap();
+        let sweeps = arc_sweeps(&canvas);
+        assert_eq!(sweeps.len(), 3);
+        // Each slice opens in its place, from its edge nearest 12 o'clock.
+        for (from, to) in &sweeps {
+            assert_eq!((from.start, from.end), (to.end, to.end));
+            assert!(to.end > to.start);
+        }
+        assert!(sweeps.iter().any(|(_, to)| to.end == FRAC_PI_2));
+        let mut line = SceneModel::new(640, 360);
+        let table = gaanim_visualization::DataTable::numeric([
+            ("x".to_owned(), vec![0.0, 1.0]),
+            ("y".to_owned(), vec![0.0, 1.0]),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(table, None)
+            .unwrap()
+            .mark(MarkKind::Line, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap();
+        assert_eq!(
+            line.chart(spec).unwrap().grow().err(),
+            Some(VisualizationError::NotAnArcChart)
+        );
+    }
+
+    #[test]
+    fn arc_slices_transition_to_the_slice_with_their_key() {
+        let mut canvas = SceneModel::new(640, 360);
+        let source = canvas
+            .chart(pie(&["a", "b", "c"], &[1.0, 1.0, 2.0]))
+            .unwrap();
+        let target = canvas
+            .chart(pie(&["b", "c", "d"], &[3.0, 1.0, 1.0]))
+            .unwrap();
+        canvas.play(vec![
+            source
+                .transition_to(&target, MatchPolicy::Key, TransitionFallback::Error)
+                .unwrap(),
+        ]);
+        let sweep = |slice: &gaanim_math::ArcSlice| slice.end - slice.start;
+        let sweeps = arc_sweeps(&canvas);
+        // "b" goes from a quarter of the circle to three fifths of it.
+        assert!(sweeps.iter().any(|(from, to)| {
+            (sweep(from) - TAU / 4.0).abs() < 1e-9 && (sweep(to) - TAU * 0.6).abs() < 1e-9
+        }));
+        // "c" goes from half the circle to a fifth of it.
+        assert!(sweeps.iter().any(|(from, to)| {
+            (sweep(from) - TAU / 2.0).abs() < 1e-9 && (sweep(to) - TAU / 5.0).abs() < 1e-9
+        }));
+        // "a" closes and "d" opens, each on its middle angle.
+        assert!(sweeps.iter().any(|(from, to)| {
+            (sweep(from) - TAU / 4.0).abs() < 1e-9
+                && sweep(to) == 0.0
+                && (to.start - from.mid_angle()).abs() < 1e-9
+        }));
+        assert!(sweeps.iter().any(|(from, to)| {
+            sweep(from) == 0.0
+                && (sweep(to) - TAU / 5.0).abs() < 1e-9
+                && (from.start - to.mid_angle()).abs() < 1e-9
+        }));
     }
 
     #[test]

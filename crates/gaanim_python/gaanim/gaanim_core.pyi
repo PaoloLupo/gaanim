@@ -6690,7 +6690,7 @@ class Guide:
         ...
 
 EncodingLike: TypeAlias = str | Field | Value
-ChartMark: TypeAlias = Literal["point", "line", "step", "area", "bar", "histogram", "box", "violin", "error_bar", "heatmap", "surface"]
+ChartMark: TypeAlias = Literal["point", "line", "step", "area", "bar", "histogram", "box", "violin", "error_bar", "heatmap", "surface", "arc"]
 
 class ChartSpec:
     """Immutable declarative chart spec that snapshots its input data eagerly."""
@@ -6698,15 +6698,35 @@ class ChartSpec:
         """Capture data and validate a non-null unique key when supplied."""
         ...
     def mark(self, kind: ChartMark, **options: float | str | Color) -> ChartSpec:
-        """Return a copy using mark options; bars accept ``label_position`` (``outside``/``inside``), non-negative local ``label_offset``, and ``label_color``."""
+        """Return a copy using mark options; bars accept ``label_position`` (``outside``/``inside``), non-negative local ``label_offset``, and ``label_color``.
+
+        ``"arc"`` draws a pie, one slice per row sized by its share of the
+        ``theta`` total, clockwise from 12 o'clock. Its options are
+        ``inner_radius`` (the fraction of the radius left empty, in
+        ``[0, 1)``: a donut above 0), ``pad_angle`` (radians left empty
+        between slices), ``start_angle`` (radians, counterclockwise from the
+        positive x axis; ``math.pi / 2`` by default), ``radius`` (scene
+        units) and ``label_color``. An arc chart has no axes: its ``axes``
+        layer is empty.
+
+        Example:
+            spec = ChartSpec(data, key="region").mark("arc", inner_radius=0.55).encode(theta="sales", color="region", label="region")
+        """
         ...
-    def encode(self, *, x: Optional[EncodingLike] = None, y: Optional[EncodingLike] = None, z: Optional[EncodingLike] = None, color: Optional[EncodingLike] = None, size: Optional[EncodingLike] = None, opacity: Optional[EncodingLike] = None, label: Optional[EncodingLike] = None) -> ChartSpec:
+    def encode(self, *, x: Optional[EncodingLike] = None, y: Optional[EncodingLike] = None, z: Optional[EncodingLike] = None, color: Optional[EncodingLike] = None, size: Optional[EncodingLike] = None, opacity: Optional[EncodingLike] = None, label: Optional[EncodingLike] = None, theta: Optional[EncodingLike] = None, radius: Optional[EncodingLike] = None) -> ChartSpec:
         """Return a copy with validated positional and visual channel encodings.
 
         For ``point`` marks ``size`` is the radius in scene units in 2D and 3D:
         ``Value(0.1)`` draws radius-0.1 points and the default is 0.06. A
         numeric ``Field`` maps its domain onto radii 0.03 to 0.12 with area
         proportional to the value. A ``radius`` mark option overrides ``size``.
+
+        ``theta`` and ``radius`` belong to ``"arc"`` marks: ``theta`` (required)
+        gives each row its share of the circle, and must not be negative;
+        missing values take no share. A ``radius`` field draws a rose chart:
+        each slice reaches from the inner radius toward the outer one in
+        proportion to its value, from 0 to the column's maximum (or over the
+        domain of its scale).
         """
         ...
     def axes(self, *, x: Optional[Axis] = None, y: Optional[Axis] = None, z: Optional[Axis] = None) -> ChartSpec:
@@ -7606,7 +7626,22 @@ class ChartAnimation:
 
         Same-dimension 2D charts morph their matching marks, axes, and labels
         and fade the rest; 2D↔3D and crossfade transitions fade between the
-        charts.
+        charts. Between two arc charts each slice sweeps its angles and radii
+        to the slice with its key (its row with ``match_="index"``); a slice
+        without a partner closes on, or opens from, its middle angle.
+        """
+        ...
+    def grow(self) -> Composition:
+        """The entry of an arc chart: a hand turns clockwise from the start angle.
+
+        Each slice opens in its place as the hand crosses it, the hand easing
+        in and out over the whole entry. A slice's label fades in from when
+        the hand passes its middle until the slice is complete; the guides
+        fade in over the whole entry. Returns a ``Composition`` for
+        ``scene.play``; any other chart raises ``ValueError``.
+
+        Example:
+            scene.play([chart.animate.grow()], duration=1.5)
         """
         ...
 
@@ -7619,8 +7654,8 @@ class Chart:
         """Return one semantic layer; ``axes`` includes grid, axes, ticks, numbers, and axis labels.
 
         ``grid`` exists when the axes draw one, ``guides`` when the spec has a
-        legend or a guide title, and ``labels`` for bar charts with a ``label``
-        encoding. Raise ValueError naming the chart's layers when it lacks the
+        legend or a guide title, and ``labels`` for bar and arc charts with a
+        ``label`` encoding. Raise ValueError naming the chart's layers when it lacks the
         requested one.
         """
         ...

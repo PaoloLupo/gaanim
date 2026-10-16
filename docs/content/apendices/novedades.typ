@@ -11,6 +11,27 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.15.0
+
+Sin publicar. Los gráficos declarativos dibujan tartas y donuts con la marca
+`arc`, que se abren porción a porción al entrar y reparten sus porciones por
+clave al cambiar de datos.
+
+== Gráficos
+
+- `ChartSpec.mark("arc")` dibuja una porción por fila según su parte del
+  total del canal `theta`, en el sentido del reloj desde las 12. Sus opciones
+  son `inner_radius` (un donut), `pad_angle` (la separación entre
+  porciones), `start_angle`, `radius` y `label_color`; el canal `label`
+  escribe cada fila en el centro de su porción y un campo `radius` dibuja un
+  gráfico de rosa.
+- `chart.animate.grow()` hace crecer la tarta: una manecilla gira desde el
+  ángulo inicial, cada porción se abre en su sitio cuando la manecilla la
+  cruza y su etiqueta aparece al completarse.
+- `chart.animate.to(...)` entre dos gráficos de arcos lleva cada porción a la
+  de su clave barriendo sus ángulos, en lugar de deformar su contorno; las
+  porciones que salen se cierran y las que llegan se abren.
+
 = 0.14.0
 
 Publicada el 15 de octubre de 2026. El editor reúne tus preferencias en una

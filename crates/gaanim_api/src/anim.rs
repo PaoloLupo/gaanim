@@ -412,6 +412,12 @@ pub enum AnimationType {
         from: f64,
         to: f64,
     },
+    /// Sweep a chart's pie or donut slice from `from` to `to`, angles and
+    /// radii interpolated; see [`gaanim_math::ArcSlice`].
+    ArcSweepTo {
+        from: gaanim_math::ArcSlice,
+        to: gaanim_math::ArcSlice,
+    },
     /// Interpolate renderer effects; `None` leaves an effect unchanged and
     /// `Some(None)` fades it out.
     EffectsTo {

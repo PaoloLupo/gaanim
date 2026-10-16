@@ -1,3 +1,4 @@
+pub mod arc_slice;
 pub mod arrow;
 pub mod bounds;
 pub mod camera;
@@ -13,6 +14,7 @@ pub mod rough;
 pub mod spatial;
 pub mod time_warp;
 
+pub use arc_slice::ArcSlice;
 pub use arrow::ArrowShape;
 pub use bounds::Bounds3D;
 pub use camera::{

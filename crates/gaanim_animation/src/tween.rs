@@ -197,6 +197,12 @@ pub enum PropertyLens {
         to: [f64; 3],
         sequential: bool,
     },
+    /// Sweep a pie or donut slice between two states; see
+    /// [`gaanim_math::ArcSlice`].
+    ArcSweep {
+        from: gaanim_math::ArcSlice,
+        to: gaanim_math::ArcSlice,
+    },
     /// Grow a solid arrow from its tail with an undistorted head.
     ArrowGrow {
         shape: gaanim_math::ArrowShape,
@@ -389,6 +395,7 @@ impl std::fmt::Debug for PropertyLens {
             Self::PathPartial { from, to } => write!(f, "PathPartial({from} -> {to})"),
             Self::PathTrim { from, to, .. } => write!(f, "PathTrim({from:?} -> {to:?})"),
             Self::ArrowGrow { from, to, .. } => write!(f, "ArrowGrow({from} -> {to})"),
+            Self::ArcSweep { from, to } => write!(f, "ArcSweep({from:?} -> {to:?})"),
             Self::ConnectorGrow { from, to } => write!(f, "ConnectorGrow({from} -> {to})"),
             Self::FillDrawProgress { from, to } => {
                 write!(f, "FillDrawProgress({} -> {})", from, to)
@@ -734,6 +741,15 @@ pub fn evaluate_tweens_system(
                 // leaves a flashing circular halo behind.
                 if let Ok((mut source, _)) = sources.get_mut(tween.target) {
                     source.0 = morphed;
+                }
+            }
+            PropertyLens::ArcSweep { from, to } => {
+                let swept = std::sync::Arc::new(from.interpolate(to, t).path());
+                if let Ok(mut path) = paths.get_mut(tween.target) {
+                    path.0 = swept.clone();
+                }
+                if let Ok((mut source, _)) = sources.get_mut(tween.target) {
+                    source.0 = swept;
                 }
             }
             PropertyLens::ArrowGrow { shape, from, to } => {
