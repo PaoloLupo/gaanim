@@ -1956,6 +1956,22 @@ class Anim:
             scene.play(bar.animate.grow_from_edge(Direction.DOWN))
         """
         ...
+    def wipe(self, direction: Optional[Direction] = None) -> Anim:
+        """Reveal the drawable behind a straight edge that sweeps across it.
+
+        The edge travels in ``direction`` (``Direction.RIGHT`` by default:
+        it uncovers the left side first), from one side of the drawable's
+        bounds to the other; diagonals sweep corner to corner. The drawable
+        stays hidden until the wipe plays, and the edge keeps to its bounds
+        if it moves or resizes later. It clips the drawable, replacing any
+        ``clip`` it had. To drive the edge with a value of your own, such as
+        the progress of a simulation, use ``Drawable.wipe(reveal)``. A
+        direction without length raises ``ValueError``.
+
+        Example:
+            scene.play(chart.layer("marks").animate.wipe(Direction.RIGHT), duration=3)
+        """
+        ...
     def grow_arrow(self) -> Anim:
         """Grow an arrow from its tail, like Manim's ``GrowArrow`` but undistorted.
 
@@ -4202,6 +4218,23 @@ class Drawable:
         Example:
             ball = scene.geometry.circle(0.4).fill(CORAL).echo(6, delay=0.05)
             scene.play([ball.animate.move_to(4, 0).duration(1.0)])
+        """
+        ...
+    def wipe(self, reveal: _ReactiveScalar, direction: Optional[Direction] = None) -> Drawable:
+        """Reveal this drawable behind an edge driven by ``reveal`` and return it.
+
+        ``reveal`` goes from 0 (hidden) to 1 (whole): a number, a
+        ``Parameter`` (animated, or driven by ``drive_from_samples``) or a
+        ``Computed`` value, read every frame. The edge travels in
+        ``direction`` (``Direction.RIGHT`` by default) across the drawable's
+        live bounds, so it follows later moves and resizes. It clips the
+        drawable, replacing any ``clip`` it had. For a plain timed sweep use
+        ``drawable.animate.wipe()``. A direction without length raises
+        ``ValueError``.
+
+        Example:
+            progress = scene.viz.parameter(0.0).drive_from_samples(times, done)
+            heat.layer("marks").wipe(progress, Direction.RIGHT)
         """
         ...
     def clip(

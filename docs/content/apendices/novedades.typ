@@ -53,6 +53,11 @@ para toda la escena y cada campo puede tener la suya.
 
 == Animación y geometría
 
+- `drawable.animate.wipe(direction)` revela un objeto detrás de un borde
+  recto que cruza su caja, por ejemplo las marcas de un gráfico de izquierda
+  a derecha, y `drawable.wipe(reveal)` mueve ese borde con un `Parameter` o
+  un `Computed`, al ritmo de una simulación. El borde sigue al objeto si se
+  mueve o cambia de tamaño.
 - `drive_from_samples(..., absolute=True)` toma las muestras de `x`, `y`,
   `xy` y `rotation` como posiciones y ángulos propios, sin restar la pose
   inicial.

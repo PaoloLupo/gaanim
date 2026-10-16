@@ -1072,6 +1072,27 @@ impl PyCanvasAnim {
         })
     }
 
+    /// Reveal the target behind a straight edge that sweeps across it.
+    #[pyo3(signature = (direction=None))]
+    fn wipe(&self, direction: Option<PyDirection>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        if self.inner.property_target_is_text_selection() {
+            return Err(PyTypeError::new_err(
+                "wipe() requires a Drawable animation proxy",
+            ));
+        }
+        self.require_effect_slot("wipe")?;
+        let direction = direction.map_or(gaanim_layout::Direction::Right, |direction| direction.0);
+        Ok(Self {
+            inner: self
+                .inner
+                .clone()
+                .wipe(direction)
+                .map_err(|error| PyValueError::new_err(error.to_string()))?,
+        })
+    }
+
     fn grow_from_edge(&self, direction: &PyDirection) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -2481,6 +2502,20 @@ impl PyDrawable {
         ))
     }
 
+    pub(crate) fn wipe_impl(
+        &self,
+        reveal: &Bound<'_, PyAny>,
+        direction: Option<&PyDirection>,
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        let reveal = extract_scalar_source_for_drawable(reveal.clone(), &self.0)?;
+        let direction = direction.map_or(gaanim_layout::Direction::Right, |direction| direction.0);
+        self.0
+            .wipe(reveal, direction)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(self.clone())
+    }
+
     pub(crate) fn clip_impl(&self, mask: &PyDrawable, rule: &str, invert: bool) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         let rule = match rule {
@@ -3685,6 +3720,17 @@ impl PyDrawable {
             .echo_impl(count, delay, decay, hold, start, end);
         same_drawable(slf, result)
     }
+    /// Reveal this drawable behind an edge that sweeps across it as
+    /// `reveal` goes from 0 to 1.
+    #[pyo3(signature = (reveal, direction=None))]
+    fn wipe<'py>(
+        slf: &Bound<'py, Self>,
+        reveal: &Bound<'py, PyAny>,
+        direction: Option<PyDirection>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().wipe_impl(reveal, direction.as_ref());
+        same_drawable(slf, result)
+    }
     /// Clip this drawable to another drawable's vector outline.
     #[pyo3(signature = (mask, rule="nonzero", invert=false))]
     fn clip<'py>(
@@ -4337,6 +4383,12 @@ macro_rules! media_drawable_methods {
         PyDrawable(slf.handle()).blend_impl(mode)?;
         Ok(slf)
     }
+    #[pyo3(signature = (reveal, direction=None))]
+    fn wipe<'py>(slf: PyRef<'py, Self>, reveal: Bound<'py, PyAny>, direction: Option<PyDirection>) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).wipe_impl(&reveal, direction.as_ref())?;
+        Ok(slf)
+    }
+
     #[pyo3(signature = (mask, rule="nonzero", invert=false))]
     fn clip<'py>(slf: PyRef<'py, Self>, mask: &PyDrawable, rule: &str, invert: bool) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).clip_impl(mask, rule, invert)?;

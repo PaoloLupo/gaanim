@@ -414,6 +414,7 @@ transición que abre su segmento. Son entradas:
 - por trazo: `create`, `write` y `draw_border_then_fill`;
 - por escala desde cero: `grow_from_center`, `grow_from_point`,
   `grow_from_edge`, `grow_arrow` y `spin_in_from_nothing`;
+- por barrido: `wipe`;
 - de texto: `typewriter` y `reveal`.
 
 Las demás animaciones (`move_to`, `scale_to`, `indicate`…) parten del estado
@@ -627,6 +628,27 @@ bars = [scene.geometry.rect(1.2, h).fill(c).move_to(x, h / 2 - 2) for x, h, c in
 badge = scene.geometry.circle(0.9).fill(GOLD).move_to(4, 1.5)
 scene.play([bar.animate.grow_from_edge(Direction.DOWN).duration(0.8) for bar in bars])
 scene.play([badge.animate.grow_from_point(2.5, 0).duration(0.6)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Anim.wipe",
+  kind: "method",
+  signature: "wipe(direction=Direction.RIGHT) -> Anim",
+  params: ((name: "direction", type: "Direction | None", default: "Direction.RIGHT", desc: [Sentido en que avanza el borde: `RIGHT` descubre primero el lado izquierdo. Una diagonal barre de esquina a esquina.]),),
+  returns: (type: "Anim", desc: [El barrido, de oculto a completo.]),
+  desc: [Revela el objeto detrás de un borde recto que lo cruza de un lado de su caja al otro. El objeto queda oculto hasta que el barrido se reproduce, y el borde sigue a su caja si después se mueve o cambia de tamaño. Recorta el objeto con una máscara oculta y sustituye el `clip` que tuviera. Para mover el borde con un valor propio, como el avance de una simulación, usa `Drawable.wipe(reveal)`. Una dirección sin longitud lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import ChartSpec, Direction, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+data = {"x": [c + 0.5 for c in range(12) for r in range(5)], "y": [r + 0.5 for c in range(12) for r in range(5)], "v": [(c * r) % 7 for c in range(12) for r in range(5)]}
+heat = scene.viz.chart(ChartSpec(data).mark("heatmap").encode(x="x", y="y", color="v"), width=9, height=4)
+scene.play([heat.layer("axes").animate.create()], duration=0.6)
+scene.play([heat.layer("marks").animate.wipe(Direction.RIGHT)], duration=1.5)
 # output: preview.webp
 scene.render()
 ```
