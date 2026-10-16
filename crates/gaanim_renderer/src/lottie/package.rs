@@ -117,7 +117,7 @@ impl Package {
             if entry.is_dir() {
                 continue;
             }
-            let name = safe_path(entry.name())?;
+            let name = safe_path(&entry.name().map_err(|e| invalid(e.to_string()))?)?;
             total = total.saturating_add(entry.size());
             if total > 256 * 1024 * 1024 {
                 return Err(invalid("package exceeds 256 MiB uncompressed"));

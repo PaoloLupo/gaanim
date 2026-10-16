@@ -334,7 +334,7 @@ mod tests {
         writer
             .write_all(b"{\"format\": \"gaanim-bundle\"}")
             .unwrap();
-        writer.set_comment(comment);
+        writer.set_comment(comment).unwrap();
         writer.finish().unwrap().into_inner()
     }
 
