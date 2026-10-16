@@ -1914,11 +1914,12 @@ impl PyChartAnimation {
             "crossfade" => TransitionFallback::Crossfade,
             _ => return Err(value_error("fallback must be 'error' or 'crossfade'")),
         };
+        // The target keeps the source's plot size.
         let target = self
             .canvas
             .lock()
             .expect("scene canvas poisoned")
-            .chart(target.0.clone())
+            .chart_with_size(target.0.clone(), self.inner.size().0, self.inner.size().1)
             .map_err(value_error)?;
         self.inner
             .transition_to(&target, matching, fallback)
@@ -2422,6 +2423,17 @@ impl PyCoordinateSpace {
         crate::custom::ensure_authoring_allowed()?;
         self.inner
             .data_to_scene(x, y)
+            .map(PyPointRef)
+            .map_err(value_error)
+    }
+
+    /// A point at data `(x, y)` that follows reactive values every frame.
+    fn point_ref(&self, x: Bound<'_, PyAny>, y: Bound<'_, PyAny>) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
+        let x = extract_scalar_source(x, &self.canvas)?;
+        let y = extract_scalar_source(y, &self.canvas)?;
+        self.inner
+            .point_ref(x, y)
             .map(PyPointRef)
             .map_err(value_error)
     }
@@ -3123,13 +3135,19 @@ impl PyVisualization {
         )
     }
 
-    fn chart(&self, spec: &PyChartSpec) -> PyResult<PyChart> {
+    #[pyo3(signature = (spec, *, width=None, height=None))]
+    fn chart(
+        &self,
+        spec: &PyChartSpec,
+        width: Option<f64>,
+        height: Option<f64>,
+    ) -> PyResult<PyChart> {
         crate::custom::ensure_authoring_allowed()?;
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .chart(spec.0.clone())
+            .chart_with_size(spec.0.clone(), width, height)
             .map_err(value_error)?;
         Ok(PyChart::new(inner, self.inner.clone()))
     }

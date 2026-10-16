@@ -2786,14 +2786,38 @@ impl DrawableHandle {
         scale: f64,
         offset: f64,
     ) -> Result<Self, InvalidSampledSeries> {
-        let driven = matches!(property, SampledProperty::Signal).then(|| {
-            values
-                .iter()
-                .map(|value| value * scale + offset)
-                .collect::<Vec<_>>()
-        });
         let driver =
             SampledSeriesDriver::new(times, values, property, interpolation, scale, offset)?;
+        Ok(self.attach_sampled_series(driver))
+    }
+
+    /// Like [`drive_from_samples`](Self::drive_from_samples), but translation
+    /// and Z rotation samples are absolute, `offset + scale * sample`, in the
+    /// parent's coordinates (the scene's for a top-level drawable) instead of
+    /// offsets from the authored pose.
+    pub fn drive_absolute_from_samples(
+        &self,
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: SampledProperty,
+        interpolation: SampledInterpolation,
+        scale: f64,
+        offset: f64,
+    ) -> Result<Self, InvalidSampledSeries> {
+        let driver =
+            SampledSeriesDriver::new(times, values, property, interpolation, scale, offset)?
+                .absolute();
+        Ok(self.attach_sampled_series(driver))
+    }
+
+    fn attach_sampled_series(&self, driver: SampledSeriesDriver) -> Self {
+        let driven = matches!(driver.property, SampledProperty::Signal).then(|| {
+            driver
+                .values
+                .iter()
+                .map(|value| value * driver.scale + driver.offset)
+                .collect::<Vec<_>>()
+        });
         let mut state = self.state.lock().expect("canvas state poisoned");
         if let Some(values) = driven {
             state.widen_parameter_range(self.id, values);
@@ -2802,7 +2826,7 @@ impl DrawableHandle {
             target: self.id,
             driver,
         });
-        Ok(self.clone())
+        self.clone()
     }
 
     /// Color the fill of this drawable, and of its members with a fill, from

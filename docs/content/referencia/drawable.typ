@@ -1064,7 +1064,7 @@ scene.render()
   name: "Drawable.clip",
   kind: "method",
   params: ((name: "mask", type: "Drawable", default: none, desc: [Silueta vectorial que recorta este objeto.]), (name: "rule", type: "str", default: "\"nonzero\"", desc: [Regla de relleno de la máscara: `"nonzero"` o `"evenodd"`.]), (name: "invert", type: "bool", default: "False", desc: [Recorta al exterior de la máscara.])),
-  desc: [Recorte vectorial vivo: la máscara puede moverse, escalarse o rotar y el recorte se recalcula en cada fotograma. La máscara sigue visible; usa `no_fill().no_stroke()` si solo debe definir la silueta. Una regla desconocida lanza `ValueError`.],
+  desc: [Recorte vectorial vivo: la máscara puede moverse, escalarse o rotar y el recorte se recalcula en cada fotograma. La máscara sigue siendo un objeto visible de la escena: con relleno o borde también se dibuja, encima del contenido recortado si se declara después. Usa `no_fill().no_stroke()` si solo debe recortar; así lo hace el ejemplo. Una regla desconocida lanza `ValueError`.],
 )[
 ```python
 # show-code: true

@@ -41,6 +41,23 @@ para toda la escena y cada campo puede tener la suya.
   `Palette` o un nombre.
 - Con más categorías que colores, la paleta vuelve a empezar algo más clara
   u oscura en cada vuelta, en lugar de repetir colores.
+- `scene.viz.chart(spec, width=..., height=...)` fija el área del gráfico sin
+  encoger el texto, como `cartesian_2d`; `chart.animate.to(...)` la conserva.
+- Las celdas de un `heatmap` miden, por defecto, el paso entre valores de `x`
+  y de `y`, así que columnas separadas más de una unidad ya no dejan huecos;
+  `cell_width` y `cell_height` lo fijan a mano. Las celdas iguales ya no
+  muestran costuras finas entre filas.
+- `plane.point_ref(x, y)` es un punto en coordenadas de datos que sigue
+  valores reactivos (un `Parameter` movido por `drive_from_samples`, un
+  `Computed`), la ventana de `view_to` y la posición del plano.
+
+== Animación y geometría
+
+- `drive_from_samples(..., absolute=True)` toma las muestras de `x`, `y`,
+  `xy` y `rotation` como posiciones y ángulos propios, sin restar la pose
+  inicial.
+- `scene.geometry.group(a, b)` acepta los miembros sueltos además de una
+  lista.
 
 == Al actualizar
 

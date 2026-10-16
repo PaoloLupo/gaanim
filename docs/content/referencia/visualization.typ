@@ -164,6 +164,27 @@ scene.play([plane.animate.view_to((0, 4), (0, 3)).duration(1.2)])
 ]
 
 #api-entry(
+  name: "CoordinateSpace.point_ref",
+  kind: "method",
+  signature: "point_ref(x, y) -> PointRef",
+  params: ((name: "x, y", type: "float | Parameter | Computed | TimeInput", default: none, desc: [Coordenadas en unidades de dato; pueden ser reactivas.]),),
+  returns: (type: "PointRef", desc: [Un punto de escena que se recalcula en cada fotograma.]),
+  desc: [Como `data_to_scene`, pero sigue valores reactivos: un `Parameter` movido por `drive_from_samples` o animado, un `Computed` o el tiempo. El punto acompaña a los valores, a la ventana de `view_to` y a la posición, escala y rotación del plano. Un valor que el eje no puede representar (un negativo en un eje logarítmico) deja el punto donde estaba.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+plane = scene.viz.cartesian_2d(Axis.linear(0, 240), Axis.linear(0, 5000), width=5.6, height=2.5)
+times = [0.0, 1.0, 2.0]
+rho = scene.viz.parameter(0.0).drive_from_samples(times, [20, 120, 200])
+q = scene.viz.parameter(0.0).drive_from_samples(times, [1500, 4200, 2600])
+car = scene.geometry.dot(0.08).follow(plane.point_ref(rho, q))
+scene.play([plane.animate.create(), car.animate.fade_in()])
+scene.wait(2.0)
+```
+]
+
+#api-entry(
   name: "CoordinateSpace.data_to_local / local_to_data",
   kind: "method",
   signature: "data_to_local(x, y) -> tuple[float, float] · local_to_data(x, y) -> tuple[float, float]",
@@ -546,7 +567,7 @@ scene.wait(2)
 #api-entry(
   name: "Visualization.variable",
   kind: "factory",
-  params: ((name: "initial", type: "float", default: none, desc: [Valor inicial.]), (name: "label", type: "str", default: none, desc: [Etiqueta antes del signo igual; admite matemática `$…$`.]), (name: "format", type: "str", default: "\".2f\"", desc: [Especificación de formato de Python para un `float`, como en `format(valor, spec)`: relleno y alineación, signo, `z`, `#`, `0`, ancho, agrupación `,` o `_`, precisión y tipo `f`, `F`, `e`, `E`, `g`, `G` o `%`. `"05.2f"` muestra `00.07`. Los tipos de enteros o texto (`d`, `x`, `s`…) y las especificaciones mal formadas lanzan `ValueError`; para enteros usa `".0f"`. El relleno con espacios no se ve, porque el número se alinea a la derecha por su tinta: para reservar sitio usa `reserve`.]), (name: "prefix / suffix / unit", type: "str / str / str | None", default: "\"\" / \"\" / None", desc: [Afijos y unidad visibles.]), (name: "decimal_separator", type: "str", default: "\".\"", desc: [`","` muestra `3,14` y convierte la agrupación `,` en `.`.]), (name: "font / weight", type: "str | None / int | None", default: "None / None", desc: [Familia y peso (1 a 1000) del número y de la etiqueta y la unidad en texto plano; una etiqueta `$…$` conserva la fuente matemática. Sin ellos, el número usa la fuente matemática del tema. Un peso fuera de rango lanza `ValueError`.])),
+  params: ((name: "initial", type: "float", default: none, desc: [Valor inicial.]), (name: "label", type: "str", default: none, desc: [Etiqueta antes del signo igual; admite matemática `$…$`.]), (name: "format", type: "str", default: "\".2f\"", desc: [Especificación de formato de Python para un `float`, como en `format(valor, spec)`: relleno y alineación, signo, `z`, `#`, `0`, ancho, agrupación `,` o `_`, precisión y tipo `f`, `F`, `e`, `E`, `g`, `G` o `%`. `"05.2f"` muestra `00.07`. Los tipos de enteros o texto (`d`, `x`, `s`…) y las especificaciones mal formadas lanzan `ValueError`; para enteros usa `".0f"`. El relleno con espacios no se ve, porque el número se alinea a la derecha por su tinta: para reservar sitio usa `reserve`.]), (name: "prefix / suffix / unit", type: "str / str / str | None", default: "\"\" / \"\" / None", desc: [Afijos y unidad visibles.]), (name: "decimal_separator", type: "str", default: "\".\"", desc: [`","` muestra `3,14` y convierte la agrupación `,` en `.`.]), (name: "font_size", type: "float | None", default: "None", desc: [Tamaño de todos los términos (etiqueta, `=`, número y unidad) en unidades de escena; 0.48 por defecto. Úsalo en lugar de `scale_to` para un indicador más pequeño dentro de un panel.]), (name: "color", type: "ColorLike | None", default: "None", desc: [Color de todos los términos, también del número al actualizarse; sin él, el color de texto del tema.]), (name: "font / weight", type: "str | None / int | None", default: "None / None", desc: [Familia y peso (1 a 1000) del número y de la etiqueta y la unidad en texto plano; una etiqueta `$…$` conserva la fuente matemática. Sin ellos, el número usa la fuente matemática del tema. Un peso fuera de rango lanza `ValueError`.])),
   desc: [Escalar animable que también se dibuja como `etiqueta = valor unidad`. Acepta las mismas operaciones que `Parameter`. Sus partes `label`, `equals`, `number` y `unit` son `Drawable` que se estilizan por separado; todos los términos usan `font_size` (0.48 por defecto) y comparten línea base. `color` pinta todo, también el número al actualizarse.],
 )[
 ```python
@@ -561,7 +582,7 @@ scene.play([k.animate.create(), k.animate.set(100).duration(1.5)])
 #api-entry(
   name: "Visualization.readout",
   kind: "factory",
-  params: ((name: "source", type: "número | Parameter | Variable | Computed | callable", default: none, desc: [Escalar o función pura cuyos argumentos son `inputs`.]), (name: "inputs", type: "Sequence", default: "()", desc: [Dependencias en orden.]), (name: "invalid", type: "str", default: "\"invalid\"", desc: [Texto para evaluaciones inválidas o no finitas.]), (name: "label / format / prefix / suffix / unit / decimal_separator / font / weight", type: "—", default: "—", desc: [Igual que en `variable`; un separador que sea dígito, signo, espacio, `e` o `%` lanza `ValueError`.]), (name: "spacing", type: "float | None", default: "None", desc: [Espacio entre etiqueta, `=`, número y unidad, en unidades de escena. Por defecto, un espacio fino que crece con `font_size` (0.1 con el tamaño por defecto). `prefix` y `suffix` van pegados al número: `suffix=" m"` conserva su espacio.]), (name: "reserve", type: "float | None", default: "None", desc: [Valor cuyo texto cabe en la celda de un layout, además de los valores que toman sus parámetros. Úsalo con conteos en vivo sin máximo conocido, como `votes` (`reserve=999`). Un valor no finito lanza `ValueError`.])),
+  params: ((name: "source", type: "número | Parameter | Variable | Computed | callable", default: none, desc: [Escalar o función pura cuyos argumentos son `inputs`.]), (name: "inputs", type: "Sequence", default: "()", desc: [Dependencias en orden.]), (name: "invalid", type: "str", default: "\"invalid\"", desc: [Texto para evaluaciones inválidas o no finitas.]), (name: "label / format / prefix / suffix / unit / decimal_separator / font_size / color / font / weight", type: "—", default: "—", desc: [Igual que en `variable`; un separador que sea dígito, signo, espacio, `e` o `%` lanza `ValueError`.]), (name: "spacing", type: "float | None", default: "None", desc: [Espacio entre etiqueta, `=`, número y unidad, en unidades de escena. Por defecto, un espacio fino que crece con `font_size` (0.1 con el tamaño por defecto). `prefix` y `suffix` van pegados al número: `suffix=" m"` conserva su espacio.]), (name: "reserve", type: "float | None", default: "None", desc: [Valor cuyo texto cabe en la celda de un layout, además de los valores que toman sus parámetros. Úsalo con conteos en vivo sin máximo conocido, como `votes` (`reserve=999`). Un valor no finito lanza `ValueError`.])),
   desc: [Lectura numérica reactiva con términos equiespaciados y alineados en la línea base. El número solo se regenera si cambia el texto formateado. Sin `color` usa el color de texto del tema. Dentro de un layout, su celda mide lo que el texto más ancho que mostrará: el de los valores a los que se fijan o animan sus parámetros (el `percent` de una encuesta llega a 100) y el de `reserve`. El número queda alineado a la derecha en ese espacio, así que sus vecinos no se mueven mientras cuenta. `variable` también acepta `reserve`.],
 )[
 ```python
@@ -953,7 +974,7 @@ points = base.mark("point").encode(x="time", y="value")
 #api-entry(
   name: "ChartSpec.mark",
   kind: "method",
-  desc: [Tipo de marca: `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`, `violin`, `error_bar`, `heatmap`, `surface` o `arc`. Las opciones dependen de la marca: las barras aceptan `width` (fracción de la banda en ejes categóricos), `label_position` (`"outside"` o `"inside"`), `label_offset` y `label_color`; los puntos, `radius`. `arc` dibuja una tarta sin ejes, una porción por fila según su parte del total de `theta`, en el sentido del reloj desde las 12; acepta `inner_radius` (fracción del radio que queda vacía, en `[0, 1)`: un donut si es mayor que 0), `pad_angle` (radianes vacíos entre porciones), `start_angle` (radianes en sentido antihorario desde el eje x; `math.pi / 2` por defecto), `radius` (unidades de escena) y `label_color`. Las marcas rellenas (`bar`, `histogram`, `area`, `point`, `box`, `violin` y las celdas de `heatmap`) se dibujan sin borde; para trazarlo, usa `chart.layer("marks").stroke(...)`.],
+  desc: [Tipo de marca: `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`, `violin`, `error_bar`, `heatmap`, `surface` o `arc`. Las opciones dependen de la marca: las barras aceptan `width` (fracción de la banda en ejes categóricos), `label_position` (`"outside"` o `"inside"`), `label_offset` y `label_color`; los puntos, `radius`; `heatmap`, `cell_width` y `cell_height` (tamaño de celda en unidades de dato; por defecto, el paso más pequeño entre valores distintos de `x` y de `y`, así que las celdas cubren el área sin huecos, y 1 con una sola columna o fila) y `bands` (niveles de color, 12 por defecto). `arc` dibuja una tarta sin ejes, una porción por fila según su parte del total de `theta`, en el sentido del reloj desde las 12; acepta `inner_radius` (fracción del radio que queda vacía, en `[0, 1)`: un donut si es mayor que 0), `pad_angle` (radianes vacíos entre porciones), `start_angle` (radianes en sentido antihorario desde el eje x; `math.pi / 2` por defecto), `radius` (unidades de escena) y `label_color`. Las marcas rellenas (`bar`, `histogram`, `area`, `point`, `box`, `violin` y las celdas de `heatmap`) se dibujan sin borde; para trazarlo, usa `chart.layer("marks").stroke(...)`.],
 )[
 ```python
 >>>from gaanim import *
@@ -1065,9 +1086,20 @@ after = ChartSpec(source).mark("line").encode(x="x", y="y")
 #api-entry(
   name: "Visualization.chart",
   kind: "factory",
+  signature: "chart(spec, *, width=None, height=None) -> Chart",
+  params: (
+    (name: "spec", type: "ChartSpec", default: none, desc: [La receta del gráfico.]),
+    (name: "width, height", type: "float | None", default: "None", desc: [Tamaño del área del gráfico en unidades de escena, como en `cartesian_2d`. El texto conserva los tamaños del tema, a diferencia de `scale_to` sobre el gráfico ya hecho. Un lado sin valor toma el 72 % del ancho del encuadre o el 62 % de su alto. El radio de un gráfico de arcos se ajusta al lado menor, y `chart.animate.to(...)` conserva el tamaño. Un lado no finito o no positivo lanza `ValueError`.]),
+  ),
   desc: [Materializa la receta en un `Chart` con capas semánticas por lotes: las marcas se agrupan por estilo resuelto en lugar de crear una entidad por registro.],
-  none,
-)
+)[
+```python
+>>>from gaanim import *
+scene = Scene(frame=(16, 9))
+spec = ChartSpec({"x": [1, 2, 3], "y": [2, 5, 3]}).mark("bar").encode(x="x", y="y")
+panel = scene.viz.chart(spec, width=6.0, height=2.8).move_to(-3.5, 0)
+```
+]
 
 #api-entry(
   name: "Chart.layer",

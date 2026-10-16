@@ -2960,6 +2960,7 @@ impl PyDrawable {
         offset: f64,
         colors: Option<Vec<PyColor>>,
         domain: Option<(f64, f64)>,
+        absolute: bool,
     ) -> PyResult<Self> {
         use gaanim_animation::{SampledProperty, SampledSeriesDriver};
 
@@ -3003,6 +3004,11 @@ impl PyDrawable {
                 "colors= and domain= apply only to property 'fill'",
             ));
         }
+        let drive = if absolute {
+            gaanim_api::canvas::DrawableHandle::drive_absolute_from_samples
+        } else {
+            gaanim_api::canvas::DrawableHandle::drive_from_samples
+        };
         // "xy" drives both translation axes from (x, y) pairs as two
         // independent channels.
         let channels = if property == "xy" {
@@ -3049,16 +3055,16 @@ impl PyDrawable {
             .map_err(|_| invalid())?;
         }
         for (property, values) in channels {
-            self.0
-                .drive_from_samples(
-                    times.clone(),
-                    values,
-                    property,
-                    interpolation,
-                    scale,
-                    offset,
-                )
-                .map_err(|_| invalid())?;
+            drive(
+                &self.0,
+                times.clone(),
+                values,
+                property,
+                interpolation,
+                scale,
+                offset,
+            )
+            .map_err(|_| invalid())?;
         }
         Ok(self.clone())
     }
@@ -4078,7 +4084,8 @@ impl PyDrawable {
     /// or `"fill"`, which reads the value in `domain` (the series' range by
     /// default) and picks a color among `colors`.
     /// Translation axes and rotation are relative to the authored pose:
-    /// `base + offset + scale * sample`. Scale, opacity, and signal are
+    /// `base + offset + scale * sample`, or with `absolute=True` positions
+    /// and angles of their own: `offset + scale * sample`. Scale, opacity, and signal are
     /// absolute: `offset + scale * sample`. Samples outside the series are
     /// clamped to its first/last value. `times` are relative to the timeline
     /// cursor where this call is made. Each property is an independent
@@ -4088,7 +4095,7 @@ impl PyDrawable {
     /// times = [i * 0.02 for i in range(len(accel))]
     /// building.drive_from_samples(times, accel, "x", scale=520.0)
     /// ```
-    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0, colors = None, domain = None))]
+    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0, colors = None, domain = None, absolute = false))]
     #[allow(clippy::too_many_arguments)]
     fn drive_from_samples<'py>(
         slf: &Bound<'py, Self>,
@@ -4100,6 +4107,7 @@ impl PyDrawable {
         offset: f64,
         colors: Option<Vec<PyColor>>,
         domain: Option<(f64, f64)>,
+        absolute: bool,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().drive_from_samples_impl(
             times,
@@ -4110,6 +4118,7 @@ impl PyDrawable {
             offset,
             colors,
             domain,
+            absolute,
         );
         same_drawable(slf, result)
     }
@@ -4488,7 +4497,7 @@ macro_rules! media_drawable_methods {
         PyDrawable(slf.handle()).add_updater_fn_impl(callback, reset, fixed_dt)?;
         Ok(slf)
     }
-    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0, colors = None, domain = None))]
+    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0, colors = None, domain = None, absolute = false))]
     #[allow(clippy::too_many_arguments)]
     fn drive_from_samples<'py>(slf: PyRef<'py, Self>, times: Vec<f64>,
         values: Bound<'py, PyAny>,
@@ -4497,8 +4506,9 @@ macro_rules! media_drawable_methods {
         scale: f64,
         offset: f64,
         colors: Option<Vec<PyColor>>,
-        domain: Option<(f64, f64)>,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).drive_from_samples_impl(times, &values, property, interpolation, scale, offset, colors, domain)?;
+        domain: Option<(f64, f64)>,
+        absolute: bool,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).drive_from_samples_impl(times, &values, property, interpolation, scale, offset, colors, domain, absolute)?;
         Ok(slf)
     }
     #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world", delay=0.0))]

@@ -577,6 +577,8 @@ pub struct ChartHandle {
     )>,
     /// The angle an arc chart's slices start from, in radians.
     pub(crate) arc_origin: f64,
+    /// The plot width and height given to [`Canvas::chart_with_size`].
+    pub(crate) size: (Option<f64>, Option<f64>),
 }
 
 impl ChartHandle {
@@ -586,6 +588,12 @@ impl ChartHandle {
 
     pub fn spec(&self) -> &ChartSpec {
         &self.spec
+    }
+
+    /// The plot width and height this chart was given; `None` for a
+    /// default side.
+    pub fn size(&self) -> (Option<f64>, Option<f64>) {
+        self.size
     }
 
     pub fn layer(&self, name: &str) -> Option<&DrawableHandle> {
@@ -866,6 +874,36 @@ fn halton(mut index: usize, base: usize) -> f64 {
     result
 }
 
+/// `source` read on `axis`, as a local coordinate along a plot side of
+/// `size` centered on 0.
+fn mapped_axis_source(
+    source: ScalarSource,
+    axis: Axis,
+    size: f64,
+) -> Result<ScalarSource, VisualizationError> {
+    let recipe = Arc::new(std::sync::OnceLock::new());
+    let _ = recipe.set(Arc::<str>::from(format!("axis {axis:?} over {size:?}")));
+    let local = move |value: f64| {
+        Ok::<_, gaanim_visualization::AxisError>((axis.normalize(value)? - 0.5) * size)
+    };
+    if let Some(value) = source.constant_value() {
+        return Ok(ScalarSource::constant(local(value)?));
+    }
+    Ok(ScalarSource::Function(
+        ReactiveFunction::from_sources_with_deferred_recipe(
+            0,
+            1,
+            vec![source],
+            recipe,
+            move |values| {
+                local(values[0])
+                    .map(|value| vec![value])
+                    .map_err(|error| error.to_string())
+            },
+        ),
+    ))
+}
+
 fn function_is_reactive(function: &ReactiveFunction) -> bool {
     !function.inputs().is_empty()
 }
@@ -1103,6 +1141,26 @@ impl CoordinateSpaceHandle {
         }))
     }
 
+    /// [`Self::data_to_scene`] for reactive data: a point that follows `x`
+    /// and `y` (parameters, computed values, time) every frame, mapped
+    /// through the space's axes, its live view and its transform. A value
+    /// an axis cannot map (a log axis below zero) leaves the point where it
+    /// was.
+    pub fn point_ref(
+        &self,
+        x: ScalarSource,
+        y: ScalarSource,
+    ) -> Result<PointRef, VisualizationError> {
+        let x = mapped_axis_source(x, self.map.x.clone(), self.map.frame.width)?;
+        let y = mapped_axis_source(y, self.map.y.clone(), self.map.frame.height)?;
+        Ok(PointRef(CanvasEndpoint::LocalExpression {
+            space: self.view.id,
+            x,
+            y,
+            z: ScalarSource::constant(0.0),
+        }))
+    }
+
     /// Convert data to space-local coordinates through the view at the authoring cursor.
     pub fn data_to_local(&self, x: f64, y: f64) -> Result<(f64, f64), VisualizationError> {
         let point = self.map.data_to_local(x, y)?;
@@ -1262,6 +1320,40 @@ impl SceneModel {
 
     /// Materialize an immutable declarative chart into stable semantic layers.
     pub fn chart(&mut self, spec: ChartSpec) -> Result<ChartHandle, VisualizationError> {
+        self.chart_with_size(spec, None, None)
+    }
+
+    /// [`Self::chart`] with a plot area of `width` by `height` scene units,
+    /// for 2D and arc charts (an arc chart's radius fits the smaller side).
+    /// Text keeps the theme's sizes, unlike scaling the finished chart. A
+    /// side left `None` takes 72% of the frame's width or 62% of its height.
+    pub fn chart_with_size(
+        &mut self,
+        spec: ChartSpec,
+        width: Option<f64>,
+        height: Option<f64>,
+    ) -> Result<ChartHandle, VisualizationError> {
+        if [width, height]
+            .into_iter()
+            .flatten()
+            .any(|side| !side.is_finite() || side <= 0.0)
+        {
+            return Err(VisualizationError::InvalidSize);
+        }
+        let plot = (
+            width.unwrap_or((self.frame.width * 0.72).max(4.0)),
+            height.unwrap_or((self.frame.height * 0.62).max(3.0)),
+        );
+        let mut chart = self.materialize_chart(spec, plot)?;
+        chart.size = (width, height);
+        Ok(chart)
+    }
+
+    fn materialize_chart(
+        &mut self,
+        spec: ChartSpec,
+        (width, height): (f64, f64),
+    ) -> Result<ChartHandle, VisualizationError> {
         spec.validate()?;
         // A spec without its own palette takes the theme's.
         let spec = match spec.palette_spec() {
@@ -1272,7 +1364,7 @@ impl SceneModel {
             }
         };
         if spec.mark_spec().kind == MarkKind::Arc {
-            return self.materialize_arc_chart(spec);
+            return self.materialize_arc_chart(spec, width.min(height));
         }
         let mut axes = spec.resolved_axes()?;
         if spec.mark_spec().kind == MarkKind::Histogram && !axes.contains_key(&Channel::Y) {
@@ -1294,8 +1386,6 @@ impl SceneModel {
             axes.insert(Channel::Y, Axis::linear(0.0, maximum * 1.1)?);
         }
         let dimensions = spec.batch()?.dimensions;
-        let width = (self.frame.width * 0.72).max(4.0);
-        let height = (self.frame.height * 0.62).max(3.0);
         let guides = self.chart_guides(&spec, width, height)?;
 
         if dimensions == 2 {
@@ -1344,6 +1434,7 @@ impl SceneModel {
                     spec,
                     arcs: Vec::new(),
                     arc_origin: 0.0,
+                    size: (None, None),
                 });
             }
             let default_color =
@@ -1384,6 +1475,7 @@ impl SceneModel {
                 labels: None,
                 arcs: Vec::new(),
                 arc_origin: 0.0,
+                size: (None, None),
             })
         } else {
             self.materialize_chart_3d(spec, axes, guides)
@@ -1448,9 +1540,9 @@ impl SceneModel {
     fn materialize_arc_chart(
         &mut self,
         spec: ChartSpec,
+        side: f64,
     ) -> Result<ChartHandle, VisualizationError> {
-        let height = (self.frame.height * 0.62).max(3.0);
-        let data = spec.arc_data(height * 0.45)?;
+        let data = spec.arc_data(side * 0.45)?;
         // Without a color encoding, each row is a category of the palette.
         let palette = spec.palette_spec().cloned().unwrap_or_default();
         let label_color = match spec.mark_spec().options.get("label_color") {
@@ -1527,6 +1619,7 @@ impl SceneModel {
             spec,
             arcs,
             arc_origin,
+            size: (None, None),
         })
     }
 
@@ -1639,10 +1732,7 @@ impl SceneModel {
                     chart_field(&spec, Channel::X)?,
                     chart_field(&spec, Channel::Y)?,
                     chart_field(&spec, Channel::Color)?,
-                    [
-                        chart_option_number(&spec, "cell_width", 1.0),
-                        chart_option_number(&spec, "cell_height", 1.0),
-                    ],
+                    spec.heatmap_cell_size(),
                     chart_option_usize(&spec, "bands", 12),
                     spec.color_scale()?,
                 )?,
@@ -1912,6 +2002,7 @@ impl SceneModel {
                 labels: None,
                 arcs: Vec::new(),
                 arc_origin: 0.0,
+                size: (None, None),
             })
         }
     }

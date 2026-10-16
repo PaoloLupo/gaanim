@@ -4212,11 +4212,15 @@ class Drawable:
     ) -> Drawable:
         """Dynamically clip this drawable to a vector mask and return it.
 
-        The mask keeps following its own geometry and transforms. ``invert``
+        The mask keeps following its own geometry and transforms, and stays
+        a visible drawable of the scene: one with a fill or stroke is drawn
+        too, on top of the clipped content when declared after it. Hide it
+        with ``no_fill().no_stroke()`` when it should only cut. ``invert``
         uses the area outside the mask; invalid fill rules raise ``ValueError``.
 
         Example:
-            result = drawable.clip(mask)
+            mask = scene.geometry.rect(2, 4).no_fill().no_stroke()
+            photo.clip(mask)
         """
         ...
     def no_clip(self) -> Drawable:
@@ -4843,6 +4847,7 @@ class Drawable:
         offset: float = 0.0,
         colors: Sequence[ColorLike] | None = None,
         domain: tuple[float, float] | None = None,
+        absolute: bool = False,
     ) -> Drawable:
         """Drive a property along a sampled ``(times, values)`` series natively.
 
@@ -4879,6 +4884,15 @@ class Drawable:
 
             car.drive_from_samples(times, speed, "fill",
                                    colors=["#ef4444", "#facc15", "#22c55e"], domain=(0, 30))
+
+        ``absolute=True`` reads translation and ``rotation`` samples as
+        positions and angles of their own, ``offset + scale * sample``, in
+        the parent's coordinates (the scene's for a top-level drawable),
+        so a computed trajectory needs no subtraction of the starting pose.
+        Other properties are absolute already::
+
+            path = [ring_point(p) for p in positions]
+            car.drive_from_samples(times, path, "xy", absolute=True)
         """
         ...
     def bind_y_from(self, source: Drawable) -> None:
@@ -7921,6 +7935,22 @@ class CoordinateSpace:
         Non-finite or out-of-scale data raises ``ValueError``.
         """
         ...
+    def point_ref(self, x: _ReactiveScalar, y: _ReactiveScalar) -> PointRef:
+        """Return a scene-space point at reactive data ``(x, y)``, re-read every frame.
+
+        Like ``data_to_scene``, but ``x`` and ``y`` may be numbers, a
+        ``Parameter`` (driven by ``drive_from_samples`` or animated), a
+        ``Computed`` value or time. The point follows the values, the live
+        ``view_to`` window and the space's move, scale and rotation. A value
+        the axis cannot map, such as a negative number on a log axis, leaves
+        the point where it was.
+
+        Example:
+            rho = scene.viz.parameter(0.0).drive_from_samples(times, densities)
+            q = scene.viz.parameter(0.0).drive_from_samples(times, flows)
+            scene.geometry.dot(0.08).follow(plane.point_ref(rho, q))
+        """
+        ...
     def local_to_data(self, x: float, y: float) -> tuple[float, float]:
         """Map local coordinates to data through the view at the cursor."""
         ...
@@ -8800,8 +8830,11 @@ class Geometry:
             scene.geometry.transform_matching(source, target, mode="tex")
         """
         ...
-    def group(self, members: Sequence[Drawable]) -> Drawable:
+    def group(self, *members: Drawable | Sequence[Drawable]) -> Drawable:
         """Gather ``members`` into one drawable that moves, styles and animates as a whole.
+
+        Pass the members one by one, ``group(a, b)``, or as a sequence,
+        ``group([a, b])``; anything else raises ``TypeError``.
 
         Grouping preserves each member's authored local coordinates, including
         coordinates returned by ``add_updater_fn``. Existing visible members do
@@ -9698,8 +9731,25 @@ class Visualization:
     @property
     def time(self) -> TimeInput: ...
     def parameter(self, initial: float) -> Parameter: ...
-    def chart(self, spec: ChartSpec) -> Chart:
-        """Materialize an immutable declarative chart using batched semantic layers."""
+    def chart(
+        self,
+        spec: ChartSpec,
+        *,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+    ) -> Chart:
+        """Materialize an immutable declarative chart using batched semantic layers.
+
+        ``width`` and ``height`` set the plot area in scene units, like
+        ``cartesian_2d``; text keeps the theme's sizes, unlike ``scale_to``
+        on the finished chart. A side left out takes 72% of the frame's
+        width or 62% of its height. An arc chart's radius fits the smaller
+        side. ``chart.animate.to(...)`` keeps the size. Sides that are not
+        finite and positive raise ``ValueError``.
+
+        Example:
+            heat = scene.viz.chart(spec, width=6.0, height=2.8)
+        """
         ...
     def cartesian_2d(
         self,
