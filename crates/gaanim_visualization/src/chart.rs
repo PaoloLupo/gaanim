@@ -741,14 +741,36 @@ impl ChartSpec {
         &self,
         axes: &mut BTreeMap<Channel, Axis>,
     ) -> Result<(), ChartError> {
-        for (channel, option) in [(Channel::X, "cell_width"), (Channel::Y, "cell_height")] {
-            let half = match self.mark.options.get(option) {
-                Some(ConstantValue::Number(size)) if size.is_finite() && *size > 0.0 => size * 0.5,
-                _ => 0.5,
-            };
+        let [width, height] = self.heatmap_cell_size();
+        for (channel, size) in [(Channel::X, width), (Channel::Y, height)] {
+            let half = size * 0.5;
             self.widen_inferred_axis(axes, channel, |min, max| (min - half, max + half))?;
         }
         Ok(())
+    }
+
+    /// The data size of a heatmap cell: the `cell_width` and `cell_height`
+    /// options, else the smallest step between distinct `x` (and `y`)
+    /// values, so the cells tile the plot whatever the spacing; 1 for a
+    /// single column or row.
+    pub fn heatmap_cell_size(&self) -> [f64; 2] {
+        let size = |channel: Channel, option: &str| {
+            if let Some(ConstantValue::Number(size)) = self.mark.options.get(option)
+                && size.is_finite()
+                && *size > 0.0
+            {
+                return *size;
+            }
+            let values = match self.encodings.get(&channel) {
+                Some(Encoding::Field { column, .. }) => self.data.numeric_column(column).ok(),
+                _ => None,
+            };
+            values.and_then(smallest_step).unwrap_or(1.0)
+        };
+        [
+            size(Channel::X, "cell_width"),
+            size(Channel::Y, "cell_height"),
+        ]
     }
 
     /// An area is filled down to its baseline, which the Y domain must include.
@@ -1055,6 +1077,25 @@ fn categorical_values(
         }
     }
     Ok(categories)
+}
+
+/// The smallest positive gap between the distinct finite `values`.
+fn smallest_step(values: &[Option<f64>]) -> Option<f64> {
+    let mut sorted: Vec<f64> = values
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect();
+    sorted.sort_by(f64::total_cmp);
+    let span = sorted.last()? - sorted.first()?;
+    // Smaller gaps are rounding noise between values meant to be equal.
+    let tolerance = span * 1e-9;
+    sorted
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .filter(|gap| *gap > tolerance)
+        .min_by(f64::total_cmp)
 }
 
 /// Colors a numeric `color` field runs through: the scale's, else a ramp
@@ -1719,6 +1760,28 @@ mod tests {
         let axes = spec.resolved_axes().unwrap();
         assert_domain(&axes[&Channel::X], (-0.5, 2.5));
         assert_domain(&axes[&Channel::Y], (1.75, 4.25));
+    }
+
+    #[test]
+    fn heatmap_cells_default_to_the_step_between_values() {
+        let data = DataTable::numeric([
+            ("x".to_owned(), vec![1.0, 3.0, 5.0, 1.0]),
+            ("y".to_owned(), vec![0.0, 0.0, 0.0, 0.25]),
+            ("value".to_owned(), vec![1.0; 4]),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(data, None)
+            .unwrap()
+            .mark(MarkKind::Heatmap, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("y"))
+            .unwrap()
+            .encode(Channel::Color, Encoding::field("value"))
+            .unwrap();
+        assert_eq!(spec.heatmap_cell_size(), [2.0, 0.25]);
+        let axes = spec.resolved_axes().unwrap();
+        assert_domain(&axes[&Channel::X], (0.0, 6.0));
     }
 
     #[test]

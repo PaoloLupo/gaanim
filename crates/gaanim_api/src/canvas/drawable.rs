@@ -106,6 +106,84 @@ impl Default for ClipOptions {
     }
 }
 
+/// A wipe needs a direction of travel; a zero or non-finite vector has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("wipe direction must be a finite, non-zero vector")]
+pub struct InvalidWipe;
+
+/// Side of the square mask a wipe slides over its target, in scene units:
+/// it reaches far past any target, so only its leading edge ever shows.
+const WIPE_MASK_SIDE: f64 = 2000.0;
+
+/// Clip `target` to a hidden square whose leading edge sweeps across the
+/// target's bounds in `direction` as `reveal` goes from 0 to 1. The edge
+/// runs from the bounds' corner (or side) behind the travel to the one
+/// ahead of it, both read every frame, so the wipe follows the target.
+pub(crate) fn wipe_mask(
+    state: &SharedCanvasState,
+    target: ObjectId,
+    reveal: ScalarSource,
+    direction: Direction,
+) -> Result<DrawableHandle, InvalidWipe> {
+    let travel = direction.to_vector().truncate();
+    if !travel.is_finite() || travel.length_squared() <= f64::EPSILON {
+        return Err(InvalidWipe);
+    }
+    let travel = travel.normalize();
+    // The extreme point of the bounds along the travel: a corner, or the
+    // middle of a side for a horizontal or vertical wipe.
+    let sign = |component: f64| {
+        if component.abs() < 1e-9 {
+            0.0
+        } else {
+            component.signum()
+        }
+    };
+    let ahead = DVec3::new(sign(travel.x), sign(travel.y), 0.0);
+    let scene_id = state.lock().expect("canvas state poisoned").scene_id;
+    let anchor = |normalized: DVec3| {
+        crate::canvas::CanvasEndpoint::Anchor(AnchorPoint {
+            scene_id,
+            object: target,
+            normalized,
+            offset: DVec3::ZERO,
+        })
+    };
+    let mask =
+        super::canvas_impl::spawn_in(state, SpawnKind::Rect(WIPE_MASK_SIDE, WIPE_MASK_SIDE), true)
+            .no_fill()
+            .no_stroke()
+            .rotate_to(travel.y.atan2(travel.x));
+    // Until the follow below takes over at the cursor, the mask waits far
+    // behind the travel, so the target is hidden rather than whole.
+    let waiting = -travel * WIPE_MASK_SIDE * 10.0;
+    let mask = mask.move_to(waiting.x, waiting.y);
+    let mut state = state.lock().expect("canvas state poisoned");
+    let ops = &mut state.active_mut().ops;
+    // The square's center trails its leading edge by half a side.
+    ops.push(Op::AttachEndpointFollow {
+        target: mask.id,
+        endpoint: crate::canvas::CanvasEndpoint::Between {
+            // A little past the bounds, so antialiasing shows no sliver
+            // at either end.
+            from: Box::new(anchor(-ahead * 1.02)),
+            to: Box::new(anchor(ahead * 1.02)),
+            alpha: reveal,
+            offset: (-travel * WIPE_MASK_SIDE * 0.5).extend(0.0),
+        },
+        offset: DVec3::ZERO,
+        offset_space: gaanim_animation::FollowOffsetSpace::World,
+    });
+    ops.push(Op::SetClip {
+        target,
+        mask: Some(mask.id),
+        rule: gaanim_core::peniko::Fill::NonZero,
+        invert: false,
+    });
+    drop(state);
+    Ok(mask)
+}
+
 /// A deferred glyph selection inside a text-like [`DrawableHandle`].
 #[derive(Debug, Clone)]
 pub struct FragmentSelection {
@@ -1681,6 +1759,19 @@ impl DrawableHandle {
         self
     }
 
+    /// Reveal this drawable behind a straight edge that sweeps across it
+    /// in `direction` as `reveal` goes from 0 (hidden) to 1 (whole). The
+    /// edge is placed from the drawable's live bounds every frame, so the
+    /// wipe follows later moves and resizes. It clips the drawable,
+    /// replacing any clip it had. Returns the hidden mask.
+    pub fn wipe(
+        &self,
+        reveal: ScalarSource,
+        direction: Direction,
+    ) -> Result<DrawableHandle, InvalidWipe> {
+        wipe_mask(&self.state, self.id, reveal, direction)
+    }
+
     /// Colors every matching text or equation fragment in this drawable.
     ///
     /// Matching is case-insensitive and tolerant of math formatting, so a
@@ -2786,14 +2877,38 @@ impl DrawableHandle {
         scale: f64,
         offset: f64,
     ) -> Result<Self, InvalidSampledSeries> {
-        let driven = matches!(property, SampledProperty::Signal).then(|| {
-            values
-                .iter()
-                .map(|value| value * scale + offset)
-                .collect::<Vec<_>>()
-        });
         let driver =
             SampledSeriesDriver::new(times, values, property, interpolation, scale, offset)?;
+        Ok(self.attach_sampled_series(driver))
+    }
+
+    /// Like [`drive_from_samples`](Self::drive_from_samples), but translation
+    /// and Z rotation samples are absolute, `offset + scale * sample`, in the
+    /// parent's coordinates (the scene's for a top-level drawable) instead of
+    /// offsets from the authored pose.
+    pub fn drive_absolute_from_samples(
+        &self,
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: SampledProperty,
+        interpolation: SampledInterpolation,
+        scale: f64,
+        offset: f64,
+    ) -> Result<Self, InvalidSampledSeries> {
+        let driver =
+            SampledSeriesDriver::new(times, values, property, interpolation, scale, offset)?
+                .absolute();
+        Ok(self.attach_sampled_series(driver))
+    }
+
+    fn attach_sampled_series(&self, driver: SampledSeriesDriver) -> Self {
+        let driven = matches!(driver.property, SampledProperty::Signal).then(|| {
+            driver
+                .values
+                .iter()
+                .map(|value| value * driver.scale + driver.offset)
+                .collect::<Vec<_>>()
+        });
         let mut state = self.state.lock().expect("canvas state poisoned");
         if let Some(values) = driven {
             state.widen_parameter_range(self.id, values);
@@ -2802,7 +2917,7 @@ impl DrawableHandle {
             target: self.id,
             driver,
         });
-        Ok(self.clone())
+        self.clone()
     }
 
     /// Color the fill of this drawable, and of its members with a fill, from

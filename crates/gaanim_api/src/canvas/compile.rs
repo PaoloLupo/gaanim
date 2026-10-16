@@ -15490,6 +15490,48 @@ mod tests {
     }
 
     #[test]
+    fn wipe_clips_its_target_to_a_hidden_mask_that_follows_its_bounds() {
+        let mut canvas = SceneModel::new(640, 360);
+        let target = canvas.rect(300.0, 160.0).move_to(80.0, 0.0);
+        assert_eq!(
+            target
+                .wipe(
+                    ScalarSource::constant(0.5),
+                    gaanim_layout::Direction::Custom(DVec3::ZERO)
+                )
+                .err(),
+            Some(crate::canvas::InvalidWipe)
+        );
+        let mask = target
+            .wipe(ScalarSource::constant(0.5), gaanim_layout::Direction::Right)
+            .unwrap();
+        let ops = canvas.state.lock().unwrap().active().ops.clone();
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            Op::SetClip { target: clipped, mask: Some(by), .. }
+                if *clipped == target.id && *by == mask.id
+        )));
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            Op::AttachEndpointFollow {
+                target: follower,
+                endpoint: CanvasEndpoint::Between { .. },
+                ..
+            } if *follower == mask.id
+        )));
+
+        let animated = canvas.rect(100.0, 100.0);
+        let anim = animated
+            .animate()
+            .wipe(gaanim_layout::Direction::Up)
+            .unwrap();
+        assert!(matches!(
+            anim.inner.anim_type,
+            AnimationType::SignalFloat { to } if to == 1.0
+        ));
+    }
+
+    #[test]
     fn segments_show_only_the_active_segment_on_seek() {
         let red = PenikoColor::from_rgb8(255, 0, 0);
         let blue = PenikoColor::from_rgb8(0, 0, 255);

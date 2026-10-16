@@ -2642,6 +2642,21 @@ impl Anim {
         self.effect(AnimationType::GrowFromPoint { px, py })
     }
 
+    /// Reveal the target behind a straight edge that sweeps across it in
+    /// `direction` (see [`DrawableHandle::wipe`]): the returned animation
+    /// takes the wipe's own progress from 0 to 1, and the target stays
+    /// hidden until it plays. Errors for a direction without length, or an
+    /// animation that has no drawable target.
+    ///
+    /// [`DrawableHandle::wipe`]: crate::canvas::DrawableHandle::wipe
+    pub fn wipe(self, direction: Direction) -> Result<Self, crate::canvas::InvalidWipe> {
+        let state = self.owner.clone().ok_or(crate::canvas::InvalidWipe)?;
+        let progress = super::visualization::parameter_in(&state, 0.0)
+            .expect("a parameter starting at 0 is valid");
+        super::drawable::wipe_mask(&state, self.inner.target, progress.source(), direction)?;
+        Ok(progress.animate().set(1.0))
+    }
+
     /// Grow from zero scale while the bounds edge (or corner) in `direction`
     /// stays fixed.
     pub fn grow_from_edge(self, direction: Direction) -> Self {

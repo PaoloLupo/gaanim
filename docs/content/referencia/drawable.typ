@@ -1064,7 +1064,7 @@ scene.render()
   name: "Drawable.clip",
   kind: "method",
   params: ((name: "mask", type: "Drawable", default: none, desc: [Silueta vectorial que recorta este objeto.]), (name: "rule", type: "str", default: "\"nonzero\"", desc: [Regla de relleno de la máscara: `"nonzero"` o `"evenodd"`.]), (name: "invert", type: "bool", default: "False", desc: [Recorta al exterior de la máscara.])),
-  desc: [Recorte vectorial vivo: la máscara puede moverse, escalarse o rotar y el recorte se recalcula en cada fotograma. La máscara sigue visible; usa `no_fill().no_stroke()` si solo debe definir la silueta. Una regla desconocida lanza `ValueError`.],
+  desc: [Recorte vectorial vivo: la máscara puede moverse, escalarse o rotar y el recorte se recalcula en cada fotograma. La máscara sigue siendo un objeto visible de la escena: con relleno o borde también se dibuja, encima del contenido recortado si se declara después. Usa `no_fill().no_stroke()` si solo debe recortar; así lo hace el ejemplo. Una regla desconocida lanza `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -1077,6 +1077,31 @@ stripes = scene.geometry.group([
 lens = scene.geometry.circle(1.2).no_fill().no_stroke().move_to(-2, 0)
 stripes.clip(lens)
 scene.play([lens.animate.move_to(2, 0).duration(1.2)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.wipe",
+  kind: "method",
+  signature: "wipe(reveal, direction=Direction.RIGHT) -> Drawable",
+  params: (
+    (name: "reveal", type: "float | Parameter | Computed", default: none, desc: [Avance del borde: 0 oculta el objeto y 1 lo muestra entero. Se lee en cada fotograma.]),
+    (name: "direction", type: "Direction | None", default: "Direction.RIGHT", desc: [Sentido en que avanza el borde; una diagonal barre de esquina a esquina.]),
+  ),
+  returns: (type: "Drawable", desc: [El mismo objeto.]),
+  desc: [Revela el objeto detrás de un borde recto que cruza su caja, al ritmo de `reveal`: un `Parameter` animado o movido por `drive_from_samples`, o un `Computed`. El borde sigue a la caja si el objeto se mueve o cambia de tamaño. Recorta el objeto con una máscara oculta y sustituye el `clip` que tuviera. Para un barrido con duración, usa `drawable.animate.wipe()`. Una dirección sin longitud lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import BLUE, Direction, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+times = [0.0, 0.5, 1.0, 1.5, 2.0]
+progress = scene.viz.parameter(0.0)
+progress.drive_from_samples(times, [0.0, 0.1, 0.5, 0.6, 1.0])
+band = scene.geometry.rect(8, 2).fill(BLUE).no_stroke().wipe(progress, Direction.RIGHT)
+scene.wait(2.2)
 # output: preview.webp
 scene.render()
 ```

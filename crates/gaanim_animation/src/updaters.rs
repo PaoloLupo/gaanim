@@ -1261,6 +1261,13 @@ impl std::fmt::Debug for SampledSeriesDriver {
 }
 
 impl SampledSeriesDriver {
+    /// Las muestras de traslación y rotación pasan a ser valores absolutos
+    /// (`offset + scale * muestra`) en lugar de sumarse a la pose declarada.
+    pub fn absolute(mut self) -> Self {
+        self.base = Some(0.0);
+        self
+    }
+
     /// Pure absolute-time sampling, shared by playback and frozen reactive targets.
     pub fn sample_at(&self, time: f64) -> f64 {
         let time = self.stop_at.map_or(time, |stop| time.min(stop));

@@ -3,14 +3,15 @@
 ``ChartSpec`` is an immutable recipe of data, a mark, encodings, axes and
 guides; ``scene.viz.chart(spec)`` draws it, inferring the axes it is not
 given from the data. Each segment draws one mark at the chart's full size,
-labelled with the spec that builds it.
+labelled with the spec that builds it; the last one sweeps the marks in
+with a wipe instead of fading them.
 """
 
 import math
 import os
 import random
 
-from gaanim import Axis, ChartSpec, Scene, Value, Zones
+from gaanim import Axis, ChartSpec, Direction, Scene, Value, Zones
 
 DRAW = 0.8
 HOLD = 0.8
@@ -47,10 +48,12 @@ ENERGY = {
 series = ChartSpec(SERIES)
 
 
-def show(label, spec, style=None):
+def show(label, spec, style=None, entry=None):
     """Draw ``spec`` at its default size and place, its label above it.
 
-    ``style(marks)`` restyles the marks layer when given.
+    ``style(marks)`` restyles the marks layer when given, and
+    ``entry(marks)`` is the animation that brings the marks in (a fade
+    by default).
     """
     top, _ = scene.layout.zones(Zones.rows(["1fr", "8fr"], padding="page_padding"))
     text = scene.text(label, role="code").place(top, anchor="bottom")
@@ -58,7 +61,8 @@ def show(label, spec, style=None):
     if style:
         style(chart.layer("marks"))
     scene.play([chart.layer("axes").animate.create(), text.animate.fade_in()], duration=DRAW)
-    scene.play([chart.layer("marks").animate.fade_in()], duration=DRAW)
+    marks = chart.layer("marks")
+    scene.play([entry(marks) if entry else marks.animate.fade_in()], duration=DRAW)
     scene.wait(HOLD)
 
 
@@ -158,9 +162,24 @@ show_arc(
     ChartSpec(ENERGY).mark("arc", inner_radius=0.2).encode(theta=Value(1), radius="growth", color="source"),
 )
 
+# Any mark can enter behind an edge that sweeps across it; a Parameter
+# passed to marks.wipe(progress, ...) moves the edge instead, at the pace of
+# a simulation.
+scene.segment("wipe")
+show(
+    'chart.layer("marks").animate.wipe(Direction.RIGHT)',
+    ChartSpec(CELLS).mark("heatmap", bands=8).encode(x="x", y="y", color="value"),
+    entry=lambda marks: marks.animate.wipe(Direction.RIGHT),
+)
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # The first chart while its marks fade in, then every chart drawn, and
-    # the first arc halfway through its growth.
-    scene.snapshots(snapshots, [1.2] + [STEP * index + 2.2 for index in range(13)] + [STEP * 10 + 0.8])
+    # The first chart while its marks fade in, then every chart drawn, the
+    # first arc halfway through its growth, and the wipe halfway across.
+    scene.snapshots(
+        snapshots,
+        [1.2]
+        + [STEP * index + 2.2 for index in range(13)]
+        + [STEP * 10 + 0.8, STEP * 13 + 1.2, STEP * 13 + 2.2],
+    )
 else:
     scene.render()

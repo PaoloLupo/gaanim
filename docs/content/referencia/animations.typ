@@ -414,6 +414,7 @@ transición que abre su segmento. Son entradas:
 - por trazo: `create`, `write` y `draw_border_then_fill`;
 - por escala desde cero: `grow_from_center`, `grow_from_point`,
   `grow_from_edge`, `grow_arrow` y `spin_in_from_nothing`;
+- por barrido: `wipe`;
 - de texto: `typewriter` y `reveal`.
 
 Las demás animaciones (`move_to`, `scale_to`, `indicate`…) parten del estado
@@ -480,7 +481,7 @@ scene.render()
     (name: "seed", type: "int", default: "0", desc: [Semilla del orden `"random"` y del temblor y el grano de la tiza.]),
   ),
   returns: (type: "Anim", desc: [Escritura trazo a trazo.]),
-  desc: [Dibuja los contornos y luego los rellena, como el `Write` de Manim. Cada pieza (un glifo, una forma, un miembro de un grupo) ocupa su parte de la animación, escalonada por `stagger`, y la curva (lineal por defecto) se aplica al avance de cada pieza. En la primera mitad de su parte la pieza traza su contorno, un tramo de Bézier tras otro y sus contornos en orden, centrado y de un 0,25 % del alto del cuadro, en el color de su trazo (el de su relleno si no tiene). En la segunda mitad el contorno pasa a su aspecto propio: aparece el relleno y el trazo toma su ancho, o desaparece. Sin duración, dura 1 s con menos de 15 piezas y 2 s con más; `scene.play(duration=...)` la sigue fijando. Sin `stagger`, el retardo entre piezas es el de Manim, `min(4 / piezas, 0.2)`; agrupada con `by` por palabras, líneas o partes es `min(4 / grupos, 1)`, así que hasta cuatro grupos se escriben uno tras otro. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
+  desc: [Dibuja los contornos y luego los rellena, pieza a pieza. Cada pieza (un glifo, una forma, un miembro de un grupo) ocupa su parte de la animación, escalonada por `stagger`, y la curva (lineal por defecto) se aplica al avance de cada pieza. En la primera mitad de su parte la pieza traza su contorno, un tramo de Bézier tras otro y sus contornos en orden, centrado y de un 0,25 % del alto del cuadro, en el color de su trazo (el de su relleno si no tiene). En la segunda mitad el contorno pasa a su aspecto propio: aparece el relleno y el trazo toma su ancho, o desaparece. Sin duración, dura 1 s con menos de 15 piezas y 2 s con más; `scene.play(duration=...)` la sigue fijando. Sin `stagger`, el retardo entre piezas es `min(4 / piezas, 0.2)`; agrupada con `by` por palabras, líneas o partes es `min(4 / grupos, 1)`, así que hasta cuatro grupos se escriben uno tras otro. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -510,7 +511,7 @@ scene.render()
   name: "Anim.unwrite",
   kind: "method",
   returns: (type: "Anim", desc: [La escritura al revés.]),
-  desc: [Borra como el `Unwrite` de Manim: `write` al revés, desde la última pieza. Cada pieza vuelve primero a su contorno y luego el contorno se recoge hasta su inicio. Dura lo que duraría `write`.],
+  desc: [Borra como `write` al revés, desde la última pieza. Cada pieza vuelve primero a su contorno y luego el contorno se recoge hasta su inicio. Dura lo que duraría `write`.],
 )[
 ```python
 # show-code: true
@@ -633,6 +634,27 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Anim.wipe",
+  kind: "method",
+  signature: "wipe(direction=Direction.RIGHT) -> Anim",
+  params: ((name: "direction", type: "Direction | None", default: "Direction.RIGHT", desc: [Sentido en que avanza el borde: `RIGHT` descubre primero el lado izquierdo. Una diagonal barre de esquina a esquina.]),),
+  returns: (type: "Anim", desc: [El barrido, de oculto a completo.]),
+  desc: [Revela el objeto detrás de un borde recto que lo cruza de un lado de su caja al otro. El objeto queda oculto hasta que el barrido se reproduce, y el borde sigue a su caja si después se mueve o cambia de tamaño. Recorta el objeto con una máscara oculta y sustituye el `clip` que tuviera. Para mover el borde con un valor propio, como el avance de una simulación, usa `Drawable.wipe(reveal)`. Una dirección sin longitud lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import ChartSpec, Direction, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+data = {"x": [c + 0.5 for c in range(12) for r in range(5)], "y": [r + 0.5 for c in range(12) for r in range(5)], "v": [(c * r) % 7 for c in range(12) for r in range(5)]}
+heat = scene.viz.chart(ChartSpec(data).mark("heatmap").encode(x="x", y="y", color="v"), width=9, height=4)
+scene.play([heat.layer("axes").animate.create()], duration=0.6)
+scene.play([heat.layer("marks").animate.wipe(Direction.RIGHT)], duration=1.5)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Anim.grow_from_point",
   kind: "method",
   params: ((name: "x, y", type: "float", default: none, desc: [Punto de la escena que queda fijo.]),),
@@ -748,7 +770,7 @@ scene.render()
     (name: "corner_radius", type: "float", default: "0.08", desc: [Radio de las esquinas.]),
   ),
   returns: (type: "Anim", desc: [Un contorno que rodea el objeto.]),
-  desc: [Dibuja un marco vivo alrededor del objeto la primera mitad y lo borra desde su inicio la segunda, como el `Circumscribe` de Manim: es `flash_around(time_width=1.0)`. Fuera de la animación el marco es invisible. El `Anim` se reproduce sobre el marco, no sobre el objeto.],
+  desc: [Dibuja un marco vivo alrededor del objeto la primera mitad y lo borra desde su inicio la segunda: es `flash_around(time_width=1.0)`. Fuera de la animación el marco es invisible. El `Anim` se reproduce sobre el marco, no sobre el objeto.],
 )[
 ```python
 >>>from gaanim import *
@@ -2094,7 +2116,7 @@ scene.play(intro)
   kind: "method",
   params: ((name: "speeds", type: "float | Mapping[float, float]", default: none, desc: [Velocidades en fracciones de la composición, de `0` a `1`, unidas linealmente: `1` es la velocidad normal, `0.15` una cámara lenta y `2` el doble. Un número es una velocidad constante.]),),
   returns: (type: "Composition", desc: [Una copia con la rampa de velocidad.]),
-  desc: [Los _speed ramps_ de los cortes modernos, como `ChangeSpeed` de Manim o `timeScale` de GSAP. Antes de la primera clave y después de la última la velocidad se mantiene. La duración pasa a ser la que tarda la rampa; los hijos conservan su orden y sus solapes, y el movimiento de cada clip sigue la rampa dentro de él, así que un seek coincide con la reproducción. Se anida y se combina con `stretch`, que se aplica después. Los updaters, la física de partículas y el temblor de cámara siguen en tiempo real. Claves fuera de `[0, 1]` o repetidas, velocidades no positivas o medios lanzan `ValueError`.],
+  desc: [Los _speed ramps_ de los cortes modernos, como `timeScale` de GSAP. Antes de la primera clave y después de la última la velocidad se mantiene. La duración pasa a ser la que tarda la rampa; los hijos conservan su orden y sus solapes, y el movimiento de cada clip sigue la rampa dentro de él, así que un seek coincide con la reproducción. Se anida y se combina con `stretch`, que se aplica después. Los updaters, la física de partículas y el temblor de cámara siguen en tiempo real. Claves fuera de `[0, 1]` o repetidas, velocidades no positivas o medios lanzan `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -2393,7 +2415,7 @@ scene.render()
 #api-entry(
   name: "Drawable.drive_from_samples",
   kind: "method",
-  signature: "drive_from_samples(times, values, property=\"x\", *, interpolation=\"linear\", scale=1.0, offset=0.0, colors=None, domain=None) -> Drawable",
+  signature: "drive_from_samples(times, values, property=\"x\", *, interpolation=\"linear\", scale=1.0, offset=0.0, colors=None, domain=None, absolute=False) -> Drawable",
   params: (
     (name: "times, values", type: "Sequence[float] | Sequence[tuple[float, float]]", default: none, desc: [Series de igual longitud; los tiempos deben ser finitos y no decrecientes. Con `"xy"`, los valores son parejas `(x, y)`.]),
     (name: "property", type: "\"x\" | \"y\" | \"xy\" | \"z\" | \"rotation\" | \"scale\" | \"opacity\" | \"signal\" | \"fill\"", default: "\"x\"", desc: [Canal que se mueve. `"xy"` mueve los dos ejes de traslación como canales `"x"` e `"y"`. `"fill"` colorea el relleno del objeto y de los miembros de un grupo que lo tengan.]),
@@ -2401,9 +2423,10 @@ scene.render()
     (name: "scale, offset", type: "float", default: "1.0, 0.0", desc: [Transformación aplicada a cada muestra.]),
     (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Solo con `"fill"`, y obligatorio: al menos dos colores, repartidos por igual sobre `domain`.]),
     (name: "domain", type: "tuple[float, float] | None", default: "None", desc: [Solo con `"fill"`: valores que corresponden al primer y al último color, tras `scale` y `offset`. Por defecto, el rango de la serie. Fuera de él se usa el color del extremo.]),
+    (name: "absolute", type: "bool", default: "False", desc: [Las muestras de traslación y de `rotation` son posiciones y ángulos propios (`offset + scale * muestra`), en coordenadas del padre (de la escena para un objeto de primer nivel), en lugar de sumarse a la pose declarada. Útil cuando ya calculaste la trayectoria. Los demás canales ya son absolutos.]),
   ),
   returns: (type: "Drawable", desc: [El mismo objeto.]),
-  desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`); `scale`, `opacity` y `signal` son absolutos. Fuera de la serie se mantiene la primera o la última muestra. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Cada canal es independiente; volver a mover el mismo canal lo reemplaza. `remove_updater()` lo quita. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],
+  desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`), salvo con `absolute=True`; `scale`, `opacity` y `signal` son absolutos. Fuera de la serie se mantiene la primera o la última muestra. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Cada canal es independiente; volver a mover el mismo canal lo reemplaza. `remove_updater()` lo quita. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],
 )[
 ```python
 >>>import math

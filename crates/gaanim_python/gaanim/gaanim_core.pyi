@@ -1888,7 +1888,7 @@ class Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
     def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None, brush: Literal["pen", "chalk"] = "pen", seed: int = 0) -> Anim:
-        """Draw the outlines, then fill them in, as Manim's ``Write``.
+        """Draw the outlines, then fill them in, piece by piece.
 
         Each piece (a glyph, a shape, a member of a group) runs over its share
         of the animation, staggered by ``stagger``, and the easing (linear by
@@ -1908,7 +1908,7 @@ class Anim:
         from the ``"center"`` outward, or in a ``"random"`` permutation fixed
         by ``seed``.
         ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
-        sequential staggering (Manim's ``min(4 / pieces, 0.2)``; grouped
+        sequential staggering (``min(4 / pieces, 0.2)``; grouped
         ``by`` word, line or part, ``min(4 / groups, 1)``, so up to four
         groups are written one after another) and a number overrides it. ``brush="chalk"`` draws the drawable as chalk for the whole
         scene, like ``Drawable.chalk(seed)``: a trembling outline and a grain
@@ -1927,7 +1927,7 @@ class Anim:
         """
         ...
     def unwrite(self) -> Anim:
-        """Erase as Manim's ``Unwrite``: ``write`` backwards, from the last piece.
+        """Erase as ``write`` backwards, from the last piece.
 
         Each piece first turns back into its outline, then the outline
         retracts to where it started. It lasts as long as ``write`` would.
@@ -1956,8 +1956,24 @@ class Anim:
             scene.play(bar.animate.grow_from_edge(Direction.DOWN))
         """
         ...
+    def wipe(self, direction: Optional[Direction] = None) -> Anim:
+        """Reveal the drawable behind a straight edge that sweeps across it.
+
+        The edge travels in ``direction`` (``Direction.RIGHT`` by default:
+        it uncovers the left side first), from one side of the drawable's
+        bounds to the other; diagonals sweep corner to corner. The drawable
+        stays hidden until the wipe plays, and the edge keeps to its bounds
+        if it moves or resizes later. It clips the drawable, replacing any
+        ``clip`` it had. To drive the edge with a value of your own, such as
+        the progress of a simulation, use ``Drawable.wipe(reveal)``. A
+        direction without length raises ``ValueError``.
+
+        Example:
+            scene.play(chart.layer("marks").animate.wipe(Direction.RIGHT), duration=3)
+        """
+        ...
     def grow_arrow(self) -> Anim:
-        """Grow an arrow from its tail, like Manim's ``GrowArrow`` but undistorted.
+        """Grow an arrow from its tail, with an undistorted head.
 
         The tail stays fixed and the tip travels along the arrow's straight or
         curved spine (the head turns along the arc tangent). The head emerges
@@ -1982,8 +1998,8 @@ class Anim:
         The frame is a new live outline (see ``Geometry.surrounding_rect``),
         ``padding`` away from the drawable's bounds (0.12 by default) and
         invisible outside the animation; it traces the whole outline over the
-        first half and erases it from its start over the second, as Manim's
-        ``Circumscribe``. It is ``flash_around`` with ``time_width=1.0``.
+        first half and erases it from its start over the second. It is
+        ``flash_around`` with ``time_width=1.0``.
         ``color`` and ``width`` restyle it (a width needs a color). The
         returned animation plays on the frame, not on the drawable.
 
@@ -4204,6 +4220,23 @@ class Drawable:
             scene.play([ball.animate.move_to(4, 0).duration(1.0)])
         """
         ...
+    def wipe(self, reveal: _ReactiveScalar, direction: Optional[Direction] = None) -> Drawable:
+        """Reveal this drawable behind an edge driven by ``reveal`` and return it.
+
+        ``reveal`` goes from 0 (hidden) to 1 (whole): a number, a
+        ``Parameter`` (animated, or driven by ``drive_from_samples``) or a
+        ``Computed`` value, read every frame. The edge travels in
+        ``direction`` (``Direction.RIGHT`` by default) across the drawable's
+        live bounds, so it follows later moves and resizes. It clips the
+        drawable, replacing any ``clip`` it had. For a plain timed sweep use
+        ``drawable.animate.wipe()``. A direction without length raises
+        ``ValueError``.
+
+        Example:
+            progress = scene.viz.parameter(0.0).drive_from_samples(times, done)
+            heat.layer("marks").wipe(progress, Direction.RIGHT)
+        """
+        ...
     def clip(
         self,
         mask: Drawable,
@@ -4212,11 +4245,15 @@ class Drawable:
     ) -> Drawable:
         """Dynamically clip this drawable to a vector mask and return it.
 
-        The mask keeps following its own geometry and transforms. ``invert``
+        The mask keeps following its own geometry and transforms, and stays
+        a visible drawable of the scene: one with a fill or stroke is drawn
+        too, on top of the clipped content when declared after it. Hide it
+        with ``no_fill().no_stroke()`` when it should only cut. ``invert``
         uses the area outside the mask; invalid fill rules raise ``ValueError``.
 
         Example:
-            result = drawable.clip(mask)
+            mask = scene.geometry.rect(2, 4).no_fill().no_stroke()
+            photo.clip(mask)
         """
         ...
     def no_clip(self) -> Drawable:
@@ -4843,6 +4880,7 @@ class Drawable:
         offset: float = 0.0,
         colors: Sequence[ColorLike] | None = None,
         domain: tuple[float, float] | None = None,
+        absolute: bool = False,
     ) -> Drawable:
         """Drive a property along a sampled ``(times, values)`` series natively.
 
@@ -4879,6 +4917,15 @@ class Drawable:
 
             car.drive_from_samples(times, speed, "fill",
                                    colors=["#ef4444", "#facc15", "#22c55e"], domain=(0, 30))
+
+        ``absolute=True`` reads translation and ``rotation`` samples as
+        positions and angles of their own, ``offset + scale * sample``, in
+        the parent's coordinates (the scene's for a top-level drawable),
+        so a computed trajectory needs no subtraction of the starting pose.
+        Other properties are absolute already::
+
+            path = [ring_point(p) for p in positions]
+            car.drive_from_samples(times, path, "xy", absolute=True)
         """
         ...
     def bind_y_from(self, source: Drawable) -> None:
@@ -4966,7 +5013,7 @@ class Drawable:
             drawable.bind_position_from(source)
         """
         ...
-    # manim Axes compatibility — coords mapping and graph helpers (only valid when self is an axes)
+    # Axes coordinate mapping and graph helpers (only valid when self is an axes)
 class Dimension(Drawable):
     """Reactive technical dimension with independently styleable parts."""
     @property
@@ -7921,6 +7968,22 @@ class CoordinateSpace:
         Non-finite or out-of-scale data raises ``ValueError``.
         """
         ...
+    def point_ref(self, x: _ReactiveScalar, y: _ReactiveScalar) -> PointRef:
+        """Return a scene-space point at reactive data ``(x, y)``, re-read every frame.
+
+        Like ``data_to_scene``, but ``x`` and ``y`` may be numbers, a
+        ``Parameter`` (driven by ``drive_from_samples`` or animated), a
+        ``Computed`` value or time. The point follows the values, the live
+        ``view_to`` window and the space's move, scale and rotation. A value
+        the axis cannot map, such as a negative number on a log axis, leaves
+        the point where it was.
+
+        Example:
+            rho = scene.viz.parameter(0.0).drive_from_samples(times, densities)
+            q = scene.viz.parameter(0.0).drive_from_samples(times, flows)
+            scene.geometry.dot(0.08).follow(plane.point_ref(rho, q))
+        """
+        ...
     def local_to_data(self, x: float, y: float) -> tuple[float, float]:
         """Map local coordinates to data through the view at the cursor."""
         ...
@@ -8800,8 +8863,11 @@ class Geometry:
             scene.geometry.transform_matching(source, target, mode="tex")
         """
         ...
-    def group(self, members: Sequence[Drawable]) -> Drawable:
+    def group(self, *members: Drawable | Sequence[Drawable]) -> Drawable:
         """Gather ``members`` into one drawable that moves, styles and animates as a whole.
+
+        Pass the members one by one, ``group(a, b)``, or as a sequence,
+        ``group([a, b])``; anything else raises ``TypeError``.
 
         Grouping preserves each member's authored local coordinates, including
         coordinates returned by ``add_updater_fn``. Existing visible members do
@@ -9698,8 +9764,25 @@ class Visualization:
     @property
     def time(self) -> TimeInput: ...
     def parameter(self, initial: float) -> Parameter: ...
-    def chart(self, spec: ChartSpec) -> Chart:
-        """Materialize an immutable declarative chart using batched semantic layers."""
+    def chart(
+        self,
+        spec: ChartSpec,
+        *,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+    ) -> Chart:
+        """Materialize an immutable declarative chart using batched semantic layers.
+
+        ``width`` and ``height`` set the plot area in scene units, like
+        ``cartesian_2d``; text keeps the theme's sizes, unlike ``scale_to``
+        on the finished chart. A side left out takes 72% of the frame's
+        width or 62% of its height. An arc chart's radius fits the smaller
+        side. ``chart.animate.to(...)`` keeps the size. Sides that are not
+        finite and positive raise ``ValueError``.
+
+        Example:
+            heat = scene.viz.chart(spec, width=6.0, height=2.8)
+        """
         ...
     def cartesian_2d(
         self,

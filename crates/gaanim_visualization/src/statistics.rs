@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::{Axis, AxisError, Column, CoordinateMap2D, DataError, DataTable, Scale};
 use gaanim_core::kurbo::{BezPath, Circle, Point, Rect, Shape};
 
@@ -306,7 +308,7 @@ pub fn data_mark_path(
                 .reduce(f64::max)
                 .ok_or(MarkError::Empty)?;
             let span = (maximum - minimum).max(f64::EPSILON);
-            let mut path = BezPath::new();
+            let mut cells = Vec::new();
             for ((x, y), value) in x.iter().zip(&y).zip(&value) {
                 let Some((x, y, value)) =
                     x.zip(*y).zip(*value).map(|((x, y), value)| (x, y, value))
@@ -325,13 +327,106 @@ pub fn data_mark_path(
                 if value_band != *band {
                     continue;
                 }
-                let min = map.data_to_local(x - cell_width * 0.5, y - cell_height * 0.5)?;
-                let max = map.data_to_local(x + cell_width * 0.5, y + cell_height * 0.5)?;
-                path.extend(Rect::new(min.x, min.y, max.x, max.y).to_path(0.1));
+                cells.push((x, y));
             }
-            Ok(path)
+            Ok(heatmap_band_path(map, &cells, *cell_width, *cell_height)?)
         }
     }
+}
+
+/// The region covered by heatmap cells centered on `cells`. Cells on a
+/// common grid are traced as the outline of their union: rectangles that
+/// share an edge inside one path leave a faint seam where the rasterizer's
+/// coverage of the two halves does not quite add up.
+fn heatmap_band_path(
+    map: &CoordinateMap2D,
+    cells: &[(f64, f64)],
+    width: f64,
+    height: f64,
+) -> Result<BezPath, AxisError> {
+    let mut path = BezPath::new();
+    let Some(&(x0, y0)) = cells.first() else {
+        return Ok(path);
+    };
+    let index = |value: f64, origin: f64, size: f64| {
+        let steps = (value - origin) / size;
+        let rounded = steps.round();
+        ((steps - rounded).abs() <= 1e-6 && rounded.abs() < f64::from(i32::MAX))
+            .then_some(rounded as i64)
+    };
+    let grid: Option<BTreeSet<(i64, i64)>> = cells
+        .iter()
+        .map(|&(x, y)| Some((index(x, x0, width)?, index(y, y0, height)?)))
+        .collect();
+    let Some(grid) = grid else {
+        // Off any grid: one rectangle per cell.
+        for &(x, y) in cells {
+            let min = map.data_to_local(x - width * 0.5, y - height * 0.5)?;
+            let max = map.data_to_local(x + width * 0.5, y + height * 0.5)?;
+            path.extend(Rect::new(min.x, min.y, max.x, max.y).to_path(0.1));
+        }
+        return Ok(path);
+    };
+    // The edges of each cell's boundary that no neighbor shares, all
+    // counterclockwise. Vertex (i, j) is the lower-left corner of cell (i, j).
+    let mut edges: BTreeMap<(i64, i64), Vec<(i64, i64)>> = BTreeMap::new();
+    for &(i, j) in &grid {
+        let sides = [
+            ((i, j - 1), (i, j), (i + 1, j)),
+            ((i + 1, j), (i + 1, j), (i + 1, j + 1)),
+            ((i, j + 1), (i + 1, j + 1), (i, j + 1)),
+            ((i - 1, j), (i, j + 1), (i, j)),
+        ];
+        for (neighbor, from, to) in sides {
+            if !grid.contains(&neighbor) {
+                edges.entry(from).or_default().push(to);
+            }
+        }
+    }
+    let corner = |(i, j): (i64, i64)| {
+        map.data_to_local(
+            x0 + (i as f64 - 0.5) * width,
+            y0 + (j as f64 - 0.5) * height,
+        )
+    };
+    while let Some((&start, _)) = edges.iter().next() {
+        let mut loop_ = vec![start];
+        let mut at = start;
+        while let Some(targets) = edges.get_mut(&at) {
+            let next = targets.pop().expect("edge lists are never left empty");
+            if targets.is_empty() {
+                edges.remove(&at);
+            }
+            if next == start {
+                break;
+            }
+            loop_.push(next);
+            at = next;
+        }
+        // Keep only the corners where the outline turns.
+        let count = loop_.len();
+        let turns: Vec<(i64, i64)> = (0..count)
+            .filter(|&k| {
+                let (a, b, c) = (
+                    loop_[(k + count - 1) % count],
+                    loop_[k],
+                    loop_[(k + 1) % count],
+                );
+                (b.0 - a.0) * (c.1 - b.1) != (b.1 - a.1) * (c.0 - b.0)
+            })
+            .map(|k| loop_[k])
+            .collect();
+        for (k, &vertex) in turns.iter().enumerate() {
+            let point = corner(vertex)?;
+            if k == 0 {
+                path.move_to(point);
+            } else {
+                path.line_to(point);
+            }
+        }
+        path.close_path();
+    }
+    Ok(path)
 }
 
 pub fn line_path(
@@ -749,7 +844,48 @@ mod tests {
             )
             .unwrap()
         };
-        assert_eq!(band(0).elements().len(), 2 * low.elements().len());
+        assert!((band(0).area().abs() - 2.0 * low.area().abs()).abs() < 1e-6);
         assert!(band(1).is_empty());
+    }
+
+    #[test]
+    fn heatmap_bands_outline_their_cells_without_inner_edges() {
+        let map = CoordinateMap2D::new(
+            Axis::linear(0.0, 3.0).unwrap(),
+            Axis::linear(0.0, 2.0).unwrap(),
+            PlotFrame::new(300.0, 200.0).unwrap(),
+        );
+        let mut x = Vec::new();
+        let mut y = Vec::new();
+        for column in 0..3 {
+            for row in 0..2 {
+                x.push(column as f64 + 0.5);
+                y.push(row as f64 + 0.5);
+            }
+        }
+        let table = DataTable::numeric([
+            ("x".to_owned(), x),
+            ("y".to_owned(), y),
+            ("value".to_owned(), vec![1.0; 6]),
+        ])
+        .unwrap();
+        let path = data_mark_path(
+            &map,
+            &table,
+            &DataMarkKind::HeatmapBand {
+                x: "x".to_owned(),
+                y: "y".to_owned(),
+                value: "value".to_owned(),
+                cell_width: 1.0,
+                cell_height: 1.0,
+                band: 0,
+                bands: 2,
+                scale: None,
+            },
+        )
+        .unwrap();
+        // One rectangle: a move, three lines and the close.
+        assert_eq!(path.elements().len(), 5);
+        assert!((path.area().abs() - 300.0 * 200.0).abs() < 1e-6);
     }
 }

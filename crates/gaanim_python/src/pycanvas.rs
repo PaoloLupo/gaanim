@@ -5813,8 +5813,25 @@ impl PyMediaLibrary {
 
 #[pymethods]
 impl PyGeometry {
-    fn group(&self, members: Vec<PyDrawable>) -> PyResult<PyDrawable> {
+    /// Members as a sequence, `group([a, b])`, or one by one, `group(a, b)`.
+    #[pyo3(signature = (*members))]
+    fn group(&self, members: &Bound<'_, PyTuple>) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
+        let mut flat = Vec::with_capacity(members.len());
+        for member in members.iter() {
+            if let Ok(drawable) = member.extract::<PyDrawable>() {
+                flat.push(drawable);
+            } else if let Ok(sequence) = member.extract::<Vec<PyDrawable>>() {
+                flat.extend(sequence);
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                    "group() takes drawables, group(a, b), or one sequence of them, \
+                     group([a, b]); got {}",
+                    member.get_type().name()?
+                )));
+            }
+        }
+        let members = flat;
         Ok({
             let refs: Vec<&gaanim_api::canvas::DrawableHandle> =
                 members.iter().map(|m| &m.0).collect();
