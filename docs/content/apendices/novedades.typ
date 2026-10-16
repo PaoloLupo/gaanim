@@ -13,17 +13,31 @@ instalar una versión nueva, sigue
 
 = 0.15.0
 
-Sin publicar. La paleta categórica de los gráficos se elige: el tema la fija
+Sin publicar. Los gráficos declarativos dibujan tartas y donuts con la marca
+`arc`, que se abren porción a porción al entrar y reparten sus porciones por
+clave al cambiar de datos, y la paleta categórica se elige: el tema la fija
 para toda la escena y cada campo puede tener la suya.
 
 == Gráficos
 
+- `ChartSpec.mark("arc")` dibuja una porción por fila según su parte del
+  total del canal `theta`, en el sentido del reloj desde las 12. Sus opciones
+  son `inner_radius` (un donut), `pad_angle` (la separación entre
+  porciones), `start_angle`, `radius` y `label_color`; el canal `label`
+  escribe cada fila en el centro de su porción y un campo `radius` dibuja un
+  gráfico de rosa.
+- `chart.animate.grow()` hace crecer la tarta: una manecilla gira desde el
+  ángulo inicial, cada porción se abre en su sitio cuando la manecilla la
+  cruza y su etiqueta aparece al completarse.
+- `chart.animate.to(...)` entre dos gráficos de arcos lleva cada porción a la
+  de su clave barriendo sus ángulos, en lugar de deformar su contorno; las
+  porciones que salen se cierran y las que llegan se abren.
 - `Palette` reparte colores entre categorías: una incluida por nombre
   (`gaanim`, `tableau10`, `okabe_ito`, `set2`, `dark2`, `paired`, `tab10`…),
   tus propios colores o los de un `ColorMap`, con `reversed()` y `rotate()`.
-- `Theme(palette=...)` colorea las categorías de todos los gráficos, leyendas
-  y carreras de barras, y `scene.canvas.palette()` la devuelve para tus
-  propios objetos. `Scale.category().colors(...)` acepta también una
+- `Theme(palette=...)` colorea las categorías de todos los gráficos, leyendas,
+  tartas y carreras de barras, y `scene.canvas.palette()` la devuelve para
+  tus propios objetos. `Scale.category().colors(...)` acepta también una
   `Palette` o un nombre.
 - Con más categorías que colores, la paleta vuelve a empezar algo más clara
   u oscura en cada vuelta, en lugar de repetir colores.

@@ -14,6 +14,10 @@ pub enum Channel {
     Size,
     Opacity,
     Label,
+    /// The share of the circle an `arc` slice takes.
+    Theta,
+    /// How far an `arc` slice reaches, for rose charts.
+    Radius,
 }
 
 impl Channel {
@@ -26,6 +30,8 @@ impl Channel {
             "size" => Ok(Self::Size),
             "opacity" => Ok(Self::Opacity),
             "label" => Ok(Self::Label),
+            "theta" => Ok(Self::Theta),
+            "radius" => Ok(Self::Radius),
             _ => Err(ChartError::UnknownChannel(value.to_owned())),
         }
     }
@@ -44,6 +50,8 @@ pub enum MarkKind {
     ErrorBar,
     Heatmap,
     Surface,
+    /// Pie and donut slices, one per row, sized by `theta`.
+    Arc,
 }
 
 impl MarkKind {
@@ -60,6 +68,7 @@ impl MarkKind {
             "error_bar" | "error_bars" => Ok(Self::ErrorBar),
             "heatmap" => Ok(Self::Heatmap),
             "surface" => Ok(Self::Surface),
+            "arc" => Ok(Self::Arc),
             _ => Err(ChartError::UnknownMark(value.to_owned())),
         }
     }
@@ -363,6 +372,7 @@ impl ChartSpec {
             }
             MarkKind::Heatmap => has(Channel::X) && has(Channel::Y) && has(Channel::Color),
             MarkKind::Surface => has(Channel::X) && has(Channel::Y) && has(Channel::Z),
+            MarkKind::Arc => has(Channel::Theta),
         };
         if valid {
             self.validate_mark_options()
@@ -372,9 +382,32 @@ impl ChartSpec {
     }
 
     fn validate_mark_options(&self) -> Result<(), ChartError> {
-        if self.mark.kind != MarkKind::Bar {
-            return Ok(());
+        match self.mark.kind {
+            MarkKind::Bar => self.validate_bar_options(),
+            MarkKind::Arc => self.validate_arc_options(),
+            _ => Ok(()),
         }
+    }
+
+    fn validate_arc_options(&self) -> Result<(), ChartError> {
+        for (name, value) in &self.mark.options {
+            match (name.as_str(), value) {
+                ("radius", ConstantValue::Number(value)) if value.is_finite() && *value > 0.0 => {}
+                ("inner_radius", ConstantValue::Number(value)) if (0.0..1.0).contains(value) => {}
+                ("pad_angle", ConstantValue::Number(value))
+                    if value.is_finite() && *value >= 0.0 => {}
+                ("start_angle", ConstantValue::Number(value)) if value.is_finite() => {}
+                ("label_color", ConstantValue::Color(_)) => {}
+                ("radius" | "inner_radius" | "pad_angle" | "start_angle" | "label_color", _) => {
+                    return Err(ChartError::InvalidMarkOption(name.clone()));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_bar_options(&self) -> Result<(), ChartError> {
         for (name, value) in &self.mark.options {
             match (name.as_str(), value) {
                 ("width", ConstantValue::Number(value)) if value.is_finite() && *value > 0.0 => {}
@@ -434,6 +467,106 @@ impl ChartSpec {
             },
             data,
         })
+    }
+
+    /// The slices of an `arc` chart, one per row in row order, clockwise
+    /// from `start_angle` (12 o'clock by default). Each takes its row's share
+    /// of the `theta` total; `radius` (`default_radius` when not given) is the
+    /// outer radius, `inner_radius` its fraction left empty for a donut, and
+    /// a `radius` field reaches from the inner radius to the outer one in
+    /// proportion to its value. Missing values take no share; a negative one
+    /// is an error.
+    pub fn arc_data(&self, default_radius: f64) -> Result<Vec<ArcDatum>, ChartError> {
+        self.validate()?;
+        if self.mark.kind != MarkKind::Arc {
+            return Err(ChartError::MissingRequiredEncoding(MarkKind::Arc));
+        }
+        let option = |name: &str, default: f64| match self.mark.options.get(name) {
+            Some(ConstantValue::Number(value)) if value.is_finite() => *value,
+            _ => default,
+        };
+        let outer = option("radius", default_radius);
+        let inner = outer * option("inner_radius", 0.0);
+        let pad = option("pad_angle", 0.0);
+        let start_angle = option("start_angle", std::f64::consts::FRAC_PI_2);
+        let shares = (0..self.data.len())
+            .map(|row| {
+                let value = self
+                    .numeric_value(row, Channel::Theta)?
+                    .filter(|value| value.is_finite())
+                    .unwrap_or(0.0);
+                if value < 0.0 {
+                    return Err(ChartError::NegativeTheta { row });
+                }
+                Ok(value)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let total: f64 = shares.iter().sum();
+        if total <= 0.0 {
+            return Err(ChartError::EmptyDomain(
+                self.encodings[&Channel::Theta]
+                    .column()
+                    .unwrap_or("theta")
+                    .to_owned(),
+            ));
+        }
+        let radius_axis = match self.encodings.get(&Channel::Radius) {
+            Some(
+                encoding @ Encoding::Field {
+                    scale:
+                        Some(ScaleSpec {
+                            domain: Some(_), ..
+                        }),
+                    ..
+                },
+            ) => Some(infer_axis(&self.data, encoding)?),
+            Some(Encoding::Field { column, .. }) => {
+                let maximum = self
+                    .data
+                    .numeric_column(column)?
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .filter(|value| value.is_finite())
+                    .fold(0.0, f64::max);
+                Some(Axis::linear(
+                    0.0,
+                    if maximum > 0.0 { maximum } else { 1.0 },
+                )?)
+            }
+            _ => None,
+        };
+        let mut before = 0.0;
+        let mut data = Vec::with_capacity(shares.len());
+        for (row, share) in shares.into_iter().enumerate() {
+            let after = before + share;
+            let reach = match &radius_axis {
+                Some(axis) => match self.numeric_value(row, Channel::Radius)? {
+                    Some(value) if value.is_finite() => axis.normalize(value)?.clamp(0.0, 1.0),
+                    _ => 0.0,
+                },
+                None => 1.0,
+            };
+            data.push(ArcDatum {
+                key: self.row_key(row)?,
+                source_row: row,
+                slice: gaanim_math::ArcSlice {
+                    start: start_angle - after / total * std::f64::consts::TAU,
+                    end: start_angle - before / total * std::f64::consts::TAU,
+                    inner,
+                    outer: inner + (outer - inner) * reach,
+                    pad,
+                },
+                opacity: self
+                    .numeric_value(row, Channel::Opacity)?
+                    .unwrap_or(1.0)
+                    .clamp(0.0, 1.0),
+                color: self.color_value(row)?,
+                label: self.label_value(row)?,
+            });
+            before = after;
+        }
+        Ok(data)
     }
 
     pub fn transition_to(
@@ -1098,6 +1231,17 @@ pub enum DatumKey {
     Text(String),
 }
 
+/// One slice of an `arc` chart; see [`ChartSpec::arc_data`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArcDatum {
+    pub key: Option<DatumKey>,
+    pub source_row: usize,
+    pub slice: gaanim_math::ArcSlice,
+    pub opacity: f64,
+    pub color: Option<Color>,
+    pub label: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BatchDatum {
     pub key: Option<DatumKey>,
@@ -1185,6 +1329,8 @@ pub enum ChartError {
     UnknownCategory(String),
     #[error("mark option '{0}' is invalid")]
     InvalidMarkOption(String),
+    #[error("theta at row {row} is negative; a slice takes a share of the total")]
+    NegativeTheta { row: usize },
     #[error("transition from {source_mark:?} to {target_mark:?} requires fallback='crossfade'")]
     IncompatibleTransition {
         source_mark: MarkKind,
@@ -1416,6 +1562,91 @@ mod tests {
             )
             .unwrap();
         assert_eq!(colors(&scaled)[0], Color::WHITE);
+    }
+
+    fn arc_spec(options: BTreeMap<String, ConstantValue>) -> ChartSpec {
+        let data = DataTable::new([
+            (
+                "region".to_owned(),
+                Column::Text(vec![
+                    Some("north".into()),
+                    Some("south".into()),
+                    Some("east".into()),
+                ]),
+            ),
+            (
+                "sales".to_owned(),
+                Column::Numeric(vec![Some(1.0), Some(2.0), Some(1.0)]),
+            ),
+            (
+                "reach".to_owned(),
+                Column::Numeric(vec![Some(2.0), Some(4.0), None]),
+            ),
+        ])
+        .unwrap();
+        ChartSpec::new(data, Some("region".to_owned()))
+            .unwrap()
+            .mark(MarkKind::Arc, options)
+            .encode(Channel::Theta, Encoding::field("sales"))
+            .unwrap()
+    }
+
+    #[test]
+    fn arc_slices_share_the_circle_clockwise_from_twelve() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let options = BTreeMap::from([
+            ("inner_radius".to_owned(), ConstantValue::Number(0.5)),
+            ("pad_angle".to_owned(), ConstantValue::Number(0.02)),
+        ]);
+        let slices = arc_spec(options).arc_data(2.0).unwrap();
+        assert_eq!(slices.len(), 3);
+        let first = slices[0].slice;
+        assert!((first.end - FRAC_PI_2).abs() < 1e-12);
+        assert!((first.start - 0.0).abs() < 1e-12);
+        assert!((slices[1].slice.end - first.start).abs() < 1e-12);
+        assert!((slices[1].slice.end - slices[1].slice.start - PI).abs() < 1e-12);
+        assert!((slices[2].slice.start - (FRAC_PI_2 - 2.0 * PI)).abs() < 1e-12);
+        assert_eq!((first.inner, first.outer, first.pad), (1.0, 2.0, 0.02));
+        assert_eq!(slices[1].key, Some(DatumKey::Text("south".into())));
+    }
+
+    #[test]
+    fn a_radius_field_reaches_out_from_the_inner_radius() {
+        let spec = arc_spec(BTreeMap::new())
+            .encode(Channel::Radius, Encoding::field("reach"))
+            .unwrap();
+        let outer: Vec<f64> = spec
+            .arc_data(2.0)
+            .unwrap()
+            .iter()
+            .map(|datum| datum.slice.outer)
+            .collect();
+        assert_eq!(outer, vec![1.0, 2.0, 0.0]);
+    }
+
+    #[test]
+    fn arc_charts_need_a_non_negative_theta_and_valid_options() {
+        let data = DataTable::numeric([("v".to_owned(), vec![1.0, -1.0])]).unwrap();
+        let spec = ChartSpec::new(data, None)
+            .unwrap()
+            .mark(MarkKind::Arc, BTreeMap::new());
+        assert!(matches!(
+            spec.validate(),
+            Err(ChartError::MissingRequiredEncoding(MarkKind::Arc))
+        ));
+        let spec = spec.encode(Channel::Theta, Encoding::field("v")).unwrap();
+        assert!(matches!(
+            spec.arc_data(1.0),
+            Err(ChartError::NegativeTheta { row: 1 })
+        ));
+        let donut = arc_spec(BTreeMap::from([(
+            "inner_radius".to_owned(),
+            ConstantValue::Number(1.0),
+        )]));
+        assert!(matches!(
+            donut.validate(),
+            Err(ChartError::InvalidMarkOption(name)) if name == "inner_radius"
+        ));
     }
 
     fn xy_spec(kind: MarkKind, options: BTreeMap<String, ConstantValue>) -> ChartSpec {

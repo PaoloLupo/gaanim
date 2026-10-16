@@ -12139,6 +12139,9 @@ impl SceneModel {
             }
         }
         b = b.opacity(spec.opacity).z_index(spec.z_index);
+        if let Some(mark) = &spec.arc_slice {
+            b.builder.arc_slices.insert(b.id, mark.clone());
+        }
         b.spawn_with_effects(spec.glow.clone(), spec.blur, spec.shadow.clone())
     }
 

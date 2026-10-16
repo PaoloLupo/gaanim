@@ -1,4 +1,4 @@
-"""Chart transitions: morphing between specs by key or index, new mark families, changing data and 2D to 3D.
+"""Chart transitions: morphing between specs by key or index, new mark families, changing data, 2D to 3D and arcs.
 
 ``chart.animate.to(spec)`` animates a chart into another recipe: marks
 matched by their key column (or by row index) move and reshape, the rest
@@ -170,11 +170,31 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
 scene.play([chart.animate.to(surface), scene.camera.animate.look_at(eye=(13, 10, 15), target=(0, 0, 0))], duration=MORPH)
 scene.wait(HOLD)
 
+# Between two arc charts each slice sweeps to the share of its key; a city
+# that leaves closes on its middle angle and one that arrives opens from it.
+scene.segment("arc")
+scene.camera.reset()
+TRIPS = {"city": ["Lima", "Cusco", "Arequipa", "Puno"], "visitors": [82, 61, 38, 15]}
+LATER = {"city": ["Lima", "Cusco", "Arequipa", "Iquitos"], "visitors": [112, 121, 70, 79]}
+pie = ChartSpec(TRIPS, key="city").mark("arc", inner_radius=0.5).encode(theta="visitors", color="city", label="city")
+before = label('pie = ChartSpec(TRIPS, key="city").mark("arc", inner_radius=0.5)\n    .encode(theta="visitors", color="city", label="city")')
+after = label('chart.animate.to(ChartSpec(LATER, key="city").mark("arc", inner_radius=0.5)\n    .encode(theta="visitors", color="city", label="city"))')
+chart = scene.viz.chart(pie)
+scene.play([chart.animate.grow(), before.animate.fade_in()], duration=2 * DRAW)
+scene.wait(HOLD)
+scene.play([before.animate.fade_out(), after.animate.fade_in()], duration=0.4)
+later = ChartSpec(LATER, key="city").mark("arc", inner_radius=0.5).encode(theta="visitors", color="city", label="city")
+scene.play([chart.animate.to(later)], duration=MORPH)
+scene.wait(HOLD)
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # Each segment before and after its transition, and the 3D ones halfway.
+    # Each segment before and after its transition, and the 3D ones and the
+    # arcs halfway.
     scene.snapshots(
         snapshots,
-        [STEP * index + t for index in range(7) for t in (2.2, 5.0)] + [STEP * 5 + 3.6, STEP * 6 + 3.6],
+        [STEP * index + t for index in range(7) for t in (2.2, 5.0)]
+        + [STEP * 5 + 3.6, STEP * 6 + 3.6]
+        + [STEP * 7 + t for t in (2.2, 3.6, 5.0)],
     )
 else:
     scene.render()

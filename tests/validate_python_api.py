@@ -647,6 +647,29 @@ def validate_visualization_contract(module: object) -> list[str]:
     chart = scene.viz.chart(chart_spec)
     if not isinstance(chart.drawable(), module.Drawable):
         failures.append("Scene.chart did not materialize a Drawable hierarchy")
+    try:
+        chart.animate.grow()
+    except ValueError:
+        pass
+    else:
+        failures.append("ChartAnimation.grow accepted a line chart")
+
+    shares = {"id": ["a", "b", "c"], "share": [3.0, 2.0, 1.0]}
+    pie_spec = module.ChartSpec(shares, key="id").mark("arc", inner_radius=0.5).encode(theta="share", color="id", label="id")
+    pie = scene.viz.chart(pie_spec)
+    if not isinstance(pie.animate.grow(), module.Composition):
+        failures.append("ChartAnimation.grow did not return a Composition")
+    if not isinstance(pie.layer("labels"), module.Drawable):
+        failures.append("an arc chart with a label encoding has no labels layer")
+    if not isinstance(pie.animate.to(pie_spec.encode(theta="share")), module.Anim):
+        failures.append("ChartAnimation.to between arc charts did not return Anim")
+    for invalid in ({"inner_radius": 1.0}, {"pad_angle": -0.1}):
+        try:
+            module.ChartSpec(shares).mark("arc", **invalid).encode(theta="share").validate()
+        except ValueError:
+            pass
+        else:
+            failures.append(f"arc mark accepted {invalid}")
 
     okabe = module.Palette("okabe_ito")
     if len(okabe) != 7 or okabe.name != "okabe_ito" or "tab20" not in module.Palette.names():

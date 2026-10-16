@@ -2450,6 +2450,11 @@ impl DrawableHandle {
         )
     }
 
+    /// Sweep this pie or donut slice of a chart from `from` to `to`.
+    pub(crate) fn arc_sweep(&self, from: gaanim_math::ArcSlice, to: gaanim_math::ArcSlice) -> Anim {
+        self.anim(AnimationType::ArcSweepTo { from, to })
+    }
+
     pub(crate) fn grow_from_center(&self, dur: impl OptDuration) -> Anim {
         self.anim_dur(AnimationType::GrowFromCenter, dur.into_opt())
     }

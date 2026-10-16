@@ -291,9 +291,9 @@ fn absolute_lens_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChannel>
         | PropertyLensSpec::PathPartial { .. }
         | PropertyLensSpec::PathTrim { .. }
         | PropertyLensSpec::PathRange { .. } => AbsoluteLensChannel::PathCompletion,
-        PropertyLensSpec::PathMorph { .. } | PropertyLensSpec::ArrowGrow { .. } => {
-            AbsoluteLensChannel::PathMorph
-        }
+        PropertyLensSpec::PathMorph { .. }
+        | PropertyLensSpec::ArrowGrow { .. }
+        | PropertyLensSpec::ArcSweep { .. } => AbsoluteLensChannel::PathMorph,
         PropertyLensSpec::FillDrawProgress { .. } => AbsoluteLensChannel::FillDrawProgress,
         PropertyLensSpec::FillLevel { .. } => AbsoluteLensChannel::FillLevel,
         PropertyLensSpec::MediaFrame { .. } => AbsoluteLensChannel::MediaFrame,
@@ -312,8 +312,10 @@ fn restored_future_channel(lens: &PropertyLensSpec) -> Option<AbsoluteLensChanne
         | PropertyLensSpec::PathTrim { .. }
         | PropertyLensSpec::PathRange { .. } => Some(AbsoluteLensChannel::PathCompletion),
         PropertyLensSpec::FillLevel { .. } => Some(AbsoluteLensChannel::FillLevel),
-        // A future grow keeps its arrow hidden until the clip starts.
-        PropertyLensSpec::ArrowGrow { .. } => Some(AbsoluteLensChannel::PathMorph),
+        // A future grow keeps its arrow or slice hidden until the clip starts.
+        PropertyLensSpec::ArrowGrow { .. } | PropertyLensSpec::ArcSweep { .. } => {
+            Some(AbsoluteLensChannel::PathMorph)
+        }
         PropertyLensSpec::ConnectorGrow { .. } => Some(AbsoluteLensChannel::ConnectorGrow),
         _ => None,
     }
@@ -4667,6 +4669,19 @@ fn apply_lens_spec(
                 && connector.progress != progress
             {
                 connector.progress = progress;
+            }
+        }
+        PropertyLensSpec::ArcSweep { from, to } => {
+            let swept = std::sync::Arc::new(from.interpolate(to, t).path());
+            if let Some(mut path) = world.get_mut::<Path2D>(target)
+                && *path.0 != *swept
+            {
+                path.0 = swept.clone();
+            }
+            if let Some(mut source) = world.get_mut::<gaanim_animation::PathSource>(target)
+                && *source.0 != *swept
+            {
+                source.0 = swept;
             }
         }
         PropertyLensSpec::ArrowGrow { shape, from, to } => {

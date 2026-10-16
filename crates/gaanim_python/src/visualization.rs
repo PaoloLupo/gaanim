@@ -935,7 +935,7 @@ impl PyChartSpec {
         Ok(Self(self.0.clone().mark(kind, native)))
     }
 
-    #[pyo3(signature = (*, x=None, y=None, z=None, color=None, size=None, opacity=None, label=None))]
+    #[pyo3(signature = (*, x=None, y=None, z=None, color=None, size=None, opacity=None, label=None, theta=None, radius=None))]
     #[allow(clippy::too_many_arguments)]
     fn encode(
         &self,
@@ -946,6 +946,8 @@ impl PyChartSpec {
         size: Option<Bound<'_, PyAny>>,
         opacity: Option<Bound<'_, PyAny>>,
         label: Option<Bound<'_, PyAny>>,
+        theta: Option<Bound<'_, PyAny>>,
+        radius: Option<Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let mut spec = self.0.clone();
         for (channel, value) in [
@@ -956,6 +958,8 @@ impl PyChartSpec {
             (Channel::Size, size),
             (Channel::Opacity, opacity),
             (Channel::Label, label),
+            (Channel::Theta, theta),
+            (Channel::Radius, radius),
         ] {
             if let Some(value) = value {
                 spec = spec
@@ -1921,6 +1925,17 @@ impl PyChartAnimation {
             .map(|inner| PyCanvasAnim { inner })
             .map_err(value_error)
     }
+
+    /// The entry of an arc chart: a hand turns clockwise from the start
+    /// angle and each slice opens in its place as the hand crosses it, its
+    /// label appearing as the slice completes.
+    fn grow(&self) -> PyResult<crate::composition::PyComposition> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.inner
+            .grow()
+            .map(|inner| crate::composition::PyComposition { inner })
+            .map_err(value_error)
+    }
 }
 
 impl PyChart {
@@ -1958,7 +1973,7 @@ impl PyChart {
         let missing = match name {
             "grid" => "its axes draw no grid",
             "guides" => "it has no legend or guide title; add one with ChartSpec.guides(...)",
-            "labels" => "only bar charts with a label encoding have value labels",
+            "labels" => "only bar and arc charts with a label encoding have value labels",
             _ => {
                 return Err(value_error(format!(
                     "layer must be marks, axes, grid, guides, or labels, not {name:?}"

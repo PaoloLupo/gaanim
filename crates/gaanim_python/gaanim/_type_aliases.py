@@ -97,7 +97,7 @@ TextBox: TypeAlias = Literal["line", "cap", "ink"]
 TextDirection: TypeAlias = Literal["auto", "ltr", "rtl"]
 TextContent: TypeAlias = str | TextPart | TextParts
 EncodingLike: TypeAlias = str | Field | Value
-ChartMark: TypeAlias = Literal["point", "line", "step", "area", "bar", "histogram", "box", "violin", "error_bar", "heatmap", "surface"]
+ChartMark: TypeAlias = Literal["point", "line", "step", "area", "bar", "histogram", "box", "violin", "error_bar", "heatmap", "surface", "arc"]
 
 __all__ = [
     "CurvePoint",
