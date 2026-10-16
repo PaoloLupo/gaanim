@@ -755,6 +755,28 @@ impl ChartSpec {
         }
     }
 
+    /// The scale and colors a numeric `color` field sets with
+    /// `Field(..., scale=...)`. `None` without a scale of its own, or for a
+    /// text field; the colors are empty when the scale names none.
+    pub fn color_scale(&self) -> Result<Option<(Axis, Vec<Color>)>, ChartError> {
+        let Some(
+            encoding @ Encoding::Field {
+                column,
+                scale: Some(scale),
+            },
+        ) = self.encodings.get(&Channel::Color)
+        else {
+            return Ok(None);
+        };
+        if !matches!(self.data.column(column)?, Column::Numeric(_)) {
+            return Ok(None);
+        }
+        Ok(Some((
+            infer_axis(&self.data, encoding)?,
+            scale.colors.clone(),
+        )))
+    }
+
     fn color_value(&self, row: usize) -> Result<Option<Color>, ChartError> {
         let Some(encoding) = self.encodings.get(&Channel::Color) else {
             return Ok(None);

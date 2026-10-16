@@ -953,7 +953,7 @@ points = base.mark("point").encode(x="time", y="value")
 #api-entry(
   name: "ChartSpec.mark",
   kind: "method",
-  desc: [Tipo de marca: `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`, `violin`, `error_bar`, `heatmap` o `surface`. Las opciones dependen de la marca: las barras aceptan `width` (fracción de la banda en ejes categóricos), `label_position` (`"outside"` o `"inside"`), `label_offset` y `label_color`; los puntos, `radius`.],
+  desc: [Tipo de marca: `point`, `line`, `step`, `area`, `bar`, `histogram`, `box`, `violin`, `error_bar`, `heatmap` o `surface`. Las opciones dependen de la marca: las barras aceptan `width` (fracción de la banda en ejes categóricos), `label_position` (`"outside"` o `"inside"`), `label_offset` y `label_color`; los puntos, `radius`. Las marcas rellenas (`bar`, `histogram`, `area`, `point`, `box`, `violin` y las celdas de `heatmap`) se dibujan sin borde; para trazarlo, usa `chart.layer("marks").stroke(...)`.],
 )[
 ```python
 >>>from gaanim import *
@@ -1019,7 +1019,7 @@ kind = Field("kind", scale=Scale.category(["new", "old"]).colors(["#38bdf8", "#f
 #api-entry(
   name: "Scale.colors",
   kind: "method",
-  desc: [Copia de la escala con un rango ordenado de colores: `Color`, cadenas CSS/hex o tuplas RGB(A), incluso mezclados. Colores inválidos lanzan `ValueError`.],
+  desc: [Copia de la escala con un rango ordenado de colores: `Color`, cadenas CSS/hex o tuplas RGB(A), incluso mezclados. Colores inválidos lanzan `ValueError`. En un `heatmap`, los colores y el dominio de la escala del canal `color` sustituyen a la paleta `heatmap` del tema solo en ese gráfico, y `bands=` cuantiza sobre ellos.],
   none,
 )
 

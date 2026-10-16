@@ -1479,6 +1479,7 @@ impl SceneModel {
                         chart_option_number(&spec, "cell_height", 1.0),
                     ],
                     chart_option_usize(&spec, "bands", 12),
+                    spec.color_scale()?,
                 )?,
                 MarkKind::Surface => {
                     return Err(VisualizationError::UnsupportedChartMark3D(
@@ -1494,7 +1495,10 @@ impl SceneModel {
                 MarkKind::Line | MarkKind::Step | MarkKind::ErrorBar => {
                     mark.stroke(default_color, 0.03)
                 }
-                _ => mark.fill(default_color),
+                // Filled marks carry no outline: the theme's plot stroke
+                // would draw a fixed-width border of another color around
+                // every bar, point, area or heatmap cell.
+                _ => mark.fill(default_color).no_stroke(),
             };
             Ok(mark
                 .opacity(chart_encoding_number(&spec, Channel::Opacity, 1.0).clamp(0.0, 1.0) as f32)
@@ -1577,7 +1581,7 @@ impl SceneModel {
             });
             let child = match kind {
                 MarkKind::Line | MarkKind::Step | MarkKind::ErrorBar => child.stroke(color, 0.03),
-                _ => child.fill(color),
+                _ => child.fill(color).no_stroke(),
             };
             children.push(child.opacity(opacity as f32).z_index(0));
         }
@@ -1829,6 +1833,7 @@ impl SceneModel {
             let handle = self
                 .visualization_path(path, frame.bounds(), color, 0.0, "ChartBars")
                 .fill(color)
+                .no_stroke()
                 .z_index(0);
             mark_paths.push(handle);
         }
@@ -4434,6 +4439,7 @@ impl SceneModel {
         value: impl Into<String>,
         cell_size: [f64; 2],
         bands: usize,
+        color_scale: Option<(Axis, Vec<Color>)>,
     ) -> Result<DrawableHandle, VisualizationError> {
         if bands < 2
             || !cell_size[0].is_finite()
@@ -4446,6 +4452,7 @@ impl SceneModel {
         let x = x.into();
         let y = y.into();
         let value = value.into();
+        let (scale, scale_colors) = color_scale.unzip();
         let mut handles = Vec::with_capacity(bands);
         for band in 0..bands {
             let kind = gaanim_visualization::DataMarkKind::HeatmapBand {
@@ -4456,6 +4463,7 @@ impl SceneModel {
                 cell_height: cell_size[1],
                 band,
                 bands,
+                scale: scale.clone().map(Box::new),
             };
             gaanim_visualization::data_mark_path(&space.map, &source.snapshot(), &kind).map_err(
                 |error| match error {
@@ -4465,11 +4473,16 @@ impl SceneModel {
                 },
             )?;
             let progress = band as f64 / (bands - 1) as f64;
-            let palette = self
-                .theme_style
-                .as_ref()
-                .map(|theme| theme.heatmap.as_slice())
-                .filter(|palette| palette.len() >= 2);
+            // The colors of the field's own scale, else the theme's.
+            let palette = scale_colors
+                .as_deref()
+                .filter(|colors| !colors.is_empty())
+                .or_else(|| {
+                    self.theme_style
+                        .as_ref()
+                        .map(|theme| theme.heatmap.as_slice())
+                        .filter(|palette| palette.len() >= 2)
+                });
             let color = if let Some(palette) = palette {
                 let scaled = progress * (palette.len() - 1) as f64;
                 let index = scaled.floor() as usize;
@@ -4499,7 +4512,8 @@ impl SceneModel {
                     source: source.clone(),
                     kind,
                 })
-                .fill(color),
+                .fill(color)
+                .no_stroke(),
             );
         }
         let refs: Vec<&DrawableHandle> = handles.iter().collect();

@@ -6639,6 +6639,9 @@ class Scale:
 
         Entries accept Color, CSS/hex strings, and RGB/RGBA byte tuples.
         Mixed representations are allowed; invalid colors raise ValueError.
+        On a heatmap's ``color`` field, the scale's colors and domain replace
+        the theme's ``heatmap`` palette for that chart, and ``bands=``
+        quantizes over them.
         """
         ...
 
