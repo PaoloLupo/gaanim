@@ -146,7 +146,8 @@ fn parse_sampled_property(value: &str) -> PyResult<gaanim_animation::SampledProp
         "opacity" => Ok(gaanim_animation::SampledProperty::Opacity),
         "signal" => Ok(gaanim_animation::SampledProperty::Signal),
         _ => Err(PyValueError::new_err(
-            "property must be one of 'x', 'y', 'z', 'rotation', 'scale', 'opacity', 'signal'",
+            "property must be one of 'x', 'y', 'xy', 'z', 'rotation', 'scale', 'opacity', \
+             'signal', 'fill'",
         )),
     }
 }
@@ -2948,6 +2949,7 @@ impl PyDrawable {
         Ok(self.clone())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn drive_from_samples_impl(
         &self,
         times: Vec<f64>,
@@ -2956,6 +2958,8 @@ impl PyDrawable {
         interpolation: &str,
         scale: f64,
         offset: f64,
+        colors: Option<Vec<PyColor>>,
+        domain: Option<(f64, f64)>,
     ) -> PyResult<Self> {
         use gaanim_animation::{SampledProperty, SampledSeriesDriver};
 
@@ -2967,6 +2971,38 @@ impl PyDrawable {
                  and non-decreasing times",
             )
         };
+        if property == "fill" {
+            let colors = colors.filter(|colors| colors.len() >= 2).ok_or_else(|| {
+                PyValueError::new_err("property 'fill' requires colors= with at least two colors")
+            })?;
+            if domain
+                .is_some_and(|(low, high)| !low.is_finite() || !high.is_finite() || low >= high)
+            {
+                return Err(PyValueError::new_err(
+                    "domain must be two finite numbers with low < high",
+                ));
+            }
+            let values = values
+                .extract::<Vec<f64>>()
+                .map_err(|_| PyValueError::new_err("values must be a sequence of numbers"))?;
+            self.0
+                .drive_fill_from_samples(
+                    times,
+                    values,
+                    colors.into_iter().map(|color| color.0).collect(),
+                    domain,
+                    interpolation,
+                    scale,
+                    offset,
+                )
+                .map_err(|_| invalid())?;
+            return Ok(self.clone());
+        }
+        if colors.is_some() || domain.is_some() {
+            return Err(PyValueError::new_err(
+                "colors= and domain= apply only to property 'fill'",
+            ));
+        }
         // "xy" drives both translation axes from (x, y) pairs as two
         // independent channels.
         let channels = if property == "xy" {
@@ -4037,8 +4073,10 @@ impl PyDrawable {
     /// per-frame Python callbacks, and exact under seeks and paused scrubbing.
     ///
     /// `property` selects the driven channel: `"x"`, `"y"`, `"z"`,
-    /// `"rotation"` (Z radians), `"scale"` (uniform), `"opacity"`, or
-    /// `"signal"` (the entity's float signal, composable with expressions).
+    /// `"rotation"` (Z radians), `"scale"` (uniform), `"opacity"`,
+    /// `"signal"` (the entity's float signal, composable with expressions),
+    /// or `"fill"`, which reads the value in `domain` (the series' range by
+    /// default) and picks a color among `colors`.
     /// Translation axes and rotation are relative to the authored pose:
     /// `base + offset + scale * sample`. Scale, opacity, and signal are
     /// absolute: `offset + scale * sample`. Samples outside the series are
@@ -4050,7 +4088,8 @@ impl PyDrawable {
     /// times = [i * 0.02 for i in range(len(accel))]
     /// building.drive_from_samples(times, accel, "x", scale=520.0)
     /// ```
-    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0))]
+    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0, colors = None, domain = None))]
+    #[allow(clippy::too_many_arguments)]
     fn drive_from_samples<'py>(
         slf: &Bound<'py, Self>,
         times: Vec<f64>,
@@ -4059,6 +4098,8 @@ impl PyDrawable {
         interpolation: &str,
         scale: f64,
         offset: f64,
+        colors: Option<Vec<PyColor>>,
+        domain: Option<(f64, f64)>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().drive_from_samples_impl(
             times,
@@ -4067,6 +4108,8 @@ impl PyDrawable {
             interpolation,
             scale,
             offset,
+            colors,
+            domain,
         );
         same_drawable(slf, result)
     }
@@ -4445,14 +4488,17 @@ macro_rules! media_drawable_methods {
         PyDrawable(slf.handle()).add_updater_fn_impl(callback, reset, fixed_dt)?;
         Ok(slf)
     }
-    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0))]
+    #[pyo3(signature = (times, values, property = "x", *, interpolation = "linear", scale = 1.0, offset = 0.0, colors = None, domain = None))]
+    #[allow(clippy::too_many_arguments)]
     fn drive_from_samples<'py>(slf: PyRef<'py, Self>, times: Vec<f64>,
         values: Bound<'py, PyAny>,
         property: &str,
         interpolation: &str,
         scale: f64,
-        offset: f64,) -> PyResult<PyRef<'py, Self>> {
-        PyDrawable(slf.handle()).drive_from_samples_impl(times, &values, property, interpolation, scale, offset)?;
+        offset: f64,
+        colors: Option<Vec<PyColor>>,
+        domain: Option<(f64, f64)>,) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).drive_from_samples_impl(times, &values, property, interpolation, scale, offset, colors, domain)?;
         Ok(slf)
     }
     #[pyo3(signature = (source, *, offset=(0.0, 0.0), offset_space="world", delay=0.0))]

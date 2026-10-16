@@ -2393,12 +2393,14 @@ scene.render()
 #api-entry(
   name: "Drawable.drive_from_samples",
   kind: "method",
-  signature: "drive_from_samples(times, values, property=\"x\", *, interpolation=\"linear\", scale=1.0, offset=0.0) -> Drawable",
+  signature: "drive_from_samples(times, values, property=\"x\", *, interpolation=\"linear\", scale=1.0, offset=0.0, colors=None, domain=None) -> Drawable",
   params: (
     (name: "times, values", type: "Sequence[float] | Sequence[tuple[float, float]]", default: none, desc: [Series de igual longitud; los tiempos deben ser finitos y no decrecientes. Con `"xy"`, los valores son parejas `(x, y)`.]),
-    (name: "property", type: "\"x\" | \"y\" | \"xy\" | \"z\" | \"rotation\" | \"scale\" | \"opacity\" | \"signal\"", default: "\"x\"", desc: [Canal que se mueve. `"xy"` mueve los dos ejes de traslación como canales `"x"` e `"y"`.]),
+    (name: "property", type: "\"x\" | \"y\" | \"xy\" | \"z\" | \"rotation\" | \"scale\" | \"opacity\" | \"signal\" | \"fill\"", default: "\"x\"", desc: [Canal que se mueve. `"xy"` mueve los dos ejes de traslación como canales `"x"` e `"y"`. `"fill"` colorea el relleno del objeto y de los miembros de un grupo que lo tengan.]),
     (name: "interpolation", type: "\"linear\" | \"step\"", default: "\"linear\"", desc: [Interpolación entre muestras.]),
     (name: "scale, offset", type: "float", default: "1.0, 0.0", desc: [Transformación aplicada a cada muestra.]),
+    (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Solo con `"fill"`, y obligatorio: al menos dos colores, repartidos por igual sobre `domain`.]),
+    (name: "domain", type: "tuple[float, float] | None", default: "None", desc: [Solo con `"fill"`: valores que corresponden al primer y al último color, tras `scale` y `offset`. Por defecto, el rango de la serie. Fuera de él se usa el color del extremo.]),
   ),
   returns: (type: "Drawable", desc: [El mismo objeto.]),
   desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`); `scale`, `opacity` y `signal` son absolutos. Fuera de la serie se mantiene la primera o la última muestra. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Cada canal es independiente; volver a mover el mismo canal lo reemplaza. `remove_updater()` lo quita. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],

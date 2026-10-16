@@ -232,6 +232,19 @@ Los tiempos son relativos al cursor en el que haces la llamada. Un `Parameter`
 también tiene `drive_from_samples`, y todo lo que dependa de él seguirá la
 serie.
 
+Para colorear un objeto según una serie, por ejemplo la velocidad de cada auto
+de una simulación, usa la propiedad `"fill"` con `colors=`. El valor se lee en
+`domain` (por defecto, el rango de la serie) y elige un color entre ellos:
+
+```python
+>>>from gaanim import Scene
+>>>scene = Scene(frame=(16, 9), background="#0f172a")
+car = scene.geometry.rounded_rect(1.2, 0.6, 0.1)
+times = [0.0, 1.0, 2.0, 3.0]
+speed = [30.0, 12.0, 2.0, 25.0]
+car.drive_from_samples(times, speed, "fill", colors=["#ef4444", "#facc15", "#22c55e"], domain=(0, 30))
+```
+
 = Simulaciones con estado
 
 Algunas simulaciones, como una pelota que cae y rebota, acumulan estado de un

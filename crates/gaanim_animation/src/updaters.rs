@@ -1164,6 +1164,29 @@ pub enum SampledProperty {
     UniformScale,
     Opacity,
     Signal,
+    /// Relleno: el valor elige un color de la rampa de `SampledColors`.
+    Fill,
+}
+
+/// Rampa de un canal `Fill`: el valor muestreado se lee en `domain` y elige
+/// un color de `ramp`, con clamp a sus extremos.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SampledColors {
+    pub ramp: crate::falloff::ColorRamp,
+    pub domain: (f64, f64),
+}
+
+impl SampledColors {
+    /// Color del valor `value`. Un dominio sin anchura da el primer color.
+    pub fn at(&self, value: f64) -> gaanim_core::peniko::Color {
+        let (low, high) = self.domain;
+        let t = if high > low {
+            (value - low) / (high - low)
+        } else {
+            0.0
+        };
+        self.ramp.at(t)
+    }
 }
 
 /// Interpolación entre muestras consecutivas de una serie muestreada.
@@ -1211,6 +1234,8 @@ pub struct SampledSeriesDriver {
     pub stop_at: Option<f64>,
     /// Valor base capturado en la primera evaluación (propiedades relativas).
     pub base: Option<f64>,
+    /// Rampa de colores del canal `Fill`.
+    pub colors: Option<SampledColors>,
 }
 
 impl std::fmt::Debug for SampledSeriesDriver {
@@ -1224,7 +1249,8 @@ impl std::fmt::Debug for SampledSeriesDriver {
             .field("offset", &self.offset)
             .field("start_at", &self.start_at)
             .field("stop_at", &self.stop_at)
-            .field("base", &self.base);
+            .field("base", &self.base)
+            .field("colors", &self.colors);
         if gaanim_core::fingerprint::identity_debug() {
             debug
                 .field("times", &self.times)
@@ -1270,7 +1296,37 @@ impl SampledSeriesDriver {
             start_at: 0.0,
             stop_at: None,
             base: None,
+            colors: None,
         })
+    }
+
+    /// Da al driver la rampa de su canal `Fill`: el valor
+    /// `offset + scale * muestra` se lee en `domain` (por defecto, el rango
+    /// de la serie) y elige un color de `colors`.
+    pub fn with_colors(
+        mut self,
+        colors: Vec<gaanim_core::peniko::Color>,
+        domain: Option<(f64, f64)>,
+    ) -> Result<Self, InvalidSampledSeries> {
+        if colors.is_empty() {
+            return Err(InvalidSampledSeries);
+        }
+        let domain = match domain {
+            Some((low, high)) if low.is_finite() && high.is_finite() && low < high => (low, high),
+            Some(_) => return Err(InvalidSampledSeries),
+            None => self
+                .values
+                .iter()
+                .map(|value| self.offset + self.scale * value)
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| {
+                    (low.min(value), high.max(value))
+                }),
+        };
+        self.colors = Some(SampledColors {
+            ramp: crate::falloff::ColorRamp(colors),
+            domain,
+        });
+        Ok(self)
     }
 
     /// Desplaza el inicio del driver a un instante absoluto de la timeline.
@@ -2805,7 +2861,12 @@ pub fn sampled_series_system(world: &mut World) {
         .map(|state| state.current_time)
         .unwrap_or(0.0);
 
-    let mut updates: Vec<(Entity, SampledProperty, f64)> = Vec::new();
+    let mut updates: Vec<(
+        Entity,
+        SampledProperty,
+        f64,
+        Option<gaanim_core::peniko::Color>,
+    )> = Vec::new();
     let mut new_bases: Vec<(Entity, usize, f64)> = Vec::new();
     {
         let mut query = world.query::<(Entity, &SampledSeriesDrivers)>();
@@ -2857,7 +2918,8 @@ pub fn sampled_series_system(world: &mut World) {
                 } else {
                     driver.offset + driver.scale * sampled
                 };
-                updates.push((entity, driver.property, output));
+                let color = driver.colors.as_ref().map(|colors| colors.at(output));
+                updates.push((entity, driver.property, output, color));
             }
         }
     }
@@ -2870,7 +2932,7 @@ pub fn sampled_series_system(world: &mut World) {
         }
     }
 
-    for (entity, property, output) in updates {
+    for (entity, property, output, color) in updates {
         match property {
             SampledProperty::TranslateX => {
                 if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
@@ -2907,7 +2969,30 @@ pub fn sampled_series_system(world: &mut World) {
                     signal.value = output;
                 }
             }
+            SampledProperty::Fill => {
+                if let Some(color) = color {
+                    set_sampled_fill(world, entity, color);
+                }
+            }
         }
+    }
+}
+
+/// Pinta `color` en la entidad y en sus descendientes que tienen relleno, de
+/// modo que un grupo se colorea entero.
+fn set_sampled_fill(world: &mut World, entity: Entity, color: gaanim_core::peniko::Color) {
+    let brush = gaanim_core::peniko::Brush::Solid(color);
+    if let Some(mut fill) = world.get_mut::<gaanim_scene::FillBrush>(entity)
+        && fill.0.as_ref().is_some_and(|current| *current != brush)
+    {
+        fill.0 = Some(brush);
+    }
+    let children: Vec<Entity> = world
+        .get::<Children>(entity)
+        .map(|children| children.to_vec())
+        .unwrap_or_default();
+    for child in children {
+        set_sampled_fill(world, child, color);
     }
 }
 
@@ -4373,5 +4458,63 @@ mod tests {
         assert!((rotation.to_scaled_axis().z - 1.5).abs() < 1e-12);
         // La opacidad se clampea a [0, 1] aunque la serie la cruce.
         assert_eq!(world.get::<gaanim_scene::Opacity>(faded).unwrap().0, 0.0);
+    }
+
+    #[test]
+    fn a_fill_series_colors_a_group_through_its_ramp() {
+        use gaanim_core::peniko::{Brush, Color};
+        let mut world = World::new();
+        world.insert_resource(PlaybackState::default());
+        let red = Color::from_rgb8(255, 0, 0);
+        let green = Color::from_rgb8(0, 255, 0);
+        let solid = |color| gaanim_scene::FillBrush(Some(Brush::Solid(color)));
+        let child = world.spawn(solid(Color::BLACK)).id();
+        let unfilled = world.spawn(gaanim_scene::FillBrush(None)).id();
+        let group = world
+            .spawn(SampledSeriesDrivers::from(
+                SampledSeriesDriver::new(
+                    vec![0.0, 2.0],
+                    vec![0.0, 20.0],
+                    SampledProperty::Fill,
+                    SampledInterpolation::Linear,
+                    1.0,
+                    0.0,
+                )
+                .unwrap()
+                .with_colors(vec![red, green], None)
+                .unwrap(),
+            ))
+            .id();
+        world.entity_mut(child).insert(ChildOf(group));
+        world.entity_mut(unfilled).insert(ChildOf(group));
+        let fill = |world: &World, entity| {
+            world
+                .get::<gaanim_scene::FillBrush>(entity)
+                .unwrap()
+                .0
+                .clone()
+        };
+
+        world.resource_mut::<PlaybackState>().current_time = 2.0;
+        sampled_series_system(&mut world);
+        assert_eq!(fill(&world, child), Some(Brush::Solid(green)));
+        // Un hijo sin relleno sigue sin él.
+        assert_eq!(fill(&world, unfilled), None);
+
+        world.resource_mut::<PlaybackState>().current_time = 0.0;
+        sampled_series_system(&mut world);
+        assert_eq!(fill(&world, child), Some(Brush::Solid(red)));
+
+        let invalid = SampledSeriesDriver::new(
+            vec![0.0],
+            vec![1.0],
+            SampledProperty::Fill,
+            SampledInterpolation::Linear,
+            1.0,
+            0.0,
+        )
+        .unwrap();
+        assert!(invalid.clone().with_colors(Vec::new(), None).is_err());
+        assert!(invalid.with_colors(vec![red], Some((1.0, 1.0))).is_err());
     }
 }

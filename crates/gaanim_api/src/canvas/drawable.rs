@@ -2800,6 +2800,43 @@ impl DrawableHandle {
         Ok(self.clone())
     }
 
+    /// Color the fill of this drawable, and of its members with a fill, from
+    /// a sampled `(times, values)` series, evaluated natively like
+    /// [`drive_from_samples`](Self::drive_from_samples). The value
+    /// `offset + scale * sample` is read in `domain` (the series' range when
+    /// `None`) and picks a color among `colors`, evenly spaced.
+    #[allow(clippy::too_many_arguments)]
+    pub fn drive_fill_from_samples(
+        &self,
+        times: Vec<f64>,
+        values: Vec<f64>,
+        colors: Vec<Color>,
+        domain: Option<(f64, f64)>,
+        interpolation: SampledInterpolation,
+        scale: f64,
+        offset: f64,
+    ) -> Result<Self, InvalidSampledSeries> {
+        let driver = SampledSeriesDriver::new(
+            times,
+            values,
+            SampledProperty::Fill,
+            interpolation,
+            scale,
+            offset,
+        )?
+        .with_colors(colors, domain)?;
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachSampledSeries {
+                target: self.id,
+                driver,
+            });
+        Ok(self.clone())
+    }
+
     /// Copy the source entity's position on specified axes each frame.
     pub fn bind_position_from(&self, source: &DrawableHandle, axes: AxisMask) {
         self.defer_visibility_until_play();
