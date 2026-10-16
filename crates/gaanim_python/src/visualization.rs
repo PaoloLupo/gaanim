@@ -802,11 +802,11 @@ impl PyScale {
             .map_err(value_error)
     }
 
-    fn colors(&self, colors: Vec<PyColor>) -> Self {
+    fn colors(&self, colors: crate::color::PyPaletteArg) -> Self {
         Self(
             self.0
                 .clone()
-                .colors(colors.into_iter().map(|color| color.0)),
+                .colors(colors.0.base_colors().iter().copied()),
         )
     }
 }

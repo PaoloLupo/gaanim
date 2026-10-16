@@ -20,6 +20,7 @@ from .gaanim_core import (
     Direction,
     Drawable,
     Field,
+    Palette,
     PointRef,
     TextPart,
     TextParts,
@@ -72,6 +73,7 @@ ThemeName: TypeAlias = Literal[
 ]
 ColorLike: TypeAlias = Color | str | tuple[int, int, int] | tuple[int, int, int, int]
 ColorMapLike: TypeAlias = ColorMap | str
+PaletteLike: TypeAlias = Palette | str | Sequence[ColorLike]
 Paint: TypeAlias = ColorLike | Brush
 BackgroundLike: TypeAlias = Paint | Background
 Length: TypeAlias = float | str
@@ -105,6 +107,7 @@ __all__ = [
     "ThemeName",
     "ColorLike",
     "ColorMapLike",
+    "PaletteLike",
     "Paint",
     "BackgroundLike",
     "Length",

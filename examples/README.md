@@ -241,7 +241,7 @@ Axes, plots, charts, vector fields and live readouts.
 | [Coordinate spaces](visualization/coordinate_spaces.py) | Cartesian, polar and complex planes, number lines, grids and numbers, coordinates that place objects and animated views. |
 | [Plots](visualization/plots.py) | Function, parametric and implicit curves, log axes, Riemann sums and other calculus constructions, and curves that follow parameters. |
 | [Chart marks](visualization/chart_marks.py) | Every chart mark: points, lines, steps, areas, bars, histograms, box plots, violins, error bars and heatmaps. |
-| [Chart encodings](visualization/chart_encodings.py) | Color, size, opacity and label channels, scales, legends and color bars, and explicit axes. |
+| [Chart encodings](visualization/chart_encodings.py) | Color, size, opacity and label channels, scales, categorical palettes, legends and color bars, and explicit axes. |
 | [Chart transitions](visualization/chart_transitions.py) | Charts that morph between specs by key or index, change mark family or data, and grow from 2D into 3D. |
 | [Bar race](visualization/bar_race.py) | Ranked bars that grow, overtake each other and leave the top, with value formats, colors and a rolling ticker. |
 | [Vector fields](visualization/vector_fields.py) | Vector fields as arrows and streamlines with their options, flowing highlights, particles, advection and color maps. |

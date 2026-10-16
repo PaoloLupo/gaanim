@@ -550,7 +550,7 @@ description = "Every chart mark: points, lines, steps, areas, bars, histograms, 
 
 [[example]]
 path = "visualization/chart_encodings.py"
-description = "Color, size, opacity and label channels, scales, legends and color bars, and explicit axes."
+description = "Color, size, opacity and label channels, scales, categorical palettes, legends and color bars, and explicit axes."
 
 [[example]]
 path = "visualization/chart_transitions.py"

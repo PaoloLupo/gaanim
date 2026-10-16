@@ -648,6 +648,28 @@ def validate_visualization_contract(module: object) -> list[str]:
     if not isinstance(chart.drawable(), module.Drawable):
         failures.append("Scene.chart did not materialize a Drawable hierarchy")
 
+    okabe = module.Palette("okabe_ito")
+    if len(okabe) != 7 or okabe.name != "okabe_ito" or "tab20" not in module.Palette.names():
+        failures.append("Palette did not resolve the built-in okabe_ito palette")
+    if len({repr(color) for color in okabe.colors(21)}) != 21:
+        failures.append("Palette repeated a color past its last one")
+    if repr(okabe.rotate(1)[0]) != repr(okabe[1]) or repr(okabe.reversed()[0]) != repr(okabe[6]):
+        failures.append("Palette.rotate or Palette.reversed reordered the colors wrongly")
+    if len(module.Palette.from_colormap("viridis", 4)) != 4:
+        failures.append("Palette.from_colormap did not take its count of colors")
+    for invalid in ("no-such-palette", []):
+        try:
+            module.Palette(invalid)
+        except ValueError:
+            pass
+        else:
+            failures.append(f"Palette accepted {invalid!r}")
+    if not isinstance(scene.canvas.palette(), module.Palette):
+        failures.append("Canvas.palette did not return a Palette")
+    module.Scale.category().colors("dark2")
+    module.Scale.category().colors(okabe)
+    module.Theme("gaanim", palette="tableau10")
+
     coordinate = space.coord(1.0, 2.0)
     coordinate.place(scene.geometry.dot(3.0))
     local = space.data_to_local(1.0, 2.0)

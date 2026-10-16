@@ -8,8 +8,10 @@ pub use thiserror::Error;
 pub mod color;
 pub mod colormap;
 pub mod console;
+pub mod palette;
 pub use color::{interpolate_color, interpolate_rgba8};
 pub use colormap::{ColorMap, ColorMapError};
+pub use palette::{Palette, PaletteError};
 
 pub mod fingerprint;
 pub mod id;

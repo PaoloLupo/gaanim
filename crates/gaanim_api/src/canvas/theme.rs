@@ -214,8 +214,11 @@ pub struct CanvasTheme {
     pub colors: HashMap<String, Color>,
     /// Family, exact-type, part, and class selector rules.
     pub styles: HashMap<String, ThemeStyle>,
-    /// Ordered categorical colors used by charts.
+    /// Series colors: the first colors a chart without a `color` encoding.
     pub series: Vec<Color>,
+    /// Categorical colors of charts, legends and bar races, handed to
+    /// categories in turn.
+    pub categorical: gaanim_core::Palette,
     /// Ordered continuous colors used by heatmaps.
     pub heatmap: Vec<Color>,
     pub fonts: Vec<ThemeFont>,
@@ -511,6 +514,7 @@ impl CanvasTheme {
             colors: HashMap::new(),
             styles: HashMap::new(),
             series: vec![palette.chart, palette.accent, palette.title, palette.muted],
+            categorical: gaanim_core::Palette::default(),
             heatmap: vec![palette.background, palette.chart, palette.accent],
             fonts: Vec::new(),
             layout: LayoutTokens::default(),

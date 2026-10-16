@@ -1202,6 +1202,14 @@ impl SceneModel {
     /// Materialize an immutable declarative chart into stable semantic layers.
     pub fn chart(&mut self, spec: ChartSpec) -> Result<ChartHandle, VisualizationError> {
         spec.validate()?;
+        // A spec without its own palette takes the theme's.
+        let spec = match spec.palette_spec() {
+            Some(_) => spec,
+            None => {
+                let palette = self.categorical_palette();
+                spec.palette(palette)
+            }
+        };
         let mut axes = spec.resolved_axes()?;
         if spec.mark_spec().kind == MarkKind::Histogram && !axes.contains_key(&Channel::Y) {
             let column =

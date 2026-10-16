@@ -117,6 +117,12 @@ impl ColorMap {
         self.categorical
     }
 
+    /// The colors the map is defined by, in order: each category's color for
+    /// a categorical map.
+    pub fn stop_colors(&self) -> Vec<Color> {
+        self.stops.iter().map(|stop| stop.color).collect()
+    }
+
     pub fn sample(&self, position: f64) -> Result<Color, ColorMapError> {
         if !position.is_finite() {
             return Err(ColorMapError::InvalidSample);

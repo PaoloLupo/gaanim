@@ -767,7 +767,7 @@ fotograma clave, así que un seek muestra lo mismo que la reproducción continua
     (name: "value_format", type: "str", default: "\"{:,.0f}\"", desc: [Campo de formato de Python con texto opcional alrededor: `"{}"`, `"{:,.0f}"`, `"{:_.2f}"` o `"${:,.1f} M"`, hasta 6 decimales.]),
     (name: "width / height", type: "float", default: "10.0 / 6.0", desc: [Tamaño de toda la carrera, centrada en su origen, en unidades de escena.]),
     (name: "label_width / bar_gap", type: "float | None / float", default: "None / 0.18", desc: [Ancho de la columna de nombres (por defecto el 22% de `width`) y fracción vacía de cada puesto. Un nombre más ancho que la columna se dibuja más pequeño, hasta que cabe.]),
-    (name: "colors", type: "Mapping[str, Color] | Sequence[Color] | None", default: "None", desc: [Colores por nombre o una lista que se repite; el resto usa una paleta categórica de diez colores.]),
+    (name: "colors", type: "Mapping[str, Color] | Sequence[Color] | None", default: "None", desc: [Colores por nombre o una lista que vuelve a empezar como una paleta; el resto toma la paleta del tema (`Theme(palette=...)`).]),
     (name: "label_color / font_size", type: "Color | None / float | None", default: "None / None", desc: [Color y tamaño de nombres y valores; por defecto el color de texto del tema y el 55% del grosor de la barra, sin pasar del 12% de `height` para que las carreras de pocos puestos sigan legibles.]),
     (name: "ticker / ticker_size / ticker_color", type: "bool / float | None / Color | None", default: "True / None / None", desc: [Etiqueta del fotograma clave abajo a la derecha, por defecto al 15% de `height` y con el color atenuado del tema.]),
   ),
@@ -1019,7 +1019,7 @@ kind = Field("kind", scale=Scale.category(["new", "old"]).colors(["#38bdf8", "#f
 #api-entry(
   name: "Scale.colors",
   kind: "method",
-  desc: [Copia de la escala con un rango ordenado de colores: `Color`, cadenas CSS/hex o tuplas RGB(A), incluso mezclados. Colores inválidos lanzan `ValueError`. En un `heatmap`, los colores y el dominio de la escala del canal `color` sustituyen a la paleta `heatmap` del tema solo en ese gráfico, y `bands=` cuantiza sobre ellos.],
+  desc: [Copia de la escala con un rango ordenado de colores: una `Palette`, el nombre de una paleta (`"okabe_ito"`) o colores (`Color`, cadenas CSS/hex o tuplas RGB(A), incluso mezclados). Colores inválidos, nombres desconocidos o una lista vacía lanzan `ValueError`. En un campo de texto, los colores se reparten entre las categorías por turno y vuelven a empezar como una paleta; sin ellos, las categorías toman la paleta del tema. En un campo numérico forman una rampa. En un `heatmap`, los colores y el dominio de la escala del canal `color` sustituyen a la paleta `heatmap` del tema solo en ese gráfico, y `bands=` cuantiza sobre ellos.],
   none,
 )
 

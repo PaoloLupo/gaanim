@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use gaanim_core::Palette;
 use gaanim_core::peniko::Color;
 
 use crate::{Axis, Column, Crossing, DataError, DataTable, Scale};
@@ -252,6 +253,9 @@ pub struct ChartSpec {
     encodings: BTreeMap<Channel, Encoding>,
     axes: BTreeMap<Channel, Axis>,
     guides: BTreeMap<Channel, GuideSpec>,
+    /// Colors of the categories of a text `color` field whose scale names
+    /// none; the `gaanim` palette when unset.
+    palette: Option<Palette>,
 }
 
 impl ChartSpec {
@@ -263,6 +267,7 @@ impl ChartSpec {
             encodings: BTreeMap::new(),
             axes: BTreeMap::new(),
             guides: BTreeMap::new(),
+            palette: None,
         };
         spec.validate_key()?;
         Ok(spec)
@@ -309,6 +314,27 @@ impl ChartSpec {
         }
         self.axes.insert(channel, axis);
         Ok(self)
+    }
+
+    /// The palette that colors the categories of a text `color` field
+    /// whose scale names no colors; a scene charts with its theme's.
+    pub fn palette(mut self, palette: Palette) -> Self {
+        self.palette = Some(palette);
+        self
+    }
+
+    /// The palette of [`Self::palette`], if one was given.
+    pub fn palette_spec(&self) -> Option<&Palette> {
+        self.palette.as_ref()
+    }
+
+    /// The colors of categories: the scale's, else the chart's palette.
+    fn category_palette(&self, scale: Option<&ScaleSpec>) -> Palette {
+        scale
+            .map(|scale| scale.colors.clone())
+            .and_then(|colors| Palette::new(colors).ok())
+            .or_else(|| self.palette.clone())
+            .unwrap_or_default()
     }
 
     pub fn guide(mut self, channel: Channel, guide: GuideSpec) -> Self {
@@ -796,8 +822,7 @@ impl ChartSpec {
                         .iter()
                         .position(|candidate| candidate == &value)
                         .ok_or_else(|| ChartError::UnknownCategory(value.clone()))?;
-                    let colors = color_palette(scale.as_ref());
-                    Ok(Some(colors[index % colors.len()]))
+                    Ok(Some(self.category_palette(scale.as_ref()).color(index)))
                 }
                 Some(crate::DataValue::Missing) | None => Ok(None),
             },
@@ -822,12 +847,12 @@ impl ChartSpec {
             return Ok(None);
         }
         let categories = categorical_values(&self.data, column, scale.as_ref())?;
-        let colors = color_palette(scale.as_ref());
+        let palette = self.category_palette(scale.as_ref());
         Ok(Some(
             categories
                 .into_iter()
                 .enumerate()
-                .map(|(index, category)| (category, colors[index % colors.len()]))
+                .map(|(index, category)| (category, palette.color(index)))
                 .collect(),
         ))
     }
@@ -899,7 +924,9 @@ fn categorical_values(
     Ok(categories)
 }
 
-fn color_palette(scale: Option<&ScaleSpec>) -> Vec<Color> {
+/// Colors a numeric `color` field runs through: the scale's, else a ramp
+/// through the first colors of the `gaanim` palette.
+fn color_ramp(scale: Option<&ScaleSpec>) -> Vec<Color> {
     let configured = scale
         .map(|scale| scale.colors.as_slice())
         .unwrap_or_default();
@@ -916,7 +943,7 @@ fn color_palette(scale: Option<&ScaleSpec>) -> Vec<Color> {
 }
 
 fn interpolate_palette(scale: Option<&ScaleSpec>, t: f64) -> Color {
-    let colors = color_palette(scale);
+    let colors = color_ramp(scale);
     if colors.len() == 1 {
         return colors[0];
     }
@@ -1333,6 +1360,62 @@ mod tests {
         assert!(x_max > 2.4, "the last bar needs symmetric outer padding");
         assert_eq!(x.crossing_value(), x_min);
         assert_eq!(y.domain(), (0.0, 3.0));
+    }
+
+    #[test]
+    fn categories_take_the_scale_colors_else_the_chart_palette_in_turn() {
+        let names: Vec<String> = (0..12).map(|index| format!("c{index}")).collect();
+        let data = DataTable::new([
+            (
+                "kind".to_owned(),
+                Column::Text(names.iter().cloned().map(Some).collect()),
+            ),
+            (
+                "x".to_owned(),
+                Column::Numeric((0..12).map(|i| Some(i as f64)).collect()),
+            ),
+        ])
+        .unwrap();
+        let spec = ChartSpec::new(data, None)
+            .unwrap()
+            .mark(MarkKind::Point, BTreeMap::new())
+            .encode(Channel::X, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Y, Encoding::field("x"))
+            .unwrap()
+            .encode(Channel::Color, Encoding::field("kind"))
+            .unwrap();
+        let colors = |spec: &ChartSpec| -> Vec<Color> {
+            spec.color_categories()
+                .unwrap()
+                .unwrap()
+                .into_iter()
+                .map(|(_, color)| color)
+                .collect()
+        };
+        // The default palette has ten colors; the next two are new shades.
+        let default = colors(&spec);
+        assert_eq!(default, Palette::default().colors(12));
+        assert!(default[10].to_rgba8() != default[0].to_rgba8());
+
+        let okabe = Palette::named("okabe_ito").unwrap();
+        assert_eq!(
+            colors(&spec.clone().palette(okabe.clone())),
+            okabe.colors(12)
+        );
+
+        let scaled = spec
+            .clone()
+            .palette(okabe)
+            .encode(
+                Channel::Color,
+                Encoding::scaled_field(
+                    "kind",
+                    ScaleSpec::category(names).unwrap().colors([Color::WHITE]),
+                ),
+            )
+            .unwrap();
+        assert_eq!(colors(&scaled)[0], Color::WHITE);
     }
 
     fn xy_spec(kind: MarkKind, options: BTreeMap<String, ConstantValue>) -> ChartSpec {
