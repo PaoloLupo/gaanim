@@ -5,7 +5,7 @@ description: Consult the Gaanim documentation that matches the version installed
 
 # Consult Gaanim documentation
 
-Gaanim evolves quickly; do not rely on memory or Manim conventions. The
+Gaanim evolves quickly; do not rely on memory or the conventions of other animation libraries. The
 authoring package installed in the project ships its documentation as Typst
 sources under `gaanim/_docs`, versioned with the API it describes.
 

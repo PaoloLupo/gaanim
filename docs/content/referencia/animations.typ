@@ -481,7 +481,7 @@ scene.render()
     (name: "seed", type: "int", default: "0", desc: [Semilla del orden `"random"` y del temblor y el grano de la tiza.]),
   ),
   returns: (type: "Anim", desc: [Escritura trazo a trazo.]),
-  desc: [Dibuja los contornos y luego los rellena, como el `Write` de Manim. Cada pieza (un glifo, una forma, un miembro de un grupo) ocupa su parte de la animación, escalonada por `stagger`, y la curva (lineal por defecto) se aplica al avance de cada pieza. En la primera mitad de su parte la pieza traza su contorno, un tramo de Bézier tras otro y sus contornos en orden, centrado y de un 0,25 % del alto del cuadro, en el color de su trazo (el de su relleno si no tiene). En la segunda mitad el contorno pasa a su aspecto propio: aparece el relleno y el trazo toma su ancho, o desaparece. Sin duración, dura 1 s con menos de 15 piezas y 2 s con más; `scene.play(duration=...)` la sigue fijando. Sin `stagger`, el retardo entre piezas es el de Manim, `min(4 / piezas, 0.2)`; agrupada con `by` por palabras, líneas o partes es `min(4 / grupos, 1)`, así que hasta cuatro grupos se escriben uno tras otro. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
+  desc: [Dibuja los contornos y luego los rellena, pieza a pieza. Cada pieza (un glifo, una forma, un miembro de un grupo) ocupa su parte de la animación, escalonada por `stagger`, y la curva (lineal por defecto) se aplica al avance de cada pieza. En la primera mitad de su parte la pieza traza su contorno, un tramo de Bézier tras otro y sus contornos en orden, centrado y de un 0,25 % del alto del cuadro, en el color de su trazo (el de su relleno si no tiene). En la segunda mitad el contorno pasa a su aspecto propio: aparece el relleno y el trazo toma su ancho, o desaparece. Sin duración, dura 1 s con menos de 15 piezas y 2 s con más; `scene.play(duration=...)` la sigue fijando. Sin `stagger`, el retardo entre piezas es `min(4 / piezas, 0.2)`; agrupada con `by` por palabras, líneas o partes es `min(4 / grupos, 1)`, así que hasta cuatro grupos se escriben uno tras otro. Los descendientes reactivos siguen ocultos hasta la animación y conservan el progreso al regenerarse. La segmentación es la de `text.words`, `text.lines` y `text.parts`. Después de un destino de propiedad o de otro efecto lanza `ValueError`.],
 )[
 ```python
 # show-code: true
@@ -511,7 +511,7 @@ scene.render()
   name: "Anim.unwrite",
   kind: "method",
   returns: (type: "Anim", desc: [La escritura al revés.]),
-  desc: [Borra como el `Unwrite` de Manim: `write` al revés, desde la última pieza. Cada pieza vuelve primero a su contorno y luego el contorno se recoge hasta su inicio. Dura lo que duraría `write`.],
+  desc: [Borra como `write` al revés, desde la última pieza. Cada pieza vuelve primero a su contorno y luego el contorno se recoge hasta su inicio. Dura lo que duraría `write`.],
 )[
 ```python
 # show-code: true
@@ -770,7 +770,7 @@ scene.render()
     (name: "corner_radius", type: "float", default: "0.08", desc: [Radio de las esquinas.]),
   ),
   returns: (type: "Anim", desc: [Un contorno que rodea el objeto.]),
-  desc: [Dibuja un marco vivo alrededor del objeto la primera mitad y lo borra desde su inicio la segunda, como el `Circumscribe` de Manim: es `flash_around(time_width=1.0)`. Fuera de la animación el marco es invisible. El `Anim` se reproduce sobre el marco, no sobre el objeto.],
+  desc: [Dibuja un marco vivo alrededor del objeto la primera mitad y lo borra desde su inicio la segunda: es `flash_around(time_width=1.0)`. Fuera de la animación el marco es invisible. El `Anim` se reproduce sobre el marco, no sobre el objeto.],
 )[
 ```python
 >>>from gaanim import *
@@ -2116,7 +2116,7 @@ scene.play(intro)
   kind: "method",
   params: ((name: "speeds", type: "float | Mapping[float, float]", default: none, desc: [Velocidades en fracciones de la composición, de `0` a `1`, unidas linealmente: `1` es la velocidad normal, `0.15` una cámara lenta y `2` el doble. Un número es una velocidad constante.]),),
   returns: (type: "Composition", desc: [Una copia con la rampa de velocidad.]),
-  desc: [Los _speed ramps_ de los cortes modernos, como `ChangeSpeed` de Manim o `timeScale` de GSAP. Antes de la primera clave y después de la última la velocidad se mantiene. La duración pasa a ser la que tarda la rampa; los hijos conservan su orden y sus solapes, y el movimiento de cada clip sigue la rampa dentro de él, así que un seek coincide con la reproducción. Se anida y se combina con `stretch`, que se aplica después. Los updaters, la física de partículas y el temblor de cámara siguen en tiempo real. Claves fuera de `[0, 1]` o repetidas, velocidades no positivas o medios lanzan `ValueError`.],
+  desc: [Los _speed ramps_ de los cortes modernos, como `timeScale` de GSAP. Antes de la primera clave y después de la última la velocidad se mantiene. La duración pasa a ser la que tarda la rampa; los hijos conservan su orden y sus solapes, y el movimiento de cada clip sigue la rampa dentro de él, así que un seek coincide con la reproducción. Se anida y se combina con `stretch`, que se aplica después. Los updaters, la física de partículas y el temblor de cámara siguen en tiempo real. Claves fuera de `[0, 1]` o repetidas, velocidades no positivas o medios lanzan `ValueError`.],
 )[
 ```python
 # show-code: true

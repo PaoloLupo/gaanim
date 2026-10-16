@@ -546,7 +546,7 @@ description = "Function, parametric and implicit curves, log axes, Riemann sums 
 
 [[example]]
 path = "visualization/chart_marks.py"
-description = "Every chart mark: points, lines, steps, areas, bars, histograms, box plots, violins, error bars, heatmaps, and pies, donuts and roses."
+description = "Every chart mark: points, lines, steps, areas, bars, histograms, box plots, violins, error bars, heatmaps, pies, donuts and roses, and marks that enter with a wipe."
 
 [[example]]
 path = "visualization/chart_encodings.py"

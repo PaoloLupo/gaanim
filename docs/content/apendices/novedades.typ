@@ -487,7 +487,7 @@ bloques de código, cajas escaladas, ecuaciones de varias filas).
 
 == Animación
 
-- `write()` y `unwrite()` animan como el `Write` y el `Unwrite` de Manim:
+- `write()` y `unwrite()` animan pieza a pieza:
   cada pieza traza su contorno en la primera mitad de su parte, un tramo de
   Bézier tras otro, fino y centrado, en el color de su trazo, y en la segunda
   mitad aparece su relleno y el trazo toma su ancho. La curva se aplica al

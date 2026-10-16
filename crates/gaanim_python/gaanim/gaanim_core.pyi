@@ -1888,7 +1888,7 @@ class Anim:
         """Select the drawable fade-out effect; scheduling occurs in ``Scene.play``."""
         ...
     def write(self, *, by: Literal["grapheme", "word", "line", "part"] = "grapheme", order: Literal["forward", "reverse", "center", "random"] = "forward", stagger: Optional[float] = None, brush: Literal["pen", "chalk"] = "pen", seed: int = 0) -> Anim:
-        """Draw the outlines, then fill them in, as Manim's ``Write``.
+        """Draw the outlines, then fill them in, piece by piece.
 
         Each piece (a glyph, a shape, a member of a group) runs over its share
         of the animation, staggered by ``stagger``, and the easing (linear by
@@ -1908,7 +1908,7 @@ class Anim:
         from the ``"center"`` outward, or in a ``"random"`` permutation fixed
         by ``seed``.
         ``stagger`` is the lag ratio between groups: ``None`` uses adaptive
-        sequential staggering (Manim's ``min(4 / pieces, 0.2)``; grouped
+        sequential staggering (``min(4 / pieces, 0.2)``; grouped
         ``by`` word, line or part, ``min(4 / groups, 1)``, so up to four
         groups are written one after another) and a number overrides it. ``brush="chalk"`` draws the drawable as chalk for the whole
         scene, like ``Drawable.chalk(seed)``: a trembling outline and a grain
@@ -1927,7 +1927,7 @@ class Anim:
         """
         ...
     def unwrite(self) -> Anim:
-        """Erase as Manim's ``Unwrite``: ``write`` backwards, from the last piece.
+        """Erase as ``write`` backwards, from the last piece.
 
         Each piece first turns back into its outline, then the outline
         retracts to where it started. It lasts as long as ``write`` would.
@@ -1973,7 +1973,7 @@ class Anim:
         """
         ...
     def grow_arrow(self) -> Anim:
-        """Grow an arrow from its tail, like Manim's ``GrowArrow`` but undistorted.
+        """Grow an arrow from its tail, with an undistorted head.
 
         The tail stays fixed and the tip travels along the arrow's straight or
         curved spine (the head turns along the arc tangent). The head emerges
@@ -1998,8 +1998,8 @@ class Anim:
         The frame is a new live outline (see ``Geometry.surrounding_rect``),
         ``padding`` away from the drawable's bounds (0.12 by default) and
         invisible outside the animation; it traces the whole outline over the
-        first half and erases it from its start over the second, as Manim's
-        ``Circumscribe``. It is ``flash_around`` with ``time_width=1.0``.
+        first half and erases it from its start over the second. It is
+        ``flash_around`` with ``time_width=1.0``.
         ``color`` and ``width`` restyle it (a width needs a color). The
         returned animation plays on the frame, not on the drawable.
 
@@ -5013,7 +5013,7 @@ class Drawable:
             drawable.bind_position_from(source)
         """
         ...
-    # manim Axes compatibility — coords mapping and graph helpers (only valid when self is an axes)
+    # Axes coordinate mapping and graph helpers (only valid when self is an axes)
 class Dimension(Drawable):
     """Reactive technical dimension with independently styleable parts."""
     @property
