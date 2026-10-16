@@ -119,12 +119,13 @@ bottom = scene.layout.zones(Zones.rows(["8fr", "1fr"], padding="page_padding"))[
 gauss = scene.text.equation('K = -"sech"^4 v', size=0.55).hud().place(left_top, anchor="bottom_left")
 metric = scene.text.equation("d s^2 = cosh^2 v (d u^2 + d v^2)", size=0.45).hud().place(left_bottom, anchor="top_left")
 
-BAR = (0.28, min(2.4, left_bar.height))
+bar_zone, label_zone = left_bar.split(Zones.columns([0.28, "1fr"], gap="16px"))
+BAR = (bar_zone.width, bar_zone.height)
 bar = geometry.rect(*BAR).no_stroke().fill(
     Brush.linear([violet, lilac, gold], start=(0, -BAR[1] / 2), end=(0, BAR[1] / 2))
-).hud().place(left_bar, anchor="left")
-bar_top = scene.text.equation("K = -1", size=0.38, color=muted).hud().place(bar, anchor="top_right", offset=(0.3, 0))
-bar_bottom = scene.text.equation("K = -0.08", size=0.38, color=muted).hud().place(bar, anchor="bottom_right", offset=(0.3, 0))
+).hud().place(bar_zone)
+bar_top = scene.text.equation("K = -1", size=0.38, color=muted).hud().place(label_zone, anchor="top_left")
+bar_bottom = scene.text.equation("K = -0.08", size=0.38, color=muted).hud().place(label_zone, anchor="bottom_left")
 scale = [bar, bar_top, bar_bottom]
 
 formula = scene.text.equation("X_theta = cos theta H + sin theta C", size=0.5).hud().place(rows[0], anchor="bottom_left")
@@ -133,7 +134,7 @@ line_readout = scene.viz.readout(line_length, inputs=[theta], label="$ell$", for
 circle_readout = scene.viz.readout(circle_length, inputs=[theta], label="$ell$", format=".3f", font_size=0.42, color=lilac)
 line_readout.hud().place(rows[2], anchor="left")
 circle_readout.hud().place(rows[3], anchor="left")
-closing = scene.text("Same metric, same curvature, different shape.", size=0.42, color=muted).hud().place(bottom)
+closing = scene.text("Same metric, same curvature, different shape.", size=0.42, color=paper).hud().place(bottom)
 
 DISTANCE = 15.0
 scene.camera.perspective(fov_y=0.62)
