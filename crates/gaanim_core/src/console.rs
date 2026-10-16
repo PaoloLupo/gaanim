@@ -385,9 +385,10 @@ pub fn entries_since(seq: u64) -> Vec<LogEntry> {
 /// The exception line of a Python traceback, or the first non-blank line of
 /// any other message, and the innermost frame a traceback names.
 pub fn traceback_summary(message: &str) -> (&str, Option<ScriptLocation>) {
+    // A caller may put its own words before the traceback on its first line.
     if !message
         .lines()
-        .any(|line| line.starts_with("Traceback (most recent call last)"))
+        .any(|line| line.contains("Traceback (most recent call last)"))
     {
         let headline = message.lines().find(|line| !line.trim().is_empty());
         return (headline.unwrap_or("").trim(), None);
@@ -813,6 +814,12 @@ mod tests {
         let location = location.expect("the innermost script frame");
         assert_eq!(location.line, 12);
         assert_eq!(location.file_name(), "lib.py");
+
+        let (headline, location) = traceback_summary(
+            "could not load project: Traceback (most recent call last):\n  File \"/p/main.py\", line 25, in <module>\n    scene.stop()\nValueError: a stop already exists\n",
+        );
+        assert_eq!(headline, "ValueError: a stop already exists");
+        assert_eq!(location.map(|at| at.line), Some(25));
 
         assert_eq!(
             traceback_summary("\nCustom animation failed\nboom\n"),

@@ -836,7 +836,7 @@ if warnings:
     (name: "text", type: "dict[TextRole, TextStyle] | None", default: "None", desc: [`TextStyle` por rol, como capa sobre el rol semántico.]),
     (name: "styles", type: "dict[str, Style | AxesStyle] | None", default: "None", desc: [Reglas por selector (ver abajo).]),
     (name: "series", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores categóricos de las gráficas.]),
-    (name: "heatmap", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores continuos de los mapas de calor.]),
+    (name: "heatmap", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores continuos de los mapas de calor. Un heatmap cuyo campo `color` lleva `Scale.colors` usa los de su escala.]),
     (name: "layout", type: "dict[str, float] | None", default: "None", desc: [Tokens de espaciado, nuevos o sustituidos.]),
     (name: "font_files", type: "dict[str, str] | None", default: "None", desc: [Familia → archivo de fuente.]),
     (name: "font_dir", type: "str | os.PathLike | None", default: "None", desc: [Carpeta cuyos `.ttf`, `.otf`, `.ttc` y `.otc` se registran (sin subcarpetas).]),

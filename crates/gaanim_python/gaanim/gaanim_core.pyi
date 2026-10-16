@@ -4783,11 +4783,13 @@ class Drawable:
         self,
         times: Sequence[float],
         values: Sequence[float] | Sequence[tuple[float, float]],
-        property: Literal["x", "y", "xy", "z", "rotation", "scale", "opacity", "signal"] = "x",
+        property: Literal["x", "y", "xy", "z", "rotation", "scale", "opacity", "signal", "fill"] = "x",
         *,
         interpolation: Literal["linear", "step"] = "linear",
         scale: float = 1.0,
         offset: float = 0.0,
+        colors: Sequence[ColorLike] | None = None,
+        domain: tuple[float, float] | None = None,
     ) -> Drawable:
         """Drive a property along a sampled ``(times, values)`` series natively.
 
@@ -4814,6 +4816,16 @@ class Drawable:
 
             path = [(math.cos(t), math.sin(t)) for t in times]
             probe.drive_from_samples(times, path, "xy", scale=2.0)
+
+        ``property="fill"`` colors the fill of this drawable, and of the members
+        of a group that have one. It requires ``colors`` (at least two, evenly
+        spaced over ``domain``); the value ``offset + scale * sample`` is read
+        in ``domain``, the series' range by default, and clamps to its end
+        colors. ``colors`` or ``domain`` with another property, fewer than two
+        colors, or a domain without ``low < high`` raise ``ValueError``::
+
+            car.drive_from_samples(times, speed, "fill",
+                                   colors=["#ef4444", "#facc15", "#22c55e"], domain=(0, 30))
         """
         ...
     def bind_y_from(self, source: Drawable) -> None:
@@ -6639,6 +6651,9 @@ class Scale:
 
         Entries accept Color, CSS/hex strings, and RGB/RGBA byte tuples.
         Mixed representations are allowed; invalid colors raise ValueError.
+        On a heatmap's ``color`` field, the scale's colors and domain replace
+        the theme's ``heatmap`` palette for that chart, and ``bands=``
+        quantizes over them.
         """
         ...
 

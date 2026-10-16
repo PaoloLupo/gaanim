@@ -433,7 +433,9 @@ pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Scen
     });
 
     host::set_host_sender(None);
-    result.map_err(|error| Python::attach(|py| format_py_traceback(py, &error)))?;
+    result.map_err(|error| {
+        Python::attach(|py| without_runner_frames(&format_py_traceback(py, &error)))
+    })?;
     receiver
         .recv_timeout(std::time::Duration::from_secs(2))
         .map(|payload| payload.canvas)

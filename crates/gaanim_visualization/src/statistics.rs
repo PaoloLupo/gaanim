@@ -93,6 +93,9 @@ pub enum DataMarkKind {
         cell_height: f64,
         band: usize,
         bands: usize,
+        /// The color scale that places a value among the bands; the data's
+        /// own range when `None`.
+        scale: Option<Box<Axis>>,
     },
 }
 
@@ -274,6 +277,7 @@ pub fn data_mark_path(
             cell_height,
             band,
             bands,
+            scale,
         } => {
             if *bands == 0
                 || *band >= *bands
@@ -312,7 +316,11 @@ pub fn data_mark_path(
                 if !x.is_finite() || !y.is_finite() || !value.is_finite() {
                     continue;
                 }
-                let normalized = ((value - minimum) / span).clamp(0.0, 1.0);
+                let normalized = match scale {
+                    Some(scale) => scale.normalize(value)?,
+                    None => (value - minimum) / span,
+                }
+                .clamp(0.0, 1.0);
                 let value_band = (normalized * (*bands - 1) as f64).round() as usize;
                 if value_band != *band {
                     continue;
@@ -717,9 +725,31 @@ mod tests {
                 cell_height: 1.0,
                 band: 0,
                 bands: 2,
+                scale: None,
             },
         )
         .unwrap();
         assert!(!low.is_empty());
+
+        // A color scale wider than the data puts both cells in its low band.
+        let band = |band| {
+            data_mark_path(
+                &map,
+                &table,
+                &DataMarkKind::HeatmapBand {
+                    x: "x".to_owned(),
+                    y: "y".to_owned(),
+                    value: "value".to_owned(),
+                    cell_width: 1.0,
+                    cell_height: 1.0,
+                    band,
+                    bands: 2,
+                    scale: Some(Box::new(Axis::linear(0.0, 10.0).unwrap())),
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(band(0).elements().len(), 2 * low.elements().len());
+        assert!(band(1).is_empty());
     }
 }

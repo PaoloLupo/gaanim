@@ -698,6 +698,24 @@ fn open_project_request_system(world: &mut World) {
     }
 }
 
+/// Report a script that failed to load and exit. A JSON message carries the
+/// exception and the script line its traceback names; text keeps the whole
+/// traceback.
+pub(crate) fn exit_could_not_load(label: &str, error: &str) -> ! {
+    if console::message_format_json() {
+        let (headline, location) = console::traceback_summary(error);
+        console::print_status_at(
+            console::Level::Error,
+            label,
+            &format!("could not load project: {headline}"),
+            location.as_ref(),
+        );
+    } else {
+        console::error(label, format!("could not load project: {error}"));
+    }
+    std::process::exit(2);
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CheckArgs {
     script: PathBuf,
@@ -738,10 +756,8 @@ fn dispatch_check_mode() -> bool {
     let json = console::message_format_json();
     // A diagnostic about a segment points at the line that made it.
     gaanim_api::canvas::track_script_lines(json);
-    let canvas = (python.load_script_canvas)(&script).unwrap_or_else(|error| {
-        console::error("check", format!("could not load project: {error}"));
-        std::process::exit(2);
-    });
+    let canvas = (python.load_script_canvas)(&script)
+        .unwrap_or_else(|error| exit_could_not_load("check", &error));
     let source = std::fs::read_to_string(&script).unwrap_or_default();
     let is_presentation = canvas.has_presentation_features();
     let mut report = if is_presentation {
