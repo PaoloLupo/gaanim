@@ -59,6 +59,9 @@ const LINE_WIDTH_PX: f64 = 1.5;
 /// Width of the stroke that closes antialiasing seams between the opaque
 /// triangles of a mesh, in output pixels.
 const SEAM_WIDTH_PX: f64 = 1.5;
+/// Depth slices the segments of one line drawable in one color sort in
+/// (see `Projector::push_line_slices`).
+const LINE_DEPTH_SLICES: usize = 64;
 
 /// Maps world points onto the Vello canvas through a camera.
 pub(crate) struct Projector {
@@ -306,6 +309,11 @@ pub(crate) enum Primitive {
     Segment {
         points: [kurbo::Point; 2],
     },
+    /// Segments of one line drawable in one paint and one depth slice,
+    /// drawn as one path: consecutive segments join into polylines.
+    Lines {
+        path: kurbo::BezPath,
+    },
     /// The visible faces of an opaque lit solid, drawn together: its
     /// silhouette in the item's (average) paint, then each face in its own
     /// paint. The silhouette beneath keeps what lies behind the solid from
@@ -530,10 +538,11 @@ impl Projector {
         let count = lines.points.len();
         let colors = lines.colors.as_ref().filter(|colors| colors.len() == count);
         let base = to_linear(lines.color);
-        let point = |index: usize| {
-            let p = lines.points[index];
-            model.transform_point3(DVec3::new(p[0].into(), p[1].into(), p[2].into()))
-        };
+        let world: Vec<DVec3> = lines
+            .points
+            .iter()
+            .map(|p| model.transform_point3(DVec3::new(p[0].into(), p[1].into(), p[2].into())))
+            .collect();
         let pairs: Vec<(usize, usize)> = if lines.strip {
             (1..count).map(|index| (index - 1, index)).collect()
         } else if let Some(indices) = &lines.indices {
@@ -549,29 +558,118 @@ impl Projector {
                 .map(|pair| (pair * 2, pair * 2 + 1))
                 .collect()
         };
+        // Each point's canvas point and depth, when it lies in front of the
+        // near plane: the segments of a strip share them.
+        let projected: Vec<Option<(kurbo::Point, f64)>> = world
+            .iter()
+            .map(|&point| {
+                let depth = self.depth(point);
+                (!self.perspective || depth >= self.near)
+                    .then(|| self.project(point))
+                    .flatten()
+                    .map(|canvas| (canvas, depth))
+            })
+            .collect();
+        let uniform = Paint::Solid(from_linear(base));
+        // Segments in one color, as `(points, depth, color)`; gradients
+        // are items of their own.
+        let mut solid: Vec<([kurbo::Point; 2], f64, peniko::Color)> = Vec::new();
         for (a, b) in pairs {
-            let Some((start, end)) = self.clip_segment(point(a), point(b)) else {
-                continue;
+            let (p0, p1, depth) = match (projected[a], projected[b]) {
+                (Some((p0, d0)), Some((p1, d1))) => (p0, p1, d0.max(d1)),
+                // Crossing the near plane.
+                _ => {
+                    let Some((start, end)) = self.clip_segment(world[a], world[b]) else {
+                        continue;
+                    };
+                    let (Some(p0), Some(p1)) = (self.project(start), self.project(end)) else {
+                        continue;
+                    };
+                    (p0, p1, self.depth(start).max(self.depth(end)))
+                }
             };
-            let (Some(p0), Some(p1)) = (self.project(start), self.project(end)) else {
-                continue;
+            let paint = match colors {
+                Some(colors) if colors[a] == colors[b] => Paint::Solid(from_linear(colors[a])),
+                Some(colors) => Paint::interpolating(&[p0, p1], &[colors[a], colors[b]]),
+                None => uniform.clone(),
             };
-            let ends = match colors {
-                Some(colors) => [colors[a], colors[b]],
-                None => [base, base],
-            };
-            let paint = Paint::interpolating(&[p0, p1], &ends);
             if paint.is_transparent() {
                 continue;
             }
-            items.push(Item {
-                key,
-                depth: self.depth(start).max(self.depth(end)),
-                paint,
-                opacity,
-                primitive: Primitive::Segment { points: [p0, p1] },
-            });
+            match paint {
+                Paint::Solid(color) => solid.push(([p0, p1], depth, color)),
+                paint => items.push(Item {
+                    key,
+                    depth,
+                    paint,
+                    opacity,
+                    primitive: Primitive::Segment { points: [p0, p1] },
+                }),
+            }
         }
+        self.push_line_slices(key, &solid, opacity, items);
+    }
+
+    /// Gather segments in one color into one item per color and depth
+    /// slice of the drawable. A dense line has tens of thousands of
+    /// segments, and sorting and stroking each on its own kept the preview
+    /// of a few such lines at a few frames per second. Segments of one
+    /// drawable in one color overlap as one shape in any order, so only
+    /// their order among other drawables needs depth; it stays within a
+    /// slice, a [`LINE_DEPTH_SLICES`]th of the drawable's depth.
+    fn push_line_slices<K: Copy>(
+        &self,
+        key: K,
+        solid: &[([kurbo::Point; 2], f64, peniko::Color)],
+        opacity: f32,
+        items: &mut Vec<Item<K>>,
+    ) {
+        let (near, far) = solid
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(near, far), item| {
+                (near.min(item.1), far.max(item.1))
+            });
+        let slice = (far - near) / LINE_DEPTH_SLICES as f64;
+        // Each slice's item and the point its path ends at.
+        let mut slices: Vec<(Item<K>, kurbo::Point)> = Vec::new();
+        let mut index = std::collections::HashMap::new();
+        for &([p0, p1], depth, color) in solid {
+            let depth_slice = if slice > 0.0 {
+                (((depth - near) / slice) as usize).min(LINE_DEPTH_SLICES - 1)
+            } else {
+                0
+            };
+            let at = *index
+                .entry((depth_slice, color.components.map(f32::to_bits)))
+                .or_insert_with(|| {
+                    slices.push((
+                        Item {
+                            key,
+                            depth,
+                            paint: Paint::Solid(color),
+                            opacity,
+                            primitive: Primitive::Lines {
+                                path: kurbo::BezPath::new(),
+                            },
+                        },
+                        p0,
+                    ));
+                    slices.len() - 1
+                });
+            let (item, end) = &mut slices[at];
+            item.depth = item.depth.max(depth);
+            let Primitive::Lines { path } = &mut item.primitive else {
+                unreachable!("slices hold lines");
+            };
+            // Joined to the previous segment where it ends, so a strip
+            // strokes as polylines.
+            if path.elements().is_empty() || *end != p0 {
+                path.move_to(p0);
+            }
+            path.line_to(p1);
+            *end = p1;
+        }
+        items.extend(slices.into_iter().map(|(item, _)| item));
     }
 
     /// Width of 3D lines in canvas units.
@@ -963,5 +1061,58 @@ mod tests {
         assert_eq!(from.to_rgba8().to_u8_array(), [255, 0, 0, 255]);
         assert_eq!(to.to_rgba8().to_u8_array(), [0, 0, 255, 255]);
         assert_eq!(items[0].opacity, 0.5);
+    }
+
+    #[test]
+    fn uniform_strips_draw_as_one_polyline_per_depth_slice() {
+        let projector = Projector::new(&camera(perspective())).unwrap();
+        // A zigzag in the z = 0 plane, then one far behind it.
+        let near: Vec<[f32; 3]> = (0..1000)
+            .map(|k| [k as f32 * 0.001, (k % 2) as f32 * 0.001, 0.0])
+            .collect();
+        let points: Vec<[f32; 3]> = near
+            .iter()
+            .copied()
+            .chain([[0.0, 0.0, -3.0], [0.1, 0.0, -3.0]])
+            .collect();
+        let lines = LineListData {
+            points,
+            indices: None,
+            strip: true,
+            color: peniko::Color::WHITE,
+            colors: None,
+        };
+        let transform = GlobalSpatialTransform::default();
+        let opacity = GlobalOpacity(1.0);
+        let mut items = Vec::new();
+        projector.push(
+            0,
+            &Content {
+                transform: &transform,
+                opacity: &opacity,
+                mesh: None,
+                lines: Some(&lines),
+                material: None,
+            },
+            &Illumination::default(),
+            &mut items,
+        );
+        sort_back_to_front(&mut items);
+        // The two segments into the distance, then the zigzag.
+        assert_eq!(items.len(), 2);
+        let moves = |item: &Item<i32>| {
+            let Primitive::Lines { path } = &item.primitive else {
+                panic!("uniform segments draw as lines");
+            };
+            let moves = path
+                .elements()
+                .iter()
+                .filter(|element| matches!(element, kurbo::PathEl::MoveTo(_)))
+                .count();
+            (moves, path.elements().len())
+        };
+        assert_eq!(moves(&items[0]), (1, 3));
+        assert_eq!(moves(&items[1]), (1, 1000), "the zigzag is one polyline");
+        assert!(items[0].depth > items[1].depth);
     }
 }

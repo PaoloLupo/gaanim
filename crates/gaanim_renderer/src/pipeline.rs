@@ -3694,6 +3694,22 @@ fn project_three_d(
                     },
                 );
             }
+            Primitive::Lines { path: lines } => {
+                extend_run(
+                    &mut runs,
+                    entity,
+                    opacity,
+                    item.paint,
+                    RunKind::Line,
+                    |path| {
+                        if path.elements().is_empty() {
+                            *path = lines;
+                        } else {
+                            path.extend(lines);
+                        }
+                    },
+                );
+            }
         }
     }
 
