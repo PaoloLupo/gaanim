@@ -46,6 +46,8 @@ pub enum VisualizationError {
     UnsupportedChartMark3D(MarkKind),
     #[error("grow() animates the slices of an arc chart")]
     NotAnArcChart,
+    #[error(transparent)]
+    Reactive(#[from] gaanim_animation::ReactiveError),
 }
 
 fn axis_title_coordinate(position: AxisLabelPosition, extent: f64, gap: f64) -> f64 {
@@ -3451,6 +3453,41 @@ impl SceneModel {
         Ok(handle)
     }
 
+    /// Evaluate a function of the whole grid once, with the inputs' current
+    /// values, so a callback that returns the wrong number of values fails
+    /// where it is declared rather than leaving an empty mesh. Inputs that
+    /// have no value yet are not checked.
+    fn validate_batch_function(
+        &self,
+        function: &ReactiveFunction,
+    ) -> Result<(), VisualizationError> {
+        if function.coordinate_arity() != 0 {
+            return Ok(());
+        }
+        let values = {
+            let state = self.state.lock().expect("canvas state poisoned");
+            function
+                .parameter_ids()
+                .into_iter()
+                .filter_map(|id| {
+                    let value = *state.parameter_values.get(&id)?.lock().ok()?;
+                    Some((id, value))
+                })
+                .collect::<Vec<_>>()
+        };
+        match function.evaluate(&[], 0.0, |logical| {
+            values
+                .iter()
+                .find_map(|(id, value)| (*id == logical).then_some(*value))
+        }) {
+            Err(
+                error @ (gaanim_animation::ReactiveError::Callback(_)
+                | gaanim_animation::ReactiveError::OutputArity { .. }),
+            ) => Err(error.into()),
+            _ => Ok(()),
+        }
+    }
+
     pub(crate) fn validate_reactive_function_owner(
         &self,
         function: &ReactiveFunction,
@@ -3595,10 +3632,11 @@ impl SceneModel {
     /// Sample `function(u, v)` -> `(x, y, z)` over `u_domain` x `v_domain` into
     /// a surface mesh of the space, redrawn when its inputs change.
     ///
-    /// `color_values` holds one value per grid vertex, `u` major, mapped
-    /// through `color_map` (over `color_range`, or the values' own span), so
-    /// the colors stay on the same points of the surface as it moves; without
-    /// it, vertices are colored by height. A `material` lights both sides.
+    /// `function` maps one grid point to a data point, or, with no
+    /// coordinates, returns every point of the grid at once, `u` major and
+    /// interleaved `x, y, z` (a value of `f64::MAX` leaves a hole). `color`
+    /// colors the vertices through `color_map`, over `color_range` or the
+    /// values' own span. A `material` lights both sides.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn reactive_parametric_surface_plot(
@@ -3608,36 +3646,48 @@ impl SceneModel {
         u_domain: (f64, f64),
         v_domain: (f64, f64),
         resolution: [usize; 2],
-        color_values: Option<Vec<f64>>,
+        color: super::SurfaceColor,
         color_map: Option<gaanim_core::ColorMap>,
         color_range: Option<(f64, f64)>,
         material: Option<gaanim_scene::Material3D>,
     ) -> Result<DrawableHandle, VisualizationError> {
+        let invalid =
+            || VisualizationError::from(gaanim_visualization::SamplingError::InvalidDomain);
         self.validate_reactive_function_owner(&function)?;
         if resolution[0] < 2 || resolution[1] < 2 {
             return Err(gaanim_visualization::SamplingError::TooFewSamples.into());
         }
-        if function.coordinate_arity() != 2 || function.output_arity() != 3 {
-            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        let count = resolution[0] * resolution[1];
+        // One grid point at a time, or the whole grid at once.
+        let arity = (function.coordinate_arity(), function.output_arity());
+        if arity != (2, 3) && arity != (0, 3 * count) {
+            return Err(invalid());
         }
+        self.validate_batch_function(&function)?;
         if ![u_domain.0, u_domain.1, v_domain.0, v_domain.1]
             .iter()
             .all(|value| value.is_finite())
             || u_domain.0 >= u_domain.1
             || v_domain.0 >= v_domain.1
         {
-            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+            return Err(invalid());
         }
-        if color_values
-            .as_ref()
-            .is_some_and(|values| values.len() != resolution[0] * resolution[1])
-        {
-            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        match &color {
+            super::SurfaceColor::Height => {}
+            super::SurfaceColor::Values(values) if values.len() == count => {}
+            super::SurfaceColor::Function(color)
+                if [(2, 1), (0, count)]
+                    .contains(&(color.coordinate_arity(), color.output_arity())) =>
+            {
+                self.validate_reactive_function_owner(color)?;
+                self.validate_batch_function(color)?;
+            }
+            _ => return Err(invalid()),
         }
         if color_range
             .is_some_and(|(low, high)| !low.is_finite() || !high.is_finite() || low == high)
         {
-            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+            return Err(invalid());
         }
         let handle = self.spawn(SpawnKind::ReactiveParametricSurface3D {
             map: space.map.clone(),
@@ -3645,7 +3695,7 @@ impl SceneModel {
             u_domain,
             v_domain,
             resolution,
-            color_values: color_values.map(Into::into),
+            color,
             color_map,
             color_range,
             material,
@@ -6817,6 +6867,75 @@ mod tests {
         canvas.polyline_3d(vec![[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]);
 
         assert!(canvas.has_3d_content());
+    }
+
+    #[test]
+    fn batched_parametric_surfaces_match_per_point_ones() {
+        let point = |u: f64, v: f64| [u.cos() * v, u.sin() * v, u * 0.1];
+        let meshes = [false, true].map(|batched| {
+            let mut canvas = SceneModel::new(640, 360);
+            let space = canvas
+                .coordinate_axes_3d(
+                    Axis::linear(-2.0, 2.0).unwrap(),
+                    Axis::linear(-2.0, 2.0).unwrap(),
+                    Axis::linear(-2.0, 2.0).unwrap(),
+                    [4.0, 4.0, 4.0],
+                    false,
+                )
+                .unwrap();
+            let (u_domain, v_domain, resolution) = ((0.0, 3.0), (0.5, 1.5), [4, 3]);
+            let grid = (0..4)
+                .flat_map(|iu| (0..3).map(move |iv| (iu as f64, 0.5 + iv as f64 * 0.5)))
+                .collect::<Vec<_>>();
+            let (function, color) = if batched {
+                let points = grid
+                    .iter()
+                    .flat_map(|&(u, v)| point(u, v))
+                    .collect::<Vec<_>>();
+                let values = grid.iter().map(|&(u, v)| u + v).collect::<Vec<_>>();
+                (
+                    ReactiveFunction::new(0, 36, Vec::new(), move |_| Ok(points.clone())),
+                    ReactiveFunction::new(0, 12, Vec::new(), move |_| Ok(values.clone())),
+                )
+            } else {
+                (
+                    ReactiveFunction::new(2, 3, Vec::new(), move |uv| {
+                        Ok(point(uv[0], uv[1]).to_vec())
+                    }),
+                    ReactiveFunction::new(2, 1, Vec::new(), |uv| Ok(vec![uv[0] + uv[1]])),
+                )
+            };
+            canvas
+                .reactive_parametric_surface_plot(
+                    &space,
+                    function,
+                    u_domain,
+                    v_domain,
+                    resolution,
+                    super::super::SurfaceColor::Function(color),
+                    None,
+                    Some((0.0, 5.0)),
+                    Some(gaanim_scene::Material3D::default()),
+                )
+                .unwrap();
+            let mut world = bevy::prelude::World::new();
+            world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+            world
+                .query::<&gaanim_scene::TriangleMeshData>()
+                .single(&world)
+                .unwrap()
+                .clone()
+        });
+        assert_eq!(meshes[0].vertices, meshes[1].vertices);
+        assert_eq!(meshes[0].indices, meshes[1].indices);
+        assert_eq!(meshes[0].colors, meshes[1].colors);
+        // Both sides of 2 x 3 cells of two triangles each, over 12 vertices.
+        assert_eq!(meshes[0].vertices.len(), 24);
+        assert_eq!(meshes[0].indices.len(), 2 * 2 * 3 * 2 * 3);
     }
 
     #[test]

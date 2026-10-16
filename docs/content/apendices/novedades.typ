@@ -66,9 +66,13 @@ para toda la escena y cada campo puede tener la suya.
 - `space.parametric_surface(f, u_domain, v_domain)` dibuja superficies
   paramétricas `(u, v) → (x, y, z)` en un espacio 3D. Con `inputs` reactivas
   la malla se vuelve a muestrear y una superficie se dobla en otra;
-  `color(u, v)` pinta cada punto con un valor fijo del material y
-  `material` la ilumina por las dos caras. Lo muestra
+  `color(u, v)` pinta cada punto con un valor fijo del material (o uno
+  reactivo con `color_inputs`) y `material` la ilumina por las dos caras.
+  Con `vectorized=True` las funciones reciben arrays de numpy con toda la
+  rejilla y se llaman una vez en lugar de una por vértice. Lo muestra
   `gallery/catenoid_helicoid`.
+- Las superficies reactivas (`surface` y `parametric_surface`) se vuelven
+  a muestrear solo cuando cambian sus entradas, no en cada fotograma.
 
 == Al actualizar
 

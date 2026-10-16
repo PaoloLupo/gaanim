@@ -1857,15 +1857,21 @@ impl ReactiveLineRegen {
     }
 }
 
+/// Builds a mesh from the world, or `None` to keep the one shown.
+pub type MeshRegenFn = dyn Fn(&World) -> Option<gaanim_scene::TriangleMeshData> + Send + Sync;
+
 /// Component that deterministically regenerates a 3D triangle mesh from the world snapshot.
+///
+/// `regen` returns `None` when the mesh it would build is the one already
+/// shown, e.g. while its inputs hold still, so the mesh is left unchanged.
 #[derive(Component)]
 pub struct ReactiveMeshRegen {
-    pub regen: Arc<dyn Fn(&World) -> gaanim_scene::TriangleMeshData + Send + Sync>,
+    pub regen: Arc<MeshRegenFn>,
 }
 
 impl ReactiveMeshRegen {
     pub fn new(
-        regen: impl Fn(&World) -> gaanim_scene::TriangleMeshData + Send + Sync + 'static,
+        regen: impl Fn(&World) -> Option<gaanim_scene::TriangleMeshData> + Send + Sync + 'static,
     ) -> Self {
         Self {
             regen: Arc::new(regen),
@@ -1969,7 +1975,7 @@ pub fn reactive_3d_regen_system(world: &mut World) {
         let mut query = world.query::<(Entity, &ReactiveMeshRegen)>();
         query
             .iter(world)
-            .map(|(entity, regen)| (entity, (regen.regen)(world)))
+            .filter_map(|(entity, regen)| Some((entity, (regen.regen)(world)?)))
             .collect::<Vec<_>>()
     };
     for (entity, data) in line_updates {

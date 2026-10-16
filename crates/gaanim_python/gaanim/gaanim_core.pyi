@@ -8142,13 +8142,15 @@ class CoordinateSpace3D:
     def parametric(self, function: Callable[..., tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
     def parametric_surface(
         self,
-        function: Callable[..., tuple[float, float, float]],
+        function: Callable[..., Any],
         u_domain: tuple[float, float],
         v_domain: tuple[float, float],
         *,
         resolution: tuple[int, int] = (64, 48),
         inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
-        color: Optional[Callable[[float, float], float]] = None,
+        vectorized: bool = False,
+        color: Optional[Callable[..., Any]] = None,
+        color_inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
         color_map: Optional[ColorMapLike] = None,
         color_range: Optional[tuple[float, float]] = None,
         material: Optional[Material3D] = None,
@@ -8157,13 +8159,22 @@ class CoordinateSpace3D:
 
         ``function`` takes u, v and the current values of ``inputs`` (reactive,
         as in ``surface``) and returns a point in data coordinates; the mesh is
-        sampled again whenever an input changes, so a surface can bend into
+        sampled again only when an input changes, so a surface can bend into
         another. ``color(u, v)`` gives the value each vertex is colored by
-        through ``color_map``: it is sampled once, so the colors stay painted
-        on the same points of the surface however it moves. ``color_range``
-        is the pair of values at the two ends of the map; by default, the
-        lowest and highest value. Without ``color``, vertices are colored by
-        height, as in ``surface``.
+        through ``color_map``. Without ``color_inputs`` it is sampled once, so
+        the colors stay painted on the same points of the surface however it
+        moves; with them, ``color(u, v, *color_inputs)`` is sampled again when
+        they change. ``color_range`` is the pair of values at the two ends of
+        the map; by default, the lowest and highest value. Without ``color``,
+        vertices are colored by height, as in ``surface``.
+
+        ``vectorized=True`` calls ``function`` and ``color`` once for the
+        whole grid instead of once per vertex: ``u`` and ``v`` are read-only
+        numpy arrays with one entry per vertex, and the inputs are numbers.
+        ``function`` returns ``(x, y, z)`` arrays (or one array of shape
+        ``(vertices, 3)``) and ``color`` one array, or a number for every
+        vertex. A NaN coordinate leaves a hole. It needs numpy, and is much
+        faster for large grids.
 
         With a ``material`` the surface is lit by the scene's ``lighting_3d``
         on both sides, keeping its vertex colors; without one it is unlit.
@@ -8172,9 +8183,11 @@ class CoordinateSpace3D:
 
         Example:
             tube = space.parametric_surface(
-                lambda u, v: (math.cos(u), math.sin(u), v),
+                lambda u, v, r: (r * np.cos(u), r * np.sin(u), v),
                 (0, math.tau),
                 (-1, 1),
+                inputs=[radius],
+                vectorized=True,
                 color=lambda u, v: v,
                 color_map="viridis",
                 material=Material3D(roughness=0.5),
