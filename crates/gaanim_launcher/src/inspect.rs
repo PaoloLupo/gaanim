@@ -68,10 +68,8 @@ pub fn dispatch_inspect_mode() -> bool {
     });
     // The lines are what this command is for.
     gaanim_api::canvas::track_script_lines(true);
-    let canvas = (python.load_script_canvas)(&script).unwrap_or_else(|error| {
-        console::error("inspect", format!("could not load project: {error}"));
-        std::process::exit(2);
-    });
+    let canvas = (python.load_script_canvas)(&script)
+        .unwrap_or_else(|error| crate::app::exit_could_not_load("inspect", &error));
     let index = canvas.timeline_index();
     if parsed.json {
         println!("{}", index_json(&script, &index));
