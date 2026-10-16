@@ -3592,6 +3592,68 @@ impl SceneModel {
         Ok(handle)
     }
 
+    /// Sample `function(u, v)` -> `(x, y, z)` over `u_domain` x `v_domain` into
+    /// a surface mesh of the space, redrawn when its inputs change.
+    ///
+    /// `color_values` holds one value per grid vertex, `u` major, mapped
+    /// through `color_map` (over `color_range`, or the values' own span), so
+    /// the colors stay on the same points of the surface as it moves; without
+    /// it, vertices are colored by height. A `material` lights both sides.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn reactive_parametric_surface_plot(
+        &mut self,
+        space: &CoordinateSpace3DHandle,
+        function: ReactiveFunction,
+        u_domain: (f64, f64),
+        v_domain: (f64, f64),
+        resolution: [usize; 2],
+        color_values: Option<Vec<f64>>,
+        color_map: Option<gaanim_core::ColorMap>,
+        color_range: Option<(f64, f64)>,
+        material: Option<gaanim_scene::Material3D>,
+    ) -> Result<DrawableHandle, VisualizationError> {
+        self.validate_reactive_function_owner(&function)?;
+        if resolution[0] < 2 || resolution[1] < 2 {
+            return Err(gaanim_visualization::SamplingError::TooFewSamples.into());
+        }
+        if function.coordinate_arity() != 2 || function.output_arity() != 3 {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        if ![u_domain.0, u_domain.1, v_domain.0, v_domain.1]
+            .iter()
+            .all(|value| value.is_finite())
+            || u_domain.0 >= u_domain.1
+            || v_domain.0 >= v_domain.1
+        {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        if color_values
+            .as_ref()
+            .is_some_and(|values| values.len() != resolution[0] * resolution[1])
+        {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        if color_range
+            .is_some_and(|(low, high)| !low.is_finite() || !high.is_finite() || low == high)
+        {
+            return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
+        }
+        let handle = self.spawn(SpawnKind::ReactiveParametricSurface3D {
+            map: space.map.clone(),
+            function,
+            u_domain,
+            v_domain,
+            resolution,
+            color_values: color_values.map(Into::into),
+            color_map,
+            color_range,
+            material,
+        });
+        self.attach_to_space_3d(space, &handle);
+        Ok(handle)
+    }
+
     /// Plot a dimensionless scalar function perpendicular to a number line.
     /// Values `-1` and `1` map to `-normal_scale` and `normal_scale` local units.
     #[doc(hidden)]

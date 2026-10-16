@@ -8140,6 +8140,47 @@ class CoordinateSpace3D:
         """
         ...
     def parametric(self, function: Callable[..., tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
+    def parametric_surface(
+        self,
+        function: Callable[..., tuple[float, float, float]],
+        u_domain: tuple[float, float],
+        v_domain: tuple[float, float],
+        *,
+        resolution: tuple[int, int] = (64, 48),
+        inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
+        color: Optional[Callable[[float, float], float]] = None,
+        color_map: Optional[ColorMapLike] = None,
+        color_range: Optional[tuple[float, float]] = None,
+        material: Optional[Material3D] = None,
+    ) -> Drawable:
+        """Sample ``(u, v) -> (x, y, z)`` on a grid of ``resolution`` points and draw it as a mesh.
+
+        ``function`` takes u, v and the current values of ``inputs`` (reactive,
+        as in ``surface``) and returns a point in data coordinates; the mesh is
+        sampled again whenever an input changes, so a surface can bend into
+        another. ``color(u, v)`` gives the value each vertex is colored by
+        through ``color_map``: it is sampled once, so the colors stay painted
+        on the same points of the surface however it moves. ``color_range``
+        is the pair of values at the two ends of the map; by default, the
+        lowest and highest value. Without ``color``, vertices are colored by
+        height, as in ``surface``.
+
+        With a ``material`` the surface is lit by the scene's ``lighting_3d``
+        on both sides, keeping its vertex colors; without one it is unlit.
+        Points outside the space's axes leave holes. Domains must be finite
+        with start < end, and ``resolution`` at least 2 by 2.
+
+        Example:
+            tube = space.parametric_surface(
+                lambda u, v: (math.cos(u), math.sin(u), v),
+                (0, math.tau),
+                (-1, 1),
+                color=lambda u, v: v,
+                color_map="viridis",
+                material=Material3D(roughness=0.5),
+            )
+        """
+        ...
     def field(self, function: Callable[..., tuple[float, float, float]], *, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> VectorField: ...
 
 Cartesian2D: TypeAlias = CoordinateSpace

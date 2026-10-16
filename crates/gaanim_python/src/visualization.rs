@@ -2313,6 +2313,73 @@ impl PyCoordinateSpace3D {
             .map_err(value_error)
     }
 
+    #[pyo3(signature = (function, u_domain, v_domain, *, resolution=(64, 48), inputs=Vec::new(), color=None, color_map=None, color_range=None, material=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn parametric_surface(
+        &self,
+        py: Python<'_>,
+        function: Py<PyAny>,
+        u_domain: (f64, f64),
+        v_domain: (f64, f64),
+        resolution: (usize, usize),
+        inputs: Vec<Py<PyAny>>,
+        color: Option<Py<PyAny>>,
+        color_map: Option<crate::color::PyColorMapArg>,
+        color_range: Option<(f64, f64)>,
+        material: Option<crate::py3d::PyMaterial3D>,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        if resolution.0 < 2 || resolution.1 < 2 || resolution.0 * resolution.1 > 250_000 {
+            return Err(PyValueError::new_err(
+                "resolution must have at least 2 points per side and at most 250000 in all",
+            ));
+        }
+        if ![u_domain.0, u_domain.1, v_domain.0, v_domain.1]
+            .iter()
+            .all(|value| value.is_finite())
+            || u_domain.0 >= u_domain.1
+            || v_domain.0 >= v_domain.1
+        {
+            return Err(PyValueError::new_err(
+                "u_domain and v_domain must be finite with start < end",
+            ));
+        }
+        let color_values = color
+            .map(|color| -> PyResult<Vec<f64>> {
+                let color = color.bind(py);
+                validate_callback(py, color, 2)?;
+                let mut values = Vec::with_capacity(resolution.0 * resolution.1);
+                for iu in 0..resolution.0 {
+                    let u = u_domain.0
+                        + (u_domain.1 - u_domain.0) * iu as f64 / (resolution.0 - 1) as f64;
+                    for iv in 0..resolution.1 {
+                        let v = v_domain.0
+                            + (v_domain.1 - v_domain.0) * iv as f64 / (resolution.1 - 1) as f64;
+                        values.push(color.call1((u, v))?.extract::<f64>()?);
+                    }
+                }
+                Ok(values)
+            })
+            .transpose()?;
+        let function = checked_python_function(py, function, 2, 3, inputs, &self.canvas)?;
+        self.canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .reactive_parametric_surface_plot(
+                &self.inner,
+                function,
+                u_domain,
+                v_domain,
+                [resolution.0, resolution.1],
+                color_values,
+                color_map.map(|color_map| color_map.0),
+                color_range,
+                material.map(|material| material.0),
+            )
+            .map(PyDrawable)
+            .map_err(value_error)
+    }
+
     #[pyo3(signature = (function, domain, *, samples=320, inputs=Vec::new()))]
     fn parametric(
         &self,

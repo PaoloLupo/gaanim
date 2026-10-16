@@ -63,6 +63,12 @@ para toda la escena y cada campo puede tener la suya.
   inicial.
 - `scene.geometry.group(a, b)` acepta los miembros sueltos además de una
   lista.
+- `space.parametric_surface(f, u_domain, v_domain)` dibuja superficies
+  paramétricas `(u, v) → (x, y, z)` en un espacio 3D. Con `inputs` reactivas
+  la malla se vuelve a muestrear y una superficie se dobla en otra;
+  `color(u, v)` pinta cada punto con un valor fijo del material y
+  `material` la ilumina por las dos caras. Lo muestra
+  `gallery/catenoid_helicoid`.
 
 == Al actualizar
 

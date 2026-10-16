@@ -436,6 +436,69 @@ pub fn sample_surface(
     Ok(mesh)
 }
 
+/// Sample a parametric surface `(u, v) -> (x, y, z)` over a grid of
+/// `resolution` points, `u` major: the vertex of `(iu, iv)` is
+/// `iu * resolution[1] + iv`, and the cells come in order along `u`.
+///
+/// `evaluator` returns the data point and the value the vertex is colored by;
+/// a cell with a corner that is missing or outside the axes is left out.
+pub fn sample_parametric_surface(
+    map: &CoordinateMap3D,
+    u_domain: (f64, f64),
+    v_domain: (f64, f64),
+    resolution: [usize; 2],
+    mut evaluator: impl FnMut(f64, f64) -> Option<([f64; 3], f64)>,
+) -> Result<SurfaceMesh, SamplingError> {
+    if resolution.iter().any(|value| *value < 2) {
+        return Err(SamplingError::TooFewSamples);
+    }
+    if ![u_domain.0, u_domain.1, v_domain.0, v_domain.1]
+        .iter()
+        .all(|value| value.is_finite())
+        || u_domain.0 >= u_domain.1
+        || v_domain.0 >= v_domain.1
+    {
+        return Err(SamplingError::InvalidDomain);
+    }
+    let [nu, nv] = resolution;
+    let mut mesh = SurfaceMesh::default();
+    for iu in 0..nu {
+        let u = u_domain.0 + (u_domain.1 - u_domain.0) * iu as f64 / (nu - 1) as f64;
+        for iv in 0..nv {
+            let v = v_domain.0 + (v_domain.1 - v_domain.0) * iv as f64 / (nv - 1) as f64;
+            let sample = evaluator(u, v)
+                .filter(|(point, _)| point.iter().all(|value| value.is_finite()))
+                .and_then(|(point, value)| Some((map.data_to_local(point).ok()?, value)));
+            match sample {
+                Some((local, value)) => {
+                    mesh.vertices
+                        .push([local[0] as f32, local[1] as f32, local[2] as f32]);
+                    mesh.values.push(value);
+                }
+                None => {
+                    mesh.vertices.push([f32::NAN; 3]);
+                    mesh.values.push(f64::NAN);
+                }
+            }
+        }
+    }
+    for iu in 0..nu - 1 {
+        for iv in 0..nv - 1 {
+            let a = (iu * nv + iv) as u32;
+            let b = a + nv as u32;
+            let c = b + 1;
+            let d = a + 1;
+            if [a, b, c, d]
+                .iter()
+                .all(|index| mesh.vertices[*index as usize][0].is_finite())
+            {
+                mesh.indices.extend_from_slice(&[a, b, c, a, c, d]);
+            }
+        }
+    }
+    Ok(mesh)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,6 +535,30 @@ mod tests {
         })
         .unwrap();
         assert!(sampled.segments.len() >= 2);
+    }
+
+    #[test]
+    fn parametric_surface_is_u_major_and_skips_missing_cells() {
+        let map = CoordinateMap3D::new(
+            Axis::linear(-1.0, 1.0).unwrap(),
+            Axis::linear(-1.0, 1.0).unwrap(),
+            Axis::linear(-1.0, 1.0).unwrap(),
+            [2.0, 2.0, 2.0],
+        )
+        .unwrap();
+        let mesh = sample_parametric_surface(&map, (0.0, 1.0), (0.0, 1.0), [3, 2], |u, v| {
+            (u < 0.9).then_some(([u, v, 0.0], u + v))
+        })
+        .unwrap();
+        assert_eq!(mesh.vertices.len(), 6);
+        // Vertex (iu, iv) sits at iu * 2 + iv: u steps every second vertex.
+        assert_eq!(mesh.vertices[2], [0.5, 0.0, 0.0]);
+        assert_eq!(mesh.values[3], 1.5);
+        // The cell next to u = 1 has missing corners.
+        assert_eq!(mesh.indices, vec![0, 2, 3, 0, 3, 1]);
+        assert!(
+            sample_parametric_surface(&map, (1.0, 0.0), (0.0, 1.0), [3, 2], |_, _| None).is_err()
+        );
     }
 
     #[test]

@@ -720,6 +720,22 @@ pub enum SpawnKind {
         /// Colors by height, lowest to highest; `None` keeps the default ramp.
         color_map: Option<gaanim_core::ColorMap>,
     },
+    /// A deterministic `(u, v) -> (x, y, z)` callback sampled into a 3D surface mesh.
+    ReactiveParametricSurface3D {
+        map: gaanim_visualization::CoordinateMap3D,
+        function: gaanim_animation::ReactiveFunction,
+        u_domain: (f64, f64),
+        v_domain: (f64, f64),
+        resolution: [usize; 2],
+        /// One value per grid vertex, `u` major, that colors it whatever the
+        /// shape; `None` colors by data height.
+        color_values: Option<std::sync::Arc<[f64]>>,
+        color_map: Option<gaanim_core::ColorMap>,
+        /// The values at the two ends of `color_map`; `None` spans the values.
+        color_range: Option<(f64, f64)>,
+        /// Lights the surface on both sides; `None` leaves it unlit.
+        material: Option<gaanim_scene::Material3D>,
+    },
     /// Numeric text evaluated from a deterministic scalar source.
     ReactiveReadout {
         source: gaanim_animation::ScalarSource,
