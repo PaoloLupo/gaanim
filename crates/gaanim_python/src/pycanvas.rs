@@ -5273,6 +5273,121 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
+    #[pyo3(signature = (major_radius=1.0, minor_radius=0.3, *, segments=48, rings=24, material=None))]
+    fn torus<'py>(
+        &self,
+        py: Python<'py>,
+        major_radius: f64,
+        minor_radius: f64,
+        segments: u32,
+        rings: u32,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .torus(
+                major_radius,
+                minor_radius,
+                segments,
+                rings,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    #[pyo3(signature = (start, end, *, shaft_radius=None, head_radius=None, head_length=None, segments=24, material=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn arrow_3d<'py>(
+        &self,
+        py: Python<'py>,
+        start: (f64, f64, f64),
+        end: (f64, f64, f64),
+        shaft_radius: Option<f64>,
+        head_radius: Option<f64>,
+        head_length: Option<f64>,
+        segments: u32,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let sizes = gaanim_api::canvas::ArrowSizes {
+            shaft_radius,
+            head_radius,
+            head_length,
+        };
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .arrow_3d(
+                [start.0, start.1, start.2],
+                [end.0, end.1, end.2],
+                sizes,
+                segments,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    #[pyo3(signature = (points, radius=0.1, *, segments=16, closed=false, caps=true, material=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn tube<'py>(
+        &self,
+        py: Python<'py>,
+        points: Vec<(f64, f64, f64)>,
+        radius: f64,
+        segments: u32,
+        closed: bool,
+        caps: bool,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let points: Vec<[f64; 3]> = points.into_iter().map(|(x, y, z)| [x, y, z]).collect();
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .tube(
+                &points,
+                radius,
+                segments,
+                closed,
+                caps,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    /// Lay the outline a 2D drawable fills flat as a two-sided 3D sheet.
+    #[pyo3(signature = (source, *, material=None, tolerance=0.01, keep_source=false))]
+    fn flat_3d<'py>(
+        &self,
+        py: Python<'py>,
+        source: &PyDrawable,
+        material: Option<PyMaterial3D>,
+        tolerance: f64,
+        keep_source: bool,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .flat_3d(
+                &source.0,
+                tolerance,
+                material.map(|value| value.0),
+                keep_source,
+            )
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
     #[pyo3(signature = (kind="point", *, color=None, intensity=1.0))]
     fn light_3d(&self, kind: &str, color: Option<PyColor>, intensity: f32) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;

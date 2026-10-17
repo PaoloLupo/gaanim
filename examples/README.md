@@ -217,7 +217,7 @@ Pan, zoom and rotation, camera paths, insets and parallax.
 
 ## 3D
 
-Primitives, extrusion, axonometric drawings and 3D axes.
+Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 
 | Example | Description |
 | --- | --- |
@@ -225,6 +225,7 @@ Primitives, extrusion, axonometric drawings and 3D axes.
 | [Materials 3d](3d/materials_3d.py) | Matte, metal and emissive materials, roughness, metallic and emission settings, and animated materials and fills. |
 | [Transforms 3d](3d/transforms_3d.py) | Turning, moving and scaling drawables in depth with the _3d methods, about their center or a pivot. |
 | [Extrusion](3d/extrusion.py) | Text, equations, SVGs, shapes with holes and groups extruded into lit solids, with depth, bevel, tolerance and materials. |
+| [Shapes 3d](3d/shapes_3d.py) | Tori, arrows between two points, tubes along open, creased and closed paths, and flat sheets of text, equations and shapes. |
 | [Lines 3d](3d/lines_3d.py) | Polylines through 3D points with solid colors and color maps, and paths traced behind moving objects that fade, cap or thin. |
 | [Axes 3d](3d/axes_3d.py) | 3D axes with their grid planes, box sizes, linear, log, symlog and power scales, and layers that animate apart. |
 | [Plots 3d](3d/plots_3d.py) | Surfaces, parametric curves and vector fields in a 3D space, static and driven by parameters. |
