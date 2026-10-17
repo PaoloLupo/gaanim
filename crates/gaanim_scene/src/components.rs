@@ -656,7 +656,8 @@ impl Default for Material3D {
 pub struct Lighting3D {
     pub enabled: bool,
     pub intensity: f32,
-    /// Kept for scripts that set it; the renderer casts no shadows.
+    /// Whether opaque meshes cast shadows from the first lights onto lit
+    /// meshes.
     pub shadows: bool,
 }
 

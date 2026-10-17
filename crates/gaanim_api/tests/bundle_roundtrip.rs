@@ -882,9 +882,10 @@ fn a_video_exported_from_a_bundle_with_reactive_shaders_matches_the_scene_export
     }
 }
 
-/// A lit sphere and cube under a point light, seen by a perspective camera
-/// that orbits them, records its meshes once and the camera per frame, and
-/// the GPU draws them again from the recording.
+/// A lit sphere and cube under a point light and a line with a stroke
+/// width, seen by a perspective camera that orbits them, records its meshes
+/// once and the camera per frame, and the GPU draws them again from the
+/// recording.
 #[test]
 fn three_d_content_records_its_meshes_and_draws_them_again() {
     let directory = tempfile::tempdir().unwrap();
@@ -895,6 +896,9 @@ fn three_d_content_records_its_meshes_and_draws_them_again() {
     // Dense: thousands of triangles, stored once.
     canvas.sphere(1.0, 96, 64, material).unwrap();
     canvas.cube(1.2, material).unwrap();
+    canvas
+        .polyline_3d(vec![[-2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [2.0, 0.0, 1.0]])
+        .stroke(Color::WHITE, 0.05);
     canvas.light_3d(gaanim_scene::LightKind3D::Point, Color::WHITE, 1.0);
     let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
     canvas.play(vec![perspective]);
@@ -935,7 +939,15 @@ fn three_d_content_records_its_meshes_and_draws_them_again() {
         .filter(|source| source.mesh.is_some())
         .count();
     assert_eq!(meshes, 2);
-    // Both draw into one image the frame shows.
+    // The line keeps its stroke's width.
+    let widths: Vec<Option<f32>> = three_d
+        .sources
+        .iter()
+        .filter(|source| source.lines.is_some())
+        .map(|source| source.line_width)
+        .collect();
+    assert_eq!(widths, [Some(0.05)]);
+    // All three draw into one image the frame shows.
     let (composed, _) = gaanim_bundle::compose_frame_layers(&middle, None, &mut Default::default());
     assert_eq!(composed.three_d.len(), 1);
     assert!(bundle.verify().unwrap().is_empty());

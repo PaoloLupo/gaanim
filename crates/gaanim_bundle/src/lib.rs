@@ -19,10 +19,9 @@
 //!   shader effects on drawables, in segments of about 2 MB, each written
 //!   just before the chunk that filled it.
 //!
-//! Frames store native 3D content as its meshes, matrices, materials and
-//! lights, not the triangles it projects to: reading a frame projects them
-//! again with the renderer's own code
-//! ([`gaanim_renderer::pipeline::captured_three_d_elements`]).
+//! Frames store native 3D content as its meshes, matrices, materials, line
+//! widths and lights, not the pixels it draws: a frame's composition hands
+//! them to the renderer's GPU pass again ([`gaanim_renderer::three_d`]).
 //! - `frames/NNNNNN.bin`: chunks of frames, each frame encoded against the
 //!   one before it; a chunk starts with a whole frame, and the manifest lists
 //!   the segments its frames refer to.
