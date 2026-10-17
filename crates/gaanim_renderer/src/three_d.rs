@@ -78,15 +78,20 @@ pub(crate) struct Content<'a> {
     pub lines: Option<&'a LineListData>,
     pub material: Option<&'a Material3D>,
     /// Width of the lines in scene units, from the drawable's stroke; `None`
-    /// draws them [`LINE_WIDTH_PX`] wide.
+    /// draws them [`LINE_WIDTH_OF_FRAME`] of the frame's height wide.
     pub line_width: Option<f64>,
+    /// The part of the lines shown, from and to, as fractions of their
+    /// segments; `None` shows all of them.
+    pub line_range: Option<[f32; 2]>,
 }
 
-/// Width of 3D lines without a stroke width, in output pixels.
-const LINE_WIDTH_PX: f64 = 1.5;
+/// Width of 3D lines without a stroke width, as a fraction of the frame's
+/// height: 2 pixels of a 1080-pixel-tall output, at any output size.
+const LINE_WIDTH_OF_FRAME: f64 = 2.0 / 1080.0;
 
 /// How `camera` maps its NDC onto the canvas, in scene units, and the width
-/// of lines in scene units; `None` when it shows nothing.
+/// of lines without a stroke width in scene units; `None` when it shows
+/// nothing.
 pub(crate) fn canvas_projection(camera: &Camera) -> Option<(kurbo::Affine, f64)> {
     let width = f64::from(camera.viewport_width);
     let height = f64::from(camera.viewport_height);
@@ -118,7 +123,7 @@ pub(crate) fn canvas_projection(camera: &Camera) -> Option<(kurbo::Affine, f64)>
     ]);
     Some((
         canvas.inverse() * ndc_to_pixels,
-        LINE_WIDTH_PX / pixels_per_unit,
+        camera.frame_height * LINE_WIDTH_OF_FRAME,
     ))
 }
 
@@ -461,6 +466,8 @@ struct GpuDraw {
     /// Drawn into the shadow maps: opaque meshes that do not glow, since
     /// a glowing mesh may hold the light that makes it glow.
     casts: bool,
+    /// Lines only: the segments drawn, those a reveal shows at least part of.
+    instances: std::ops::Range<u32>,
 }
 
 /// The meshes and lines one image of a frame draws, with what the shader
@@ -521,6 +528,8 @@ struct Pending {
     translucent: bool,
     /// Lines only: their width in scene units, or the default.
     line_width: Option<f64>,
+    /// Lines only: the part shown, as fractions of their segments.
+    line_range: Option<[f32; 2]>,
 }
 
 impl Pending {
@@ -638,6 +647,7 @@ impl<'a> GpuMeshes<'a> {
         if opacity <= f32::EPSILON {
             return;
         }
+        let source_lines = source.lines;
         let opaque_colors = if source.has_colors {
             source.opaque_colors
         } else {
@@ -652,6 +662,11 @@ impl<'a> GpuMeshes<'a> {
             base: to_linear(base),
             material,
             line_width,
+            line_range: if source_lines {
+                content.line_range
+            } else {
+                None
+            },
         });
     }
 
@@ -727,11 +742,22 @@ impl<'a> GpuMeshes<'a> {
             let mut draw_uniforms = Vec::with_capacity(members.len() * DRAW_STRIDE);
             for (_, pending) in members {
                 let line_px = pending.line_width.unwrap_or(line_width) * pixels_per_unit;
-                push_draw_uniforms(&mut draw_uniforms, pending, line_px);
+                // The segments shown: all of them, or a reveal's part.
+                let segments = pending.source.count as f32;
+                let [from, to] = pending.line_range.map_or([0.0, segments], |[from, to]| {
+                    [from * segments, to * segments]
+                });
+                push_draw_uniforms(&mut draw_uniforms, pending, line_px, [from, to]);
+                let instances = if to > from {
+                    (from.floor().max(0.0) as u32)..(to.ceil() as u32).min(pending.source.count)
+                } else {
+                    0..0
+                };
                 draws.push(GpuDraw {
                     culled: pending.material.is_some() && !pending.source.lines,
                     translucent: pending.translucent,
                     casts: pending.casts(),
+                    instances,
                     source: Arc::clone(&pending.source),
                 });
             }
@@ -1074,9 +1100,10 @@ fn frame_uniforms(
     uniforms
 }
 
-/// Append one draw's uniforms, its lines `line_px` pixels wide, padded to
-/// `DRAW_STRIDE`.
-fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64) {
+/// Append one draw's uniforms, padded to `DRAW_STRIDE`: its lines
+/// `line_px` pixels wide, showing the segments from `shown[0]` to
+/// `shown[1]` (fractional at the ends).
+fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64, shown: [f32; 2]) {
     let start = bytes.len();
     push_mat4(bytes, pending.model);
     push_mat4(bytes, pending.model.inverse().transpose());
@@ -1105,7 +1132,7 @@ fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64) {
             f32::from(u8::from(pending.source.has_colors)),
         ],
     );
-    push_f32s(bytes, &[(line_px * 0.5) as f32, 0.0, 0.0, 0.0]);
+    push_f32s(bytes, &[(line_px * 0.5) as f32, shown[0], shown[1], 0.0]);
     debug_assert_eq!(bytes.len() - start, DRAW_BYTES);
     bytes.resize(start + DRAW_STRIDE, 0);
 }
@@ -1916,8 +1943,10 @@ impl GpuThreeD {
                     );
                     pass.set_pipeline(&set[each as usize]);
                     if draw.source.lines {
-                        // A quad per segment.
-                        pass.draw(0..6, 0..draw.source.count);
+                        // A quad per segment shown.
+                        if !draw.instances.is_empty() {
+                            pass.draw(0..6, draw.instances.clone());
+                        }
                     } else {
                         pass.draw_indexed(0..draw.source.count, 0, 0..1);
                     }
@@ -1980,7 +2009,8 @@ struct Draw {
     emissive: vec4<f32>,
     // Roughness, metalness, 1 when lit, and 1 when vertices have colors.
     material: vec4<f32>,
-    // Half the width of lines in pixels.
+    // Half the width of lines in pixels, and the segments shown, from and
+    // to, fractional at the ends.
     line: vec4<f32>,
 }
 
@@ -2286,10 +2316,23 @@ const CORNERS = array<vec2<f32>, 6>(
 );
 
 @vertex
-fn vertex_line(@builtin(vertex_index) index: u32, in: LineIn) -> LineOut {
+fn vertex_line(
+    @builtin(vertex_index) index: u32,
+    @builtin(instance_index) segment: u32,
+    in: LineIn,
+) -> LineOut {
     var out: LineOut;
-    var start = image_clip((draw.model * vec4<f32>(in.start.xyz, 1.0)).xyz);
-    var end = image_clip((draw.model * vec4<f32>(in.end.xyz, 1.0)).xyz);
+    // The part of the segment shown, when a reveal ends within it.
+    let first = clamp(draw.line.y - f32(segment), 0.0, 1.0);
+    let last = clamp(draw.line.z - f32(segment), 0.0, 1.0);
+    if last <= first {
+        out.clip = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+        return out;
+    }
+    let head = mix(in.start.xyz, in.end.xyz, first);
+    let tail = mix(in.start.xyz, in.end.xyz, last);
+    var start = image_clip((draw.model * vec4<f32>(head, 1.0)).xyz);
+    var end = image_clip((draw.model * vec4<f32>(tail, 1.0)).xyz);
     // The part in front of the near plane, where reversed depth reaches w.
     let start_out = start.z - start.w;
     let end_out = end.z - end.w;
@@ -2319,11 +2362,11 @@ fn vertex_line(@builtin(vertex_index) index: u32, in: LineIn) -> LineOut {
     let corner = corners[index];
     var pixel = s0 - along * reach;
     var clip = start;
-    var color = in.start_color;
+    var color = mix(in.start_color, in.end_color, first);
     if corner.x > 0.5 {
         pixel = s1 + along * reach;
         clip = end;
-        color = in.end_color;
+        color = mix(in.start_color, in.end_color, last);
     }
     if draw.material.w < 0.5 {
         color = draw.base;
@@ -2495,8 +2538,8 @@ mod tests {
         // The NDC square spans the 16 x 9 frame around the camera.
         let corner = ndc_to_canvas * kurbo::Point::new(1.0, 1.0);
         assert!((corner.x - 8.0).abs() < 1e-9 && (corner.y - 4.5).abs() < 1e-9);
-        // 1.5 output pixels at 120 pixels per unit.
-        assert!((line_width - 1.5 / 120.0).abs() < 1e-12);
+        // 2 pixels of a 1080-pixel-tall output, in the 9-unit-tall frame.
+        assert!((line_width - 9.0 * 2.0 / 1080.0).abs() < 1e-12);
     }
 
     #[test]
@@ -2569,6 +2612,7 @@ mod tests {
             strip,
             color: peniko::Color::WHITE,
             colors: None,
+            revealed: None,
         };
         assert_eq!(MeshSource::lines(&lines(true, None)).unwrap().count, 3);
         assert_eq!(MeshSource::lines(&lines(false, None)).unwrap().count, 2);
@@ -2605,6 +2649,7 @@ mod tests {
         let red = quad(peniko::Color::from_rgb8(255, 0, 0));
         let content = |opacity| Content {
             line_width: None,
+            line_range: None,
             transform: &transform,
             opacity,
             mesh: Some(&red),
@@ -2669,6 +2714,7 @@ mod tests {
                 lines: None,
                 material: floor.material.as_ref(),
                 line_width: None,
+                line_range: None,
             },
         );
         // The fixed key light casts one map, at full size.
@@ -2717,6 +2763,7 @@ mod tests {
             strip: true,
             color: peniko::Color::WHITE,
             colors: None,
+            revealed: None,
         };
         let (transform, opacity) = (GlobalSpatialTransform::default(), GlobalOpacity(1.0));
         let mut sources = MeshSources::default();
@@ -2734,6 +2781,7 @@ mod tests {
                     lines: Some(&lines),
                     material: None,
                     line_width: width,
+                    line_range: None,
                 },
             );
         }
@@ -2746,9 +2794,125 @@ mod tests {
                     .unwrap(),
             )
         };
-        // 0.05 scene units at 120 pixels per unit, and the default 1.5 pixels.
+        // 0.05 scene units at 120 pixels per unit, and the default 2 pixels
+        // of a 1080-pixel-tall output.
         assert!((half_width(0) - 3.0).abs() < 1e-4, "{}", half_width(0));
-        assert!((half_width(1) - 0.75).abs() < 1e-4, "{}", half_width(1));
+        assert!((half_width(1) - 1.0).abs() < 1e-4, "{}", half_width(1));
+    }
+
+    #[test]
+    fn a_revealed_line_draws_only_the_segments_it_shows() {
+        let camera = camera(Projection::Orthographic { zoom: 1.0 });
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let lines = LineListData {
+            points: vec![
+                [0.0; 3],
+                [1.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [4.0; 3],
+            ],
+            indices: None,
+            strip: true,
+            color: peniko::Color::WHITE,
+            colors: None,
+            revealed: None,
+        };
+        let (transform, opacity) = (GlobalSpatialTransform::default(), GlobalOpacity(1.0));
+        let mut sources = MeshSources::default();
+        let mut meshes =
+            GpuMeshes::new(&mut sources, (1920, 1080), camera.to_vello_transform(), 0).unwrap();
+        for (key, range) in [(1, Some([0.25, 0.6])), (2, Some([0.5, 0.5])), (3, None)] {
+            meshes.push(
+                0,
+                [(key, 1), (key, 1)],
+                [None, None],
+                &Content {
+                    transform: &transform,
+                    opacity: &opacity,
+                    mesh: None,
+                    lines: Some(&lines),
+                    material: None,
+                    line_width: None,
+                    line_range: range,
+                },
+            );
+        }
+        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let frame = &frames[0].1;
+        let shown = |draw: usize| {
+            let start = draw * DRAW_STRIDE + DRAW_BYTES - 12;
+            let value = |offset: usize| {
+                f32::from_le_bytes(
+                    frame.draw_uniforms[start + offset..start + offset + 4]
+                        .try_into()
+                        .unwrap(),
+                )
+            };
+            [value(0), value(4)]
+        };
+        // A quarter to 60% of 4 segments: from 1 to 2.4, which draws the
+        // second and third segments, the third in part.
+        assert_eq!(shown(0), [1.0, 2.4]);
+        assert_eq!(frame.draws[0].instances, 1..3);
+        // Nothing shown draws nothing; without a reveal, every segment.
+        assert!(frame.draws[1].instances.is_empty());
+        assert_eq!(
+            (shown(2), frame.draws[2].instances.clone()),
+            ([0.0, 4.0], 0..4)
+        );
+    }
+
+    #[test]
+    fn a_line_revealed_halfway_draws_its_first_half() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, _) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let (transform, opacity) = (GlobalSpatialTransform::default(), GlobalOpacity(1.0));
+        let lines = LineListData {
+            points: vec![[-1.5, 0.0, 0.0], [0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
+            indices: None,
+            strip: true,
+            color: peniko::Color::from_rgb8(255, 0, 0),
+            colors: None,
+            revealed: None,
+        };
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        meshes.push(
+            0,
+            [(1, 1), (1, 1)],
+            [None, None],
+            &Content {
+                transform: &transform,
+                opacity: &opacity,
+                mesh: None,
+                lines: Some(&lines),
+                material: None,
+                line_width: Some(0.25),
+                line_range: Some([0.0, 0.5]),
+            },
+        );
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, 0.1, &Illumination::default())
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        let pixels = gpu.read(&target);
+        let red = |x: usize| pixels[(32 * 64 + x) * 4];
+        // At 16 pixels per unit, x = -1 is shown and x = 1 is not.
+        assert!(red(16) > 200, "{}", red(16));
+        assert_eq!(red(48), 0);
     }
 
     #[test]
@@ -2780,6 +2944,7 @@ mod tests {
                     lines: None,
                     material: lit.material.as_ref(),
                     line_width: None,
+                    line_range: None,
                 },
             );
         }
@@ -2840,6 +3005,7 @@ mod tests {
                     lines: None,
                     material: lit.material.as_ref(),
                     line_width: None,
+                    line_range: None,
                 },
             );
         }
@@ -2901,6 +3067,7 @@ mod tests {
             [None, None],
             &Content {
                 line_width: None,
+                line_range: None,
                 transform: &transform,
                 opacity: &opacity,
                 mesh: Some(&red),

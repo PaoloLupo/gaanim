@@ -923,20 +923,34 @@ fn write_three_d(
             .collect();
         write_keys(w, &lineage);
     }
-    // The widths of lines that set one, by source, after the sources: the
-    // frames of bundles recorded before end with them, and readers that
-    // predate widths stop there.
+    // After the sources, by source: the widths of lines that set one, then
+    // the parts of lines a reveal shows. Frames of bundles recorded before
+    // end before either, and readers that predate them stop there.
     let widths: Vec<(usize, f32)> = three_d
         .sources
         .iter()
         .enumerate()
         .filter_map(|(index, source)| source.line_width.map(|width| (index, width)))
         .collect();
-    if !widths.is_empty() {
+    let ranges: Vec<(usize, [f32; 2])> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.line_range.map(|range| (index, range)))
+        .collect();
+    if !widths.is_empty() || !ranges.is_empty() {
         w.len(widths.len());
         for (index, width) in widths {
             w.len(index);
             w.f32(width);
+        }
+    }
+    if !ranges.is_empty() {
+        w.len(ranges.len());
+        for (index, [from, to]) in ranges {
+            w.len(index);
+            w.f32(from);
+            w.f32(to);
         }
     }
 }
@@ -989,6 +1003,7 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
             lines,
             material,
             line_width: None,
+            line_range: None,
             composition: ThreeDComposition {
                 in_views,
                 post_exempt,
@@ -1006,6 +1021,16 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                 .get_mut(index)
                 .ok_or_else(|| corrupt("a line width of no 3D source"))?
                 .line_width = Some(width);
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let range = [r.f32()?, r.f32()?];
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a revealed part of no 3D source"))?
+                .line_range = Some(range);
         }
     }
     Ok(CapturedThreeD {

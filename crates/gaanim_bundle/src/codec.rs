@@ -470,6 +470,7 @@ pub fn read_lines(r: &mut Reader<'_>) -> Result<gaanim_scene::LineListData> {
         strip: r.bool()?,
         color: read_color(r)?,
         colors: r.option(read_points)?,
+        revealed: None,
     })
 }
 

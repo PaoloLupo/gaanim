@@ -4223,6 +4223,7 @@ fn trim_line_list(source: &LineListData, completion: f64) -> LineListData {
             strip: source.strip,
             color: source.color,
             colors: source.colors.as_ref().map(|_| Vec::new()),
+            revealed: None,
         };
     }
     if completion >= 1.0 {
@@ -4265,6 +4266,7 @@ fn trim_line_list(source: &LineListData, completion: f64) -> LineListData {
             strip: true,
             color: source.color,
             colors,
+            revealed: None,
         };
     }
 
@@ -4308,6 +4310,7 @@ fn trim_line_list(source: &LineListData, completion: f64) -> LineListData {
             strip: source.strip,
             color: source.color,
             colors,
+            revealed: None,
         };
     }
 
@@ -4343,6 +4346,7 @@ fn trim_line_list(source: &LineListData, completion: f64) -> LineListData {
         strip: false,
         color: source.color,
         colors,
+        revealed: None,
     }
 }
 
@@ -4357,6 +4361,7 @@ fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineLis
             strip: true,
             color: source.color,
             colors: source.colors.as_ref().map(|_| Vec::new()),
+            revealed: None,
         };
     }
 
@@ -4406,6 +4411,7 @@ fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineLis
         strip: true,
         color: source.color,
         colors,
+        revealed: None,
     }
 }
 
@@ -4574,11 +4580,15 @@ fn apply_lens_spec(
                 if let Some(line) = line_clone
                     && let Ok(mut entity) = world.get_entity_mut(target)
                 {
-                    entity.insert(LineListSource(line));
+                    entity.insert(LineListSource(LineListData {
+                        revealed: None,
+                        ..line
+                    }));
                 }
             }
             if let Some(source) = world.get::<LineListSource>(target) {
-                let visible = trim_line_list(&source.0, completion);
+                let visible =
+                    trim_line_list(&source.0, completion).revealing(&source.0, 0.0, completion);
                 if let Some(mut line) = world.get_mut::<LineListData>(target)
                     && *line != visible
                 {
@@ -5168,14 +5178,18 @@ fn apply_lens_spec(
                 if let Some(line) = line_clone
                     && let Ok(mut entity) = world.get_entity_mut(target)
                 {
-                    entity.insert(LineListSource(line));
+                    entity.insert(LineListSource(LineListData {
+                        revealed: None,
+                        ..line
+                    }));
                 }
             }
             if let Some(source) = world.get::<LineListSource>(target)
                 && source.0.strip
                 && source.0.indices.is_none()
             {
-                let visible = trim_line_strip_range(&source.0, start, end);
+                let visible =
+                    trim_line_strip_range(&source.0, start, end).revealing(&source.0, start, end);
                 if let Some(mut line) = world.get_mut::<LineListData>(target)
                     && *line != visible
                 {
@@ -6446,6 +6460,7 @@ mod tests {
                     strip: true,
                     color: gaanim_core::peniko::Color::WHITE,
                     colors: None,
+                    revealed: None,
                 },
                 SpatialTransform::default(),
                 gaanim_scene::Visibility::Inherited,

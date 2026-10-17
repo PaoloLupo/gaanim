@@ -855,7 +855,8 @@ pub fn evaluate_line_path_ranges_system(
         {
             // Completed tweens keep producing the same strip; skip the write
             // so the line is not reported as changed every frame.
-            let visible = trim_line_strip_range(&source.0, start, end);
+            let visible =
+                trim_line_strip_range(&source.0, start, end).revealing(&source.0, start, end);
             if *line != visible {
                 *line = visible;
             }
@@ -878,6 +879,7 @@ fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineLis
             strip: true,
             color: source.color,
             colors: source.colors.as_ref().map(|_| Vec::new()),
+            revealed: None,
         };
     }
 
@@ -927,6 +929,7 @@ fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineLis
         strip: true,
         color: source.color,
         colors,
+        revealed: None,
     }
 }
 
