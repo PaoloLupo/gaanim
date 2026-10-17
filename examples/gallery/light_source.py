@@ -29,11 +29,11 @@ solids = [
 ]
 
 # The lamp and its bulb share a point that turns on an arc above the solids,
-# in front of them.
+# in front of them: a follower takes the point's depth, which is its center's.
 angle = scene.viz.parameter(math.pi * 0.95)
-sun = geometry.polar_point((0.0, -0.6), 3.9, angle)
-lamp = geometry.light_3d(color=gold, intensity=1.8).move_to_3d(0, 0, 2.5).follow(sun).hidden()
-bulb = geometry.sphere(0.16, material=Material3D.emissive(gold, 2.0)).move_to_3d(0, 0, 2.5).follow(sun).hidden()
+sun = geometry.polar_point((0.0, -0.6, 2.5), 3.9, angle)
+lamp = geometry.light_3d(color=gold, intensity=1.8).follow(sun).hidden()
+bulb = geometry.sphere(0.16, material=Material3D.emissive(gold, 2.0)).follow(sun).hidden()
 fill = geometry.light_3d(color=violet, intensity=0.5).move_to_3d(2.0, 3.0, -6.0)
 
 scene.camera.perspective(fov_y=0.7)
