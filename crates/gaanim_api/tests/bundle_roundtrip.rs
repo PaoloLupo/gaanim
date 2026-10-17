@@ -895,7 +895,8 @@ fn three_d_content_records_its_meshes_and_draws_them_again() {
         gaanim_scene::Material3D::new(Color::from_rgb8(200, 80, 60), 0.5, 0.0, None, 0.0).unwrap();
     // Dense: thousands of triangles, stored once.
     canvas.sphere(1.0, 96, 64, material).unwrap();
-    canvas.cube(1.2, material).unwrap();
+    let outlined = material.with_outline(Color::BLACK, 0.04).unwrap();
+    canvas.cube(1.2, outlined).unwrap();
     canvas
         .polyline_3d(vec![[-2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [2.0, 0.0, 1.0]])
         .stroke(Color::WHITE, 0.05);
@@ -939,6 +940,15 @@ fn three_d_content_records_its_meshes_and_draws_them_again() {
         .filter(|source| source.mesh.is_some())
         .count();
     assert_eq!(meshes, 2);
+    // The cube keeps its material's outline.
+    let outlines: Vec<f32> = three_d
+        .sources
+        .iter()
+        .filter_map(|source| source.material)
+        .filter(|material| material.outlined())
+        .map(|material| material.outline_width)
+        .collect();
+    assert_eq!(outlines, [0.04]);
     // The line keeps its stroke's width.
     let widths: Vec<Option<f32>> = three_d
         .sources

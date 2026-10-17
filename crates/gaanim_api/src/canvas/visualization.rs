@@ -3698,7 +3698,7 @@ impl SceneModel {
             color,
             color_map,
             color_range,
-            material,
+            material: material.map(Box::new),
         });
         self.attach_to_space_3d(space, &handle);
         Ok(handle)

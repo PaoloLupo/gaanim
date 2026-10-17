@@ -747,7 +747,7 @@ pub enum SpawnKind {
         /// The values at the two ends of `color_map`; `None` spans the values.
         color_range: Option<(f64, f64)>,
         /// Lights the surface on both sides; `None` leaves it unlit.
-        material: Option<gaanim_scene::Material3D>,
+        material: Option<Box<gaanim_scene::Material3D>>,
     },
     /// Numeric text evaluated from a deterministic scalar source.
     ReactiveReadout {

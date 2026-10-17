@@ -430,6 +430,7 @@ pub fn read_material(r: &mut Reader<'_>) -> Result<gaanim_scene::Material3D> {
         metallic: r.f32()?,
         emissive: read_color(r)?,
         emissive_strength: r.f32()?,
+        ..Default::default()
     })
 }
 

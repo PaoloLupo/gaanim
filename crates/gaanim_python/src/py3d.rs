@@ -20,15 +20,17 @@ copy_from_py_object!(PyMaterial3D);
 #[pymethods]
 impl PyMaterial3D {
     #[new]
-    #[pyo3(signature = (color=None, roughness=0.55, metallic=0.0, emissive=None, emissive_strength=0.0))]
+    #[pyo3(signature = (color=None, roughness=0.55, metallic=0.0, emissive=None, emissive_strength=0.0, outline=None, outline_width=0.03))]
     fn new(
         color: Option<PyColor>,
         roughness: f32,
         metallic: f32,
         emissive: Option<PyColor>,
         emissive_strength: f32,
+        outline: Option<PyColor>,
+        outline_width: f32,
     ) -> PyResult<Self> {
-        gaanim_scene::Material3D::new(
+        let material = gaanim_scene::Material3D::new(
             color
                 .map(|value| value.0)
                 .unwrap_or(gaanim_core::peniko::Color::WHITE),
@@ -36,9 +38,25 @@ impl PyMaterial3D {
             metallic,
             emissive.map(|value| value.0),
             emissive_strength,
-        )
-        .map(Self)
-        .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+        );
+        let material = match outline {
+            Some(outline) => {
+                material.and_then(|material| material.with_outline(outline.0, outline_width))
+            }
+            None => material,
+        };
+        material
+            .map(Self)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+    }
+
+    /// This material with an outline of `color`, `width` scene units wide.
+    #[pyo3(signature = (color, width=0.03))]
+    fn outlined(&self, color: PyColor, width: f32) -> PyResult<Self> {
+        self.0
+            .with_outline(color.0, width)
+            .map(Self)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
     }
 
     #[staticmethod]
@@ -97,6 +115,16 @@ impl PyMaterial3D {
     #[getter]
     fn emissive_strength(&self) -> f32 {
         self.0.emissive_strength
+    }
+
+    #[getter]
+    fn outline(&self) -> PyColor {
+        PyColor(self.0.outline)
+    }
+
+    #[getter]
+    fn outline_width(&self) -> f32 {
+        self.0.outline_width
     }
 }
 

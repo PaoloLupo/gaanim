@@ -142,7 +142,11 @@ const INSTANCE_BYTES: usize = 128;
 const FRAME_BYTES: usize = 2336;
 /// Bytes of one draw's uniforms (`Draw` in [`SHADER`]), and their stride in
 /// the draw buffer, the minimum uniform offset alignment.
-const DRAW_BYTES: usize = 192;
+const DRAW_BYTES: usize = 224;
+/// Where a draw's uniforms keep its lines' half width and shown segments
+/// (`Draw.line` in [`SHADER`]).
+#[cfg(test)]
+const LINE_ROW: usize = 176;
 const DRAW_STRIDE: usize = 256;
 /// Lights the shader reads; further lights are left out.
 const MAX_LIGHTS: usize = 8;
@@ -186,6 +190,9 @@ pub struct MeshSource {
     /// that run it in opposite directions, once vertices at one place are
     /// one. Only a lit mesh shadows itself, so only a lit one is checked.
     closed: bool,
+    /// A lit mesh's outline directions (see [`outline_directions`]); empty
+    /// for others, which have no material to outline them.
+    outline: Vec<u8>,
     /// Hash of what the shader reads: sources alike share one upload, and
     /// meshes alike draw next to each other, as one instanced draw.
     digest: u64,
@@ -214,11 +221,16 @@ impl MeshSource {
 
 /// Whether the triangles `indices` over `positions` enclose a volume: each
 /// edge, once vertices at one place are one, is run once in each direction.
+#[cfg(test)]
 fn encloses(positions: &[DVec3], indices: &[u32], radius: f64) -> bool {
-    // Vertices closer than a hundred-thousandth of the mesh's size are one,
-    // found in their cell of a grid that fine or in a neighboring one: two
-    // copies of a vertex computed with different rounding may straddle a
-    // cell boundary.
+    encloses_places(&weld(positions, radius), indices)
+}
+
+/// The place of each of `positions`, the same for vertices at one place: those
+/// closer than a hundred-thousandth of `radius`, found in their cell of a
+/// grid that fine or in a neighboring one, since two copies of a vertex
+/// computed with different rounding may straddle a cell boundary.
+fn weld(positions: &[DVec3], radius: f64) -> Vec<u32> {
     let step = (radius * 1e-5).max(f64::MIN_POSITIVE);
     let mut cells: HashMap<[i64; 3], u32> = HashMap::with_capacity(positions.len());
     let mut places: Vec<DVec3> = Vec::with_capacity(positions.len());
@@ -239,6 +251,12 @@ fn encloses(positions: &[DVec3], indices: &[u32], radius: f64) -> bool {
             })
         })
         .collect();
+    place
+}
+
+/// Whether the triangles `indices` over vertices at `place`s enclose a
+/// volume (see [`encloses`]).
+fn encloses_places(place: &[u32], indices: &[u32]) -> bool {
     // Each edge counts +1 one way and -1 the other.
     let mut edges: HashMap<(u32, u32), i32> = HashMap::with_capacity(indices.len());
     for triangle in indices.as_chunks::<3>().0 {
@@ -251,6 +269,99 @@ fn encloses(positions: &[DVec3], indices: &[u32], radius: f64) -> bool {
         }
     }
     !edges.is_empty() && edges.values().all(|count| *count == 0)
+}
+
+/// The way an outline pushes each vertex out, 12 bytes a vertex. A closed
+/// mesh, or a two-sided sheet, pushes out along the sum of the normals of
+/// the faces at its place on its side (all of a cube corner's faces, but not
+/// the other copy of the sheet), so that the outline of a mesh with hard
+/// edges stays whole at its corners, plus, along a sheet's border, out of
+/// the face within its plane. An open mesh, a plane's, pushes out only its
+/// border, within its plane: pushed along its normal, a mesh seen at an
+/// angle would slide over itself.
+fn outline_directions(
+    positions: &[DVec3],
+    indices: &[u32],
+    place: &[u32],
+    closed: bool,
+) -> Vec<u8> {
+    let triangles = indices.as_chunks::<3>().0;
+    let faces: Vec<DVec3> = triangles
+        .iter()
+        .map(|triangle| {
+            let [a, b, c] = triangle.map(|index| positions[index as usize]);
+            (b - a).cross(c - a).normalize_or_zero()
+        })
+        .collect();
+    // Each vertex's own normal, from the faces it belongs to.
+    let mut own = vec![DVec3::ZERO; positions.len()];
+    // The faces at each place, and the faces along each edge between places.
+    let mut at_place: HashMap<u32, Vec<usize>> = HashMap::new();
+    let mut along: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+    for (face, triangle) in triangles.iter().enumerate() {
+        for corner in 0..3 {
+            let index = triangle[corner] as usize;
+            own[index] += faces[face];
+            let here = at_place.entry(place[index]).or_default();
+            if here.last() != Some(&face) {
+                here.push(face);
+            }
+            let [from, to] = [place[index], place[triangle[(corner + 1) % 3] as usize]];
+            along
+                .entry((from.min(to), from.max(to)))
+                .or_default()
+                .push(face);
+        }
+    }
+    let side = |a: DVec3, b: DVec3| a.dot(b) > -0.5;
+    let mut directions = vec![DVec3::ZERO; positions.len()];
+    let mut borders = vec![DVec3::ZERO; positions.len()];
+    for (index, direction) in directions.iter_mut().enumerate() {
+        let normal = own[index].normalize_or_zero();
+        for &face in at_place.get(&place[index]).map_or(&[][..], Vec::as_slice) {
+            if side(faces[face], normal) {
+                *direction += faces[face];
+            }
+        }
+    }
+    for (face, triangle) in triangles.iter().enumerate() {
+        for corner in 0..3 {
+            let [a, b] = [
+                triangle[corner] as usize,
+                triangle[(corner + 1) % 3] as usize,
+            ];
+            let [from, to] = [place[a], place[b]];
+            let others = along[&(from.min(to), from.max(to))]
+                .iter()
+                .filter(|&&other| other != face && side(faces[other], faces[face]))
+                .count();
+            if others == 0 {
+                // Counter-clockwise, the face lies left of a to b.
+                let out = (positions[b] - positions[a])
+                    .cross(faces[face])
+                    .normalize_or_zero();
+                borders[a] += out;
+                borders[b] += out;
+            }
+        }
+    }
+    // A unit push along the faces' normal, and a unit push out of a border
+    // within the faces' plane: an outline is as wide beyond a border as
+    // beyond a silhouette.
+    let mut bytes = Vec::with_capacity(positions.len() * 12);
+    for (direction, border) in directions.into_iter().zip(borders) {
+        let along = if closed {
+            direction.normalize_or_zero()
+        } else {
+            DVec3::ZERO
+        };
+        let direction = along + border.normalize_or_zero();
+        push_f32s(
+            &mut bytes,
+            &[direction.x as f32, direction.y as f32, direction.z as f32],
+        );
+    }
+    bytes
 }
 
 impl MeshSource {
@@ -308,10 +419,18 @@ impl MeshSource {
             );
         }
         let (center, radius) = bounding_sphere(&positions);
+        let place = lit.then(|| weld(&positions, radius));
+        let closed = place
+            .as_ref()
+            .is_some_and(|place| encloses_places(place, &indices));
         Some(Self {
             vertices,
             count: indices.len() as u32,
-            closed: lit && encloses(&positions, &indices, radius),
+            closed,
+            outline: place
+                .as_ref()
+                .map(|place| outline_directions(&positions, &indices, place, closed))
+                .unwrap_or_default(),
             digest: 0,
             indices,
             lines: false,
@@ -368,6 +487,7 @@ impl MeshSource {
             count: pairs.len() as u32,
             lines: true,
             closed: false,
+            outline: Vec::new(),
             digest: 0,
             has_colors: colors.is_some(),
             opaque_colors: colors.is_none_or(|colors| colors.iter().all(|c| c[3] >= 0.999)),
@@ -521,6 +641,8 @@ struct GpuDraw {
     casts: bool,
     /// Lines only: the segments drawn, those a reveal shows at least part of.
     instances: std::ops::Range<u32>,
+    /// An opaque mesh whose material draws an outline.
+    outlined: bool,
 }
 
 /// The meshes and lines one image of a frame draws, with what the shader
@@ -564,6 +686,7 @@ impl GpuMeshFrame {
                 u8::from(draw.culled),
                 u8::from(draw.translucent),
                 u8::from(draw.casts),
+                u8::from(draw.outlined),
             ]);
             update(&draw.source.vertices);
             for index in &draw.source.indices {
@@ -809,7 +932,15 @@ impl<'a> GpuMeshes<'a> {
                 let [from, to] = pending.line_range.map_or([0.0, segments], |[from, to]| {
                     [from * segments, to * segments]
                 });
-                push_draw_uniforms(&mut draw_uniforms, pending, line_px, [from, to]);
+                let outline_px = pending.material.map_or(0.0, |material| {
+                    f64::from(material.outline_width) * pixels_per_unit
+                });
+                push_draw_uniforms(
+                    &mut draw_uniforms,
+                    pending,
+                    [line_px, outline_px],
+                    [from, to],
+                );
                 let instances = if to > from {
                     (from.floor().max(0.0) as u32)..(to.ceil() as u32).min(pending.source.count)
                 } else {
@@ -820,6 +951,9 @@ impl<'a> GpuMeshes<'a> {
                     translucent: pending.translucent,
                     casts: pending.casts(),
                     instances,
+                    outlined: !pending.translucent
+                        && !pending.source.outline.is_empty()
+                        && pending.material.is_some_and(|material| material.outlined()),
                     source: Arc::clone(&pending.source),
                 });
             }
@@ -833,6 +967,7 @@ impl<'a> GpuMeshes<'a> {
                 draw.culled.hash(&mut hasher);
                 draw.translucent.hash(&mut hasher);
                 draw.casts.hash(&mut hasher);
+                draw.outlined.hash(&mut hasher);
             }
             frames.push((
                 class,
@@ -1197,10 +1332,15 @@ fn draw_alike(frame: &GpuMeshFrame, a: usize, b: usize) -> bool {
         && uniforms(a) == uniforms(b)
 }
 
-/// Append one draw's uniforms, padded to `DRAW_STRIDE`: its lines
-/// `line_px` pixels wide, showing the segments from `shown[0]` to
-/// `shown[1]` (fractional at the ends).
-fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64, shown: [f32; 2]) {
+/// Append one draw's uniforms, padded to `DRAW_STRIDE`: its lines and its
+/// outline `widths_px` pixels wide, its lines showing the segments from
+/// `shown[0]` to `shown[1]` (fractional at the ends).
+fn push_draw_uniforms(
+    bytes: &mut Vec<u8>,
+    pending: &Pending,
+    [line_px, outline_px]: [f64; 2],
+    shown: [f32; 2],
+) {
     let start = bytes.len();
     push_mat4(bytes, pending.model);
     push_mat4(bytes, pending.model.inverse().transpose());
@@ -1230,6 +1370,12 @@ fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64, show
         ],
     );
     push_f32s(bytes, &[(line_px * 0.5) as f32, shown[0], shown[1], 0.0]);
+    let outline = pending
+        .material
+        .map_or([0.0; 4], |material| to_linear(material.outline));
+    push_f32s(bytes, &outline);
+    let open = f32::from(u8::from(!pending.source.closed));
+    push_f32s(bytes, &[outline_px as f32, open, 0.0, 0.0]);
     debug_assert_eq!(bytes.len() - start, DRAW_BYTES);
     bytes.resize(start + DRAW_STRIDE, 0);
 }
@@ -1368,6 +1514,9 @@ struct Pipelines {
     meshes: [[wgpu::RenderPipeline; 3]; 2],
     /// Lines by pass.
     lines: [wgpu::RenderPipeline; 3],
+    /// The outlines of opaque meshes, by `[closed]`: a closed mesh's
+    /// outline draws the faces turned away, an open mesh's both faces.
+    outline: [wgpu::RenderPipeline; 2],
     /// Opaque meshes into a shadow map, by `[closed]`: an open mesh casts
     /// with both faces, a closed one with the faces turned away from the
     /// light, so that it never shadows the side that faces it.
@@ -1627,6 +1776,68 @@ impl Pipelines {
                 cache: None,
             })
         };
+        let outline_attributes = [wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 11,
+        }];
+        // The mesh pushed out along its outline directions by the outline's
+        // width: its faces turned away from the viewer show only beyond the
+        // silhouette. An open mesh has none, so it draws both faces, pushed
+        // back behind the mesh too.
+        let outline = |closed: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("gaanim-3d-outline"),
+                layout: Some(&plain),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vertex_outline"),
+                    compilation_options: Default::default(),
+                    buffers: &[
+                        wgpu::VertexBufferLayout {
+                            array_stride: MESH_VERTEX_BYTES as u64,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &mesh_attributes[..1],
+                        },
+                        instance_layout(&instance_attributes),
+                        wgpu::VertexBufferLayout {
+                            array_stride: 12,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &outline_attributes,
+                        },
+                    ],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: closed.then_some(wgpu::Face::Front),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Greater),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: SAMPLES,
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fragment_outline"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: COLOR_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         Self {
             layout,
             depth_layout,
@@ -1635,6 +1846,7 @@ impl Pipelines {
             shadow_sampler,
             meshes: [passes(false, false), passes(false, true)],
             lines: passes(true, false),
+            outline: [outline(false), outline(true)],
             shadow: [shadow(false), shadow(true)],
         }
     }
@@ -1712,6 +1924,7 @@ struct Uploaded {
     _source: Arc<MeshSource>,
     vertices: wgpu::Buffer,
     indices: Option<wgpu::Buffer>,
+    outline: Option<wgpu::Buffer>,
 }
 
 /// Draws [`GpuMeshFrame`]s on the device of a Vello renderer.
@@ -1840,6 +2053,13 @@ impl GpuThreeD {
                             label: Some("gaanim-3d-indices"),
                             contents: &bytes,
                             usage: wgpu::BufferUsages::INDEX,
+                        })
+                    }),
+                    outline: (!draw.source.outline.is_empty()).then(|| {
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("gaanim-3d-outline"),
+                            contents: &draw.source.outline,
+                            usage: wgpu::BufferUsages::VERTEX,
                         })
                     }),
                     _source: Arc::clone(&draw.source),
@@ -2105,6 +2325,13 @@ impl GpuThreeD {
                         pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
                     }
                 }
+                if draw.outlined
+                    && let Some(outline) = &uploaded.outline
+                {
+                    pass.set_pipeline(&pipelines.outline[usize::from(draw.source.closed)]);
+                    pass.set_vertex_buffer(2, outline.slice(..));
+                    pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
+                }
             };
             if opaque {
                 while next < frame.draws.len() && !frame.draws[next].translucent {
@@ -2173,6 +2400,10 @@ struct Draw {
     // Half the width of lines in pixels, and the segments shown, from and
     // to, fractional at the ends.
     line: vec4<f32>,
+    // The linear color of the outline, its width in pixels, and 1 for an
+    // open mesh.
+    outline: vec4<f32>,
+    outline_size: vec4<f32>,
 }
 
 struct Caster {
@@ -2203,6 +2434,19 @@ struct VertexIn {
     @location(8) normal_y: vec4<f32>,
     @location(9) normal_z: vec4<f32>,
     @location(10) base: vec4<f32>,
+}
+
+struct OutlineIn {
+    @location(0) position: vec3<f32>,
+    @location(3) model_x: vec4<f32>,
+    @location(4) model_y: vec4<f32>,
+    @location(5) model_z: vec4<f32>,
+    @location(6) model_w: vec4<f32>,
+    @location(7) normal_x: vec4<f32>,
+    @location(8) normal_y: vec4<f32>,
+    @location(9) normal_z: vec4<f32>,
+    // The vertex's outline direction, the mean normal around its place.
+    @location(11) direction: vec3<f32>,
 }
 
 struct ShadowIn {
@@ -2642,6 +2886,47 @@ fn fragment_line_layer(in: LineOut, @builtin(sample_index) sample: u32) -> LineF
     return line_fragment(in);
 }
 
+// A vertex of a mesh's outline: pushed out along its outline direction by
+// the outline's width, measured across the line of sight at its depth, and
+// for an open mesh back by as much too, so that the outline shows only
+// beyond its border.
+@vertex
+fn vertex_outline(in: OutlineIn) -> @builtin(position) vec4<f32> {
+    let model = mat4x4<f32>(in.model_x, in.model_y, in.model_z, in.model_w);
+    let normal = mat3x3<f32>(in.normal_x.xyz, in.normal_y.xyz, in.normal_z.xyz);
+    let world = (model * vec4<f32>(in.position, 1.0)).xyz;
+    // Through the normal matrix, keeping the push's own length.
+    let direction = normalize_or_zero(normal * in.direction) * length(in.direction);
+    let toward = toward_viewer(world);
+    var across = cross(toward, vec3<f32>(0.0, 1.0, 0.0));
+    if dot(across, across) < 1e-6 {
+        across = cross(toward, vec3<f32>(1.0, 0.0, 0.0));
+    }
+    across = normalize(across);
+    // The size of a pixel in the scene at the vertex's depth.
+    let half_size = vec2<f32>(frame.ndc_x.w, frame.ndc_y.w);
+    let clip = image_clip(world);
+    let side = image_clip(world + across * 0.01);
+    let pixels = length(side.xy / side.w * half_size - clip.xy / clip.w * half_size);
+    var pixel_size = 0.0;
+    if pixels > 1e-6 {
+        pixel_size = 0.01 / pixels;
+    }
+    let reach = draw.outline_size.x * pixel_size;
+    var shifted = world + direction * reach;
+    if draw.outline_size.y > 0.5 {
+        // An open mesh's border, within its plane, and the mesh behind
+        // itself: only what lies beyond the border shows.
+        shifted -= toward * reach;
+    }
+    return image_clip(shifted);
+}
+
+@fragment
+fn fragment_outline() -> @location(0) vec4<f32> {
+    return output(draw.outline);
+}
+
 // An opaque mesh's depth in the shadow map layer it casts into.
 @vertex
 fn vertex_shadow(in: ShadowIn) -> @builtin(position) vec4<f32> {
@@ -3030,7 +3315,7 @@ mod tests {
         }
         let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
         let half_width = |draw: usize| {
-            let start = draw * DRAW_STRIDE + DRAW_BYTES - 16;
+            let start = draw * DRAW_STRIDE + LINE_ROW;
             f32::from_le_bytes(
                 frames[0].1.draw_uniforms[start..start + 4]
                     .try_into()
@@ -3084,7 +3369,7 @@ mod tests {
         let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
         let frame = &frames[0].1;
         let shown = |draw: usize| {
-            let start = draw * DRAW_STRIDE + DRAW_BYTES - 12;
+            let start = draw * DRAW_STRIDE + LINE_ROW + 4;
             let value = |offset: usize| {
                 f32::from_le_bytes(
                     frame.draw_uniforms[start + offset..start + offset + 4]
@@ -3341,6 +3626,121 @@ mod tests {
         assert!(draw_alike(frame, first, first + 1) && draw_alike(frame, first, last));
         let apart = (0..4).find(|index| !alike.contains(index)).unwrap();
         assert!(!draw_alike(frame, first, apart));
+    }
+
+    #[test]
+    fn outlines_push_a_cube_out_along_the_mean_normal_of_its_corners() {
+        // A tetrahedron whose faces have vertices of their own: each copy of
+        // a corner pushes out the same way, between its three faces.
+        let corners = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
+        let tetrahedron = TriangleMeshData {
+            vertices: faces
+                .iter()
+                .flatten()
+                .map(|&corner| corners[corner])
+                .collect(),
+            indices: (0..12).collect(),
+            ..quad(peniko::Color::WHITE)
+        };
+        let source = MeshSource::mesh(&tetrahedron, true).unwrap();
+        assert_eq!(source.outline.len(), 12 * 12);
+        let direction = |vertex: usize| -> [f32; 3] {
+            std::array::from_fn(|axis| {
+                let at = vertex * 12 + axis * 4;
+                f32::from_le_bytes(source.outline[at..at + 4].try_into().unwrap())
+            })
+        };
+        // The origin corner's copies (vertices 0, 3 and 6) all point away
+        // from the solid, equally along the three axes.
+        for vertex in [0, 3, 6] {
+            let [x, y, z] = direction(vertex);
+            assert!(
+                x < 0.0 && (x - y).abs() < 1e-5 && (y - z).abs() < 1e-5,
+                "{x} {y} {z}"
+            );
+        }
+        // Unlit meshes have no material to outline them.
+        assert!(
+            MeshSource::mesh(&tetrahedron, false)
+                .unwrap()
+                .outline
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_outlined_mesh_draws_its_outline_around_its_silhouette() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let mut card = lit_quad();
+        card.material = Some(
+            Material3D {
+                color: peniko::Color::BLACK,
+                emissive: peniko::Color::from_rgb8(0, 0, 255),
+                emissive_strength: 1.0,
+                ..Material3D::default()
+            }
+            .with_outline(peniko::Color::from_rgb8(255, 0, 0), 0.25)
+            .unwrap(),
+        );
+        // A card 1 unit on a side in the middle: its outline reaches 0.25
+        // units beyond its edges, 4 pixels at 16 pixels per unit.
+        let transform = placed(0.5, DVec3::ZERO);
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        meshes.push(
+            0,
+            [(1, 1), (1, 1)],
+            [None, None],
+            &Content {
+                transform: &transform,
+                opacity: &opacity,
+                mesh: Some(&card),
+                lines: None,
+                material: card.material.as_ref(),
+                line_width: None,
+                line_range: None,
+            },
+        );
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        assert!(frames[0].draws[0].outlined);
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        let pixels = gpu.read(&target);
+        let pixel = |x: usize, y: usize| &pixels[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4];
+        // The card's middle is the card; 2 pixels beyond its right edge
+        // (x = 40 + 2), the outline; well beyond it, nothing.
+        assert!(
+            pixel(32, 32)[2] > 200 && pixel(32, 32)[0] < 100,
+            "{:?}",
+            pixel(32, 32)
+        );
+        assert!(
+            pixel(42, 32)[0] > 200 && pixel(42, 32)[2] < 100,
+            "{:?}",
+            pixel(42, 32)
+        );
+        assert_eq!(pixel(50, 32)[3], 0);
     }
 
     #[test]
