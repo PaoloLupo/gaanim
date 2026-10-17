@@ -1217,7 +1217,7 @@ Gaanim las rasteriza en la GPU con un búfer de profundidad y luz calculada en
 cada píxel y sombras (ver #link("/guias/camara-y-3d/")[Cámara y 3D]), y
 todo el 3D queda debajo del contenido 2D. Gaanim usa un
 mundo dextrógiro con Y hacia arriba: cilindros y conos crecen a lo largo de Y y
-los planos yacen en XZ. Los puntos 3D son tuplas `(x, y, z)`. La guía
+los planos y los toros yacen en XZ. Los puntos 3D son tuplas `(x, y, z)`. La guía
 #link("/guias/camara-y-3d/")[Cámara y 3D] explica la cámara en perspectiva.
 
 `Primitive3D` extiende `Drawable`, así que posición, rotación, escala, opacidad
@@ -1275,6 +1275,106 @@ scene.render()
   desc: [Plano en XZ con normales hacia arriba, subdividido en `subdivisions` celdas.],
   none,
 )
+
+Además de los sólidos básicos, `torus` crea toros, `arrow_3d` flechas entre
+dos puntos, `tube` tubos a lo largo de un recorrido y `flat_3d` láminas planas
+con la forma de un texto, una ecuación o un dibujo 2D. Las flechas y los tubos
+se definen con puntos del mundo; el objeto queda en su centro, así que
+`move_to_3d` mueve ese punto y los giros y `create()` parten de él. Todos son
+mallas cerradas: proyectan sombra y no se sombrean a sí mismas.
+
+```python
+# output: primitivas-3d.webp
+# show-code: true
+import math
+from gaanim import *
+
+scene = Scene(frame=(16, 9))
+floor = scene.geometry.plane(16, 9, material=Material3D.matte("#e2e8f0")).move_to_3d(0, -1.5, 0)
+ring = scene.geometry.torus(1.0, 0.3, material=Material3D.metal(GOLD))
+ring.move_to_3d(-4.5, 0, 0).rotate_to_3d(math.pi / 2, 0, 0)
+axes = [
+    scene.geometry.arrow_3d((-1, -1.5, 0), end, material=Material3D.matte(color))
+    for end, color in [((1.5, -1.5, 0), RED), ((-1, 1.5, 0), GREEN), ((-1, -1.5, 2.5), CYAN)]
+]
+helix = [(4 + 0.8 * math.cos(t / 4), t / 20 - 1.4, 0.8 * math.sin(t / 4)) for t in range(61)]
+spring = scene.geometry.tube(helix, 0.12, material=Material3D.metal(PURPLE))
+label = scene.geometry.flat_3d(scene.text("x² + y² = r²", size=0.8), material=Material3D.matte(BLUE))
+label.move_to_3d(0, -1.49, 2.8).rotate_to_3d(-math.pi / 2, 0, 0)
+
+scene.camera.perspective(fov_y=0.7)
+scene.camera.look_at(eye=(0, 4, 12), target=(0, -0.5, 0))
+scene.play([m.animate.create() for m in [ring, *axes, spring, label]])
+scene.play([scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.0).duration(2)])
+scene.render()
+```
+
+#api-entry(
+  name: "Geometry.torus",
+  kind: "factory",
+  params: (
+    (name: "major_radius", type: "float", default: "1.0", desc: [Radio de la circunferencia que recorre el tubo, en el plano XZ.]),
+    (name: "minor_radius", type: "float", default: "0.3", desc: [Radio del tubo; menor que `major_radius`.]),
+    (name: "segments", type: "int", default: "48", desc: [Divisiones a lo largo de la circunferencia; al menos 3.]),
+    (name: "rings", type: "int", default: "24", desc: [Divisiones alrededor del tubo; al menos 3.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Toro cerrado con sombreado suave, centrado en el origen.]),
+  desc: [El toro yace en el plano XZ, como `plane`; `rotate_to_3d` lo pone de pie. Radios no positivos, un `minor_radius` no menor que `major_radius` o menos de 3 `segments` o `rings` lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+ring = scene.geometry.torus(1.2, 0.35, material=Material3D.metal(GOLD))
+```
+]
+
+#api-entry(
+  name: "Geometry.arrow_3d",
+  kind: "factory",
+  params: (
+    (name: "start", type: "tuple[float, float, float]", default: none, desc: [Cola de la flecha, en coordenadas del mundo.]),
+    (name: "end", type: "tuple[float, float, float]", default: none, desc: [Punta de la flecha.]),
+    (name: "shaft_radius", type: "float | None", default: "None", desc: [Radio del astil; por defecto, el 2,5 % de la longitud.]),
+    (name: "head_radius", type: "float | None", default: "None", desc: [Radio de la base de la punta; por defecto, el triple del astil. Mayor que `shaft_radius`.]),
+    (name: "head_length", type: "float | None", default: "None", desc: [Largo de la punta; por defecto, el 22 % de la longitud. Menor que la flecha.]),
+    (name: "segments", type: "int", default: "24", desc: [Lados del astil y de la punta; al menos 3.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Flecha cerrada: astil cilíndrico con tapa y punta cónica.]),
+  desc: [Una flecha iluminada para vectores en escenas 3D. Sus medidas siguen su longitud salvo que las fijes en unidades de escena. El objeto queda en el punto medio de la flecha. Puntos iguales o no finitos, medidas no positivas, una punta no más corta que la flecha o no más ancha que el astil, o menos de 3 `segments` lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+velocity = scene.geometry.arrow_3d((0, 0, 0), (2, 1, 1), material=Material3D.matte(RED))
+thin = scene.geometry.arrow_3d((0, 0, 0), (0, 3, 0), shaft_radius=0.03, head_length=0.4)
+```
+]
+
+#api-entry(
+  name: "Geometry.tube",
+  kind: "factory",
+  params: (
+    (name: "points", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Recorrido del tubo en coordenadas del mundo; al menos dos puntos distintos, tres si es cerrado.]),
+    (name: "radius", type: "float", default: "0.1", desc: [Radio del tubo, en unidades de escena.]),
+    (name: "segments", type: "int", default: "16", desc: [Lados de la sección; al menos 3.]),
+    (name: "closed", type: "bool", default: "False", desc: [Vuelve del último punto al primero y forma un lazo.]),
+    (name: "caps", type: "bool", default: "True", desc: [Cierra los extremos de un tubo abierto; sin tapas es una cáscara abierta.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Tubo iluminado a lo largo de la polilínea.]),
+  desc: [La sección sigue el recorrido con marcos de transporte paralelo, así que el tubo no se retuerce, y en un lazo cerrado la costura coincide. En las esquinas el tubo conserva su radio; los giros de más de 35° dejan una arista y los más suaves (curvas muestreadas) quedan lisos. Los puntos repetidos se ignoran. El objeto queda en el centro de la caja de los puntos y es un `Primitive3D` como los demás: posición, giro, escala, opacidad y material se animan, y `create()` lo hace crecer desde ese centro. Menos de dos puntos distintos (tres si `closed`), puntos no finitos, un `radius` no positivo o menos de 3 `segments` lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>import math
+>>>scene = Scene(frame=(16, 9))
+knot = [(math.sin(t) + 2 * math.sin(2 * t), math.cos(t) - 2 * math.cos(2 * t), -math.sin(3 * t))
+        for t in (k * math.tau / 120 for k in range(120))]
+trefoil = scene.geometry.tube(knot, 0.25, closed=True, material=Material3D.metal(GOLD))
+```
+]
 
 #api-entry(
   name: "Geometry.lighting_3d",
@@ -1338,6 +1438,27 @@ scene.camera.look_at(eye=(2, 3, 12), target=(1, 0, 0))
 scene.play([word.animate.create(), star.animate.create()])
 scene.play([scene.camera.animate.orbit(delta_yaw=0.6, delta_pitch=0.0).duration(2)])
 scene.render()
+```
+]
+
+#api-entry(
+  name: "Geometry.flat_3d",
+  kind: "factory",
+  params: (
+    (name: "source", type: "Drawable", default: none, desc: [Drawable 2D cuyo relleno se vuelve lámina: forma, texto, ecuación, grupo o SVG.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate del color de relleno del origen.]),
+    (name: "tolerance", type: "float", default: "0.01", desc: [Tolerancia al aplanar las curvas, en unidades de escena.]),
+    (name: "keep_source", type: "bool", default: "False", desc: [Mantiene visible el drawable de origen.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Lámina plana con una cara a cada lado.]),
+  desc: [Como `extrude` sin profundidad: texto en un plano 3D. El contorno se lee al compilar la escena y se rellena con la regla nonzero, así que las letras conservan sus huecos. La lámina queda donde está el origen, en el plano z = 0 mirando a la cámara predeterminada, con una cara por cada lado (desde atrás se lee al revés) que recibe luz y proyecta sombra. Con `move_to_3d` y `rotate_to_3d` se pone en una pared, en el suelo o en la cara de un sólido; a diferencia de `billboard`, que mantiene un objeto 2D de frente a la cámara, la lámina gira con la escena. Un origen de otra escena, 3D, imagen, video o Lottie, o una `tolerance` no positiva lanzan `ValueError`; un contorno sin área avisa y deja la malla vacía.],
+)[
+```python
+>>>from gaanim import *
+>>>import math
+>>>scene = Scene(frame=(16, 9))
+title = scene.geometry.flat_3d(scene.text("Volumen", size=1.2), material=Material3D.matte(BLUE))
+title.move_to_3d(0, -1.5, 1).rotate_to_3d(-math.pi / 2, 0, 0)
 ```
 ]
 

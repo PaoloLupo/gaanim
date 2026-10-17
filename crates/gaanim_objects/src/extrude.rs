@@ -1,5 +1,6 @@
 //! Extrusion of 2D outlines into closed 3D meshes (CA-06): a front and a back
-//! cap, side walls along every contour and an optional 45° bevel.
+//! cap, side walls along every contour and an optional 45° bevel; or, with
+//! [`flat`], just the two caps back to back, a sheet with no depth.
 //!
 //! The outline is flattened and normalized under the nonzero fill rule, as
 //! it is drawn, so letters keep their holes and overlapping contours merge.
@@ -58,36 +59,16 @@ pub fn extrude(
     if !bevel.is_finite() || bevel < 0.0 || bevel >= depth / 2.0 {
         return Err(ExtrudeError::InvalidBevel);
     }
-    if !tolerance.is_finite() || tolerance <= 0.0 {
-        return Err(ExtrudeError::InvalidTolerance);
-    }
-    let shapes: Vec<Vec<Vec<DVec2>>> = bezpath_to_shape_with_tolerance(path, tolerance)
-        .simplify_shape(FillRule::NonZero)
-        .into_iter()
-        .filter_map(|shape| clean_shape(shape, tolerance))
-        .collect();
-    let points = shapes.iter().flatten().flatten();
-    let (min, max) = points.fold(
-        (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
-        |(min, max), point| (min.min(*point), max.max(*point)),
-    );
-    if shapes.is_empty() || !(max.x > min.x && max.y > min.y) {
-        return Err(ExtrudeError::EmptyShape);
-    }
-    let center = (min + max) / 2.0;
+    let outline = Outline::new(path, tolerance)?;
     let mut builder = MeshBuilder {
-        min: min - center,
-        size: max - min,
+        min: outline.min,
+        size: outline.size,
         depth,
         ..MeshBuilder::default()
     };
     let half = depth / 2.0;
-    let mut caps = Vec::with_capacity(shapes.len());
-    for shape in &shapes {
-        let shape: Vec<Vec<DVec2>> = shape
-            .iter()
-            .map(|contour| contour.iter().map(|point| *point - center).collect())
-            .collect();
+    let mut caps = Vec::with_capacity(outline.shapes.len());
+    for shape in outline.shapes {
         let inset = inset_shape(&shape, bevel);
         let side = half - if inset.is_some() { bevel } else { 0.0 };
         for contour in &shape {
@@ -102,26 +83,85 @@ pub fn extrude(
         caps.push(inset.unwrap_or(shape));
     }
     for cap in &caps {
-        builder.cap(cap, -half);
+        builder.cap(cap, -half, -1.0);
     }
     for cap in &caps {
-        builder.cap(cap, half);
+        builder.cap(cap, half, 1.0);
     }
-    if builder.indices.is_empty() {
-        return Err(ExtrudeError::EmptyShape);
+    builder.finish(outline.center, material)
+}
+
+/// The area `path` fills as a flat sheet in the z = 0 plane, flattening
+/// curves to `tolerance`: a front face toward +z and a back face toward -z
+/// on the same triangles, so it shows from both sides and, as its faces
+/// meet at every edge, is closed. Centered on the outline's box like
+/// [`extrude`].
+pub fn flat(
+    path: &BezPath,
+    tolerance: f64,
+    material: Material3D,
+) -> Result<Extrusion, ExtrudeError> {
+    let outline = Outline::new(path, tolerance)?;
+    let mut builder = MeshBuilder {
+        min: outline.min,
+        size: outline.size,
+        // Caps set their own texture coordinates; any depth will do.
+        depth: 1.0,
+        ..MeshBuilder::default()
+    };
+    for facing in [-1.0, 1.0] {
+        for shape in &outline.shapes {
+            builder.cap(shape, 0.0, facing);
+        }
     }
-    Ok(Extrusion {
-        mesh: TriangleMeshData {
-            vertices: builder.vertices,
-            indices: builder.indices,
-            normals: Some(builder.normals),
-            uvs: Some(builder.uvs),
-            color: None,
-            colors: None,
-            material: Some(material),
-        },
-        center: Point::new(center.x, center.y),
-    })
+    builder.finish(outline.center, material)
+}
+
+/// The shapes `path` fills, as [`clean_shape`] leaves them, around the
+/// center of their box.
+struct Outline {
+    shapes: Vec<Vec<Vec<DVec2>>>,
+    center: DVec2,
+    /// Box of the centered shapes.
+    min: DVec2,
+    size: DVec2,
+}
+
+impl Outline {
+    fn new(path: &BezPath, tolerance: f64) -> Result<Self, ExtrudeError> {
+        if !tolerance.is_finite() || tolerance <= 0.0 {
+            return Err(ExtrudeError::InvalidTolerance);
+        }
+        let shapes: Vec<Vec<Vec<DVec2>>> = bezpath_to_shape_with_tolerance(path, tolerance)
+            .simplify_shape(FillRule::NonZero)
+            .into_iter()
+            .filter_map(|shape| clean_shape(shape, tolerance))
+            .collect();
+        let points = shapes.iter().flatten().flatten();
+        let (min, max) = points.fold(
+            (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+            |(min, max), point| (min.min(*point), max.max(*point)),
+        );
+        if shapes.is_empty() || !(max.x > min.x && max.y > min.y) {
+            return Err(ExtrudeError::EmptyShape);
+        }
+        let center = (min + max) / 2.0;
+        let shapes = shapes
+            .into_iter()
+            .map(|shape| {
+                shape
+                    .into_iter()
+                    .map(|contour| contour.into_iter().map(|point| point - center).collect())
+                    .collect()
+            })
+            .collect();
+        Ok(Self {
+            shapes,
+            center,
+            min: min - center,
+            size: max - min,
+        })
+    }
 }
 
 /// Contours of one shape without repeated or collinear points, the outer one
@@ -278,6 +318,25 @@ impl MeshBuilder {
         (self.vertices.len() - 1) as u32
     }
 
+    /// The mesh built, to sit at `center` in the outline's plane.
+    fn finish(self, center: DVec2, material: Material3D) -> Result<Extrusion, ExtrudeError> {
+        if self.indices.is_empty() {
+            return Err(ExtrudeError::EmptyShape);
+        }
+        Ok(Extrusion {
+            mesh: TriangleMeshData {
+                vertices: self.vertices,
+                indices: self.indices,
+                normals: Some(self.normals),
+                uvs: Some(self.uvs),
+                color: None,
+                colors: None,
+                material: Some(material),
+            },
+            center: Point::new(center.x, center.y),
+        })
+    }
+
     /// Two triangles over `a b c d` (counterclockwise seen from outside).
     fn quad(&mut self, [a, b, c, d]: [u32; 4]) {
         self.indices.extend([a, b, c, a, c, d]);
@@ -337,9 +396,9 @@ impl MeshBuilder {
         }
     }
 
-    /// A flat cap at `z` over the contours of one shape, facing away from
-    /// the mesh.
-    fn cap(&mut self, shape: &[Vec<DVec2>], z: f64) {
+    /// A flat cap at `z` over the contours of one shape, facing +z when
+    /// `facing` is positive and -z otherwise.
+    fn cap(&mut self, shape: &[Vec<DVec2>], z: f64, facing: f64) {
         let mut points = Vec::new();
         let mut holes = Vec::new();
         for (index, contour) in shape.iter().enumerate() {
@@ -350,7 +409,6 @@ impl MeshBuilder {
         }
         let triangles = earcut(&points, &holes);
         let base = self.vertices.len() as u32;
-        let facing = z.signum();
         for point in &points {
             let point = DVec2::from_array(*point);
             let uv = (point - self.min) / self.size;
@@ -543,6 +601,45 @@ mod tests {
         .mesh;
         assert_closed(&thin);
         assert_eq!(thin.indices.len(), 3 * (8 + 4));
+    }
+
+    #[test]
+    fn a_flat_sheet_shows_both_faces_and_keeps_holes() {
+        let mut ring = rect(-2.0, -2.0, 2.0, 2.0);
+        ring.extend(rect(-1.0, -1.0, 1.0, 1.0).reverse_subpaths());
+        ring.apply_affine(gaanim_core::kurbo::Affine::translate((3.0, 1.0)));
+        let sheet = flat(&ring, 0.01, Material3D::default()).unwrap();
+        assert_eq!(sheet.center, Point::new(3.0, 1.0));
+        let mesh = &sheet.mesh;
+        assert_valid(mesh);
+        // Front and back meet at every edge, back to back.
+        assert_closed(mesh);
+        assert!(mesh.vertices.iter().all(|v| v[2] == 0.0));
+        let normals = mesh.normals.as_ref().unwrap();
+        let facing = |z: f32| {
+            mesh.indices
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .filter(|t| normals[t[0] as usize][2] == z)
+                .count()
+        };
+        // Eight triangles cover the square ring on each side.
+        assert_eq!((facing(1.0), facing(-1.0)), (8, 8));
+        assert!(
+            !mesh
+                .vertices
+                .iter()
+                .any(|v| v[0].abs() < 0.9 && v[1].abs() < 0.9)
+        );
+        assert_eq!(
+            flat(&ring, 0.0, Material3D::default()).unwrap_err(),
+            ExtrudeError::InvalidTolerance
+        );
+        assert_eq!(
+            flat(&BezPath::new(), 0.01, Material3D::default()).unwrap_err(),
+            ExtrudeError::EmptyShape
+        );
     }
 
     #[test]

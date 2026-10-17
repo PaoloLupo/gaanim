@@ -124,6 +124,7 @@ pub use gaanim_animation::live::{
     ZoneNames as LiveZoneNames, ZoneState as LiveZoneState,
 };
 pub use gaanim_objects::character::Character;
+pub use gaanim_objects::primitives3d::ArrowSizes;
 pub use live::{LiveZoneError, LiveZoneHandle, check_behavior};
 mod poll;
 pub use gaanim_animation::polls::{BarDirection, BarScale, TextAlign};

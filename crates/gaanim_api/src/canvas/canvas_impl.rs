@@ -4151,6 +4151,69 @@ impl SceneModel {
         )?)))
     }
 
+    /// A Y-up torus: a tube `minor_radius` thick around a circle of
+    /// `major_radius` in the XZ plane.
+    pub fn torus(
+        &mut self,
+        major_radius: f64,
+        minor_radius: f64,
+        segments: u32,
+        rings: u32,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        Ok(self.spawn(SpawnKind::Primitive3D(primitives3d::torus(
+            major_radius,
+            minor_radius,
+            segments,
+            rings,
+            material,
+        )?)))
+    }
+
+    /// A closed, lit arrow from `start` to `end` in world space, placed at
+    /// its midpoint so it moves, turns and grows about it.
+    pub fn arrow_3d(
+        &mut self,
+        start: [f64; 3],
+        end: [f64; 3],
+        sizes: primitives3d::ArrowSizes,
+        segments: u32,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        let arrow = primitives3d::arrow_3d(
+            DVec3::from_array(start),
+            DVec3::from_array(end),
+            sizes,
+            segments,
+            material,
+        )?;
+        Ok(self.spawn_placed_mesh(arrow))
+    }
+
+    /// A lit tube `radius` thick along the polyline through `points` in
+    /// world space, without twisting; `closed` makes it a loop and `caps`
+    /// closes the ends of an open one. Placed at the center of the points'
+    /// box.
+    pub fn tube(
+        &mut self,
+        points: &[[f64; 3]],
+        radius: f64,
+        segments: u32,
+        closed: bool,
+        caps: bool,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        let points: Vec<DVec3> = points.iter().copied().map(DVec3::from_array).collect();
+        let tube = primitives3d::tube(&points, radius, segments, closed, caps, material)?;
+        Ok(self.spawn_placed_mesh(tube))
+    }
+
+    fn spawn_placed_mesh(&mut self, placed: primitives3d::PlacedMesh) -> DrawableHandle {
+        let center = placed.center;
+        self.spawn(SpawnKind::Primitive3D(placed.mesh))
+            .move_to_3d(center.x, center.y, center.z)
+    }
+
     /// A light at the origin for lit 3D content: move it like any drawable.
     /// While the scene shows lights they replace the fixed key light.
     pub fn light_3d(
@@ -10685,6 +10748,70 @@ mod tests {
         assert!(
             actual.distance(expected) < 1e-6,
             "expected {expected:?}, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn meshes_built_from_points_or_outlines_sit_at_their_center() {
+        let mut canvas = SceneModel::new(640, 360);
+        let material = gaanim_scene::Material3D::default();
+        canvas
+            .arrow_3d(
+                [1.0, 2.0, 3.0],
+                [3.0, 2.0, -1.0],
+                primitives3d::ArrowSizes::default(),
+                8,
+                material,
+            )
+            .expect("valid arrow");
+        let path = [[-4.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 2.0, 6.0]];
+        canvas
+            .tube(&path, 0.1, 8, false, true, material)
+            .expect("valid tube");
+        let square = canvas.rect(2.0, 2.0).move_to(5.0, -1.0);
+        canvas
+            .flat_3d(&square, 0.01, None, false)
+            .expect("a square lies flat");
+        assert!(canvas.flat_3d(&square, 0.0, None, false).is_err());
+        assert!(
+            canvas
+                .tube(&path[..1], 0.1, 8, false, true, material)
+                .is_err()
+        );
+
+        let mut world = World::new();
+        world.insert_resource(Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut timeline = world.remove_resource::<Timeline>().expect("timeline");
+        timeline.add_keyframe(0.0, WorldSnapshot::capture(&mut world));
+        timeline.seek(&mut world, 0.0);
+
+        let mut meshes = world
+            .query::<(&gaanim_scene::TriangleMeshData, &SpatialTransform)>()
+            .iter(&world)
+            .map(|(mesh, transform)| (transform.translation, mesh.clone()))
+            .collect::<Vec<_>>();
+        meshes.sort_by(|(a, _), (b, _)| a.x.total_cmp(&b.x));
+        let centers: Vec<DVec3> = meshes.iter().map(|(center, _)| *center).collect();
+        assert_eq!(
+            centers,
+            [
+                DVec3::new(-2.0, 1.0, 3.0),
+                DVec3::new(2.0, 2.0, 1.0),
+                DVec3::new(5.0, -1.0, 0.0),
+            ]
+        );
+        assert!(meshes.iter().all(|(_, mesh)| !mesh.indices.is_empty()));
+        // The sheet lies in the plane it was drawn in, around its center.
+        let sheet = &meshes[2].1;
+        assert!(
+            sheet
+                .vertices
+                .iter()
+                .all(|v| v[2] == 0.0 && v[0].abs() <= 1.0 + 1e-6 && v[1].abs() <= 1.0 + 1e-6)
         );
     }
 

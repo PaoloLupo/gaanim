@@ -17,8 +17,8 @@ Sin publicar. Los gráficos declarativos dibujan tartas y donuts con la marca
 `arc`, que se abren porción a porción al entrar y reparten sus porciones por
 clave al cambiar de datos, y la paleta categórica se elige: el tema la fija
 para toda la escena y cada campo puede tener la suya. El 3D se rasteriza en
-la GPU: se ve mejor y deja de ralentizar las escenas densas. Lee «Al
-actualizar».
+la GPU: se ve mejor y deja de ralentizar las escenas densas, y suma toros,
+flechas, tubos y texto en un plano. Lee «Al actualizar».
 
 == Gráficos
 
@@ -100,6 +100,15 @@ actualizar».
   enciende (por defecto) o las apaga.
 - Una línea 3D mide el ancho de su trazo, `.stroke(color, ancho)`, en lugar
   de 1,5 px fijos, y `animate.stroke_width(...)` lo anima.
+- Nuevas primitivas iluminadas: `scene.geometry.torus(...)` crea toros;
+  `scene.geometry.arrow_3d(start, end)`, flechas sólidas entre dos puntos
+  para los vectores de una escena 3D, con el astil y la punta proporcionales
+  a su longitud, y `scene.geometry.tube(points, radius)`, tubos a lo largo de
+  una polilínea que no se retuercen, abiertos con tapas o cerrados en lazo.
+- `scene.geometry.flat_3d(source)` convierte el relleno de un texto, una
+  ecuación o un dibujo 2D en una lámina iluminada de dos caras que se coloca
+  con `move_to_3d` y `rotate_to_3d`: texto en el suelo, en una pared o en la
+  cara de un sólido. El ejemplo `3d/shapes_3d` muestra las cuatro.
 
 == Al actualizar
 
