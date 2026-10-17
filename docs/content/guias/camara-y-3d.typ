@@ -318,9 +318,11 @@ scene.render()
   Mientras hay luces, sustituyen a la luz principal fija, cada una en su
   color e intensidad; `fade_in` y `fade_out` la encienden y la apagan. Con
   `lighting_3d("none")` solo alumbran ellas.
-- Las mallas opacas proyectan sombra de la luz principal, o de las dos
+- Las mallas opacas proyectan sombra de la luz principal, o de las cuatro
   primeras luces de `light_3d`, sobre lo que recibe luz: un cubo sobre un
-  plano deja su sombra en el plano. El borde de la sombra es suave.
+  plano deja su sombra en el plano. El borde de la sombra es nítido donde el
+  objeto toca la superficie y se suaviza a medida que se separan, como bajo
+  el sol o una lámpara.
   `lighting_3d(shadows=False)` las quita.
   `"none"` deja solo la emisión del material.
 - Las caras planas se pintan de un solo color y las curvas con degradados

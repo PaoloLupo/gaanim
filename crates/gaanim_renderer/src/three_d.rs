@@ -139,7 +139,7 @@ const CASTER_BYTES: usize = 64;
 /// normal matrix and its linear base color (`VertexIn` in [`SHADER`]).
 const INSTANCE_BYTES: usize = 128;
 /// Bytes of the frame uniforms (`Frame` in [`SHADER`]).
-const FRAME_BYTES: usize = 1376;
+const FRAME_BYTES: usize = 2336;
 /// Bytes of one draw's uniforms (`Draw` in [`SHADER`]), and their stride in
 /// the draw buffer, the minimum uniform offset alignment.
 const DRAW_BYTES: usize = 192;
@@ -147,16 +147,19 @@ const DRAW_STRIDE: usize = 256;
 /// Lights the shader reads; further lights are left out.
 const MAX_LIGHTS: usize = 8;
 /// Lights that cast shadows: the first ones of a frame.
-const MAX_SHADOW_LIGHTS: usize = 2;
+const MAX_SHADOW_LIGHTS: usize = 4;
 /// Layers of the shadow maps: one for a directional light, one per cube
 /// face for a point light.
 const MAX_SHADOW_LAYERS: usize = MAX_SHADOW_LIGHTS * 6;
-/// Texels on a side of a shadow map: the only one of a directional light,
-/// and each of several.
+/// Texels on a side of the shadow maps: of the only one of a directional
+/// light, of up to two lights' maps, and of more.
 const SHADOW_SIZE: u32 = 2048;
 const SHADOW_SIZE_SHARED: u32 = 1024;
-/// Radius of the soft edge of shadows, in shadow-map texels.
-const SHADOW_SOFTNESS: f32 = 1.5;
+const SHADOW_SIZE_MANY: u32 = 512;
+/// Radius of the edge of shadows where an object touches what it shadows,
+/// in shadow-map texels; it widens with the distance between them
+/// (`shadowed` in [`SHADER`]).
+const SHADOW_CONTACT: f32 = 1.0;
 /// Where the fixed key light of [`Lighting3D`] shines from (`KEY_LIGHT` in
 /// [`SHADER`]).
 const KEY_LIGHT: DVec3 = DVec3::new(-3.0, 6.0, 4.0);
@@ -750,7 +753,7 @@ impl<'a> GpuMeshes<'a> {
         let shadow_layers: Arc<[[f32; 16]]> = shadows
             .layers
             .iter()
-            .map(|(matrix, ..)| matrix.as_mat4().to_cols_array())
+            .map(|layer| layer.view_proj.as_mat4().to_cols_array())
             .collect();
         // Pixels of the image per scene unit, which line widths scale by.
         let pixels_per_unit = self.placement.determinant().abs().sqrt();
@@ -881,13 +884,23 @@ fn world_sphere(pending: &Pending) -> (DVec3, f64) {
 struct Shadows {
     /// Texels on a side of each layer.
     size: u32,
-    /// Each layer's view-projection, whether it is a perspective one, and
-    /// the size of its texels: in scene units, or per scene unit of distance
-    /// from the light under perspective.
-    layers: Vec<(DMat4, bool, f64)>,
+    layers: Vec<ShadowLayer>,
     /// The first layer of the fixed key light's shadow and of each light's.
     key: Option<usize>,
     lights: [Option<usize>; MAX_LIGHTS],
+}
+
+/// What one shadow map layer sees.
+#[derive(Clone, Copy, Debug)]
+struct ShadowLayer {
+    view_proj: DMat4,
+    perspective: bool,
+    /// The size of its texels: in scene units, or per scene unit of
+    /// distance from the light under perspective.
+    texel: f64,
+    /// The distances from the light its depths span.
+    near: f64,
+    far: f64,
 }
 
 /// The shadows of the first lights of `illumination` (or of its fixed key
@@ -945,10 +958,10 @@ fn shadows(illumination: &Illumination, pending: &[Pending]) -> Shadows {
         .iter()
         .map(|(.., directional)| if *directional { 1 } else { 6 })
         .sum();
-    shadows.size = if layers == 1 {
-        SHADOW_SIZE
-    } else {
-        SHADOW_SIZE_SHARED
+    shadows.size = match layers {
+        1 => SHADOW_SIZE,
+        ..=12 => SHADOW_SIZE_SHARED,
+        _ => SHADOW_SIZE_MANY,
     };
     for (light, position, directional) in casters {
         let first = shadows.layers.len();
@@ -977,12 +990,7 @@ fn shadows(illumination: &Illumination, pending: &[Pending]) -> Shadows {
 /// sphere at `center` with `radius`, `size` texels on a side. The map is
 /// seen from the origin and its radius steps by an eighth of an octave, so
 /// that its texels stay put while the content moves within it.
-fn directional_shadow(
-    toward: DVec3,
-    center: DVec3,
-    radius: f64,
-    size: u32,
-) -> Option<(DMat4, bool, f64)> {
+fn directional_shadow(toward: DVec3, center: DVec3, radius: f64, size: u32) -> Option<ShadowLayer> {
     let toward = toward.try_normalize()?;
     let up = if toward.cross(DVec3::Y).length_squared() > 1e-6 {
         DVec3::Y
@@ -997,34 +1005,25 @@ fn directional_shadow(
     let y = (middle.y / texel).round() * texel;
     let reach = radius + texel;
     let depth = -middle.z;
-    let projection = directx::orthographic(
-        x - reach,
-        x + reach,
-        y - reach,
-        y + reach,
-        depth - reach,
-        depth + reach,
-    );
-    Some((projection * view, false, texel))
+    let (near, far) = (depth - reach, depth + reach);
+    let projection = directx::orthographic(x - reach, x + reach, y - reach, y + reach, near, far);
+    Some(ShadowLayer {
+        view_proj: projection * view,
+        perspective: false,
+        texel,
+        near,
+        far,
+    })
 }
 
 /// The six shadow maps of a point light at `position` over the sphere at
 /// `center` with `radius`, `size` texels on a side: one per cube face, in
 /// the order +x, -x, +y, -y, +z, -z (`shadowed` in [`SHADER`]).
-fn point_shadows(
-    position: DVec3,
-    center: DVec3,
-    radius: f64,
-    size: u32,
-) -> [(DMat4, bool, f64); 6] {
+fn point_shadows(position: DVec3, center: DVec3, radius: f64, size: u32) -> [ShadowLayer; 6] {
     let distance = position.distance(center);
     let near = ((distance - radius) * 0.5).max(radius * 1e-3).max(1e-4);
-    let projection = directx::perspective(
-        std::f64::consts::FRAC_PI_2,
-        1.0,
-        near,
-        (distance + radius) * 1.01,
-    );
+    let far = (distance + radius) * 1.01;
+    let projection = directx::perspective(std::f64::consts::FRAC_PI_2, 1.0, near, far);
     let faces = [
         (DVec3::X, DVec3::NEG_Y),
         (DVec3::NEG_X, DVec3::NEG_Y),
@@ -1034,12 +1033,12 @@ fn point_shadows(
         (DVec3::NEG_Z, DVec3::NEG_Y),
     ];
     // A face spans 90 degrees: its texels are 2 / size wide a unit away.
-    faces.map(|(axis, up)| {
-        (
-            projection * view::look_at_mat4(position, position + axis, up),
-            true,
-            2.0 / f64::from(size),
-        )
+    faces.map(|(axis, up)| ShadowLayer {
+        view_proj: projection * view::look_at_mat4(position, position + axis, up),
+        perspective: true,
+        texel: 2.0 / f64::from(size),
+        near,
+        far,
     })
 }
 
@@ -1114,7 +1113,7 @@ fn frame_uniforms(
             } else {
                 0.0
             },
-            SHADOW_SOFTNESS,
+            SHADOW_CONTACT,
             shadows.layers.len() as f32,
             0.0,
         ],
@@ -1147,11 +1146,16 @@ fn frame_uniforms(
     }
     for index in 0..MAX_SHADOW_LAYERS {
         match shadows.layers.get(index) {
-            Some((matrix, perspective, texel)) => {
-                push_mat4(&mut uniforms, *matrix);
+            Some(layer) => {
+                push_mat4(&mut uniforms, layer.view_proj);
                 push_f32s(
                     &mut uniforms,
-                    &[*texel as f32, f32::from(u8::from(*perspective)), 0.0, 0.0],
+                    &[
+                        layer.texel as f32,
+                        f32::from(u8::from(layer.perspective)),
+                        layer.near as f32,
+                        layer.far as f32,
+                    ],
                 );
             }
             None => push_f32s(&mut uniforms, &[0.0; 20]),
@@ -2130,7 +2134,8 @@ struct Light {
 }
 
 // A shadow map layer: its view-projection, the size of its texels (in scene
-// units, or per scene unit away from the light), and 1 under perspective.
+// units, or per scene unit away from the light), 1 under perspective, and
+// the distances from the light its depths span.
 struct Shadow {
     view_proj: mat4x4<f32>,
     params: vec4<f32>,
@@ -2150,10 +2155,10 @@ struct Frame {
     // first layer of the key light's shadow plus one (0 for none).
     params: vec4<f32>,
     // 1 over the texels on a side of a shadow map, and the radius of the
-    // soft edge of shadows in texels.
+    // edge of shadows in texels where an object touches what it shadows.
     shadow: vec4<f32>,
     lights: array<Light, 8>,
-    shadows: array<Shadow, 12>,
+    shadows: array<Shadow, 24>,
 }
 
 struct Draw {
@@ -2303,9 +2308,22 @@ const SHADOW_TAPS = array<vec2<f32>, 12>(
     vec2<f32>(-0.792, -0.598),
 );
 
+// How wide the edge of a shadow grows per unit of distance between the
+// object that casts it and what it falls on, under a directional light (the
+// key light's included), as the sun's disc spreads it.
+const SUN_SPREAD: f32 = 0.03;
+// The radius of a point light, in scene units, which spreads its shadows'
+// edges the same way.
+const LAMP_RADIUS: f32 = 0.12;
+// The widest edge of a shadow, in texels, and so how far around a point the
+// lookup searches for what casts it.
+const SHADOW_SEARCH: f32 = 16.0;
+
 // How much of `light` reaches `point`, whose surface faces `normal`: 1 where
-// no opaque mesh lies between them, 0 in its shadow, between at the edge.
-fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>) -> f32 {
+// no opaque mesh lies between them, 0 in its shadow, between at the edge,
+// which is sharp where the object touches the surface and widens as they
+// part.
+fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>) -> f32 {
     if light.color.w < 0.5 {
         return 1.0;
     }
@@ -2347,8 +2365,44 @@ fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>) -> f32 {
     if ndc.z < 0.0 || ndc.z > 1.0 || any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
         return 1.0;
     }
-    let reach = frame.shadow.x * frame.shadow.y;
     var taps = SHADOW_TAPS;
+    // The taps turn by a different angle at each pixel (interleaved
+    // gradient noise), so that a wide edge shades smoothly instead of in
+    // steps of the same pattern.
+    let turn = 6.2831853 * fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715))));
+    let rotation = mat2x2<f32>(cos(turn), sin(turn), -sin(turn), cos(turn));
+    for (var i = 0u; i < 12u; i = i + 1u) {
+        taps[i] = rotation * taps[i];
+    }
+    // The mean depth of what casts the shadow around the point.
+    let size = vec2<f32>(textureDimensions(shadow_maps));
+    var blockers = 0.0;
+    var found = 0.0;
+    for (var i = 0u; i < 12u; i = i + 1u) {
+        let at = (uv + taps[i] * SHADOW_SEARCH * frame.shadow.x) * size;
+        let texel_at = vec2<i32>(clamp(at, vec2<f32>(0.0), size - 1.0));
+        let stored = textureLoad(shadow_maps, texel_at, i32(layer), 0);
+        if stored < ndc.z {
+            blockers += stored;
+            found += 1.0;
+        }
+    }
+    if found < 0.5 {
+        return 1.0;
+    }
+    let blocker = blockers / found;
+    // The width of the edge, in texels, from the distance between them.
+    var penumbra: f32;
+    let near = shadow.params.z;
+    let far = shadow.params.w;
+    if shadow.params.y > 0.5 {
+        let receiver_distance = far * near / (far - ndc.z * (far - near));
+        let blocker_distance = far * near / (far - blocker * (far - near));
+        penumbra = LAMP_RADIUS * (receiver_distance - blocker_distance) / blocker_distance / texel;
+    } else {
+        penumbra = (ndc.z - blocker) * (far - near) * SUN_SPREAD / texel;
+    }
+    let reach = clamp(penumbra, frame.shadow.y, SHADOW_SEARCH) * frame.shadow.x;
     var lit = 0.0;
     for (var i = 0u; i < 12u; i = i + 1u) {
         lit += textureSampleCompareLevel(
@@ -2370,6 +2424,7 @@ fn shade(
     face: vec3<f32>,
     viewer: vec3<f32>,
     point: vec3<f32>,
+    pixel: vec2<f32>,
 ) -> vec4<f32> {
     let metallic = clamp(draw.material.y, 0.0, 1.0);
     let gloss = 1.0 - clamp(draw.material.x, 0.0, 1.0);
@@ -2392,7 +2447,7 @@ fn shade(
             toward_light = light.position.xyz - point;
         }
         toward_light = normalize_or_zero(toward_light);
-        let lit = shadowed(light, point, face);
+        let lit = shadowed(light, point, face, pixel);
         let key = max((dot(normal, toward_light) + KEY_WRAP) / (1.0 + KEY_WRAP), 0.0);
         let half = normalize_or_zero(toward_light + viewer);
         let shine = pow(max(dot(normal, half), 0.0), shininess) * polish * min(key, 1.0);
@@ -2446,7 +2501,7 @@ fn surface(in: VertexOut) -> vec4<f32> {
         if dot(normal, normal) < 0.5 {
             normal = face;
         }
-        color = shade(color, normal, face, viewer, in.world);
+        color = shade(color, normal, face, viewer, in.world, in.clip.xy);
     }
     return color;
 }
@@ -2912,12 +2967,12 @@ mod tests {
         );
         // The floor's middle lies in the map, its corner too.
         for point in [DVec3::ZERO, DVec3::new(2.0, 2.0, 0.0)] {
-            let ndc = key.layers[0].0.project_point3(point);
+            let ndc = key.layers[0].view_proj.project_point3(point);
             assert!(ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0, "{ndc:?}");
             assert!((0.0..=1.0).contains(&ndc.z), "{ndc:?}");
         }
-        // A point light casts a cube of six, a directional one a map; a third
-        // light casts none.
+        // A point light casts a cube of six, a directional one a map: three
+        // lights cast 13 smaller maps.
         let light = |position, directional| Light {
             position,
             directional,
@@ -2930,10 +2985,12 @@ mod tests {
         ];
         let lit = shadows(&illumination, &meshes.pending);
         assert_eq!(lit.key, None);
-        assert_eq!(&lit.lights[..3], [Some(0), Some(6), None]);
-        assert_eq!((lit.layers.len(), lit.size), (7, SHADOW_SIZE_SHARED));
+        assert_eq!(&lit.lights[..3], [Some(0), Some(6), Some(7)]);
+        assert_eq!((lit.layers.len(), lit.size), (13, SHADOW_SIZE_MANY));
         // The floor beneath the point light lies in the face looking down.
-        let below = lit.layers[5].0.project_point3(DVec3::new(0.5, 0.5, 0.0));
+        let below = lit.layers[5]
+            .view_proj
+            .project_point3(DVec3::new(0.5, 0.5, 0.0));
         assert!(below.x.abs() <= 1.0 && below.y.abs() <= 1.0, "{below:?}");
         illumination.lighting.shadows = false;
         assert!(shadows(&illumination, &meshes.pending).layers.is_empty());
