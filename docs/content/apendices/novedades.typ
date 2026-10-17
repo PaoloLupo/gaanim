@@ -95,11 +95,20 @@ actualizar».
 - El 3D se dibuja igual en la vista previa, las exportaciones, los paquetes
   `.gaanim`, el reproductor web y las vistas previas de Presenter View.
 - Sombras: las mallas opacas proyectan sombra de la luz principal, o de las
-  dos primeras luces de `light_3d`, sobre lo que recibe luz, con el borde
-  suave. `lighting_3d(shadows=...)`, que se aceptaba sin efecto, las
+  cuatro primeras luces de `light_3d`, sobre lo que recibe luz, con un borde
+  nítido al contacto que se suaviza con la distancia. `lighting_3d(shadows=...)`, que se aceptaba sin efecto, las
   enciende (por defecto) o las apaga.
 - Una línea 3D mide el ancho de su trazo, `.stroke(color, ancho)`, en lugar
-  de 1,5 px fijos, y `animate.stroke_width(...)` lo anima.
+  de 1,5 px fijos, y `animate.stroke_width(...)` lo anima. Sin trazo mide
+  2 px de una salida de 1080 px de alto: en 4K es igual de visible que en
+  1080p.
+- Una línea 3D que se dibuja con `create` se guarda una vez en los paquetes
+  `.gaanim`, que de cada fotograma solo apuntan hasta dónde se ve, y se
+  sube una vez a la GPU mientras crece. El paquete del atractor de
+  `gallery/lorenz_attractor` pasa de 5,9 MB a 1,5 MB.
+- Las mallas 3D iguales se suben una vez a la GPU, y las opacas con la
+  misma geometría y el mismo material se dibujan juntas, en una llamada: una
+  escena con 8.000 esferas sueltas pasa de 21 a 69 fps.
 
 == Al actualizar
 
@@ -109,7 +118,8 @@ actualizar».
 - Las escenas 3D iluminadas tienen sombras. Para el aspecto anterior, usa
   `lighting_3d(..., shadows=False)`.
 - Las líneas 3D con `.stroke(color, ancho)` miden ese ancho; quita el ancho
-  o ajústalo si las querías de 1,5 px.
+  o ajústalo si las querías de 1,5 px. Las que no tienen trazo miden 2 px a
+  1080p en lugar de 1,5 px a cualquier tamaño.
 - Un objeto translúcido se ve como una capa: su superficie más cercana se
   mezcla una vez sobre lo que tiene detrás, y los objetos translúcidos se
   ordenan de atrás hacia delante como objetos enteros. Una malla con colores

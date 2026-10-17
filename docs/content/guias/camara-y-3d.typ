@@ -318,9 +318,11 @@ scene.render()
   Mientras hay luces, sustituyen a la luz principal fija, cada una en su
   color e intensidad; `fade_in` y `fade_out` la encienden y la apagan. Con
   `lighting_3d("none")` solo alumbran ellas.
-- Las mallas opacas proyectan sombra de la luz principal, o de las dos
+- Las mallas opacas proyectan sombra de la luz principal, o de las cuatro
   primeras luces de `light_3d`, sobre lo que recibe luz: un cubo sobre un
-  plano deja su sombra en el plano. El borde de la sombra es suave.
+  plano deja su sombra en el plano. El borde de la sombra es nítido donde el
+  objeto toca la superficie y se suaviza a medida que se separan, como bajo
+  el sol o una lámpara.
   `lighting_3d(shadows=False)` las quita.
   `"none"` deja solo la emisión del material.
 - Las caras planas se pintan de un solo color y las curvas con degradados
@@ -387,7 +389,8 @@ puntos se reproducen a la frecuencia de la pantalla.
   3D) no reciben luz y se ven por las dos caras; las líneas 3D tampoco
   reciben luz y tienen extremos redondeados.
 - Una línea 3D mide en pantalla el ancho de su trazo, `.stroke(color, ancho)`
-  en unidades de la escena, a cualquier profundidad; sin trazo, 1,5 px.
+  en unidades de la escena, a cualquier profundidad; sin trazo, 2 px de una
+  salida de 1080 px de alto, la misma parte del encuadre a cualquier tamaño.
   En una línea con trazo, `animate.stroke_width(...)` anima el ancho.
 - Las superficies y las líneas que se cruzan se cortan donde corresponde, y
   la geometría que atraviesa el plano cercano de la cámara se recorta.

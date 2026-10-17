@@ -78,15 +78,20 @@ pub(crate) struct Content<'a> {
     pub lines: Option<&'a LineListData>,
     pub material: Option<&'a Material3D>,
     /// Width of the lines in scene units, from the drawable's stroke; `None`
-    /// draws them [`LINE_WIDTH_PX`] wide.
+    /// draws them [`LINE_WIDTH_OF_FRAME`] of the frame's height wide.
     pub line_width: Option<f64>,
+    /// The part of the lines shown, from and to, as fractions of their
+    /// segments; `None` shows all of them.
+    pub line_range: Option<[f32; 2]>,
 }
 
-/// Width of 3D lines without a stroke width, in output pixels.
-const LINE_WIDTH_PX: f64 = 1.5;
+/// Width of 3D lines without a stroke width, as a fraction of the frame's
+/// height: 2 pixels of a 1080-pixel-tall output, at any output size.
+const LINE_WIDTH_OF_FRAME: f64 = 2.0 / 1080.0;
 
 /// How `camera` maps its NDC onto the canvas, in scene units, and the width
-/// of lines in scene units; `None` when it shows nothing.
+/// of lines without a stroke width in scene units; `None` when it shows
+/// nothing.
 pub(crate) fn canvas_projection(camera: &Camera) -> Option<(kurbo::Affine, f64)> {
     let width = f64::from(camera.viewport_width);
     let height = f64::from(camera.viewport_height);
@@ -118,7 +123,7 @@ pub(crate) fn canvas_projection(camera: &Camera) -> Option<(kurbo::Affine, f64)>
     ]);
     Some((
         canvas.inverse() * ndc_to_pixels,
-        LINE_WIDTH_PX / pixels_per_unit,
+        camera.frame_height * LINE_WIDTH_OF_FRAME,
     ))
 }
 
@@ -130,8 +135,11 @@ const SEGMENT_BYTES: usize = 64;
 /// Bytes of a shadow map layer's view-projection (`Caster` in [`SHADER`]),
 /// at `DRAW_STRIDE` from one layer to the next.
 const CASTER_BYTES: usize = 64;
+/// Bytes of a draw's instance data: its model matrix, the columns of its
+/// normal matrix and its linear base color (`VertexIn` in [`SHADER`]).
+const INSTANCE_BYTES: usize = 128;
 /// Bytes of the frame uniforms (`Frame` in [`SHADER`]).
-const FRAME_BYTES: usize = 1376;
+const FRAME_BYTES: usize = 2336;
 /// Bytes of one draw's uniforms (`Draw` in [`SHADER`]), and their stride in
 /// the draw buffer, the minimum uniform offset alignment.
 const DRAW_BYTES: usize = 192;
@@ -139,16 +147,19 @@ const DRAW_STRIDE: usize = 256;
 /// Lights the shader reads; further lights are left out.
 const MAX_LIGHTS: usize = 8;
 /// Lights that cast shadows: the first ones of a frame.
-const MAX_SHADOW_LIGHTS: usize = 2;
+const MAX_SHADOW_LIGHTS: usize = 4;
 /// Layers of the shadow maps: one for a directional light, one per cube
 /// face for a point light.
 const MAX_SHADOW_LAYERS: usize = MAX_SHADOW_LIGHTS * 6;
-/// Texels on a side of a shadow map: the only one of a directional light,
-/// and each of several.
+/// Texels on a side of the shadow maps: of the only one of a directional
+/// light, of up to two lights' maps, and of more.
 const SHADOW_SIZE: u32 = 2048;
 const SHADOW_SIZE_SHARED: u32 = 1024;
-/// Radius of the soft edge of shadows, in shadow-map texels.
-const SHADOW_SOFTNESS: f32 = 1.5;
+const SHADOW_SIZE_MANY: u32 = 512;
+/// Radius of the edge of shadows where an object touches what it shadows,
+/// in shadow-map texels; it widens with the distance between them
+/// (`shadowed` in [`SHADER`]).
+const SHADOW_CONTACT: f32 = 1.0;
 /// Where the fixed key light of [`Lighting3D`] shines from (`KEY_LIGHT` in
 /// [`SHADER`]).
 const KEY_LIGHT: DVec3 = DVec3::new(-3.0, 6.0, 4.0);
@@ -175,6 +186,30 @@ pub struct MeshSource {
     /// that run it in opposite directions, once vertices at one place are
     /// one. Only a lit mesh shadows itself, so only a lit one is checked.
     closed: bool,
+    /// Hash of what the shader reads: sources alike share one upload, and
+    /// meshes alike draw next to each other, as one instanced draw.
+    digest: u64,
+}
+
+impl MeshSource {
+    /// The hash of what the shader reads of the source.
+    fn content_digest(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.vertices.hash(&mut hasher);
+        self.indices.hash(&mut hasher);
+        (self.lines, self.has_colors, self.closed).hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Whether `other` draws exactly what this source does.
+    fn same_as(&self, other: &MeshSource) -> bool {
+        self.digest == other.digest
+            && self.lines == other.lines
+            && self.has_colors == other.has_colors
+            && self.closed == other.closed
+            && self.vertices == other.vertices
+            && self.indices == other.indices
+    }
 }
 
 /// Whether the triangles `indices` over `positions` enclose a volume: each
@@ -277,6 +312,7 @@ impl MeshSource {
             vertices,
             count: indices.len() as u32,
             closed: lit && encloses(&positions, &indices, radius),
+            digest: 0,
             indices,
             lines: false,
             has_colors: colors.is_some(),
@@ -332,6 +368,7 @@ impl MeshSource {
             count: pairs.len() as u32,
             lines: true,
             closed: false,
+            digest: 0,
             has_colors: colors.is_some(),
             opaque_colors: colors.is_none_or(|colors| colors.iter().all(|c| c[3] >= 0.999)),
             center,
@@ -375,6 +412,8 @@ pub struct MeshSources {
     /// By key and whether it is lines.
     sources: HashMap<(u64, bool), Held>,
     used: HashSet<(u64, bool)>,
+    /// Sources by digest, so that drawables alike share one.
+    shared: HashMap<u64, std::sync::Weak<MeshSource>>,
 }
 
 struct Held {
@@ -395,24 +434,42 @@ impl MeshSources {
         build: impl FnOnce() -> Option<MeshSource>,
     ) -> Option<Arc<MeshSource>> {
         self.used.insert((key, lines));
-        match self.sources.entry((key, lines)) {
-            Entry::Occupied(mut entry) => {
-                let held = entry.get_mut();
-                if held.revision != revision {
-                    held.revision = revision;
-                    held.source = build().map(Arc::new);
-                    held._keep = keep;
-                }
-                held.source.clone()
-            }
-            Entry::Vacant(entry) => entry
-                .insert(Held {
+        let stale = self
+            .sources
+            .get(&(key, lines))
+            .is_none_or(|held| held.revision != revision);
+        if stale {
+            let source = build().map(|source| self.share(source));
+            self.sources.insert(
+                (key, lines),
+                Held {
                     revision,
-                    source: build().map(Arc::new),
+                    source,
                     _keep: keep,
-                })
-                .source
-                .clone(),
+                },
+            );
+        }
+        self.sources.get(&(key, lines))?.source.clone()
+    }
+
+    /// `source`, or the one alike that another drawable already holds.
+    fn share(&mut self, mut source: MeshSource) -> Arc<MeshSource> {
+        source.digest = source.content_digest();
+        match self.shared.entry(source.digest) {
+            Entry::Occupied(mut entry) => match entry.get().upgrade() {
+                Some(held) if held.same_as(&source) => held,
+                Some(_) => Arc::new(source),
+                None => {
+                    let source = Arc::new(source);
+                    entry.insert(Arc::downgrade(&source));
+                    source
+                }
+            },
+            Entry::Vacant(entry) => {
+                let source = Arc::new(source);
+                entry.insert(Arc::downgrade(&source));
+                source
+            }
         }
     }
 
@@ -420,6 +477,7 @@ impl MeshSources {
     fn end_frame(&mut self) {
         let used = std::mem::take(&mut self.used);
         self.sources.retain(|key, _| used.contains(key));
+        self.shared.retain(|_, source| source.strong_count() > 0);
     }
 }
 
@@ -461,6 +519,8 @@ struct GpuDraw {
     /// Drawn into the shadow maps: opaque meshes that do not glow, since
     /// a glowing mesh may hold the light that makes it glow.
     casts: bool,
+    /// Lines only: the segments drawn, those a reveal shows at least part of.
+    instances: std::ops::Range<u32>,
 }
 
 /// The meshes and lines one image of a frame draws, with what the shader
@@ -476,6 +536,8 @@ pub struct GpuMeshFrame {
     draws: Arc<[GpuDraw]>,
     /// `DRAW_STRIDE` bytes per draw.
     draw_uniforms: Arc<[u8]>,
+    /// `INSTANCE_BYTES` per draw: what differs between meshes drawn as one.
+    instances: Arc<[u8]>,
     /// Texels on a side of the shadow maps, and the view-projection of each
     /// layer, which the opaque meshes are drawn into before the frame.
     shadow_size: u32,
@@ -496,6 +558,7 @@ impl GpuMeshFrame {
     pub fn hash_content(&self, update: &mut dyn FnMut(&[u8])) {
         update(&self.uniforms);
         update(&self.draw_uniforms);
+        update(&self.instances);
         for draw in self.draws.iter() {
             update(&[
                 u8::from(draw.culled),
@@ -521,6 +584,8 @@ struct Pending {
     translucent: bool,
     /// Lines only: their width in scene units, or the default.
     line_width: Option<f64>,
+    /// Lines only: the part shown, as fractions of their segments.
+    line_range: Option<[f32; 2]>,
 }
 
 impl Pending {
@@ -638,6 +703,7 @@ impl<'a> GpuMeshes<'a> {
         if opacity <= f32::EPSILON {
             return;
         }
+        let source_lines = source.lines;
         let opaque_colors = if source.has_colors {
             source.opaque_colors
         } else {
@@ -652,6 +718,11 @@ impl<'a> GpuMeshes<'a> {
             base: to_linear(base),
             material,
             line_width,
+            line_range: if source_lines {
+                content.line_range
+            } else {
+                None
+            },
         });
     }
 
@@ -682,7 +753,7 @@ impl<'a> GpuMeshes<'a> {
         let shadow_layers: Arc<[[f32; 16]]> = shadows
             .layers
             .iter()
-            .map(|(matrix, ..)| matrix.as_mat4().to_cols_array())
+            .map(|layer| layer.view_proj.as_mat4().to_cols_array())
             .collect();
         // Pixels of the image per scene unit, which line widths scale by.
         let pixels_per_unit = self.placement.determinant().abs().sqrt();
@@ -699,6 +770,7 @@ impl<'a> GpuMeshes<'a> {
                 (depth, pending)
             })
             .collect();
+        // Opaque meshes alike next to each other, so that they draw as one.
         pending.sort_by(|(a_depth, a), (b_depth, b)| {
             a.class
                 .cmp(&b.class)
@@ -707,7 +779,10 @@ impl<'a> GpuMeshes<'a> {
                     if a.translucent {
                         b_depth.total_cmp(a_depth)
                     } else {
-                        a_depth.total_cmp(b_depth)
+                        a.source
+                            .digest
+                            .cmp(&b.source.digest)
+                            .then(a_depth.total_cmp(b_depth))
                     }
                 })
         });
@@ -725,13 +800,26 @@ impl<'a> GpuMeshes<'a> {
             let image = frame_image(width, height, self.slot + class);
             let mut draws = Vec::with_capacity(members.len());
             let mut draw_uniforms = Vec::with_capacity(members.len() * DRAW_STRIDE);
+            let mut instances = Vec::with_capacity(members.len() * INSTANCE_BYTES);
             for (_, pending) in members {
+                push_instance(&mut instances, pending);
                 let line_px = pending.line_width.unwrap_or(line_width) * pixels_per_unit;
-                push_draw_uniforms(&mut draw_uniforms, pending, line_px);
+                // The segments shown: all of them, or a reveal's part.
+                let segments = pending.source.count as f32;
+                let [from, to] = pending.line_range.map_or([0.0, segments], |[from, to]| {
+                    [from * segments, to * segments]
+                });
+                push_draw_uniforms(&mut draw_uniforms, pending, line_px, [from, to]);
+                let instances = if to > from {
+                    (from.floor().max(0.0) as u32)..(to.ceil() as u32).min(pending.source.count)
+                } else {
+                    0..0
+                };
                 draws.push(GpuDraw {
                     culled: pending.material.is_some() && !pending.source.lines,
                     translucent: pending.translucent,
                     casts: pending.casts(),
+                    instances,
                     source: Arc::clone(&pending.source),
                 });
             }
@@ -739,6 +827,7 @@ impl<'a> GpuMeshes<'a> {
             image.data.id().hash(&mut hasher);
             uniforms.hash(&mut hasher);
             draw_uniforms.hash(&mut hasher);
+            instances.hash(&mut hasher);
             for draw in &draws {
                 (Arc::as_ptr(&draw.source) as usize).hash(&mut hasher);
                 draw.culled.hash(&mut hasher);
@@ -753,6 +842,7 @@ impl<'a> GpuMeshes<'a> {
                     uniforms: Arc::clone(&uniforms),
                     draws: draws.into(),
                     draw_uniforms: draw_uniforms.into(),
+                    instances: instances.into(),
                     shadow_size: shadows.size,
                     shadow_layers: Arc::clone(&shadow_layers),
                     digest: hasher.finish(),
@@ -794,13 +884,23 @@ fn world_sphere(pending: &Pending) -> (DVec3, f64) {
 struct Shadows {
     /// Texels on a side of each layer.
     size: u32,
-    /// Each layer's view-projection, whether it is a perspective one, and
-    /// the size of its texels: in scene units, or per scene unit of distance
-    /// from the light under perspective.
-    layers: Vec<(DMat4, bool, f64)>,
+    layers: Vec<ShadowLayer>,
     /// The first layer of the fixed key light's shadow and of each light's.
     key: Option<usize>,
     lights: [Option<usize>; MAX_LIGHTS],
+}
+
+/// What one shadow map layer sees.
+#[derive(Clone, Copy, Debug)]
+struct ShadowLayer {
+    view_proj: DMat4,
+    perspective: bool,
+    /// The size of its texels: in scene units, or per scene unit of
+    /// distance from the light under perspective.
+    texel: f64,
+    /// The distances from the light its depths span.
+    near: f64,
+    far: f64,
 }
 
 /// The shadows of the first lights of `illumination` (or of its fixed key
@@ -858,10 +958,10 @@ fn shadows(illumination: &Illumination, pending: &[Pending]) -> Shadows {
         .iter()
         .map(|(.., directional)| if *directional { 1 } else { 6 })
         .sum();
-    shadows.size = if layers == 1 {
-        SHADOW_SIZE
-    } else {
-        SHADOW_SIZE_SHARED
+    shadows.size = match layers {
+        1 => SHADOW_SIZE,
+        ..=12 => SHADOW_SIZE_SHARED,
+        _ => SHADOW_SIZE_MANY,
     };
     for (light, position, directional) in casters {
         let first = shadows.layers.len();
@@ -890,12 +990,7 @@ fn shadows(illumination: &Illumination, pending: &[Pending]) -> Shadows {
 /// sphere at `center` with `radius`, `size` texels on a side. The map is
 /// seen from the origin and its radius steps by an eighth of an octave, so
 /// that its texels stay put while the content moves within it.
-fn directional_shadow(
-    toward: DVec3,
-    center: DVec3,
-    radius: f64,
-    size: u32,
-) -> Option<(DMat4, bool, f64)> {
+fn directional_shadow(toward: DVec3, center: DVec3, radius: f64, size: u32) -> Option<ShadowLayer> {
     let toward = toward.try_normalize()?;
     let up = if toward.cross(DVec3::Y).length_squared() > 1e-6 {
         DVec3::Y
@@ -910,34 +1005,25 @@ fn directional_shadow(
     let y = (middle.y / texel).round() * texel;
     let reach = radius + texel;
     let depth = -middle.z;
-    let projection = directx::orthographic(
-        x - reach,
-        x + reach,
-        y - reach,
-        y + reach,
-        depth - reach,
-        depth + reach,
-    );
-    Some((projection * view, false, texel))
+    let (near, far) = (depth - reach, depth + reach);
+    let projection = directx::orthographic(x - reach, x + reach, y - reach, y + reach, near, far);
+    Some(ShadowLayer {
+        view_proj: projection * view,
+        perspective: false,
+        texel,
+        near,
+        far,
+    })
 }
 
 /// The six shadow maps of a point light at `position` over the sphere at
 /// `center` with `radius`, `size` texels on a side: one per cube face, in
 /// the order +x, -x, +y, -y, +z, -z (`shadowed` in [`SHADER`]).
-fn point_shadows(
-    position: DVec3,
-    center: DVec3,
-    radius: f64,
-    size: u32,
-) -> [(DMat4, bool, f64); 6] {
+fn point_shadows(position: DVec3, center: DVec3, radius: f64, size: u32) -> [ShadowLayer; 6] {
     let distance = position.distance(center);
     let near = ((distance - radius) * 0.5).max(radius * 1e-3).max(1e-4);
-    let projection = directx::perspective(
-        std::f64::consts::FRAC_PI_2,
-        1.0,
-        near,
-        (distance + radius) * 1.01,
-    );
+    let far = (distance + radius) * 1.01;
+    let projection = directx::perspective(std::f64::consts::FRAC_PI_2, 1.0, near, far);
     let faces = [
         (DVec3::X, DVec3::NEG_Y),
         (DVec3::NEG_X, DVec3::NEG_Y),
@@ -947,12 +1033,12 @@ fn point_shadows(
         (DVec3::NEG_Z, DVec3::NEG_Y),
     ];
     // A face spans 90 degrees: its texels are 2 / size wide a unit away.
-    faces.map(|(axis, up)| {
-        (
-            projection * view::look_at_mat4(position, position + axis, up),
-            true,
-            2.0 / f64::from(size),
-        )
+    faces.map(|(axis, up)| ShadowLayer {
+        view_proj: projection * view::look_at_mat4(position, position + axis, up),
+        perspective: true,
+        texel: 2.0 / f64::from(size),
+        near,
+        far,
     })
 }
 
@@ -1027,7 +1113,7 @@ fn frame_uniforms(
             } else {
                 0.0
             },
-            SHADOW_SOFTNESS,
+            SHADOW_CONTACT,
             shadows.layers.len() as f32,
             0.0,
         ],
@@ -1060,11 +1146,16 @@ fn frame_uniforms(
     }
     for index in 0..MAX_SHADOW_LAYERS {
         match shadows.layers.get(index) {
-            Some((matrix, perspective, texel)) => {
-                push_mat4(&mut uniforms, *matrix);
+            Some(layer) => {
+                push_mat4(&mut uniforms, layer.view_proj);
                 push_f32s(
                     &mut uniforms,
-                    &[*texel as f32, f32::from(u8::from(*perspective)), 0.0, 0.0],
+                    &[
+                        layer.texel as f32,
+                        f32::from(u8::from(layer.perspective)),
+                        layer.near as f32,
+                        layer.far as f32,
+                    ],
                 );
             }
             None => push_f32s(&mut uniforms, &[0.0; 20]),
@@ -1074,9 +1165,42 @@ fn frame_uniforms(
     uniforms
 }
 
-/// Append one draw's uniforms, its lines `line_px` pixels wide, padded to
-/// `DRAW_STRIDE`.
-fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64) {
+/// Append one draw's instance data (see [`INSTANCE_BYTES`]).
+fn push_instance(bytes: &mut Vec<u8>, pending: &Pending) {
+    let start = bytes.len();
+    push_mat4(bytes, pending.model);
+    let normal = pending.model.inverse().transpose();
+    for column in [normal.x_axis, normal.y_axis, normal.z_axis] {
+        push_f32s(
+            bytes,
+            &[column.x as f32, column.y as f32, column.z as f32, 0.0],
+        );
+    }
+    push_f32s(bytes, &pending.base);
+    debug_assert_eq!(bytes.len() - start, INSTANCE_BYTES);
+}
+
+/// Whether draws `a` and `b` of a frame draw as one: opaque meshes alike,
+/// with the same uniforms but for their placement and base color.
+fn draw_alike(frame: &GpuMeshFrame, a: usize, b: usize) -> bool {
+    let (first, second) = (&frame.draws[a], &frame.draws[b]);
+    // The model and normal matrices and the base color lead each draw's
+    // uniforms; instances carry those.
+    const SHARED: std::ops::Range<usize> = 144..DRAW_BYTES;
+    let uniforms = |index: usize| &frame.draw_uniforms[index * DRAW_STRIDE..][SHARED];
+    !first.source.lines
+        && !first.translucent
+        && !second.translucent
+        && Arc::ptr_eq(&first.source, &second.source)
+        && first.culled == second.culled
+        && first.casts == second.casts
+        && uniforms(a) == uniforms(b)
+}
+
+/// Append one draw's uniforms, padded to `DRAW_STRIDE`: its lines
+/// `line_px` pixels wide, showing the segments from `shown[0]` to
+/// `shown[1]` (fractional at the ends).
+fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64, shown: [f32; 2]) {
     let start = bytes.len();
     push_mat4(bytes, pending.model);
     push_mat4(bytes, pending.model.inverse().transpose());
@@ -1105,7 +1229,7 @@ fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64) {
             f32::from(u8::from(pending.source.has_colors)),
         ],
     );
-    push_f32s(bytes, &[(line_px * 0.5) as f32, 0.0, 0.0, 0.0]);
+    push_f32s(bytes, &[(line_px * 0.5) as f32, shown[0], shown[1], 0.0]);
     debug_assert_eq!(bytes.len() - start, DRAW_BYTES);
     bytes.resize(start + DRAW_STRIDE, 0);
 }
@@ -1359,6 +1483,18 @@ impl Pipelines {
                 shader_location: 2,
             },
         ];
+        // A draw's instance data: model matrix, normal matrix, base color.
+        let instance_attributes: [wgpu::VertexAttribute; 8] =
+            std::array::from_fn(|index| wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: index as u64 * 16,
+                shader_location: 3 + index as u32,
+            });
+        let instance_layout = |attributes| wgpu::VertexBufferLayout {
+            array_stride: INSTANCE_BYTES as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes,
+        };
         let segment_attributes: [wgpu::VertexAttribute; 4] =
             std::array::from_fn(|index| wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x4,
@@ -1372,6 +1508,19 @@ impl Pipelines {
                 (true, Pass::Layer) => ("vertex_line", "fragment_line_layer"),
                 (true, _) => ("vertex_line", "fragment_line"),
             };
+            let segment_buffers = [wgpu::VertexBufferLayout {
+                array_stride: SEGMENT_BYTES as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &segment_attributes,
+            }];
+            let mesh_buffers = [
+                wgpu::VertexBufferLayout {
+                    array_stride: MESH_VERTEX_BYTES as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &mesh_attributes,
+                },
+                instance_layout(&instance_attributes),
+            ];
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("gaanim-3d"),
                 layout: Some(if matches!(pass, Pass::Layer) {
@@ -1383,19 +1532,11 @@ impl Pipelines {
                     module: &module,
                     entry_point: Some(vertex),
                     compilation_options: Default::default(),
-                    buffers: &[if lines {
-                        wgpu::VertexBufferLayout {
-                            array_stride: SEGMENT_BYTES as u64,
-                            step_mode: wgpu::VertexStepMode::Instance,
-                            attributes: &segment_attributes,
-                        }
+                    buffers: if lines {
+                        &segment_buffers[..]
                     } else {
-                        wgpu::VertexBufferLayout {
-                            array_stride: MESH_VERTEX_BYTES as u64,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &mesh_attributes,
-                        }
-                    }],
+                        &mesh_buffers[..]
+                    },
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
@@ -1453,11 +1594,14 @@ impl Pipelines {
                     module: &module,
                     entry_point: Some("vertex_shadow"),
                     compilation_options: Default::default(),
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: MESH_VERTEX_BYTES as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &mesh_attributes[..1],
-                    }],
+                    buffers: &[
+                        wgpu::VertexBufferLayout {
+                            array_stride: MESH_VERTEX_BYTES as u64,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &mesh_attributes[..1],
+                        },
+                        instance_layout(&instance_attributes[..4]),
+                    ],
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
@@ -1583,6 +1727,8 @@ pub struct GpuThreeD {
     /// The draw uniforms, with room for that many bytes, and their bind group.
     draw_buffer: Option<(wgpu::Buffer, usize, wgpu::BindGroup)>,
     shadow_maps: Option<ShadowMaps>,
+    /// The frame's instance data, with room for that many bytes.
+    instance_buffer: Option<(wgpu::Buffer, usize)>,
     /// The view-projections of the shadow map layers, with room for that
     /// many layers, and their bind group.
     caster_buffer: Option<(wgpu::Buffer, usize, wgpu::BindGroup)>,
@@ -1744,6 +1890,28 @@ impl GpuThreeD {
         }
         let (draw_buffer, _, bind_group) = self.draw_buffer.as_ref().expect("draw buffer is set");
         queue.write_buffer(draw_buffer, 0, &frame.draw_uniforms);
+        let needed = frame.instances.len().max(INSTANCE_BYTES);
+        if self
+            .instance_buffer
+            .as_ref()
+            .is_none_or(|(_, capacity)| *capacity < needed)
+        {
+            let capacity = needed.next_power_of_two();
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gaanim-3d-instances"),
+                size: capacity as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.instance_buffer = Some((buffer, capacity));
+        }
+        let (instance_buffer, _) = self
+            .instance_buffer
+            .as_ref()
+            .expect("instance buffer is set");
+        if !frame.instances.is_empty() {
+            queue.write_buffer(instance_buffer, 0, &frame.instances);
+        }
 
         // The shadow maps: one texel while the frame casts no shadow.
         let layers = frame.shadow_layers.len();
@@ -1816,7 +1984,16 @@ impl GpuThreeD {
                     multiview_mask: None,
                 });
                 pass.set_bind_group(1, caster_group, &[(layer * DRAW_STRIDE) as u32]);
-                for (index, draw) in frame.draws.iter().enumerate() {
+                pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                let mut index = 0;
+                while index < frame.draws.len() {
+                    let draw = &frame.draws[index];
+                    let mut end = index + 1;
+                    while end < frame.draws.len() && draw_alike(frame, index, end) {
+                        end += 1;
+                    }
+                    let first = index;
+                    index = end;
                     if !draw.casts {
                         continue;
                     }
@@ -1828,18 +2005,19 @@ impl GpuThreeD {
                         continue;
                     };
                     pass.set_pipeline(&pipelines.shadow[usize::from(draw.source.closed)]);
-                    pass.set_bind_group(0, bind_group, &[(index * DRAW_STRIDE) as u32]);
+                    pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
                     pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
                     pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..draw.source.count, 0, 0..1);
+                    pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
                 }
             }
         }
 
         let translucent = frame.draws.iter().filter(|draw| draw.translucent).count();
-        // The opaque draws, then one pass per translucent drawable with a
-        // layer depth of its own; the last pass resolves.
-        let mut draws = frame.draws.iter().enumerate().peekable();
+        // The opaque draws, alike meshes as one, then one pass per
+        // translucent drawable with a layer depth of its own; the last pass
+        // resolves.
+        let mut next = 0;
         let mut passes_left = 1 + translucent;
         while passes_left > 0 {
             passes_left -= 1;
@@ -1885,7 +2063,9 @@ impl GpuThreeD {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            let draw_one = |pass: &mut wgpu::RenderPass<'_>, index: usize, draw: &GpuDraw| {
+            // Draws `first..end`, meshes alike drawn as instances of one.
+            let draw_one = |pass: &mut wgpu::RenderPass<'_>, first: usize, end: usize| {
+                let draw = &frame.draws[first];
                 let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize)) else {
                     return;
                 };
@@ -1894,9 +2074,10 @@ impl GpuThreeD {
                 } else {
                     &pipelines.meshes[usize::from(draw.culled)]
                 };
-                pass.set_bind_group(0, bind_group, &[(index * DRAW_STRIDE) as u32]);
+                pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
                 pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
                 if let Some(indices) = &uploaded.indices {
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
                     pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                 }
                 let passes: &[Pass] = if draw.translucent {
@@ -1916,19 +2097,27 @@ impl GpuThreeD {
                     );
                     pass.set_pipeline(&set[each as usize]);
                     if draw.source.lines {
-                        // A quad per segment.
-                        pass.draw(0..6, 0..draw.source.count);
+                        // A quad per segment shown.
+                        if !draw.instances.is_empty() {
+                            pass.draw(0..6, draw.instances.clone());
+                        }
                     } else {
-                        pass.draw_indexed(0..draw.source.count, 0, 0..1);
+                        pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
                     }
                 }
             };
             if opaque {
-                while let Some((index, draw)) = draws.next_if(|(_, draw)| !draw.translucent) {
-                    draw_one(&mut pass, index, draw);
+                while next < frame.draws.len() && !frame.draws[next].translucent {
+                    let first = next;
+                    next += 1;
+                    while next < frame.draws.len() && draw_alike(frame, first, next) {
+                        next += 1;
+                    }
+                    draw_one(&mut pass, first, next);
                 }
-            } else if let Some((index, draw)) = draws.next() {
-                draw_one(&mut pass, index, draw);
+            } else if next < frame.draws.len() {
+                draw_one(&mut pass, next, next + 1);
+                next += 1;
             }
         }
         queue.submit(Some(encoder.finish()));
@@ -1945,7 +2134,8 @@ struct Light {
 }
 
 // A shadow map layer: its view-projection, the size of its texels (in scene
-// units, or per scene unit away from the light), and 1 under perspective.
+// units, or per scene unit away from the light), 1 under perspective, and
+// the distances from the light its depths span.
 struct Shadow {
     view_proj: mat4x4<f32>,
     params: vec4<f32>,
@@ -1965,10 +2155,10 @@ struct Frame {
     // first layer of the key light's shadow plus one (0 for none).
     params: vec4<f32>,
     // 1 over the texels on a side of a shadow map, and the radius of the
-    // soft edge of shadows in texels.
+    // edge of shadows in texels where an object touches what it shadows.
     shadow: vec4<f32>,
     lights: array<Light, 8>,
-    shadows: array<Shadow, 12>,
+    shadows: array<Shadow, 24>,
 }
 
 struct Draw {
@@ -1980,7 +2170,8 @@ struct Draw {
     emissive: vec4<f32>,
     // Roughness, metalness, 1 when lit, and 1 when vertices have colors.
     material: vec4<f32>,
-    // Half the width of lines in pixels.
+    // Half the width of lines in pixels, and the segments shown, from and
+    // to, fractional at the ends.
     line: vec4<f32>,
 }
 
@@ -2002,6 +2193,24 @@ struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
+    // The draw's instance data: its model matrix, the columns of its normal
+    // matrix, and its linear base color.
+    @location(3) model_x: vec4<f32>,
+    @location(4) model_y: vec4<f32>,
+    @location(5) model_z: vec4<f32>,
+    @location(6) model_w: vec4<f32>,
+    @location(7) normal_x: vec4<f32>,
+    @location(8) normal_y: vec4<f32>,
+    @location(9) normal_z: vec4<f32>,
+    @location(10) base: vec4<f32>,
+}
+
+struct ShadowIn {
+    @location(0) position: vec3<f32>,
+    @location(3) model_x: vec4<f32>,
+    @location(4) model_y: vec4<f32>,
+    @location(5) model_z: vec4<f32>,
+    @location(6) model_w: vec4<f32>,
 }
 
 struct VertexOut {
@@ -2099,9 +2308,22 @@ const SHADOW_TAPS = array<vec2<f32>, 12>(
     vec2<f32>(-0.792, -0.598),
 );
 
+// How wide the edge of a shadow grows per unit of distance between the
+// object that casts it and what it falls on, under a directional light (the
+// key light's included), as the sun's disc spreads it.
+const SUN_SPREAD: f32 = 0.03;
+// The radius of a point light, in scene units, which spreads its shadows'
+// edges the same way.
+const LAMP_RADIUS: f32 = 0.12;
+// The widest edge of a shadow, in texels, and so how far around a point the
+// lookup searches for what casts it.
+const SHADOW_SEARCH: f32 = 16.0;
+
 // How much of `light` reaches `point`, whose surface faces `normal`: 1 where
-// no opaque mesh lies between them, 0 in its shadow, between at the edge.
-fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>) -> f32 {
+// no opaque mesh lies between them, 0 in its shadow, between at the edge,
+// which is sharp where the object touches the surface and widens as they
+// part.
+fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>) -> f32 {
     if light.color.w < 0.5 {
         return 1.0;
     }
@@ -2143,8 +2365,44 @@ fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>) -> f32 {
     if ndc.z < 0.0 || ndc.z > 1.0 || any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
         return 1.0;
     }
-    let reach = frame.shadow.x * frame.shadow.y;
     var taps = SHADOW_TAPS;
+    // The taps turn by a different angle at each pixel (interleaved
+    // gradient noise), so that a wide edge shades smoothly instead of in
+    // steps of the same pattern.
+    let turn = 6.2831853 * fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715))));
+    let rotation = mat2x2<f32>(cos(turn), sin(turn), -sin(turn), cos(turn));
+    for (var i = 0u; i < 12u; i = i + 1u) {
+        taps[i] = rotation * taps[i];
+    }
+    // The mean depth of what casts the shadow around the point.
+    let size = vec2<f32>(textureDimensions(shadow_maps));
+    var blockers = 0.0;
+    var found = 0.0;
+    for (var i = 0u; i < 12u; i = i + 1u) {
+        let at = (uv + taps[i] * SHADOW_SEARCH * frame.shadow.x) * size;
+        let texel_at = vec2<i32>(clamp(at, vec2<f32>(0.0), size - 1.0));
+        let stored = textureLoad(shadow_maps, texel_at, i32(layer), 0);
+        if stored < ndc.z {
+            blockers += stored;
+            found += 1.0;
+        }
+    }
+    if found < 0.5 {
+        return 1.0;
+    }
+    let blocker = blockers / found;
+    // The width of the edge, in texels, from the distance between them.
+    var penumbra: f32;
+    let near = shadow.params.z;
+    let far = shadow.params.w;
+    if shadow.params.y > 0.5 {
+        let receiver_distance = far * near / (far - ndc.z * (far - near));
+        let blocker_distance = far * near / (far - blocker * (far - near));
+        penumbra = LAMP_RADIUS * (receiver_distance - blocker_distance) / blocker_distance / texel;
+    } else {
+        penumbra = (ndc.z - blocker) * (far - near) * SUN_SPREAD / texel;
+    }
+    let reach = clamp(penumbra, frame.shadow.y, SHADOW_SEARCH) * frame.shadow.x;
     var lit = 0.0;
     for (var i = 0u; i < 12u; i = i + 1u) {
         lit += textureSampleCompareLevel(
@@ -2166,6 +2424,7 @@ fn shade(
     face: vec3<f32>,
     viewer: vec3<f32>,
     point: vec3<f32>,
+    pixel: vec2<f32>,
 ) -> vec4<f32> {
     let metallic = clamp(draw.material.y, 0.0, 1.0);
     let gloss = 1.0 - clamp(draw.material.x, 0.0, 1.0);
@@ -2188,7 +2447,7 @@ fn shade(
             toward_light = light.position.xyz - point;
         }
         toward_light = normalize_or_zero(toward_light);
-        let lit = shadowed(light, point, face);
+        let lit = shadowed(light, point, face, pixel);
         let key = max((dot(normal, toward_light) + KEY_WRAP) / (1.0 + KEY_WRAP), 0.0);
         let half = normalize_or_zero(toward_light + viewer);
         let shine = pow(max(dot(normal, half), 0.0), shininess) * polish * min(key, 1.0);
@@ -2214,12 +2473,14 @@ fn shade(
 
 @vertex
 fn vertex(in: VertexIn) -> VertexOut {
-    let world = (draw.model * vec4<f32>(in.position, 1.0)).xyz;
+    let model = mat4x4<f32>(in.model_x, in.model_y, in.model_z, in.model_w);
+    let normal = mat3x3<f32>(in.normal_x.xyz, in.normal_y.xyz, in.normal_z.xyz);
+    let world = (model * vec4<f32>(in.position, 1.0)).xyz;
     var out: VertexOut;
     out.clip = image_clip(world);
     out.world = world;
-    out.normal = (draw.normal * vec4<f32>(in.normal, 0.0)).xyz;
-    out.color = draw.base;
+    out.normal = normal * in.normal;
+    out.color = in.base;
     if draw.material.w > 0.5 {
         out.color = in.color;
     }
@@ -2240,7 +2501,7 @@ fn surface(in: VertexOut) -> vec4<f32> {
         if dot(normal, normal) < 0.5 {
             normal = face;
         }
-        color = shade(color, normal, face, viewer, in.world);
+        color = shade(color, normal, face, viewer, in.world, in.clip.xy);
     }
     return color;
 }
@@ -2286,10 +2547,23 @@ const CORNERS = array<vec2<f32>, 6>(
 );
 
 @vertex
-fn vertex_line(@builtin(vertex_index) index: u32, in: LineIn) -> LineOut {
+fn vertex_line(
+    @builtin(vertex_index) index: u32,
+    @builtin(instance_index) segment: u32,
+    in: LineIn,
+) -> LineOut {
     var out: LineOut;
-    var start = image_clip((draw.model * vec4<f32>(in.start.xyz, 1.0)).xyz);
-    var end = image_clip((draw.model * vec4<f32>(in.end.xyz, 1.0)).xyz);
+    // The part of the segment shown, when a reveal ends within it.
+    let first = clamp(draw.line.y - f32(segment), 0.0, 1.0);
+    let last = clamp(draw.line.z - f32(segment), 0.0, 1.0);
+    if last <= first {
+        out.clip = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+        return out;
+    }
+    let head = mix(in.start.xyz, in.end.xyz, first);
+    let tail = mix(in.start.xyz, in.end.xyz, last);
+    var start = image_clip((draw.model * vec4<f32>(head, 1.0)).xyz);
+    var end = image_clip((draw.model * vec4<f32>(tail, 1.0)).xyz);
     // The part in front of the near plane, where reversed depth reaches w.
     let start_out = start.z - start.w;
     let end_out = end.z - end.w;
@@ -2319,11 +2593,11 @@ fn vertex_line(@builtin(vertex_index) index: u32, in: LineIn) -> LineOut {
     let corner = corners[index];
     var pixel = s0 - along * reach;
     var clip = start;
-    var color = in.start_color;
+    var color = mix(in.start_color, in.end_color, first);
     if corner.x > 0.5 {
         pixel = s1 + along * reach;
         clip = end;
-        color = in.end_color;
+        color = mix(in.start_color, in.end_color, last);
     }
     if draw.material.w < 0.5 {
         color = draw.base;
@@ -2370,8 +2644,9 @@ fn fragment_line_layer(in: LineOut, @builtin(sample_index) sample: u32) -> LineF
 
 // An opaque mesh's depth in the shadow map layer it casts into.
 @vertex
-fn vertex_shadow(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
-    return caster.view_proj * (draw.model * vec4<f32>(position, 1.0));
+fn vertex_shadow(in: ShadowIn) -> @builtin(position) vec4<f32> {
+    let model = mat4x4<f32>(in.model_x, in.model_y, in.model_z, in.model_w);
+    return caster.view_proj * (model * vec4<f32>(in.position, 1.0));
 }
 "#;
 
@@ -2495,8 +2770,8 @@ mod tests {
         // The NDC square spans the 16 x 9 frame around the camera.
         let corner = ndc_to_canvas * kurbo::Point::new(1.0, 1.0);
         assert!((corner.x - 8.0).abs() < 1e-9 && (corner.y - 4.5).abs() < 1e-9);
-        // 1.5 output pixels at 120 pixels per unit.
-        assert!((line_width - 1.5 / 120.0).abs() < 1e-12);
+        // 2 pixels of a 1080-pixel-tall output, in the 9-unit-tall frame.
+        assert!((line_width - 9.0 * 2.0 / 1080.0).abs() < 1e-12);
     }
 
     #[test]
@@ -2569,6 +2844,7 @@ mod tests {
             strip,
             color: peniko::Color::WHITE,
             colors: None,
+            revealed: None,
         };
         assert_eq!(MeshSource::lines(&lines(true, None)).unwrap().count, 3);
         assert_eq!(MeshSource::lines(&lines(false, None)).unwrap().count, 2);
@@ -2582,18 +2858,27 @@ mod tests {
     #[test]
     fn uploads_are_kept_until_their_revision_changes() {
         let mesh = quad(peniko::Color::WHITE);
+        let mut moved = quad(peniko::Color::WHITE);
+        moved.vertices[0] = [-2.0, -1.0, 0.0];
         let mut sources = MeshSources::default();
-        let built = |sources: &mut MeshSources, revision| {
+        let mut built = |revision, mesh: &TriangleMeshData| {
             sources
-                .get(7, false, revision, None, || MeshSource::mesh(&mesh, true))
+                .get(7, false, revision, None, || MeshSource::mesh(mesh, true))
                 .unwrap()
         };
-        let first = built(&mut sources, 1);
-        assert!(Arc::ptr_eq(&first, &built(&mut sources, 1)));
-        assert!(!Arc::ptr_eq(&first, &built(&mut sources, 2)));
+        let first = built(1, &mesh);
+        // The same revision keeps the source without building it again.
+        assert!(Arc::ptr_eq(&first, &built(1, &moved)));
+        // A new revision builds it again: the same mesh keeps its source,
+        // which drawables alike share; another mesh gets a new one.
+        assert!(Arc::ptr_eq(&first, &built(2, &mesh)));
+        assert!(!Arc::ptr_eq(&first, &built(3, &moved)));
         sources.end_frame();
         sources.end_frame();
         assert!(sources.sources.is_empty());
+        drop(first);
+        sources.end_frame();
+        assert!(sources.shared.is_empty());
     }
 
     #[test]
@@ -2605,6 +2890,7 @@ mod tests {
         let red = quad(peniko::Color::from_rgb8(255, 0, 0));
         let content = |opacity| Content {
             line_width: None,
+            line_range: None,
             transform: &transform,
             opacity,
             mesh: Some(&red),
@@ -2669,6 +2955,7 @@ mod tests {
                 lines: None,
                 material: floor.material.as_ref(),
                 line_width: None,
+                line_range: None,
             },
         );
         // The fixed key light casts one map, at full size.
@@ -2680,12 +2967,12 @@ mod tests {
         );
         // The floor's middle lies in the map, its corner too.
         for point in [DVec3::ZERO, DVec3::new(2.0, 2.0, 0.0)] {
-            let ndc = key.layers[0].0.project_point3(point);
+            let ndc = key.layers[0].view_proj.project_point3(point);
             assert!(ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0, "{ndc:?}");
             assert!((0.0..=1.0).contains(&ndc.z), "{ndc:?}");
         }
-        // A point light casts a cube of six, a directional one a map; a third
-        // light casts none.
+        // A point light casts a cube of six, a directional one a map: three
+        // lights cast 13 smaller maps.
         let light = |position, directional| Light {
             position,
             directional,
@@ -2698,10 +2985,12 @@ mod tests {
         ];
         let lit = shadows(&illumination, &meshes.pending);
         assert_eq!(lit.key, None);
-        assert_eq!(&lit.lights[..3], [Some(0), Some(6), None]);
-        assert_eq!((lit.layers.len(), lit.size), (7, SHADOW_SIZE_SHARED));
+        assert_eq!(&lit.lights[..3], [Some(0), Some(6), Some(7)]);
+        assert_eq!((lit.layers.len(), lit.size), (13, SHADOW_SIZE_MANY));
         // The floor beneath the point light lies in the face looking down.
-        let below = lit.layers[5].0.project_point3(DVec3::new(0.5, 0.5, 0.0));
+        let below = lit.layers[5]
+            .view_proj
+            .project_point3(DVec3::new(0.5, 0.5, 0.0));
         assert!(below.x.abs() <= 1.0 && below.y.abs() <= 1.0, "{below:?}");
         illumination.lighting.shadows = false;
         assert!(shadows(&illumination, &meshes.pending).layers.is_empty());
@@ -2717,6 +3006,7 @@ mod tests {
             strip: true,
             color: peniko::Color::WHITE,
             colors: None,
+            revealed: None,
         };
         let (transform, opacity) = (GlobalSpatialTransform::default(), GlobalOpacity(1.0));
         let mut sources = MeshSources::default();
@@ -2734,6 +3024,7 @@ mod tests {
                     lines: Some(&lines),
                     material: None,
                     line_width: width,
+                    line_range: None,
                 },
             );
         }
@@ -2746,9 +3037,125 @@ mod tests {
                     .unwrap(),
             )
         };
-        // 0.05 scene units at 120 pixels per unit, and the default 1.5 pixels.
+        // 0.05 scene units at 120 pixels per unit, and the default 2 pixels
+        // of a 1080-pixel-tall output.
         assert!((half_width(0) - 3.0).abs() < 1e-4, "{}", half_width(0));
-        assert!((half_width(1) - 0.75).abs() < 1e-4, "{}", half_width(1));
+        assert!((half_width(1) - 1.0).abs() < 1e-4, "{}", half_width(1));
+    }
+
+    #[test]
+    fn a_revealed_line_draws_only_the_segments_it_shows() {
+        let camera = camera(Projection::Orthographic { zoom: 1.0 });
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let lines = LineListData {
+            points: vec![
+                [0.0; 3],
+                [1.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [4.0; 3],
+            ],
+            indices: None,
+            strip: true,
+            color: peniko::Color::WHITE,
+            colors: None,
+            revealed: None,
+        };
+        let (transform, opacity) = (GlobalSpatialTransform::default(), GlobalOpacity(1.0));
+        let mut sources = MeshSources::default();
+        let mut meshes =
+            GpuMeshes::new(&mut sources, (1920, 1080), camera.to_vello_transform(), 0).unwrap();
+        for (key, range) in [(1, Some([0.25, 0.6])), (2, Some([0.5, 0.5])), (3, None)] {
+            meshes.push(
+                0,
+                [(key, 1), (key, 1)],
+                [None, None],
+                &Content {
+                    transform: &transform,
+                    opacity: &opacity,
+                    mesh: None,
+                    lines: Some(&lines),
+                    material: None,
+                    line_width: None,
+                    line_range: range,
+                },
+            );
+        }
+        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let frame = &frames[0].1;
+        let shown = |draw: usize| {
+            let start = draw * DRAW_STRIDE + DRAW_BYTES - 12;
+            let value = |offset: usize| {
+                f32::from_le_bytes(
+                    frame.draw_uniforms[start + offset..start + offset + 4]
+                        .try_into()
+                        .unwrap(),
+                )
+            };
+            [value(0), value(4)]
+        };
+        // A quarter to 60% of 4 segments: from 1 to 2.4, which draws the
+        // second and third segments, the third in part.
+        assert_eq!(shown(0), [1.0, 2.4]);
+        assert_eq!(frame.draws[0].instances, 1..3);
+        // Nothing shown draws nothing; without a reveal, every segment.
+        assert!(frame.draws[1].instances.is_empty());
+        assert_eq!(
+            (shown(2), frame.draws[2].instances.clone()),
+            ([0.0, 4.0], 0..4)
+        );
+    }
+
+    #[test]
+    fn a_line_revealed_halfway_draws_its_first_half() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, _) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let (transform, opacity) = (GlobalSpatialTransform::default(), GlobalOpacity(1.0));
+        let lines = LineListData {
+            points: vec![[-1.5, 0.0, 0.0], [0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
+            indices: None,
+            strip: true,
+            color: peniko::Color::from_rgb8(255, 0, 0),
+            colors: None,
+            revealed: None,
+        };
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        meshes.push(
+            0,
+            [(1, 1), (1, 1)],
+            [None, None],
+            &Content {
+                transform: &transform,
+                opacity: &opacity,
+                mesh: None,
+                lines: Some(&lines),
+                material: None,
+                line_width: Some(0.25),
+                line_range: Some([0.0, 0.5]),
+            },
+        );
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, 0.1, &Illumination::default())
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        let pixels = gpu.read(&target);
+        let red = |x: usize| pixels[(32 * 64 + x) * 4];
+        // At 16 pixels per unit, x = -1 is shown and x = 1 is not.
+        assert!(red(16) > 200, "{}", red(16));
+        assert_eq!(red(48), 0);
     }
 
     #[test]
@@ -2780,6 +3187,7 @@ mod tests {
                     lines: None,
                     material: lit.material.as_ref(),
                     line_width: None,
+                    line_range: None,
                 },
             );
         }
@@ -2840,6 +3248,7 @@ mod tests {
                     lines: None,
                     material: lit.material.as_ref(),
                     line_width: None,
+                    line_range: None,
                 },
             );
         }
@@ -2882,6 +3291,59 @@ mod tests {
     }
 
     #[test]
+    fn meshes_alike_share_one_upload_and_draw_as_one() {
+        let camera = camera(Projection::Orthographic { zoom: 1.0 });
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let lit = lit_quad();
+        let mut other = lit_quad();
+        other.vertices[2] = [2.0, 2.0, 0.0];
+        let opacity = GlobalOpacity(1.0);
+        let places: Vec<GlobalSpatialTransform> = (0..4)
+            .map(|index| placed(0.5, DVec3::new(index as f64, 0.0, 0.0)))
+            .collect();
+        let mut sources = MeshSources::default();
+        let mut meshes =
+            GpuMeshes::new(&mut sources, (1920, 1080), camera.to_vello_transform(), 0).unwrap();
+        for (index, transform) in places.iter().enumerate() {
+            let mesh = if index == 2 { &other } else { &lit };
+            meshes.push(
+                0,
+                [(index as u64, 1), (index as u64, 1)],
+                [None, None],
+                &Content {
+                    transform,
+                    opacity: &opacity,
+                    mesh: Some(mesh),
+                    lines: None,
+                    material: mesh.material.as_ref(),
+                    line_width: None,
+                    line_range: None,
+                },
+            );
+        }
+        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let frame = &frames[0].1;
+        assert_eq!(frame.instances.len(), 4 * INSTANCE_BYTES);
+        // The three quads alike share one source and sit next to each
+        // other, so they draw as one; the other quad draws apart.
+        let alike: Vec<usize> = (0..4)
+            .filter(|index| frame.draws[*index].source.vertices == frame.draws[0].source.vertices)
+            .collect();
+        assert_eq!(alike.len(), 3);
+        assert!(alike.windows(2).all(|pair| pair[1] == pair[0] + 1));
+        let [first, .., last] = alike[..] else {
+            unreachable!()
+        };
+        assert!(Arc::ptr_eq(
+            &frame.draws[first].source,
+            &frame.draws[last].source
+        ));
+        assert!(draw_alike(frame, first, first + 1) && draw_alike(frame, first, last));
+        let apart = (0..4).find(|index| !alike.contains(index)).unwrap();
+        assert!(!draw_alike(frame, first, apart));
+    }
+
+    #[test]
     fn a_mesh_draws_into_the_image_the_scene_shows() {
         let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
             return;
@@ -2901,6 +3363,7 @@ mod tests {
             [None, None],
             &Content {
                 line_width: None,
+                line_range: None,
                 transform: &transform,
                 opacity: &opacity,
                 mesh: Some(&red),

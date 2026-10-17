@@ -1555,6 +1555,7 @@ mod tests {
                     strip: true,
                     color: gaanim_core::peniko::Color::WHITE,
                     colors: None,
+                    revealed: None,
                 },
                 LocalBounds::default(),
             ))

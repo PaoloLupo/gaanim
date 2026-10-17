@@ -8417,8 +8417,9 @@ class Geometry:
         faint rim along silhouettes, keeping each material's color readable.
         ``"none"`` leaves only their emission. With ``shadows`` (the
         default), opaque 3D meshes (primitives, surfaces and plots) cast
-        shadows from the key light, or from the first two lights of
-        ``light_3d``, onto what is lit; glowing (emissive) meshes, which may
+        shadows from the key light, or from the first four lights of
+        ``light_3d``, onto what is lit, sharp where an object touches a
+        surface and softer as they part; glowing (emissive) meshes, which may
         hold a light, do not. ``shadows=False`` turns them off.
         Lights from ``light_3d`` replace the key light.
 
@@ -8444,7 +8445,7 @@ class Geometry:
         light stays, and each shines in ``color`` (white by default) at
         ``intensity``, dimmed by the light's opacity: ``fade_in`` and
         ``fade_out`` switch it on and off. With ``lighting_3d("none")`` only
-        the lights light the scene. The first two lights a scene shows cast
+        the lights light the scene. The first four lights a scene shows cast
         shadows (see ``lighting_3d``). Surfaces, 3D plots and lines are unlit.
         A negative or non-finite ``intensity`` or another ``kind`` raises
         ``ValueError``.
@@ -8865,7 +8866,8 @@ class Geometry:
         point, or ``colormap`` for ``"inferno"``, ``"viridis"``, or
         ``"plasma"``. The color list must match ``points`` in length. The
         line is as wide on screen as its stroke, ``.stroke(color, width)``
-        in scene units, and 1.5 output pixels without one.
+        in scene units, and without one 2 pixels of a 1080-pixel-tall
+        output, the same share of the frame at any output size.
 
         Example:
             path = scene.polyline_3d(
