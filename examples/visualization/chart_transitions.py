@@ -141,7 +141,7 @@ scene.play([chart.layer("marks").animate.fade_in()], duration=DRAW)
 scene.wait(HOLD)
 scene.play([before.animate.fade_out(), after.animate.fade_in()], duration=0.4)
 scene.camera.perspective(fov_y=0.785, near=0.1, far=1000)
-scene.play([chart.animate.to(deep), scene.camera.animate.look_at(eye=(9, 7, 11), target=(0, 0, 0))], duration=MORPH)
+scene.play([chart.animate.to(deep), scene.camera.animate.look_at(eye=(9, 8.5, 11), target=(0, 1.5, 0))], duration=MORPH)
 scene.wait(HOLD)
 
 # A heatmap and a surface share their grid of cells, so one becomes the other.

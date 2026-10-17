@@ -13,8 +13,8 @@ from gaanim import Axis, Scene, Zones
 DRAW = 1.4
 HOLD = 0.8
 
-X = Axis.linear(-3, 3).ticks(1).label("x")
-Y = Axis.linear(-3, 3).ticks(1).label("y")
+X = Axis.linear(-2, 2).ticks(1).label("x")
+Y = Axis.linear(-2, 2).ticks(1).label("y")
 Z = Axis.linear(-2, 2).ticks(1).label("z")
 
 scene = Scene()
@@ -48,7 +48,7 @@ def gallery(variants, rows=2):
     grid = scene.layout.zones(Zones.grid(rows=rows, columns=columns, gap="48px", padding="page_padding"))
     spaces = []
     for zone, (label, build) in zip(grid, variants):
-        art, caption = zone.split(Zones.rows(["1fr", 0.5 * (label.count("\n") + 1)]))
+        art, caption = zone.split(Zones.rows(["1fr", 0.5 * (label.count("\n") + 1)], gap="72px"))
         scene.text(label, role="code").place(caption)
         spaces.append(build().move_to_3d(*on_screen(art)))
     scene.play([space.animate.create() for space in spaces], duration=DRAW)
@@ -88,9 +88,9 @@ gallery(
 scene.segment("size")
 gallery(
     [
-        ("size=(3.6, 3.6, 1.2)", space((3.6, 3.6, 1.2), xz_grid=False)),
+        ("size=(3.2, 3.2, 1.2)", space((3.2, 3.2, 1.2), xz_grid=False)),
         ("size=(2.2, 2.2, 4)", space((2.2, 2.2, 4), xz_grid=False)),
-        ("size=(4, 1.4, 1.4)", space((4, 1.4, 1.4), xz_grid=False)),
+        ("size=(4, 2, 1.4)", space((4, 2, 1.4), xz_grid=False)),
     ],
     rows=1,
 )
@@ -104,10 +104,10 @@ def scaled(x_axis):
 
 scene.segment("scales")
 gallery([
-    ("Axis.linear(0, 1000).ticks(100)", scaled(Axis.linear(0, 1000).ticks(100))),
+    ("Axis.linear(0, 1000).ticks(250)", scaled(Axis.linear(0, 1000).ticks(250))),
     ("Axis.log(1, 1000)", scaled(Axis.log(1, 1000))),
-    ("Axis.symlog(-100, 100)", scaled(Axis.symlog(-100, 100))),
-    ("Axis.power(0, 100, 0.5).ticks(10)", scaled(Axis.power(0, 100, 0.5).ticks(10))),
+    ("Axis.symlog(-100, 100).ticks(100)", scaled(Axis.symlog(-100, 100).ticks(100))),
+    ("Axis.power(0, 100, 0.5).ticks(50)", scaled(Axis.power(0, 100, 0.5).ticks(50))),
 ])
 
 # Every space keeps its parts in layers that animate on their own: "grid",
@@ -116,11 +116,13 @@ gallery([
 scene.segment("layers")
 label_column, stage = scene.layout.zones(Zones.columns(["4fr", "3fr"], gap="48px", padding="page_padding"))
 styled = [axis.style(color=accent, tick_color=accent) for axis in (X, Y, Z)]
-world = scene.viz.cartesian_3d(*styled, size=(4.4, 4.4, 3)).move_to_3d(*on_screen(stage))
+world = scene.viz.cartesian_3d(*styled, size=(4, 4, 2.8)).move_to_3d(*on_screen(stage))
 steps = [
     ('world.layer("axes").animate.create()', world.layer("axes").animate.create()),
     ('world.layer("grid").animate.fade_in()', world.layer("grid").animate.fade_in()),
     ('world.layer("ticks").animate.create()', world.layer("ticks").animate.create()),
+    ('world.layer("numbers").animate.fade_in()', world.layer("numbers").animate.fade_in()),
+    ('world.layer("labels").animate.fade_in()', world.layer("labels").animate.fade_in()),
 ]
 rows = label_column.split(Zones.rows(len(steps), gap="24px"))
 for row, (label, _) in zip(rows, steps):
@@ -132,7 +134,8 @@ scene.wait(HOLD)
 # Drawing and settled in the first four segments, then each layer step.
 segment = DRAW + HOLD
 seeks = [segment * index + t for index in range(4) for t in (0.6, DRAW + 0.4)]
-seeks += [4 * segment + DRAW / 2 * step + 0.6 for step in range(3)] + [4 * segment + 1.5 * DRAW + 0.4]
+seeks += [4 * segment + DRAW / 2 * step + 0.6 for step in range(len(steps))]
+seeks += [4 * segment + DRAW / 2 * len(steps) + 0.4]
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, seeks)
 else:
