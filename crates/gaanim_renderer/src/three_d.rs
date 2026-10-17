@@ -135,6 +135,9 @@ const SEGMENT_BYTES: usize = 64;
 /// Bytes of a shadow map layer's view-projection (`Caster` in [`SHADER`]),
 /// at `DRAW_STRIDE` from one layer to the next.
 const CASTER_BYTES: usize = 64;
+/// Bytes of a draw's instance data: its model matrix, the columns of its
+/// normal matrix and its linear base color (`VertexIn` in [`SHADER`]).
+const INSTANCE_BYTES: usize = 128;
 /// Bytes of the frame uniforms (`Frame` in [`SHADER`]).
 const FRAME_BYTES: usize = 1376;
 /// Bytes of one draw's uniforms (`Draw` in [`SHADER`]), and their stride in
@@ -180,6 +183,30 @@ pub struct MeshSource {
     /// that run it in opposite directions, once vertices at one place are
     /// one. Only a lit mesh shadows itself, so only a lit one is checked.
     closed: bool,
+    /// Hash of what the shader reads: sources alike share one upload, and
+    /// meshes alike draw next to each other, as one instanced draw.
+    digest: u64,
+}
+
+impl MeshSource {
+    /// The hash of what the shader reads of the source.
+    fn content_digest(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.vertices.hash(&mut hasher);
+        self.indices.hash(&mut hasher);
+        (self.lines, self.has_colors, self.closed).hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Whether `other` draws exactly what this source does.
+    fn same_as(&self, other: &MeshSource) -> bool {
+        self.digest == other.digest
+            && self.lines == other.lines
+            && self.has_colors == other.has_colors
+            && self.closed == other.closed
+            && self.vertices == other.vertices
+            && self.indices == other.indices
+    }
 }
 
 /// Whether the triangles `indices` over `positions` enclose a volume: each
@@ -282,6 +309,7 @@ impl MeshSource {
             vertices,
             count: indices.len() as u32,
             closed: lit && encloses(&positions, &indices, radius),
+            digest: 0,
             indices,
             lines: false,
             has_colors: colors.is_some(),
@@ -337,6 +365,7 @@ impl MeshSource {
             count: pairs.len() as u32,
             lines: true,
             closed: false,
+            digest: 0,
             has_colors: colors.is_some(),
             opaque_colors: colors.is_none_or(|colors| colors.iter().all(|c| c[3] >= 0.999)),
             center,
@@ -380,6 +409,8 @@ pub struct MeshSources {
     /// By key and whether it is lines.
     sources: HashMap<(u64, bool), Held>,
     used: HashSet<(u64, bool)>,
+    /// Sources by digest, so that drawables alike share one.
+    shared: HashMap<u64, std::sync::Weak<MeshSource>>,
 }
 
 struct Held {
@@ -400,24 +431,42 @@ impl MeshSources {
         build: impl FnOnce() -> Option<MeshSource>,
     ) -> Option<Arc<MeshSource>> {
         self.used.insert((key, lines));
-        match self.sources.entry((key, lines)) {
-            Entry::Occupied(mut entry) => {
-                let held = entry.get_mut();
-                if held.revision != revision {
-                    held.revision = revision;
-                    held.source = build().map(Arc::new);
-                    held._keep = keep;
-                }
-                held.source.clone()
-            }
-            Entry::Vacant(entry) => entry
-                .insert(Held {
+        let stale = self
+            .sources
+            .get(&(key, lines))
+            .is_none_or(|held| held.revision != revision);
+        if stale {
+            let source = build().map(|source| self.share(source));
+            self.sources.insert(
+                (key, lines),
+                Held {
                     revision,
-                    source: build().map(Arc::new),
+                    source,
                     _keep: keep,
-                })
-                .source
-                .clone(),
+                },
+            );
+        }
+        self.sources.get(&(key, lines))?.source.clone()
+    }
+
+    /// `source`, or the one alike that another drawable already holds.
+    fn share(&mut self, mut source: MeshSource) -> Arc<MeshSource> {
+        source.digest = source.content_digest();
+        match self.shared.entry(source.digest) {
+            Entry::Occupied(mut entry) => match entry.get().upgrade() {
+                Some(held) if held.same_as(&source) => held,
+                Some(_) => Arc::new(source),
+                None => {
+                    let source = Arc::new(source);
+                    entry.insert(Arc::downgrade(&source));
+                    source
+                }
+            },
+            Entry::Vacant(entry) => {
+                let source = Arc::new(source);
+                entry.insert(Arc::downgrade(&source));
+                source
+            }
         }
     }
 
@@ -425,6 +474,7 @@ impl MeshSources {
     fn end_frame(&mut self) {
         let used = std::mem::take(&mut self.used);
         self.sources.retain(|key, _| used.contains(key));
+        self.shared.retain(|_, source| source.strong_count() > 0);
     }
 }
 
@@ -483,6 +533,8 @@ pub struct GpuMeshFrame {
     draws: Arc<[GpuDraw]>,
     /// `DRAW_STRIDE` bytes per draw.
     draw_uniforms: Arc<[u8]>,
+    /// `INSTANCE_BYTES` per draw: what differs between meshes drawn as one.
+    instances: Arc<[u8]>,
     /// Texels on a side of the shadow maps, and the view-projection of each
     /// layer, which the opaque meshes are drawn into before the frame.
     shadow_size: u32,
@@ -503,6 +555,7 @@ impl GpuMeshFrame {
     pub fn hash_content(&self, update: &mut dyn FnMut(&[u8])) {
         update(&self.uniforms);
         update(&self.draw_uniforms);
+        update(&self.instances);
         for draw in self.draws.iter() {
             update(&[
                 u8::from(draw.culled),
@@ -714,6 +767,7 @@ impl<'a> GpuMeshes<'a> {
                 (depth, pending)
             })
             .collect();
+        // Opaque meshes alike next to each other, so that they draw as one.
         pending.sort_by(|(a_depth, a), (b_depth, b)| {
             a.class
                 .cmp(&b.class)
@@ -722,7 +776,10 @@ impl<'a> GpuMeshes<'a> {
                     if a.translucent {
                         b_depth.total_cmp(a_depth)
                     } else {
-                        a_depth.total_cmp(b_depth)
+                        a.source
+                            .digest
+                            .cmp(&b.source.digest)
+                            .then(a_depth.total_cmp(b_depth))
                     }
                 })
         });
@@ -740,7 +797,9 @@ impl<'a> GpuMeshes<'a> {
             let image = frame_image(width, height, self.slot + class);
             let mut draws = Vec::with_capacity(members.len());
             let mut draw_uniforms = Vec::with_capacity(members.len() * DRAW_STRIDE);
+            let mut instances = Vec::with_capacity(members.len() * INSTANCE_BYTES);
             for (_, pending) in members {
+                push_instance(&mut instances, pending);
                 let line_px = pending.line_width.unwrap_or(line_width) * pixels_per_unit;
                 // The segments shown: all of them, or a reveal's part.
                 let segments = pending.source.count as f32;
@@ -765,6 +824,7 @@ impl<'a> GpuMeshes<'a> {
             image.data.id().hash(&mut hasher);
             uniforms.hash(&mut hasher);
             draw_uniforms.hash(&mut hasher);
+            instances.hash(&mut hasher);
             for draw in &draws {
                 (Arc::as_ptr(&draw.source) as usize).hash(&mut hasher);
                 draw.culled.hash(&mut hasher);
@@ -779,6 +839,7 @@ impl<'a> GpuMeshes<'a> {
                     uniforms: Arc::clone(&uniforms),
                     draws: draws.into(),
                     draw_uniforms: draw_uniforms.into(),
+                    instances: instances.into(),
                     shadow_size: shadows.size,
                     shadow_layers: Arc::clone(&shadow_layers),
                     digest: hasher.finish(),
@@ -1100,6 +1161,38 @@ fn frame_uniforms(
     uniforms
 }
 
+/// Append one draw's instance data (see [`INSTANCE_BYTES`]).
+fn push_instance(bytes: &mut Vec<u8>, pending: &Pending) {
+    let start = bytes.len();
+    push_mat4(bytes, pending.model);
+    let normal = pending.model.inverse().transpose();
+    for column in [normal.x_axis, normal.y_axis, normal.z_axis] {
+        push_f32s(
+            bytes,
+            &[column.x as f32, column.y as f32, column.z as f32, 0.0],
+        );
+    }
+    push_f32s(bytes, &pending.base);
+    debug_assert_eq!(bytes.len() - start, INSTANCE_BYTES);
+}
+
+/// Whether draws `a` and `b` of a frame draw as one: opaque meshes alike,
+/// with the same uniforms but for their placement and base color.
+fn draw_alike(frame: &GpuMeshFrame, a: usize, b: usize) -> bool {
+    let (first, second) = (&frame.draws[a], &frame.draws[b]);
+    // The model and normal matrices and the base color lead each draw's
+    // uniforms; instances carry those.
+    const SHARED: std::ops::Range<usize> = 144..DRAW_BYTES;
+    let uniforms = |index: usize| &frame.draw_uniforms[index * DRAW_STRIDE..][SHARED];
+    !first.source.lines
+        && !first.translucent
+        && !second.translucent
+        && Arc::ptr_eq(&first.source, &second.source)
+        && first.culled == second.culled
+        && first.casts == second.casts
+        && uniforms(a) == uniforms(b)
+}
+
 /// Append one draw's uniforms, padded to `DRAW_STRIDE`: its lines
 /// `line_px` pixels wide, showing the segments from `shown[0]` to
 /// `shown[1]` (fractional at the ends).
@@ -1386,6 +1479,18 @@ impl Pipelines {
                 shader_location: 2,
             },
         ];
+        // A draw's instance data: model matrix, normal matrix, base color.
+        let instance_attributes: [wgpu::VertexAttribute; 8] =
+            std::array::from_fn(|index| wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: index as u64 * 16,
+                shader_location: 3 + index as u32,
+            });
+        let instance_layout = |attributes| wgpu::VertexBufferLayout {
+            array_stride: INSTANCE_BYTES as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes,
+        };
         let segment_attributes: [wgpu::VertexAttribute; 4] =
             std::array::from_fn(|index| wgpu::VertexAttribute {
                 format: wgpu::VertexFormat::Float32x4,
@@ -1399,6 +1504,19 @@ impl Pipelines {
                 (true, Pass::Layer) => ("vertex_line", "fragment_line_layer"),
                 (true, _) => ("vertex_line", "fragment_line"),
             };
+            let segment_buffers = [wgpu::VertexBufferLayout {
+                array_stride: SEGMENT_BYTES as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &segment_attributes,
+            }];
+            let mesh_buffers = [
+                wgpu::VertexBufferLayout {
+                    array_stride: MESH_VERTEX_BYTES as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &mesh_attributes,
+                },
+                instance_layout(&instance_attributes),
+            ];
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("gaanim-3d"),
                 layout: Some(if matches!(pass, Pass::Layer) {
@@ -1410,19 +1528,11 @@ impl Pipelines {
                     module: &module,
                     entry_point: Some(vertex),
                     compilation_options: Default::default(),
-                    buffers: &[if lines {
-                        wgpu::VertexBufferLayout {
-                            array_stride: SEGMENT_BYTES as u64,
-                            step_mode: wgpu::VertexStepMode::Instance,
-                            attributes: &segment_attributes,
-                        }
+                    buffers: if lines {
+                        &segment_buffers[..]
                     } else {
-                        wgpu::VertexBufferLayout {
-                            array_stride: MESH_VERTEX_BYTES as u64,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &mesh_attributes,
-                        }
-                    }],
+                        &mesh_buffers[..]
+                    },
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
@@ -1480,11 +1590,14 @@ impl Pipelines {
                     module: &module,
                     entry_point: Some("vertex_shadow"),
                     compilation_options: Default::default(),
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: MESH_VERTEX_BYTES as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &mesh_attributes[..1],
-                    }],
+                    buffers: &[
+                        wgpu::VertexBufferLayout {
+                            array_stride: MESH_VERTEX_BYTES as u64,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &mesh_attributes[..1],
+                        },
+                        instance_layout(&instance_attributes[..4]),
+                    ],
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
@@ -1610,6 +1723,8 @@ pub struct GpuThreeD {
     /// The draw uniforms, with room for that many bytes, and their bind group.
     draw_buffer: Option<(wgpu::Buffer, usize, wgpu::BindGroup)>,
     shadow_maps: Option<ShadowMaps>,
+    /// The frame's instance data, with room for that many bytes.
+    instance_buffer: Option<(wgpu::Buffer, usize)>,
     /// The view-projections of the shadow map layers, with room for that
     /// many layers, and their bind group.
     caster_buffer: Option<(wgpu::Buffer, usize, wgpu::BindGroup)>,
@@ -1771,6 +1886,28 @@ impl GpuThreeD {
         }
         let (draw_buffer, _, bind_group) = self.draw_buffer.as_ref().expect("draw buffer is set");
         queue.write_buffer(draw_buffer, 0, &frame.draw_uniforms);
+        let needed = frame.instances.len().max(INSTANCE_BYTES);
+        if self
+            .instance_buffer
+            .as_ref()
+            .is_none_or(|(_, capacity)| *capacity < needed)
+        {
+            let capacity = needed.next_power_of_two();
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("gaanim-3d-instances"),
+                size: capacity as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.instance_buffer = Some((buffer, capacity));
+        }
+        let (instance_buffer, _) = self
+            .instance_buffer
+            .as_ref()
+            .expect("instance buffer is set");
+        if !frame.instances.is_empty() {
+            queue.write_buffer(instance_buffer, 0, &frame.instances);
+        }
 
         // The shadow maps: one texel while the frame casts no shadow.
         let layers = frame.shadow_layers.len();
@@ -1843,7 +1980,16 @@ impl GpuThreeD {
                     multiview_mask: None,
                 });
                 pass.set_bind_group(1, caster_group, &[(layer * DRAW_STRIDE) as u32]);
-                for (index, draw) in frame.draws.iter().enumerate() {
+                pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                let mut index = 0;
+                while index < frame.draws.len() {
+                    let draw = &frame.draws[index];
+                    let mut end = index + 1;
+                    while end < frame.draws.len() && draw_alike(frame, index, end) {
+                        end += 1;
+                    }
+                    let first = index;
+                    index = end;
                     if !draw.casts {
                         continue;
                     }
@@ -1855,18 +2001,19 @@ impl GpuThreeD {
                         continue;
                     };
                     pass.set_pipeline(&pipelines.shadow[usize::from(draw.source.closed)]);
-                    pass.set_bind_group(0, bind_group, &[(index * DRAW_STRIDE) as u32]);
+                    pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
                     pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
                     pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..draw.source.count, 0, 0..1);
+                    pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
                 }
             }
         }
 
         let translucent = frame.draws.iter().filter(|draw| draw.translucent).count();
-        // The opaque draws, then one pass per translucent drawable with a
-        // layer depth of its own; the last pass resolves.
-        let mut draws = frame.draws.iter().enumerate().peekable();
+        // The opaque draws, alike meshes as one, then one pass per
+        // translucent drawable with a layer depth of its own; the last pass
+        // resolves.
+        let mut next = 0;
         let mut passes_left = 1 + translucent;
         while passes_left > 0 {
             passes_left -= 1;
@@ -1912,7 +2059,9 @@ impl GpuThreeD {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            let draw_one = |pass: &mut wgpu::RenderPass<'_>, index: usize, draw: &GpuDraw| {
+            // Draws `first..end`, meshes alike drawn as instances of one.
+            let draw_one = |pass: &mut wgpu::RenderPass<'_>, first: usize, end: usize| {
+                let draw = &frame.draws[first];
                 let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize)) else {
                     return;
                 };
@@ -1921,9 +2070,10 @@ impl GpuThreeD {
                 } else {
                     &pipelines.meshes[usize::from(draw.culled)]
                 };
-                pass.set_bind_group(0, bind_group, &[(index * DRAW_STRIDE) as u32]);
+                pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
                 pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
                 if let Some(indices) = &uploaded.indices {
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
                     pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                 }
                 let passes: &[Pass] = if draw.translucent {
@@ -1948,16 +2098,22 @@ impl GpuThreeD {
                             pass.draw(0..6, draw.instances.clone());
                         }
                     } else {
-                        pass.draw_indexed(0..draw.source.count, 0, 0..1);
+                        pass.draw_indexed(0..draw.source.count, 0, first as u32..end as u32);
                     }
                 }
             };
             if opaque {
-                while let Some((index, draw)) = draws.next_if(|(_, draw)| !draw.translucent) {
-                    draw_one(&mut pass, index, draw);
+                while next < frame.draws.len() && !frame.draws[next].translucent {
+                    let first = next;
+                    next += 1;
+                    while next < frame.draws.len() && draw_alike(frame, first, next) {
+                        next += 1;
+                    }
+                    draw_one(&mut pass, first, next);
                 }
-            } else if let Some((index, draw)) = draws.next() {
-                draw_one(&mut pass, index, draw);
+            } else if next < frame.draws.len() {
+                draw_one(&mut pass, next, next + 1);
+                next += 1;
             }
         }
         queue.submit(Some(encoder.finish()));
@@ -2032,6 +2188,24 @@ struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) color: vec4<f32>,
+    // The draw's instance data: its model matrix, the columns of its normal
+    // matrix, and its linear base color.
+    @location(3) model_x: vec4<f32>,
+    @location(4) model_y: vec4<f32>,
+    @location(5) model_z: vec4<f32>,
+    @location(6) model_w: vec4<f32>,
+    @location(7) normal_x: vec4<f32>,
+    @location(8) normal_y: vec4<f32>,
+    @location(9) normal_z: vec4<f32>,
+    @location(10) base: vec4<f32>,
+}
+
+struct ShadowIn {
+    @location(0) position: vec3<f32>,
+    @location(3) model_x: vec4<f32>,
+    @location(4) model_y: vec4<f32>,
+    @location(5) model_z: vec4<f32>,
+    @location(6) model_w: vec4<f32>,
 }
 
 struct VertexOut {
@@ -2244,12 +2418,14 @@ fn shade(
 
 @vertex
 fn vertex(in: VertexIn) -> VertexOut {
-    let world = (draw.model * vec4<f32>(in.position, 1.0)).xyz;
+    let model = mat4x4<f32>(in.model_x, in.model_y, in.model_z, in.model_w);
+    let normal = mat3x3<f32>(in.normal_x.xyz, in.normal_y.xyz, in.normal_z.xyz);
+    let world = (model * vec4<f32>(in.position, 1.0)).xyz;
     var out: VertexOut;
     out.clip = image_clip(world);
     out.world = world;
-    out.normal = (draw.normal * vec4<f32>(in.normal, 0.0)).xyz;
-    out.color = draw.base;
+    out.normal = normal * in.normal;
+    out.color = in.base;
     if draw.material.w > 0.5 {
         out.color = in.color;
     }
@@ -2413,8 +2589,9 @@ fn fragment_line_layer(in: LineOut, @builtin(sample_index) sample: u32) -> LineF
 
 // An opaque mesh's depth in the shadow map layer it casts into.
 @vertex
-fn vertex_shadow(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
-    return caster.view_proj * (draw.model * vec4<f32>(position, 1.0));
+fn vertex_shadow(in: ShadowIn) -> @builtin(position) vec4<f32> {
+    let model = mat4x4<f32>(in.model_x, in.model_y, in.model_z, in.model_w);
+    return caster.view_proj * (model * vec4<f32>(in.position, 1.0));
 }
 "#;
 
@@ -2626,18 +2803,27 @@ mod tests {
     #[test]
     fn uploads_are_kept_until_their_revision_changes() {
         let mesh = quad(peniko::Color::WHITE);
+        let mut moved = quad(peniko::Color::WHITE);
+        moved.vertices[0] = [-2.0, -1.0, 0.0];
         let mut sources = MeshSources::default();
-        let built = |sources: &mut MeshSources, revision| {
+        let mut built = |revision, mesh: &TriangleMeshData| {
             sources
-                .get(7, false, revision, None, || MeshSource::mesh(&mesh, true))
+                .get(7, false, revision, None, || MeshSource::mesh(mesh, true))
                 .unwrap()
         };
-        let first = built(&mut sources, 1);
-        assert!(Arc::ptr_eq(&first, &built(&mut sources, 1)));
-        assert!(!Arc::ptr_eq(&first, &built(&mut sources, 2)));
+        let first = built(1, &mesh);
+        // The same revision keeps the source without building it again.
+        assert!(Arc::ptr_eq(&first, &built(1, &moved)));
+        // A new revision builds it again: the same mesh keeps its source,
+        // which drawables alike share; another mesh gets a new one.
+        assert!(Arc::ptr_eq(&first, &built(2, &mesh)));
+        assert!(!Arc::ptr_eq(&first, &built(3, &moved)));
         sources.end_frame();
         sources.end_frame();
         assert!(sources.sources.is_empty());
+        drop(first);
+        sources.end_frame();
+        assert!(sources.shared.is_empty());
     }
 
     #[test]
@@ -3045,6 +3231,59 @@ mod tests {
             u16::from(shadow) + 40 < u16::from(light),
             "shadow {shadow}, light {light}"
         );
+    }
+
+    #[test]
+    fn meshes_alike_share_one_upload_and_draw_as_one() {
+        let camera = camera(Projection::Orthographic { zoom: 1.0 });
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let lit = lit_quad();
+        let mut other = lit_quad();
+        other.vertices[2] = [2.0, 2.0, 0.0];
+        let opacity = GlobalOpacity(1.0);
+        let places: Vec<GlobalSpatialTransform> = (0..4)
+            .map(|index| placed(0.5, DVec3::new(index as f64, 0.0, 0.0)))
+            .collect();
+        let mut sources = MeshSources::default();
+        let mut meshes =
+            GpuMeshes::new(&mut sources, (1920, 1080), camera.to_vello_transform(), 0).unwrap();
+        for (index, transform) in places.iter().enumerate() {
+            let mesh = if index == 2 { &other } else { &lit };
+            meshes.push(
+                0,
+                [(index as u64, 1), (index as u64, 1)],
+                [None, None],
+                &Content {
+                    transform,
+                    opacity: &opacity,
+                    mesh: Some(mesh),
+                    lines: None,
+                    material: mesh.material.as_ref(),
+                    line_width: None,
+                    line_range: None,
+                },
+            );
+        }
+        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let frame = &frames[0].1;
+        assert_eq!(frame.instances.len(), 4 * INSTANCE_BYTES);
+        // The three quads alike share one source and sit next to each
+        // other, so they draw as one; the other quad draws apart.
+        let alike: Vec<usize> = (0..4)
+            .filter(|index| frame.draws[*index].source.vertices == frame.draws[0].source.vertices)
+            .collect();
+        assert_eq!(alike.len(), 3);
+        assert!(alike.windows(2).all(|pair| pair[1] == pair[0] + 1));
+        let [first, .., last] = alike[..] else {
+            unreachable!()
+        };
+        assert!(Arc::ptr_eq(
+            &frame.draws[first].source,
+            &frame.draws[last].source
+        ));
+        assert!(draw_alike(frame, first, first + 1) && draw_alike(frame, first, last));
+        let apart = (0..4).find(|index| !alike.contains(index)).unwrap();
+        assert!(!draw_alike(frame, first, apart));
     }
 
     #[test]
