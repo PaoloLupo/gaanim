@@ -306,6 +306,10 @@ scene.render()
 - `Material3D.matte(color)`, `Material3D.metal(color)` y
   `Material3D.emissive(color, strength)` son puntos de partida; el constructor
   `Material3D(color, roughness=, metallic=)` permite ajustarlos.
+- `Material3D.matte(color).outlined(ink)` añade un contorno de ilustración:
+  la silueta y los pliegues de una malla cerrada (y los bordes de una
+  abierta, como un plano) se dibujan en ese color, del ancho que se pida en
+  unidades de la escena.
 - `scene.geometry.lighting_3d("studio")` ilumina las primitivas con material
   al estilo de Gaanim: luz del cielo y del suelo, que aclara las caras que
   miran arriba y oscurece las que miran abajo; una luz principal suave desde

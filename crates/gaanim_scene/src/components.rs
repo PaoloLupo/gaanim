@@ -561,6 +561,11 @@ pub struct Material3D {
     pub metallic: f32,
     pub emissive: gaanim_core::peniko::Color,
     pub emissive_strength: f32,
+    /// Color of the outline drawn around the mesh's silhouette, as an
+    /// illustration's contour; transparent draws none.
+    pub outline: gaanim_core::peniko::Color,
+    /// Width of the outline in scene units, as a stroke's.
+    pub outline_width: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -569,6 +574,8 @@ pub enum Material3DError {
     InvalidSurface,
     #[error("emissive strength must be finite and non-negative")]
     InvalidEmissiveStrength,
+    #[error("outline width must be finite and non-negative")]
+    InvalidOutlineWidth,
 }
 
 impl Material3D {
@@ -595,7 +602,30 @@ impl Material3D {
             metallic,
             emissive: emissive.unwrap_or(gaanim_core::peniko::Color::TRANSPARENT),
             emissive_strength,
+            ..Self::default()
         })
+    }
+
+    /// This material with an outline of `color`, `width` scene units wide,
+    /// around the mesh's silhouette.
+    pub fn with_outline(
+        self,
+        color: gaanim_core::peniko::Color,
+        width: f32,
+    ) -> Result<Self, Material3DError> {
+        if !width.is_finite() || width < 0.0 {
+            return Err(Material3DError::InvalidOutlineWidth);
+        }
+        Ok(Self {
+            outline: color,
+            outline_width: width,
+            ..self
+        })
+    }
+
+    /// Whether it draws an outline.
+    pub fn outlined(&self) -> bool {
+        self.outline.components[3] > 0.0 && self.outline_width > 0.0
     }
 
     pub fn matte(color: gaanim_core::peniko::Color) -> Self {
@@ -635,6 +665,9 @@ impl Material3D {
             emissive: gaanim_core::interpolate_color(self.emissive, other.emissive, t),
             emissive_strength: self.emissive_strength
                 + (other.emissive_strength - self.emissive_strength) * t as f32,
+            outline: gaanim_core::interpolate_color(self.outline, other.outline, t),
+            outline_width: self.outline_width
+                + (other.outline_width - self.outline_width) * t as f32,
         }
     }
 }
@@ -647,6 +680,8 @@ impl Default for Material3D {
             metallic: 0.0,
             emissive: gaanim_core::peniko::Color::TRANSPARENT,
             emissive_strength: 0.0,
+            outline: gaanim_core::peniko::Color::TRANSPARENT,
+            outline_width: 0.0,
         }
     }
 }

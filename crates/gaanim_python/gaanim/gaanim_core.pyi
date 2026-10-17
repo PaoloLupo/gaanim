@@ -5130,7 +5130,22 @@ class Material3D:
         metallic: float = 0.0,
         emissive: Optional[ColorLike] = None,
         emissive_strength: float = 0.0,
-    ) -> None: ...
+        outline: Optional[ColorLike] = None,
+        outline_width: float = 0.03,
+    ) -> None:
+        """A material; with ``outline``, the mesh's silhouette and folds are
+        drawn in that color, ``outline_width`` scene units wide, as the
+        contour of an illustration. An outline animates with the material.
+        A negative or non-finite width raises ``ValueError``.
+        """
+        ...
+    def outlined(self, color: ColorLike, width: float = 0.03) -> Material3D:
+        """This material with an outline of ``color``, ``width`` scene units wide.
+
+        Example:
+            cube = scene.geometry.cube(1.5, material=Material3D.matte(accent).outlined(ink))
+        """
+        ...
     @staticmethod
     def matte(color: ColorLike = WHITE) -> Material3D: ...
     @staticmethod
@@ -5147,6 +5162,10 @@ class Material3D:
     def emissive_color(self) -> Color: ...
     @property
     def emissive_strength(self) -> float: ...
+    @property
+    def outline(self) -> Color: ...
+    @property
+    def outline_width(self) -> float: ...
 
 class Primitive3D(Drawable):
     """Indexed 3D mesh with an animatable material, lit and drawn by Vello."""

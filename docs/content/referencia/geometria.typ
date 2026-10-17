@@ -1298,15 +1298,16 @@ scene.play([lamp.animate.move_to_3d(-3, 2, 4).duration(2.0)])
 ]
 
 #api-entry(
-  name: "Material3D.matte / metal / emissive / color / roughness / metallic / emissive_color / emissive_strength",
+  name: "Material3D.matte / metal / emissive / outlined / color / roughness / metallic / emissive_color / emissive_strength / outline / outline_width",
   kind: "class",
-  signature: "Material3D(color=WHITE, roughness=0.55, metallic=0.0, emissive=None, emissive_strength=0.0)",
-  desc: [Material de una primitiva 3D iluminada, sombreado por Gaanim: la rugosidad y la metalicidad dan forma al brillo y la emisión se suma a la luz. Sus propiedades numéricas se interpolan en espacio lineal y cuyos rangos se validan. Los atajos `Material3D.matte(color)`, `Material3D.metal(color)` y `Material3D.emissive(color, strength=1.0)` cubren los aspectos habituales. Las propiedades `color`, `roughness`, `metallic`, `emissive_color` y `emissive_strength` son de solo lectura.],
+  signature: "Material3D(color=WHITE, roughness=0.55, metallic=0.0, emissive=None, emissive_strength=0.0, outline=None, outline_width=0.03)",
+  desc: [Material de una primitiva 3D iluminada, sombreado por Gaanim: la rugosidad y la metalicidad dan forma al brillo y la emisión se suma a la luz. Sus propiedades numéricas se interpolan en espacio lineal y cuyos rangos se validan. Los atajos `Material3D.matte(color)`, `Material3D.metal(color)` y `Material3D.emissive(color, strength=1.0)` cubren los aspectos habituales. Con `outline`, la malla se dibuja con un contorno de ese color y `outline_width` unidades de la escena de ancho, como el de una ilustración: alrededor de la silueta y los pliegues de una malla cerrada o de una superficie de dos caras, y a lo largo del borde de una abierta, como un plano. `material.outlined(color, width=0.03)` devuelve el material con contorno, y el contorno se anima con `animate.material(...)`. Un ancho negativo o no finito lanza `ValueError`. Las propiedades `color`, `roughness`, `metallic`, `emissive_color`, `emissive_strength`, `outline` y `outline_width` son de solo lectura.],
 )[
 ```python
 >>>from gaanim import *
 glass = Material3D(color="#93c5fd", roughness=0.1, metallic=0.0)
 lamp = Material3D.emissive(GOLD, strength=2.0)
+inked = Material3D.matte(CYAN).outlined(BLACK, width=0.04)
 ```
 ]
 

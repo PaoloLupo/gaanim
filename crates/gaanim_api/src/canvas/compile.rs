@@ -11199,7 +11199,7 @@ impl SceneModel {
                     color,
                     color_map.as_ref(),
                     *color_range,
-                    *material,
+                    material.as_deref().copied(),
                     builder.current_time,
                     &values,
                 );
@@ -11213,7 +11213,7 @@ impl SceneModel {
                     let (u_domain, v_domain, resolution) = (*u_domain, *v_domain, *resolution);
                     let color = color.clone();
                     let color_map = color_map.clone();
-                    let (color_range, material) = (*color_range, *material);
+                    let (color_range, material) = (*color_range, material.as_deref().copied());
                     let last = LastInputs::default();
                     let regen = ReactiveMeshRegen::new(move |world| {
                         let (time, values) = reactive_values(world, &parameter_entities);

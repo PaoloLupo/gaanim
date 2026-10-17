@@ -98,6 +98,10 @@ actualizar».
   cuatro primeras luces de `light_3d`, sobre lo que recibe luz, con un borde
   nítido al contacto que se suaviza con la distancia. `lighting_3d(shadows=...)`, que se aceptaba sin efecto, las
   enciende (por defecto) o las apaga.
+- Contornos: `Material3D(..., outline=color, outline_width=...)` o
+  `material.outlined(color)` dibujan la silueta y los pliegues de una malla, o
+  el borde de un plano, en ese color, como el contorno de una ilustración;
+  se animan con el material.
 - Una línea 3D mide el ancho de su trazo, `.stroke(color, ancho)`, en lugar
   de 1,5 px fijos, y `animate.stroke_width(...)` lo anima. Sin trazo mide
   2 px de una salida de 1080 px de alto: en 4K es igual de visible que en
