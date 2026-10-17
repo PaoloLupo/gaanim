@@ -106,6 +106,9 @@ actualizar».
   `.gaanim`, que de cada fotograma solo apuntan hasta dónde se ve, y se
   sube una vez a la GPU mientras crece. El paquete del atractor de
   `gallery/lorenz_attractor` pasa de 5,9 MB a 1,5 MB.
+- Las mallas 3D iguales se suben una vez a la GPU, y las opacas con la
+  misma geometría y el mismo material se dibujan juntas, en una llamada: una
+  escena con 8.000 esferas sueltas pasa de 21 a 69 fps.
 
 == Al actualizar
 
