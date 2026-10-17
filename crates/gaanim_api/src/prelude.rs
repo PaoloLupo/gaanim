@@ -26,7 +26,7 @@ pub use crate::{
     ReactiveFunction, ScalarSource,
 };
 pub use gaanim_core::{ColorMap, ColorMapError};
-pub use gaanim_objects::primitives3d::Primitive3DError;
+pub use gaanim_objects::primitives3d::{ArrowSizes, Primitive3DError};
 pub use gaanim_scene::{Lighting3D, Material3D, Material3DError};
 pub use gaanim_visualization::{
     Axis, AxisStyle, Channel, ChartSpec, DataSource, DataTable, Encoding, GuideSpec, MarkKind,

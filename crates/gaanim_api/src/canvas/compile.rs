@@ -2954,9 +2954,9 @@ impl SceneModel {
         leaves
     }
 
-    /// The mesh extruded from the outline `source` fills in the scene, and
-    /// the center it belongs at; `None`, with a console warning, when the
-    /// outline encloses no area.
+    /// The mesh extruded from the outline `source` fills in the scene (a
+    /// flat sheet at depth 0), and the center it belongs at; `None`, with a
+    /// console warning, when the outline encloses no area.
     fn extruded_mesh(
         builder: &SceneBuilder<'_, '_, '_>,
         source: ObjectId,
@@ -2976,16 +2976,26 @@ impl SceneModel {
                 gaanim_scene::Material3D::matte,
             )
         });
-        match gaanim_objects::extrude::extrude(
-            &outline,
-            extrusion.depth,
-            extrusion.bevel,
-            extrusion.tolerance,
-            material,
-        ) {
+        let built = if extrusion.depth > 0.0 {
+            gaanim_objects::extrude::extrude(
+                &outline,
+                extrusion.depth,
+                extrusion.bevel,
+                extrusion.tolerance,
+                material,
+            )
+        } else {
+            gaanim_objects::extrude::flat(&outline, extrusion.tolerance, material)
+        };
+        match built {
             Ok(extruded) => Some((extruded.mesh, extruded.center)),
             Err(error) => {
-                gaanim_core::console::warn("3d", format!("extrude: {error}"));
+                let factory = if extrusion.depth > 0.0 {
+                    "extrude"
+                } else {
+                    "flat_3d"
+                };
+                gaanim_core::console::warn("3d", format!("{factory}: {error}"));
                 None
             }
         }

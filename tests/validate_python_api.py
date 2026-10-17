@@ -1513,6 +1513,52 @@ def validate_extrude_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_primitives_3d_contract(module: object) -> list[str]:
+    """Exercise the torus, 3D arrows, tubes and flat sheets."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    gold = module.Material3D.metal(module.GOLD)
+    meshes = (
+        scene.geometry.torus(1.2, 0.3, segments=24, rings=12, material=gold),
+        scene.geometry.arrow_3d((0, 0, 0), (2, 1, 1)),
+        scene.geometry.arrow_3d((0, 0, 0), (0, 3, 0), shaft_radius=0.05, head_radius=0.2, head_length=0.5),
+        scene.geometry.tube([(0, 0, 0), (1, 1, 0), (2, 0, 1)], 0.1),
+        scene.geometry.tube([(1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0)], closed=True, caps=False),
+        scene.geometry.flat_3d(scene.text("HOLA"), material=gold),
+        scene.geometry.flat_3d(scene.geometry.annulus(1.0, 0.5), keep_source=True, tolerance=0.02),
+    )
+    for mesh in meshes:
+        if not isinstance(mesh, module.Primitive3D):
+            failures.append("a 3D primitive factory did not return a Primitive3D")
+        elif not isinstance(mesh.animate.material(module.Material3D()), module.Anim):
+            failures.append("a 3D primitive cannot animate its material")
+    other = module.Scene(frame=(16, 9))
+    invalid_calls = (
+        lambda: scene.geometry.torus(1.0, 1.0),
+        lambda: scene.geometry.torus(1.0, 0.2, rings=2),
+        lambda: scene.geometry.torus(-1.0, 0.2),
+        lambda: scene.geometry.arrow_3d((0, 0, 0), (0, 0, 0)),
+        lambda: scene.geometry.arrow_3d((0, 0, 0), (1, 0, 0), head_length=1.0),
+        lambda: scene.geometry.arrow_3d((0, 0, 0), (1, 0, 0), shaft_radius=0.2, head_radius=0.1),
+        lambda: scene.geometry.arrow_3d((0, 0, 0), (1, 0, 0), segments=2),
+        lambda: scene.geometry.tube([(0, 0, 0)]),
+        lambda: scene.geometry.tube([(0, 0, 0), (1, 0, 0)], closed=True),
+        lambda: scene.geometry.tube([(0, 0, 0), (1, 0, 0)], 0.0),
+        lambda: scene.geometry.tube([(0, 0, 0), (float("nan"), 0, 0)]),
+        lambda: scene.geometry.flat_3d(scene.geometry.square(1.0), tolerance=0.0),
+        lambda: scene.geometry.flat_3d(scene.geometry.cube()),
+        lambda: scene.geometry.flat_3d(other.geometry.square(1.0)),
+    )
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("a 3D primitive factory accepted an invalid argument")
+    return failures
+
+
 def validate_matrix_contract(module: object) -> list[str]:
     """Exercise matrix construction, selectors, ordering, and mutations."""
     failures: list[str] = []
@@ -3490,6 +3536,7 @@ def main() -> int:
     missing.extend(validate_text_on_path_contract(module))
     missing.extend(validate_rough_notation_contract(module))
     missing.extend(validate_extrude_contract(module))
+    missing.extend(validate_primitives_3d_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())

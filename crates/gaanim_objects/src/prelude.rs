@@ -4,6 +4,9 @@ pub use crate::primitives::{
     dot, ellipse, image, line, open_path, polygon, rectangle, regular_polygon, rounded_rect,
     square, star, triangle,
 };
-pub use crate::primitives3d::{Primitive3DError, cone, cube, cylinder, plane, sphere};
+pub use crate::primitives3d::{
+    ArrowSizes, PlacedMesh, Primitive3DError, arrow_3d, cone, cube, cylinder, plane, sphere, torus,
+    tube,
+};
 pub use crate::svg::{SVG_PIXELS_PER_UNIT, SvgDocument, SvgGroup, SvgLoadError, SvgNode, SvgPath};
 pub use crate::text::{MathContent, TextContent, TypstDocument};
