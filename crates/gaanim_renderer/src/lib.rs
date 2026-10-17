@@ -35,6 +35,7 @@ pub mod prelude;
 mod soft_effects;
 mod stroke;
 pub mod three_d;
+pub mod three_d_gpu;
 pub mod transition_presets;
 
 // MainVelloScene is re-exported via prelude; used implicitly by the plugin system registration.
@@ -98,6 +99,8 @@ impl Plugin for GaanimRendererPlugin {
         background_gpu::build(app);
         // Post-processing runs on the Vello render target after Vello draws it.
         post_process_gpu::build(app);
+        // With `GAANIM_3D=gpu`, meshes render on the render device too.
+        three_d_gpu::build(app);
 
         // Initialize the fragment retain cache
         app.init_resource::<pipeline::GaanimRenderCache>();

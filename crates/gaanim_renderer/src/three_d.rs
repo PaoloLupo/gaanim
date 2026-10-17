@@ -124,6 +124,11 @@ impl Projector {
         })
     }
 
+    /// The map from NDC to canvas units.
+    pub(crate) fn ndc_to_canvas(&self) -> kurbo::Affine {
+        self.ndc_to_canvas
+    }
+
     /// Distance in front of the camera along its view axis.
     fn depth(&self, world: DVec3) -> f64 {
         -self.view.transform_point3(world).z

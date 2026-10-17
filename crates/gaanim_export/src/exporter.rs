@@ -871,6 +871,7 @@ where
                 unprocessed,
                 effects: composed.effects,
                 backgrounds: composed.backgrounds,
+                three_d: composed.three_d,
                 base_color: clear_color(app.world()),
                 post,
             }
@@ -1253,6 +1254,7 @@ impl FrameRasterizer {
             unprocessed,
             effects: composed.effects,
             backgrounds: composed.backgrounds,
+            three_d: composed.three_d,
             base_color: self.bg_color,
             post,
         }
@@ -1578,6 +1580,7 @@ where
             unprocessed,
             effects: composed.effects,
             backgrounds: composed.backgrounds,
+            three_d: composed.three_d,
             base_color: clear_color(app.world()),
             post,
         };
@@ -1681,6 +1684,7 @@ fn updated_world_job(
         unprocessed,
         effects: composed.effects,
         backgrounds: composed.backgrounds,
+        three_d: composed.three_d,
         base_color: clear_color(app.world()),
         post: post_process,
     }

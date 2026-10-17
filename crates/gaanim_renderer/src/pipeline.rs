@@ -2640,7 +2640,9 @@ fn compile_scene_with_pins(
     pins: Option<&mut PinnedElements>,
     effects: bool,
 ) -> ComposedFrame {
-    let mut extraction = extract_world(world, camera, pins, true, effects, false);
+    // Motion blur sub-frames redraw the same meshes; they stay on the CPU.
+    let gpu_meshes = effects && pins.is_none() && crate::three_d_gpu::enabled();
+    let mut extraction = extract_world(world, camera, pins, true, effects, false, gpu_meshes);
     let soft = soft_layers(&extraction.elements);
     if effects {
         crate::soft_effects::collect_group_shadows();
@@ -2695,6 +2697,7 @@ fn compile_scene_with_pins(
     );
     frame.effects = with_group_shadows(effect_layers, effects);
     frame.backgrounds = background_requests;
+    frame.three_d = extraction.gpu_three_d.take();
     if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
         append_live_overlay(frame.top_mut(), overlay);
     }
@@ -2788,6 +2791,8 @@ struct WorldExtraction {
     background_values: Vec<BackgroundValues>,
     /// What draws the frame's 3D content, when the extraction captures it.
     three_d: Option<CapturedThreeD>,
+    /// The meshes the GPU draws, when the extraction leaves them to it.
+    gpu_three_d: Option<crate::three_d_gpu::GpuMeshFrame>,
 }
 
 /// The scene times whose backgrounds a frame may draw: the frame's and,
@@ -2851,6 +2856,7 @@ fn extract_world(
     cull: bool,
     gpu: bool,
     capture_three_d: bool,
+    gpu_meshes: bool,
 ) -> WorldExtraction {
     // Fragments of drawables not extracted this frame are dropped with it.
     let mut previous_fragments = world
@@ -3310,8 +3316,32 @@ fn extract_world(
         pins.recorded = true;
     }
     let mut three_d = capture_three_d.then(CapturedThreeD::default);
+    let mut gpu_three_d = None;
     if let Some(camera) = camera {
-        extract_three_d(
+        // The meshes draw into an image as large as the output, placed as
+        // the exporter places the scene.
+        let output = world
+            .get_resource::<CanvasBackground>()
+            .map(|background| background.pixel_size);
+        let resolved = world
+            .get_resource::<gaanim_math::ResolvedCamera>()
+            .copied()
+            .unwrap_or_else(|| {
+                gaanim_math::ResolvedCamera::new(*camera, gaanim_math::CameraViewport::default())
+            });
+        let mut mesh_sources = (gpu_meshes && camera_views.is_empty()).then(|| {
+            world
+                .remove_resource::<crate::three_d_gpu::MeshSources>()
+                .unwrap_or_default()
+        });
+        let meshes = mesh_sources
+            .as_mut()
+            .zip(output)
+            .and_then(|(sources, size)| {
+                let placement = camera_to_output(Some(&resolved), size.0, size.1, false);
+                crate::three_d_gpu::GpuMeshes::new(sources, size, placement)
+            });
+        gpu_three_d = extract_three_d(
             world,
             camera,
             transition_frame.as_ref(),
@@ -3319,7 +3349,11 @@ fn extract_world(
             opacity_fallback,
             &mut extracted,
             three_d.as_mut(),
+            meshes,
         );
+        if let Some(sources) = mesh_sources {
+            world.insert_resource(sources);
+        }
     }
 
     extracted.sort_by(ExtractedElement::draw_order);
@@ -3333,17 +3367,21 @@ fn extract_world(
         background_time,
         background_values,
         three_d,
+        gpu_three_d,
     }
 }
 
 /// The 3D content of one drawable, with how it composes: whether it is a HUD
-/// overlay, whether the post-process leaves it out, and its view layer.
+/// overlay, whether the post-process leaves it out, and its view layer; last,
+/// the change ticks of its mesh and its lines, by which the GPU path keeps
+/// their uploads.
 pub(crate) type ThreeDSource<'a> = (
     Entity,
     crate::three_d::Content<'a>,
     bool,
     bool,
     Option<Arc<str>>,
+    (u32, u32),
 );
 
 /// Components of a drawable with 3D content.
@@ -3351,8 +3389,8 @@ type ThreeDData = (
     Entity,
     &'static GlobalSpatialTransform,
     &'static GlobalOpacity,
-    Option<&'static gaanim_scene::TriangleMeshData>,
-    Option<&'static gaanim_scene::LineListData>,
+    Option<Ref<'static, gaanim_scene::TriangleMeshData>>,
+    Option<Ref<'static, gaanim_scene::LineListData>>,
     Option<&'static gaanim_scene::Material3D>,
     Has<gaanim_scene::HudOverlay>,
     Has<PostProcessExempt>,
@@ -3401,8 +3439,8 @@ type ThreeDItem<'a> = (
     Entity,
     &'a GlobalSpatialTransform,
     &'a GlobalOpacity,
-    Option<&'a gaanim_scene::TriangleMeshData>,
-    Option<&'a gaanim_scene::LineListData>,
+    Option<Ref<'a, gaanim_scene::TriangleMeshData>>,
+    Option<Ref<'a, gaanim_scene::LineListData>>,
     Option<&'a gaanim_scene::Material3D>,
     bool,
     bool,
@@ -3412,18 +3450,23 @@ type ThreeDItem<'a> = (
 fn three_d_source<'a>(
     (entity, transform, opacity, mesh, lines, material, hud, exempt, layer): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
+    let revisions = (
+        mesh.as_ref().map_or(0, |mesh| mesh.last_changed().get()),
+        lines.as_ref().map_or(0, |lines| lines.last_changed().get()),
+    );
     (
         entity,
         crate::three_d::Content {
             transform,
             opacity,
-            mesh,
-            lines,
+            mesh: mesh.map(Ref::into_inner),
+            lines: lines.map(Ref::into_inner),
             material,
         },
         hud,
         exempt,
         layer.map(|layer| Arc::clone(&layer.0)),
+        revisions,
     )
 }
 
@@ -3436,7 +3479,8 @@ fn extract_three_d(
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
     capture: Option<&mut CapturedThreeD>,
-) {
+    gpu: Option<crate::three_d_gpu::GpuMeshes<'_>>,
+) -> Option<crate::three_d_gpu::GpuMeshFrame> {
     let mut lights = world.query_filtered::<LightData, With<Visible>>();
     let lighting = illumination(
         world.get_resource::<gaanim_scene::Lighting3D>(),
@@ -3455,7 +3499,8 @@ fn extract_three_d(
         opacity_fallback,
         extracted,
         capture,
-    );
+        gpu,
+    )
 }
 
 /// A drawable's 3D content as a recording keeps it: what the projection
@@ -3536,6 +3581,7 @@ pub fn captured_three_d_elements(
         sources,
         captured.opacity_fallback,
         false,
+        0,
         &mut extracted,
     );
     extracted.sort_by(ExtractedElement::draw_order);
@@ -3545,7 +3591,9 @@ pub fn captured_three_d_elements(
 /// Native 3D content (see [`crate::three_d`]) as drawables beneath the 2D
 /// content, back to front. Consecutive primitives of one drawable with the
 /// same paint share an element. With `capture`, also what a recording keeps
-/// to draw them again.
+/// to draw them again. With `gpu`, the meshes it can draw are left to the
+/// GPU (see [`crate::three_d_gpu`]): one image beneath the rest, whose frame
+/// this returns.
 #[allow(clippy::too_many_arguments)]
 fn three_d_elements<'a>(
     camera: &gaanim_math::Camera,
@@ -3557,10 +3605,13 @@ fn three_d_elements<'a>(
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
     capture: Option<&mut CapturedThreeD>,
-) {
+    gpu: Option<crate::three_d_gpu::GpuMeshes<'_>>,
+) -> Option<crate::three_d_gpu::GpuMeshFrame> {
+    let mut revisions = Vec::new();
     // How each drawable's elements compose, the same for all of them.
-    let sources: Vec<(Entity, crate::three_d::Content<'a>, ThreeDComposition)> = sources
-        .map(|(entity, content, hud, exempt, layer)| {
+    let mut sources: Vec<(Entity, crate::three_d::Content<'a>, ThreeDComposition)> = sources
+        .map(|(entity, content, hud, exempt, layer, revision)| {
+            revisions.push(revision);
             let composition = ThreeDComposition {
                 in_views: !hud,
                 post_exempt: exempt,
@@ -3594,7 +3645,90 @@ fn three_d_elements<'a>(
             })
             .collect();
     }
-    project_three_d(camera, lighting, sources, opacity_fallback, true, extracted);
+    let mut gpu_frame = None;
+    let projector = crate::three_d::Projector::new(camera);
+    let transition = transition_frame.is_some_and(|frame| !frame.is_empty());
+    if let (Some(mut gpu), Some(projector)) = (gpu.filter(|_| !transition), projector) {
+        for ((entity, content, composition), revision) in sources.iter_mut().zip(&revisions) {
+            let plain =
+                composition.in_views && !composition.post_exempt && composition.layer.is_none();
+            if !plain {
+                continue;
+            }
+            if gpu.push(entity.to_bits(), revision.0, content) {
+                content.mesh = None;
+            }
+            if gpu.push_lines(entity.to_bits(), revision.1, content) {
+                content.lines = None;
+            }
+        }
+        let frame = gpu.finish(
+            camera,
+            projector.ndc_to_canvas(),
+            projector.line_width(),
+            lighting,
+        );
+        if let Some(frame) = frame {
+            let mut scene = vello::Scene::new();
+            frame.draw_image(&mut scene);
+            extracted.push(gpu_three_d_element(scene, opacity_fallback));
+            gpu_frame = Some(frame);
+        }
+    }
+    let first_order = usize::from(gpu_frame.is_some());
+    project_three_d(
+        camera,
+        lighting,
+        sources,
+        opacity_fallback,
+        true,
+        first_order,
+        extracted,
+    );
+    gpu_frame
+}
+
+/// The element of the image the GPU draws the meshes into: the first of the
+/// 3D content, beneath the rest of it.
+fn gpu_three_d_element(scene: vello::Scene, opacity_fallback: kurbo::Rect) -> ExtractedElement {
+    ExtractedElement {
+        soft: Default::default(),
+        persistent: false,
+        post_exempt: false,
+        entity: Entity::PLACEHOLDER,
+        recipe: None,
+        lottie: None,
+        transform: kurbo::Affine::IDENTITY,
+        opacity: 1.0,
+        opacity_bounds: opacity_fallback,
+        opacity_extent: None,
+        opacity_group: Entity::PLACEHOLDER,
+        group_opacity: 1.0,
+        group_shadow: None,
+        effect_root: None,
+        effect_extent: None,
+        matte_root: None,
+        matte_of: None,
+        glass_root: None,
+        outline: None,
+        render_order: RenderOrder {
+            z_index: i32::MIN,
+            creation_order: 0,
+        },
+        z_layer: i32::MIN,
+        scene: Arc::new(scene),
+        clip_mask: None,
+        blend: None,
+        transition_side: Default::default(),
+        lineage: Vec::new(),
+        view_bounds: None,
+        in_views: true,
+        layer: None,
+        screen: None,
+        echo_rank: 0,
+        tip: false,
+        backdrop: None,
+    }
 }
 
 /// The elements of 3D `sources`, each with how its elements compose. With
@@ -3606,6 +3740,7 @@ fn project_three_d(
     mut sources: Vec<(Entity, crate::three_d::Content<'_>, ThreeDComposition)>,
     opacity_fallback: kurbo::Rect,
     scenes: bool,
+    first_order: usize,
     extracted: &mut Vec<ExtractedElement>,
 ) {
     use crate::three_d::{Primitive, Projector, sort_back_to_front};
@@ -3720,7 +3855,7 @@ fn project_three_d(
         runs.iter_mut()
             .enumerate()
             .map(|(offset, run)| {
-                let creation_order = first + offset;
+                let creation_order = first_order + first + offset;
                 let (entity, opacity, kind) = (run.entity, run.opacity, run.kind);
                 let path = std::mem::take(&mut run.path);
                 let paint = &run.paint;
@@ -4548,6 +4683,10 @@ pub struct ComposedFrame {
     /// background: a renderer that post-processes the frame composites them
     /// above its result. See [`Self::take_unprocessed`].
     pub unprocessed: Option<vello::Scene>,
+    /// The meshes the GPU draws into the image the frame shows them in,
+    /// which a renderer draws with [`crate::three_d_gpu::GpuThreeD`] before
+    /// the frame.
+    pub three_d: Option<crate::three_d_gpu::GpuMeshFrame>,
 }
 
 /// The parts of a frame under a shader transition besides the outgoing
@@ -4625,6 +4764,7 @@ impl ComposedFrame {
             effects: self.effects,
             backgrounds: self.backgrounds,
             unprocessed: self.unprocessed.as_ref().map(place),
+            three_d: self.three_d,
         }
     }
 }
@@ -4652,6 +4792,7 @@ fn compose_frame(
             effects: Vec::new(),
             backgrounds: Vec::new(),
             unprocessed,
+            three_d: None,
         };
     };
     let side = |side: gaanim_scene::TransitionSide| -> Vec<ExtractedElement> {
@@ -4766,6 +4907,7 @@ fn compose_frame(
         effects: Vec::new(),
         backgrounds: Vec::new(),
         unprocessed,
+        three_d: None,
     }
 }
 
@@ -4915,7 +5057,7 @@ fn is_three_d(element: &ExtractedElement) -> bool {
 /// Capture the drawables of the world as it stands, without culling, for a
 /// replay that composites the same frame with [`compose_captured`].
 pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) -> FrameCapture {
-    let extraction = extract_world(world, camera, None, false, false, true);
+    let extraction = extract_world(world, camera, None, false, false, true, false);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
     let mattes = world_mattes(world);
     let glasses = world_glasses(world);
@@ -4976,7 +5118,7 @@ pub fn capture_frame_pinned(
     camera: Option<&gaanim_math::Camera>,
     pins: &mut PinnedElements,
 ) -> FrameCapture {
-    let extraction = extract_world(world, camera, Some(pins), false, false, true);
+    let extraction = extract_world(world, camera, Some(pins), false, false, true, false);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
     let mattes = world_mattes(world);
     let glasses = world_glasses(world);
@@ -5388,6 +5530,32 @@ pub fn external_frame_system(
     }
 }
 
+/// The size of the canvas's rasterized region at preview `scale`, and the
+/// map from scene units to its pixels, as the canvas places the scene with
+/// the camera that shows it.
+#[cfg(not(target_os = "emscripten"))]
+fn canvas_placement(
+    camera: &Camera,
+    transform: &Transform,
+    projection: &Projection,
+    scale: f32,
+) -> Option<((u32, u32), kurbo::Affine)> {
+    let full = camera.physical_viewport_size()?;
+    let logical = camera.logical_viewport_size()?;
+    // Bevy updates the projection's area after this system; the canvas
+    // draws with the updated one.
+    let mut projection = projection.clone();
+    projection.update(logical.x, logical.y);
+    let pixels = crate::canvas::scaled_canvas_size(full, scale);
+    let placement = crate::canvas::scene_to_canvas(
+        Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)),
+        transform.to_matrix(),
+        projection.get_clip_from_view(),
+        pixels.as_vec2(),
+    );
+    Some(((pixels.x, pixels.y), placement))
+}
+
 /// Visible camera view screens and what resolving their views reads.
 type CameraScreenQuery<'w, 's> = Query<
     'w,
@@ -5531,6 +5699,9 @@ pub fn gaanim_render_system(
         mut transition_layers,
         post_process,
         mut unprocessed_layer,
+        mut gpu_three_d,
+        mut mesh_sources,
+        canvas_camera,
     ): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
@@ -5539,6 +5710,9 @@ pub fn gaanim_render_system(
         Option<ResMut<TransitionLayers>>,
         Option<Res<crate::post_process::CanvasPostProcess>>,
         Option<ResMut<UnprocessedLayer>>,
+        Option<ResMut<crate::three_d_gpu::GpuThreeDFrame>>,
+        Local<crate::three_d_gpu::MeshSources>,
+        Query<(&Camera, &Transform, &Projection), With<crate::canvas::VelloView>>,
     ),
     (camera_screens, camera_sources, hud_query, layer_query, float_signals, exempt_query): CameraViewQueries,
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
@@ -6017,8 +6191,26 @@ pub fn gaanim_render_system(
                 .map(|backdrop| backdrop.depth),
         });
     }
+    let mut gpu_frame = None;
     if let Some(camera) = gaanim_camera.as_deref() {
-        three_d_elements(
+        // With the GPU path, the meshes draw into an image of the canvas's
+        // pixels, placed as the canvas places the scene.
+        let placement = canvas_camera
+            .single()
+            .ok()
+            .filter(|_| gpu_three_d.is_some() && camera_views.is_empty())
+            .and_then(|(canvas, transform, projection)| {
+                canvas_placement(
+                    canvas,
+                    transform,
+                    projection,
+                    preview.as_ref().map_or(1.0, |preview| preview.scale),
+                )
+            });
+        let meshes = placement.and_then(|(size, placement)| {
+            crate::three_d_gpu::GpuMeshes::new(&mut mesh_sources, size, placement)
+        });
+        gpu_frame = three_d_elements(
             &camera.camera,
             &illumination(lighting.as_deref(), light_query.iter()),
             three_d_query.iter().map(three_d_source),
@@ -6028,7 +6220,11 @@ pub fn gaanim_render_system(
             opacity_fallback,
             local_extracted,
             None,
+            meshes,
         );
+    }
+    if let Some(frame) = gpu_three_d.as_mut() {
+        frame.0 = gpu_frame;
     }
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
