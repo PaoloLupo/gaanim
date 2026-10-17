@@ -98,6 +98,8 @@ impl Plugin for GaanimRendererPlugin {
         background_gpu::build(app);
         // Post-processing runs on the Vello render target after Vello draws it.
         post_process_gpu::build(app);
+        // Native 3D content renders on the render device.
+        three_d::build(app);
 
         // Initialize the fragment retain cache
         app.init_resource::<pipeline::GaanimRenderCache>();

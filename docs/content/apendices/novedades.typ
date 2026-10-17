@@ -16,7 +16,9 @@ instalar una versión nueva, sigue
 Sin publicar. Los gráficos declarativos dibujan tartas y donuts con la marca
 `arc`, que se abren porción a porción al entrar y reparten sus porciones por
 clave al cambiar de datos, y la paleta categórica se elige: el tema la fija
-para toda la escena y cada campo puede tener la suya.
+para toda la escena y cada campo puede tener la suya. El 3D se rasteriza en
+la GPU: se ve mejor y deja de ralentizar las escenas densas. Lee «Al
+actualizar».
 
 == Gráficos
 
@@ -64,7 +66,40 @@ para toda la escena y cada campo puede tener la suya.
 - `scene.geometry.group(a, b)` acepta los miembros sueltos además de una
   lista.
 
+== 3D
+
+- El 3D se rasteriza en la GPU, con búfer de profundidad y antialiasing MSAA,
+  en lugar de proyectar cada triángulo en la CPU y dibujarlo con Vello. Una
+  malla o una línea se sube una vez cuando cambia, así que el coste de un
+  fotograma depende de cuántos objetos 3D hay y no de cuántos triángulos o
+  puntos tienen. En las medidas de referencia, `gallery/surface_plot`,
+  `3d/plots_3d`, `3d/materials_3d` y una atractora de Lorenz de 8 curvas de
+  6.500 puntos pasan de 40–62 fps en su peor segundo a la frecuencia de la
+  pantalla (144 Hz).
+- La luz de las primitivas con `Material3D` se calcula en cada píxel y en
+  luz lineal: los brillos son redondos y nítidos y las luces puntuales se
+  reflejan en su sitio.
+- Las superficies y las líneas que se cruzan se cortan donde corresponde, y
+  la geometría que atraviesa el plano cercano se recorta en lugar de
+  desaparecer.
+- El 3D se dibuja igual en la vista previa, las exportaciones, los paquetes
+  `.gaanim`, el reproductor web y las vistas previas de Presenter View.
+
 == Al actualizar
+
+- El 3D cambia de aspecto: bordes con MSAA en lugar del antialiasing de
+  Vello, luz por píxel y orden por profundidad. Vuelve a aprobar las
+  capturas de referencia de tus escenas 3D.
+- Un objeto translúcido se ve como una capa: su superficie más cercana se
+  mezcla una vez sobre lo que tiene detrás, y los objetos translúcidos se
+  ordenan de atrás hacia delante como objetos enteros. Una malla con colores
+  transparentes ya no deja ver sus caras traseras a través de las
+  delanteras.
+- Las caras planas de una primitiva iluminada reciben la luz en cada píxel,
+  así que un brillo puede recorrerlas.
+- Los paquetes `.gaanim` con 3D grabados con versiones anteriores se abren y
+  se reproducen con el nuevo 3D, pero su verificación informa de diferencias
+  en los fotogramas con 3D: vuelve a grabarlos.
 
 - Un gráfico de más de cuatro categorías sin colores propios usa ahora diez
   colores en lugar de repetir los cuatro primeros, y una carrera de barras

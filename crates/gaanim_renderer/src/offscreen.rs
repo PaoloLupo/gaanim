@@ -20,13 +20,19 @@ use vello::{AaConfig, RenderParams};
 
 use crate::canvas::VelloRenderer;
 
-/// Rasterize `scene`, in the image's pixels, over `base_color` into `image`.
+/// Rasterize `scene`, in the image's pixels, over `base_color` into `image`,
+/// with the 3D content of `three_d` drawn into the images `scene` shows.
 #[derive(Component, Clone, ExtractComponent)]
 pub struct VelloImageRender {
     pub scene: Arc<vello::Scene>,
+    pub three_d: Vec<crate::three_d::GpuMeshFrame>,
     pub image: Handle<Image>,
     pub base_color: vello::peniko::Color,
 }
+
+/// The images of the 3D content these renders draw, apart from the canvas's.
+#[derive(Resource, Default)]
+struct ImageThreeD(crate::three_d::GpuThreeD);
 
 /// An image Vello can render into and Bevy can read back.
 pub fn vello_target_image(width: u32, height: u32) -> Image {
@@ -66,6 +72,7 @@ fn render_images(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     renderer: Res<VelloRenderer>,
+    mut three_d: ResMut<ImageThreeD>,
 ) {
     let Ok(mut renderer) = renderer.lock() else {
         return;
@@ -74,6 +81,9 @@ fn render_images(
         let Some(target) = images.get(&render.image) else {
             continue;
         };
+        three_d
+            .0
+            .prepare(device.wgpu_device(), &queue, &mut renderer, &render.three_d);
         let size = target.texture_descriptor.size;
         if let Err(error) = renderer.render_to_texture(
             device.wgpu_device(),
@@ -100,6 +110,7 @@ impl Plugin for VelloImagePlugin {
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
+        render_app.init_resource::<ImageThreeD>();
         // Before the frame's commands, which carry the readback copies.
         render_app.add_systems(
             Render,

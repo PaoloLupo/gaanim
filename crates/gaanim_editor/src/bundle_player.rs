@@ -111,8 +111,13 @@ const READ_AHEAD_CHUNKS: usize = 3;
 
 /// A recorded frame composed for a preview, or why there is none.
 pub enum Preview {
-    /// The scene and the color to render it over.
-    Ready(Box<vello::Scene>, vello::peniko::Color),
+    /// The scene, the 3D content the GPU draws into the images it shows,
+    /// and the color to render it over.
+    Ready(
+        Box<vello::Scene>,
+        Vec<gaanim_renderer::three_d::GpuMeshFrame>,
+        vello::peniko::Color,
+    ),
     /// Its bytes are still downloading; ask again later.
     Pending,
     Failed,
@@ -284,7 +289,7 @@ impl BundlePlayback {
             }
             background
         });
-        let scene = gaanim_export::prelude::compose_bundle_frame(
+        let (scene, three_d) = gaanim_export::prelude::compose_bundle_frame(
             &frame,
             background.as_ref(),
             &mut self.preview_store,
@@ -299,7 +304,7 @@ impl BundlePlayback {
             .clear_color
             .map(|[r, g, b, a]| vello::peniko::Color::from_rgba8(r, g, b, a))
             .unwrap_or(vello::peniko::Color::BLACK);
-        Preview::Ready(Box::new(scene), base)
+        Preview::Ready(Box::new(scene), three_d, base)
     }
 }
 

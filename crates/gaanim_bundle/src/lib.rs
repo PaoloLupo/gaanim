@@ -55,8 +55,8 @@ use std::sync::Arc;
 use gaanim_renderer::background::{BackgroundPaint, ShaderBackground, ShaderBackgroundRequest};
 use gaanim_renderer::fragment::FragmentStore;
 use gaanim_renderer::pipeline::{
-    CanvasBackground, CapturedElement, ComposedFrame, SegmentBackgroundPaint,
-    compose_captured_frame,
+    CanvasBackground, CapturedElement, CapturedGpuThreeD, ComposedFrame, SegmentBackgroundPaint,
+    camera_to_output, compose_captured_frame,
 };
 use gaanim_renderer::post_process::PostProcessShader;
 use gaanim_timeline::timeline::{
@@ -2031,6 +2031,11 @@ pub fn compose_frame_layers(
     let pixels_per_unit = background.and_then(|background| {
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
     });
+    // The 3D content draws into images of the background's pixels, placed
+    // as an export at that size places the scene.
+    let size = background.map_or((1920, 1080), |background| background.pixel_size);
+    let resolved =
+        gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
     let composed = compose_captured_frame(
         &frame.capture,
         store,
@@ -2039,6 +2044,12 @@ pub fn compose_frame_layers(
         Some(&mut requests),
         0.0,
         pixels_per_unit.unwrap_or(gaanim_renderer::pipeline::DEFAULT_EFFECT_DENSITY),
+        Some(CapturedGpuThreeD {
+            camera: &frame.camera,
+            size,
+            placement: camera_to_output(Some(&resolved), size.0, size.1, false),
+            slot: 0,
+        }),
     );
     (composed, requests)
 }
@@ -2061,8 +2072,19 @@ pub fn frame_digest(
         hash_effect(&mut key, effect);
         seen.insert(*key.finalize().as_bytes())
     });
+    let three_d = std::mem::take(&mut composed.three_d);
     let mut hasher = blake3::Hasher::new();
     hasher.update(&scene_digest(&composed.flattened()));
+    // What the GPU draws of the 3D content; a frame without any digests as
+    // before the GPU drew it.
+    if !three_d.is_empty() {
+        hasher.update(&(three_d.len() as u64).to_le_bytes());
+    }
+    for frame in &three_d {
+        frame.hash_content(&mut |bytes| {
+            hasher.update(bytes);
+        });
+    }
     hasher.update(&(effects.len() as u64).to_le_bytes());
     for effect in &effects {
         hash_effect(&mut hasher, effect);

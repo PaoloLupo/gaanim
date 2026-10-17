@@ -77,6 +77,8 @@ pub struct FrameJob {
     pub unprocessed: Option<vello::Scene>,
     pub effects: Vec<gaanim_renderer::object_effects::EffectLayer>,
     pub backgrounds: Vec<gaanim_renderer::background::ShaderBackgroundRequest>,
+    /// The meshes and lines the GPU draws into the frame's 3D images.
+    pub three_d: Vec<gaanim_renderer::three_d::GpuMeshFrame>,
     pub base_color: vello::peniko::Color,
     pub post: Option<PostProcessRequest>,
 }
@@ -95,6 +97,8 @@ impl FrameJob {
             }
             && self.backgrounds.is_empty()
             && other.backgrounds.is_empty()
+            && self.three_d.is_empty()
+            && other.three_d.is_empty()
             && self.base_color == other.base_color
             && self.effects.len() == other.effects.len()
             && self
@@ -142,6 +146,8 @@ pub struct GpuContext {
     effects: gaanim_renderer::object_effects::ObjectEffects,
     /// The textures of shader backgrounds, drawn on this device.
     backgrounds: gaanim_renderer::background::GpuShaderBackgrounds,
+    /// The image of the meshes the GPU draws.
+    three_d: gaanim_renderer::three_d::GpuThreeD,
     /// Multiplier of Vello's bump buffers; it only grows during an export.
     bump_scale: u32,
     /// Largest Vello buffer the device can bind.
@@ -299,6 +305,7 @@ impl GpuContext {
             overlay_target: None,
             effects: Default::default(),
             backgrounds: Default::default(),
+            three_d: Default::default(),
             bump_scale: 1,
             max_bump_bytes: max_storage,
             pending: None,
@@ -526,6 +533,13 @@ impl GpuContext {
         }
     }
 
+    /// Draw the 3D content `frames` into the images the next frame shows;
+    /// [`Self::submit_frame`] does it for its frame.
+    pub fn prepare_three_d(&mut self, frames: &[gaanim_renderer::three_d::GpuMeshFrame]) {
+        self.three_d
+            .prepare(&self.device, &self.queue, &mut self.renderer, frames);
+    }
+
     /// The frame given to [`Self::submit_frame`] and not finished yet.
     pub fn pending_frame(&self) -> Option<&FrameJob> {
         self.pending.as_ref()
@@ -540,6 +554,8 @@ impl GpuContext {
             self.pending.is_none(),
             "finish the pending frame before submitting another"
         );
+        // A frame Vello skips is rendered again from the same images.
+        self.prepare_three_d(&frame.three_d);
         self.submit_attempt(
             &frame.scene,
             frame.layers.as_ref(),
@@ -1238,6 +1254,7 @@ mod tests {
             unprocessed: None,
             effects: Vec::new(),
             backgrounds: Vec::new(),
+            three_d: Vec::new(),
             base_color: vello::peniko::Color::from_rgb8(9, 11, 23),
             post: None,
         }

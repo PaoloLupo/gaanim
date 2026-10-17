@@ -33,9 +33,12 @@ This file guides repository work; model selection belongs to the calling client.
   - `gaanim_renderer` — Vello 0.9 backend, fragment retain caching, and its own
     Bevy canvas (`canvas.rs`): Vello renders to a texture that a full-screen pass
     composites into the `VelloView` camera's main 2D pass. 3D content
-    (`TriangleMeshData`, `LineListData`) is projected, depth-sorted and shaded
-    on the CPU in `three_d.rs` and drawn by Vello beneath the 2D content; there
-    is no Bevy 3D pipeline and no glTF support.
+    (`TriangleMeshData`, `LineListData`) is rasterized by its own wgpu pass in
+    `three_d.rs` (depth buffer, 4x MSAA, per-pixel shading) into images that
+    Vello composes beneath the 2D content through `override_image`; every
+    host that renders frames (canvas, exporter, embed player, offscreen
+    previews) prepares those images with `GpuThreeD` before Vello renders.
+    There is no Bevy 3D pipeline and no glTF support.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.
@@ -161,7 +164,8 @@ all use the application host, which owns the native runtime.
 - Shared Bevy features only enable `multi_threaded`; consumer manifests enable
   their required subsystems. Keep window/audio features out of the shared base,
   and do not add Bevy's UI, sprite, text, gizmo, or 3D (PBR, glTF, animation)
-  subsystems: the editor draws its UI with egui and Vello draws 3D.
+  subsystems: the editor draws its UI with egui and 3D has its own wgpu pass
+  that Vello composes.
 - Prefer `just check-package <crate>` during local iteration. `just build-timings`
   writes `target/cargo-timings/cargo-timing.html`; it performs a real build.
 - Dev recipes use `scripts/dev.py` to opt selected Bevy consumers into
