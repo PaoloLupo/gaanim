@@ -94,12 +94,22 @@ actualizar».
   desaparecer.
 - El 3D se dibuja igual en la vista previa, las exportaciones, los paquetes
   `.gaanim`, el reproductor web y las vistas previas de Presenter View.
+- Sombras: las mallas opacas proyectan sombra de la luz principal, o de las
+  dos primeras luces de `light_3d`, sobre lo que recibe luz, con el borde
+  suave. `lighting_3d(shadows=...)`, que se aceptaba sin efecto, las
+  enciende (por defecto) o las apaga.
+- Una línea 3D mide el ancho de su trazo, `.stroke(color, ancho)`, en lugar
+  de 1,5 px fijos, y `animate.stroke_width(...)` lo anima.
 
 == Al actualizar
 
 - El 3D cambia de aspecto: bordes con MSAA en lugar del antialiasing de
   Vello, luz por píxel y orden por profundidad. Vuelve a aprobar las
   capturas de referencia de tus escenas 3D.
+- Las escenas 3D iluminadas tienen sombras. Para el aspecto anterior, usa
+  `lighting_3d(..., shadows=False)`.
+- Las líneas 3D con `.stroke(color, ancho)` miden ese ancho; quita el ancho
+  o ajústalo si las querías de 1,5 px.
 - Un objeto translúcido se ve como una capa: su superficie más cercana se
   mezcla una vez sobre lo que tiene detrás, y los objetos translúcidos se
   ordenan de atrás hacia delante como objetos enteros. Una malla con colores

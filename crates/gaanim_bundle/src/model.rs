@@ -923,6 +923,22 @@ fn write_three_d(
             .collect();
         write_keys(w, &lineage);
     }
+    // The widths of lines that set one, by source, after the sources: the
+    // frames of bundles recorded before end with them, and readers that
+    // predate widths stop there.
+    let widths: Vec<(usize, f32)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.line_width.map(|width| (index, width)))
+        .collect();
+    if !widths.is_empty() {
+        w.len(widths.len());
+        for (index, width) in widths {
+            w.len(index);
+            w.f32(width);
+        }
+    }
 }
 
 /// Decode what [`write_three_d`] wrote.
@@ -972,6 +988,7 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
             mesh,
             lines,
             material,
+            line_width: None,
             composition: ThreeDComposition {
                 in_views,
                 post_exempt,
@@ -980,6 +997,16 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                 lineage,
             },
         });
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let width = r.f32()?;
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a line width of no 3D source"))?
+                .line_width = Some(width);
+        }
     }
     Ok(CapturedThreeD {
         lighting,

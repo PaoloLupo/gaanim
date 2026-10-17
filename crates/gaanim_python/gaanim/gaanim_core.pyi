@@ -8415,8 +8415,12 @@ class Geometry:
         ``"studio"`` lights them in Gaanim's style, scaled by ``intensity``:
         sky and ground light, a soft key light from the upper left, and a
         faint rim along silhouettes, keeping each material's color readable.
-        ``"none"`` leaves only their emission. ``shadows`` is accepted for existing scripts; 3D content
-        casts no shadows. Lights from ``light_3d`` replace the key light.
+        ``"none"`` leaves only their emission. With ``shadows`` (the
+        default), opaque 3D meshes (primitives, surfaces and plots) cast
+        shadows from the key light, or from the first two lights of
+        ``light_3d``, onto what is lit; glowing (emissive) meshes, which may
+        hold a light, do not. ``shadows=False`` turns them off.
+        Lights from ``light_3d`` replace the key light.
 
         Example:
             scene.geometry.lighting_3d("studio", intensity=1.2)
@@ -8440,7 +8444,8 @@ class Geometry:
         light stays, and each shines in ``color`` (white by default) at
         ``intensity``, dimmed by the light's opacity: ``fade_in`` and
         ``fade_out`` switch it on and off. With ``lighting_3d("none")`` only
-        the lights light the scene. Surfaces, 3D plots and lines are unlit.
+        the lights light the scene. The first two lights a scene shows cast
+        shadows (see ``lighting_3d``). Surfaces, 3D plots and lines are unlit.
         A negative or non-finite ``intensity`` or another ``kind`` raises
         ``ValueError``.
 
@@ -8858,7 +8863,9 @@ class Geometry:
 
         Provide ``color`` for a uniform line, ``colors`` for one color per
         point, or ``colormap`` for ``"inferno"``, ``"viridis"``, or
-        ``"plasma"``. The color list must match ``points`` in length.
+        ``"plasma"``. The color list must match ``points`` in length. The
+        line is as wide on screen as its stroke, ``.stroke(color, width)``
+        in scene units, and 1.5 output pixels without one.
 
         Example:
             path = scene.polyline_3d(

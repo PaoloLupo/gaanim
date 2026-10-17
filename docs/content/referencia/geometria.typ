@@ -1214,7 +1214,7 @@ scene.play(iso.animate_to(plan).defaults(duration=1.5))
 
 Primitivas iluminadas con `Material3D`, líneas en el espacio y estelas 3D.
 Gaanim las rasteriza en la GPU con un búfer de profundidad y luz calculada en
-cada píxel (ver #link("/guias/camara-y-3d/")[Cámara y 3D]). No hay sombras, y
+cada píxel y sombras (ver #link("/guias/camara-y-3d/")[Cámara y 3D]), y
 todo el 3D queda debajo del contenido 2D. Gaanim usa un
 mundo dextrógiro con Y hacia arriba: cilindros y conos crecen a lo largo de Y y
 los planos yacen en XZ. Los puntos 3D son tuplas `(x, y, z)`. La guía
@@ -1279,7 +1279,7 @@ scene.render()
 #api-entry(
   name: "Geometry.lighting_3d",
   kind: "method",
-  desc: [Configura el único equipo automático de luces 3D de la escena. `"studio"` ilumina las primitivas con material al estilo de Gaanim (luz del cielo y del suelo, una luz principal suave desde arriba a la izquierda y un brillo leve en los bordes), escalada por `intensity`; `"none"` deja solo la emisión. `shadows` se acepta por compatibilidad, pero el contenido 3D no proyecta sombras. Las superficies, los gráficos 3D y las líneas no reciben luz. Las luces de `light_3d` sustituyen a la luz principal.],
+  desc: [Configura el único equipo automático de luces 3D de la escena. `"studio"` ilumina las primitivas con material al estilo de Gaanim (luz del cielo y del suelo, una luz principal suave desde arriba a la izquierda y un brillo leve en los bordes), escalada por `intensity`; `"none"` deja solo la emisión. Con `shadows` (por defecto), las mallas 3D opacas (primitivas, superficies y gráficos) proyectan sombra de la luz principal, o de las dos primeras luces de `light_3d`, sobre lo que recibe luz; las que brillan (emisivas), que pueden contener una luz, no. `shadows=False` las quita. Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Las luces de `light_3d` sustituyen a la luz principal.],
   none,
 )
 
@@ -1287,7 +1287,7 @@ scene.render()
   name: "Geometry.light_3d",
   kind: "factory",
   signature: "light_3d(kind=\"point\", *, color=None, intensity=1.0) -> Drawable",
-  desc: [Una luz para las primitivas con material, en el origen. No dibuja nada; es un dibujable, así que `move_to_3d` la coloca y `animate`, los grupos y `follow` la mueven. Una luz `"point"` alumbra desde su posición en todas direcciones; una `"directional"`, con rayos paralelos desde la dirección de su posición vista desde el origen, como el sol. Mientras la escena muestra luces, sustituyen a la luz principal fija de `lighting_3d`, cuya luz del cielo y del suelo se mantiene, y cada una alumbra en su `color` (blanco por defecto) con su `intensity`, atenuada por su opacidad: `fade_in` y `fade_out` la encienden y la apagan. Con `lighting_3d("none")` solo alumbran las luces. Las superficies, los gráficos 3D y las líneas no reciben luz. Una `intensity` negativa o no finita, u otro `kind`, lanzan `ValueError`.],
+  desc: [Una luz para las primitivas con material, en el origen. No dibuja nada; es un dibujable, así que `move_to_3d` la coloca y `animate`, los grupos y `follow` la mueven. Una luz `"point"` alumbra desde su posición en todas direcciones; una `"directional"`, con rayos paralelos desde la dirección de su posición vista desde el origen, como el sol. Mientras la escena muestra luces, sustituyen a la luz principal fija de `lighting_3d`, cuya luz del cielo y del suelo se mantiene, y cada una alumbra en su `color` (blanco por defecto) con su `intensity`, atenuada por su opacidad: `fade_in` y `fade_out` la encienden y la apagan. Con `lighting_3d("none")` solo alumbran las luces. Las dos primeras luces que muestra la escena proyectan sombra (ver `lighting_3d`). Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Una `intensity` negativa o no finita, u otro `kind`, lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -1352,7 +1352,7 @@ scene.render()
   name: "Geometry.polyline_3d",
   kind: "factory",
   params: ((name: "points", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Al menos dos puntos finitos del mundo.]), (name: "color", type: "Color | None", default: "None", desc: [Color uniforme.]), (name: "colors", type: "Sequence[Color] | None", default: "None", desc: [Un color por punto; tiene prioridad sobre `colormap`.]), (name: "colormap", type: "str | None", default: "None", desc: [Degradado ordenado a lo largo de la línea, por ejemplo `"inferno"`, `"viridis"` o `"plasma"`.])),
-  desc: [Tira de líneas 3D en el espacio del mundo. La lista `colors` debe tener la misma longitud que `points`.],
+  desc: [Tira de líneas 3D en el espacio del mundo. La lista `colors` debe tener la misma longitud que `points`. Mide en pantalla el ancho de su trazo, `.stroke(color, ancho)` en unidades de la escena, a cualquier profundidad; sin trazo, 1,5 px.],
 )[
 ```python
 >>>from gaanim import *

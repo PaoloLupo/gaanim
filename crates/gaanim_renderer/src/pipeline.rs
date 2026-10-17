@@ -3394,6 +3394,7 @@ type ThreeDData = (
     Has<gaanim_scene::HudOverlay>,
     Has<PostProcessExempt>,
     Option<&'static ViewLayer>,
+    Option<&'static gaanim_scene::StrokeBrush>,
 );
 type ThreeDFilter = (With<Visible>, With<gaanim_scene::Mesh3DMarker>);
 /// Query of the drawables with 3D content.
@@ -3444,10 +3445,11 @@ type ThreeDItem<'a> = (
     bool,
     bool,
     Option<&'a ViewLayer>,
+    Option<&'a gaanim_scene::StrokeBrush>,
 );
 
 fn three_d_source<'a>(
-    (entity, transform, opacity, mesh, lines, material, hud, exempt, layer): ThreeDItem<'a>,
+    (entity, transform, opacity, mesh, lines, material, hud, exempt, layer, stroke): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     let revisions = (
         mesh.as_ref().map_or(0, |mesh| mesh.last_changed().get()),
@@ -3461,6 +3463,7 @@ fn three_d_source<'a>(
             mesh: mesh.map(Ref::into_inner),
             lines: lines.map(Ref::into_inner),
             material,
+            line_width: line_width(stroke),
         },
         hud,
         exempt,
@@ -3503,6 +3506,15 @@ fn extract_three_d(
     )
 }
 
+/// The width of a drawable's 3D lines in scene units: its stroke's, when
+/// it sets one.
+fn line_width(stroke: Option<&gaanim_scene::StrokeBrush>) -> Option<f64> {
+    stroke
+        .filter(|stroke| stroke.brush.is_some())
+        .map(|stroke| stroke.style.width)
+        .filter(|width| width.is_finite() && *width > 0.0)
+}
+
 /// A drawable's 3D content as a recording keeps it: what the projection
 /// reads and how its elements compose (see [`CapturedThreeD`]).
 #[derive(Clone, Debug)]
@@ -3514,6 +3526,8 @@ pub struct CapturedThreeDSource {
     pub mesh: Option<Arc<gaanim_scene::TriangleMeshData>>,
     pub lines: Option<Arc<gaanim_scene::LineListData>>,
     pub material: Option<gaanim_scene::Material3D>,
+    /// Width of the lines in scene units, from the drawable's stroke.
+    pub line_width: Option<f32>,
     pub composition: ThreeDComposition,
 }
 
@@ -3578,6 +3592,7 @@ fn captured_gpu_three_d(
                     mesh: source.mesh.as_deref(),
                     lines: source.lines.as_deref(),
                     material: source.material.as_ref(),
+                    line_width: source.line_width.map(f64::from),
                 },
                 source.composition.clone(),
             )
@@ -3667,6 +3682,7 @@ fn three_d_elements<'a>(
                 mesh: content.mesh.cloned().map(Arc::new),
                 lines: content.lines.cloned().map(Arc::new),
                 material: content.material.copied(),
+                line_width: content.line_width.map(|width| width as f32),
                 composition: composition.clone(),
             })
             .collect();

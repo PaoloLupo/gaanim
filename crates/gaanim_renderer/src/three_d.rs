@@ -27,6 +27,7 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex};
 
+use gaanim_core::glam::dcamera::rh::{proj::directx, view};
 use gaanim_core::glam::{DMat4, DVec3};
 use gaanim_core::{kurbo, peniko};
 use gaanim_math::{Camera, GlobalSpatialTransform, Projection};
@@ -76,9 +77,12 @@ pub(crate) struct Content<'a> {
     pub mesh: Option<&'a TriangleMeshData>,
     pub lines: Option<&'a LineListData>,
     pub material: Option<&'a Material3D>,
+    /// Width of the lines in scene units, from the drawable's stroke; `None`
+    /// draws them [`LINE_WIDTH_PX`] wide.
+    pub line_width: Option<f64>,
 }
 
-/// Width of 3D lines, in output pixels.
+/// Width of 3D lines without a stroke width, in output pixels.
 const LINE_WIDTH_PX: f64 = 1.5;
 
 /// How `camera` maps its NDC onto the canvas, in scene units, and the width
@@ -123,14 +127,31 @@ const MESH_VERTEX_BYTES: usize = 40;
 /// Bytes of a line segment: both ends (the first with a vertex-color flag)
 /// and their linear colors.
 const SEGMENT_BYTES: usize = 64;
+/// Bytes of a shadow map layer's view-projection (`Caster` in [`SHADER`]),
+/// at `DRAW_STRIDE` from one layer to the next.
+const CASTER_BYTES: usize = 64;
 /// Bytes of the frame uniforms (`Frame` in [`SHADER`]).
-const FRAME_BYTES: usize = 400;
+const FRAME_BYTES: usize = 1376;
 /// Bytes of one draw's uniforms (`Draw` in [`SHADER`]), and their stride in
 /// the draw buffer, the minimum uniform offset alignment.
-const DRAW_BYTES: usize = 176;
+const DRAW_BYTES: usize = 192;
 const DRAW_STRIDE: usize = 256;
 /// Lights the shader reads; further lights are left out.
 const MAX_LIGHTS: usize = 8;
+/// Lights that cast shadows: the first ones of a frame.
+const MAX_SHADOW_LIGHTS: usize = 2;
+/// Layers of the shadow maps: one for a directional light, one per cube
+/// face for a point light.
+const MAX_SHADOW_LAYERS: usize = MAX_SHADOW_LIGHTS * 6;
+/// Texels on a side of a shadow map: the only one of a directional light,
+/// and each of several.
+const SHADOW_SIZE: u32 = 2048;
+const SHADOW_SIZE_SHARED: u32 = 1024;
+/// Radius of the soft edge of shadows, in shadow-map texels.
+const SHADOW_SOFTNESS: f32 = 1.5;
+/// Where the fixed key light of [`Lighting3D`] shines from (`KEY_LIGHT` in
+/// [`SHADER`]).
+const KEY_LIGHT: DVec3 = DVec3::new(-3.0, 6.0, 4.0);
 const SAMPLES: u32 = 4;
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -150,11 +171,57 @@ pub struct MeshSource {
     /// Bounding sphere in model space.
     center: DVec3,
     radius: f64,
+    /// A lit mesh that encloses a volume: every edge joins two triangles
+    /// that run it in opposite directions, once vertices at one place are
+    /// one. Only a lit mesh shadows itself, so only a lit one is checked.
+    closed: bool,
+}
+
+/// Whether the triangles `indices` over `positions` enclose a volume: each
+/// edge, once vertices at one place are one, is run once in each direction.
+fn encloses(positions: &[DVec3], indices: &[u32], radius: f64) -> bool {
+    // Vertices closer than a hundred-thousandth of the mesh's size are one,
+    // found in their cell of a grid that fine or in a neighboring one: two
+    // copies of a vertex computed with different rounding may straddle a
+    // cell boundary.
+    let step = (radius * 1e-5).max(f64::MIN_POSITIVE);
+    let mut cells: HashMap<[i64; 3], u32> = HashMap::with_capacity(positions.len());
+    let mut places: Vec<DVec3> = Vec::with_capacity(positions.len());
+    let place: Vec<u32> = positions
+        .iter()
+        .map(|p| {
+            let cell = [p.x, p.y, p.z].map(|value| (value / step).floor() as i64);
+            let near = (-1..=1)
+                .flat_map(|x| (-1..=1).flat_map(move |y| (-1..=1).map(move |z| [x, y, z])))
+                .filter_map(|[x, y, z]| cells.get(&[cell[0] + x, cell[1] + y, cell[2] + z]))
+                .find(|&&id| places[id as usize].distance(*p) <= step)
+                .copied();
+            near.unwrap_or_else(|| {
+                let id = places.len() as u32;
+                places.push(*p);
+                cells.entry(cell).or_insert(id);
+                id
+            })
+        })
+        .collect();
+    // Each edge counts +1 one way and -1 the other.
+    let mut edges: HashMap<(u32, u32), i32> = HashMap::with_capacity(indices.len());
+    for triangle in indices.as_chunks::<3>().0 {
+        let [a, b, c] = triangle.map(|index| place[index as usize]);
+        for (from, to) in [(a, b), (b, c), (c, a)] {
+            if from != to {
+                *edges.entry((from.min(to), from.max(to))).or_insert(0) +=
+                    if from < to { 1 } else { -1 };
+            }
+        }
+    }
+    !edges.is_empty() && edges.values().all(|count| *count == 0)
 }
 
 impl MeshSource {
-    /// `None` when `mesh` has no triangle.
-    fn mesh(mesh: &TriangleMeshData) -> Option<Self> {
+    /// `None` when `mesh` has no triangle; whether it is closed is checked
+    /// when it is `lit`.
+    fn mesh(mesh: &TriangleMeshData, lit: bool) -> Option<Self> {
         let count = mesh.vertices.len();
         let positions: Vec<DVec3> = mesh
             .vertices
@@ -209,6 +276,7 @@ impl MeshSource {
         Some(Self {
             vertices,
             count: indices.len() as u32,
+            closed: lit && encloses(&positions, &indices, radius),
             indices,
             lines: false,
             has_colors: colors.is_some(),
@@ -263,6 +331,7 @@ impl MeshSource {
             indices: Vec::new(),
             count: pairs.len() as u32,
             lines: true,
+            closed: false,
             has_colors: colors.is_some(),
             opaque_colors: colors.is_none_or(|colors| colors.iter().all(|c| c[3] >= 0.999)),
             center,
@@ -389,6 +458,9 @@ struct GpuDraw {
     culled: bool,
     /// Drawn after the opaque meshes, as one layer.
     translucent: bool,
+    /// Drawn into the shadow maps: opaque meshes that do not glow, since
+    /// a glowing mesh may hold the light that makes it glow.
+    casts: bool,
 }
 
 /// The meshes and lines one image of a frame draws, with what the shader
@@ -404,6 +476,10 @@ pub struct GpuMeshFrame {
     draws: Arc<[GpuDraw]>,
     /// `DRAW_STRIDE` bytes per draw.
     draw_uniforms: Arc<[u8]>,
+    /// Texels on a side of the shadow maps, and the view-projection of each
+    /// layer, which the opaque meshes are drawn into before the frame.
+    shadow_size: u32,
+    shadow_layers: Arc<[[f32; 16]]>,
     digest: u64,
 }
 
@@ -421,7 +497,11 @@ impl GpuMeshFrame {
         update(&self.uniforms);
         update(&self.draw_uniforms);
         for draw in self.draws.iter() {
-            update(&[u8::from(draw.culled), u8::from(draw.translucent)]);
+            update(&[
+                u8::from(draw.culled),
+                u8::from(draw.translucent),
+                u8::from(draw.casts),
+            ]);
             update(&draw.source.vertices);
             for index in &draw.source.indices {
                 update(&index.to_le_bytes());
@@ -439,6 +519,23 @@ struct Pending {
     base: [f32; 4],
     material: Option<Material3D>,
     translucent: bool,
+    /// Lines only: their width in scene units, or the default.
+    line_width: Option<f64>,
+}
+
+impl Pending {
+    /// Whether it is drawn into the shadow maps: an opaque mesh that does
+    /// not glow, since a glowing mesh may hold the light that makes it glow.
+    fn casts(&self) -> bool {
+        let glows = self.material.is_some_and(|material| {
+            material.emissive_strength > 0.0
+                && material.emissive.components[..3]
+                    .iter()
+                    .any(|value| *value > 0.0)
+                && material.emissive.components[3] > 0.0
+        });
+        !self.translucent && !self.source.lines && !glows
+    }
 }
 
 /// Collects the meshes and lines of a frame that the GPU draws, in classes
@@ -492,7 +589,7 @@ impl<'a> GpuMeshes<'a> {
             && let Some(source) = self
                 .sources
                 .get(mesh_key.0, false, mesh_key.1, mesh_keep, || {
-                    MeshSource::mesh(mesh)
+                    MeshSource::mesh(mesh, content.material.is_some())
                 })
         {
             let base = content
@@ -507,6 +604,7 @@ impl<'a> GpuMeshes<'a> {
                 opacity,
                 base,
                 content.material.copied(),
+                None,
             );
             taken.0 = true;
         }
@@ -517,12 +615,16 @@ impl<'a> GpuMeshes<'a> {
                         MeshSource::lines(lines)
                     })
         {
-            self.add(class, source, content, opacity, lines.color, None);
+            let width = content
+                .line_width
+                .filter(|width| width.is_finite() && *width > 0.0);
+            self.add(class, source, content, opacity, lines.color, None, width);
             taken.1 = true;
         }
         taken
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add(
         &mut self,
         class: usize,
@@ -531,6 +633,7 @@ impl<'a> GpuMeshes<'a> {
         opacity: f32,
         base: peniko::Color,
         material: Option<Material3D>,
+        line_width: Option<f64>,
     ) {
         if opacity <= f32::EPSILON {
             return;
@@ -548,6 +651,7 @@ impl<'a> GpuMeshes<'a> {
             opacity,
             base: to_linear(base),
             material,
+            line_width,
         });
     }
 
@@ -566,14 +670,22 @@ impl<'a> GpuMeshes<'a> {
             return Vec::new();
         }
         let (width, height) = self.size;
+        let shadows = shadows(illumination, &self.pending);
         let uniforms: Arc<[u8]> = frame_uniforms(
             camera,
             pixels_to_ndc(width, height) * self.placement * ndc_to_scene,
             (width, height),
-            line_width * self.placement.determinant().abs().sqrt(),
             illumination,
+            &shadows,
         )
         .into();
+        let shadow_layers: Arc<[[f32; 16]]> = shadows
+            .layers
+            .iter()
+            .map(|(matrix, ..)| matrix.as_mat4().to_cols_array())
+            .collect();
+        // Pixels of the image per scene unit, which line widths scale by.
+        let pixels_per_unit = self.placement.determinant().abs().sqrt();
 
         // Opaque draws first, near ones first so that the depth test skips
         // what they hide; translucent ones after them, from back to front.
@@ -582,15 +694,8 @@ impl<'a> GpuMeshes<'a> {
             .pending
             .into_iter()
             .map(|pending| {
-                let center = pending.model.transform_point3(pending.source.center);
-                let scale = [
-                    pending.model.x_axis.truncate().length(),
-                    pending.model.y_axis.truncate().length(),
-                    pending.model.z_axis.truncate().length(),
-                ]
-                .into_iter()
-                .fold(0.0, f64::max);
-                let depth = -view.transform_point3(center).z + pending.source.radius * scale;
+                let (center, radius) = world_sphere(&pending);
+                let depth = -view.transform_point3(center).z + radius;
                 (depth, pending)
             })
             .collect();
@@ -621,10 +726,12 @@ impl<'a> GpuMeshes<'a> {
             let mut draws = Vec::with_capacity(members.len());
             let mut draw_uniforms = Vec::with_capacity(members.len() * DRAW_STRIDE);
             for (_, pending) in members {
-                push_draw_uniforms(&mut draw_uniforms, pending);
+                let line_px = pending.line_width.unwrap_or(line_width) * pixels_per_unit;
+                push_draw_uniforms(&mut draw_uniforms, pending, line_px);
                 draws.push(GpuDraw {
                     culled: pending.material.is_some() && !pending.source.lines,
                     translucent: pending.translucent,
+                    casts: pending.casts(),
                     source: Arc::clone(&pending.source),
                 });
             }
@@ -636,6 +743,7 @@ impl<'a> GpuMeshes<'a> {
                 (Arc::as_ptr(&draw.source) as usize).hash(&mut hasher);
                 draw.culled.hash(&mut hasher);
                 draw.translucent.hash(&mut hasher);
+                draw.casts.hash(&mut hasher);
             }
             frames.push((
                 class,
@@ -645,6 +753,8 @@ impl<'a> GpuMeshes<'a> {
                     uniforms: Arc::clone(&uniforms),
                     draws: draws.into(),
                     draw_uniforms: draw_uniforms.into(),
+                    shadow_size: shadows.size,
+                    shadow_layers: Arc::clone(&shadow_layers),
                     digest: hasher.finish(),
                 },
             ));
@@ -665,14 +775,195 @@ fn pixels_to_ndc(width: u32, height: u32) -> kurbo::Affine {
     ])
 }
 
+/// The bounding sphere of a drawable's mesh or lines in the world.
+fn world_sphere(pending: &Pending) -> (DVec3, f64) {
+    let center = pending.model.transform_point3(pending.source.center);
+    let scale = [
+        pending.model.x_axis.truncate().length(),
+        pending.model.y_axis.truncate().length(),
+        pending.model.z_axis.truncate().length(),
+    ]
+    .into_iter()
+    .fold(0.0, f64::max);
+    (center, pending.source.radius * scale)
+}
+
+/// The shadow maps of a frame: what each layer sees, and where the shadows
+/// of the lights that cast them start.
+#[derive(Default)]
+struct Shadows {
+    /// Texels on a side of each layer.
+    size: u32,
+    /// Each layer's view-projection, whether it is a perspective one, and
+    /// the size of its texels: in scene units, or per scene unit of distance
+    /// from the light under perspective.
+    layers: Vec<(DMat4, bool, f64)>,
+    /// The first layer of the fixed key light's shadow and of each light's.
+    key: Option<usize>,
+    lights: [Option<usize>; MAX_LIGHTS],
+}
+
+/// The shadows of the first lights of `illumination` (or of its fixed key
+/// light while it shows none) over the meshes of `pending`: a map that
+/// covers their bounding sphere along a directional light, and a cube of
+/// six around a point light.
+fn shadows(illumination: &Illumination, pending: &[Pending]) -> Shadows {
+    let mut shadows = Shadows::default();
+    let lighting = &illumination.lighting;
+    // Shadows need a lit mesh to fall on and a mesh to cast them.
+    let receives = pending
+        .iter()
+        .any(|pending| pending.material.is_some() && !pending.source.lines);
+    if !lighting.shadows || !receives || !pending.iter().any(Pending::casts) {
+        return shadows;
+    }
+    let spheres: Vec<(DVec3, f64)> = pending
+        .iter()
+        .filter(|pending| !pending.source.lines)
+        .map(world_sphere)
+        .filter(|(center, radius)| center.is_finite() && radius.is_finite())
+        .collect();
+    let Some(low) = spheres
+        .iter()
+        .map(|(center, radius)| center - *radius)
+        .reduce(DVec3::min)
+    else {
+        return shadows;
+    };
+    let high = spheres
+        .iter()
+        .map(|(center, radius)| center + *radius)
+        .fold(low, DVec3::max);
+    let center = (low + high) * 0.5;
+    let radius = spheres
+        .iter()
+        .map(|(sphere, radius)| sphere.distance(center) + radius)
+        .fold(0.0, f64::max);
+    if !(radius.is_finite() && radius > 1e-9) {
+        return shadows;
+    }
+    let casters: Vec<(Option<usize>, DVec3, bool)> = if illumination.lights.is_empty() {
+        let lit = lighting.enabled && lighting.intensity > 0.0;
+        lit.then_some((None, KEY_LIGHT, true)).into_iter().collect()
+    } else {
+        illumination
+            .lights
+            .iter()
+            .take(MAX_SHADOW_LIGHTS)
+            .enumerate()
+            .map(|(index, light)| (Some(index), light.position, light.directional))
+            .collect()
+    };
+    let layers: usize = casters
+        .iter()
+        .map(|(.., directional)| if *directional { 1 } else { 6 })
+        .sum();
+    shadows.size = if layers == 1 {
+        SHADOW_SIZE
+    } else {
+        SHADOW_SIZE_SHARED
+    };
+    for (light, position, directional) in casters {
+        let first = shadows.layers.len();
+        if directional {
+            match directional_shadow(position, center, radius, shadows.size) {
+                Some(layer) => shadows.layers.push(layer),
+                None => continue,
+            }
+        } else {
+            shadows
+                .layers
+                .extend(point_shadows(position, center, radius, shadows.size));
+        }
+        match light {
+            None => shadows.key = Some(first),
+            Some(index) => shadows.lights[index] = Some(first),
+        }
+    }
+    if shadows.layers.is_empty() {
+        shadows.size = 0;
+    }
+    shadows
+}
+
+/// The shadow map of a light shining from the direction `toward` over the
+/// sphere at `center` with `radius`, `size` texels on a side. The map is
+/// seen from the origin and its radius steps by an eighth of an octave, so
+/// that its texels stay put while the content moves within it.
+fn directional_shadow(
+    toward: DVec3,
+    center: DVec3,
+    radius: f64,
+    size: u32,
+) -> Option<(DMat4, bool, f64)> {
+    let toward = toward.try_normalize()?;
+    let up = if toward.cross(DVec3::Y).length_squared() > 1e-6 {
+        DVec3::Y
+    } else {
+        DVec3::Z
+    };
+    let view = view::look_at_mat4(DVec3::ZERO, -toward, up);
+    let radius = ((radius.log2() * 8.0).ceil() / 8.0).exp2();
+    let texel = 2.0 * radius / f64::from(size);
+    let middle = view.transform_point3(center);
+    let x = (middle.x / texel).round() * texel;
+    let y = (middle.y / texel).round() * texel;
+    let reach = radius + texel;
+    let depth = -middle.z;
+    let projection = directx::orthographic(
+        x - reach,
+        x + reach,
+        y - reach,
+        y + reach,
+        depth - reach,
+        depth + reach,
+    );
+    Some((projection * view, false, texel))
+}
+
+/// The six shadow maps of a point light at `position` over the sphere at
+/// `center` with `radius`, `size` texels on a side: one per cube face, in
+/// the order +x, -x, +y, -y, +z, -z (`shadowed` in [`SHADER`]).
+fn point_shadows(
+    position: DVec3,
+    center: DVec3,
+    radius: f64,
+    size: u32,
+) -> [(DMat4, bool, f64); 6] {
+    let distance = position.distance(center);
+    let near = ((distance - radius) * 0.5).max(radius * 1e-3).max(1e-4);
+    let projection = directx::perspective(
+        std::f64::consts::FRAC_PI_2,
+        1.0,
+        near,
+        (distance + radius) * 1.01,
+    );
+    let faces = [
+        (DVec3::X, DVec3::NEG_Y),
+        (DVec3::NEG_X, DVec3::NEG_Y),
+        (DVec3::Y, DVec3::Z),
+        (DVec3::NEG_Y, DVec3::NEG_Z),
+        (DVec3::Z, DVec3::NEG_Y),
+        (DVec3::NEG_Z, DVec3::NEG_Y),
+    ];
+    // A face spans 90 degrees: its texels are 2 / size wide a unit away.
+    faces.map(|(axis, up)| {
+        (
+            projection * view::look_at_mat4(position, position + axis, up),
+            true,
+            2.0 / f64::from(size),
+        )
+    })
+}
+
 /// The frame uniforms: `camera`, the map `ndc_map` from its NDC to the
-/// image's, the image's `size`, lines `line_px` pixels wide and the lights.
+/// image's, the image's `size`, the lights and their shadows.
 fn frame_uniforms(
     camera: &Camera,
     ndc_map: kurbo::Affine,
     size: (u32, u32),
-    line_px: f64,
     illumination: &Illumination,
+    shadows: &Shadows,
 ) -> Vec<u8> {
     let [a, b, c, d, e, f] = ndc_map.as_coeffs();
     let perspective = matches!(camera.projection, Projection::Perspective { .. });
@@ -717,12 +1008,27 @@ fn frame_uniforms(
             intensity,
         ],
     );
+    // A shadow's first layer, plus one; 0 for none.
+    let layer = |first: Option<usize>| first.map_or(0.0, |first| first as f32 + 1.0);
     push_f32s(
         &mut uniforms,
         &[
             f32::from(u8::from(lights.is_empty())),
             lights.len() as f32,
-            (line_px * 0.5) as f32,
+            layer(shadows.key),
+            0.0,
+        ],
+    );
+    push_f32s(
+        &mut uniforms,
+        &[
+            if shadows.size > 0 {
+                1.0 / shadows.size as f32
+            } else {
+                0.0
+            },
+            SHADOW_SOFTNESS,
+            shadows.layers.len() as f32,
             0.0,
         ],
     );
@@ -741,18 +1047,36 @@ fn frame_uniforms(
                 );
                 push_f32s(
                     &mut uniforms,
-                    &[light.color[0], light.color[1], light.color[2], 0.0],
+                    &[
+                        light.color[0],
+                        light.color[1],
+                        light.color[2],
+                        layer(shadows.lights[index]),
+                    ],
                 );
             }
             None => push_f32s(&mut uniforms, &[0.0; 8]),
+        }
+    }
+    for index in 0..MAX_SHADOW_LAYERS {
+        match shadows.layers.get(index) {
+            Some((matrix, perspective, texel)) => {
+                push_mat4(&mut uniforms, *matrix);
+                push_f32s(
+                    &mut uniforms,
+                    &[*texel as f32, f32::from(u8::from(*perspective)), 0.0, 0.0],
+                );
+            }
+            None => push_f32s(&mut uniforms, &[0.0; 20]),
         }
     }
     debug_assert_eq!(uniforms.len(), FRAME_BYTES);
     uniforms
 }
 
-/// Append one draw's uniforms, padded to `DRAW_STRIDE`.
-fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending) {
+/// Append one draw's uniforms, its lines `line_px` pixels wide, padded to
+/// `DRAW_STRIDE`.
+fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending, line_px: f64) {
     let start = bytes.len();
     push_mat4(bytes, pending.model);
     push_mat4(bytes, pending.model.inverse().transpose());
@@ -781,6 +1105,7 @@ fn push_draw_uniforms(bytes: &mut Vec<u8>, pending: &Pending) {
             f32::from(u8::from(pending.source.has_colors)),
         ],
     );
+    push_f32s(bytes, &[(line_px * 0.5) as f32, 0.0, 0.0, 0.0]);
     debug_assert_eq!(bytes.len() - start, DRAW_BYTES);
     bytes.resize(start + DRAW_STRIDE, 0);
 }
@@ -912,10 +1237,17 @@ enum Pass {
 struct Pipelines {
     layout: wgpu::BindGroupLayout,
     depth_layout: wgpu::BindGroupLayout,
+    shadow_layout: wgpu::BindGroupLayout,
+    caster_layout: wgpu::BindGroupLayout,
+    shadow_sampler: wgpu::Sampler,
     /// Meshes by `[culled][pass]`.
     meshes: [[wgpu::RenderPipeline; 3]; 2],
     /// Lines by pass.
     lines: [wgpu::RenderPipeline; 3],
+    /// Opaque meshes into a shadow map, by `[closed]`: an open mesh casts
+    /// with both faces, a closed one with the faces turned away from the
+    /// light, so that it never shadows the side that faces it.
+    shadow: [wgpu::RenderPipeline; 2],
 }
 
 impl Pipelines {
@@ -951,9 +1283,58 @@ impl Pipelines {
                 count: None,
             }],
         });
+        // Group 1 holds what each pass reads besides the uniforms: the
+        // opaque depth for translucent layers, the shadow maps for shading,
+        // and a shadow map's view for the meshes drawn into it.
+        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("gaanim-3d-shadows"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+            ],
+        });
+        let caster_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("gaanim-3d-caster"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(CASTER_BYTES as u64),
+                },
+                count: None,
+            }],
+        });
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("gaanim-3d-shadows"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
         let plain = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gaanim-3d"),
-            bind_group_layouts: &[Some(&layout)],
+            bind_group_layouts: &[Some(&layout), Some(&shadow_layout)],
+            immediate_size: 0,
+        });
+        let casting = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("gaanim-3d-shadow"),
+            bind_group_layouts: &[Some(&layout), Some(&caster_layout)],
             immediate_size: 0,
         });
         let layered = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1064,11 +1445,119 @@ impl Pipelines {
                 pipeline(lines, culled, Pass::Blend),
             ]
         };
+        let shadow = |closed: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("gaanim-3d-shadow"),
+                layout: Some(&casting),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vertex_shadow"),
+                    compilation_options: Default::default(),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: MESH_VERTEX_BYTES as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes[..1],
+                    }],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: closed.then_some(wgpu::Face::Front),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: Default::default(),
+                    // Keeps a surface from shadowing itself.
+                    bias: wgpu::DepthBiasState {
+                        constant: 2,
+                        slope_scale: 2.0,
+                        clamp: 0.0,
+                    },
+                }),
+                multisample: Default::default(),
+                fragment: None,
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         Self {
             layout,
             depth_layout,
+            shadow_layout,
+            caster_layout,
+            shadow_sampler,
             meshes: [passes(false, false), passes(false, true)],
             lines: passes(true, false),
+            shadow: [shadow(false), shadow(true)],
+        }
+    }
+}
+
+/// The shadow maps frames draw their opaque meshes into, one layer per view
+/// of a light, and the bind groups that read and write them.
+struct ShadowMaps {
+    size: u32,
+    layers: u32,
+    /// Each layer, as the depth target of the meshes drawn into it.
+    targets: Vec<wgpu::TextureView>,
+    /// Reads every layer while shading.
+    group: wgpu::BindGroup,
+}
+
+impl ShadowMaps {
+    /// `layers` maps `size` texels on a side; one texel when a frame has no
+    /// shadows, which the shading pipelines still bind.
+    fn new(device: &wgpu::Device, pipelines: &Pipelines, size: u32, layers: u32) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("gaanim-3d-shadows"),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: layers,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let all = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let targets = (0..layers)
+            .map(|layer| {
+                texture.create_view(&wgpu::TextureViewDescriptor {
+                    dimension: Some(wgpu::TextureViewDimension::D2),
+                    base_array_layer: layer,
+                    array_layer_count: Some(1),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("gaanim-3d-shadows"),
+            layout: &pipelines.shadow_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&all),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&pipelines.shadow_sampler),
+                },
+            ],
+        });
+        Self {
+            size,
+            layers,
+            targets,
+            group,
         }
     }
 }
@@ -1093,6 +1582,10 @@ pub struct GpuThreeD {
     frame_buffer: Option<wgpu::Buffer>,
     /// The draw uniforms, with room for that many bytes, and their bind group.
     draw_buffer: Option<(wgpu::Buffer, usize, wgpu::BindGroup)>,
+    shadow_maps: Option<ShadowMaps>,
+    /// The view-projections of the shadow map layers, with room for that
+    /// many layers, and their bind group.
+    caster_buffer: Option<(wgpu::Buffer, usize, wgpu::BindGroup)>,
 }
 
 impl GpuThreeD {
@@ -1252,10 +1745,98 @@ impl GpuThreeD {
         let (draw_buffer, _, bind_group) = self.draw_buffer.as_ref().expect("draw buffer is set");
         queue.write_buffer(draw_buffer, 0, &frame.draw_uniforms);
 
-        let translucent = frame.draws.iter().filter(|draw| draw.translucent).count();
+        // The shadow maps: one texel while the frame casts no shadow.
+        let layers = frame.shadow_layers.len();
+        let (size, count) = if layers > 0 {
+            (frame.shadow_size, layers as u32)
+        } else {
+            (1, 1)
+        };
+        if self
+            .shadow_maps
+            .as_ref()
+            .is_none_or(|maps| maps.size != size || maps.layers != count)
+        {
+            self.shadow_maps = Some(ShadowMaps::new(device, pipelines, size, count));
+        }
+        let shadow_maps = self.shadow_maps.as_ref().expect("shadow maps are set");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("gaanim-3d"),
         });
+        if layers > 0 {
+            let needed = layers * DRAW_STRIDE;
+            if self
+                .caster_buffer
+                .as_ref()
+                .is_none_or(|(_, capacity, _)| *capacity < needed)
+            {
+                let capacity = needed.next_power_of_two();
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("gaanim-3d-casters"),
+                    size: capacity as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("gaanim-3d-caster"),
+                    layout: &pipelines.caster_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &buffer,
+                            offset: 0,
+                            size: NonZeroU64::new(CASTER_BYTES as u64),
+                        }),
+                    }],
+                });
+                self.caster_buffer = Some((buffer, capacity, group));
+            }
+            let (caster_buffer, _, caster_group) =
+                self.caster_buffer.as_ref().expect("caster buffer is set");
+            let mut bytes = Vec::with_capacity(needed);
+            for matrix in frame.shadow_layers.iter() {
+                push_f32s(&mut bytes, matrix);
+                bytes.resize(bytes.len() + DRAW_STRIDE - CASTER_BYTES, 0);
+            }
+            queue.write_buffer(caster_buffer, 0, &bytes);
+            for (layer, target) in shadow_maps.targets.iter().enumerate() {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("gaanim-3d-shadow"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: target,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_bind_group(1, caster_group, &[(layer * DRAW_STRIDE) as u32]);
+                for (index, draw) in frame.draws.iter().enumerate() {
+                    if !draw.casts {
+                        continue;
+                    }
+                    let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize))
+                    else {
+                        continue;
+                    };
+                    let Some(indices) = &uploaded.indices else {
+                        continue;
+                    };
+                    pass.set_pipeline(&pipelines.shadow[usize::from(draw.source.closed)]);
+                    pass.set_bind_group(0, bind_group, &[(index * DRAW_STRIDE) as u32]);
+                    pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..draw.source.count, 0, 0..1);
+                }
+            }
+        }
+
+        let translucent = frame.draws.iter().filter(|draw| draw.translucent).count();
         // The opaque draws, then one pass per translucent drawable with a
         // layer depth of its own; the last pass resolves.
         let mut draws = frame.draws.iter().enumerate().peekable();
@@ -1324,9 +1905,15 @@ impl GpuThreeD {
                     &[Pass::Opaque]
                 };
                 for &each in passes {
-                    if matches!(each, Pass::Layer) {
-                        pass.set_bind_group(1, &scratch.depth_group, &[]);
-                    }
+                    pass.set_bind_group(
+                        1,
+                        if matches!(each, Pass::Layer) {
+                            &scratch.depth_group
+                        } else {
+                            &shadow_maps.group
+                        },
+                        &[],
+                    );
                     pass.set_pipeline(&set[each as usize]);
                     if draw.source.lines {
                         // A quad per segment.
@@ -1351,8 +1938,17 @@ impl GpuThreeD {
 /// The shader: [`crate::three_d`]'s projection and illustrative shading.
 const SHADER: &str = r#"
 struct Light {
+    // Position, or direction toward a directional light, and 1 for one.
     position: vec4<f32>,
+    // Linear color, and its shadow's first layer plus one (0 for none).
     color: vec4<f32>,
+}
+
+// A shadow map layer: its view-projection, the size of its texels (in scene
+// units, or per scene unit away from the light), and 1 under perspective.
+struct Shadow {
+    view_proj: mat4x4<f32>,
+    params: vec4<f32>,
 }
 
 struct Frame {
@@ -1365,10 +1961,14 @@ struct Frame {
     eye: vec4<f32>,
     // View direction, and the scene's light intensity.
     forward: vec4<f32>,
-    // 1 when the fixed key light shines, the count of lights, and half the
-    // width of lines in pixels.
+    // 1 when the fixed key light shines, the count of lights, and the
+    // first layer of the key light's shadow plus one (0 for none).
     params: vec4<f32>,
+    // 1 over the texels on a side of a shadow map, and the radius of the
+    // soft edge of shadows in texels.
+    shadow: vec4<f32>,
     lights: array<Light, 8>,
+    shadows: array<Shadow, 12>,
 }
 
 struct Draw {
@@ -1380,12 +1980,23 @@ struct Draw {
     emissive: vec4<f32>,
     // Roughness, metalness, 1 when lit, and 1 when vertices have colors.
     material: vec4<f32>,
+    // Half the width of lines in pixels.
+    line: vec4<f32>,
+}
+
+struct Caster {
+    view_proj: mat4x4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var<uniform> draw: Draw;
 // The opaque depth, which translucent layers lie in front of.
 @group(1) @binding(0) var opaque_depth: texture_depth_multisampled_2d;
+// The shadow maps, which shading reads.
+@group(1) @binding(1) var shadow_maps: texture_depth_2d_array;
+@group(1) @binding(2) var shadow_sampler: sampler_comparison;
+// The shadow map layer meshes are drawn into.
+@group(1) @binding(3) var<uniform> caster: Caster;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -1471,7 +2082,91 @@ fn hidden(position: vec4<f32>, sample: u32) -> bool {
     return position.z < opaque;
 }
 
-fn shade(base: vec4<f32>, normal: vec3<f32>, viewer: vec3<f32>, point: vec3<f32>) -> vec4<f32> {
+// Points around a shadow map lookup, within a unit disc, which soften the
+// edge of shadows.
+const SHADOW_TAPS = array<vec2<f32>, 12>(
+    vec2<f32>(-0.326, -0.406),
+    vec2<f32>(-0.840, -0.074),
+    vec2<f32>(-0.696, 0.457),
+    vec2<f32>(-0.203, 0.621),
+    vec2<f32>(0.962, -0.195),
+    vec2<f32>(0.473, -0.480),
+    vec2<f32>(0.519, 0.767),
+    vec2<f32>(0.185, -0.893),
+    vec2<f32>(0.507, 0.064),
+    vec2<f32>(0.896, 0.412),
+    vec2<f32>(-0.322, -0.933),
+    vec2<f32>(-0.792, -0.598),
+);
+
+// How much of `light` reaches `point`, whose surface faces `normal`: 1 where
+// no opaque mesh lies between them, 0 in its shadow, between at the edge.
+fn shadowed(light: Light, point: vec3<f32>, normal: vec3<f32>) -> f32 {
+    if light.color.w < 0.5 {
+        return 1.0;
+    }
+    var layer = u32(light.color.w - 0.5);
+    var toward = light.position.xyz;
+    if light.position.w < 0.5 {
+        // A point light's cube face: the one its ray to the point leaves by.
+        let ray = point - light.position.xyz;
+        let size = abs(ray);
+        var face = select(5u, 4u, ray.z > 0.0);
+        if size.x >= size.y && size.x >= size.z {
+            face = select(1u, 0u, ray.x > 0.0);
+        } else if size.y >= size.z {
+            face = select(3u, 2u, ray.y > 0.0);
+        }
+        layer += face;
+        toward = -ray;
+    }
+    let shadow = frame.shadows[layer];
+    var texel = shadow.params.x;
+    if shadow.params.y > 0.5 {
+        texel *= distance(point, light.position.xyz);
+    }
+    // Off the surface, on the side the light comes from, by a texel and a
+    // half: a surface does not shadow itself. A closed mesh casts with its
+    // faces turned away from the light, so its far side, moved toward the
+    // light into the mesh, lies in front of what it casts: its own shadow
+    // leaves the wrapped light past the terminator alone.
+    var side = normal;
+    if dot(side, toward) < 0.0 {
+        side = -side;
+    }
+    let clip = shadow.view_proj * vec4<f32>(point + side * texel * 1.5, 1.0);
+    if clip.w <= 0.0 {
+        return 1.0;
+    }
+    let ndc = clip.xyz / clip.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if ndc.z < 0.0 || ndc.z > 1.0 || any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
+        return 1.0;
+    }
+    let reach = frame.shadow.x * frame.shadow.y;
+    var taps = SHADOW_TAPS;
+    var lit = 0.0;
+    for (var i = 0u; i < 12u; i = i + 1u) {
+        lit += textureSampleCompareLevel(
+            shadow_maps,
+            shadow_sampler,
+            uv + taps[i] * reach,
+            i32(layer),
+            ndc.z,
+        );
+    }
+    return lit / 12.0;
+}
+
+// The lit color of a surface's point: `normal` shades it, and `face`, the
+// normal of the triangle it lies on, decides where shadows fall.
+fn shade(
+    base: vec4<f32>,
+    normal: vec3<f32>,
+    face: vec3<f32>,
+    viewer: vec3<f32>,
+    point: vec3<f32>,
+) -> vec4<f32> {
     let metallic = clamp(draw.material.y, 0.0, 1.0);
     let gloss = 1.0 - clamp(draw.material.x, 0.0, 1.0);
     let polish = gloss * gloss;
@@ -1484,7 +2179,7 @@ fn shade(base: vec4<f32>, normal: vec3<f32>, viewer: vec3<f32>, point: vec3<f32>
     var keyed = vec3<f32>(0.0);
     var highlight = vec3<f32>(0.0);
     for (var i = 0u; i < count; i = i + 1u) {
-        var light = Light(vec4<f32>(KEY_LIGHT, 1.0), vec4<f32>(1.0));
+        var light = Light(vec4<f32>(KEY_LIGHT, 1.0), vec4<f32>(1.0, 1.0, 1.0, frame.params.z));
         if !fixed {
             light = frame.lights[i];
         }
@@ -1493,11 +2188,12 @@ fn shade(base: vec4<f32>, normal: vec3<f32>, viewer: vec3<f32>, point: vec3<f32>
             toward_light = light.position.xyz - point;
         }
         toward_light = normalize_or_zero(toward_light);
+        let lit = shadowed(light, point, face);
         let key = max((dot(normal, toward_light) + KEY_WRAP) / (1.0 + KEY_WRAP), 0.0);
         let half = normalize_or_zero(toward_light + viewer);
         let shine = pow(max(dot(normal, half), 0.0), shininess) * polish * min(key, 1.0);
-        keyed += KEY_STRENGTH * key * light.color.rgb;
-        highlight += shine * light.color.rgb;
+        keyed += KEY_STRENGTH * key * light.color.rgb * lit;
+        highlight += shine * light.color.rgb * lit;
     }
     var diffuse: vec3<f32>;
     if fixed {
@@ -1544,7 +2240,7 @@ fn surface(in: VertexOut) -> vec4<f32> {
         if dot(normal, normal) < 0.5 {
             normal = face;
         }
-        color = shade(color, normal, viewer, in.world);
+        color = shade(color, normal, face, viewer, in.world);
     }
     return color;
 }
@@ -1618,7 +2314,7 @@ fn vertex_line(@builtin(vertex_index) index: u32, in: LineIn) -> LineOut {
     }
     let across = vec2<f32>(-along.y, along.x);
     // Half the width, and a pixel of antialiasing around it.
-    let reach = frame.params.z + 1.0;
+    let reach = draw.line.x + 1.0;
     var corners = CORNERS;
     let corner = corners[index];
     var pixel = s0 - along * reach;
@@ -1651,7 +2347,7 @@ fn line_fragment(in: LineOut) -> LineFragment {
     let span = in.ends.zw - s0;
     let t = clamp(dot(in.pixel - s0, span) / max(dot(span, span), 1e-12), 0.0, 1.0);
     let distance = length(in.pixel - (s0 + span * t));
-    let coverage = clamp(frame.params.z + 0.5 - distance, 0.0, 1.0);
+    let coverage = clamp(draw.line.x + 0.5 - distance, 0.0, 1.0);
     let samples = u32(round(coverage * 4.0));
     var out: LineFragment;
     out.mask = (1u << samples) - 1u;
@@ -1670,6 +2366,12 @@ fn fragment_line_layer(in: LineOut, @builtin(sample_index) sample: u32) -> LineF
         discard;
     }
     return line_fragment(in);
+}
+
+// An opaque mesh's depth in the shadow map layer it casts into.
+@vertex
+fn vertex_shadow(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+    return caster.view_proj * (draw.model * vec4<f32>(position, 1.0));
 }
 "#;
 
@@ -1801,7 +2503,7 @@ mod tests {
     fn meshes_keep_their_valid_triangles_with_unit_normals() {
         let mut mesh = quad(peniko::Color::WHITE);
         mesh.indices.extend([0, 1, 9]);
-        let source = MeshSource::mesh(&mesh).unwrap();
+        let source = MeshSource::mesh(&mesh, true).unwrap();
         assert_eq!(source.count, 6);
         assert_eq!(source.vertices.len(), 4 * MESH_VERTEX_BYTES);
         // The first vertex's normal, generated from the faces, faces +z.
@@ -1811,7 +2513,52 @@ mod tests {
             .collect();
         assert_eq!(normal, [0.0, 0.0, 1.0]);
         mesh.indices.clear();
-        assert!(MeshSource::mesh(&mesh).is_none());
+        assert!(MeshSource::mesh(&mesh, true).is_none());
+    }
+
+    #[test]
+    fn closed_meshes_are_told_apart_from_open_ones() {
+        assert!(
+            !MeshSource::mesh(&quad(peniko::Color::WHITE), true)
+                .unwrap()
+                .closed
+        );
+        // A tetrahedron whose faces have vertices of their own, as flat
+        // shading and seams make them, encloses its volume.
+        let corners = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
+        let tetrahedron = TriangleMeshData {
+            vertices: faces
+                .iter()
+                .flatten()
+                .map(|&corner| corners[corner])
+                .collect(),
+            indices: (0..12).collect(),
+            ..quad(peniko::Color::WHITE)
+        };
+        assert!(MeshSource::mesh(&tetrahedron, true).unwrap().closed);
+        // Without a face it is open.
+        let mut open = tetrahedron.clone();
+        open.indices.truncate(9);
+        assert!(!MeshSource::mesh(&open, true).unwrap().closed);
+        // Copies of a corner computed with different rounding still meet,
+        // even across a cell of the grid that welds them (1e-5 here).
+        let mut positions: Vec<DVec3> = tetrahedron
+            .vertices
+            .iter()
+            .map(|v| DVec3::new(v[0].into(), v[1].into(), v[2].into()))
+            .collect();
+        for (index, corner) in faces.iter().flatten().enumerate() {
+            if *corner == 1 && index % 2 == 0 {
+                positions[index].x -= 1e-8;
+            }
+        }
+        assert!(encloses(&positions, &tetrahedron.indices, 1.0));
     }
 
     #[test]
@@ -1838,7 +2585,7 @@ mod tests {
         let mut sources = MeshSources::default();
         let built = |sources: &mut MeshSources, revision| {
             sources
-                .get(7, false, revision, None, || MeshSource::mesh(&mesh))
+                .get(7, false, revision, None, || MeshSource::mesh(&mesh, true))
                 .unwrap()
         };
         let first = built(&mut sources, 1);
@@ -1857,6 +2604,7 @@ mod tests {
         let (opaque, faded) = (GlobalOpacity(1.0), GlobalOpacity(0.5));
         let red = quad(peniko::Color::from_rgb8(255, 0, 0));
         let content = |opacity| Content {
+            line_width: None,
             transform: &transform,
             opacity,
             mesh: Some(&red),
@@ -1884,6 +2632,255 @@ mod tests {
         assert_eq!(translucent, [false, true]);
     }
 
+    fn lit_quad() -> TriangleMeshData {
+        TriangleMeshData {
+            material: Some(Material3D::default()),
+            ..quad(peniko::Color::WHITE)
+        }
+    }
+
+    fn placed(scale: f64, translation: DVec3) -> GlobalSpatialTransform {
+        GlobalSpatialTransform {
+            mat4: DMat4::from_scale_rotation_translation(
+                DVec3::splat(scale),
+                Default::default(),
+                translation,
+            ),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shadows_cover_the_meshes_from_the_first_lights() {
+        let camera = camera(Projection::Orthographic { zoom: 1.0 });
+        let floor = lit_quad();
+        let (transform, opacity) = (placed(2.0, DVec3::ZERO), GlobalOpacity(1.0));
+        let mut sources = MeshSources::default();
+        let mut meshes =
+            GpuMeshes::new(&mut sources, (1920, 1080), camera.to_vello_transform(), 0).unwrap();
+        meshes.push(
+            0,
+            [(1, 1), (1, 1)],
+            [None, None],
+            &Content {
+                transform: &transform,
+                opacity: &opacity,
+                mesh: Some(&floor),
+                lines: None,
+                material: floor.material.as_ref(),
+                line_width: None,
+            },
+        );
+        // The fixed key light casts one map, at full size.
+        let mut illumination = Illumination::default();
+        let key = shadows(&illumination, &meshes.pending);
+        assert_eq!(
+            (key.key, key.layers.len(), key.size),
+            (Some(0), 1, SHADOW_SIZE)
+        );
+        // The floor's middle lies in the map, its corner too.
+        for point in [DVec3::ZERO, DVec3::new(2.0, 2.0, 0.0)] {
+            let ndc = key.layers[0].0.project_point3(point);
+            assert!(ndc.x.abs() <= 1.0 && ndc.y.abs() <= 1.0, "{ndc:?}");
+            assert!((0.0..=1.0).contains(&ndc.z), "{ndc:?}");
+        }
+        // A point light casts a cube of six, a directional one a map; a third
+        // light casts none.
+        let light = |position, directional| Light {
+            position,
+            directional,
+            color: [1.0; 3],
+        };
+        illumination.lights = vec![
+            light(DVec3::new(0.0, 0.0, 3.0), false),
+            light(DVec3::new(1.0, 1.0, 1.0), true),
+            light(DVec3::new(0.0, 3.0, 0.0), false),
+        ];
+        let lit = shadows(&illumination, &meshes.pending);
+        assert_eq!(lit.key, None);
+        assert_eq!(&lit.lights[..3], [Some(0), Some(6), None]);
+        assert_eq!((lit.layers.len(), lit.size), (7, SHADOW_SIZE_SHARED));
+        // The floor beneath the point light lies in the face looking down.
+        let below = lit.layers[5].0.project_point3(DVec3::new(0.5, 0.5, 0.0));
+        assert!(below.x.abs() <= 1.0 && below.y.abs() <= 1.0, "{below:?}");
+        illumination.lighting.shadows = false;
+        assert!(shadows(&illumination, &meshes.pending).layers.is_empty());
+    }
+
+    #[test]
+    fn lines_are_as_wide_as_their_stroke() {
+        let camera = camera(Projection::Orthographic { zoom: 1.0 });
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let lines = LineListData {
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+            indices: None,
+            strip: true,
+            color: peniko::Color::WHITE,
+            colors: None,
+        };
+        let (transform, opacity) = (GlobalSpatialTransform::default(), GlobalOpacity(1.0));
+        let mut sources = MeshSources::default();
+        let mut meshes =
+            GpuMeshes::new(&mut sources, (1920, 1080), camera.to_vello_transform(), 0).unwrap();
+        for (key, width) in [(1, Some(0.05)), (2, None)] {
+            meshes.push(
+                0,
+                [(key, 1), (key, 1)],
+                [None, None],
+                &Content {
+                    transform: &transform,
+                    opacity: &opacity,
+                    mesh: None,
+                    lines: Some(&lines),
+                    material: None,
+                    line_width: width,
+                },
+            );
+        }
+        let frames = meshes.finish(&camera, ndc_to_canvas, line_width, &Illumination::default());
+        let half_width = |draw: usize| {
+            let start = draw * DRAW_STRIDE + DRAW_BYTES - 16;
+            f32::from_le_bytes(
+                frames[0].1.draw_uniforms[start..start + 4]
+                    .try_into()
+                    .unwrap(),
+            )
+        };
+        // 0.05 scene units at 120 pixels per unit, and the default 1.5 pixels.
+        assert!((half_width(0) - 3.0).abs() < 1e-4, "{}", half_width(0));
+        assert!((half_width(1) - 0.75).abs() < 1e-4, "{}", half_width(1));
+    }
+
+    #[test]
+    fn an_opaque_mesh_shadows_the_lit_floor_beneath_it() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let lit = lit_quad();
+        // A floor 2 units on a side, and a card a unit above it, right of the
+        // middle: light from the right throws the card's shadow left of it.
+        let floor = placed(1.0, DVec3::ZERO);
+        let card = placed(0.25, DVec3::new(0.5, 0.0, 1.0));
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        for (key, transform) in [(1, &floor), (2, &card)] {
+            meshes.push(
+                0,
+                [(key, 1), (key, 1)],
+                [None, None],
+                &Content {
+                    transform,
+                    opacity: &opacity,
+                    mesh: Some(&lit),
+                    lines: None,
+                    material: lit.material.as_ref(),
+                    line_width: None,
+                },
+            );
+        }
+        let illumination = Illumination {
+            lighting: Lighting3D::default(),
+            lights: vec![Light {
+                position: DVec3::new(1.0, 0.0, 1.0),
+                directional: true,
+                color: [1.0; 3],
+            }],
+        };
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        assert!(three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames));
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        let pixels = gpu.read(&target);
+        let pixel = |x: usize, y: usize| pixels[(y * 64 + x) * 4];
+        // At 16 pixels per unit: the shadow at (-0.5, 0), the floor in the
+        // light at (-0.5, 0.75).
+        let (shadow, light) = (pixel(24, 32), pixel(24, 20));
+        assert!(
+            u16::from(shadow) + 40 < u16::from(light),
+            "shadow {shadow}, light {light}"
+        );
+    }
+
+    /// The red channel at `pixels` of a 64 x 64 render of a lit floor 2
+    /// units on a side and a card a unit above it, right of the middle,
+    /// under `light`, seen from above at 16 pixels per unit.
+    fn floor_and_card(lights: Vec<Light>) -> Option<Vec<u8>> {
+        let mut gpu = crate::background::test_gpu::test_gpu()?;
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let lit = lit_quad();
+        let floor = placed(1.0, DVec3::ZERO);
+        let card = placed(0.25, DVec3::new(0.5, 0.0, 1.0));
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        for (key, transform) in [(1, &floor), (2, &card)] {
+            meshes.push(
+                0,
+                [(key, 1), (key, 1)],
+                [None, None],
+                &Content {
+                    transform,
+                    opacity: &opacity,
+                    mesh: Some(&lit),
+                    lines: None,
+                    material: lit.material.as_ref(),
+                    line_width: None,
+                },
+            );
+        }
+        let illumination = Illumination {
+            lighting: Lighting3D::default(),
+            lights,
+        };
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        Some(gpu.read(&target).chunks(4).map(|pixel| pixel[0]).collect())
+    }
+
+    #[test]
+    fn a_point_light_shadows_through_the_face_of_its_cube_the_floor_lies_in() {
+        // From (1.5, 0, 3) through the card, the shadow falls around the
+        // middle of the floor, which the light sees through its -z face.
+        let Some(red) = floor_and_card(vec![Light {
+            position: DVec3::new(1.5, 0.0, 3.0),
+            directional: false,
+            color: [1.0; 3],
+        }]) else {
+            return;
+        };
+        // At 16 pixels per unit: the shadow at (-0.2, 0), the floor in the
+        // light at (-0.2, 0.75).
+        let (shadow, light) = (red[32 * 64 + 29], red[20 * 64 + 29]);
+        assert!(
+            u16::from(shadow) + 40 < u16::from(light),
+            "shadow {shadow}, light {light}"
+        );
+    }
+
     #[test]
     fn a_mesh_draws_into_the_image_the_scene_shows() {
         let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
@@ -1903,6 +2900,7 @@ mod tests {
             [(1, 1), (1, 1)],
             [None, None],
             &Content {
+                line_width: None,
                 transform: &transform,
                 opacity: &opacity,
                 mesh: Some(&red),

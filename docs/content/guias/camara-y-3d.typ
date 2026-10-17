@@ -318,6 +318,10 @@ scene.render()
   Mientras hay luces, sustituyen a la luz principal fija, cada una en su
   color e intensidad; `fade_in` y `fade_out` la encienden y la apagan. Con
   `lighting_3d("none")` solo alumbran ellas.
+- Las mallas opacas proyectan sombra de la luz principal, o de las dos
+  primeras luces de `light_3d`, sobre lo que recibe luz: un cubo sobre un
+  plano deja su sombra en el plano. El borde de la sombra es suave.
+  `lighting_3d(shadows=False)` las quita.
   `"none"` deja solo la emisión del material.
 - Las caras planas se pintan de un solo color y las curvas con degradados
   suaves.
@@ -381,7 +385,10 @@ puntos se reproducen a la frecuencia de la pantalla.
 - Las primitivas con `Material3D` reciben luz, calculada en cada píxel, y
   ocultan sus caras traseras. Las mallas sin material (superficies, gráficos
   3D) no reciben luz y se ven por las dos caras; las líneas 3D tampoco
-  reciben luz y miden 1,5 px con extremos redondeados.
+  reciben luz y tienen extremos redondeados.
+- Una línea 3D mide en pantalla el ancho de su trazo, `.stroke(color, ancho)`
+  en unidades de la escena, a cualquier profundidad; sin trazo, 1,5 px.
+  En una línea con trazo, `animate.stroke_width(...)` anima el ancho.
 - Las superficies y las líneas que se cruzan se cortan donde corresponde, y
   la geometría que atraviesa el plano cercano de la cámara se recorta.
 - Un objeto translúcido (con opacidad, o con colores con transparencia) se
@@ -389,8 +396,10 @@ puntos se reproducen a la frecuencia de la pantalla.
   tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante.
 - Una línea sobre una superficie en el mismo plano, como la rejilla del
   suelo bajo un gráfico, queda debajo de la superficie.
-- No hay sombras: `lighting_3d(shadows=True)` se acepta, pero ningún objeto
-  proyecta sombra.
+- Las sombras salen de mapas de sombra: uno por luz direccional y seis
+  (un cubo) por luz puntual, que cubren todas las mallas. Proyectan sombra
+  las mallas opacas; no las translúcidas, las líneas ni las que brillan
+  (`Material3D.emissive`), que pueden contener la luz que las hace brillar.
 - Todo el contenido 3D se dibuja debajo del 2D: etiquetas, textos y HUD
   quedan siempre encima.
 
