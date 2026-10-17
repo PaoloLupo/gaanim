@@ -892,8 +892,9 @@ fn write_three_d(
         }
     }
     w.rect(three_d.opacity_fallback);
-    // A count of elements drawn again, not of bytes that follow.
-    w.var(three_d.elements as u64);
+    // Formerly the count of elements a CPU projection drew; the GPU draws
+    // the content now, beneath the elements, and readers ignore it.
+    w.var(0);
     w.len(three_d.sources.len());
     for source in &three_d.sources {
         w.var(u64::from(keys.key(source.entity)));
@@ -942,7 +943,8 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
         });
     }
     let opacity_fallback = r.rect()?;
-    let elements = usize::try_from(r.var()?).map_err(|_| corrupt("3D element count"))?;
+    // A count of elements a CPU projection drew, which the GPU replaced.
+    usize::try_from(r.var()?).map_err(|_| corrupt("3D element count"))?;
     let count = r.len()?;
     let mut sources = Vec::with_capacity(count.min(1 << 16));
     for _ in 0..count {
@@ -984,7 +986,6 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
         lights,
         opacity_fallback,
         sources,
-        elements,
     })
 }
 
@@ -1833,10 +1834,6 @@ impl FrameRecord {
         if !frame.capture.glasses.is_empty() {
             tables.glass = true;
         }
-        // The projection of the 3D content is drawn again from the content.
-        let projected = frame.capture.three_d.as_ref().map_or(0, |three_d| {
-            three_d.elements.min(frame.capture.elements.len())
-        });
         Self {
             three_d: frame.capture.three_d.as_ref().map(|three_d| {
                 let mut w = Writer::new();
@@ -1853,7 +1850,9 @@ impl FrameRecord {
                 w.into_bytes()
             }),
             post: frame.post.clone(),
-            elements: frame.capture.elements[projected..]
+            elements: frame
+                .capture
+                .elements
                 .iter()
                 .map(|element| ElementRecord::capture(element, tables, keys, lottie(element)))
                 .collect(),
@@ -1899,24 +1898,14 @@ impl FrameRecord {
         tables: &DecodedTables,
         lottie_scene: &mut dyn FnMut(u32) -> Result<Option<Arc<vello::Scene>>>,
     ) -> Result<Frame> {
-        let mut three_d = self
+        // The GPU draws the 3D content from what was recorded (see
+        // `gaanim_renderer::three_d`).
+        let three_d = self
             .three_d
             .as_ref()
             .map(|bytes| read_three_d(&mut Reader::new(bytes), tables))
             .transpose()?;
-        // The same code projects it again. Shading calls functions such as
-        // `powf` whose last bits differ between platforms (the web player's
-        // WebAssembly), which may group triangles into other runs: the
-        // projection drawn here is the frame's, whatever it counts.
-        let mut elements = match &mut three_d {
-            Some(three_d) => {
-                let projected =
-                    gaanim_renderer::pipeline::captured_three_d_elements(three_d, &self.camera);
-                three_d.elements = projected.len();
-                projected
-            }
-            None => Vec::new(),
-        };
+        let mut elements = Vec::with_capacity(self.elements.len());
         for element in &self.elements {
             let scene = element
                 .lottie

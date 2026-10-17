@@ -575,8 +575,10 @@ pub(crate) fn render_previews_in_world_system(
     let Some((time, keys)) = plan.captures.pop_front() else {
         return;
     };
-    let (scene, base_color) = match playback.preview_scene(time, width, height) {
-        crate::bundle_player::Preview::Ready(scene, base_color) => (*scene, base_color),
+    let (scene, three_d, base_color) = match playback.preview_scene(time, width, height) {
+        crate::bundle_player::Preview::Ready(scene, three_d, base_color) => {
+            (*scene, three_d, base_color)
+        }
         // The web player downloads the frame's chunk; capture it then.
         crate::bundle_player::Preview::Pending => {
             plan.captures.push_front((time, keys));
@@ -599,6 +601,7 @@ pub(crate) fn render_previews_in_world_system(
         .spawn((
             VelloImageRender {
                 scene: Arc::new(scene),
+                three_d,
                 image: image.clone(),
                 base_color,
             },

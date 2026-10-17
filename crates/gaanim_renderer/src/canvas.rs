@@ -812,7 +812,7 @@ fn render_canvas(
     mut object_effects: ResMut<CanvasObjectEffects>,
     mut rendered: ResMut<RenderedCanvas>,
     mut overflow: ResMut<CanvasOverflow>,
-    three_d: Option<Res<crate::three_d_gpu::RenderGpuThreeD>>,
+    three_d: Option<Res<crate::three_d::RenderGpuThreeD>>,
 ) {
     let Some(target) = extracted.image.and_then(|image| images.get(image)) else {
         return;

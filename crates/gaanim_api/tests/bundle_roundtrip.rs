@@ -884,7 +884,7 @@ fn a_video_exported_from_a_bundle_with_reactive_shaders_matches_the_scene_export
 
 /// A lit sphere and cube under a point light, seen by a perspective camera
 /// that orbits them, records its meshes once and the camera per frame, and
-/// draws the projection again exactly.
+/// the GPU draws them again from the recording.
 #[test]
 fn three_d_content_records_its_meshes_and_draws_them_again() {
     let directory = tempfile::tempdir().unwrap();
@@ -892,7 +892,7 @@ fn three_d_content_records_its_meshes_and_draws_them_again() {
     let mut canvas = SceneModel::new(16.0, 9.0);
     let material =
         gaanim_scene::Material3D::new(Color::from_rgb8(200, 80, 60), 0.5, 0.0, None, 0.0).unwrap();
-    // Dense enough that its projection draws thousands of elements.
+    // Dense: thousands of triangles, stored once.
     canvas.sphere(1.0, 96, 64, material).unwrap();
     canvas.cube(1.2, material).unwrap();
     canvas.light_3d(gaanim_scene::LightKind3D::Point, Color::WHITE, 1.0);
@@ -929,8 +929,15 @@ fn three_d_content_records_its_meshes_and_draws_them_again() {
         .three_d
         .as_ref()
         .expect("the frame keeps its 3D content");
-    assert!(three_d.elements > 1000, "{}", three_d.elements);
-    assert!(three_d.elements <= middle.capture.elements.len());
+    let meshes = three_d
+        .sources
+        .iter()
+        .filter(|source| source.mesh.is_some())
+        .count();
+    assert_eq!(meshes, 2);
+    // Both draw into one image the frame shows.
+    let (composed, _) = gaanim_bundle::compose_frame_layers(&middle, None, &mut Default::default());
+    assert_eq!(composed.three_d.len(), 1);
     assert!(bundle.verify().unwrap().is_empty());
 }
 

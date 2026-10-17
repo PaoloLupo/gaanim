@@ -200,11 +200,11 @@ estilo de Gaanim: luz de cielo y suelo, una luz principal suave y un brillo leve
 en los bordes, conservando el color de cada material. Consulta
 `examples/3d/primitives_3d.py` y `examples/3d/materials_3d.py` para verlas con todas sus opciones.
 
-Vello dibuja el 3D como el resto de la escena: proyecta las mallas y las líneas
-3D con la cámara, las ordena de atrás hacia delante y calcula la luz en la CPU.
-No hay sombras ni búfer de profundidad, la geometría que se cruza puede
-ordenarse mal y el 3D queda debajo del contenido 2D. Gaanim ya no importa
-glTF: `scene.media.gltf(...)` lanza `NotImplementedError`.
+El 3D se rasteriza en la GPU, con búfer de profundidad, antialiasing MSAA y luz
+calculada en cada píxel, y Vello compone el resultado debajo del contenido 2D:
+el coste de un fotograma depende de cuántos objetos 3D hay, no de cuántos
+triángulos tienen. No hay sombras. Gaanim ya no importa glTF:
+`scene.media.gltf(...)` lanza `NotImplementedError`.
 
 Las escenas 2D y 3D abren con el modo interactivo desactivado. Cuando el usuario
 pulsa `I` o usa **Interactivo: ON/OFF** en Overlays (`O`), la cámara interactiva

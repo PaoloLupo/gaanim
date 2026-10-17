@@ -1213,10 +1213,9 @@ scene.play(iso.animate_to(plan).defaults(duration=1.5))
 #experimental()
 
 Primitivas iluminadas con `Material3D`, líneas en el espacio y estelas 3D.
-Gaanim las dibuja con Vello: proyecta cada triángulo con la cámara, los ordena
-de atrás hacia delante y calcula la luz en la CPU. No hay sombras ni búfer de
-profundidad, así que las superficies que se cruzan pueden mostrar errores de
-orden, y todo el 3D queda debajo del contenido 2D. Gaanim usa un
+Gaanim las rasteriza en la GPU con un búfer de profundidad y luz calculada en
+cada píxel (ver #link("/guias/camara-y-3d/")[Cámara y 3D]). No hay sombras, y
+todo el 3D queda debajo del contenido 2D. Gaanim usa un
 mundo dextrógiro con Y hacia arriba: cilindros y conos crecen a lo largo de Y y
 los planos yacen en XZ. Los puntos 3D son tuplas `(x, y, z)`. La guía
 #link("/guias/camara-y-3d/")[Cámara y 3D] explica la cámara en perspectiva.

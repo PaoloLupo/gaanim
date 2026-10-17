@@ -1160,6 +1160,7 @@ impl FrameRasterizer {
     ) -> Result<Vec<u8>> {
         if frame.motion_blur.is_empty() {
             let job = self.frame_job(frame, overlay);
+            self.gpu.prepare_three_d(&job.three_d);
             return self
                 .gpu
                 .render_frame_layers(
@@ -1272,9 +1273,24 @@ pub fn compose_bundle_frame(
     height: u32,
     fit: crate::config::OutputFit,
     overlay: Option<&gaanim_animation::live::LiveOverlay>,
-) -> vello::Scene {
-    compose_bundle_parts(frame, background, store, width, height, fit, overlay, false).flattened()
+) -> (vello::Scene, Vec<gaanim_renderer::three_d::GpuMeshFrame>) {
+    let mut composed = compose_bundle_parts(
+        frame,
+        background,
+        store,
+        (width, height),
+        fit,
+        overlay,
+        false,
+        PREVIEW_THREE_D_SLOT,
+    );
+    let three_d = std::mem::take(&mut composed.three_d);
+    (composed.flattened(), three_d)
 }
+
+/// Image slots of the 3D content of [`compose_bundle_frame`]'s previews,
+/// which the preview's renderer draws while the canvas uses the first ones.
+const PREVIEW_THREE_D_SLOT: usize = 64;
 
 /// [`compose_bundle_frame`] keeping a shader transition's segments apart,
 /// for [`GpuContext::render_frame_layers`].
@@ -1287,24 +1303,35 @@ pub fn compose_bundle_layers(
     fit: crate::config::OutputFit,
     overlay: Option<&gaanim_animation::live::LiveOverlay>,
 ) -> gaanim_renderer::pipeline::ComposedFrame {
-    compose_bundle_parts(frame, background, store, width, height, fit, overlay, true)
+    compose_bundle_parts(
+        frame,
+        background,
+        store,
+        (width, height),
+        fit,
+        overlay,
+        true,
+        0,
+    )
 }
 
 /// [`compose_bundle_layers`]; with `gpu`, shader backgrounds are left to
 /// the renderer's device as [`ComposedFrame::backgrounds`], otherwise they
-/// are drawn through the CPU.
+/// are drawn through the CPU. The 3D content draws into images from slot
+/// `three_d_slot` on (see [`ComposedFrame::three_d`]).
 ///
 /// [`ComposedFrame::backgrounds`]: gaanim_renderer::pipeline::ComposedFrame::backgrounds
+/// [`ComposedFrame::three_d`]: gaanim_renderer::pipeline::ComposedFrame::three_d
 #[allow(clippy::too_many_arguments)]
 fn compose_bundle_parts(
     frame: &gaanim_bundle::Frame,
     background: Option<&gaanim_renderer::pipeline::CanvasBackground>,
     store: &mut gaanim_renderer::fragment::FragmentStore,
-    width: u32,
-    height: u32,
+    (width, height): (u32, u32),
     fit: crate::config::OutputFit,
     overlay: Option<&gaanim_animation::live::LiveOverlay>,
     gpu: bool,
+    three_d_slot: usize,
 ) -> gaanim_renderer::pipeline::ComposedFrame {
     let resolved =
         gaanim_math::ResolvedCamera::new(frame.camera, gaanim_math::CameraViewport::default());
@@ -1313,6 +1340,13 @@ fn compose_bundle_parts(
         gaanim_renderer::pipeline::output_pixels_per_unit(&frame.camera, background.pixel_size.0)
     });
     let mut background_requests = Vec::new();
+    // The recorded meshes draw into images of the output's pixels.
+    let three_d = gaanim_renderer::pipeline::CapturedGpuThreeD {
+        camera: &frame.camera,
+        size: (width, height),
+        placement: capture_camera_to_vello_transform(Some(&resolved), width, height, fit),
+        slot: three_d_slot,
+    };
     let mut composed = gaanim_renderer::pipeline::compose_captured_frame(
         &frame.capture,
         store,
@@ -1321,6 +1355,7 @@ fn compose_bundle_parts(
         gpu.then_some(&mut background_requests),
         0.0,
         pixels_per_unit.unwrap_or(gaanim_renderer::pipeline::DEFAULT_EFFECT_DENSITY),
+        Some(three_d),
     );
     composed.backgrounds = background_requests;
     store.end_frame();
