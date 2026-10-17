@@ -1275,7 +1275,7 @@ world = scene.viz.cartesian_3d(
 #api-entry(
   name: "CoordinateSpace3D.surface",
   kind: "method",
-  desc: [Superficie `z = f(x, y)` muestreada en una rejilla de `resolution`, con `inputs` reactivas como `plot`. Los vértices se colorean por altura, de la más baja a la más alta, con `color_map`: un `ColorMap` o el nombre de un mapa integrado, como `"viridis"` o `"plasma"`. Sin él, usa una rampa de azul, verde y rojo.],
+  desc: [Superficie `z = f(x, y)` muestreada en una rejilla de `resolution`, con `inputs` reactivas como `plot`. Los vértices se colorean por altura, de la más baja a la más alta, con `color_map`: un `ColorMap` o el nombre de un mapa integrado, como `"viridis"` o `"plasma"`. Sin él, usa una rampa de azul, verde y rojo. Con `vectorized=True`, `function` se llama una vez para toda la rejilla, cada vez que cambian sus entradas, en lugar de una vez por vértice: `x` e `y` son arrays de numpy de solo lectura con un valor por vértice, y devuelve el array de alturas (o un número para todas); una altura `NaN` deja un hueco. Necesita numpy y es mucho más rápido en rejillas grandes o animadas.],
 )[
 ```python
 >>>from gaanim import *

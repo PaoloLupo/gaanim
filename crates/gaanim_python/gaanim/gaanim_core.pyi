@@ -8146,6 +8146,7 @@ class CoordinateSpace3D:
         *,
         resolution: tuple[int, int] = (64, 48),
         inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
+        vectorized: bool = False,
         color_map: Optional[ColorMapLike] = None,
     ) -> Drawable:
         """Sample ``z = f(x, y)`` on a grid of ``resolution`` points and draw it as a lit mesh.
@@ -8156,8 +8157,16 @@ class CoordinateSpace3D:
         map such as ``"viridis"`` or ``"plasma"``. Without one, a blue, green
         and red ramp.
 
+        ``vectorized=True`` calls ``function`` once for the whole grid, each
+        time its inputs change, instead of once per vertex: ``x`` and ``y``
+        are read-only numpy arrays with one entry per vertex, the inputs are
+        numbers, and it returns an array of heights (or one number for all).
+        A NaN height leaves a hole. It needs numpy, and is much faster for
+        large or animated grids.
+
         Example:
             hill = space.surface(lambda x, y: math.exp(-(x * x + y * y)), color_map="magma")
+            wave = space.surface(lambda x, y, t: np.sin(x + t) * np.cos(y), inputs=[phase], vectorized=True)
         """
         ...
     def parametric(self, function: Callable[..., tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...

@@ -75,6 +75,9 @@ actualizar».
   `gallery/catenoid_helicoid`.
 - Las superficies reactivas (`surface` y `parametric_surface`) se vuelven
   a muestrear solo cuando cambian sus entradas, no en cada fotograma.
+- `space.surface(..., vectorized=True)` calcula toda la rejilla con una
+  llamada con arrays de numpy, como `parametric_surface`, en lugar de una
+  llamada de Python por vértice.
 
 == 3D
 
