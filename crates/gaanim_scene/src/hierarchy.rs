@@ -98,12 +98,18 @@ impl Plugin for GaanimScenePlugin {
             )
                 .in_set(SceneSet::Propagation),
         );
-        // Billboards face the camera after hierarchy propagation.
+        // Billboards face the camera after hierarchy propagation, and fade
+        // behind 3D meshes before opacity propagates.
         app.add_systems(
             Update,
-            crate::systems::billboard_system
-                .in_set(SceneSet::Propagation)
-                .after(crate::systems::transform_propagation_system),
+            (
+                crate::systems::billboard_system
+                    .after(crate::systems::transform_propagation_system),
+                crate::occlusion::billboard_occlusion_system
+                    .after(crate::systems::billboard_system)
+                    .before(crate::systems::opacity_propagation_system),
+            )
+                .in_set(SceneSet::Propagation),
         );
         app.add_systems(
             Update,

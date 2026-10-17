@@ -8832,6 +8832,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             strip,
             color,
             colors,
+            revealed: None,
         };
         let entity = self
             .commands

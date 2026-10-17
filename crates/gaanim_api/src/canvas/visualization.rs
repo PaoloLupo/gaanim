@@ -409,6 +409,16 @@ pub struct CoordinateSpace3DHandle {
     pub(crate) layers: HashMap<SpaceLayer, DrawableHandle>,
 }
 
+impl CoordinateSpace3DHandle {
+    /// The `(x, y)` data points a surface of this space samples on a grid of
+    /// `resolution` points, in its vertex order: what a function that
+    /// computes every height of the surface at once is called with.
+    #[doc(hidden)]
+    pub fn surface_grid(&self, resolution: [usize; 2]) -> Vec<[f64; 2]> {
+        gaanim_visualization::sampling::surface_grid(&self.map, resolution)
+    }
+}
+
 #[derive(Clone)]
 pub struct VectorField2DHandle {
     pub(crate) space: CoordinateSpaceHandle,
@@ -3616,9 +3626,13 @@ impl SceneModel {
         if resolution[0] < 2 || resolution[1] < 2 {
             return Err(gaanim_visualization::SamplingError::TooFewSamples.into());
         }
-        if function.coordinate_arity() != 2 || function.output_arity() != 1 {
+        // One point at a time, or every height of the grid at once, in the
+        // order of `CoordinateSpace3DHandle::surface_grid`.
+        let arity = (function.coordinate_arity(), function.output_arity());
+        if arity != (2, 1) && arity != (0, resolution[0] * resolution[1]) {
             return Err(gaanim_visualization::SamplingError::InvalidDomain.into());
         }
+        self.validate_batch_function(&function)?;
         let handle = self.spawn(SpawnKind::ReactiveSurface3D {
             map: space.map.clone(),
             function,
@@ -3698,7 +3712,7 @@ impl SceneModel {
             color,
             color_map,
             color_range,
-            material,
+            material: material.map(Box::new),
         });
         self.attach_to_space_3d(space, &handle);
         Ok(handle)
@@ -6936,6 +6950,68 @@ mod tests {
         // Both sides of 2 x 3 cells of two triangles each, over 12 vertices.
         assert_eq!(meshes[0].vertices.len(), 24);
         assert_eq!(meshes[0].indices.len(), 2 * 2 * 3 * 2 * 3);
+    }
+
+    #[test]
+    fn batched_surfaces_match_per_point_ones() {
+        let height = |x: f64, y: f64| (x * x - y * y) * 0.25;
+        let meshes = [false, true].map(|batched| {
+            let mut canvas = SceneModel::new(640, 360);
+            let space = canvas
+                .coordinate_axes_3d(
+                    Axis::linear(-2.0, 2.0).unwrap(),
+                    Axis::linear(-1.0, 1.0).unwrap(),
+                    Axis::linear(-2.0, 2.0).unwrap(),
+                    [4.0, 2.0, 4.0],
+                    false,
+                )
+                .unwrap();
+            let resolution = [5, 3];
+            let function = if batched {
+                // Every height at once, in the grid's order; one is missing.
+                let mut heights = space
+                    .surface_grid(resolution)
+                    .iter()
+                    .map(|&[x, y]| height(x, y))
+                    .collect::<Vec<_>>();
+                heights[0] = f64::MAX;
+                ReactiveFunction::new(0, 15, Vec::new(), move |_| Ok(heights.clone()))
+            } else {
+                ReactiveFunction::new(2, 1, Vec::new(), move |xy| {
+                    let missing = xy[0] == -2.0 && xy[1] == -1.0;
+                    Ok(vec![if missing {
+                        f64::NAN
+                    } else {
+                        height(xy[0], xy[1])
+                    }])
+                })
+            };
+            canvas
+                .reactive_surface_plot(&space, function, resolution, None)
+                .unwrap();
+            let mut world = bevy::prelude::World::new();
+            world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+            world
+                .query::<&gaanim_scene::TriangleMeshData>()
+                .iter(&world)
+                .find(|mesh| mesh.vertices.len() == 15)
+                .expect("the surface")
+                .clone()
+        });
+        let finite = |mesh: &gaanim_scene::TriangleMeshData| {
+            mesh.vertices
+                .iter()
+                .map(|v| v.map(|value| if value.is_finite() { value } else { 0.0 }))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(finite(&meshes[0]), finite(&meshes[1]));
+        assert_eq!(meshes[0].indices, meshes[1].indices);
+        // 4 x 2 cells of two triangles, less the corner one with the hole.
+        assert_eq!(meshes[0].indices.len(), 7 * 2 * 3);
     }
 
     #[test]

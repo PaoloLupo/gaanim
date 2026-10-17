@@ -224,6 +224,7 @@ fn sampled_reactive_parametric_3d(
         strip: false,
         color,
         colors: None,
+        revealed: None,
     }
 }
 
@@ -235,15 +236,22 @@ fn sampled_reactive_surface_3d(
     time: f64,
     values: &[(ObjectId, f64)],
 ) -> TriangleMeshData {
-    let mesh = gaanim_visualization::sample_surface(map, resolution, |x, y| {
-        function
-            .evaluate(&[x, y], time, |logical| {
-                values
-                    .iter()
-                    .find_map(|(id, value)| (*id == logical).then_some(*value))
-            })
+    let lookup = |logical| {
+        values
+            .iter()
+            .find_map(|(id, value)| (*id == logical).then_some(*value))
+    };
+    // A function with no coordinates gives every height at once, in the
+    // grid's order; f64::MAX marks a missing one.
+    let mut heights = (function.coordinate_arity() == 0)
+        .then(|| function.evaluate(&[], time, lookup).unwrap_or_default())
+        .map(Vec::into_iter);
+    let mesh = gaanim_visualization::sample_surface(map, resolution, |x, y| match &mut heights {
+        Some(heights) => heights.next().filter(|z| *z != f64::MAX),
+        None => function
+            .evaluate(&[x, y], time, lookup)
             .ok()
-            .map(|output| output[0])
+            .map(|output| output[0]),
     })
     .unwrap_or(gaanim_visualization::SurfaceMesh {
         vertices: Vec::new(),
@@ -685,6 +693,7 @@ fn reactive_arrow_lines_3d(
         strip: false,
         color: PenikoColor::WHITE,
         colors: Some(colors),
+        revealed: None,
     })
 }
 
@@ -8058,6 +8067,7 @@ impl SceneModel {
                                     strip: false,
                                     color: PenikoColor::WHITE,
                                     colors: None,
+                                    revealed: None,
                                 });
                             if let Some(mut visible) =
                                 world.get_mut::<gaanim_scene::LineListData>(entity)
@@ -8190,6 +8200,7 @@ impl SceneModel {
                                     strip: true,
                                     color: PenikoColor::WHITE,
                                     colors: None,
+                                    revealed: None,
                                 };
                                 if let Some(mut visible) =
                                     world.get_mut::<gaanim_scene::LineListData>(entity)
@@ -8212,6 +8223,7 @@ impl SceneModel {
                                     strip: true,
                                     color: PenikoColor::WHITE,
                                     colors: None,
+                                    revealed: None,
                                 };
                                 if let Some(mut visible) =
                                     world.get_mut::<gaanim_scene::LineListData>(entity)
@@ -8260,6 +8272,7 @@ impl SceneModel {
                                 strip: true,
                                 color: PenikoColor::WHITE,
                                 colors: Some(colors),
+                                revealed: None,
                             };
                             if let Some(mut visible) =
                                 world.get_mut::<gaanim_scene::LineListData>(entity)
@@ -11203,7 +11216,7 @@ impl SceneModel {
                     color,
                     color_map.as_ref(),
                     *color_range,
-                    *material,
+                    material.as_deref().copied(),
                     builder.current_time,
                     &values,
                 );
@@ -11217,7 +11230,7 @@ impl SceneModel {
                     let (u_domain, v_domain, resolution) = (*u_domain, *v_domain, *resolution);
                     let color = color.clone();
                     let color_map = color_map.clone();
-                    let (color_range, material) = (*color_range, *material);
+                    let (color_range, material) = (*color_range, material.as_deref().copied());
                     let last = LastInputs::default();
                     let regen = ReactiveMeshRegen::new(move |world| {
                         let (time, values) = reactive_values(world, &parameter_entities);

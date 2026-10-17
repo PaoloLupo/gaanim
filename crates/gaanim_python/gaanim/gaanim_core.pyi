@@ -4597,7 +4597,9 @@ class Drawable:
         """Keep a 3D drawable facing the perspective camera.
 
         This is useful for labels and markers attached to a 3D scene. The
-        method is chainable and returns the same ``Drawable``.
+        label fades out, with its children, while an opaque 3D mesh lies
+        between its anchor and the camera. The method is chainable and
+        returns the same ``Drawable``.
 
         Example:
             label = scene.text("origin").move_to_3d(0.0, 1.0, 0.0).billboard()
@@ -5130,7 +5132,22 @@ class Material3D:
         metallic: float = 0.0,
         emissive: Optional[ColorLike] = None,
         emissive_strength: float = 0.0,
-    ) -> None: ...
+        outline: Optional[ColorLike] = None,
+        outline_width: float = 0.03,
+    ) -> None:
+        """A material; with ``outline``, the mesh's silhouette and folds are
+        drawn in that color, ``outline_width`` scene units wide, as the
+        contour of an illustration. An outline animates with the material.
+        A negative or non-finite width raises ``ValueError``.
+        """
+        ...
+    def outlined(self, color: ColorLike, width: float = 0.03) -> Material3D:
+        """This material with an outline of ``color``, ``width`` scene units wide.
+
+        Example:
+            cube = scene.geometry.cube(1.5, material=Material3D.matte(accent).outlined(ink))
+        """
+        ...
     @staticmethod
     def matte(color: ColorLike = WHITE) -> Material3D: ...
     @staticmethod
@@ -5147,6 +5164,10 @@ class Material3D:
     def emissive_color(self) -> Color: ...
     @property
     def emissive_strength(self) -> float: ...
+    @property
+    def outline(self) -> Color: ...
+    @property
+    def outline_width(self) -> float: ...
 
 class Primitive3D(Drawable):
     """Indexed 3D mesh with an animatable material, lit and drawn by Vello."""
@@ -8125,6 +8146,7 @@ class CoordinateSpace3D:
         *,
         resolution: tuple[int, int] = (64, 48),
         inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
+        vectorized: bool = False,
         color_map: Optional[ColorMapLike] = None,
     ) -> Drawable:
         """Sample ``z = f(x, y)`` on a grid of ``resolution`` points and draw it as a lit mesh.
@@ -8135,8 +8157,16 @@ class CoordinateSpace3D:
         map such as ``"viridis"`` or ``"plasma"``. Without one, a blue, green
         and red ramp.
 
+        ``vectorized=True`` calls ``function`` once for the whole grid, each
+        time its inputs change, instead of once per vertex: ``x`` and ``y``
+        are read-only numpy arrays with one entry per vertex, the inputs are
+        numbers, and it returns an array of heights (or one number for all).
+        A NaN height leaves a hole. It needs numpy, and is much faster for
+        large or animated grids.
+
         Example:
             hill = space.surface(lambda x, y: math.exp(-(x * x + y * y)), color_map="magma")
+            wave = space.surface(lambda x, y, t: np.sin(x + t) * np.cos(y), inputs=[phase], vectorized=True)
         """
         ...
     def parametric(self, function: Callable[..., tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
@@ -8518,8 +8548,9 @@ class Geometry:
         faint rim along silhouettes, keeping each material's color readable.
         ``"none"`` leaves only their emission. With ``shadows`` (the
         default), opaque 3D meshes (primitives, surfaces and plots) cast
-        shadows from the key light, or from the first two lights of
-        ``light_3d``, onto what is lit; glowing (emissive) meshes, which may
+        shadows from the key light, or from the first four lights of
+        ``light_3d``, onto what is lit, sharp where an object touches a
+        surface and softer as they part; glowing (emissive) meshes, which may
         hold a light, do not. ``shadows=False`` turns them off.
         Lights from ``light_3d`` replace the key light.
 
@@ -8545,7 +8576,7 @@ class Geometry:
         light stays, and each shines in ``color`` (white by default) at
         ``intensity``, dimmed by the light's opacity: ``fade_in`` and
         ``fade_out`` switch it on and off. With ``lighting_3d("none")`` only
-        the lights light the scene. The first two lights a scene shows cast
+        the lights light the scene. The first four lights a scene shows cast
         shadows (see ``lighting_3d``). Surfaces, 3D plots and lines are unlit.
         A negative or non-finite ``intensity`` or another ``kind`` raises
         ``ValueError``.
@@ -8966,7 +8997,8 @@ class Geometry:
         point, or ``colormap`` for ``"inferno"``, ``"viridis"``, or
         ``"plasma"``. The color list must match ``points`` in length. The
         line is as wide on screen as its stroke, ``.stroke(color, width)``
-        in scene units, and 1.5 output pixels without one.
+        in scene units, and without one 2 pixels of a 1080-pixel-tall
+        output, the same share of the frame at any output size.
 
         Example:
             path = scene.polyline_3d(

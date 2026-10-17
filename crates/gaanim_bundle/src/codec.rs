@@ -430,6 +430,7 @@ pub fn read_material(r: &mut Reader<'_>) -> Result<gaanim_scene::Material3D> {
         metallic: r.f32()?,
         emissive: read_color(r)?,
         emissive_strength: r.f32()?,
+        ..Default::default()
     })
 }
 
@@ -470,6 +471,7 @@ pub fn read_lines(r: &mut Reader<'_>) -> Result<gaanim_scene::LineListData> {
         strip: r.bool()?,
         color: read_color(r)?,
         colors: r.option(read_points)?,
+        revealed: None,
     })
 }
 

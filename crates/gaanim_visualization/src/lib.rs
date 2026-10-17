@@ -26,7 +26,8 @@ pub use chart::{
 pub use data::{Column, DataError, DataSource, DataTable, DataValue};
 pub use sampling::{
     SampledPath, Sampling, SamplingError, SurfaceMesh, VectorGlyph, implicit_contours,
-    sample_function, sample_parametric, sample_parametric_surface, sample_surface, sample_vector_field,
+    sample_function, sample_parametric, sample_parametric_surface, sample_surface,
+    sample_vector_field,
 };
 pub use space::{
     Cartesian3DVisibility, CartesianSpace, CartesianVisibility, ComplexSpace, CoordinateMap2D,

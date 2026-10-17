@@ -1379,7 +1379,7 @@ trefoil = scene.geometry.tube(knot, 0.25, closed=True, material=Material3D.metal
 #api-entry(
   name: "Geometry.lighting_3d",
   kind: "method",
-  desc: [Configura el único equipo automático de luces 3D de la escena. `"studio"` ilumina las primitivas con material al estilo de Gaanim (luz del cielo y del suelo, una luz principal suave desde arriba a la izquierda y un brillo leve en los bordes), escalada por `intensity`; `"none"` deja solo la emisión. Con `shadows` (por defecto), las mallas 3D opacas (primitivas, superficies y gráficos) proyectan sombra de la luz principal, o de las dos primeras luces de `light_3d`, sobre lo que recibe luz; las que brillan (emisivas), que pueden contener una luz, no. `shadows=False` las quita. Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Las luces de `light_3d` sustituyen a la luz principal.],
+  desc: [Configura el único equipo automático de luces 3D de la escena. `"studio"` ilumina las primitivas con material al estilo de Gaanim (luz del cielo y del suelo, una luz principal suave desde arriba a la izquierda y un brillo leve en los bordes), escalada por `intensity`; `"none"` deja solo la emisión. Con `shadows` (por defecto), las mallas 3D opacas (primitivas, superficies y gráficos) proyectan sombra de la luz principal, o de las cuatro primeras luces de `light_3d`, sobre lo que recibe luz, con un borde nítido al contacto que se suaviza con la distancia; las que brillan (emisivas), que pueden contener una luz, no. `shadows=False` las quita. Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Las luces de `light_3d` sustituyen a la luz principal.],
   none,
 )
 
@@ -1387,7 +1387,7 @@ trefoil = scene.geometry.tube(knot, 0.25, closed=True, material=Material3D.metal
   name: "Geometry.light_3d",
   kind: "factory",
   signature: "light_3d(kind=\"point\", *, color=None, intensity=1.0) -> Drawable",
-  desc: [Una luz para las primitivas con material, en el origen. No dibuja nada; es un dibujable, así que `move_to_3d` la coloca y `animate`, los grupos y `follow` la mueven. Una luz `"point"` alumbra desde su posición en todas direcciones; una `"directional"`, con rayos paralelos desde la dirección de su posición vista desde el origen, como el sol. Mientras la escena muestra luces, sustituyen a la luz principal fija de `lighting_3d`, cuya luz del cielo y del suelo se mantiene, y cada una alumbra en su `color` (blanco por defecto) con su `intensity`, atenuada por su opacidad: `fade_in` y `fade_out` la encienden y la apagan. Con `lighting_3d("none")` solo alumbran las luces. Las dos primeras luces que muestra la escena proyectan sombra (ver `lighting_3d`). Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Una `intensity` negativa o no finita, u otro `kind`, lanzan `ValueError`.],
+  desc: [Una luz para las primitivas con material, en el origen. No dibuja nada; es un dibujable, así que `move_to_3d` la coloca y `animate`, los grupos y `follow` la mueven. Una luz `"point"` alumbra desde su posición en todas direcciones; una `"directional"`, con rayos paralelos desde la dirección de su posición vista desde el origen, como el sol. Mientras la escena muestra luces, sustituyen a la luz principal fija de `lighting_3d`, cuya luz del cielo y del suelo se mantiene, y cada una alumbra en su `color` (blanco por defecto) con su `intensity`, atenuada por su opacidad: `fade_in` y `fade_out` la encienden y la apagan. Con `lighting_3d("none")` solo alumbran las luces. Las cuatro primeras luces que muestra la escena proyectan sombra (ver `lighting_3d`). Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Una `intensity` negativa o no finita, u otro `kind`, lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -1398,15 +1398,16 @@ scene.play([lamp.animate.move_to_3d(-3, 2, 4).duration(2.0)])
 ]
 
 #api-entry(
-  name: "Material3D.matte / metal / emissive / color / roughness / metallic / emissive_color / emissive_strength",
+  name: "Material3D.matte / metal / emissive / outlined / color / roughness / metallic / emissive_color / emissive_strength / outline / outline_width",
   kind: "class",
-  signature: "Material3D(color=WHITE, roughness=0.55, metallic=0.0, emissive=None, emissive_strength=0.0)",
-  desc: [Material de una primitiva 3D iluminada, sombreado por Gaanim: la rugosidad y la metalicidad dan forma al brillo y la emisión se suma a la luz. Sus propiedades numéricas se interpolan en espacio lineal y cuyos rangos se validan. Los atajos `Material3D.matte(color)`, `Material3D.metal(color)` y `Material3D.emissive(color, strength=1.0)` cubren los aspectos habituales. Las propiedades `color`, `roughness`, `metallic`, `emissive_color` y `emissive_strength` son de solo lectura.],
+  signature: "Material3D(color=WHITE, roughness=0.55, metallic=0.0, emissive=None, emissive_strength=0.0, outline=None, outline_width=0.03)",
+  desc: [Material de una primitiva 3D iluminada, sombreado por Gaanim: la rugosidad y la metalicidad dan forma al brillo y la emisión se suma a la luz. Sus propiedades numéricas se interpolan en espacio lineal y cuyos rangos se validan. Los atajos `Material3D.matte(color)`, `Material3D.metal(color)` y `Material3D.emissive(color, strength=1.0)` cubren los aspectos habituales. Con `outline`, la malla se dibuja con un contorno de ese color y `outline_width` unidades de la escena de ancho, como el de una ilustración: alrededor de la silueta y los pliegues de una malla cerrada o de una superficie de dos caras, y a lo largo del borde de una abierta, como un plano. `material.outlined(color, width=0.03)` devuelve el material con contorno, y el contorno se anima con `animate.material(...)`. Un ancho negativo o no finito lanza `ValueError`. Las propiedades `color`, `roughness`, `metallic`, `emissive_color`, `emissive_strength`, `outline` y `outline_width` son de solo lectura.],
 )[
 ```python
 >>>from gaanim import *
 glass = Material3D(color="#93c5fd", roughness=0.1, metallic=0.0)
 lamp = Material3D.emissive(GOLD, strength=2.0)
+inked = Material3D.matte(CYAN).outlined(BLACK, width=0.04)
 ```
 ]
 
@@ -1473,7 +1474,7 @@ title.move_to_3d(0, -1.5, 1).rotate_to_3d(-math.pi / 2, 0, 0)
   name: "Geometry.polyline_3d",
   kind: "factory",
   params: ((name: "points", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Al menos dos puntos finitos del mundo.]), (name: "color", type: "Color | None", default: "None", desc: [Color uniforme.]), (name: "colors", type: "Sequence[Color] | None", default: "None", desc: [Un color por punto; tiene prioridad sobre `colormap`.]), (name: "colormap", type: "str | None", default: "None", desc: [Degradado ordenado a lo largo de la línea, por ejemplo `"inferno"`, `"viridis"` o `"plasma"`.])),
-  desc: [Tira de líneas 3D en el espacio del mundo. La lista `colors` debe tener la misma longitud que `points`. Mide en pantalla el ancho de su trazo, `.stroke(color, ancho)` en unidades de la escena, a cualquier profundidad; sin trazo, 1,5 px.],
+  desc: [Tira de líneas 3D en el espacio del mundo. La lista `colors` debe tener la misma longitud que `points`. Mide en pantalla el ancho de su trazo, `.stroke(color, ancho)` en unidades de la escena, a cualquier profundidad; sin trazo, 2 px de una salida de 1080 px de alto (la misma parte del encuadre a cualquier tamaño).],
 )[
 ```python
 >>>from gaanim import *

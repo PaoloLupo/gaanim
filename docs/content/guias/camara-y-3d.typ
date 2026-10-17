@@ -307,6 +307,10 @@ scene.render()
 - `Material3D.matte(color)`, `Material3D.metal(color)` y
   `Material3D.emissive(color, strength)` son puntos de partida; el constructor
   `Material3D(color, roughness=, metallic=)` permite ajustarlos.
+- `Material3D.matte(color).outlined(ink)` añade un contorno de ilustración:
+  la silueta y los pliegues de una malla cerrada (y los bordes de una
+  abierta, como un plano) se dibujan en ese color, del ancho que se pida en
+  unidades de la escena.
 - `scene.geometry.lighting_3d("studio")` ilumina las primitivas con material
   al estilo de Gaanim: luz del cielo y del suelo, que aclara las caras que
   miran arriba y oscurece las que miran abajo; una luz principal suave desde
@@ -319,9 +323,11 @@ scene.render()
   Mientras hay luces, sustituyen a la luz principal fija, cada una en su
   color e intensidad; `fade_in` y `fade_out` la encienden y la apagan. Con
   `lighting_3d("none")` solo alumbran ellas.
-- Las mallas opacas proyectan sombra de la luz principal, o de las dos
+- Las mallas opacas proyectan sombra de la luz principal, o de las cuatro
   primeras luces de `light_3d`, sobre lo que recibe luz: un cubo sobre un
-  plano deja su sombra en el plano. El borde de la sombra es suave.
+  plano deja su sombra en el plano. El borde de la sombra es nítido donde el
+  objeto toca la superficie y se suaviza a medida que se separan, como bajo
+  el sol o una lámpara.
   `lighting_3d(shadows=False)` las quita.
   `"none"` deja solo la emisión del material.
 - Las caras planas se pintan de un solo color y las curvas con degradados
@@ -427,7 +433,8 @@ puntos se reproducen a la frecuencia de la pantalla.
   3D) no reciben luz y se ven por las dos caras; las líneas 3D tampoco
   reciben luz y tienen extremos redondeados.
 - Una línea 3D mide en pantalla el ancho de su trazo, `.stroke(color, ancho)`
-  en unidades de la escena, a cualquier profundidad; sin trazo, 1,5 px.
+  en unidades de la escena, a cualquier profundidad; sin trazo, 2 px de una
+  salida de 1080 px de alto, la misma parte del encuadre a cualquier tamaño.
   En una línea con trazo, `animate.stroke_width(...)` anima el ancho.
 - Las superficies y las líneas que se cruzan se cortan donde corresponde, y
   la geometría que atraviesa el plano cercano de la cámara se recorta.
@@ -441,7 +448,11 @@ puntos se reproducen a la frecuencia de la pantalla.
   las mallas opacas; no las translúcidas, las líneas ni las que brillan
   (`Material3D.emissive`), que pueden contener la luz que las hace brillar.
 - Todo el contenido 3D se dibuja debajo del 2D: etiquetas, textos y HUD
-  quedan siempre encima.
+  quedan siempre encima. La excepción son las etiquetas con `.billboard()`:
+  se desvanecen, con todo lo que contienen, mientras una malla opaca queda
+  entre su punto 3D y la cámara, y pierden opacidad poco a poco cuando
+  quedan a medias tras el borde de la malla. Se ocultan enteras, no por
+  píxel, y las líneas 3D no las tapan.
 
 El 3D aparece en la vista previa, las exportaciones, las capturas, los
 paquetes `.gaanim` (también en el reproductor web) y las vistas previas de
