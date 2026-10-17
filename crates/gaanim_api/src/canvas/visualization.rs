@@ -2213,6 +2213,22 @@ impl SceneModel {
         axis.with_theme_style(style)
     }
 
+    /// Scales of tick numbers and axis titles relative to body text: the
+    /// theme's `axes/numbers` and `axes/labels` sizes, or 1 and 1.125
+    /// without them.
+    fn axis_text_scales(&self) -> (f64, f64) {
+        let body_size = self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size;
+        let scale = |selector: &str, fallback: f64| {
+            self.theme_style
+                .as_ref()
+                .and_then(|theme| theme.styles.get(selector))
+                .and_then(|style| style.text.as_ref())
+                .and_then(|style| style.size)
+                .map_or(fallback, |size| size / body_size)
+        };
+        (scale("axes/numbers", 1.0), scale("axes/labels", 1.125))
+    }
+
     fn axis_text_size(&self, text: &str, scale: f64) -> (f64, f64) {
         let font_size =
             self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size * scale;
@@ -2651,6 +2667,27 @@ impl SceneModel {
             })
             .unwrap_or(Color::from_rgb8(0x50, 0x50, 0x50));
         let tick_half = size.into_iter().fold(f64::INFINITY, f64::min) * 0.015;
+        let axis_ticks = [x.ticks_values(7)?, y.ticks_values(7)?, z.ticks_values(7)?];
+        // Numbers and titles take the sizes of 2D axes. They face the camera
+        // centered on their anchor, so each keeps the 2D gap past its tick
+        // plus half its larger extent, clear of the axis whichever way the
+        // camera turns the offset.
+        let (number_scale, label_scale) = self.axis_text_scales();
+        let clearance = |text: &str, scale: f64| {
+            let (width, height) = self.axis_text_size(text, scale);
+            tick_half + super::view_ticks::NUMBER_GAP + width.max(height) * 0.5
+        };
+        let number_offsets = axis_ticks.each_ref().map(|ticks| {
+            ticks
+                .iter()
+                .filter(|tick| tick.major && !tick.label.is_empty())
+                .map(|tick| clearance(&tick.label, number_scale))
+                .fold(0.0, f64::max)
+        });
+        let label_offsets = [&x, &y, &z].map(|axis| {
+            axis.label_text()
+                .map_or(0.0, |label| clearance(label, label_scale))
+        });
         let mut numbers = Vec::new();
         let ticks_visible = [visibility.x_ticks, visibility.y_ticks, visibility.z_ticks];
         let numbers_visible = [
@@ -2658,8 +2695,12 @@ impl SceneModel {
             visibility.y_numbers,
             visibility.z_numbers,
         ];
+        // The three axes start at the box's lowest corner, where their first
+        // numbers would pile up: only the first axis numbered keeps its
+        // number there.
+        let mut corner_numbered = false;
         for (dimension, axis) in [x.clone(), y.clone(), z.clone()].into_iter().enumerate() {
-            for tick in axis.ticks_values(7)? {
+            for tick in &axis_ticks[dimension] {
                 let normalized = axis.normalize(tick.value)?;
                 let coordinate = min[dimension] + normalized * size[dimension];
                 let tick_color = axis.style_value().tick_color;
@@ -2724,34 +2765,41 @@ impl SceneModel {
                         grid_colors.extend_from_slice(&[grid_color, grid_color]);
                     }
                 }
-                let (from, to, label_position) = match dimension {
+                let offset = number_offsets[dimension];
+                let (from, to, number_position) = match dimension {
                     0 => (
                         [coordinate, min[1] - tick_half, min[2]],
                         [coordinate, min[1] + tick_half, min[2]],
-                        [coordinate, min[1] - tick_half * 4.0, min[2]],
+                        [coordinate, min[1] - offset, min[2]],
                     ),
                     1 => (
                         [min[0] - tick_half, coordinate, min[2]],
                         [min[0] + tick_half, coordinate, min[2]],
-                        [min[0] - tick_half * 4.0, coordinate, min[2]],
+                        [min[0] - offset, coordinate, min[2]],
                     ),
                     _ => (
                         [min[0] - tick_half, min[1], coordinate],
                         [min[0] + tick_half, min[1], coordinate],
-                        [min[0] - tick_half * 4.0, min[1], coordinate],
+                        [min[0] - offset, min[1], coordinate],
                     ),
                 };
                 if ticks_visible[dimension] {
                     tick_points.extend_from_slice(&[as_point(from), as_point(to)]);
                     tick_colors.extend_from_slice(&[tick_color, tick_color]);
                 }
-                if numbers_visible[dimension] && tick.major && !tick.label.is_empty() {
+                let at_corner = normalized <= 1e-12;
+                if numbers_visible[dimension]
+                    && tick.major
+                    && !tick.label.is_empty()
+                    && !(at_corner && corner_numbered)
+                {
+                    corner_numbered |= at_corner;
                     numbers.push(
                         self.text(&tick.label)
                             .fill(axis.style_value().number_color)
-                            .move_to_3d(label_position[0], label_position[1], label_position[2])
+                            .move_to_3d(number_position[0], number_position[1], number_position[2])
                             .billboard()
-                            .scale_to(0.016),
+                            .scale_to(number_scale),
                     );
                 }
             }
@@ -2764,17 +2812,17 @@ impl SceneModel {
         for (axis, position, visible) in [
             (
                 &x,
-                [max[0] + tick_half * 5.0, min[1], min[2]],
+                [max[0] + label_offsets[0], min[1], min[2]],
                 visibility.x_labels,
             ),
             (
                 &y,
-                [min[0], max[1] + tick_half * 5.0, min[2]],
+                [min[0], max[1] + label_offsets[1], min[2]],
                 visibility.y_labels,
             ),
             (
                 &z,
-                [min[0], min[1], max[2] + tick_half * 5.0],
+                [min[0], min[1], max[2] + label_offsets[2]],
                 visibility.z_labels,
             ),
         ] {
@@ -2784,7 +2832,7 @@ impl SceneModel {
                         .fill(axis.style_value().label_color)
                         .move_to_3d(position[0], position[1], position[2])
                         .billboard()
-                        .scale_to(0.019),
+                        .scale_to(label_scale),
                 );
             }
         }
@@ -2952,26 +3000,7 @@ impl SceneModel {
             space.minor_grid_color = Color::from_rgba8(rgba.r, rgba.g, rgba.b, rgba.a / 2);
         }
         let mut geometry = space.geometry()?;
-        let number_scale = self
-            .theme_style
-            .as_ref()
-            .and_then(|theme| theme.styles.get("axes/numbers"))
-            .and_then(|style| style.text.as_ref())
-            .and_then(|style| style.size)
-            .map(|size| {
-                size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
-            })
-            .unwrap_or(1.0);
-        let label_scale = self
-            .theme_style
-            .as_ref()
-            .and_then(|theme| theme.styles.get("axes/labels"))
-            .and_then(|style| style.text.as_ref())
-            .and_then(|style| style.size)
-            .map(|size| {
-                size / self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size
-            })
-            .unwrap_or(1.125);
+        let (number_scale, label_scale) = self.axis_text_scales();
         self.lay_out_cartesian_axis_labels(&space, &mut geometry, number_scale, label_scale);
         let (line_mask, number_mask, data_mask) =
             self.cartesian_view_masks(&space, &geometry, number_scale);
@@ -3197,23 +3226,7 @@ impl SceneModel {
         let length = length.unwrap_or_else(|| self.safe_frame().width());
         let line = NumberLine::new(axis.clone(), length)?;
         let style = axis.style_value();
-        let body_size = self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size;
-        let number_scale = self
-            .theme_style
-            .as_ref()
-            .and_then(|theme| theme.styles.get("axes/numbers"))
-            .and_then(|style| style.text.as_ref())
-            .and_then(|style| style.size)
-            .map(|size| size / body_size)
-            .unwrap_or(1.0);
-        let label_scale = self
-            .theme_style
-            .as_ref()
-            .and_then(|theme| theme.styles.get("axes/labels"))
-            .and_then(|style| style.text.as_ref())
-            .and_then(|style| style.size)
-            .map(|size| size / body_size)
-            .unwrap_or(1.125);
+        let (number_scale, label_scale) = self.axis_text_scales();
         let mut axis_path = BezPath::new();
         if visibility.axis {
             axis_path.move_to(Point::new(-length * 0.5, 0.0));
@@ -3310,15 +3323,7 @@ impl SceneModel {
         let radial = self.themed_axis(radial);
         let space = PolarSpace::new(radial.clone(), radius)?;
         let style = radial.style_value();
-        let body_size = self.themed_text_config().roles[&gaanim_text::prelude::TextRole::Body].size;
-        let number_scale = self
-            .theme_style
-            .as_ref()
-            .and_then(|theme| theme.styles.get("axes/numbers"))
-            .and_then(|style| style.text.as_ref())
-            .and_then(|style| style.size)
-            .map(|size| size / body_size)
-            .unwrap_or(1.0);
+        let (number_scale, label_scale) = self.axis_text_scales();
         let bounds = gaanim_math::Bounds3D::new_2d(-radius, -radius, radius, radius);
         let mut grid_path = BezPath::new();
         let mut numbers_handles = Vec::new();
@@ -3371,14 +3376,6 @@ impl SceneModel {
         let axes = self.themed_axis_path(axes_path, bounds, style.color, style.width, "PolarAxes");
         let number_refs: Vec<&DrawableHandle> = numbers_handles.iter().collect();
         let numbers = self.group(&number_refs);
-        let label_scale = self
-            .theme_style
-            .as_ref()
-            .and_then(|theme| theme.styles.get("axes/labels"))
-            .and_then(|style| style.text.as_ref())
-            .and_then(|style| style.size)
-            .map(|size| size / body_size)
-            .unwrap_or(1.125);
         let labels = if visibility.labels
             && let Some(label) = radial.label_text()
         {
@@ -7127,6 +7124,46 @@ mod tests {
         for (actual, expected) in restored.into_iter().zip(point) {
             assert!((actual - expected).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn three_dimensional_numbers_and_labels_are_drawn_at_text_size() {
+        let mut canvas = SceneModel::new(1920, 1080);
+        canvas.set_theme("gaanim").unwrap();
+        let axis = |label: &str| {
+            Axis::linear(-2.0, 2.0)
+                .unwrap()
+                .ticks(1.0)
+                .unwrap()
+                .label(label)
+        };
+        canvas
+            .coordinate_axes_3d(axis("X"), axis("Y"), axis("Z"), [4.0, 4.0, 3.0], false)
+            .unwrap();
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+
+        // Each billboard is a tick number or an axis title, at the size of
+        // the theme's text rather than below a pixel.
+        use bevy::prelude::With;
+        use gaanim_math::SpatialTransform;
+        use gaanim_scene::{Billboard, LocalBounds};
+        let heights: Vec<f64> = world
+            .query_filtered::<(&SpatialTransform, &LocalBounds), With<Billboard>>()
+            .iter(&world)
+            .map(|(transform, bounds)| (bounds.0.max.y - bounds.0.min.y) * transform.scale.y)
+            .collect();
+        // Five numbers along x, four along y and z, whose -2 would sit on
+        // x's at the lowest corner, and three titles.
+        assert_eq!(heights.len(), 16);
+        assert!(
+            heights.iter().all(|height| (0.15..=0.6).contains(height)),
+            "{heights:?}"
+        );
     }
 
     #[test]
