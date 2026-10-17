@@ -413,6 +413,8 @@ pub struct FragmentStore {
     built: std::collections::HashMap<(usize, usize, bool), StoredFragment>,
     /// Frames composed so far, for evicting fragments no longer drawn.
     generation: u64,
+    /// The recorded meshes and lines the GPU draws, kept while drawn.
+    pub(crate) three_d: crate::three_d::MeshSources,
 }
 
 struct StoredFragment {

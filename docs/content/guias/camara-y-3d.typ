@@ -371,23 +371,32 @@ superficie como un relieve se usa `up=(0, 0, 1)` en `look_at`.
 
 == Cómo se dibuja el 3D
 
-Gaanim dibuja el 3D con Vello, igual que el 2D: proyecta las mallas de
-triángulos y las líneas 3D a través de la cámara de la escena, las ordena de
-atrás hacia delante y calcula la luz en la CPU. De ahí salen sus límites:
+Gaanim rasteriza el 3D en la GPU. Cada malla y cada línea se sube una vez,
+cuando cambia, y en cada fotograma se dibuja con un búfer de profundidad y
+antialiasing MSAA 4x. El resultado es una imagen que Vello compone debajo del
+contenido 2D. Por eso el coste de un fotograma depende de cuántos objetos 3D
+hay, no de cuántos triángulos tienen: superficies densas y curvas de miles de
+puntos se reproducen a la frecuencia de la pantalla.
 
-- Las primitivas con `Material3D` reciben luz y ocultan sus caras traseras.
-  Las mallas sin material (superficies, gráficos 3D) no reciben luz y se ven
-  por las dos caras; las líneas 3D tampoco reciben luz y miden 1,5 px.
+- Las primitivas con `Material3D` reciben luz, calculada en cada píxel, y
+  ocultan sus caras traseras. Las mallas sin material (superficies, gráficos
+  3D) no reciben luz y se ven por las dos caras; las líneas 3D tampoco
+  reciben luz y miden 1,5 px con extremos redondeados.
+- Las superficies y las líneas que se cruzan se cortan donde corresponde, y
+  la geometría que atraviesa el plano cercano de la cámara se recorta.
+- Un objeto translúcido (con opacidad, o con colores con transparencia) se
+  ve como una capa: su superficie más cercana se mezcla una vez sobre lo que
+  tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante.
+- Una línea sobre una superficie en el mismo plano, como la rejilla del
+  suelo bajo un gráfico, queda debajo de la superficie.
 - No hay sombras: `lighting_3d(shadows=True)` se acepta, pero ningún objeto
   proyecta sombra.
-- No hay búfer de profundidad: los triángulos se ordenan por profundidad, así
-  que las superficies que se cruzan pueden mostrar errores de orden.
 - Todo el contenido 3D se dibuja debajo del 2D: etiquetas, textos y HUD
   quedan siempre encima.
 
-Como es dibujo normal de Vello, el 3D aparece en las exportaciones, las
-capturas, los paquetes `.gaanim` y las vistas previas de Presenter View, y
-admite desenfoque de movimiento y postprocesado.
+El 3D aparece en la vista previa, las exportaciones, las capturas, los
+paquetes `.gaanim` (también en el reproductor web) y las vistas previas de
+Presenter View, y admite desenfoque de movimiento y postprocesado.
 
 = Consejos
 

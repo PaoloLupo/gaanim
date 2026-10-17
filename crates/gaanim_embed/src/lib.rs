@@ -25,8 +25,10 @@ mod web {
     use gaanim_renderer::background::BackgroundPaint;
     use gaanim_renderer::fragment::FragmentStore;
     use gaanim_renderer::pipeline::{
-        CanvasBackground, camera_to_output, compose_captured_at, output_pixels_per_unit,
+        CanvasBackground, CapturedGpuThreeD, camera_to_output, compose_captured_at,
+        output_pixels_per_unit,
     };
+    use gaanim_renderer::three_d::{GpuMeshFrame, GpuThreeD};
     use vello::peniko::Color;
     use wasm_bindgen::prelude::*;
     use web_sys::HtmlCanvasElement;
@@ -136,8 +138,11 @@ mod web {
                 self.wanted
                     .extend(file.bundle.missing_around(index, READ_AHEAD_CHUNKS));
             }
-            let scene = file.compose(&frame, width, height);
-            if self.gpu.render(&scene, file.base, width, height)? {
+            let (scene, three_d) = file.compose(&frame, width, height);
+            if self
+                .gpu
+                .render(&scene, &three_d, file.base, width, height)?
+            {
                 file.shown = Some((index, width, height));
             }
             Ok(true)
@@ -236,8 +241,14 @@ mod web {
         }
 
         /// The scene `frame` draws on a canvas `width` by `height` pixels,
-        /// as an export at that size composes it.
-        fn compose(&mut self, frame: &Frame, width: u32, height: u32) -> vello::Scene {
+        /// as an export at that size composes it, and the frames of its 3D
+        /// content, which the GPU draws into images the scene shows.
+        fn compose(
+            &mut self,
+            frame: &Frame,
+            width: u32,
+            height: u32,
+        ) -> (vello::Scene, Vec<GpuMeshFrame>) {
             if let Some(background) = &mut self.background {
                 background.pixel_size = (width, height);
             }
@@ -245,26 +256,30 @@ mod web {
             let pixels_per_unit = background.and_then(|background| {
                 output_pixels_per_unit(&frame.camera, background.pixel_size.0)
             });
-            let scene = compose_captured_at(
+            // Fitted inside the canvas, as an export with `fit="contain"`.
+            let resolved = gaanim_math::ResolvedCamera::new(
+                frame.camera,
+                gaanim_math::CameraViewport::default(),
+            );
+            let placement = camera_to_output(Some(&resolved), width, height, false);
+            let (scene, three_d) = compose_captured_at(
                 &frame.capture,
                 &mut self.store,
                 background.map(|background| (background, (width, height))),
                 pixels_per_unit,
                 None,
                 0.0,
+                Some(CapturedGpuThreeD {
+                    camera: &frame.camera,
+                    size: (width, height),
+                    placement,
+                    slot: 0,
+                }),
             );
             self.store.end_frame();
             let mut placed = vello::Scene::new();
-            // Fitted inside the canvas, as an export with `fit="contain"`.
-            let resolved = gaanim_math::ResolvedCamera::new(
-                frame.camera,
-                gaanim_math::CameraViewport::default(),
-            );
-            placed.append(
-                &scene,
-                Some(camera_to_output(Some(&resolved), width, height, false)),
-            );
-            placed
+            placed.append(&scene, Some(placement));
+            (placed, three_d)
         }
     }
 
@@ -393,6 +408,8 @@ mod web {
         renderer: vello::Renderer,
         /// Copies Vello's output, which is a storage texture, to the canvas.
         blitter: wgpu::util::TextureBlitter,
+        /// Draws the 3D content into the images the scene shows.
+        three_d: GpuThreeD,
         /// Vello's output and its size.
         target: Option<(wgpu::TextureView, u32, u32)>,
     }
@@ -469,6 +486,7 @@ mod web {
                 config,
                 renderer,
                 blitter,
+                three_d: GpuThreeD::default(),
                 target: None,
             })
         }
@@ -510,16 +528,19 @@ mod web {
             view
         }
 
-        /// Draw `scene` over `base` and show it; `false` when the canvas
-        /// could not take a frame now.
+        /// Draw `scene`, with the 3D content of `three_d`, over `base` and
+        /// show it; `false` when the canvas could not take a frame now.
         fn render(
             &mut self,
             scene: &vello::Scene,
+            three_d: &[GpuMeshFrame],
             base: Color,
             width: u32,
             height: u32,
         ) -> Result<bool, JsValue> {
             let target = self.target(width, height);
+            self.three_d
+                .prepare(&self.device, &self.queue, &mut self.renderer, three_d);
             self.renderer
                 .render_to_texture(
                     &self.device,

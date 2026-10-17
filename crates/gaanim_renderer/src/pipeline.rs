@@ -7,7 +7,7 @@ use crate::effects::{
     PostProcessExempt, StrokeAlign, StrokeProfile, StrokeScalesWithObject, VectorOutlineBinding,
     ViewLayer,
 };
-use crate::fragment::{FragmentParts, FragmentRecipe, build_fragment, fragment_recipe};
+use crate::fragment::{FragmentParts, FragmentRecipe, fragment_recipe};
 use crate::lottie::LottiePlayer;
 use crate::stroke::{draw_stroke, scene_unit_stroke_transform};
 use bevy::prelude::*;
@@ -2640,7 +2640,8 @@ fn compile_scene_with_pins(
     pins: Option<&mut PinnedElements>,
     effects: bool,
 ) -> ComposedFrame {
-    let mut extraction = extract_world(world, camera, pins, true, effects, false);
+    let gpu_meshes = effects;
+    let mut extraction = extract_world(world, camera, pins, true, effects, false, gpu_meshes);
     let soft = soft_layers(&extraction.elements);
     if effects {
         crate::soft_effects::collect_group_shadows();
@@ -2695,6 +2696,7 @@ fn compile_scene_with_pins(
     );
     frame.effects = with_group_shadows(effect_layers, effects);
     frame.backgrounds = background_requests;
+    frame.three_d = std::mem::take(&mut extraction.gpu_three_d);
     if let Some(overlay) = world.get_resource::<gaanim_animation::live::LiveOverlay>() {
         append_live_overlay(frame.top_mut(), overlay);
     }
@@ -2788,6 +2790,8 @@ struct WorldExtraction {
     background_values: Vec<BackgroundValues>,
     /// What draws the frame's 3D content, when the extraction captures it.
     three_d: Option<CapturedThreeD>,
+    /// The meshes the GPU draws, when the extraction leaves them to it.
+    gpu_three_d: Vec<crate::three_d::GpuMeshFrame>,
 }
 
 /// The scene times whose backgrounds a frame may draw: the frame's and,
@@ -2851,6 +2855,7 @@ fn extract_world(
     cull: bool,
     gpu: bool,
     capture_three_d: bool,
+    gpu_meshes: bool,
 ) -> WorldExtraction {
     // Fragments of drawables not extracted this frame are dropped with it.
     let mut previous_fragments = world
@@ -3310,8 +3315,32 @@ fn extract_world(
         pins.recorded = true;
     }
     let mut three_d = capture_three_d.then(CapturedThreeD::default);
+    let mut gpu_three_d = Vec::new();
     if let Some(camera) = camera {
-        extract_three_d(
+        // The meshes draw into an image as large as the output, placed as
+        // the exporter places the scene.
+        let output = world
+            .get_resource::<CanvasBackground>()
+            .map(|background| background.pixel_size);
+        let resolved = world
+            .get_resource::<gaanim_math::ResolvedCamera>()
+            .copied()
+            .unwrap_or_else(|| {
+                gaanim_math::ResolvedCamera::new(*camera, gaanim_math::CameraViewport::default())
+            });
+        let mut mesh_sources = gpu_meshes.then(|| {
+            world
+                .remove_resource::<crate::three_d::MeshSources>()
+                .unwrap_or_default()
+        });
+        let meshes = mesh_sources
+            .as_mut()
+            .zip(output)
+            .and_then(|(sources, size)| {
+                let placement = camera_to_output(Some(&resolved), size.0, size.1, false);
+                crate::three_d::GpuMeshes::new(sources, size, placement, 0)
+            });
+        gpu_three_d = extract_three_d(
             world,
             camera,
             transition_frame.as_ref(),
@@ -3319,7 +3348,11 @@ fn extract_world(
             opacity_fallback,
             &mut extracted,
             three_d.as_mut(),
+            meshes,
         );
+        if let Some(sources) = mesh_sources {
+            world.insert_resource(sources);
+        }
     }
 
     extracted.sort_by(ExtractedElement::draw_order);
@@ -3333,17 +3366,21 @@ fn extract_world(
         background_time,
         background_values,
         three_d,
+        gpu_three_d,
     }
 }
 
 /// The 3D content of one drawable, with how it composes: whether it is a HUD
-/// overlay, whether the post-process leaves it out, and its view layer.
+/// overlay, whether the post-process leaves it out, and its view layer; last,
+/// the change ticks of its mesh and its lines, by which the GPU path keeps
+/// their uploads.
 pub(crate) type ThreeDSource<'a> = (
     Entity,
     crate::three_d::Content<'a>,
     bool,
     bool,
     Option<Arc<str>>,
+    (u32, u32),
 );
 
 /// Components of a drawable with 3D content.
@@ -3351,8 +3388,8 @@ type ThreeDData = (
     Entity,
     &'static GlobalSpatialTransform,
     &'static GlobalOpacity,
-    Option<&'static gaanim_scene::TriangleMeshData>,
-    Option<&'static gaanim_scene::LineListData>,
+    Option<Ref<'static, gaanim_scene::TriangleMeshData>>,
+    Option<Ref<'static, gaanim_scene::LineListData>>,
     Option<&'static gaanim_scene::Material3D>,
     Has<gaanim_scene::HudOverlay>,
     Has<PostProcessExempt>,
@@ -3401,8 +3438,8 @@ type ThreeDItem<'a> = (
     Entity,
     &'a GlobalSpatialTransform,
     &'a GlobalOpacity,
-    Option<&'a gaanim_scene::TriangleMeshData>,
-    Option<&'a gaanim_scene::LineListData>,
+    Option<Ref<'a, gaanim_scene::TriangleMeshData>>,
+    Option<Ref<'a, gaanim_scene::LineListData>>,
     Option<&'a gaanim_scene::Material3D>,
     bool,
     bool,
@@ -3412,22 +3449,28 @@ type ThreeDItem<'a> = (
 fn three_d_source<'a>(
     (entity, transform, opacity, mesh, lines, material, hud, exempt, layer): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
+    let revisions = (
+        mesh.as_ref().map_or(0, |mesh| mesh.last_changed().get()),
+        lines.as_ref().map_or(0, |lines| lines.last_changed().get()),
+    );
     (
         entity,
         crate::three_d::Content {
             transform,
             opacity,
-            mesh,
-            lines,
+            mesh: mesh.map(Ref::into_inner),
+            lines: lines.map(Ref::into_inner),
             material,
         },
         hud,
         exempt,
         layer.map(|layer| Arc::clone(&layer.0)),
+        revisions,
     )
 }
 
 /// [`three_d_elements`] of every drawable with 3D content in `world`.
+#[allow(clippy::too_many_arguments)]
 fn extract_three_d(
     world: &mut World,
     camera: &gaanim_math::Camera,
@@ -3436,7 +3479,8 @@ fn extract_three_d(
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
     capture: Option<&mut CapturedThreeD>,
-) {
+    gpu: Option<crate::three_d::GpuMeshes<'_>>,
+) -> Vec<crate::three_d::GpuMeshFrame> {
     let mut lights = world.query_filtered::<LightData, With<Visible>>();
     let lighting = illumination(
         world.get_resource::<gaanim_scene::Lighting3D>(),
@@ -3455,7 +3499,8 @@ fn extract_three_d(
         opacity_fallback,
         extracted,
         capture,
-    );
+        gpu,
+    )
 }
 
 /// A drawable's 3D content as a recording keeps it: what the projection
@@ -3473,9 +3518,8 @@ pub struct CapturedThreeDSource {
 }
 
 /// A frame's native 3D content as a recording keeps it: the meshes, lines,
-/// matrices, materials and lights the projection reads, not the triangles it
-/// drew. [`captured_three_d_elements`] draws them again, through the frame's
-/// camera, into the elements the frame began with.
+/// matrices, materials and lights the GPU draws. A composition given a
+/// [`CapturedGpuThreeD`] draws them through the frame's camera.
 #[derive(Clone, Debug, Default)]
 pub struct CapturedThreeD {
     pub lighting: gaanim_scene::Lighting3D,
@@ -3483,17 +3527,31 @@ pub struct CapturedThreeD {
     /// Layer bounds of the elements of an opaque drawable.
     pub opacity_fallback: kurbo::Rect,
     pub sources: Vec<CapturedThreeDSource>,
-    /// How many of the frame's first elements the projection drew.
-    pub elements: usize,
 }
 
-/// The elements the 3D content `captured` draws through `camera`, exactly as
-/// the frame it was captured from began: a bundle stores the content and
-/// draws it again instead of storing every projected triangle.
-pub fn captured_three_d_elements(
+/// Where a captured frame's native 3D content draws on the GPU (see
+/// [`crate::three_d`]).
+#[derive(Clone, Copy)]
+pub struct CapturedGpuThreeD<'a> {
+    /// The camera the frame was captured through.
+    pub camera: &'a gaanim_math::Camera,
+    /// Pixels of the output, and the map from scene units to them.
+    pub size: (u32, u32),
+    pub placement: kurbo::Affine,
+    /// The first image slot the frame's images take: hosts that draw at
+    /// once with one Vello renderer take slots apart.
+    pub slot: usize,
+}
+
+/// The meshes and lines of `captured` drawn by the GPU as `target` draws
+/// them, keyed by their address in the recording: their image elements go
+/// into `extracted`.
+fn captured_gpu_three_d(
     captured: &CapturedThreeD,
-    camera: &gaanim_math::Camera,
-) -> Vec<CapturedElement> {
+    target: CapturedGpuThreeD<'_>,
+    sources: &mut crate::three_d::MeshSources,
+    extracted: &mut Vec<ExtractedElement>,
+) -> Vec<crate::three_d::GpuMeshFrame> {
     let held: Vec<(GlobalSpatialTransform, GlobalOpacity)> = captured
         .sources
         .iter()
@@ -3507,7 +3565,7 @@ pub fn captured_three_d_elements(
             )
         })
         .collect();
-    let sources = captured
+    let mut contents: Vec<(Entity, crate::three_d::Content<'_>, ThreeDComposition)> = captured
         .sources
         .iter()
         .zip(&held)
@@ -3525,27 +3583,43 @@ pub fn captured_three_d_elements(
             )
         })
         .collect();
+    let keys = captured
+        .sources
+        .iter()
+        .map(|source| {
+            let mesh = source.mesh.clone().map(|mesh| mesh as crate::three_d::Keep);
+            let lines = source
+                .lines
+                .clone()
+                .map(|lines| lines as crate::three_d::Keep);
+            let key = |held: &Option<crate::three_d::Keep>| {
+                held.as_ref()
+                    .map_or(0, |held| Arc::as_ptr(held) as *const u8 as usize as u64)
+            };
+            ([(key(&mesh), 0), (key(&lines), 0)], [mesh, lines])
+        })
+        .collect();
     let lighting = crate::three_d::Illumination {
         lighting: captured.lighting,
         lights: captured.lights.clone(),
     };
-    let mut extracted = Vec::new();
-    project_three_d(
-        camera,
-        &lighting,
-        sources,
-        captured.opacity_fallback,
-        false,
-        &mut extracted,
-    );
-    extracted.sort_by(ExtractedElement::draw_order);
-    extracted.into_iter().map(captured_element).collect()
+    match crate::three_d::GpuMeshes::new(sources, target.size, target.placement, target.slot) {
+        Some(gpu) => take_gpu_three_d(
+            target.camera,
+            &lighting,
+            &mut contents,
+            keys,
+            gpu,
+            captured.opacity_fallback,
+            extracted,
+        ),
+        None => Vec::new(),
+    }
 }
 
 /// Native 3D content (see [`crate::three_d`]) as drawables beneath the 2D
-/// content, back to front. Consecutive primitives of one drawable with the
-/// same paint share an element. With `capture`, also what a recording keeps
-/// to draw them again.
+/// content: with `gpu`, the images the GPU draws it into, whose frames this
+/// returns. With `capture`, also what a recording keeps to draw it again.
 #[allow(clippy::too_many_arguments)]
 fn three_d_elements<'a>(
     camera: &gaanim_math::Camera,
@@ -3557,10 +3631,13 @@ fn three_d_elements<'a>(
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
     capture: Option<&mut CapturedThreeD>,
-) {
+    gpu: Option<crate::three_d::GpuMeshes<'_>>,
+) -> Vec<crate::three_d::GpuMeshFrame> {
+    let mut revisions = Vec::new();
     // How each drawable's elements compose, the same for all of them.
-    let sources: Vec<(Entity, crate::three_d::Content<'a>, ThreeDComposition)> = sources
-        .map(|(entity, content, hud, exempt, layer)| {
+    let mut sources: Vec<(Entity, crate::three_d::Content<'a>, ThreeDComposition)> = sources
+        .map(|(entity, content, hud, exempt, layer, revision)| {
+            revisions.push(revision);
             let composition = ThreeDComposition {
                 in_views: !hud,
                 post_exempt: exempt,
@@ -3594,208 +3671,131 @@ fn three_d_elements<'a>(
             })
             .collect();
     }
-    project_three_d(camera, lighting, sources, opacity_fallback, true, extracted);
+    let Some(gpu) = gpu else {
+        return Vec::new();
+    };
+    // A drawable's mesh and lines upload again when their change ticks do.
+    let keys = sources
+        .iter()
+        .zip(&revisions)
+        .map(|((entity, ..), revision)| {
+            let key = entity.to_bits();
+            ([(key, revision.0), (key, revision.1)], [None, None])
+        })
+        .collect();
+    take_gpu_three_d(
+        camera,
+        lighting,
+        &mut sources,
+        keys,
+        gpu,
+        opacity_fallback,
+        extracted,
+    )
 }
 
-/// The elements of 3D `sources`, each with how its elements compose. With
-/// `scenes`, each element carries its fragment's scene, as the preview
-/// draws it; a replay builds fragments from recipes and needs none.
-fn project_three_d(
+/// How a drawable's mesh and lines are kept uploaded: a key and a revision
+/// for each, and what an address key points to (see
+/// [`crate::three_d::GpuMeshes::push`]).
+type GpuThreeDKeys = ([(u64, u32); 2], [Option<crate::three_d::Keep>; 2]);
+
+/// Leave the meshes and lines of `sources` to the GPU, identified by `keys`:
+/// one image for each way their elements compose, whose elements this pushes
+/// into `extracted` and whose frames it returns.
+fn take_gpu_three_d(
     camera: &gaanim_math::Camera,
     lighting: &crate::three_d::Illumination,
-    mut sources: Vec<(Entity, crate::three_d::Content<'_>, ThreeDComposition)>,
+    sources: &mut [(Entity, crate::three_d::Content<'_>, ThreeDComposition)],
+    keys: Vec<GpuThreeDKeys>,
+    mut gpu: crate::three_d::GpuMeshes<'_>,
     opacity_fallback: kurbo::Rect,
-    scenes: bool,
     extracted: &mut Vec<ExtractedElement>,
-) {
-    use crate::three_d::{Primitive, Projector, sort_back_to_front};
-
-    let Some(projector) = Projector::new(camera) else {
-        return;
+) -> Vec<crate::three_d::GpuMeshFrame> {
+    let Some((ndc_to_canvas, line_width)) = crate::three_d::canvas_projection(camera) else {
+        return Vec::new();
     };
-    // Drawables project independently, so they spread over the compute
-    // threads; their items keep the order of `sources`.
-    let projected: Vec<Vec<_>> = parallel_chunks(&mut sources, 1, |_, sources| {
-        sources
-            .iter()
-            .map(|(entity, content, _)| {
-                let mut items = Vec::new();
-                projector.push(*entity, content, lighting, &mut items);
-                items
-            })
-            .collect::<Vec<_>>()
-    })
-    .into_iter()
-    .flatten()
-    .collect();
-    let mut composition = HashMap::new();
-    let mut items = Vec::new();
-    for ((entity, _, drawn), projected) in sources.into_iter().zip(projected) {
-        if projected.is_empty() {
-            continue;
+    // Drawables that compose alike share an image; their lineage only
+    // matters to camera views, which show the image they are in.
+    let mut classes: Vec<ThreeDComposition> = Vec::new();
+    for ((_, content, composition), (keys, keep)) in sources.iter_mut().zip(keys) {
+        let class = ThreeDComposition {
+            lineage: Vec::new(),
+            ..composition.clone()
+        };
+        let index = match classes.iter().position(|held| *held == class) {
+            Some(index) => index,
+            None => {
+                classes.push(class);
+                classes.len() - 1
+            }
+        };
+        let (mesh, lines) = gpu.push(index, keys, keep, content);
+        if mesh {
+            content.mesh = None;
         }
-        items.extend(projected);
-        composition.insert(entity, drawn);
-    }
-    if items.is_empty() {
-        return;
-    }
-    sort_back_to_front(&mut items);
-
-    // Each run of primitives that shares an element: one path and one paint.
-    let mut runs: Vec<Run> = Vec::new();
-    for item in items {
-        let entity = item.key;
-        let opacity = item.opacity;
-        match item.primitive {
-            Primitive::Solid { faces } => {
-                let mut silhouette = kurbo::BezPath::new();
-                for (points, _) in &faces {
-                    push_triangle(&mut silhouette, points);
-                }
-                runs.push(Run {
-                    entity,
-                    opacity,
-                    path: silhouette,
-                    paint: item.paint,
-                    kind: RunKind::Fill,
-                });
-                for (points, paint) in faces {
-                    extend_run(
-                        &mut runs,
-                        entity,
-                        opacity,
-                        paint,
-                        RunKind::SealedFill,
-                        |path| push_triangle(path, &points),
-                    );
-                }
-            }
-            Primitive::Triangle { points, seam } => {
-                let kind = if seam {
-                    RunKind::SealedFill
-                } else {
-                    RunKind::Fill
-                };
-                extend_run(&mut runs, entity, opacity, item.paint, kind, |path| {
-                    push_triangle(path, &points)
-                });
-            }
-            Primitive::Segment { points } => {
-                extend_run(
-                    &mut runs,
-                    entity,
-                    opacity,
-                    item.paint,
-                    RunKind::Line,
-                    |path| {
-                        path.move_to(points[0]);
-                        path.line_to(points[1]);
-                    },
-                );
-            }
+        if lines {
+            content.lines = None;
         }
     }
-
-    // Each run builds its fragment on its own: chunks of runs spread over
-    // the compute threads, and the elements keep the order of the runs.
-    let reach = projector.line_width().max(projector.seam_width());
-    let parts = parallel_chunks(&mut runs, RUNS_PER_TASK, |first, runs| {
-        runs.iter_mut()
-            .enumerate()
-            .map(|(offset, run)| {
-                let creation_order = first + offset;
-                let (entity, opacity, kind) = (run.entity, run.opacity, run.kind);
-                let path = std::mem::take(&mut run.path);
-                let paint = &run.paint;
-                // A fading drawable composites its runs in one layer, clipped to
-                // what they draw.
-                let opacity_bounds = if opacity < 1.0 {
-                    path.bounding_box().inflate(reach, reach)
-                } else {
-                    opacity_fallback
-                };
-                let brush = paint.brush();
-                let stroke = match kind {
-                    RunKind::Line => Some(StrokeBrush {
-                        brush: Some(brush.clone()),
-                        style: kurbo::Stroke::new(projector.line_width())
-                            .with_caps(kurbo::Cap::Round),
-                    }),
-                    RunKind::SealedFill => Some(StrokeBrush {
-                        brush: Some(brush.clone()),
-                        style: kurbo::Stroke::new(projector.seam_width()),
-                    }),
-                    RunKind::Fill => None,
-                };
-                let recipe = FragmentRecipe {
-                    path: Some(Arc::new(path)),
-                    fill: (kind != RunKind::Line).then_some(brush),
-                    stroke,
-                    // Centered: an inside stroke is clipped by a layer per
-                    // run, thousands per frame of a lit mesh, which kept its
-                    // preview below 144 fps.
-                    stroke_align: StrokeAlign::Center,
-                    ..Default::default()
-                };
-                let scene = if scenes {
-                    build_fragment(&recipe, None).scene
-                } else {
-                    vello::Scene::new()
-                };
-                let composition = &composition[&entity];
-                ExtractedElement {
-                    soft: Default::default(),
-                    persistent: false,
-                    post_exempt: composition.post_exempt,
-                    entity,
-                    recipe: Some(Arc::new(recipe)),
-                    lottie: None,
-                    transform: kurbo::Affine::IDENTITY,
-                    opacity,
-                    opacity_bounds,
-                    opacity_extent: None,
-                    opacity_group: entity,
-                    group_opacity: 1.0,
-                    group_shadow: None,
-                    effect_root: None,
-                    effect_extent: None,
-                    matte_root: None,
-                    matte_of: None,
-                    glass_root: None,
-                    outline: None,
-                    // Beneath every 2D drawable, in depth order.
-                    render_order: RenderOrder {
-                        z_index: i32::MIN,
-                        creation_order: creation_order as u64,
-                    },
-                    z_layer: i32::MIN,
-                    scene: Arc::new(scene),
-                    clip_mask: None,
-                    blend: None,
-                    transition_side: composition.transition_side,
-                    lineage: composition.lineage.clone(),
-                    view_bounds: None,
-                    in_views: composition.in_views,
-                    layer: composition.layer.clone(),
-                    screen: None,
-                    echo_rank: 0,
-                    tip: false,
-                    backdrop: None,
-                }
-            })
-            .collect::<Vec<_>>()
-    });
-    extracted.reserve(parts.iter().map(Vec::len).sum());
-    for part in parts {
-        extracted.extend(part);
-    }
+    gpu.finish(camera, ndc_to_canvas, line_width, lighting)
+        .into_iter()
+        .map(|(class, frame)| {
+            extracted.push(gpu_three_d_element(
+                frame.scene(),
+                opacity_fallback,
+                &classes[class],
+            ));
+            frame
+        })
+        .collect()
 }
 
-/// Runs of 3D primitives below which building their elements stays on one
-/// thread: a run takes about 1.5 µs, so a task of fewer would cost more to
-/// schedule than it saves.
-const RUNS_PER_TASK: usize = 128;
+/// The element of an image the GPU draws meshes and lines into, composed as
+/// `class`: the first of the 3D content, beneath the rest of it.
+fn gpu_three_d_element(
+    scene: vello::Scene,
+    opacity_fallback: kurbo::Rect,
+    class: &ThreeDComposition,
+) -> ExtractedElement {
+    ExtractedElement {
+        soft: Default::default(),
+        persistent: false,
+        post_exempt: class.post_exempt,
+        entity: Entity::PLACEHOLDER,
+        recipe: None,
+        lottie: None,
+        transform: kurbo::Affine::IDENTITY,
+        opacity: 1.0,
+        opacity_bounds: opacity_fallback,
+        opacity_extent: None,
+        opacity_group: Entity::PLACEHOLDER,
+        group_opacity: 1.0,
+        group_shadow: None,
+        effect_root: None,
+        effect_extent: None,
+        matte_root: None,
+        matte_of: None,
+        glass_root: None,
+        outline: None,
+        render_order: RenderOrder {
+            z_index: i32::MIN,
+            creation_order: 0,
+        },
+        z_layer: i32::MIN,
+        scene: Arc::new(scene),
+        clip_mask: None,
+        blend: None,
+        transition_side: class.transition_side,
+        lineage: Vec::new(),
+        view_bounds: None,
+        in_views: class.in_views,
+        layer: class.layer.clone(),
+        screen: None,
+        echo_rank: 0,
+        tip: false,
+        backdrop: None,
+    }
+}
 
 /// How the elements of one drawable with 3D content compose.
 #[derive(Clone, Debug, PartialEq)]
@@ -3807,39 +3807,12 @@ pub struct ThreeDComposition {
     pub lineage: Vec<Entity>,
 }
 
-/// `f` of consecutive chunks of `items`, given the index of each chunk's
-/// first item, in order. With items for at least two chunks of `min_chunk`,
-/// the chunks run on the compute task pool; the results are the same as on
-/// one thread. The items stay in place, so tasks start without copying them.
-fn parallel_chunks<T: Send, R: Send + 'static>(
-    items: &mut [T],
-    min_chunk: usize,
-    f: impl Fn(usize, &mut [T]) -> R + Sync,
-) -> Vec<R> {
-    let pool = bevy::tasks::ComputeTaskPool::try_get();
-    let tasks = pool
-        .map_or(1, |pool| pool.thread_num())
-        .min(items.len() / min_chunk.max(1));
-    let Some(pool) = pool.filter(|_| tasks > 1) else {
-        return vec![f(0, items)];
-    };
-    let chunk = items.len().div_ceil(tasks);
-    let f = &f;
-    let mut parts = pool.scope(|scope| {
-        for (index, part) in items.chunks_mut(chunk).enumerate() {
-            scope.spawn(async move { (index, f(index * chunk, part)) });
-        }
-    });
-    parts.sort_unstable_by_key(|(index, _)| *index);
-    parts.into_iter().map(|(_, part)| part).collect()
-}
-
 /// Elements past which [`clear_elements`] frees them on another thread.
 const MANY_ELEMENTS: usize = 1024;
 
-/// Empty `elements`. Thousands of them (a lit 3D mesh makes one per run of
-/// primitives) take over a millisecond to free, mostly waiting on memory,
-/// and nothing waits for that: they are freed on the async compute pool.
+/// Empty `elements`. Thousands of them take over a millisecond to free,
+/// mostly waiting on memory, and nothing waits for that: they are freed on
+/// the async compute pool.
 fn clear_elements(elements: &mut Vec<ExtractedElement>) {
     if elements.len() < MANY_ELEMENTS {
         elements.clear();
@@ -3849,77 +3822,6 @@ fn clear_elements(elements: &mut Vec<ExtractedElement>) {
     match bevy::tasks::AsyncComputeTaskPool::try_get() {
         Some(pool) => pool.spawn(async move { drop(elements) }).detach(),
         None => drop(elements),
-    }
-}
-
-/// Consecutive 3D primitives drawn as one element: one path, one paint.
-struct Run {
-    entity: Entity,
-    opacity: f32,
-    path: kurbo::BezPath,
-    paint: crate::three_d::Paint,
-    kind: RunKind,
-}
-
-/// How a run of 3D primitives is painted.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RunKind {
-    Fill,
-    /// A fill whose edges are also stroked on their centerline, closing
-    /// antialiasing seams between neighbouring opaque triangles; at a
-    /// silhouette the stroke reaches half its width past the edge.
-    SealedFill,
-    Line,
-}
-
-/// Append a triangle, always with the same orientation: triangles merged into
-/// one nonzero fill must not cancel where front and back faces overlap.
-fn push_triangle(path: &mut kurbo::BezPath, points: &[kurbo::Point; 3]) {
-    let [a, b, c] = *points;
-    let (b, c) = if (b - a).cross(c - a) < 0.0 {
-        (c, b)
-    } else {
-        (b, c)
-    };
-    path.move_to(a);
-    path.line_to(b);
-    path.line_to(c);
-    path.close_path();
-}
-
-/// Add to the last run when it has the same drawable, kind and solid paint;
-/// otherwise start a run. Gradients never share a run: each is fitted to one
-/// primitive.
-fn extend_run(
-    runs: &mut Vec<Run>,
-    entity: Entity,
-    opacity: f32,
-    paint: crate::three_d::Paint,
-    kind: RunKind,
-    add: impl FnOnce(&mut kurbo::BezPath),
-) {
-    let shares = matches!(paint, crate::three_d::Paint::Solid(_));
-    match runs.last_mut() {
-        Some(last)
-            if shares
-                && last.entity == entity
-                && last.kind == kind
-                && last.opacity == opacity
-                && last.paint == paint =>
-        {
-            add(&mut last.path)
-        }
-        _ => {
-            let mut path = kurbo::BezPath::new();
-            add(&mut path);
-            runs.push(Run {
-                entity,
-                opacity,
-                path,
-                paint,
-                kind,
-            });
-        }
     }
 }
 
@@ -4532,6 +4434,10 @@ pub struct ComposedFrame {
     /// background: a renderer that post-processes the frame composites them
     /// above its result. See [`Self::take_unprocessed`].
     pub unprocessed: Option<vello::Scene>,
+    /// The meshes and lines the GPU draws into the images the frame shows
+    /// them in, which a renderer draws with
+    /// [`crate::three_d::GpuThreeD`] before the frame.
+    pub three_d: Vec<crate::three_d::GpuMeshFrame>,
 }
 
 /// The parts of a frame under a shader transition besides the outgoing
@@ -4609,6 +4515,7 @@ impl ComposedFrame {
             effects: self.effects,
             backgrounds: self.backgrounds,
             unprocessed: self.unprocessed.as_ref().map(place),
+            three_d: self.three_d,
         }
     }
 }
@@ -4636,6 +4543,7 @@ fn compose_frame(
             effects: Vec::new(),
             backgrounds: Vec::new(),
             unprocessed,
+            three_d: Vec::new(),
         };
     };
     let side = |side: gaanim_scene::TransitionSide| -> Vec<ExtractedElement> {
@@ -4750,6 +4658,7 @@ fn compose_frame(
         effects: Vec::new(),
         backgrounds: Vec::new(),
         unprocessed,
+        three_d: Vec::new(),
     }
 }
 
@@ -4884,22 +4793,14 @@ pub struct FrameCapture {
     pub glasses: Vec<CapturedGlass>,
     /// Uniforms of the shader backgrounds this frame draws.
     pub background_values: Vec<BackgroundValues>,
-    /// The native 3D content whose projection is the first
-    /// [`CapturedThreeD::elements`] of `elements`, for a recording that
-    /// stores it instead of them.
+    /// The native 3D content, which the GPU draws beneath `elements`.
     pub three_d: Option<CapturedThreeD>,
-}
-
-/// Whether `element` is part of the native 3D content, which draws beneath
-/// every 2D drawable.
-fn is_three_d(element: &ExtractedElement) -> bool {
-    element.z_layer == i32::MIN && element.render_order.z_index == i32::MIN
 }
 
 /// Capture the drawables of the world as it stands, without culling, for a
 /// replay that composites the same frame with [`compose_captured`].
 pub fn capture_frame(world: &mut World, camera: Option<&gaanim_math::Camera>) -> FrameCapture {
-    let extraction = extract_world(world, camera, None, false, false, true);
+    let extraction = extract_world(world, camera, None, false, false, true, false);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
     let mattes = world_mattes(world);
     let glasses = world_glasses(world);
@@ -4960,7 +4861,7 @@ pub fn capture_frame_pinned(
     camera: Option<&gaanim_math::Camera>,
     pins: &mut PinnedElements,
 ) -> FrameCapture {
-    let extraction = extract_world(world, camera, Some(pins), false, false, true);
+    let extraction = extract_world(world, camera, Some(pins), false, false, true, false);
     let effects = world_effects(world, &extraction.elements, extraction.background_time);
     let mattes = world_mattes(world);
     let glasses = world_glasses(world);
@@ -4973,16 +4874,8 @@ fn capture_extraction(
     mattes: Vec<CapturedMatte>,
     glasses: Vec<CapturedGlass>,
 ) -> FrameCapture {
-    let three_d_elements = extraction
-        .elements
-        .iter()
-        .take_while(|element| is_three_d(element))
-        .count();
     FrameCapture {
-        three_d: extraction.three_d.map(|mut three_d| {
-            three_d.elements = three_d_elements;
-            three_d
-        }),
+        three_d: extraction.three_d,
         background_time: extraction.background_time,
         background_values: extraction.background_values,
         effects,
@@ -5019,11 +4912,23 @@ pub fn compose_captured(
     pixels_per_unit: Option<f64>,
     gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
 ) -> vello::Scene {
-    compose_captured_layers(frame, store, background, pixels_per_unit, gpu, 0.0, None).flattened()
+    compose_captured_layers(
+        frame,
+        store,
+        background,
+        pixels_per_unit,
+        gpu,
+        0.0,
+        None,
+        None,
+    )
+    .flattened()
 }
 
 /// [`compose_captured`] with a shader background animated `rest` seconds
-/// past the frame's time (see [`gaanim_animation::AmbientClock`]).
+/// past the frame's time (see [`gaanim_animation::AmbientClock`]). With
+/// `three_d`, the native 3D content draws on the GPU into images the scene
+/// shows, whose frames this returns too.
 pub fn compose_captured_at(
     frame: &FrameCapture,
     store: &mut crate::fragment::FragmentStore,
@@ -5031,14 +4936,28 @@ pub fn compose_captured_at(
     pixels_per_unit: Option<f64>,
     gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
     rest: f64,
-) -> vello::Scene {
-    compose_captured_layers(frame, store, background, pixels_per_unit, gpu, rest, None).flattened()
+    three_d: Option<CapturedGpuThreeD<'_>>,
+) -> (vello::Scene, Vec<crate::three_d::GpuMeshFrame>) {
+    let mut composed = compose_captured_layers(
+        frame,
+        store,
+        background,
+        pixels_per_unit,
+        gpu,
+        rest,
+        None,
+        three_d,
+    );
+    let three_d = std::mem::take(&mut composed.three_d);
+    (composed.flattened(), three_d)
 }
 
 /// [`compose_captured_at`] keeping a shader transition's segments apart,
 /// with the drawables under a shader effect drawn as the images of
 /// [`ComposedFrame::effects`], whose textures hold `effect_density` pixels
-/// per scene unit.
+/// per scene unit. With `three_d`, the native 3D content draws on the GPU
+/// (see [`ComposedFrame::three_d`]).
+#[allow(clippy::too_many_arguments)]
 pub fn compose_captured_frame(
     frame: &FrameCapture,
     store: &mut crate::fragment::FragmentStore,
@@ -5047,6 +4966,7 @@ pub fn compose_captured_frame(
     gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
     rest: f64,
     effect_density: f64,
+    three_d: Option<CapturedGpuThreeD<'_>>,
 ) -> ComposedFrame {
     compose_captured_layers(
         frame,
@@ -5056,11 +4976,13 @@ pub fn compose_captured_frame(
         gpu,
         rest,
         Some(effect_density),
+        three_d,
     )
 }
 
 /// [`compose_captured_frame`]; without `effect_density`, drawables under a
 /// shader effect are drawn plainly.
+#[allow(clippy::too_many_arguments)]
 fn compose_captured_layers(
     frame: &FrameCapture,
     store: &mut crate::fragment::FragmentStore,
@@ -5069,78 +4991,89 @@ fn compose_captured_layers(
     mut gpu: Option<&mut Vec<ShaderBackgroundRequest>>,
     rest: f64,
     effect_density: Option<f64>,
+    three_d: Option<CapturedGpuThreeD<'_>>,
 ) -> ComposedFrame {
     if let Some((background, _)) = background {
         background.record_uniforms(&frame.background_values);
     }
     let margin = antialias_margin(pixels_per_unit);
-    let mut elements: Vec<ExtractedElement> = frame
-        .elements
-        .iter()
-        .map(|element| {
-            let (scene, overlay, soft) = store.get_with(
-                &element.recipe,
-                element.lottie.as_ref(),
-                effect_density.is_some(),
-            );
-            ExtractedElement {
-                soft,
-                persistent: false,
-                post_exempt: element.post_exempt,
-                entity: element.entity,
-                recipe: None,
-                lottie: None,
-                transform: element.transform,
-                opacity: element.opacity,
-                opacity_bounds: element
-                    .opacity_reach
-                    .map_or(element.opacity_bounds, |reach| {
-                        pad_opacity_layer(
-                            element.opacity_bounds,
-                            reach,
-                            margin,
-                            element.opacity_bounds,
-                        )
-                    }),
-                opacity_extent: None,
-                opacity_group: element.opacity_group,
-                group_opacity: element.group_opacity,
-                group_shadow: element.group_shadow.clone(),
-                effect_root: element.effect_root,
-                effect_extent: element.effect_extent,
-                matte_root: element.matte_root,
-                matte_of: element.matte_of,
-                glass_root: element.glass_root,
-                outline: element.glass_root.and_then(|_| element.recipe.path.clone()),
-                render_order: element.render_order,
-                // Captured elements are already in draw order.
-                z_layer: 0,
-                scene,
-                clip_mask: element.clip_mask.clone(),
-                blend: element.blend,
-                transition_side: element.transition_side,
-                lineage: element.lineage.clone(),
-                view_bounds: element.view_bounds,
-                in_views: element.in_views,
-                layer: element.layer.clone(),
-                screen: element.screen.as_ref().map(|view| ExtractedScreen {
-                    view: Arc::new(ExtractedCameraView {
-                        clip: Arc::clone(&view.clip),
-                        content: view.content,
-                        region: view.region,
-                        excluded: view.excluded.clone(),
-                        layers: view.layers.clone(),
-                        background: view.background.clone(),
-                    }),
-                    overlay,
+    // The 3D content beneath the rest, which the GPU draws when the
+    // composition has it.
+    let mut elements: Vec<ExtractedElement> = Vec::new();
+    let mut three_d_frames = Vec::new();
+    if let (Some(captured), Some(target)) = (&frame.three_d, three_d) {
+        let mut sources = std::mem::take(&mut store.three_d);
+        three_d_frames = captured_gpu_three_d(captured, target, &mut sources, &mut elements);
+        store.three_d = sources;
+    }
+    // Elements from the composition above are in draw order already, as
+    // captured elements are.
+    for element in &mut elements {
+        element.z_layer = 0;
+    }
+    elements.extend(frame.elements.iter().map(|element| {
+        let (scene, overlay, soft) = store.get_with(
+            &element.recipe,
+            element.lottie.as_ref(),
+            effect_density.is_some(),
+        );
+        ExtractedElement {
+            soft,
+            persistent: false,
+            post_exempt: element.post_exempt,
+            entity: element.entity,
+            recipe: None,
+            lottie: None,
+            transform: element.transform,
+            opacity: element.opacity,
+            opacity_bounds: element
+                .opacity_reach
+                .map_or(element.opacity_bounds, |reach| {
+                    pad_opacity_layer(
+                        element.opacity_bounds,
+                        reach,
+                        margin,
+                        element.opacity_bounds,
+                    )
                 }),
-                echo_rank: element.echo_rank,
-                // Captured frames keep their recorded order.
-                tip: false,
-                backdrop: None,
-            }
-        })
-        .collect();
+            opacity_extent: None,
+            opacity_group: element.opacity_group,
+            group_opacity: element.group_opacity,
+            group_shadow: element.group_shadow.clone(),
+            effect_root: element.effect_root,
+            effect_extent: element.effect_extent,
+            matte_root: element.matte_root,
+            matte_of: element.matte_of,
+            glass_root: element.glass_root,
+            outline: element.glass_root.and_then(|_| element.recipe.path.clone()),
+            render_order: element.render_order,
+            // Captured elements are already in draw order.
+            z_layer: 0,
+            scene,
+            clip_mask: element.clip_mask.clone(),
+            blend: element.blend,
+            transition_side: element.transition_side,
+            lineage: element.lineage.clone(),
+            view_bounds: element.view_bounds,
+            in_views: element.in_views,
+            layer: element.layer.clone(),
+            screen: element.screen.as_ref().map(|view| ExtractedScreen {
+                view: Arc::new(ExtractedCameraView {
+                    clip: Arc::clone(&view.clip),
+                    content: view.content,
+                    region: view.region,
+                    excluded: view.excluded.clone(),
+                    layers: view.layers.clone(),
+                    background: view.background.clone(),
+                }),
+                overlay,
+            }),
+            echo_rank: element.echo_rank,
+            // Captured frames keep their recorded order.
+            tip: false,
+            backdrop: None,
+        }
+    }));
     let mut effects = soft_layers(&elements);
     if effect_density.is_some() {
         crate::soft_effects::collect_group_shadows();
@@ -5182,6 +5115,7 @@ fn compose_captured_layers(
         gpu,
     );
     composed.effects = with_group_shadows(effects, effect_density.is_some());
+    composed.three_d = three_d_frames;
     composed
 }
 
@@ -5273,7 +5207,7 @@ pub struct ExternalFrame {
 }
 
 /// System: composites the [`ExternalFrame`] into the main Vello scene.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 #[cfg(not(target_os = "emscripten"))]
 pub fn external_frame_system(
     mut commands: Commands,
@@ -5301,6 +5235,10 @@ pub fn external_frame_system(
     ),
     mut query_vello_scene: Query<&mut VelloScene2d, With<MainVelloScene>>,
     live: Option<Res<gaanim_animation::live::LiveOverlay>>,
+    (mut gpu_three_d, canvas_camera): (
+        Option<ResMut<crate::three_d::GpuThreeDFrame>>,
+        Query<(&Camera, &Transform, &Projection), With<crate::canvas::VelloView>>,
+    ),
 ) {
     let external = &mut *external;
     let Some(frame) = external.frame.clone() else {
@@ -5322,6 +5260,29 @@ pub fn external_frame_system(
         _ => None,
     });
     let mut shader_requests = Vec::new();
+    // With the GPU path, the recorded meshes draw into images of the
+    // canvas's pixels, placed as the canvas places the scene.
+    let placement = canvas_camera
+        .single()
+        .ok()
+        .filter(|_| gpu_three_d.is_some())
+        .and_then(|(canvas, transform, projection)| {
+            canvas_placement(
+                canvas,
+                transform,
+                projection,
+                preview.as_ref().map_or(1.0, |preview| preview.scale),
+            )
+        });
+    let three_d = gaanim_camera
+        .as_deref()
+        .zip(placement)
+        .map(|(camera, (size, placement))| CapturedGpuThreeD {
+            camera: &camera.camera,
+            size,
+            placement,
+            slot: 0,
+        });
     let mut composed = compose_captured_frame(
         &frame,
         &mut external.store,
@@ -5330,7 +5291,11 @@ pub fn external_frame_system(
         shader_frame.is_some().then_some(&mut shader_requests),
         ambient.map_or(0.0, |clock| clock.rest),
         preview_effect_density(gaanim_camera.as_deref(), preview.as_deref()),
+        three_d,
     );
+    if let Some(frame) = gpu_three_d.as_mut() {
+        frame.0 = std::mem::take(&mut composed.three_d);
+    }
     if let Some(published) = effect_layers.as_deref_mut()
         && !(published.0.is_empty() && composed.effects.is_empty())
     {
@@ -5370,6 +5335,32 @@ pub fn external_frame_system(
             Transform::from_scale(Vec3::new(1.0, -1.0, 1.0)),
         ));
     }
+}
+
+/// The size of the canvas's rasterized region at preview `scale`, and the
+/// map from scene units to its pixels, as the canvas places the scene with
+/// the camera that shows it.
+#[cfg(not(target_os = "emscripten"))]
+fn canvas_placement(
+    camera: &Camera,
+    transform: &Transform,
+    projection: &Projection,
+    scale: f32,
+) -> Option<((u32, u32), kurbo::Affine)> {
+    let full = camera.physical_viewport_size()?;
+    let logical = camera.logical_viewport_size()?;
+    // Bevy updates the projection's area after this system; the canvas
+    // draws with the updated one.
+    let mut projection = projection.clone();
+    projection.update(logical.x, logical.y);
+    let pixels = crate::canvas::scaled_canvas_size(full, scale);
+    let placement = crate::canvas::scene_to_canvas(
+        Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0)),
+        transform.to_matrix(),
+        projection.get_clip_from_view(),
+        pixels.as_vec2(),
+    );
+    Some(((pixels.x, pixels.y), placement))
 }
 
 /// Visible camera view screens and what resolving their views reads.
@@ -5515,6 +5506,9 @@ pub fn gaanim_render_system(
         mut transition_layers,
         post_process,
         mut unprocessed_layer,
+        mut gpu_three_d,
+        mut mesh_sources,
+        canvas_camera,
     ): (
         Option<ResMut<ShaderBackgroundFrame>>,
         Option<Res<crate::canvas::PreviewResolution>>,
@@ -5523,6 +5517,9 @@ pub fn gaanim_render_system(
         Option<ResMut<TransitionLayers>>,
         Option<Res<crate::post_process::CanvasPostProcess>>,
         Option<ResMut<UnprocessedLayer>>,
+        Option<ResMut<crate::three_d::GpuThreeDFrame>>,
+        Local<crate::three_d::MeshSources>,
+        Query<(&Camera, &Transform, &Projection), With<crate::canvas::VelloView>>,
     ),
     (camera_screens, camera_sources, hud_query, layer_query, float_signals, exempt_query): CameraViewQueries,
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
@@ -6001,8 +5998,26 @@ pub fn gaanim_render_system(
                 .map(|backdrop| backdrop.depth),
         });
     }
+    let mut gpu_frames = Vec::new();
     if let Some(camera) = gaanim_camera.as_deref() {
-        three_d_elements(
+        // With the GPU path, the meshes draw into images of the canvas's
+        // pixels, placed as the canvas places the scene.
+        let placement = canvas_camera
+            .single()
+            .ok()
+            .filter(|_| gpu_three_d.is_some())
+            .and_then(|(canvas, transform, projection)| {
+                canvas_placement(
+                    canvas,
+                    transform,
+                    projection,
+                    preview.as_ref().map_or(1.0, |preview| preview.scale),
+                )
+            });
+        let meshes = placement.and_then(|(size, placement)| {
+            crate::three_d::GpuMeshes::new(&mut mesh_sources, size, placement, 0)
+        });
+        gpu_frames = three_d_elements(
             &camera.camera,
             &illumination(lighting.as_deref(), light_query.iter()),
             three_d_query.iter().map(three_d_source),
@@ -6012,7 +6027,11 @@ pub fn gaanim_render_system(
             opacity_fallback,
             local_extracted,
             None,
+            meshes,
         );
+    }
+    if let Some(frame) = gpu_three_d.as_mut() {
+        frame.0 = gpu_frames;
     }
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
@@ -6225,42 +6244,6 @@ mod tests {
             [(&light, &transform, &GlobalOpacity(0.0))].into_iter(),
         );
         assert!(hidden.lights.is_empty());
-    }
-
-    #[test]
-    fn merged_triangles_of_either_winding_never_cancel() {
-        use kurbo::Shape;
-        let a = kurbo::Point::new(0.0, 0.0);
-        let b = kurbo::Point::new(10.0, 0.0);
-        let c = kurbo::Point::new(0.0, 10.0);
-        let mut path = kurbo::BezPath::new();
-        push_triangle(&mut path, &[a, b, c]);
-        push_triangle(&mut path, &[a, c, b]);
-        assert_eq!(path.winding(kurbo::Point::new(2.0, 2.0)).abs(), 2);
-    }
-
-    #[test]
-    fn parallel_chunks_keep_the_order_of_the_items() {
-        let doubled = |first: usize, items: &mut [usize]| -> Vec<(usize, usize)> {
-            (first..).zip(items.iter().map(|item| item * 2)).collect()
-        };
-        let expected: Vec<(usize, usize)> = (0..1000).map(|item| (item, item * 2)).collect();
-        // On one thread when no pool exists or the items are too few.
-        assert_eq!(
-            parallel_chunks(&mut [3, 1, 2], 128, |_, items| items.to_vec()),
-            [vec![3, 1, 2]]
-        );
-        // Another test may have started the pool with its own threads.
-        let threads = bevy::tasks::ComputeTaskPool::get_or_init(|| {
-            bevy::tasks::TaskPoolBuilder::new().num_threads(4).build()
-        })
-        .thread_num();
-        for (min_chunk, tasks) in [(7, threads), (999, 1)] {
-            let mut items: Vec<usize> = (0..1000).collect();
-            let parts = parallel_chunks(&mut items, min_chunk, doubled);
-            assert_eq!(parts.len(), tasks);
-            assert_eq!(parts.concat(), expected);
-        }
     }
 
     #[test]

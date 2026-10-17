@@ -753,7 +753,7 @@ fn scene_to_pixels(
 /// the Y-up world (the main scene's model flips Y back, since it is composed
 /// Y-up); clip space is Y-up and the canvas Y-down. Built as one matrix, a
 /// rotated camera turns the view about its own position, as exports do.
-fn scene_to_canvas(
+pub(crate) fn scene_to_canvas(
     model: Mat4,
     world_from_view: Mat4,
     clip_from_view: Mat4,
@@ -812,6 +812,7 @@ fn render_canvas(
     mut object_effects: ResMut<CanvasObjectEffects>,
     mut rendered: ResMut<RenderedCanvas>,
     mut overflow: ResMut<CanvasOverflow>,
+    three_d: Option<Res<crate::three_d::RenderGpuThreeD>>,
 ) {
     let Some(target) = extracted.image.and_then(|image| images.get(image)) else {
         return;
@@ -860,7 +861,9 @@ fn render_canvas(
     let volatile = post.is_some_and(|post| post.is_active())
         || shader.is_some_and(|shader| shader.is_active())
         || extracted.transition.is_some()
-        || extracted.effects.iter().any(|layer| !layer.fixed);
+        || extracted.effects.iter().any(|layer| !layer.fixed)
+        // The GPU's meshes drew a new image, which the scene draws unchanged.
+        || three_d.is_some_and(|three_d| three_d.changed);
     if !volatile && rendered.0.as_ref().is_some_and(|last| last.same(&current)) {
         return;
     }
