@@ -2,6 +2,7 @@ pub mod media_frame;
 pub use media_frame::{ImageFit, MediaFrame};
 pub mod components;
 pub mod hierarchy;
+pub mod occlusion;
 // Bevy's log and asset subsystems are left out of the playground's Pyodide
 // extension (wasm32-unknown-emscripten); see Cargo.toml.
 #[cfg(not(target_os = "emscripten"))]
@@ -22,6 +23,7 @@ pub use components::{
     WorldBounds, ZLayer,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
+pub use occlusion::Occlusion;
 
 /// Bevy's render visibility, which scene entities carry for Bevy's own
 /// hierarchy; Gaanim's renderer reads [`Visible`] instead.

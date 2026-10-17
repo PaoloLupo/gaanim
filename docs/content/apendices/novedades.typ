@@ -113,6 +113,10 @@ actualizar».
 - Las mallas 3D iguales se suben una vez a la GPU, y las opacas con la
   misma geometría y el mismo material se dibujan juntas, en una llamada: una
   escena con 8.000 esferas sueltas pasa de 21 a 69 fps.
+- Las etiquetas con `.billboard()` se desvanecen detrás de las mallas 3D
+  opacas y vuelven al salir, poco a poco cuando quedan a medias tras su
+  borde. Con la cámara en perspectiva aparecen en su punto 3D; antes caían
+  fuera de la imagen.
 
 == Al actualizar
 

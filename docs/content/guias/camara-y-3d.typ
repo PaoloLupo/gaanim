@@ -408,7 +408,11 @@ puntos se reproducen a la frecuencia de la pantalla.
   las mallas opacas; no las translúcidas, las líneas ni las que brillan
   (`Material3D.emissive`), que pueden contener la luz que las hace brillar.
 - Todo el contenido 3D se dibuja debajo del 2D: etiquetas, textos y HUD
-  quedan siempre encima.
+  quedan siempre encima. La excepción son las etiquetas con `.billboard()`:
+  se desvanecen, con todo lo que contienen, mientras una malla opaca queda
+  entre su punto 3D y la cámara, y pierden opacidad poco a poco cuando
+  quedan a medias tras el borde de la malla. Se ocultan enteras, no por
+  píxel, y las líneas 3D no las tapan.
 
 El 3D aparece en la vista previa, las exportaciones, las capturas, los
 paquetes `.gaanim` (también en el reproductor web) y las vistas previas de

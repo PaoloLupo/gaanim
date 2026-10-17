@@ -546,10 +546,16 @@ pub fn pin_hud_overlays_system(
 #[allow(clippy::type_complexity)]
 pub fn has_opacity_changes(
     query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>,
-    presences: Query<(), Changed<crate::Presence>>,
-    mut removed: RemovedComponents<crate::Presence>,
+    presences: Query<(), Or<(Changed<crate::Presence>, Changed<crate::Occlusion>)>>,
+    mut removed: (
+        RemovedComponents<crate::Presence>,
+        RemovedComponents<crate::Occlusion>,
+    ),
 ) -> bool {
-    !query.is_empty() || !presences.is_empty() || removed.read().next().is_some()
+    !query.is_empty()
+        || !presences.is_empty()
+        || removed.0.read().next().is_some()
+        || removed.1.read().next().is_some()
 }
 
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.19's `ChildOf` relation.
@@ -561,16 +567,21 @@ pub fn opacity_propagation_system(
         RemovedComponents<ChildOf>,
         RemovedComponents<crate::Presence>,
         RemovedComponents<Opacity>,
+        RemovedComponents<crate::Occlusion>,
     ),
     children_query: Query<&'static Children>,
     local_opacities: Query<&'static Opacity>,
     parents: Query<&'static ChildOf>,
-    presences: Query<&'static crate::Presence>,
+    presences: Query<(
+        Option<&'static crate::Presence>,
+        Option<&'static crate::Occlusion>,
+    )>,
 ) {
     let mut stale: EntityHashSet = queries.p0().iter().collect();
     stale.extend(removed.0.read());
     stale.extend(removed.1.read());
     stale.extend(removed.2.read());
+    stale.extend(removed.3.read());
     let mut opacities = queries.p1();
     let propagation = OpacityPropagation {
         children_query: &children_query,
@@ -604,12 +615,25 @@ type StaleOpacityFilter = Or<(
     Changed<Opacity>,
     Changed<GlobalOpacity>,
     Changed<crate::Presence>,
+    Changed<crate::Occlusion>,
     Changed<ChildOf>,
 )>;
 
+/// An entity's extra opacity factors: a repeater copy's presence and a
+/// billboard's occlusion by 3D meshes.
+type OpacityFactors = (
+    Option<&'static crate::Presence>,
+    Option<&'static crate::Occlusion>,
+);
+
+/// The product of an entity's extra opacity factors.
+fn opacity_factor(factors: (Option<&crate::Presence>, Option<&crate::Occlusion>)) -> f32 {
+    factors.0.map_or(1.0, |presence| presence.0) * factors.1.map_or(1.0, |occlusion| occlusion.0)
+}
+
 struct OpacityPropagation<'a, 'w1, 's1, 'w2, 's2> {
     children_query: &'a Query<'w1, 's1, &'static Children>,
-    presences: &'a Query<'w2, 's2, &'static crate::Presence>,
+    presences: &'a Query<'w2, 's2, OpacityFactors>,
     stale: &'a EntityHashSet,
 }
 
@@ -623,7 +647,7 @@ fn inherited_opacity(
     parents: &Query<&'static ChildOf>,
     local_opacities: &Query<&'static Opacity>,
     opacities: &Query<(&Opacity, &mut GlobalOpacity)>,
-    presences: &Query<&'static crate::Presence>,
+    presences: &Query<OpacityFactors>,
 ) -> f32 {
     let mut product = 1.0;
     let mut cascade = 1.0;
@@ -632,7 +656,7 @@ fn inherited_opacity(
         if let Ok((_, global)) = opacities.get(current) {
             return product * global.0;
         }
-        product *= presences.get(current).map_or(1.0, |presence| presence.0);
+        product *= presences.get(current).map_or(1.0, opacity_factor);
         if local_opacities.contains(current) {
             cascade = product;
         }
@@ -654,7 +678,7 @@ fn propagate_opacities_recursive(
         propagation
             .presences
             .get(entity)
-            .map_or(1.0, |presence| presence.0)
+            .map_or(1.0, opacity_factor)
     };
     let (current_opacity, changed) = match opacities.get_mut(entity) {
         Ok((local, mut global)) if recompute => {
@@ -1001,15 +1025,16 @@ pub fn billboard_system(
             gaanim_core::glam::DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
         billboard.mat4 = billboard_mat;
         if is_perspective {
-            // Project 3D world position to screen, then map to fixed Vello world.
+            // Project 3D world position to screen, then map to fixed Vello
+            // world as the 3D pass does (`canvas_projection` in the
+            // renderer); the canvas camera applies the host viewport to both.
             let world_pos = gaanim_core::glam::DVec3::new(trans.x, trans.y, trans.z);
             let screen = cam.world_to_screen(world_pos);
-            let eff = cam.viewport.scale.max(0.01);
+            let ppu = cam.pixels_per_unit().max(1e-9);
             let hw = cam.viewport_width as f64 * 0.5;
-            let hh = cam.viewport_height as f64 * 0.5 + cam.viewport.offset_y;
-            // Fixed Vello transform: translate to center + scale (no rotation, no cam pos)
+            let hh = cam.viewport_height as f64 * 0.5;
             let vello = gaanim_core::kurbo::Affine::translate((hw, hh))
-                * gaanim_core::kurbo::Affine::scale_non_uniform(eff, -eff);
+                * gaanim_core::kurbo::Affine::scale_non_uniform(ppu, -ppu);
             let inv = vello.inverse();
             let vpos = inv * gaanim_core::kurbo::Point::new(screen.x, screen.y);
             billboard.affine_2d = gaanim_core::kurbo::Affine::translate((vpos.x, vpos.y))
@@ -1341,6 +1366,45 @@ mod tests {
         assert!(a > 0.0 && d < 0.0);
         let at = global * gaanim_core::kurbo::Point::ORIGIN;
         assert!((at - gaanim_core::kurbo::Point::new(2.0, 1.0)).hypot() < 1e-9);
+    }
+
+    #[test]
+    fn perspective_billboards_land_where_their_anchor_is_drawn() {
+        // A perspective camera showing the same 16 by 9 frame on the z = 0
+        // plane as the orthographic one: canvas points there are world points.
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+        let pose = camera.pose().perspective_equivalent(0.8, 0.1, 100.0, 9.0);
+        camera.apply_pose(pose).unwrap();
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            camera,
+            gaanim_math::CameraViewport {
+                scale: 0.5,
+                offset_x: 40.0,
+                offset_y: 30.0,
+            },
+        ));
+        let local = SpatialTransform::new_2d(2.0, 1.0);
+        let label = world
+            .spawn((
+                local,
+                GlobalSpatialTransform::from_local(&local),
+                crate::components::Billboard,
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(billboard_system);
+        schedule.run(&mut world);
+
+        let global = world
+            .get::<GlobalSpatialTransform>(label)
+            .unwrap()
+            .affine_2d;
+        let at = global * gaanim_core::kurbo::Point::ORIGIN;
+        assert!(
+            (at - gaanim_core::kurbo::Point::new(2.0, 1.0)).hypot() < 1e-6,
+            "drawn at {at:?}"
+        );
     }
 
     #[test]
