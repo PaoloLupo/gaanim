@@ -387,7 +387,8 @@ puntos se reproducen a la frecuencia de la pantalla.
   3D) no reciben luz y se ven por las dos caras; las líneas 3D tampoco
   reciben luz y tienen extremos redondeados.
 - Una línea 3D mide en pantalla el ancho de su trazo, `.stroke(color, ancho)`
-  en unidades de la escena, a cualquier profundidad; sin trazo, 1,5 px.
+  en unidades de la escena, a cualquier profundidad; sin trazo, 2 px de una
+  salida de 1080 px de alto, la misma parte del encuadre a cualquier tamaño.
   En una línea con trazo, `animate.stroke_width(...)` anima el ancho.
 - Las superficies y las líneas que se cruzan se cortan donde corresponde, y
   la geometría que atraviesa el plano cercano de la cámara se recorta.

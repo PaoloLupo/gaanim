@@ -719,6 +719,64 @@ pub struct LineListData {
     /// Optional per-vertex RGBA colors (linear, 0..1). If Some, length must match `points`.
     /// When present the renderer uses vertex colors instead of the uniform `color`.
     pub colors: Option<Vec<[f32; 4]>>,
+    /// When these points are the part of the drawable's [`LineListSource`]
+    /// that a reveal shows: that part, from and to, as fractions of the
+    /// source's segments (a strip's or its pairs'). The renderer then draws
+    /// the source over that range, which stays uploaded while it grows, and
+    /// recordings keep the source once.
+    pub revealed: Option<[f32; 2]>,
+}
+
+impl LineListData {
+    /// These points, a trim of `source` that shows it from `start` to `end`
+    /// (fractions of its segments), marked as such in [`Self::revealed`]
+    /// when the renderer takes the source's segments in the order the trim
+    /// does: a strip's in turn, or its pairs. A trim that shows all of the
+    /// source is left unmarked.
+    pub fn revealing(mut self, source: &LineListData, start: f64, end: f64) -> Self {
+        let ordered = !source.strip || source.indices.is_none();
+        let whole = start <= 0.0 && end >= 1.0;
+        self.revealed = (ordered && !whole).then(|| {
+            let start = start.clamp(0.0, 1.0);
+            [start as f32, end.clamp(start, 1.0) as f32]
+        });
+        self
+    }
+}
+
+#[cfg(test)]
+mod line_tests {
+    use super::*;
+
+    fn line(strip: bool, indices: Option<Vec<u32>>) -> LineListData {
+        LineListData {
+            points: vec![[0.0; 3], [1.0; 3], [2.0; 3], [3.0; 3]],
+            indices,
+            strip,
+            color: gaanim_core::peniko::Color::WHITE,
+            colors: None,
+            revealed: None,
+        }
+    }
+
+    #[test]
+    fn trims_are_marked_with_the_part_of_their_source_they_show() {
+        let strip = line(true, None);
+        assert_eq!(
+            strip.clone().revealing(&strip, 0.0, 0.4).revealed,
+            Some([0.0, 0.4])
+        );
+        let pairs = line(false, Some(vec![0, 1, 2, 3]));
+        assert_eq!(
+            pairs.clone().revealing(&pairs, 0.2, 2.0).revealed,
+            Some([0.2, 1.0])
+        );
+        // A trim that shows all of it, or that orders segments as the
+        // renderer does not, stays unmarked.
+        assert_eq!(strip.clone().revealing(&strip, 0.0, 1.0).revealed, None);
+        let indexed = line(true, Some(vec![0, 2]));
+        assert_eq!(indexed.clone().revealing(&indexed, 0.0, 0.5).revealed, None);
+    }
 }
 
 /// Immutable source geometry retained while `PathCompletion` reveals a 3D line.

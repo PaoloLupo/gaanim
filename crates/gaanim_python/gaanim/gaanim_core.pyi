@@ -8865,7 +8865,8 @@ class Geometry:
         point, or ``colormap`` for ``"inferno"``, ``"viridis"``, or
         ``"plasma"``. The color list must match ``points`` in length. The
         line is as wide on screen as its stroke, ``.stroke(color, width)``
-        in scene units, and 1.5 output pixels without one.
+        in scene units, and without one 2 pixels of a 1080-pixel-tall
+        output, the same share of the frame at any output size.
 
         Example:
             path = scene.polyline_3d(

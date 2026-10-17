@@ -1352,7 +1352,7 @@ scene.render()
   name: "Geometry.polyline_3d",
   kind: "factory",
   params: ((name: "points", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Al menos dos puntos finitos del mundo.]), (name: "color", type: "Color | None", default: "None", desc: [Color uniforme.]), (name: "colors", type: "Sequence[Color] | None", default: "None", desc: [Un color por punto; tiene prioridad sobre `colormap`.]), (name: "colormap", type: "str | None", default: "None", desc: [Degradado ordenado a lo largo de la línea, por ejemplo `"inferno"`, `"viridis"` o `"plasma"`.])),
-  desc: [Tira de líneas 3D en el espacio del mundo. La lista `colors` debe tener la misma longitud que `points`. Mide en pantalla el ancho de su trazo, `.stroke(color, ancho)` en unidades de la escena, a cualquier profundidad; sin trazo, 1,5 px.],
+  desc: [Tira de líneas 3D en el espacio del mundo. La lista `colors` debe tener la misma longitud que `points`. Mide en pantalla el ancho de su trazo, `.stroke(color, ancho)` en unidades de la escena, a cualquier profundidad; sin trazo, 2 px de una salida de 1080 px de alto (la misma parte del encuadre a cualquier tamaño).],
 )[
 ```python
 >>>from gaanim import *

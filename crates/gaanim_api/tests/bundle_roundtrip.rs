@@ -953,6 +953,42 @@ fn three_d_content_records_its_meshes_and_draws_them_again() {
     assert!(bundle.verify().unwrap().is_empty());
 }
 
+/// A long 3D line drawn by `create` records its points once: each frame
+/// keeps the part shown, and the GPU draws that part of the recorded line.
+#[test]
+fn a_growing_3d_line_records_its_points_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("grow.gaanim");
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let points: Vec<[f32; 3]> = (0..2000)
+        .map(|index| {
+            let t = index as f32 * 0.01;
+            [t.cos() * 2.0, t.sin() * 2.0, t * 0.05]
+        })
+        .collect();
+    let curve = canvas.polyline_3d(points.clone());
+    canvas.play(vec![curve.animate().create().duration(1.0)]);
+    let mut config = BundleConfig::new(&path);
+    config.fps = 10;
+    config.thumbnail = false;
+    record_canvas(canvas, config).unwrap();
+
+    let mut bundle = Bundle::open(&path).unwrap();
+    let lines: u32 = bundle
+        .manifest
+        .table_segments
+        .iter()
+        .map(|segment| segment.counts.lines)
+        .sum();
+    assert_eq!(lines, 1, "the line is stored once");
+    let middle = bundle.frame(bundle.frame_index_at(0.5)).unwrap();
+    let source = &middle.capture.three_d.as_ref().unwrap().sources[0];
+    assert_eq!(source.lines.as_ref().unwrap().points.len(), points.len());
+    let [from, to] = source.line_range.expect("the frame keeps the part shown");
+    assert!(from == 0.0 && to > 0.2 && to < 0.8, "{from} {to}");
+    assert!(bundle.verify().unwrap().is_empty());
+}
+
 /// Groups whose members draw alike under a glow and a blur, and two rows
 /// that end on the same glow: their drawables share one recipe. A replay
 /// shares one effect image among them where the recording built one per
