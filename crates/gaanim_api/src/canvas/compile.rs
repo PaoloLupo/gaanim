@@ -235,15 +235,22 @@ fn sampled_reactive_surface_3d(
     time: f64,
     values: &[(ObjectId, f64)],
 ) -> TriangleMeshData {
-    let mesh = gaanim_visualization::sample_surface(map, resolution, |x, y| {
-        function
-            .evaluate(&[x, y], time, |logical| {
-                values
-                    .iter()
-                    .find_map(|(id, value)| (*id == logical).then_some(*value))
-            })
+    let lookup = |logical| {
+        values
+            .iter()
+            .find_map(|(id, value)| (*id == logical).then_some(*value))
+    };
+    // A function with no coordinates gives every height at once, in the
+    // grid's order; f64::MAX marks a missing one.
+    let mut heights = (function.coordinate_arity() == 0)
+        .then(|| function.evaluate(&[], time, lookup).unwrap_or_default())
+        .map(Vec::into_iter);
+    let mesh = gaanim_visualization::sample_surface(map, resolution, |x, y| match &mut heights {
+        Some(heights) => heights.next().filter(|z| *z != f64::MAX),
+        None => function
+            .evaluate(&[x, y], time, lookup)
             .ok()
-            .map(|output| output[0])
+            .map(|output| output[0]),
     })
     .unwrap_or(gaanim_visualization::SurfaceMesh {
         vertices: Vec::new(),
