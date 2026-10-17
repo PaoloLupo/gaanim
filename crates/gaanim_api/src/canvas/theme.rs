@@ -1122,6 +1122,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::ReactiveParametric2D { .. }
         | SpawnKind::ReactiveParametric3D { .. }
         | SpawnKind::ReactiveSurface3D { .. }
+        | SpawnKind::ReactiveParametricSurface3D { .. }
         | SpawnKind::DataMark { .. }
         | SpawnKind::Polyline3D { .. }
         | SpawnKind::LineSegments3D { .. }
@@ -1197,6 +1198,7 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::ReactiveParametric2D { .. } => "parametric_plot",
         SpawnKind::ReactiveParametric3D { .. } => "parametric_plot_3d",
         SpawnKind::ReactiveSurface3D { .. } => "surface",
+        SpawnKind::ReactiveParametricSurface3D { .. } => "parametric_surface",
         SpawnKind::ReactiveReadout { .. } => "expression_readout",
         SpawnKind::DataMark { .. } => "data_mark",
         SpawnKind::ProgressArc { .. } => "progress_arc",

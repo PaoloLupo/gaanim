@@ -250,17 +250,44 @@ fn sampled_reactive_surface_3d(
         indices: Vec::new(),
         values: Vec::new(),
     });
-    let finite = mesh
-        .values
-        .iter()
-        .copied()
-        .filter(|value| value.is_finite())
-        .collect::<Vec<_>>();
-    let minimum = finite.iter().copied().reduce(f64::min).unwrap_or(0.0);
-    let maximum = finite.iter().copied().reduce(f64::max).unwrap_or(1.0);
-    let span = (maximum - minimum).max(f64::EPSILON);
-    let colors = mesh
-        .values
+    let colors = surface_vertex_colors(&mesh.values, color_map, None);
+    TriangleMeshData {
+        vertices: mesh.vertices,
+        indices: mesh.indices,
+        normals: None,
+        uvs: None,
+        color: None,
+        colors: Some(colors),
+        material: None,
+    }
+}
+
+/// One color per surface vertex: `values` mapped through `color_map` over
+/// `range`, or over the span of the finite values; a non-finite value is
+/// transparent. Without a map, a blue, green and red ramp.
+fn surface_vertex_colors(
+    values: &[f64],
+    color_map: Option<&gaanim_core::ColorMap>,
+    range: Option<(f64, f64)>,
+) -> Vec<[f32; 4]> {
+    let (minimum, maximum) = range.unwrap_or_else(|| {
+        let finite = values
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .collect::<Vec<_>>();
+        (
+            finite.iter().copied().reduce(f64::min).unwrap_or(0.0),
+            finite.iter().copied().reduce(f64::max).unwrap_or(1.0),
+        )
+    });
+    let span = maximum - minimum;
+    let span = if span.abs() < f64::EPSILON {
+        f64::EPSILON
+    } else {
+        span
+    };
+    values
         .iter()
         .map(|value| {
             let t = if value.is_finite() {
@@ -279,15 +306,143 @@ fn sampled_reactive_surface_3d(
                 if value.is_finite() { 1.0 } else { 0.0 },
             ]
         })
-        .collect();
+        .collect()
+}
+
+/// Remembers the inputs a reactive mesh was last built from, so it is built
+/// again only when they change.
+#[derive(Default)]
+struct LastInputs(std::sync::Mutex<Option<InputBits>>);
+
+/// The time's and every input's bits, as [`LastInputs`] compares them.
+type InputBits = (u64, Vec<(ObjectId, u64)>);
+
+impl LastInputs {
+    /// Whether `values` (and `time`, for a mesh that follows it) differ from
+    /// the last call's.
+    fn changed(&self, time: Option<f64>, values: &[(ObjectId, f64)]) -> bool {
+        let snapshot = (
+            time.map_or(0, f64::to_bits),
+            values
+                .iter()
+                .map(|(id, value)| (*id, value.to_bits()))
+                .collect::<Vec<_>>(),
+        );
+        let mut last = self.0.lock().expect("reactive mesh inputs poisoned");
+        if last.as_ref() == Some(&snapshot) {
+            return false;
+        }
+        *last = Some(snapshot);
+        true
+    }
+}
+
+/// A batched function's values when it is evaluated with no coordinates;
+/// `None` when it fails.
+fn evaluate_batch(
+    function: &ReactiveFunction,
+    time: f64,
+    values: &[(ObjectId, f64)],
+) -> Option<Vec<f64>> {
+    function
+        .evaluate(&[], time, |logical| {
+            values
+                .iter()
+                .find_map(|(id, value)| (*id == logical).then_some(*value))
+        })
+        .ok()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sampled_reactive_parametric_surface_3d(
+    map: &gaanim_visualization::CoordinateMap3D,
+    function: &ReactiveFunction,
+    u_domain: (f64, f64),
+    v_domain: (f64, f64),
+    resolution: [usize; 2],
+    color: &super::SurfaceColor,
+    color_map: Option<&gaanim_core::ColorMap>,
+    color_range: Option<(f64, f64)>,
+    material: Option<gaanim_scene::Material3D>,
+    time: f64,
+    values: &[(ObjectId, f64)],
+) -> TriangleMeshData {
+    let signal = |logical| {
+        values
+            .iter()
+            .find_map(|(id, value)| (*id == logical).then_some(*value))
+    };
+    // Batched functions return the whole grid at once.
+    let points = (function.coordinate_arity() == 0)
+        .then(|| evaluate_batch(function, time, values).unwrap_or_default());
+    let colors = match color {
+        super::SurfaceColor::Function(color) if color.coordinate_arity() == 0 => {
+            Some(evaluate_batch(color, time, values).unwrap_or_default())
+        }
+        _ => None,
+    };
+    let mut index = 0;
+    let mesh = gaanim_visualization::sample_parametric_surface(
+        map,
+        u_domain,
+        v_domain,
+        resolution,
+        |u, v| {
+            let vertex = index;
+            index += 1;
+            let point = match &points {
+                Some(points) => {
+                    let point = points.get(3 * vertex..3 * vertex + 3)?;
+                    // A batch marks a missing point with f64::MAX.
+                    if point.contains(&f64::MAX) {
+                        return None;
+                    }
+                    [point[0], point[1], point[2]]
+                }
+                None => {
+                    let point = function.evaluate(&[u, v], time, signal).ok()?;
+                    [point[0], point[1], point[2]]
+                }
+            };
+            let value = match color {
+                super::SurfaceColor::Height => point[2],
+                super::SurfaceColor::Values(values) => values[vertex],
+                super::SurfaceColor::Function(color) => match &colors {
+                    Some(colors) => colors.get(vertex).copied().unwrap_or(f64::NAN),
+                    None => color
+                        .evaluate(&[u, v], time, signal)
+                        .map_or(f64::NAN, |value| value[0]),
+                },
+            };
+            Some((point, value))
+        },
+    )
+    .unwrap_or_default();
+    let mut colors = surface_vertex_colors(&mesh.values, color_map, color_range);
+    let mut vertices = mesh.vertices;
+    let mut indices = mesh.indices;
+    // Lit meshes hide their back faces, so a lit sheet gets a second copy
+    // wound the other way, whose normals face the other side.
+    if material.is_some() {
+        let count = vertices.len() as u32;
+        vertices.extend_from_within(..);
+        colors.extend_from_within(..);
+        let back = indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|[a, b, c]| [a + count, c + count, b + count])
+            .collect::<Vec<_>>();
+        indices.extend(back);
+    }
     TriangleMeshData {
-        vertices: mesh.vertices,
-        indices: mesh.indices,
+        vertices,
+        indices,
         normals: None,
         uvs: None,
         color: None,
         colors: Some(colors),
-        material: None,
+        material,
     }
 }
 
@@ -10976,16 +11131,102 @@ impl SceneModel {
                     let function = function.clone();
                     let resolution = *resolution;
                     let color_map = color_map.clone();
+                    let follows_time = function.depends_on_time();
+                    let last = LastInputs::default();
                     let regen = ReactiveMeshRegen::new(move |world| {
                         let (time, values) = reactive_values(world, &parameter_entities);
-                        sampled_reactive_surface_3d(
+                        if !last.changed(follows_time.then_some(time), &values) {
+                            return None;
+                        }
+                        Some(sampled_reactive_surface_3d(
                             &map,
                             &function,
                             resolution,
                             color_map.as_ref(),
                             time,
                             &values,
-                        )
+                        ))
+                    });
+                    builder.commands.entity(state.entity).insert(regen);
+                }
+                mr
+            }
+            SpawnKind::ReactiveParametricSurface3D {
+                map,
+                function,
+                u_domain,
+                v_domain,
+                resolution,
+                color,
+                color_map,
+                color_range,
+                material,
+            } => {
+                let mut parameter_entities =
+                    compile_function_parameters(function, id_map, &builder.states);
+                let mut follows_time = function.depends_on_time();
+                if let super::SurfaceColor::Function(color) = color {
+                    for entity in compile_function_parameters(color, id_map, &builder.states) {
+                        if !parameter_entities.contains(&entity) {
+                            parameter_entities.push(entity);
+                        }
+                    }
+                    follows_time |= color.depends_on_time();
+                }
+                let values = parameter_entities
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        builder
+                            .float_signals
+                            .get(&actual)
+                            .copied()
+                            .map(|value| (*logical, value))
+                    })
+                    .collect::<Vec<_>>();
+                let data = sampled_reactive_parametric_surface_3d(
+                    map,
+                    function,
+                    *u_domain,
+                    *v_domain,
+                    *resolution,
+                    color,
+                    color_map.as_ref(),
+                    *color_range,
+                    *material,
+                    builder.current_time,
+                    &values,
+                );
+                let mr = builder.spawn_triangle_mesh_data(data);
+                Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                if (!parameter_entities.is_empty() || follows_time)
+                    && let Some(state) = builder.states.get(mr.id)
+                {
+                    let map = map.clone();
+                    let function = function.clone();
+                    let (u_domain, v_domain, resolution) = (*u_domain, *v_domain, *resolution);
+                    let color = color.clone();
+                    let color_map = color_map.clone();
+                    let (color_range, material) = (*color_range, *material);
+                    let last = LastInputs::default();
+                    let regen = ReactiveMeshRegen::new(move |world| {
+                        let (time, values) = reactive_values(world, &parameter_entities);
+                        if !last.changed(follows_time.then_some(time), &values) {
+                            return None;
+                        }
+                        Some(sampled_reactive_parametric_surface_3d(
+                            &map,
+                            &function,
+                            u_domain,
+                            v_domain,
+                            resolution,
+                            &color,
+                            color_map.as_ref(),
+                            color_range,
+                            material,
+                            time,
+                            &values,
+                        ))
                     });
                     builder.commands.entity(state.entity).insert(regen);
                 }
@@ -12949,6 +13190,19 @@ mod tests {
     use super::*;
     use crate::canvas::{Anchor, DrawableHandle, TextAnchor};
     use bevy::ecs::world::CommandQueue;
+
+    #[test]
+    fn reactive_meshes_rebuild_only_when_their_inputs_change() {
+        let last = LastInputs::default();
+        let id = ObjectId::from_raw(7);
+        assert!(last.changed(None, &[(id, 1.0)]));
+        assert!(!last.changed(None, &[(id, 1.0)]));
+        assert!(last.changed(None, &[(id, 2.0)]));
+        // A mesh that follows the time rebuilds as it passes.
+        assert!(last.changed(Some(0.5), &[(id, 2.0)]));
+        assert!(!last.changed(Some(0.5), &[(id, 2.0)]));
+        assert!(last.changed(Some(0.6), &[(id, 2.0)]));
+    }
     use gaanim_animation::rehearsal::Lean;
     use gaanim_core::peniko::Brush;
     use gaanim_math::SpatialTransform;

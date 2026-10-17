@@ -65,6 +65,16 @@ actualizar».
   inicial.
 - `scene.geometry.group(a, b)` acepta los miembros sueltos además de una
   lista.
+- `space.parametric_surface(f, u_domain, v_domain)` dibuja superficies
+  paramétricas `(u, v) → (x, y, z)` en un espacio 3D. Con `inputs` reactivas
+  la malla se vuelve a muestrear y una superficie se dobla en otra;
+  `color(u, v)` pinta cada punto con un valor fijo del material (o uno
+  reactivo con `color_inputs`) y `material` la ilumina por las dos caras.
+  Con `vectorized=True` las funciones reciben arrays de numpy con toda la
+  rejilla y se llaman una vez en lugar de una por vértice. Lo muestra
+  `gallery/catenoid_helicoid`.
+- Las superficies reactivas (`surface` y `parametric_surface`) se vuelven
+  a muestrear solo cuando cambian sus entradas, no en cada fotograma.
 
 == 3D
 
@@ -73,9 +83,9 @@ actualizar».
   malla o una línea se sube una vez cuando cambia, así que el coste de un
   fotograma depende de cuántos objetos 3D hay y no de cuántos triángulos o
   puntos tienen. En las medidas de referencia, `gallery/surface_plot`,
-  `3d/plots_3d`, `3d/materials_3d` y una atractora de Lorenz de 8 curvas de
-  6.500 puntos pasan de 40–62 fps en su peor segundo a la frecuencia de la
-  pantalla (144 Hz).
+  `3d/plots_3d`, `3d/materials_3d` y el atractor de Lorenz de
+  `gallery/lorenz_attractor`, 8 curvas de 6.500 puntos, pasan de 40–62 fps
+  en su peor segundo a la frecuencia de la pantalla (144 Hz).
 - La luz de las primitivas con `Material3D` se calcula en cada píxel y en
   luz lineal: los brillos son redondos y nítidos y las luces puntuales se
   reflejan en su sitio.

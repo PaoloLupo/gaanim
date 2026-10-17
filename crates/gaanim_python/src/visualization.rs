@@ -9,8 +9,8 @@ use gaanim_api::canvas::{
     ChartHandle, CoordinateRef, CoordinateSpace3DHandle, CoordinateSpaceHandle,
     DEFAULT_REACTIVE_TEXT_SIZE, FlowParticleOptions, FlowParticlesHandle, NumberLineHandle,
     NumberLineVisibility, Parameter as NativeParameter, PolarSpaceHandle, PolarVisibility,
-    SceneModel as ApiCanvas, StreamLinesHandle, StreamLinesStyle, VectorField2DHandle,
-    VectorField3DHandle,
+    SceneModel as ApiCanvas, StreamLinesHandle, StreamLinesStyle, SurfaceColor,
+    VectorField2DHandle, VectorField3DHandle,
 };
 use gaanim_visualization::{
     Axis as NativeAxis, AxisLabelPosition, AxisStylePatch, Channel, ChartSpec as NativeChartSpec,
@@ -254,6 +254,145 @@ fn checked_python_function(
         coordinate_arity,
         output_arity,
         inputs,
+    ))
+}
+
+/// The `u`-major sample grid of a parametric surface.
+struct SurfaceGrid {
+    u_domain: (f64, f64),
+    v_domain: (f64, f64),
+    resolution: (usize, usize),
+}
+
+/// A surface grid's `u` and `v` as two numpy arrays, one entry per vertex.
+struct GridArrays {
+    u: Py<PyAny>,
+    v: Py<PyAny>,
+    count: usize,
+}
+
+impl SurfaceGrid {
+    fn new(u_domain: (f64, f64), v_domain: (f64, f64), resolution: (usize, usize)) -> Self {
+        Self {
+            u_domain,
+            v_domain,
+            resolution,
+        }
+    }
+
+    /// Every vertex's `(u, v)`, `u` major, as the mesh samples them.
+    fn points(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+        let (nu, nv) = self.resolution;
+        let at = |(start, end): (f64, f64), index: usize, count: usize| {
+            start + (end - start) * index as f64 / (count - 1) as f64
+        };
+        (0..nu).flat_map(move |iu| {
+            (0..nv).map(move |iv| (at(self.u_domain, iu, nu), at(self.v_domain, iv, nv)))
+        })
+    }
+
+    fn arrays(&self, py: Python<'_>) -> PyResult<GridArrays> {
+        let numpy = py.import("numpy").map_err(|_| {
+            PyTypeError::new_err("vectorized=True needs numpy: install it with `pip install numpy`")
+        })?;
+        let (u, v): (Vec<f64>, Vec<f64>) = self.points().unzip();
+        // Read-only, so a callback cannot change the grid of later frames.
+        let freeze = |values: Vec<f64>| -> PyResult<Py<PyAny>> {
+            let array = numpy.call_method1("array", (values,))?;
+            array.getattr("flags")?.setattr("writeable", false)?;
+            Ok(array.unbind())
+        };
+        Ok(GridArrays {
+            count: u.len(),
+            u: freeze(u)?,
+            v: freeze(v)?,
+        })
+    }
+}
+
+/// Call a vectorized `callback(u, v, *inputs)` over the whole grid and
+/// return its values as one flat list, `components` per vertex in vertex
+/// order. The callback may return `components` arrays (or a sequence of
+/// them) or one `(vertices, components)` array; one component may be a
+/// single array or a number. Non-finite values become `f64::MAX`, which the
+/// surface leaves out.
+fn batch_values(
+    py: Python<'_>,
+    callback: &Bound<'_, PyAny>,
+    arrays: &GridArrays,
+    inputs: &[f64],
+    components: usize,
+) -> PyResult<Vec<f64>> {
+    let numpy = py.import("numpy")?;
+    let mut arguments = vec![arrays.u.bind(py).clone(), arrays.v.bind(py).clone()];
+    for value in inputs {
+        arguments.push(value.into_pyobject(py)?.into_any());
+    }
+    let result = callback.call1(PyTuple::new(py, arguments)?)?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("dtype", numpy.getattr("float64")?)?;
+    let mut array = numpy.call_method("asarray", (result,), Some(&kwargs))?;
+    let count = arrays.count;
+    let shape: Vec<usize> = array.getattr("shape")?.extract()?;
+    let wrong = || {
+        PyValueError::new_err(format!(
+            "a vectorized callback must return {components} array(s) of {count} values, got shape {shape:?}"
+        ))
+    };
+    array = match (components, shape.as_slice()) {
+        (1, []) => numpy.call_method1("broadcast_to", (array, (count,)))?,
+        (1, [length]) if *length == count => array,
+        (_, [rows, columns]) if *rows == components && *columns == count => array.getattr("T")?,
+        (_, [rows, columns]) if *rows == count && *columns == components => array,
+        _ => return Err(wrong()),
+    };
+    let finite = numpy.call_method1("isfinite", (&array,))?;
+    let array = numpy.call_method1("where", (finite, &array, f64::MAX))?;
+    let bytes = numpy
+        .call_method1("ascontiguousarray", (array,))?
+        .call_method0("tobytes")?;
+    let bytes = bytes.cast::<pyo3::types::PyBytes>()?.as_bytes();
+    if bytes.len() != count * components * 8 {
+        return Err(wrong());
+    }
+    Ok(bytes
+        .chunks_exact(8)
+        .map(|chunk| f64::from_ne_bytes(chunk.try_into().expect("8-byte chunk")))
+        .collect())
+}
+
+/// A reactive function with no coordinates that calls a vectorized
+/// `callback(u, v, *inputs)` once for the whole grid of `arrays`.
+fn checked_batch_function(
+    py: Python<'_>,
+    callback: Py<PyAny>,
+    arrays: &GridArrays,
+    components: usize,
+    inputs: Vec<Py<PyAny>>,
+    canvas: &Arc<Mutex<ApiCanvas>>,
+) -> PyResult<ReactiveFunction> {
+    validate_callback(py, callback.bind(py), 2 + inputs.len())?;
+    let (inputs, owners) = parse_inputs(py, inputs)?;
+    validate_owners(&owners, canvas)?;
+    let recipe = crate::callback_recipe::deferred(py, &callback);
+    let arrays = GridArrays {
+        u: arrays.u.clone_ref(py),
+        v: arrays.v.clone_ref(py),
+        count: arrays.count,
+    };
+    Ok(ReactiveFunction::from_sources_with_deferred_recipe(
+        0,
+        components * arrays.count,
+        inputs,
+        recipe,
+        move |arguments| {
+            crate::custom::with_pure_callback(|| {
+                Python::attach(|py| {
+                    batch_values(py, callback.bind(py), &arrays, arguments, components)
+                        .map_err(|error| error.to_string())
+                })
+            })
+        },
     ))
 }
 
@@ -2308,6 +2447,87 @@ impl PyCoordinateSpace3D {
                 function,
                 [resolution.0, resolution.1],
                 color_map.map(|color_map| color_map.0),
+            )
+            .map(PyDrawable)
+            .map_err(value_error)
+    }
+
+    #[pyo3(signature = (function, u_domain, v_domain, *, resolution=(64, 48), inputs=Vec::new(), vectorized=false, color=None, color_inputs=Vec::new(), color_map=None, color_range=None, material=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn parametric_surface(
+        &self,
+        py: Python<'_>,
+        function: Py<PyAny>,
+        u_domain: (f64, f64),
+        v_domain: (f64, f64),
+        resolution: (usize, usize),
+        inputs: Vec<Py<PyAny>>,
+        vectorized: bool,
+        color: Option<Py<PyAny>>,
+        color_inputs: Vec<Py<PyAny>>,
+        color_map: Option<crate::color::PyColorMapArg>,
+        color_range: Option<(f64, f64)>,
+        material: Option<crate::py3d::PyMaterial3D>,
+    ) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        if resolution.0 < 2 || resolution.1 < 2 || resolution.0 * resolution.1 > 250_000 {
+            return Err(PyValueError::new_err(
+                "resolution must have at least 2 points per side and at most 250000 in all",
+            ));
+        }
+        if ![u_domain.0, u_domain.1, v_domain.0, v_domain.1]
+            .iter()
+            .all(|value| value.is_finite())
+            || u_domain.0 >= u_domain.1
+            || v_domain.0 >= v_domain.1
+        {
+            return Err(PyValueError::new_err(
+                "u_domain and v_domain must be finite with start < end",
+            ));
+        }
+        if color.is_none() && !color_inputs.is_empty() {
+            return Err(PyValueError::new_err("color_inputs needs a color function"));
+        }
+        let grid = SurfaceGrid::new(u_domain, v_domain, resolution);
+        let arrays = vectorized.then(|| grid.arrays(py)).transpose()?;
+        let function = match &arrays {
+            Some(arrays) => checked_batch_function(py, function, arrays, 3, inputs, &self.canvas)?,
+            None => checked_python_function(py, function, 2, 3, inputs, &self.canvas)?,
+        };
+        let color = match color {
+            None => SurfaceColor::Height,
+            Some(color) if !color_inputs.is_empty() => SurfaceColor::Function(match &arrays {
+                Some(arrays) => {
+                    checked_batch_function(py, color, arrays, 1, color_inputs, &self.canvas)?
+                }
+                None => checked_python_function(py, color, 2, 1, color_inputs, &self.canvas)?,
+            }),
+            // Without inputs the colors are painted once, on the material.
+            Some(color) => {
+                validate_callback(py, color.bind(py), 2)?;
+                let values = match &arrays {
+                    Some(arrays) => batch_values(py, color.bind(py), arrays, &[], 1)?,
+                    None => grid
+                        .points()
+                        .map(|(u, v)| color.bind(py).call1((u, v))?.extract::<f64>())
+                        .collect::<PyResult<Vec<_>>>()?,
+                };
+                SurfaceColor::Values(values.into())
+            }
+        };
+        self.canvas
+            .lock()
+            .expect("scene canvas poisoned")
+            .reactive_parametric_surface_plot(
+                &self.inner,
+                function,
+                u_domain,
+                v_domain,
+                [resolution.0, resolution.1],
+                color,
+                color_map.map(|color_map| color_map.0),
+                color_range,
+                material.map(|material| material.0),
             )
             .map(PyDrawable)
             .map_err(value_error)

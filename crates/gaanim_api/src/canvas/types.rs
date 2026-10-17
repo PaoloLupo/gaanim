@@ -529,6 +529,20 @@ impl ImageOptions {
     }
 }
 
+/// The value a surface vertex is colored by.
+#[derive(Debug, Clone)]
+pub enum SurfaceColor {
+    /// The data height of the vertex.
+    Height,
+    /// One value per grid vertex, `u` major, painted on the material: it
+    /// stays on the same points whatever the shape.
+    Values(std::sync::Arc<[f64]>),
+    /// A reactive function of the grid, sampled again when its inputs change:
+    /// `(u, v) -> value` per vertex, or, with no coordinates, all the vertices'
+    /// values at once, `u` major.
+    Function(gaanim_animation::ReactiveFunction),
+}
+
 #[derive(Debug, Clone)]
 pub enum SpawnKind {
     FillLevelOutline {
@@ -719,6 +733,21 @@ pub enum SpawnKind {
         resolution: [usize; 2],
         /// Colors by height, lowest to highest; `None` keeps the default ramp.
         color_map: Option<gaanim_core::ColorMap>,
+    },
+    /// A deterministic `(u, v) -> (x, y, z)` callback sampled into a 3D surface mesh.
+    ReactiveParametricSurface3D {
+        map: gaanim_visualization::CoordinateMap3D,
+        function: gaanim_animation::ReactiveFunction,
+        u_domain: (f64, f64),
+        v_domain: (f64, f64),
+        resolution: [usize; 2],
+        /// What colors each vertex through `color_map`.
+        color: SurfaceColor,
+        color_map: Option<gaanim_core::ColorMap>,
+        /// The values at the two ends of `color_map`; `None` spans the values.
+        color_range: Option<(f64, f64)>,
+        /// Lights the surface on both sides; `None` leaves it unlit.
+        material: Option<gaanim_scene::Material3D>,
     },
     /// Numeric text evaluated from a deterministic scalar source.
     ReactiveReadout {

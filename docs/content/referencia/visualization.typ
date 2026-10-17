@@ -1286,6 +1286,27 @@ saddle = world.surface(lambda x, y: 0.1 * (x * x - y * y), resolution=(32, 24))
 ]
 
 #api-entry(
+  name: "CoordinateSpace3D.parametric_surface",
+  kind: "method",
+  desc: [Superficie paramétrica `(u, v) → (x, y, z)` muestreada sobre `u_domain` × `v_domain` en una rejilla de `resolution`, con `inputs` reactivas como `surface`: la malla se vuelve a muestrear solo cuando cambian, así que una superficie puede doblarse en otra. `color(u, v)` da el valor con que se colorea cada vértice a través de `color_map`. Sin `color_inputs` se muestrea una sola vez, de modo que el color queda pintado sobre los mismos puntos del material aunque la forma cambie; con ellas, `color(u, v, *color_inputs)` se vuelve a muestrear cuando cambian. `color_range` fija los valores de los dos extremos del mapa (por defecto, el menor y el mayor). Sin `color`, colorea por altura. Con `vectorized=True`, `function` y `color` se llaman una vez para toda la rejilla en lugar de una vez por vértice: `u` y `v` son arrays de numpy de solo lectura con un valor por vértice, y la función devuelve los arrays `(x, y, z)` (o uno de forma `(vértices, 3)`); un `NaN` deja un hueco. Necesita numpy y es mucho más rápido en rejillas grandes. Con `material` la superficie se ilumina por las dos caras con `lighting_3d` y conserva sus colores; sin él no se ilumina.],
+)[
+```python
+>>>from gaanim import *
+>>>import math
+>>>scene = Scene(frame=(16, 9))
+>>>world = scene.viz.cartesian_3d(Axis.linear(-2, 2), Axis.linear(-2, 2), Axis.linear(-1, 1))
+tube = world.parametric_surface(
+    lambda u, v: (math.cos(u), math.sin(u), v),
+    (0, math.tau),
+    (-1, 1),
+    color=lambda u, v: v,
+    color_map="viridis",
+    material=Material3D(roughness=0.5),
+)
+```
+]
+
+#api-entry(
   name: "CoordinateSpace3D.parametric",
   kind: "method",
   desc: [Curva 3D `t → (x, y, z)` sobre `domain` con `samples` muestras e `inputs` reactivas.],
