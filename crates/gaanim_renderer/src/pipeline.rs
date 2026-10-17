@@ -3395,6 +3395,7 @@ type ThreeDData = (
     Has<PostProcessExempt>,
     Option<&'static ViewLayer>,
     Option<&'static gaanim_scene::StrokeBrush>,
+    Option<Ref<'static, gaanim_scene::LineListSource>>,
 );
 type ThreeDFilter = (With<Visible>, With<gaanim_scene::Mesh3DMarker>);
 /// Query of the drawables with 3D content.
@@ -3446,11 +3447,21 @@ type ThreeDItem<'a> = (
     bool,
     Option<&'a ViewLayer>,
     Option<&'a gaanim_scene::StrokeBrush>,
+    Option<Ref<'a, gaanim_scene::LineListSource>>,
 );
 
 fn three_d_source<'a>(
-    (entity, transform, opacity, mesh, lines, material, hud, exempt, layer, stroke): ThreeDItem<'a>,
+    (entity, transform, opacity, mesh, lines, material, hud, exempt, layer, stroke, source): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
+    // A line revealing part of its source draws the source over that part:
+    // the source stays uploaded while the reveal moves.
+    let (lines, line_range) = match (lines, source) {
+        (Some(lines), Some(source)) if lines.revealed.is_some() => {
+            let range = lines.revealed;
+            (Some(source.map(|source| &source.0)), range)
+        }
+        (lines, _) => (lines, None),
+    };
     let revisions = (
         mesh.as_ref().map_or(0, |mesh| mesh.last_changed().get()),
         lines.as_ref().map_or(0, |lines| lines.last_changed().get()),
@@ -3464,6 +3475,7 @@ fn three_d_source<'a>(
             lines: lines.map(Ref::into_inner),
             material,
             line_width: line_width(stroke),
+            line_range,
         },
         hud,
         exempt,
@@ -3528,6 +3540,9 @@ pub struct CapturedThreeDSource {
     pub material: Option<gaanim_scene::Material3D>,
     /// Width of the lines in scene units, from the drawable's stroke.
     pub line_width: Option<f32>,
+    /// The part of `lines` shown, as fractions of its segments, when a
+    /// reveal shows part of it (see [`gaanim_scene::LineListData::revealed`]).
+    pub line_range: Option<[f32; 2]>,
     pub composition: ThreeDComposition,
 }
 
@@ -3593,6 +3608,7 @@ fn captured_gpu_three_d(
                     lines: source.lines.as_deref(),
                     material: source.material.as_ref(),
                     line_width: source.line_width.map(f64::from),
+                    line_range: source.line_range,
                 },
                 source.composition.clone(),
             )
@@ -3683,6 +3699,7 @@ fn three_d_elements<'a>(
                 lines: content.lines.cloned().map(Arc::new),
                 material: content.material.copied(),
                 line_width: content.line_width.map(|width| width as f32),
+                line_range: content.line_range,
                 composition: composition.clone(),
             })
             .collect();

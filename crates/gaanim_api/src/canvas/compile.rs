@@ -224,6 +224,7 @@ fn sampled_reactive_parametric_3d(
         strip: false,
         color,
         colors: None,
+        revealed: None,
     }
 }
 
@@ -685,6 +686,7 @@ fn reactive_arrow_lines_3d(
         strip: false,
         color: PenikoColor::WHITE,
         colors: Some(colors),
+        revealed: None,
     })
 }
 
@@ -8048,6 +8050,7 @@ impl SceneModel {
                                     strip: false,
                                     color: PenikoColor::WHITE,
                                     colors: None,
+                                    revealed: None,
                                 });
                             if let Some(mut visible) =
                                 world.get_mut::<gaanim_scene::LineListData>(entity)
@@ -8180,6 +8183,7 @@ impl SceneModel {
                                     strip: true,
                                     color: PenikoColor::WHITE,
                                     colors: None,
+                                    revealed: None,
                                 };
                                 if let Some(mut visible) =
                                     world.get_mut::<gaanim_scene::LineListData>(entity)
@@ -8202,6 +8206,7 @@ impl SceneModel {
                                     strip: true,
                                     color: PenikoColor::WHITE,
                                     colors: None,
+                                    revealed: None,
                                 };
                                 if let Some(mut visible) =
                                     world.get_mut::<gaanim_scene::LineListData>(entity)
@@ -8250,6 +8255,7 @@ impl SceneModel {
                                 strip: true,
                                 color: PenikoColor::WHITE,
                                 colors: Some(colors),
+                                revealed: None,
                             };
                             if let Some(mut visible) =
                                 world.get_mut::<gaanim_scene::LineListData>(entity)
