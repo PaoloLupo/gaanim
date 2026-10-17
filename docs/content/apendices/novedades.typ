@@ -95,8 +95,8 @@ actualizar».
 - El 3D se dibuja igual en la vista previa, las exportaciones, los paquetes
   `.gaanim`, el reproductor web y las vistas previas de Presenter View.
 - Sombras: las mallas opacas proyectan sombra de la luz principal, o de las
-  dos primeras luces de `light_3d`, sobre lo que recibe luz, con el borde
-  suave. `lighting_3d(shadows=...)`, que se aceptaba sin efecto, las
+  cuatro primeras luces de `light_3d`, sobre lo que recibe luz, con un borde
+  nítido al contacto que se suaviza con la distancia. `lighting_3d(shadows=...)`, que se aceptaba sin efecto, las
   enciende (por defecto) o las apaga.
 - Una línea 3D mide el ancho de su trazo, `.stroke(color, ancho)`, en lugar
   de 1,5 px fijos, y `animate.stroke_width(...)` lo anima. Sin trazo mide
