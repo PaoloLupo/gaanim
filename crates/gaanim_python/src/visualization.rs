@@ -356,8 +356,10 @@ fn batch_values(
         return Err(wrong());
     }
     Ok(bytes
-        .chunks_exact(8)
-        .map(|chunk| f64::from_ne_bytes(chunk.try_into().expect("8-byte chunk")))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| f64::from_ne_bytes(*chunk))
         .collect())
 }
 
