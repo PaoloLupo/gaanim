@@ -853,6 +853,12 @@ description = "A helicoid that bends into a catenoid without stretching, its cur
 allow = ["theme"]
 
 [[example]]
+path = "gallery/lorenz_attractor.py"
+group = "Camera and 3D"
+description = "Eight paths of the Lorenz system that start a ten-thousandth apart, travel as one curve, then split and each weave the butterfly its own way."
+allow = ["theme"]
+
+[[example]]
 path = "gallery/warped_grid.py"
 group = "Advanced"
 description = "A sentence and an equation that write themselves and transform, then a grid bent by a nonlinear function."

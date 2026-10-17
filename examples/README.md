@@ -354,6 +354,7 @@ Short scenes in the brand's colors, from a logo built of primitives to Fourier e
 | [Light source](gallery/light_source.py) | A gold point light that sweeps over three solids like a sun, lighting each from the side it passes. |
 | [Camera orbit](gallery/camera_orbit.py) | Lit solids on 3D axes seen by a camera that circles them, tilts up and down, and keeps a readout fixed on the screen. |
 | [Catenoid helicoid](gallery/catenoid_helicoid.py) | A helicoid that bends into a catenoid without stretching, its curvature painted on the material and two curves keeping their lengths. |
+| [Lorenz attractor](gallery/lorenz_attractor.py) | Eight paths of the Lorenz system that start a ten-thousandth apart, travel as one curve, then split and each weave the butterfly its own way. |
 | [Warped grid](gallery/warped_grid.py) | A sentence and an equation that write themselves and transform, then a grid bent by a nonlinear function. |
 | [Fourier epicycles](gallery/fourier_epicycles.py) | Five turning circles stacked on each other, the odd harmonics of a square wave, whose tip draws the wave as they spin. |
 

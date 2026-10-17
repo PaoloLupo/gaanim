@@ -83,9 +83,9 @@ actualizar».
   malla o una línea se sube una vez cuando cambia, así que el coste de un
   fotograma depende de cuántos objetos 3D hay y no de cuántos triángulos o
   puntos tienen. En las medidas de referencia, `gallery/surface_plot`,
-  `3d/plots_3d`, `3d/materials_3d` y una atractora de Lorenz de 8 curvas de
-  6.500 puntos pasan de 40–62 fps en su peor segundo a la frecuencia de la
-  pantalla (144 Hz).
+  `3d/plots_3d`, `3d/materials_3d` y el atractor de Lorenz de
+  `gallery/lorenz_attractor`, 8 curvas de 6.500 puntos, pasan de 40–62 fps
+  en su peor segundo a la frecuencia de la pantalla (144 Hz).
 - La luz de las primitivas con `Material3D` se calcula en cada píxel y en
   luz lineal: los brillos son redondos y nítidos y las luces puntuales se
   reflejan en su sitio.
