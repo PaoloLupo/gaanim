@@ -167,6 +167,7 @@ Per-object glow, blur, shadow, echo, mattes, shaders and particles.
 | Example | Description |
 | --- | --- |
 | [Glow blur shadow](effects/glow_blur_shadow.py) | Glow, blur and drop shadow: their parameters, the drawables they apply to, and how they animate. |
+| [Outlines](effects/outlines.py) | Sticker outlines traced from a drawable's alpha, on an image, text, a shape and a group, with a shadow and after a shader effect. |
 | [Echo](effects/echo.py) | Trails of delayed copies with their count, delay and decay, what they replay, held trails and onion skins. |
 | [Mattes](effects/mattes.py) | Track mattes in alpha and luma modes, inverted, animated and removed, and metaballs whose drops melt together. |
 | [Glass](effects/glass.py) | Frosted and liquid glass over what is drawn behind, every refraction, bevel, twist and dispersion setting, and backdrop blur. |

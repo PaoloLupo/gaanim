@@ -215,6 +215,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - `scene.fx.spotlight` sobre una selección de texto abre un hueco por cada
   línea que abarca, solo alrededor de sus glifos, en lugar del rectángulo de
   las líneas enteras, y los huecos giran con un texto girado.
+- `drawable.outline(color, width)` traza un borde de pegatina alrededor del
+  alfa de una imagen recortada, de los glifos de un texto o de los miembros
+  de un grupo. Se combina con `shader_effect`, cuyo resultado contornea, y
+  con `shadow`, que se proyecta desde el resultado contorneado.
 - `Background.image(ruta)` cubre el cuadro con una imagen, centrada y
   recortada, como una textura de papel bajo un collage.
 - `PostProcess.overlay(ruta, blend="multiply", opacity=...)` pone una imagen

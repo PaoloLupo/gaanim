@@ -106,6 +106,150 @@ pub fn depth_of_field_effect(sigma: f64) -> Option<ShaderEffect> {
     })
 }
 
+/// Widest outline, in texture pixels, a drawable is drawn with: a wider one
+/// is drawn at a lower density, as a depth-of-field blur is.
+pub const MAX_OUTLINE_PIXELS: f64 = 96.0;
+
+/// Shared by both outline passes: a texel by its integer coordinates, read
+/// at its center so neighbors never blend. Outside the texture it is
+/// uncovered and, to the second pass, as far as the outline reaches.
+const OUTLINE_TEXEL: &str = r#"
+fn gaanim_outline_texel(p: vec2<f32>, resolution: vec2<f32>) -> vec4<f32> {
+    if (any(p < vec2<f32>(0.0)) || any(p >= resolution)) {
+        return vec4<f32>(1.0, 0.0, 0.0, 0.0);
+    }
+    return gaanim_scene((p + vec2<f32>(0.5)) / resolution);
+}
+"#;
+
+/// First outline pass: on each row, the distance from every uncovered
+/// texel to the nearest covered one, as a share of the outline's reach
+/// written to red and, for the 8 bits red loses, to green. Covered texels keep their color; an edge texel of
+/// coverage `a` counts as `0.5 - a` away, so the outline is antialiased.
+/// `width` arrives in scene units and [`crate::pipeline`] turns it into
+/// the texture's pixels.
+const OUTLINE_ROWS: &str = r#"
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let p = floor(uv * resolution);
+    let here = gaanim_outline_texel(p, resolution);
+    if (here.a > 0.0) {
+        return here;
+    }
+    let width = clamp(gaanim_uniforms.width, 0.0, 96.0);
+    let reach = width + 1.5;
+    let steps = i32(ceil(width)) + 1;
+    var nearest = reach;
+    for (var i = 1; i <= 97; i++) {
+        if (i > steps) {
+            break;
+        }
+        let offset = vec2<f32>(f32(i), 0.0);
+        let covered = max(
+            gaanim_outline_texel(p - offset, resolution).a,
+            gaanim_outline_texel(p + offset, resolution).a,
+        );
+        // Nearer texels are always closer than farther ones, whatever
+        // their coverage, so the first one found is the nearest.
+        if (covered > 0.0) {
+            nearest = f32(i) - covered + 0.5;
+            break;
+        }
+    }
+    let share = clamp(nearest / reach, 0.0, 1.0) * 255.0;
+    return vec4<f32>(floor(share) / 255.0, fract(share), 0.0, 0.0);
+}
+"#;
+
+/// Second outline pass: the Euclidean distance to the silhouette from the
+/// rows' distances (`min over dy of sqrt(row² + dy²)`), drawn as `color`
+/// where it is within `width` and beneath the drawable's own texels.
+const OUTLINE_COLUMNS: &str = r#"
+fn gaanim_outline_row(texel: vec4<f32>, reach: f32) -> f32 {
+    let share = (round(texel.r * 255.0) + texel.g) / 255.0;
+    return select(share * reach, max(0.5 - texel.a, 0.0), texel.a > 0.0);
+}
+
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let p = floor(uv * resolution);
+    let here = gaanim_outline_texel(p, resolution);
+    let width = clamp(gaanim_uniforms.width, 0.0, 96.0);
+    let reach = width + 1.5;
+    let steps = i32(ceil(width)) + 1;
+    var nearest = gaanim_outline_row(here, reach);
+    for (var i = 1; i <= 97; i++) {
+        let dy = f32(i);
+        // Rows farther away than the nearest texel so far are farther.
+        if (i > steps || dy - 0.5 > nearest) {
+            break;
+        }
+        let offset = vec2<f32>(0.0, dy);
+        let row = min(
+            gaanim_outline_row(gaanim_outline_texel(p - offset, resolution), reach),
+            gaanim_outline_row(gaanim_outline_texel(p + offset, resolution), reach),
+        );
+        nearest = min(nearest, sqrt(row * row + dy * dy));
+    }
+    let ink = vec4<f32>(
+        gaanim_uniforms.red,
+        gaanim_uniforms.green,
+        gaanim_uniforms.blue,
+        gaanim_uniforms.alpha,
+    );
+    let outline = ink.a * clamp(width - nearest + 0.5, 0.0, 1.0);
+    // The drawable over its outline.
+    let base = select(vec4<f32>(0.0), here, here.a > 0.0);
+    let alpha = base.a + outline * (1.0 - base.a);
+    let color = (base.rgb * base.a + ink.rgb * outline * (1.0 - base.a)) / max(alpha, 1e-4);
+    return vec4<f32>(color, alpha);
+}
+"#;
+
+/// The two outline passes; their first uniform is a width in scene units
+/// until a layer's texture density turns it into pixels.
+pub fn outline_shaders() -> Option<&'static [PostProcessShader; 2]> {
+    static SHADERS: OnceLock<Option<[PostProcessShader; 2]>> = OnceLock::new();
+    SHADERS
+        .get_or_init(|| {
+            let rows = PostProcessShader::with_uniforms(
+                format!("{OUTLINE_TEXEL}{OUTLINE_ROWS}"),
+                ["width"],
+            )
+            .ok()?;
+            let columns = PostProcessShader::with_uniforms(
+                format!("{OUTLINE_TEXEL}{OUTLINE_COLUMNS}"),
+                ["width", "red", "green", "blue", "alpha"],
+            )
+            .ok()?;
+            Some([rows, columns])
+        })
+        .as_ref()
+}
+
+/// Whether `shader` is one of the outline passes, whose width is in scene
+/// units.
+pub fn is_outline_shader(shader: &PostProcessShader) -> bool {
+    outline_shaders().is_some_and(|shaders| shaders.contains(shader))
+}
+
+/// The passes that trace a `color` outline `width` scene units wide around
+/// what a drawable's texture covers, beneath it; `None` when the shaders
+/// are unavailable.
+pub fn outline_passes(
+    width: f64,
+    color: gaanim_core::peniko::Color,
+) -> Option<Vec<crate::post_process::PostProcessPass>> {
+    let [rows, columns] = outline_shaders()?;
+    let [red, green, blue, alpha] = color.components.map(f64::from);
+    Some(vec![
+        crate::post_process::PostProcessPass::constant(rows.clone(), &[width]).ok()?,
+        crate::post_process::PostProcessPass::constant(
+            columns.clone(),
+            &[width, red, green, blue, alpha],
+        )
+        .ok()?,
+    ])
+}
+
 /// Marks a [`ShaderEffect`] put on a parallax layer by its depth of field,
 /// with the blur it was built for.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]

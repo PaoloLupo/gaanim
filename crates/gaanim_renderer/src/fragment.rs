@@ -144,8 +144,8 @@ pub struct BuiltFragment {
 }
 
 /// What a drawable with a drop shadow draws into the shader effect it is
-/// the root of: its fragment without the shadow, which the effect casts
-/// from what its passes draw instead (see `pipeline::divert_effects`).
+/// part of: its fragment without the shadow, which the effect casts from
+/// what its passes draw instead (see `pipeline::divert_effects`).
 pub(crate) struct EffectShadow {
     pub shadow: DropShadow,
     pub scene: Arc<vello::Scene>,

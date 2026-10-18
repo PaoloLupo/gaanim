@@ -235,6 +235,22 @@ impl CanvasState {
         }
     }
 
+    /// Outline `spec` for the whole scene, like [`Self::set_shader_effect`].
+    pub(crate) fn set_outline(
+        &mut self,
+        spec: &SharedObjectSpec,
+        outline: Option<super::types::OutlineSpec>,
+    ) {
+        let id = {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            spec.outline = outline;
+            spec.id
+        };
+        if let Some(frozen) = self.frozen_spawn_specs.get_mut(&id) {
+            frozen.outline = outline;
+        }
+    }
+
     /// Show `spec` through a matte for the whole scene, like
     /// [`Self::set_shader_effect`].
     pub(crate) fn set_matte(

@@ -609,7 +609,7 @@ blob = scene.geometry.circle(2).fill("#1E3A8A").blur(0.15)
     (name: "effect", type: "PostProcess | Sequence[PostProcess] | None", default: none, desc: [Un pase o una cadena de pases WGSL; `None` quita el efecto.]),
     (name: "margin", type: "float", default: "0.25", desc: [Unidades de escena que se agregan alrededor del objeto, para efectos que se salen de su contorno (un brillo, una onda).]),
   ),
-  desc: [Dibuja el objeto y sus descendientes en una textura propia, le aplica los pases y devuelve el resultado a la escena en su lugar del orden de dibujo. Es un `PostProcess.shader` sobre un solo objeto: en el shader, `gaanim_scene(uv)` lee solo ese objeto (transparente alrededor), `uv` va de 0 a 1 sobre su caja con el margen, `resolution` es el tamaño de la textura en píxeles y `time` es el tiempo de la escena. Los uniforms aceptan `Parameter`, `Computed` y señales de audio. Los presets de `PostProcess` (`grain`, `chromatic_aberration`…) también sirven. La `shadow` de una imagen o una forma queda fuera de la textura y se proyecta desde el resultado, debajo de él. Es estado de declaración: vale para toda la línea de tiempo. Si un objeto con efecto contiene otro, se aplica el efecto exterior. Se ve en la vista previa, en la exportación y en los paquetes `.gaanim`, que guardan los uniforms de cada fotograma.],
+  desc: [Dibuja el objeto y sus descendientes en una textura propia, le aplica los pases y devuelve el resultado a la escena en su lugar del orden de dibujo. Es un `PostProcess.shader` sobre un solo objeto: en el shader, `gaanim_scene(uv)` lee solo ese objeto (transparente alrededor), `uv` va de 0 a 1 sobre su caja con el margen, `resolution` es el tamaño de la textura en píxeles y `time` es el tiempo de la escena. Los uniforms aceptan `Parameter`, `Computed` y señales de audio. Los presets de `PostProcess` (`grain`, `chromatic_aberration`…) también sirven. La `shadow` que comparten los objetos de dentro (la propia, la de un texto o la del estilo de un grupo) queda fuera de la textura y se proyecta desde el resultado, debajo de él; los miembros con sombras distintas las conservan dentro. Es estado de declaración: vale para toda la línea de tiempo. Si un objeto con efecto contiene otro, se aplica el efecto exterior. Se ve en la vista previa, en la exportación y en los paquetes `.gaanim`, que guardan los uniforms de cada fotograma.],
 )[
 ```python
 # show-code: true
@@ -624,6 +624,28 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
 title = scene.text("Ondas").fill(WHITE).scale_to(2.0).shader_effect(ripple, margin=0.4)
 plain = scene.text("Sin efecto").fill(GOLD).scale_to(1.0).move_to(0, -2.5)
 scene.wait(2)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.outline",
+  kind: "method",
+  params: (
+    (name: "color", type: "Color | None", default: none, desc: [Color del borde; `None` lo quita.]),
+    (name: "width", type: "float", default: "0.06", desc: [Ancho del borde en unidades de escena.]),
+  ),
+  desc: [Traza un borde alrededor de lo que cubre el objeto, como el de una pegatina: sigue el alfa del objeto y sus descendientes, no su caja (los píxeles opacos de un recorte, los glifos de un texto, los miembros de un grupo), con el borde suavizado y debajo de ellos. Se traza después de los pases de `shader_effect`, alrededor de lo que dejan, y la `shadow` se proyecta desde el resultado contorneado. Es estado de declaración: vale para toda la línea de tiempo. Un `width` no finito o no positivo lanza `ValueError`. Cuesta dos pases sobre la textura del objeto, de unas cuatro lecturas por píxel de ancho como mucho; un borde de más de 96 píxeles de la textura baja su densidad.],
+)[
+```python
+# show-code: true
+from gaanim import Scene, WHITE
+scene = Scene(frame=(16, 9), background="#e8dcc4")
+word = scene.text("Sticker", size=1.4, color="#c0392b").move_to(-3, 0)
+word.outline(WHITE, width=0.1).shadow("#00000088", 0.12, -0.12, 0.05)
+star = scene.geometry.star(5, 1.6, 0.45).fill("#2e86de").move_to(4, 0)
+star.outline(WHITE, width=0.12).shadow("#00000088", 0.12, -0.12, 0.05)
 # output: preview.webp
 scene.render()
 ```
@@ -689,7 +711,7 @@ scene.render()
   name: "Drawable.shadow",
   kind: "method",
   params: ((name: "color", type: "Color", default: none, desc: [Color de la sombra; su alfa escala la opacidad.]), (name: "x / y", type: "float", default: "0.08 / -0.08", desc: [Desplazamiento en unidades de escena.]), (name: "blur", type: "float", default: "0.06", desc: [Desenfoque en unidades de escena.])),
-  desc: [Sombra proyectada desplazada y desenfocada. Una imagen proyecta la sombra de sus píxeles opacos, no la de su rectángulo. En un texto o un grupo, una sombra desenfocada se dibuja una sola vez a partir de la silueta de sus miembros rellenos y debajo de todos, como `drop-shadow` de CSS sobre un grupo: los solapes no se oscurecen y el coste no crece con cada glifo. Los miembros recortados, con mezcla o solo con trazo proyectan la suya. Una imagen o una forma con `shader_effect` proyecta su sombra desde lo que dibuja el efecto, sin importar cuál de los dos se aplique primero.],
+  desc: [Sombra proyectada desplazada y desenfocada. Una imagen proyecta la sombra de sus píxeles opacos, no la de su rectángulo. En un texto o un grupo, una sombra desenfocada se dibuja una sola vez a partir de la silueta de sus miembros rellenos y debajo de todos, como `drop-shadow` de CSS sobre un grupo: los solapes no se oscurecen y el coste no crece con cada glifo. Los miembros recortados, con mezcla o solo con trazo proyectan la suya. Con `shader_effect`, la sombra se proyecta desde lo que dibuja el efecto, sin importar cuál de los dos se aplique primero (en un texto o un grupo, cuando sus miembros comparten la sombra, como la da su estilo).],
 )[
 ```python
 >>>from gaanim import *
