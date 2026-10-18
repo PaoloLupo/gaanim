@@ -281,8 +281,10 @@ impl Anim {
 impl SceneModel {
     /// Dim everything outside `targets`: an overlay with a hole around each
     /// (a frame `padding` away, rounded by `corner_radius`) fades in to `dim`
-    /// opacity and, by the default rate function, back out. The holes follow
-    /// their targets if they move; holes that overlap merge.
+    /// opacity and, by the default rate function, back out. A text selection
+    /// gets one hole per rendered line it spans, which turns with the text.
+    /// The holes follow their targets if they move; holes that overlap
+    /// merge.
     pub fn spotlight(
         &mut self,
         targets: Vec<BoundsTarget>,
@@ -307,10 +309,26 @@ impl SceneModel {
             .no_stroke();
         let holes = targets
             .into_iter()
-            .map(|target| {
-                self.surrounding_rect(vec![target], padding, corner_radius)
+            .map(|target| match target {
+                BoundsTarget::TextSelection { .. } => {
+                    let hole = spawn_in(&self.state, SpawnKind::SurroundingRect, true);
+                    self.state
+                        .lock()
+                        .expect("canvas state poisoned")
+                        .active_mut()
+                        .ops
+                        .push(Op::AttachLineFrames {
+                            target: hole.id,
+                            sources: vec![target],
+                            padding,
+                            corner_radius,
+                        });
+                    Ok(hole.no_fill().no_stroke())
+                }
+                target => self
+                    .surrounding_rect(vec![target], padding, corner_radius)
                     .map(|hole| hole.drawable.no_fill().no_stroke())
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| error.to_string()),
             })
             .collect::<Result<Vec<_>, _>>()?;
         let operands: Vec<&DrawableHandle> = std::iter::once(&cover).chain(&holes).collect();
