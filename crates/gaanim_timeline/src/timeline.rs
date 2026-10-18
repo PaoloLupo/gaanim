@@ -4637,6 +4637,24 @@ fn apply_lens_spec(
                     path.0 = std::sync::Arc::new(trimmed);
                 }
             }
+            // A 3D line strip trims its segments.
+            if world.get::<LineListSource>(target).is_none()
+                && let Some(line) = world.get::<LineListData>(target).cloned()
+                && let Ok(mut entity) = world.get_entity_mut(target)
+            {
+                entity.insert(LineListSource(LineListData {
+                    revealed: None,
+                    ..line
+                }));
+            }
+            if let Some(source) = world.get::<LineListSource>(target)
+                && let Some(visible) =
+                    gaanim_animation::tween::trim_line_strip(&source.0, start, end, offset)
+                && let Some(mut line) = world.get_mut::<LineListData>(target)
+                && *line != visible
+            {
+                *line = visible;
+            }
             set_path_trim_window(
                 world,
                 target,
@@ -5043,6 +5061,7 @@ fn apply_lens_spec(
             up,
             delta_yaw,
             delta_pitch,
+            dolly,
         } => {
             let mut orbit = gaanim_math::Camera::ortho_2d(1, 1);
             orbit
@@ -5051,8 +5070,10 @@ fn apply_lens_spec(
             orbit
                 .orbit_around_target(delta_yaw * t, delta_pitch * t)
                 .expect("validated orbit interpolation");
+            // The radius changes geometrically, so the dolly looks steady.
+            let position = *target + (orbit.position - *target) * dolly.powf(t);
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
-                camera.position = orbit.position;
+                camera.position = position;
                 camera.target = orbit.target;
                 camera.up = orbit.up;
                 camera.rotation = orbit.rotation;

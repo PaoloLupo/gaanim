@@ -186,6 +186,25 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   malla opaca, y con `in_3d(material)` se ilumina y recibe sombras. Tapa lo
   translúcido que tiene detrás, como una superficie opaca, donde es al
   menos medio opaco. Lo muestra `3d/drawables_in_3d`.
+- `trim()` y `animate.trim(...)` recortan también las líneas 3D de
+  `polyline_3d`, que antes se quedaban enteras. Cuentan segmentos, no
+  longitud: una línea de muestras tomadas a intervalos iguales de tiempo,
+  recortada de `end=0` a `end=1` con `Easing.LINEAR`, crece con su extremo
+  sobre el objeto que la traza. Lo muestra `gallery/heavy_top`.
+- `scene.geometry.mesh(vertices, triangles, colors=)` crea una malla
+  iluminada con los vértices, triángulos y colores por vértice que le des, y
+  `scene.geometry.revolve(profile)` el sólido de revolución de un perfil
+  `(r, y)`. Los dos conservan el origen de sus coordenadas, así que una pieza
+  modelada desde su pivote gira sobre él.
+- `scene.geometry.group(..., origin=(x, y, z))` agrupa alrededor de un punto:
+  el grupo gira sobre él y `move_to` lo coloca, en lugar del centro de la
+  caja de sus miembros. `drive_from_samples(times, quaternions,
+  "orientation")` orienta un objeto en 3D con cuaterniones muestreados,
+  interpolados por el camino más corto: un sólido rígido simulado gira sin
+  Python en cada fotograma.
+- `scene.camera.animate.orbit(..., dolly=0.8)` gira alrededor del objetivo
+  mientras se acerca o se aleja, en un solo movimiento: `orbit` y `dolly` no
+  se pueden reproducir a la vez.
 
 == Editor
 

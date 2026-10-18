@@ -2299,7 +2299,9 @@ class Anim:
     def trim(self, start: Optional[float] = None, end: Optional[float] = None, offset: Optional[float] = None) -> Anim:
         """Animate the visible window of the drawn path (see ``Drawable.trim``).
 
-        Omitted values keep their current setting. ``offset`` slides the
+        Omitted values keep their current setting. On a 3D line the window
+        counts segments, so ``Easing.LINEAR`` moves its end one sample per
+        equal step of time. ``offset`` slides the
         window and wraps around the path, so animating it makes a segment
         travel. Values outside ``[0, 1]`` for ``start``/``end`` raise
         ``ValueError``.
@@ -3978,8 +3980,10 @@ class Drawable:
         """Show only the window ``[start, end]`` of the drawn path, shifted by ``offset``.
 
         Values are arc-length fractions; omitted ones keep their current
-        setting (initially ``0``, ``1`` and ``0``). ``offset`` wraps around
-        the end of the path. ``"simultaneous"`` (default) trims every
+        setting (initially ``0``, ``1`` and ``0``). A 3D line
+        (``polyline_3d``) is trimmed by fractions of its segments instead, so
+        a line of samples evenly spaced in time grows at a steady rate.
+        ``offset`` wraps around the end of the path. ``"simultaneous"`` (default) trims every
         sub-path and every drawn descendant at once; ``"sequential"`` trims
         the total length, so sub-paths appear one after another. Animate it
         with ``animate.trim(...)``.
@@ -4906,8 +4910,8 @@ class Drawable:
     def drive_from_samples(
         self,
         times: Sequence[float],
-        values: Sequence[float] | Sequence[tuple[float, float]],
-        property: Literal["x", "y", "xy", "z", "rotation", "scale", "opacity", "signal", "fill"] = "x",
+        values: Sequence[float] | Sequence[tuple[float, float]] | Sequence[tuple[float, float, float, float]],
+        property: Literal["x", "y", "xy", "z", "rotation", "orientation", "scale", "opacity", "signal", "fill"] = "x",
         *,
         interpolation: Literal["linear", "step"] = "linear",
         scale: float = 1.0,
@@ -4963,6 +4967,16 @@ class Drawable:
 
             path = [ring_point(p) for p in positions]
             car.drive_from_samples(times, path, "xy", absolute=True)
+
+        ``property="orientation"`` turns the drawable in 3D: each value is a
+        ``(w, x, y, z)`` quaternion (normalized for you), its orientation in
+        the parent's frame at that time, whatever the authored one; between
+        samples ``"linear"`` turns the shorter way (slerp). It suits a rigid
+        body from a simulation, whatever Euler convention computed it, with
+        no Python per frame. ``scale`` and ``offset`` do not apply and raise
+        ``ValueError``, as does a zero or non-finite quaternion::
+
+            top.drive_from_samples(times, quaternions, "orientation")
         """
         ...
     def bind_y_from(self, source: Drawable) -> None:
@@ -6614,10 +6628,17 @@ class CameraAnimation:
         self,
         delta_yaw: float,
         delta_pitch: float,
+        *,
+        dolly: float = 1.0,
     ) -> Anim:
         """Orbit around the current look-at target.
 
-        ``delta_yaw`` and ``delta_pitch`` are radians.
+        ``delta_yaw`` and ``delta_pitch`` are radians. ``dolly`` multiplies
+        the distance to the target along the way, below ``1`` closer, at a
+        constant rate of change: rising over a scene while closing in is one
+        move, since ``orbit`` and ``dolly`` both drive the camera pose and
+        cannot play together. A ``dolly`` that is not finite and positive
+        raises ``ValueError``.
 
         Example:
             scene.camera.animate.orbit(delta_yaw=0.6, delta_pitch=0.12).duration(1.0)
@@ -8612,6 +8633,62 @@ class Geometry:
             knot = scene.geometry.tube(points, 0.12, closed=True, material=Material3D.metal(GOLD))
         """
         ...
+    def mesh(
+        self,
+        vertices: Sequence[tuple[float, float, float]],
+        triangles: Sequence[tuple[int, int, int]],
+        *,
+        colors: Optional[Sequence[ColorLike]] = None,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create a lit mesh from ``vertices`` and the ``triangles`` that index them.
+
+        Vertices are in the mesh's own coordinates, whose origin stays the
+        drawable's: ``move_to_3d`` places it and turns are about it, so a
+        part modelled from its pivot turns about the pivot. Each triangle
+        faces the side from which its vertices run counterclockwise; a lit
+        mesh hides the faces turned away. ``colors`` gives one color per
+        vertex, blended across each triangle and kept when the mesh is lit by
+        ``material`` (matte white by default). Normals are generated, smooth
+        across shared vertices: repeat a vertex for a crease. Numpy arrays of
+        shape ``(n, 3)`` work for both sequences. Non-finite vertices, no
+        triangles, an index past the vertices or a ``colors`` of another
+        length raise ``ValueError``.
+
+        Example:
+            tetra = scene.geometry.mesh(
+                [(1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)],
+                [(0, 1, 2), (0, 3, 1), (0, 2, 3), (1, 3, 2)],
+                colors=[RED, GREEN, BLUE, GOLD],
+            )
+        """
+        ...
+    def revolve(
+        self,
+        profile: Sequence[tuple[float, float]],
+        *,
+        segments: int = 64,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create the lit solid a ``(r, y)`` profile sweeps turning around the y axis, as on a lathe.
+
+        ``r`` is the distance from the axis (at least ``0``) and ``y`` the
+        height. List the profile counterclockwise in the (r, y) half-plane,
+        up an outer wall, so the surface faces out; starting and ending on
+        the axis (``r = 0``) closes the solid. Turns sharper than 35° leave
+        an edge and gentler ones (sampled curves) stay smooth; ``segments``
+        steps go around. The profile's origin, on the axis, is the
+        drawable's: ``move_to_3d`` places it and turns are about it. Fewer
+        than two distinct points, a negative ``r``, non-finite points or
+        fewer than 3 ``segments`` raise ``ValueError``.
+
+        Example:
+            vase = scene.geometry.revolve(
+                [(0, 0), (0.6, 0), (0.8, 0.6), (0.4, 1.4), (0.5, 2.0), (0, 2.0)],
+                material=Material3D.matte(GOLD),
+            )
+        """
+        ...
     def lighting_3d(self, preset: Literal["studio", "none"] = "studio", intensity: float = 1.0, shadows: bool = True) -> None:
         """Configure the light of lit 3D primitives.
 
@@ -9129,11 +9206,23 @@ class Geometry:
             scene.geometry.transform_matching(source, target, mode="tex")
         """
         ...
-    def group(self, *members: Drawable | Sequence[Drawable]) -> Drawable:
+    def group(
+        self,
+        *members: Drawable | Sequence[Drawable],
+        origin: tuple[float, float] | tuple[float, float, float] | None = None,
+    ) -> Drawable:
         """Gather ``members`` into one drawable that moves, styles and animates as a whole.
 
         Pass the members one by one, ``group(a, b)``, or as a sequence,
         ``group([a, b])``; anything else raises ``TypeError``.
+
+        A group turns, scales and skews about the center of its members' box,
+        and ``move_to`` places that center. ``origin``, a point in scene
+        coordinates, takes its place: the group turns about it and
+        ``move_to``/``move_to_3d`` put it where they say, as the pivot of a
+        rigid body. A top built upright from its tip at ``(0, 0, 0)`` and
+        grouped with ``origin=(0, 0, 0)`` tilts about the tip wherever it is
+        moved. A non-finite ``origin`` raises ``ValueError``.
 
         Grouping preserves each member's authored local coordinates, including
         coordinates returned by ``add_updater_fn``. Existing visible members do
@@ -9143,6 +9232,7 @@ class Geometry:
 
         Example:
             result = scene.geometry.group([drawable])
+            top = scene.geometry.group(cone, disk, origin=(0, 0, 0)).move_to_3d(2, 0, 0)
         """
         ...
     def repeat(

@@ -301,6 +301,8 @@ pub enum AnimationType {
     CameraOrbit {
         delta_yaw: f64,
         delta_pitch: f64,
+        /// Factor on the eye's distance from the target, reached along the orbit.
+        dolly: f64,
     },
     CameraPerspective {
         fov_y: f64,

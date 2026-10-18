@@ -304,6 +304,10 @@ scene.render()
 - `scene.geometry` crea primitivas 3D: `cube`, `sphere`, `cylinder`, `cone`,
   `plane` y `torus`. `arrow_3d`, `tube` y `flat_3d` construyen flechas,
   tubos y láminas a partir de puntos o de un dibujo 2D (ver más abajo).
+- `mesh(vertices, triangles, colors=)` crea una malla con los vértices y
+  triángulos que le des, y `revolve(profile)` el sólido que barre un perfil
+  `(r, y)` al girar alrededor del eje y. Ambos conservan el origen de sus
+  coordenadas, así que una pieza modelada desde su pivote gira sobre él.
 - `Material3D.matte(color)`, `Material3D.metal(color)` y
   `Material3D.emissive(color, strength)` son puntos de partida; el constructor
   `Material3D(color, roughness=, metallic=)` permite ajustarlos.
@@ -335,6 +339,11 @@ scene.render()
 - Los drawables tienen versiones 3D de sus transformaciones: `move_to_3d`,
   `shift_by_3d`, `rotate_by_3d(eje, radianes)` y `scale_by_3d`, tanto
   inmediatas como bajo `.animate`.
+- Un sólido rígido se arma con `group(..., origin=(x, y, z))`: el grupo gira
+  alrededor de ese punto y `move_to_3d` lo coloca, así que una peonza modelada
+  desde su punta se inclina sobre ella. Para moverlo con una simulación,
+  `drive_from_samples(tiempos, cuaterniones, "orientation")` lo orienta en
+  cada instante sin llamar a Python en cada fotograma.
 
 Los ejes son los de la escena 2D: `x` hacia la derecha, `y` hacia arriba y `z`
 hacia el espectador.
@@ -384,6 +393,9 @@ scene.render()
   campo de visión vertical en radianes.
 - `look_at(eye=, target=, up=)` coloca la cámara en `eye` mirando a `target`.
 - `animate.orbit(delta_yaw=, delta_pitch=)` gira alrededor del objetivo.
+  Con `dolly=` además se acerca (menor que `1`) o se aleja mientras gira:
+  `orbit` y `dolly` no se pueden reproducir a la vez, porque mueven la misma
+  pose de la cámara.
 - `animate.dolly(factor)` se acerca (menor que `1`) o se aleja (mayor que
   `1`).
 - `orthographic()` vuelve a la proyección ortográfica y `reset()` al encuadre

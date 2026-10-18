@@ -2930,6 +2930,22 @@ impl DrawableHandle {
         self.clone()
     }
 
+    /// Turn this drawable to a sampled series of 3D orientations: at each of
+    /// `times` (seconds from the cursor), the quaternion of the same index,
+    /// absolute in its parent's frame. Between samples `Linear` turns the
+    /// shorter way (slerp); before the first and after the last it holds
+    /// them. Evaluated natively as a pure function of timeline time, like
+    /// [`drive_from_samples`](Self::drive_from_samples).
+    pub fn drive_orientation_from_samples(
+        &self,
+        times: Vec<f64>,
+        orientations: Vec<DQuat>,
+        interpolation: SampledInterpolation,
+    ) -> Result<Self, InvalidSampledSeries> {
+        let driver = SampledSeriesDriver::orientations(times, orientations, interpolation)?;
+        Ok(self.attach_sampled_series(driver))
+    }
+
     /// Color the fill of this drawable, and of its members with a fill, from
     /// a sampled `(times, values)` series, evaluated natively like
     /// [`drive_from_samples`](Self::drive_from_samples). The value

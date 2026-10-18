@@ -383,13 +383,16 @@ pub enum PropertyLensSpec {
         target: gaanim_core::glam::DVec3,
         up: gaanim_core::glam::DVec3,
     },
-    /// Orbit from an authored pose without contracting the eye-target radius.
+    /// Orbit from an authored pose, scaling the eye-target radius by
+    /// `dolly` at a constant rate of change (`1` keeps it).
     CameraOrbit {
         from_position: gaanim_core::glam::DVec3,
         target: gaanim_core::glam::DVec3,
         up: gaanim_core::glam::DVec3,
         delta_yaw: f64,
         delta_pitch: f64,
+        #[cfg_attr(feature = "serde", serde(default = "unit_dolly"))]
+        dolly: f64,
     },
     #[cfg_attr(feature = "serde", serde(skip))]
     CameraLookAtSource {
@@ -733,6 +736,7 @@ impl PropertyLensSpec {
                 up,
                 delta_yaw,
                 delta_pitch,
+                ..
             } => PropertyLens::CameraOrbit {
                 from_position: *from_position,
                 target: *target,
@@ -843,4 +847,10 @@ impl gaanim_animation::AnimatableLens for DummyLens {
         // Leaking the string into static lifetime is acceptable for a fallback/dummy error recovery
         Box::leak(self.type_name.clone().into_boxed_str())
     }
+}
+
+/// An orbit without a dolly, for lenses recorded before orbits had one.
+#[cfg(feature = "serde")]
+fn unit_dolly() -> f64 {
+    1.0
 }

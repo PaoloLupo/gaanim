@@ -403,6 +403,10 @@ salen los revelados de line art más habituales:
   en caminos cerrados.
 - `mode="sequential"`: los subtrazos aparecen uno tras otro en lugar de a la
   vez.
+- Una línea 3D (`polyline_3d`) se recorta por segmentos, no por longitud: si
+  sus puntos son muestras tomadas a intervalos iguales de tiempo, animar
+  `end` de `0` a `1` con `Easing.LINEAR` y la duración del recorrido mantiene
+  su extremo sobre el objeto que la traza.
 
 ```python
 from gaanim import CORAL, CYAN, GOLD, WHITE, Scene

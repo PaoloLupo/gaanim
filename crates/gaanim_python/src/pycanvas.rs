@@ -2743,19 +2743,26 @@ impl PyCameraAnimation {
         Ok(PyCanvasAnim { inner })
     }
 
-    /// Orbit around current target by yaw/pitch (radians).
-    fn orbit(&self, delta_yaw: f64, delta_pitch: f64) -> PyResult<PyCanvasAnim> {
+    /// Orbit around current target by yaw/pitch (radians), scaling the
+    /// distance to it by `dolly` on the way.
+    #[pyo3(signature = (delta_yaw, delta_pitch, *, dolly=1.0))]
+    fn orbit(&self, delta_yaw: f64, delta_pitch: f64, dolly: f64) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         if ![delta_yaw, delta_pitch].iter().all(|v| v.is_finite()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "delta_yaw/delta_pitch must be finite",
             ));
         }
+        if !dolly.is_finite() || dolly <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "dolly must be finite and positive",
+            ));
+        }
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_orbit(delta_yaw, delta_pitch, 1.0);
+            .camera_orbit_dolly(delta_yaw, delta_pitch, dolly, 1.0);
         Ok(PyCanvasAnim { inner })
     }
 
@@ -5386,6 +5393,54 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
+    /// A lit mesh from vertices and triangles in its own coordinates.
+    #[pyo3(signature = (vertices, triangles, *, colors=None, material=None))]
+    fn mesh<'py>(
+        &self,
+        py: Python<'py>,
+        vertices: Vec<[f64; 3]>,
+        triangles: Vec<[u32; 3]>,
+        colors: Option<Vec<PyColor>>,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .mesh_3d(
+                &vertices,
+                &triangles,
+                colors.map(|colors| colors.into_iter().map(|color| color.0).collect()),
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    /// A lit solid of revolution: a `(r, y)` profile swept around the y axis.
+    #[pyo3(signature = (profile, *, segments=64, material=None))]
+    fn revolve<'py>(
+        &self,
+        py: Python<'py>,
+        profile: Vec<[f64; 2]>,
+        segments: u32,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .revolve(
+                &profile,
+                segments,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
     /// Lay the outline a 2D drawable fills flat as a two-sided 3D sheet.
     #[pyo3(signature = (source, *, material=None, tolerance=0.01, keep_source=false))]
     fn flat_3d<'py>(
@@ -5951,9 +6006,15 @@ impl PyMediaLibrary {
 
 #[pymethods]
 impl PyGeometry {
-    /// Members as a sequence, `group([a, b])`, or one by one, `group(a, b)`.
-    #[pyo3(signature = (*members))]
-    fn group(&self, members: &Bound<'_, PyTuple>) -> PyResult<PyDrawable> {
+    /// Members as a sequence, `group([a, b])`, or one by one, `group(a, b)`;
+    /// `origin` is the point, in scene coordinates, it turns about and that
+    /// `move_to` places, instead of the center of its members' box.
+    #[pyo3(signature = (*members, origin=None))]
+    fn group(
+        &self,
+        members: &Bound<'_, PyTuple>,
+        origin: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         let mut flat = Vec::with_capacity(members.len());
         for member in members.iter() {
@@ -5970,16 +6031,27 @@ impl PyGeometry {
             }
         }
         let members = flat;
-        Ok({
-            let refs: Vec<&gaanim_api::canvas::DrawableHandle> =
-                members.iter().map(|m| &m.0).collect();
-            PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .group(&refs),
-            )
-        })
+        let origin = origin
+            .map(|origin| {
+                origin
+                    .extract::<(f64, f64, f64)>()
+                    .or_else(|_| origin.extract::<(f64, f64)>().map(|(x, y)| (x, y, 0.0)))
+                    .ok()
+                    .map(|(x, y, z)| gaanim_core::glam::DVec3::new(x, y, z))
+                    .filter(|origin| origin.is_finite())
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err(
+                            "origin must be a finite (x, y) or (x, y, z) point",
+                        )
+                    })
+            })
+            .transpose()?;
+        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().map(|m| &m.0).collect();
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        Ok(PyDrawable(match origin {
+            Some(origin) => canvas.group_about(&refs, origin),
+            None => canvas.group(&refs),
+        }))
     }
 
     /// `count` copies of `shape`, each turned, scaled and shifted by one more

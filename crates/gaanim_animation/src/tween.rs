@@ -83,10 +83,24 @@ impl Tween {
 /// shared by its clones: every later frame only interpolates. It belongs to
 /// the `from` and `to` paths beside it, so tables always compare equal.
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct MorphTable(
-    #[cfg_attr(feature = "serde", serde(skip))] Arc<std::sync::OnceLock<gaanim_math::MorphPlan>>,
-);
+pub struct MorphTable(Arc<std::sync::OnceLock<gaanim_math::MorphPlan>>);
+
+/// A table is a cache rebuilt on its first frame: it is written empty and
+/// read back as a new one.
+#[cfg(feature = "serde")]
+impl serde::Serialize for MorphTable {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_unit_struct("MorphTable")
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MorphTable {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer)?;
+        Ok(Self::default())
+    }
+}
 
 impl MorphTable {
     /// The morph from `from` to `to` at `t`, as
@@ -821,23 +835,19 @@ pub fn evaluate_tweens_system(
     }
 }
 
-/// Applies moving path windows to 3D line strips after the main tween system
-/// has advanced the shared tween clock.
+/// Applies moving path windows and trims to 3D line strips after the main
+/// tween system has advanced the shared tween clock.
 pub fn evaluate_line_path_ranges_system(
     tweens: Query<(&Tween, &PropertyLens)>,
     line_sources: Query<&LineListSource>,
     mut line_lists: Query<&mut LineListData>,
 ) {
     for (tween, lens) in &tweens {
-        let PropertyLens::PathRange {
-            from,
-            to,
-            time_width,
-        } = lens
-        else {
-            continue;
-        };
-        if tween.state == TweenState::Pending {
+        if !matches!(
+            lens,
+            PropertyLens::PathRange { .. } | PropertyLens::PathTrim { .. }
+        ) || tween.state == TweenState::Pending
+        {
             continue;
         }
         let progress = if tween.state == TweenState::Completed {
@@ -845,18 +855,25 @@ pub fn evaluate_line_path_ranges_system(
         } else {
             ((tween.elapsed - tween.delay) / tween.duration).clamp(0.0, 1.0)
         };
-        let p = *from + (*to - *from) * tween.rate_func.evaluate(progress);
-        let start = (p - *time_width).max(0.0);
-        let end = p.min(1.0);
+        let t = tween.rate_func.evaluate(progress);
+        let [start, end, offset] = match lens {
+            PropertyLens::PathRange {
+                from,
+                to,
+                time_width,
+            } => {
+                let p = *from + (*to - *from) * t;
+                [(p - *time_width).max(0.0), p.min(1.0), 0.0]
+            }
+            PropertyLens::PathTrim { from, to, .. } => lerp_trim(from, to, t),
+            _ => continue,
+        };
         if let Ok(source) = line_sources.get(tween.target)
             && let Ok(mut line) = line_lists.get_mut(tween.target)
-            && source.0.strip
-            && source.0.indices.is_none()
+            && let Some(visible) = trim_line_strip(&source.0, start, end, offset)
         {
             // Completed tweens keep producing the same strip; skip the write
             // so the line is not reported as changed every frame.
-            let visible =
-                trim_line_strip_range(&source.0, start, end).revealing(&source.0, start, end);
             if *line != visible {
                 *line = visible;
             }
@@ -933,6 +950,60 @@ fn trim_line_strip_range(source: &LineListData, start: f64, end: f64) -> LineLis
     }
 }
 
+/// The part of a 3D line strip that a trim window shows: `[start, end]`
+/// shifted by `offset`, wrapping past the end as `gaanim_math::trim_path`
+/// does. Fractions count segments, not length, so a strip of samples evenly
+/// spaced in time grows at a steady rate. `None` for a line that is not an
+/// unindexed strip.
+pub fn trim_line_strip(
+    source: &LineListData,
+    start: f64,
+    end: f64,
+    offset: f64,
+) -> Option<LineListData> {
+    if !source.strip || source.indices.is_some() {
+        return None;
+    }
+    let (low, high) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let (low, high) = (low.clamp(0.0, 1.0), high.clamp(0.0, 1.0));
+    if high - low >= 1.0 {
+        return Some(LineListData {
+            revealed: None,
+            ..source.clone()
+        });
+    }
+    let shift = offset.rem_euclid(1.0);
+    let (from, to) = (low + shift, high + shift);
+    if to <= 1.0 {
+        return Some(trim_line_strip_range(source, from, to).revealing(source, from, to));
+    }
+    // The window wraps past the end: its tail and head pieces, as point pairs.
+    let mut pieces = LineListData {
+        points: Vec::new(),
+        indices: None,
+        strip: false,
+        color: source.color,
+        colors: source.colors.as_ref().map(|_| Vec::new()),
+        revealed: None,
+    };
+    for (a, b) in [(from.min(1.0), 1.0), ((from - 1.0).max(0.0), to - 1.0)] {
+        let piece = trim_line_strip_range(source, a, b);
+        for pair in piece.points.windows(2) {
+            pieces.points.extend_from_slice(pair);
+        }
+        if let (Some(colors), Some(piece_colors)) = (&mut pieces.colors, &piece.colors) {
+            for pair in piece_colors.windows(2) {
+                colors.extend_from_slice(pair);
+            }
+        }
+    }
+    Some(pieces)
+}
+
 /// System: Evaluates only custom `AnimatableLens` tweens that require exclusive World access.
 ///
 /// This system runs after `evaluate_tweens_system` and handles any tween whose `PropertyLens`
@@ -992,6 +1063,57 @@ pub fn lerp_trim(from: &[f64; 3], to: &[f64; 3], t: f64) -> [f64; 3] {
 mod tests {
     use gaanim_math::get_point_at_alpha;
     use kurbo::BezPath;
+
+    fn strip(count: usize) -> super::LineListData {
+        super::LineListData {
+            points: (0..=count).map(|index| [index as f32, 0.0, 0.0]).collect(),
+            indices: None,
+            strip: true,
+            color: gaanim_core::peniko::Color::WHITE,
+            colors: None,
+            revealed: None,
+        }
+    }
+
+    #[test]
+    fn a_trimmed_line_strip_keeps_a_share_of_its_segments() {
+        let source = strip(10);
+        let half = super::trim_line_strip(&source, 0.0, 0.5, 0.0).unwrap();
+        assert_eq!(half.points.first(), Some(&[0.0, 0.0, 0.0]));
+        assert_eq!(half.points.last(), Some(&[5.0, 0.0, 0.0]));
+        assert_eq!(half.revealed, Some([0.0, 0.5]));
+        let middle = super::trim_line_strip(&source, 0.25, 0.75, 0.0).unwrap();
+        assert_eq!(middle.points.first(), Some(&[2.5, 0.0, 0.0]));
+        assert_eq!(middle.points.last(), Some(&[7.5, 0.0, 0.0]));
+        assert!(
+            super::trim_line_strip(&source, 0.0, 0.0, 0.0)
+                .unwrap()
+                .points
+                .is_empty()
+        );
+        let whole = super::trim_line_strip(&source, 0.0, 1.0, 0.0).unwrap();
+        assert_eq!((whole.points.len(), whole.revealed), (11, None));
+    }
+
+    #[test]
+    fn a_trim_window_wraps_past_the_end_of_a_line_strip() {
+        // [0.6, 0.9] shifted by 0.3 shows [0.9, 1] and [0, 0.2], as point pairs.
+        let wrapped = super::trim_line_strip(&strip(10), 0.6, 0.9, 0.3).unwrap();
+        assert!(!wrapped.strip && wrapped.revealed.is_none());
+        let pairs: Vec<_> = wrapped
+            .points
+            .chunks(2)
+            .map(|pair| (pair[0][0], pair[1][0]))
+            .collect();
+        assert_eq!(pairs, vec![(9.0, 10.0), (0.0, 1.0), (1.0, 2.0)]);
+    }
+
+    #[test]
+    fn indexed_lines_are_not_trimmed() {
+        let mut pairs = strip(4);
+        pairs.indices = Some(vec![0, 1, 2, 3]);
+        assert!(super::trim_line_strip(&pairs, 0.0, 0.5, 0.0).is_none());
+    }
 
     /// `PathFollow` should sample the Bézier at the rate-function-eased
     /// `t`. With `RateFunc::Linear` and a polyline path, the sampled

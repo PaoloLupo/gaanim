@@ -999,6 +999,57 @@ fn a_growing_3d_line_records_its_points_once() {
     assert!(bundle.verify().unwrap().is_empty());
 }
 
+/// A 3D line trimmed to nothing and trimmed open again at a steady rate
+/// shows the share of its segments the trim reaches, so a line of samples
+/// evenly spaced in time keeps its end on the sample of the moment.
+#[test]
+fn a_trimmed_3d_line_shows_the_segments_its_trim_reaches() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("trim.gaanim");
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    // Points crowded at the start: a share of length would run ahead of a share of segments.
+    let points: Vec<[f32; 3]> = (0..=100)
+        .map(|index| {
+            let t = index as f32 / 100.0;
+            [t * t * 6.0 - 3.0, 0.0, 0.0]
+        })
+        .collect();
+    let curve = canvas
+        .polyline_3d(points.clone())
+        .trim(None, Some(0.0), None, None);
+    canvas.wait(0.5);
+    canvas.play(vec![
+        curve
+            .animate()
+            .trim(None, Some(1.0), None)
+            .duration(1.0)
+            .rate_func(gaanim_math::RateFunc::Linear),
+    ]);
+    let mut config = BundleConfig::new(&path);
+    config.fps = 10;
+    config.thumbnail = false;
+    record_canvas(canvas, config).unwrap();
+
+    let mut bundle = Bundle::open(&path).unwrap();
+    let before = bundle.frame(bundle.frame_index_at(0.2)).unwrap();
+    let hidden = before.capture.three_d.as_ref().is_none_or(|three_d| {
+        three_d.sources.iter().all(|source| {
+            source
+                .lines
+                .as_ref()
+                .is_none_or(|lines| lines.points.is_empty())
+                || source.line_range.is_some_and(|[from, to]| to <= from)
+        })
+    });
+    assert!(hidden, "trim(end=0) hides the line");
+    let middle = bundle.frame(bundle.frame_index_at(1.0)).unwrap();
+    let source = &middle.capture.three_d.as_ref().unwrap().sources[0];
+    assert_eq!(source.lines.as_ref().unwrap().points.len(), points.len());
+    let [from, to] = source.line_range.expect("the frame keeps the part shown");
+    assert!(from == 0.0 && (to - 0.5).abs() < 1e-3, "{from} {to}");
+    assert!(bundle.verify().unwrap().is_empty());
+}
+
 /// Groups whose members draw alike under a glow and a blur, and two rows
 /// that end on the same glow: their drawables share one recipe. A replay
 /// shares one effect image among them where the recording built one per

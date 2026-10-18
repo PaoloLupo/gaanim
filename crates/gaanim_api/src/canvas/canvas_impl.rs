@@ -4191,6 +4191,47 @@ impl SceneModel {
         Ok(self.spawn_placed_mesh(tube))
     }
 
+    /// A lit mesh of `vertices` in its own coordinates (its origin stays the
+    /// drawable's) and `triangles` indexing them, with one optional color per
+    /// vertex.
+    pub fn mesh_3d(
+        &mut self,
+        vertices: &[[f64; 3]],
+        triangles: &[[u32; 3]],
+        colors: Option<Vec<Color>>,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        let vertices: Vec<DVec3> = vertices.iter().copied().map(DVec3::from_array).collect();
+        let colors = colors.map(|colors| {
+            colors
+                .iter()
+                .map(|color| {
+                    let rgba = color.to_rgba8();
+                    [rgba.r, rgba.g, rgba.b, rgba.a].map(|channel| f32::from(channel) / 255.0)
+                })
+                .collect()
+        });
+        let mesh = primitives3d::custom_mesh(&vertices, triangles, colors, material)?;
+        Ok(self.spawn(SpawnKind::Primitive3D(mesh)))
+    }
+
+    /// A lit solid swept by a `(r, y)` profile around the y axis, its
+    /// origin the profile's.
+    pub fn revolve(
+        &mut self,
+        profile: &[[f64; 2]],
+        segments: u32,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, primitives3d::Primitive3DError> {
+        let profile: Vec<gaanim_core::glam::DVec2> = profile
+            .iter()
+            .copied()
+            .map(gaanim_core::glam::DVec2::from_array)
+            .collect();
+        let mesh = primitives3d::revolve(&profile, segments, material)?;
+        Ok(self.spawn(SpawnKind::Primitive3D(mesh)))
+    }
+
     fn spawn_placed_mesh(&mut self, placed: primitives3d::PlacedMesh) -> DrawableHandle {
         let center = placed.center;
         self.spawn(SpawnKind::Primitive3D(placed.mesh))
@@ -4832,6 +4873,15 @@ impl SceneModel {
                     .flat_map(|member| member.inherited_style_targets())
                     .collect(),
             )
+    }
+
+    /// A group whose origin is `origin`, in scene coordinates, instead of
+    /// the center of its members' box: it turns, scales and skews about that
+    /// point, and `move_to` places it, as the pivot of a rigid body.
+    pub fn group_about(&mut self, members: &[&DrawableHandle], origin: DVec3) -> DrawableHandle {
+        let group = self.group(members);
+        group.spec.lock().expect("group spec poisoned").group_origin = Some(origin);
+        group
     }
 
     /// Build the stable, equation-style row used by reactive numeric readouts.
@@ -5484,10 +5534,25 @@ impl SceneModel {
 
     /// Orbit around current target by yaw/pitch radians.
     pub fn camera_orbit(&mut self, delta_yaw: f64, delta_pitch: f64, duration: f64) -> Anim {
+        self.camera_orbit_dolly(delta_yaw, delta_pitch, 1.0, duration)
+    }
+
+    /// Orbit around the current target by yaw/pitch radians while the eye's
+    /// distance from it changes by `dolly` (below 1 closer), at a constant
+    /// rate of change: one move on the camera pose instead of two that would
+    /// both drive it.
+    pub fn camera_orbit_dolly(
+        &mut self,
+        delta_yaw: f64,
+        delta_pitch: f64,
+        dolly: f64,
+        duration: f64,
+    ) -> Anim {
         self.camera_anim(
             AnimationType::CameraOrbit {
                 delta_yaw,
                 delta_pitch,
+                dolly,
             },
             duration,
         )

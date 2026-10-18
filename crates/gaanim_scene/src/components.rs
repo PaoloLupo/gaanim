@@ -408,7 +408,28 @@ pub struct TextSpan {
     /// The 0-indexed character sequence index within the flat string representation.
     pub char_index: usize,
     /// The source span range in the original source markup text.
+    #[cfg_attr(feature = "serde", serde(with = "range_serde"))]
     pub source_range: core::range::Range<usize>,
+}
+
+/// `core::range::Range` has no serde support: it is written as `(start, end)`.
+#[cfg(feature = "serde")]
+mod range_serde {
+    use core::range::Range;
+
+    pub fn serialize<S: serde::Serializer>(
+        range: &Range<usize>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&(range.start, range.end), serializer)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Range<usize>, D::Error> {
+        let (start, end) = <(usize, usize) as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(Range { start, end })
+    }
 }
 
 /// Billboard component: makes an entity always face the camera (for 3D labels).

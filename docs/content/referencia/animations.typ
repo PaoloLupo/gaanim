@@ -1396,11 +1396,11 @@ scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))   # levanta
   name: "Anim.trim",
   kind: "method",
   params: (
-    (name: "start, end", type: "float | None", default: "None", desc: [Ventana visible del trazo, en fracciones de longitud de arco en `[0, 1]`.]),
+    (name: "start, end", type: "float | None", default: "None", desc: [Ventana visible del trazo, en fracciones de longitud de arco en `[0, 1]`; en una línea 3D, fracciones de sus segmentos.]),
     (name: "offset", type: "float | None", default: "None", desc: [Desplaza la ventana y da la vuelta al final del camino.]),
   ),
   returns: (type: "Anim", desc: [Recorte animado del trazo.]),
-  desc: [Los valores omitidos conservan el actual. Animar `offset` hace viajar un segmento. El recorte también se mantiene en trazos que se regeneran en cada fotograma, como conectores, líneas entre extremos y curvas reactivas. Ver #link("/referencia/drawable/#api-drawable-trim")[`Drawable.trim`].],
+  desc: [Los valores omitidos conservan el actual. Animar `offset` hace viajar un segmento. El recorte también se mantiene en trazos que se regeneran en cada fotograma, como conectores, líneas entre extremos y curvas reactivas. Una línea 3D (`polyline_3d`) se recorta por segmentos: con muestras a intervalos iguales de tiempo y `Easing.LINEAR`, su extremo avanza al ritmo de las muestras. Ver #link("/referencia/drawable/#api-drawable-trim")[`Drawable.trim`].],
 )[
 ```python
 >>>from gaanim import *
@@ -2417,8 +2417,8 @@ scene.render()
   kind: "method",
   signature: "drive_from_samples(times, values, property=\"x\", *, interpolation=\"linear\", scale=1.0, offset=0.0, colors=None, domain=None, absolute=False) -> Drawable",
   params: (
-    (name: "times, values", type: "Sequence[float] | Sequence[tuple[float, float]]", default: none, desc: [Series de igual longitud; los tiempos deben ser finitos y no decrecientes. Con `"xy"`, los valores son parejas `(x, y)`.]),
-    (name: "property", type: "\"x\" | \"y\" | \"xy\" | \"z\" | \"rotation\" | \"scale\" | \"opacity\" | \"signal\" | \"fill\"", default: "\"x\"", desc: [Canal que se mueve. `"xy"` mueve los dos ejes de traslación como canales `"x"` e `"y"`. `"fill"` colorea el relleno del objeto y de los miembros de un grupo que lo tengan.]),
+    (name: "times, values", type: "Sequence[float] | Sequence[tuple[float, float]]", default: none, desc: [Series de igual longitud; los tiempos deben ser finitos y no decrecientes. Con `"xy"`, los valores son parejas `(x, y)`; con `"orientation"`, cuaterniones `(w, x, y, z)`.]),
+    (name: "property", type: "\"x\" | \"y\" | \"xy\" | \"z\" | \"rotation\" | \"orientation\" | \"scale\" | \"opacity\" | \"signal\" | \"fill\"", default: "\"x\"", desc: [Canal que se mueve. `"xy"` mueve los dos ejes de traslación como canales `"x"` e `"y"`. `"orientation"` gira el objeto en 3D: cada cuaternión es su orientación en el marco del padre, y entre muestras gira por el camino más corto. `"fill"` colorea el relleno del objeto y de los miembros de un grupo que lo tengan.]),
     (name: "interpolation", type: "\"linear\" | \"step\"", default: "\"linear\"", desc: [Interpolación entre muestras.]),
     (name: "scale, offset", type: "float", default: "1.0, 0.0", desc: [Transformación aplicada a cada muestra.]),
     (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Solo con `"fill"`, y obligatorio: al menos dos colores, repartidos por igual sobre `domain`.]),
@@ -2426,7 +2426,7 @@ scene.render()
     (name: "absolute", type: "bool", default: "False", desc: [Las muestras de traslación y de `rotation` son posiciones y ángulos propios (`offset + scale * muestra`), en coordenadas del padre (de la escena para un objeto de primer nivel), en lugar de sumarse a la pose declarada. Útil cuando ya calculaste la trayectoria. Los demás canales ya son absolutos.]),
   ),
   returns: (type: "Drawable", desc: [El mismo objeto.]),
-  desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`), salvo con `absolute=True`; `scale`, `opacity` y `signal` son absolutos. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Antes de ese cursor la serie no toca el canal, que sigue con lo que lo animara antes: un `fade_in` seguido de una serie de `"opacity"` se ve entero. Después de su última muestra mantiene la última. Cada canal es independiente; volver a mover el mismo canal toma el relevo desde el nuevo cursor, o reemplaza la serie declarada en el mismo cursor. `remove_updater()` lo quita. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],
+  desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`), salvo con `absolute=True`; `scale`, `opacity` y `signal` son absolutos. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Antes de ese cursor la serie no toca el canal, que sigue con lo que lo animara antes: un `fade_in` seguido de una serie de `"opacity"` se ve entero. Después de su última muestra mantiene la última. Cada canal es independiente; volver a mover el mismo canal toma el relevo desde el nuevo cursor, o reemplaza la serie declarada en el mismo cursor. `remove_updater()` lo quita. Con `"orientation"` las muestras son orientaciones absolutas, sin `scale` ni `offset`: sirve para un sólido rígido simulado, sea cual sea la convención de ángulos que lo calculó, sin Python en cada fotograma. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],
 )[
 ```python
 >>>import math

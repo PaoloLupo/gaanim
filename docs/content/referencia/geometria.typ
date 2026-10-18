@@ -558,7 +558,7 @@ Agrupa objetos para moverlos como uno o dibuja un marco vivo a su alrededor.
 #api-entry(
   name: "Geometry.group",
   kind: "factory",
-  desc: [Agrupa objetos para moverlos, rotarlos y escalarlos como uno: `group(a, b)` o `group([a, b])`, conservando las coordenadas locales de cada miembro (también las de sus updaters). Los miembros ya visibles no se ocultan al unirse a un grupo que contiene un trazo o una fuerza diferidos. `write`, `create` y los fundidos del grupo son entradas explícitas de todo el subárbol. Para distribuir miembros usa #link("/referencia/layout/")[Layout].],
+  desc: [Agrupa objetos para moverlos, rotarlos y escalarlos como uno: `group(a, b)` o `group([a, b])`, conservando las coordenadas locales de cada miembro (también las de sus updaters). El grupo gira, escala y se inclina alrededor del centro de la caja de sus miembros, y `move_to` coloca ese centro; con `origin=(x, y)` o `(x, y, z)`, un punto en coordenadas de la escena, ese punto ocupa su lugar: el grupo gira alrededor de él y `move_to` y `move_to_3d` lo colocan, como el pivote de un sólido rígido. Un `origin` no finito lanza `ValueError`. Los miembros ya visibles no se ocultan al unirse a un grupo que contiene un trazo o una fuerza diferidos. `write`, `create` y los fundidos del grupo son entradas explícitas de todo el subárbol. Para distribuir miembros usa #link("/referencia/layout/")[Layout].],
 )[
 ```python
 # show-code: true
@@ -1373,6 +1373,50 @@ thin = scene.geometry.arrow_3d((0, 0, 0), (0, 3, 0), shaft_radius=0.03, head_len
 knot = [(math.sin(t) + 2 * math.sin(2 * t), math.cos(t) - 2 * math.cos(2 * t), -math.sin(3 * t))
         for t in (k * math.tau / 120 for k in range(120))]
 trefoil = scene.geometry.tube(knot, 0.25, closed=True, material=Material3D.metal(GOLD))
+```
+]
+
+#api-entry(
+  name: "Geometry.mesh",
+  kind: "factory",
+  params: (
+    (name: "vertices", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Vértices en las coordenadas propias de la malla; su origen es el del objeto.]),
+    (name: "triangles", type: "Sequence[tuple[int, int, int]]", default: none, desc: [Índices de los vértices de cada triángulo, en sentido antihorario visto desde la cara que muestra.]),
+    (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Un color por vértice, mezclado dentro de cada triángulo.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Malla iluminada.]),
+  desc: [Para sólidos que no dan las primitivas. El origen de las coordenadas de los vértices sigue siendo el del objeto: `move_to_3d` lo coloca y los giros son a su alrededor, así que una pieza modelada desde su pivote gira sobre él. Una malla con material oculta las caras que miran hacia atrás. Los colores por vértice se conservan con la luz. Las normales se generan suaves entre vértices compartidos; repite un vértice para una arista. Sirven arrays de numpy de forma `(n, 3)`. Vértices no finitos, ningún triángulo, un índice fuera de los vértices o `colors` de otra longitud lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+tetra = scene.geometry.mesh(
+    [(1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)],
+    [(0, 1, 2), (0, 3, 1), (0, 2, 3), (1, 3, 2)],
+    colors=[RED, GREEN, BLUE, GOLD],
+)
+```
+]
+
+#api-entry(
+  name: "Geometry.revolve",
+  kind: "factory",
+  params: (
+    (name: "profile", type: "Sequence[tuple[float, float]]", default: none, desc: [Perfil `(r, y)`: distancia al eje (al menos `0`) y altura.]),
+    (name: "segments", type: "int", default: "64", desc: [Pasos alrededor del eje; al menos 3.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Sólido de revolución iluminado.]),
+  desc: [El sólido que barre el perfil al girar alrededor del eje y, como en un torno: jarrones, peonzas, campanas. Recorre el perfil en sentido antihorario en el semiplano (r, y), subiendo por la pared exterior, para que la superficie mire hacia fuera; si empieza y termina en el eje (`r = 0`), el sólido queda cerrado. Los giros de más de 35° dejan una arista y los más suaves quedan lisos. El origen del perfil, sobre el eje, es el del objeto: `move_to_3d` lo coloca y los giros son a su alrededor. Menos de dos puntos distintos, un `r` negativo, puntos no finitos o menos de 3 `segments` lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+vase = scene.geometry.revolve(
+    [(0, 0), (0.6, 0), (0.8, 0.6), (0.4, 1.4), (0.5, 2.0), (0, 2.0)],
+    material=Material3D.matte(GOLD),
+)
 ```
 ]
 

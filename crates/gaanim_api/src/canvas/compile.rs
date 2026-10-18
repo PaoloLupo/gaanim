@@ -6202,6 +6202,7 @@ impl SceneModel {
                                     up: gaanim_core::glam::DVec3::Y,
                                     delta_yaw: *delta_yaw,
                                     delta_pitch: *delta_pitch,
+                                    dolly: 1.0,
                                 },
                                 rate_func: gaanim_math::RateFunc::Smooth,
                                 delay: 0.0,
@@ -9090,6 +9091,7 @@ impl SceneModel {
             AnimationType::CameraOrbit {
                 delta_yaw,
                 delta_pitch,
+                dolly,
             } => {
                 let mut camera = gaanim_math::Camera::ortho_2d(1, 1);
                 camera.position = *camera_position;
@@ -9116,9 +9118,10 @@ impl SceneModel {
                         up: *camera_up,
                         delta_yaw: *delta_yaw,
                         delta_pitch: *delta_pitch,
+                        dolly: *dolly,
                     },
                 );
-                *camera_position = camera.position;
+                *camera_position = *camera_target + (camera.position - *camera_target) * *dolly;
                 *camera_rotation = camera.rotation;
             }
             AnimationType::CameraPerspective { fov_y, near, far } => {
@@ -11478,7 +11481,7 @@ impl SceneModel {
                     .reactive_readout_layout
                     .as_ref()
                     .and_then(|layout| Self::lay_out_readout_row(builder, id_map, layout));
-                let mr = builder.group(&refs);
+                let mr = builder.group_about(&refs, spec.group_origin);
                 // A readout is one line of text: its text anchors use the
                 // row's baseline.
                 if let Some(baseline) = baseline {
@@ -12529,7 +12532,7 @@ impl SceneModel {
                 LayoutOp::SetTranslation(translation) => {
                     pending_text_anchor = None;
                     transform.translation = if matches!(spec.kind, SpawnKind::Group(_)) {
-                        *translation - bounds.center()
+                        *translation - spec.group_origin.unwrap_or_else(|| bounds.center())
                     } else {
                         *translation
                     };
@@ -14399,6 +14402,75 @@ mod tests {
             let forward = camera.rotation * -DVec3::Z;
             let expected = (target - camera.position).normalize();
             assert!(forward.dot(expected) > 1.0 - 1e-9);
+        }
+    }
+
+    /// A group about a chosen origin pivots on it and `move_to` places it,
+    /// so a rigid body modelled from its tip turns about the tip.
+    #[test]
+    fn a_group_about_a_point_turns_about_it_and_is_placed_by_it() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let stick = canvas.circle(0.1).move_to_3d(0.0, 1.0, 0.0);
+        let knob = canvas.circle(0.2).move_to_3d(0.0, 2.0, 0.0);
+        canvas
+            .group_about(&[&stick, &knob], DVec3::ZERO)
+            .rotate_to_3d(0.0, 0.0, 1.0)
+            .move_to_3d(-6.0, -1.5, 0.0);
+        let (mut world, _) = compile_camera_timeline(canvas);
+        let mut groups = world
+            .query_filtered::<&gaanim_math::SpatialTransform, With<gaanim_scene::GroupMarker>>();
+        let transforms: Vec<_> = groups.iter(&world).copied().collect();
+        assert_eq!(transforms.len(), 1);
+        let matrix = transforms[0].to_mat4();
+        let tip = matrix.transform_point3(DVec3::ZERO);
+        assert!(
+            (tip - DVec3::new(-6.0, -1.5, 0.0)).length() < 1e-9,
+            "{tip:?}"
+        );
+        let top = matrix.transform_point3(DVec3::new(0.0, 2.0, 0.0));
+        let expected = DVec3::new(-6.0 - 2.0 * 1f64.sin(), -1.5 + 2.0 * 1f64.cos(), 0.0);
+        assert!((top - expected).length() < 1e-9, "{top:?}");
+    }
+
+    #[test]
+    fn camera_orbit_dollies_along_the_orbit() {
+        let eye = DVec3::new(0.0, 2.0, 12.0);
+        let target = DVec3::new(0.0, 0.5, 0.0);
+        let radius = (eye - target).length();
+        let mut canvas = SceneModel::new(1280, 720);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let look_at = canvas.camera_look_at_endpoints(
+            CanvasEndpoint::Static(eye),
+            CanvasEndpoint::Static(target),
+            DVec3::Y,
+            0.0,
+        );
+        canvas.play(vec![look_at]);
+        let orbit = canvas
+            .camera_orbit_dolly(0.6, 0.5, 0.25, 2.0)
+            .rate_func(gaanim_math::RateFunc::Linear);
+        canvas.play(vec![orbit]);
+        // The next move starts from where the orbit left the eye.
+        let after = canvas.camera_orbit(0.1, 0.0, 1.0);
+        canvas.play(vec![after]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+
+        // The distance shrinks geometrically: half way, by the square root of 0.25.
+        for (time, factor) in [(1.0, 0.5), (2.0, 0.25), (3.0, 0.25)] {
+            timeline.seek(&mut world, time);
+            let camera = *world.resource::<gaanim_math::Camera>();
+            assert!(camera.validate().is_ok(), "invalid camera at {time}");
+            assert_eq!(camera.target, target);
+            let distance = (camera.position - target).length();
+            assert!(
+                (distance - radius * factor).abs() < 1e-9,
+                "distance {distance} at {time}, expected {}",
+                radius * factor
+            );
+            let forward = camera.rotation * -DVec3::Z;
+            assert!(forward.dot((target - camera.position).normalize()) > 1.0 - 1e-9);
         }
     }
 
