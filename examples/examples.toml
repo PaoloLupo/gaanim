@@ -426,7 +426,7 @@ description = "Live lines between drifting points, by range, nearest neighbors o
 
 [[example]]
 path = "post_processing/color_grading.py"
-description = "Exposure, contrast, saturation and temperature grades and a 3D lookup table, applied to the whole frame."
+description = "Exposure, contrast, saturation and temperature grades, a 3D lookup table, tint and duotone, applied to the whole frame."
 allow = ["post"]
 
 [[example]]

@@ -686,6 +686,38 @@ class PostProcess:
         ``saturation`` about luma (1 keeps them)."""
         ...
     @staticmethod
+    def tint(color: ColorLike, amount: float | Parameter | Computed = 1.0) -> PostProcess:
+        """Turn the frame into a monochrome in ``color``, like a sepia print.
+
+        Each pixel's brightness runs from black through ``color`` (where the
+        pixel is as bright as ``color``) to white, so the image keeps its
+        brightness. ``amount`` (0..1) blends the result with the original
+        colors; the color's alpha is ignored. Works as a ``shader_effect``
+        too, to tint one photo. An ``amount`` outside 0..1 raises
+        ``ValueError``.
+
+        Example:
+            photo.shader_effect(PostProcess.tint("#704214"))
+        """
+        ...
+    @staticmethod
+    def duotone(
+        shadows: ColorLike,
+        highlights: ColorLike,
+        amount: float | Parameter | Computed = 1.0,
+    ) -> PostProcess:
+        """Map each pixel's brightness from ``shadows`` (black) to ``highlights`` (white).
+
+        Midtones mix the two colors, as in a two-ink print. ``amount``
+        (0..1) blends the result with the original colors; the colors' alpha
+        is ignored. Works as a ``shader_effect`` too, to set one photo in a
+        brand's colors. An ``amount`` outside 0..1 raises ``ValueError``.
+
+        Example:
+            photo.shader_effect(PostProcess.duotone("#1d2b53", "#ffcc66"))
+        """
+        ...
+    @staticmethod
     def lut(path: str | os.PathLike[str], strength: float | Parameter | Computed = 1.0) -> PostProcess:
         """Grade through the 3D lookup table of a ``.cube`` file, blended by ``strength`` (0..1).
 
