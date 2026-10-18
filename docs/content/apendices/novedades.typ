@@ -206,6 +206,15 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   mientras se acerca o se aleja, en un solo movimiento: `orbit` y `dolly` no
   se pueden reproducir a la vez.
 
+== Efectos
+
+- `Background.image(ruta)` cubre el cuadro con una imagen, centrada y
+  recortada, como una textura de papel bajo un collage.
+- `PostProcess.overlay(ruta, blend="multiply", opacity=...)` pone una imagen
+  sobre todo el cuadro y la mezcla con lo de debajo (`multiply`, `screen`,
+  `overlay` o `normal`): una textura de papel o de grano se pone una vez en
+  la escena, no en cada segmento.
+
 == Editor
 
 - Al reproducir un paquete `.gaanim`, la barra de overlays, la paleta de

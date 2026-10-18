@@ -9,7 +9,9 @@ pub use gaanim_renderer::effects::{
     CameraViewBackground, CameraViewFit, ConnectMode, DropShadow, GaussianBlur, Glow, MotionBlur,
     StrokeAlign, StrokeProfile,
 };
-pub use gaanim_renderer::post_presets::{CubeLut, PostPreset};
+pub use gaanim_renderer::post_presets::{
+    CubeLut, ImageOverlay, MAX_OVERLAY_SIDE, OverlayBlend, PostPreset,
+};
 pub use gaanim_renderer::post_process::{
     PostProcessError, PostProcessOverride, PostProcessPass, PostProcessShader,
 };
@@ -108,7 +110,7 @@ pub use canvas_impl::{
     stagger_weights,
 };
 pub use canvas_impl::{InsertPosition, ScheduleLabel};
-pub use canvas_impl::{clear_asset_caches, forget_assets};
+pub use canvas_impl::{background_image, clear_asset_caches, forget_assets, image_overlay};
 pub use gaanim_media::narration::{MarkerSource, NARRATION_DIR, ScriptSection, TakeFiles};
 pub use narration::{
     LiveTakeSpec, MarkerSpec, NarrationManifest, ScriptSpec, TextSource, VoiceoverError,

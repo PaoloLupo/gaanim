@@ -395,6 +395,14 @@ cambian el tiempo o el tamaño en píxeles. Las exportaciones y las capturas
 producen los mismos píxeles.
 
 #api-entry(
+  name: "Background.image",
+  kind: "factory",
+  signature: "Background.image(path) -> Background",
+  desc: [Cubre el cuadro de la escena con la imagen de `path`, como una textura de papel: centrada y escalada hasta cubrirlo, recortando lo que no cabe, como `background-size: cover` en CSS. Su color promedio es el de respaldo (el borrado de la ventana y el contraste del texto). Una ruta relativa se busca en el directorio de trabajo, luego en la carpeta `assets` del script y luego junto a él; la imagen se lee al crear el fondo y un archivo ilegible lanza `RuntimeError`.],
+  none,
+)
+
+#api-entry(
   name: "Background.fallback",
   kind: "property",
   returns: (type: "Color", desc: [El color representativo del fondo, usado para limpiar y para el contraste.]),
@@ -581,6 +589,14 @@ siempre el mismo. Un número fuera de rango lanza `ValueError`.
   kind: "factory",
   signature: "color_grade(exposure=0.0, contrast=1.0, saturation=1.0, temperature=0.0) -> PostProcess",
   desc: [Corrección de color: `exposure` en pasos y `temperature` (-1 frío a 1 cálido) en luz lineal; después `contrast` alrededor del gris medio y `saturation` alrededor de la luminancia. `1.0` deja contraste y saturación igual.],
+  none,
+)
+
+#api-entry(
+  name: "PostProcess.overlay",
+  kind: "factory",
+  signature: "overlay(path, blend=\"multiply\", opacity=1.0) -> PostProcess",
+  desc: [Pone la imagen de `path` sobre el cuadro, como una textura de papel o de grano: lo cubre centrada y recortada, como `Background.image`, y se mezcla con lo de debajo. `"multiply"` oscurece como la tinta (el blanco no cambia nada), `"screen"` aclara, `"overlay"` hace las dos cosas y `"normal"` pinta encima; `opacity` (0 a 1) y el alfa de la imagen escalan la mezcla. Como pase de la escena o de un segmento cubre todos los objetos, así que la textura se pone una vez y no en cada segmento. Una imagen de más de 2048 píxeles en su lado largo se reduce al leerla. Un `blend` desconocido o una `opacity` fuera de 0 a 1 lanzan `ValueError`, y un archivo ilegible, `RuntimeError`.],
   none,
 )
 

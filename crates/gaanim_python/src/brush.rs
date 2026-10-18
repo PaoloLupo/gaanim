@@ -32,6 +32,15 @@ impl PyBackground {
         Self(gaanim_api::canvas::BackgroundPaint::Brush(paint.0))
     }
 
+    /// Cover the scene frame with an image, centered and cropped.
+    #[staticmethod]
+    fn image(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        let path = crate::pycanvas::script_asset_path(py, path);
+        gaanim_api::canvas::background_image(path)
+            .map(Self)
+            .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
+    }
+
     /// Build a WGSL background evaluated with exact timeline time, with
     /// optional uniforms and an audio track's analysis.
     #[staticmethod]
@@ -360,6 +369,41 @@ impl PyPostProcess {
                 preset_value("temperature", temperature, 0.0, -1.0..=1.0)?,
             ],
         )
+    }
+
+    /// Lay an image over the frame, covering it, with a blend mode.
+    #[staticmethod]
+    #[pyo3(signature = (path, blend="multiply", opacity=None))]
+    fn overlay(
+        py: Python<'_>,
+        path: PathBuf,
+        blend: &str,
+        opacity: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let blend = gaanim_api::canvas::OverlayBlend::parse(blend).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "blend must be 'normal', 'multiply', 'screen' or 'overlay', got {blend:?}"
+            ))
+        })?;
+        let opacity = preset_value("opacity", opacity, 1.0, 0.0..=1.0)?;
+        let path = crate::pycanvas::script_asset_path(py, path);
+        let overlay = gaanim_api::canvas::image_overlay(path)
+            .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+        let shader = overlay.shader().map_err(post_process_error)?;
+        let constant = |value: f64| {
+            crate::visualization::DeferredScalar::validated(
+                gaanim_animation::ScalarSource::constant(value),
+            )
+        };
+        Ok(Self::new(
+            shader,
+            vec![
+                constant(f64::from(overlay.width)),
+                constant(f64::from(overlay.height)),
+                constant(blend.mode()),
+                opacity,
+            ],
+        ))
     }
 
     /// Grade through a 3D lookup table from a `.cube` file.

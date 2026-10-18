@@ -411,6 +411,21 @@ class Background:
         """Wrap a solid or gradient Brush for use inside the full scene bounds."""
         ...
     @staticmethod
+    def image(path: str | os.PathLike[str]) -> Background:
+        """Cover the scene frame with the image at ``path``, such as a paper texture.
+
+        The image is centered and scaled to cover the frame, cropping what
+        does not fit, like CSS ``background-size: cover``. Its average color
+        is the fallback (the window's clear color and text contrast). A
+        relative path is found in the working directory, then in the
+        calling script's ``assets`` folder, then beside the script. The image
+        is read immediately; an unreadable file raises ``RuntimeError``.
+
+        Example:
+            scene.segment("collage", background=Background.image("assets/paper.png"))
+        """
+        ...
+    @staticmethod
     def shader(
         source: str | os.PathLike[str],
         *,
@@ -684,6 +699,29 @@ class PostProcess:
         """Grade colors: ``exposure`` in stops and ``temperature`` (-1 cool to 1
         warm) in linear light, then ``contrast`` about mid-gray and
         ``saturation`` about luma (1 keeps them)."""
+        ...
+    @staticmethod
+    def overlay(
+        path: str | os.PathLike[str],
+        blend: Literal["normal", "multiply", "screen", "overlay"] = "multiply",
+        opacity: float | Parameter | Computed = 1.0,
+    ) -> PostProcess:
+        """Lay the image at ``path`` over the frame, such as a paper or grain texture.
+
+        The image covers the frame, centered and cropped like
+        ``Background.image``, and blends with what is beneath it:
+        ``"multiply"`` darkens like ink (white leaves the frame as it is),
+        ``"screen"`` lightens, ``"overlay"`` does both and ``"normal"``
+        paints over. ``opacity`` (0..1) and the image's alpha scale the
+        blend. As a scene or segment pass it covers every drawable, so a
+        texture is set once instead of once per segment. An image larger
+        than 2048 pixels on its long side is downscaled when it is read. An
+        unknown ``blend`` or an ``opacity`` outside 0..1 raises
+        ``ValueError`` and an unreadable file ``RuntimeError``.
+
+        Example:
+            scene = Scene(post=PostProcess.overlay("assets/paper.png", opacity=0.8))
+        """
         ...
     @staticmethod
     def lut(path: str | os.PathLike[str], strength: float | Parameter | Computed = 1.0) -> PostProcess:

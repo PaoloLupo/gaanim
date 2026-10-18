@@ -2231,6 +2231,47 @@ fn load_image(path: impl AsRef<Path>) -> Result<gaanim_core::peniko::ImageData, 
     Ok(cache.insert(cache_key, image, IMAGE_CACHE_BYTES))
 }
 
+/// A background that covers the scene frame with the image at `path`,
+/// centered and cropped like CSS `background-size: cover`.
+pub fn background_image(
+    path: impl AsRef<Path>,
+) -> Result<gaanim_renderer::background::BackgroundPaint, ImageLoadError> {
+    let image = load_image(path)?;
+    Ok(gaanim_renderer::background::BackgroundPaint::Brush(
+        gaanim_core::peniko::Brush::Image(gaanim_core::peniko::ImageBrush::new(image)),
+    ))
+}
+
+/// The image at `path` for an overlay post-process pass, downscaled to
+/// [`gaanim_renderer::post_presets::MAX_OVERLAY_SIDE`] texels on its long
+/// side when it is larger.
+pub fn image_overlay(
+    path: impl AsRef<Path>,
+) -> Result<gaanim_renderer::post_presets::ImageOverlay, String> {
+    use gaanim_renderer::post_presets::{ImageOverlay, MAX_OVERLAY_SIDE};
+    let image = load_image(path).map_err(|error| error.to_string())?;
+    let (width, height) = (image.width, image.height);
+    let longest = width.max(height);
+    if longest <= MAX_OVERLAY_SIDE {
+        return ImageOverlay::from_rgba8(width, height, image.data.data())
+            .map_err(|error| error.to_string());
+    }
+    let scale = f64::from(MAX_OVERLAY_SIDE) / f64::from(longest);
+    let side =
+        |length: u32| ((f64::from(length) * scale).round() as u32).clamp(1, MAX_OVERLAY_SIDE);
+    let (small_width, small_height) = (side(width), side(height));
+    let texels = image::RgbaImage::from_raw(width, height, image.data.data().to_vec())
+        .ok_or_else(|| "the decoded image does not match its size".to_string())?;
+    let small = image::imageops::resize(
+        &texels,
+        small_width,
+        small_height,
+        image::imageops::FilterType::Triangle,
+    );
+    ImageOverlay::from_rgba8(small_width, small_height, small.as_raw())
+        .map_err(|error| error.to_string())
+}
+
 /// Default height of a presentation brand logo in scene units.
 const BRAND_LOGO_HEIGHT: f64 = 0.6;
 /// Inset of the brand footer and rule from the safe frame's sides.
@@ -8570,6 +8611,27 @@ impl SceneModel {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn image_overlays_are_downscaled_and_backgrounds_keep_the_image() {
+        let directory = std::env::temp_dir().join(format!("gaanim-overlay-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("wide.png");
+        image::RgbaImage::from_pixel(3000, 20, image::Rgba([10, 20, 30, 255]))
+            .save(&path)
+            .unwrap();
+        let overlay = image_overlay(&path).unwrap();
+        assert_eq!((overlay.width, overlay.height), (2048, 14));
+        let Ok(gaanim_renderer::background::BackgroundPaint::Brush(
+            gaanim_core::peniko::Brush::Image(brush),
+        )) = background_image(&path)
+        else {
+            panic!("an image background is an image brush");
+        };
+        assert_eq!((brush.image.width, brush.image.height), (3000, 20));
+        assert!(image_overlay(directory.join("missing.png")).is_err());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
     use super::*;
 
     #[test]

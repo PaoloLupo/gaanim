@@ -81,7 +81,7 @@ impl BackgroundPaint {
                 .first()
                 .map(|stop| stop.color.to_alpha_color())
                 .unwrap_or(Color::BLACK),
-            Self::Brush(Brush::Image(_)) => Color::BLACK,
+            Self::Brush(Brush::Image(image)) => image_average(&image.image),
             Self::Shader(shader) => shader.fallback,
         }
     }
@@ -104,6 +104,43 @@ impl BackgroundPaint {
     pub fn is_shader(&self) -> bool {
         matches!(self, Self::Shader(_))
     }
+}
+
+/// The average opaque color of `image`, from a grid of at most 16 by 16
+/// samples: cheap enough for every frame's window clear.
+fn image_average(image: &gaanim_core::peniko::ImageData) -> Color {
+    use gaanim_core::peniko::ImageFormat;
+    const GRID: u32 = 16;
+    let (width, height) = (image.width, image.height);
+    let bytes = image.data.data();
+    if width == 0 || height == 0 || bytes.len() < width as usize * height as usize * 4 {
+        return Color::BLACK;
+    }
+    let (columns, rows) = (width.min(GRID), height.min(GRID));
+    let mut sum = [0.0_f64; 3];
+    let mut weight = 0.0_f64;
+    for row in 0..rows {
+        for column in 0..columns {
+            let x = (column * width + width / 2) / columns;
+            let y = (row * height + height / 2) / rows;
+            let at = (y as usize * width as usize + x as usize) * 4;
+            let texel = &bytes[at..at + 4];
+            let (red, blue) = match image.format {
+                ImageFormat::Bgra8 => (texel[2], texel[0]),
+                _ => (texel[0], texel[2]),
+            };
+            let alpha = f64::from(texel[3]) / 255.0;
+            sum[0] += f64::from(red) * alpha;
+            sum[1] += f64::from(texel[1]) * alpha;
+            sum[2] += f64::from(blue) * alpha;
+            weight += alpha;
+        }
+    }
+    if weight <= 0.0 {
+        return Color::BLACK;
+    }
+    let channel = |value: f64| (value / weight).round().clamp(0.0, 255.0) as u8;
+    Color::from_rgb8(channel(sum[0]), channel(sum[1]), channel(sum[2]))
 }
 
 /// A custom WGSL scene background driven by exact timeline time.
@@ -1354,6 +1391,26 @@ pub(crate) mod test_gpu {
 mod tests {
     use super::test_gpu::{TestGpu, test_gpu};
     use super::*;
+
+    #[test]
+    fn an_image_background_falls_back_to_its_average_color() {
+        // Red and blue texels, and a transparent one that does not count.
+        let image = gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::from(vec![
+                200, 0, 0, 255, 0, 0, 100, 255, 255, 255, 255, 0,
+            ]),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 3,
+            height: 1,
+        };
+        let paint =
+            BackgroundPaint::Brush(Brush::Image(gaanim_core::peniko::ImageBrush::new(image)));
+        assert_eq!(
+            paint.fallback_color().to_rgba8(),
+            Color::from_rgb8(100, 0, 50).to_rgba8()
+        );
+    }
 
     #[test]
     fn shader_validation_accepts_a_time_parameter_in_the_documented_contract() {
