@@ -1,4 +1,4 @@
-"""Color grading: exposure, contrast, saturation and temperature, and a 3D lookup table.
+"""Color grading: exposure, contrast, saturation and temperature, a 3D lookup table, tint and duotone.
 
 Each segment grades the same test card through one full-frame pass, set with
 ``scene.segment(..., post=...)``: the tiles show hue and saturation, the ramp
@@ -16,6 +16,7 @@ LUT = "assets/teal_orange.cube"
 scene = Scene()
 background = scene.canvas.color("background")
 foreground = scene.canvas.color("foreground")
+accent = scene.canvas.color("accent")
 page = scene.layout.zones(Zones.rows(["6fr", "1fr"], gap="24px", padding="page_padding"))
 
 
@@ -63,6 +64,12 @@ GRADES = [
     # with the original.
     ("PostProcess.lut(LUT)", PostProcess.lut(LUT)),
     ("PostProcess.lut(LUT, strength=0.5)", PostProcess.lut(LUT, strength=0.5)),
+    # tint turns the frame into a monochrome in one color, keeping its
+    # brightness; duotone maps it from a shadow color to a highlight color.
+    # amount blends either with the original.
+    ("PostProcess.tint(accent)", PostProcess.tint(accent)),
+    ("PostProcess.tint(accent, amount=0.5)", PostProcess.tint(accent, amount=0.5)),
+    ("PostProcess.duotone(background, accent)", PostProcess.duotone(background, accent)),
 ]
 for code, post in GRADES:
     grade(code, post)

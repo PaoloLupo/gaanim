@@ -362,6 +362,48 @@ impl PyPostProcess {
         )
     }
 
+    /// Monochrome in `color`: black, the color at its own brightness, then
+    /// white; `amount` blends it with the original.
+    #[staticmethod]
+    #[pyo3(signature = (color, amount=None))]
+    fn tint(color: PyColor, amount: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        let [red, green, blue, _] = color.0.components;
+        preset(
+            gaanim_api::canvas::PostPreset::Tint,
+            vec![
+                fixed_value(red),
+                fixed_value(green),
+                fixed_value(blue),
+                preset_value("amount", amount, 1.0, 0.0..=1.0)?,
+            ],
+        )
+    }
+
+    /// Brightness mapped from `shadows` to `highlights`; `amount` blends it
+    /// with the original.
+    #[staticmethod]
+    #[pyo3(signature = (shadows, highlights, amount=None))]
+    fn duotone(
+        shadows: PyColor,
+        highlights: PyColor,
+        amount: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
+        let [shadow_red, shadow_green, shadow_blue, _] = shadows.0.components;
+        let [highlight_red, highlight_green, highlight_blue, _] = highlights.0.components;
+        preset(
+            gaanim_api::canvas::PostPreset::Duotone,
+            vec![
+                fixed_value(shadow_red),
+                fixed_value(shadow_green),
+                fixed_value(shadow_blue),
+                fixed_value(highlight_red),
+                fixed_value(highlight_green),
+                fixed_value(highlight_blue),
+                preset_value("amount", amount, 1.0, 0.0..=1.0)?,
+            ],
+        )
+    }
+
     /// Grade through a 3D lookup table from a `.cube` file.
     #[staticmethod]
     #[pyo3(signature = (path, strength=None))]
@@ -480,6 +522,13 @@ fn preset(
     values: Vec<crate::visualization::DeferredScalar>,
 ) -> PyResult<PyPostProcess> {
     Ok(PyPostProcess::new(preset.shader(), values))
+}
+
+/// A preset uniform fixed when the preset is made, such as a color channel.
+fn fixed_value(value: f32) -> crate::visualization::DeferredScalar {
+    crate::visualization::DeferredScalar::validated(gaanim_animation::ScalarSource::constant(
+        f64::from(value),
+    ))
 }
 
 /// A preset amount: `default` when omitted, a number within `range`, or a

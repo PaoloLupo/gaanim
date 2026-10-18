@@ -206,6 +206,13 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   mientras se acerca o se aleja, en un solo movimiento: `orbit` y `dolly` no
   se pueden reproducir a la vez.
 
+== Efectos
+
+- `PostProcess.tint(color, amount)` pasa el cuadro, o una foto con
+  `shader_effect`, a un monocromo en ese color sin cambiar su brillo (un
+  sepia en un solo paso), y `PostProcess.duotone(shadows, highlights,
+  amount)` lo imprime a dos tintas.
+
 == Editor
 
 - Al reproducir un paquete `.gaanim`, la barra de overlays, la paleta de
