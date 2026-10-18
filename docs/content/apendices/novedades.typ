@@ -145,8 +145,9 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   `rotate_to_3d` lo sitúan, la perspectiva lo inclina y las mallas de
   delante lo tapan píxel a píxel. El pase 3D lo dibuja desde sus curvas, así
   que sus bordes siguen nítidos a cualquier tamaño, y conserva sus
-  animaciones, colores, degradados y trazos. Con `in_3d(material)` se
-  ilumina y recibe sombras. Lo muestra `3d/drawables_in_3d`.
+  animaciones, colores, degradados y trazos. Proyecta sombra como una
+  malla opaca, y con `in_3d(material)` se ilumina y recibe sombras. Lo
+  muestra `3d/drawables_in_3d`.
 
 == Editor
 

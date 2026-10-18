@@ -11,6 +11,13 @@
 //! its geometry and a ramp of its colors, sampled as Vello samples them, so
 //! it matches the 2D drawing.
 //!
+//! Outlines cast shadows: the shadow maps hold the texels an outline covers
+//! at least half of, where it is at least half opaque.
+//!
+//! An outline clipped to a contour, as a stroke aligned inside or outside
+//! its shape is, multiplies its coverage by that contour's, or by what the
+//! contour leaves, as Vello's clip layers do.
+//!
 //! [`SHADER`] is a WGSL port of the reference shaders of the Slug algorithm
 //! (<https://github.com/EricLengyel/Slug>), MIT licensed, copyright 2017 by
 //! Eric Lengyel.
@@ -26,9 +33,11 @@ use gaanim_scene::PlaneFillData;
 use crate::three_d::{push_f32s, to_linear};
 
 /// Bytes of an outline's instance (`FillIn` in [`SHADER`]): its box, its
-/// placement in the plane, its bands' transform, where its bands start, how
-/// many there are and its gradient's record, and its linear color.
-pub(crate) const GLYPH_BYTES: usize = 96;
+/// placement in the plane and the offset to its clip's units, its bands'
+/// transform, where its bands start, how many there are and its gradient's
+/// record, its linear color, and its clip's bands' transform, start, counts
+/// and side.
+pub(crate) const GLYPH_BYTES: usize = 128;
 /// Most bands an outline is split into, each way.
 const MAX_BANDS: usize = 16;
 /// How close quadratics follow a cubic, as a fraction of its outline's size.
@@ -87,25 +96,32 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
     let mut ramps: Vec<u32> = Vec::new();
     // Ramps by their stops, which the gradients of a text's letters share.
     let mut ramp_of: HashMap<Vec<u32>, u32> = HashMap::new();
-    for glyph in &fill.glyphs {
-        let packed = *by_address
-            .entry(Arc::as_ptr(&glyph.outline))
-            .or_insert_with(|| {
-                let entries = known.entry(outline_hash(&glyph.outline)).or_default();
-                match entries
-                    .iter()
-                    .find(|(outline, _)| **outline == *glyph.outline)
-                {
-                    Some((_, packed)) => *packed,
-                    None => {
-                        let packed = pack(&contours(&glyph.outline), &mut curves, &mut bands);
-                        entries.push((Arc::clone(&glyph.outline), packed));
-                        packed
-                    }
+    let mut packed_of = |outline: &Arc<BezPath>| {
+        *by_address.entry(Arc::as_ptr(outline)).or_insert_with(|| {
+            let entries = known.entry(outline_hash(outline)).or_default();
+            match entries.iter().find(|(known, _)| **known == **outline) {
+                Some((_, packed)) => *packed,
+                None => {
+                    let packed = pack(&contours(outline), &mut curves, &mut bands);
+                    entries.push((Arc::clone(outline), packed));
+                    packed
                 }
-            });
-        let Some(packed) = packed else {
+            }
+        })
+    };
+    for glyph in &fill.glyphs {
+        let Some(packed) = packed_of(&glyph.outline) else {
             continue;
+        };
+        // A contour that encloses nothing keeps nothing inside it and
+        // everything outside.
+        let clip = match &glyph.clip {
+            None => None,
+            Some(clip) => match packed_of(&clip.outline) {
+                Some(packed) => Some((clip, packed)),
+                None if clip.outside => None,
+                None => continue,
+            },
         };
         let placement = glyph.placement.as_coeffs();
         if !placement.iter().all(|value| value.is_finite()) {
@@ -132,8 +148,11 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
             opaque &= color[3] >= 0.999;
         }
         let start = instances.len();
+        let offset = clip.map_or([0.0; 2], |(clip, _)| {
+            [clip.offset.x as f32, clip.offset.y as f32]
+        });
         push_f32s(&mut instances, &packed.bounds);
-        push_f32s(&mut instances, &[a, b, c, d, e, f, 0.0, 0.0]);
+        push_f32s(&mut instances, &[a, b, c, d, e, f, offset[0], offset[1]]);
         push_f32s(&mut instances, &packed.transform);
         for word in [
             packed.start,
@@ -144,6 +163,16 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
             instances.extend_from_slice(&word.to_le_bytes());
         }
         push_f32s(&mut instances, &color);
+        match clip {
+            Some((clip, clipping)) => {
+                push_f32s(&mut instances, &clipping.transform);
+                let side = if clip.outside { 2 } else { 1 };
+                for word in [clipping.start, clipping.last[0], clipping.last[1], side] {
+                    instances.extend_from_slice(&word.to_le_bytes());
+                }
+            }
+            None => instances.resize(instances.len() + 32, 0),
+        }
         debug_assert_eq!(instances.len() - start, GLYPH_BYTES);
         count += 1;
     }
@@ -613,7 +642,7 @@ struct FillIn {
     // The outline's box in its own units.
     @location(0) rect: vec4<f32>,
     // Its placement in the drawable's plane: the linear part's columns,
-    // then the offset.
+    // then the offset, then the offset from its units to its clip's.
     @location(1) linear: vec4<f32>,
     @location(2) offset: vec4<f32>,
     // Scale and offset from its units to band indexes.
@@ -623,6 +652,11 @@ struct FillIn {
     @location(4) glyph: vec4<u32>,
     // Linear color.
     @location(5) color: vec4<f32>,
+    // Its clip's bands' transform, and its first band word, its last
+    // vertical and horizontal band, and 1 to keep what lies inside it, 2
+    // outside, 0 for no clip.
+    @location(6) clip_band: vec4<f32>,
+    @location(7) clip: vec4<u32>,
 }
 
 struct FillOut {
@@ -633,6 +667,9 @@ struct FillOut {
     @location(2) @interpolate(flat) band: vec4<f32>,
     @location(3) @interpolate(flat) glyph: vec4<u32>,
     @location(4) world: vec3<f32>,
+    @location(5) @interpolate(flat) clip_band: vec4<f32>,
+    @location(6) @interpolate(flat) clip_glyph: vec4<u32>,
+    @location(7) @interpolate(flat) clip_offset: vec2<f32>,
 }
 
 const FILL_CORNERS = array<vec2<f32>, 6>(
@@ -695,6 +732,9 @@ fn vertex_fill(@builtin(vertex_index) index: u32, in: FillIn) -> FillOut {
     out.band = in.band;
     out.glyph = in.glyph;
     out.world = world;
+    out.clip_band = in.clip_band;
+    out.clip_glyph = in.clip;
+    out.clip_offset = in.offset.zw;
     return out;
 }
 
@@ -740,18 +780,24 @@ fn fill_solve_vertical(p12: vec4<f32>, p3: vec2<f32>) -> vec2<f32> {
 
 // How much of the pixel at `coord`, in the outline's units, the outline
 // covers, with the nonzero rule.
-fn fill_coverage(coord: vec2<f32>, band: vec4<f32>, glyph: vec4<u32>) -> f32 {
-    // Pixels per unit along each ray: across the pixel's footprint in the
-    // outline's units, through its middle, along that axis. Facing the
-    // camera that is `fwidth`; seen at a grazing angle under perspective the
-    // footprint is a long slanted parallelogram, whose width along x
-    // `fwidth` overstates, smearing the text sideways.
+// Pixels per unit along each ray at `coord`: across the pixel's footprint
+// in the outline's units, through its middle, along that axis. Facing the
+// camera that is `fwidth`; seen at a grazing angle under perspective the
+// footprint is a long slanted parallelogram, whose width along x `fwidth`
+// overstates, smearing the text sideways. Called in uniform control flow,
+// as derivatives must be.
+fn fill_pixels(coord: vec2<f32>) -> vec2<f32> {
     let across_x = dpdx(coord);
     let across_y = dpdy(coord);
     let area = abs(across_x.x * across_y.y - across_x.y * across_y.x);
     let reach = max(abs(across_x), abs(across_y));
     let chord = max(area / max(reach.yx, vec2<f32>(1e-30)), fwidth(coord) * 1e-3);
-    let pixels = 1.0 / chord;
+    return 1.0 / chord;
+}
+
+// The coverage at `coord` of the outline whose bands `band` and `glyph`
+// locate, at `pixels` per unit (`fill_pixels`).
+fn fill_coverage(coord: vec2<f32>, band: vec4<f32>, glyph: vec4<u32>, pixels: vec2<f32>) -> f32 {
     let last = vec2<i32>(i32(glyph.y), i32(glyph.z));
     let index = clamp(vec2<i32>(coord * band.xy + band.zw), vec2<i32>(0), last);
     let start = glyph.x;
@@ -904,7 +950,8 @@ fn fill_gradient(paint: u32, at: vec2<f32>) -> vec4<f32> {
 
 @fragment
 fn fragment_fill(in: FillOut) -> @location(0) vec4<f32> {
-    let coverage = fill_coverage(in.outline, in.band, in.glyph);
+    let pixels = fill_pixels(in.outline);
+    let coverage = fill_clipped(in.outline, in.band, in.glyph, in.clip_offset, in.clip_band, in.clip_glyph, pixels);
     var color = in.color;
     if in.glyph.w != 0u {
         color = fill_gradient(in.glyph.w, in.outline);
@@ -922,6 +969,73 @@ fn fragment_fill(in: FillOut) -> @location(0) vec4<f32> {
         discard;
     }
     return output(color) * coverage;
+}
+
+// The coverage of an outline at `coord`, kept within its clip, or outside
+// it (see `FillIn`).
+fn fill_clipped(
+    coord: vec2<f32>,
+    band: vec4<f32>,
+    glyph: vec4<u32>,
+    clip_offset: vec2<f32>,
+    clip_band: vec4<f32>,
+    clip: vec4<u32>,
+    pixels: vec2<f32>,
+) -> f32 {
+    let coverage = fill_coverage(coord, band, glyph, pixels);
+    if clip.w == 0u || coverage <= 0.0 {
+        return coverage;
+    }
+    let inside = fill_coverage(coord + clip_offset, clip_band, clip, pixels);
+    return coverage * select(1.0 - inside, inside, clip.w == 1u);
+}
+
+struct FillShadowOut {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) @interpolate(flat) alpha: f32,
+    @location(1) outline: vec2<f32>,
+    @location(2) @interpolate(flat) band: vec4<f32>,
+    @location(3) @interpolate(flat) glyph: vec4<u32>,
+    @location(4) @interpolate(flat) clip_band: vec4<f32>,
+    @location(5) @interpolate(flat) clip: vec4<u32>,
+    @location(6) @interpolate(flat) clip_offset: vec2<f32>,
+}
+
+// An outline's box in a shadow map layer, grown by a 32nd of its size so
+// that the texels along its edges are tested too.
+@vertex
+fn vertex_fill_shadow(@builtin(vertex_index) index: u32, in: FillIn) -> FillShadowOut {
+    var corners = FILL_CORNERS;
+    let corner = corners[index];
+    let size = max(in.rect.z - in.rect.x, in.rect.w - in.rect.y);
+    let outline = mix(in.rect.xy, in.rect.zw, corner) + (corner * 2.0 - 1.0) * size / 32.0;
+    let linear = mat2x2<f32>(in.linear.xy, in.linear.zw);
+    let plane = linear * outline + in.offset.xy;
+    var out: FillShadowOut;
+    out.clip_position = caster.view_proj * (draw.model * vec4<f32>(plane, 0.0, 1.0));
+    out.alpha = in.color.a;
+    out.outline = outline;
+    out.band = in.band;
+    out.glyph = in.glyph;
+    out.clip_band = in.clip_band;
+    out.clip = in.clip;
+    out.clip_offset = in.offset.zw;
+    return out;
+}
+
+// The texels an outline casts a shadow from: those it covers at least half
+// of, at least half opaque, its drawable's opacity included.
+@fragment
+fn fragment_fill_shadow(in: FillShadowOut) {
+    var alpha = in.alpha;
+    if in.glyph.w != 0u {
+        alpha = fill_gradient(in.glyph.w, in.outline).a;
+    }
+    let pixels = fill_pixels(in.outline);
+    let coverage = fill_clipped(in.outline, in.band, in.glyph, in.clip_offset, in.clip_band, in.clip, pixels);
+    if coverage * alpha * draw.emissive.w < 0.5 {
+        discard;
+    }
 }
 "#;
 
@@ -945,6 +1059,7 @@ mod tests {
             placement: Affine::translate((x, 0.0)),
             color: red,
             gradient: gradient.map(|gradient| (gradient, Affine::translate((x, 0.0)))),
+            clip: None,
         };
         let fill = build(&PlaneFillData {
             glyphs: vec![
@@ -989,6 +1104,7 @@ mod tests {
                     placement: Affine::IDENTITY,
                     color: peniko::Color::WHITE,
                     gradient: None,
+                    clip: None,
                 })
                 .collect(),
         };

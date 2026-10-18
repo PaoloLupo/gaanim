@@ -2281,7 +2281,8 @@ mod tests {
     }
 
     /// Outlines filled in a 3D drawable's plane come back with their
-    /// outlines, placements, colors and gradients, each outline stored once.
+    /// outlines, placements, colors, gradients and clips, each outline
+    /// stored once.
     #[test]
     fn filled_outlines_of_3d_frames_round_trip() {
         use gaanim_core::kurbo::{Affine, Rect, Shape};
@@ -2292,6 +2293,7 @@ mod tests {
             placement: Affine::translate((x, 0.5)) * Affine::scale(0.25),
             color,
             gradient: None,
+            clip: None,
         };
         let (red, blue) = (Color::from_rgb8(255, 0, 0), Color::from_rgb8(0, 0, 255));
         let mut fill = gaanim_scene::PlaneFillData {
@@ -2305,6 +2307,11 @@ mod tests {
             ),
             Affine::translate((3.0, 0.0)),
         ));
+        fill.glyphs[1].clip = Some(gaanim_scene::PlaneClip {
+            outline: Arc::clone(&square),
+            offset: gaanim_core::kurbo::Vec2::new(-0.25, 0.5),
+            outside: true,
+        });
         let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
         let mut first = frame(0.0);
         first.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {

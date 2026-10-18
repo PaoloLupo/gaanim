@@ -5,9 +5,10 @@ its outlines in its own plane: ``move_to_3d`` and ``rotate_to_3d`` place and
 turn it like a 3D primitive, perspective tilts it, and meshes in front of it
 hide it pixel by pixel, while its edges stay sharp at any size. It keeps what
 it is in 2D: text, equations and shapes, fills and strokes, and animations
-such as ``write`` or a change of color. ``in_3d(material)`` lights it, and
-shadows fall on it, as on a surface. ``billboard()`` instead keeps a label
-facing the camera, above the 3D content, and ``hud()`` pins it to the frame.
+such as ``write`` or a change of color. It casts shadows as a mesh does,
+and ``in_3d(material)`` lights it, and shadows fall on it, as on a surface.
+``billboard()`` instead keeps a label facing the camera, above the 3D
+content, and ``hud()`` pins it to the frame.
 """
 
 import math
@@ -60,8 +61,9 @@ for turn in TURNS:
 scene.wait(HOLD)
 
 # Under a perspective camera, a sign stands through a sphere, which hides
-# part of it pixel by pixel; a line lies on the floor, lit and in the
-# sphere's shadow; and a billboard label stays facing the camera as it
+# part of it pixel by pixel, and casts its shadow on the sphere and the
+# floor; a line lies on the floor, lit and in the sphere's shadow; and a
+# billboard label stays facing the camera as it
 # orbits, drawn above the 3D content. The text of each is the code that
 # places it. The sign then changes color, as it would in 2D.
 scene.segment("world")

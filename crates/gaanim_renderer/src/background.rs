@@ -1250,9 +1250,19 @@ pub(crate) mod test_gpu {
         pub(crate) device: wgpu::Device,
         pub(crate) queue: wgpu::Queue,
         pub(crate) renderer: vello::Renderer,
+        /// The test's turn on the GPU, released after the device.
+        _turn: std::sync::MutexGuard<'static, ()>,
     }
 
+    /// One GPU test at a time: creating devices and compiling their pipelines
+    /// on many test threads at once now and then deadlocks the driver.
+    static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     pub(crate) fn test_gpu() -> Option<TestGpu> {
+        // A test that failed holding its turn leaves it to the next one.
+        let turn = TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // CI sets `WGPU_BACKEND` to skip adapters that crash the test process.
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all().with_env(),
@@ -1275,6 +1285,7 @@ pub(crate) mod test_gpu {
             device,
             queue,
             renderer,
+            _turn: turn,
         })
     }
 

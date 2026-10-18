@@ -4615,8 +4615,9 @@ class Drawable:
         It keeps its animations, colors, gradients and strokes: a write, a
         fade or a color change plays as in 2D. Without a ``material`` it keeps
         its colors unlit; with one it is lit, and receives shadows, as a
-        surface. Shadows, glows, blurs, chalk, images and Lottie scenes are
-        left out. ``billboard`` instead keeps a
+        surface. Either way it casts shadows on lit 3D content, as an opaque
+        mesh does, where it is at least half opaque. Its 2D drop shadows,
+        glows and blurs, chalk, images and Lottie scenes are left out. ``billboard`` instead keeps a
         drawable facing the camera, and ``hud`` pins it to the frame. The
         method is chainable and returns the same ``Drawable``.
 

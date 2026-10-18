@@ -21,7 +21,7 @@ pub use components::{
     InWorld3D, LayoutBackdrop, LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame,
     LayoutInspectionKind, LayoutZoneRecord, LayoutZones, Light3D, LightKind3D, Lighting3D,
     LineListData, LineListSource, LocalBounds, Material3D, Material3DError, Mesh3DMarker,
-    MobjectId, ObjectTag, Opacity, ParallaxLayer, Path2D, PathRevealOrder, PathSource,
+    MobjectId, ObjectTag, Opacity, ParallaxLayer, Path2D, PathRevealOrder, PathSource, PlaneClip,
     PlaneFillData, PlaneGlyph, Presence, RasterImage, RenderLayer, RenderOrder, SegmentContent,
     ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds, ZLayer,
 };

@@ -445,8 +445,9 @@ puntos se reproducen a la frecuencia de la pantalla.
   suelo bajo un gráfico, queda debajo de la superficie.
 - Las sombras salen de mapas de sombra: uno por luz direccional y seis
   (un cubo) por luz puntual, que cubren todas las mallas. Proyectan sombra
-  las mallas opacas; no las translúcidas, las líneas ni las que brillan
-  (`Material3D.emissive`), que pueden contener la luz que las hace brillar.
+  las mallas opacas y los objetos 2D con `.in_3d()`, donde son al menos
+  medio opacos; no las mallas translúcidas, las líneas ni lo que brilla
+  (`Material3D.emissive`), que puede contener la luz que lo hace brillar.
 - Todo el contenido 3D se dibuja debajo del 2D: etiquetas, textos y HUD
   quedan siempre encima. La excepción son las etiquetas con `.billboard()`:
   se desvanecen, con todo lo que contienen, mientras una malla opaca queda

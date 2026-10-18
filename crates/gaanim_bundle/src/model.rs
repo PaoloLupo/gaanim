@@ -1085,7 +1085,21 @@ fn write_three_d(
             (!glyphs.is_empty()).then_some((index, glyphs))
         })
         .collect();
-    if !gradients.is_empty() {
+    // Then the contours outlines are clipped to: by source, each glyph's
+    // index, its contour in the paths table, the offset to it and its side.
+    let clips: Vec<(usize, Vec<(usize, &gaanim_scene::PlaneClip)>)> = fills
+        .iter()
+        .filter_map(|&(index, fill)| {
+            let glyphs: Vec<_> = fill
+                .glyphs
+                .iter()
+                .enumerate()
+                .filter_map(|(glyph, filled)| filled.clip.as_ref().map(|clip| (glyph, clip)))
+                .collect();
+            (!glyphs.is_empty()).then_some((index, glyphs))
+        })
+        .collect();
+    if !gradients.is_empty() || !clips.is_empty() {
         w.len(gradients.len());
         for (index, glyphs) in gradients {
             w.len(index);
@@ -1096,6 +1110,20 @@ fn write_three_d(
                 for value in to_gradient.as_coeffs() {
                     w.f32(value as f32);
                 }
+            }
+        }
+    }
+    if !clips.is_empty() {
+        w.len(clips.len());
+        for (index, glyphs) in clips {
+            w.len(index);
+            w.len(glyphs.len());
+            for (glyph, clip) in glyphs {
+                w.len(glyph);
+                w.var(u64::from(Interner::path(tables, &clip.outline)));
+                w.f32(clip.offset.x as f32);
+                w.f32(clip.offset.y as f32);
+                w.bool(clip.outside);
             }
         }
     }
@@ -1219,6 +1247,7 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                     placement: kurbo::Affine::new(placement),
                     color,
                     gradient: None,
+                    clip: None,
                 });
             }
             if index >= sources.len() {
@@ -1245,6 +1274,29 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                     .get_mut(glyph)
                     .ok_or_else(|| corrupt("a gradient of no filled outline"))?
                     .gradient = Some((Arc::new(gradient), kurbo::Affine::new(to_gradient)));
+            }
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let (_, glyphs) = fills
+                .iter_mut()
+                .find(|(filled, _)| *filled == index)
+                .ok_or_else(|| corrupt("clips of no filled outlines"))?;
+            for _ in 0..r.len()? {
+                let glyph = r.len()?;
+                let outline = Resolver::path(tables, r.u32()?)?;
+                let offset = kurbo::Vec2::new(f64::from(r.f32()?), f64::from(r.f32()?));
+                let outside = r.bool()?;
+                glyphs
+                    .get_mut(glyph)
+                    .ok_or_else(|| corrupt("a clip of no filled outline"))?
+                    .clip = Some(gaanim_scene::PlaneClip {
+                    outline,
+                    offset,
+                    outside,
+                });
             }
         }
     }
