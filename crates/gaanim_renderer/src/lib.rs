@@ -26,6 +26,7 @@ pub mod object_effects;
 #[cfg(not(target_os = "emscripten"))]
 pub mod offscreen;
 pub mod pipeline;
+mod plane_fill;
 mod post_bloom;
 pub mod post_presets;
 pub mod post_process;

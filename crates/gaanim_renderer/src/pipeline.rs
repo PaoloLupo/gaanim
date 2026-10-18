@@ -3372,15 +3372,15 @@ fn extract_world(
 
 /// The 3D content of one drawable, with how it composes: whether it is a HUD
 /// overlay, whether the post-process leaves it out, and its view layer; last,
-/// the change ticks of its mesh and its lines, by which the GPU path keeps
-/// their uploads.
+/// the change ticks of its mesh, its lines and its filled outlines, by which
+/// the GPU path keeps their uploads.
 pub(crate) type ThreeDSource<'a> = (
     Entity,
     crate::three_d::Content<'a>,
     bool,
     bool,
     Option<Arc<str>>,
-    (u32, u32),
+    [u32; 3],
 );
 
 /// Components of a drawable with 3D content.
@@ -3396,6 +3396,7 @@ type ThreeDData = (
     Option<&'static ViewLayer>,
     Option<&'static gaanim_scene::StrokeBrush>,
     Option<Ref<'static, gaanim_scene::LineListSource>>,
+    Option<Ref<'static, gaanim_scene::PlaneFillData>>,
 );
 type ThreeDFilter = (With<Visible>, With<gaanim_scene::Mesh3DMarker>);
 /// Query of the drawables with 3D content.
@@ -3448,10 +3449,11 @@ type ThreeDItem<'a> = (
     Option<&'a ViewLayer>,
     Option<&'a gaanim_scene::StrokeBrush>,
     Option<Ref<'a, gaanim_scene::LineListSource>>,
+    Option<Ref<'a, gaanim_scene::PlaneFillData>>,
 );
 
 fn three_d_source<'a>(
-    (entity, transform, opacity, mesh, lines, material, hud, exempt, layer, stroke, source): ThreeDItem<'a>,
+    (entity, transform, opacity, mesh, lines, material, hud, exempt, layer, stroke, source, fill): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
     // the source stays uploaded while the reveal moves.
@@ -3462,10 +3464,11 @@ fn three_d_source<'a>(
         }
         (lines, _) => (lines, None),
     };
-    let revisions = (
+    let revisions = [
         mesh.as_ref().map_or(0, |mesh| mesh.last_changed().get()),
         lines.as_ref().map_or(0, |lines| lines.last_changed().get()),
-    );
+        fill.as_ref().map_or(0, |fill| fill.last_changed().get()),
+    ];
     (
         entity,
         crate::three_d::Content {
@@ -3476,6 +3479,7 @@ fn three_d_source<'a>(
             material,
             line_width: line_width(stroke),
             line_range,
+            fill: fill.map(Ref::into_inner),
         },
         hud,
         exempt,
@@ -3543,6 +3547,8 @@ pub struct CapturedThreeDSource {
     /// The part of `lines` shown, as fractions of its segments, when a
     /// reveal shows part of it (see [`gaanim_scene::LineListData::revealed`]).
     pub line_range: Option<[f32; 2]>,
+    /// Outlines filled in the drawable's plane.
+    pub fill: Option<Arc<gaanim_scene::PlaneFillData>>,
     pub composition: ThreeDComposition,
 }
 
@@ -3609,6 +3615,7 @@ fn captured_gpu_three_d(
                     material: source.material.as_ref(),
                     line_width: source.line_width.map(f64::from),
                     line_range: source.line_range,
+                    fill: source.fill.as_deref(),
                 },
                 source.composition.clone(),
             )
@@ -3623,11 +3630,15 @@ fn captured_gpu_three_d(
                 .lines
                 .clone()
                 .map(|lines| lines as crate::three_d::Keep);
+            let fill = source.fill.clone().map(|fill| fill as crate::three_d::Keep);
             let key = |held: &Option<crate::three_d::Keep>| {
                 held.as_ref()
                     .map_or(0, |held| Arc::as_ptr(held) as *const u8 as usize as u64)
             };
-            ([(key(&mesh), 0), (key(&lines), 0)], [mesh, lines])
+            (
+                [(key(&mesh), 0), (key(&lines), 0), (key(&fill), 0)],
+                [mesh, lines, fill],
+            )
         })
         .collect();
     let lighting = crate::three_d::Illumination {
@@ -3700,6 +3711,7 @@ fn three_d_elements<'a>(
                 material: content.material.copied(),
                 line_width: content.line_width.map(|width| width as f32),
                 line_range: content.line_range,
+                fill: content.fill.cloned().map(Arc::new),
                 composition: composition.clone(),
             })
             .collect();
@@ -3713,7 +3725,7 @@ fn three_d_elements<'a>(
         .zip(&revisions)
         .map(|((entity, ..), revision)| {
             let key = entity.to_bits();
-            ([(key, revision.0), (key, revision.1)], [None, None])
+            (revision.map(|revision| (key, revision)), [None, None, None])
         })
         .collect();
     take_gpu_three_d(
@@ -3727,10 +3739,10 @@ fn three_d_elements<'a>(
     )
 }
 
-/// How a drawable's mesh and lines are kept uploaded: a key and a revision
-/// for each, and what an address key points to (see
+/// How a drawable's mesh, lines and filled outlines are kept uploaded: a key
+/// and a revision for each, and what an address key points to (see
 /// [`crate::three_d::GpuMeshes::push`]).
-type GpuThreeDKeys = ([(u64, u32); 2], [Option<crate::three_d::Keep>; 2]);
+type GpuThreeDKeys = ([(u64, u32); 3], [Option<crate::three_d::Keep>; 3]);
 
 /// Leave the meshes and lines of `sources` to the GPU, identified by `keys`:
 /// one image for each way their elements compose, whose elements this pushes
@@ -3762,12 +3774,22 @@ fn take_gpu_three_d(
                 classes.len() - 1
             }
         };
-        let (mesh, lines) = gpu.push(index, keys, keep, content);
+        let [mesh_key, lines_key, fill_key] = keys;
+        let [mesh_keep, lines_keep, fill_keep] = keep;
+        let (mesh, lines) = gpu.push(
+            index,
+            [mesh_key, lines_key],
+            [mesh_keep, lines_keep],
+            content,
+        );
         if mesh {
             content.mesh = None;
         }
         if lines {
             content.lines = None;
+        }
+        if gpu.push_fill(index, fill_key, fill_keep, content) {
+            content.fill = None;
         }
     }
     gpu.finish(camera, ndc_to_canvas, line_width, lighting)

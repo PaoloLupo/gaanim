@@ -818,6 +818,27 @@ mod line_tests {
 #[derive(Component, Debug, Clone)]
 pub struct LineListSource(pub LineListData);
 
+/// Filled outlines lying in the drawable's z = 0 plane, as text, equations
+/// and shapes laid in the 3D world: the 3D pass draws them from their curves,
+/// per pixel, beneath or in front of meshes as the depth buffer decides. An
+/// entity with a [`Material3D`] is lit as a surface facing along +z.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct PlaneFillData {
+    pub glyphs: Vec<PlaneGlyph>,
+}
+
+/// One filled outline of a [`PlaneFillData`]: a letter of a text, or a
+/// shape. Outlines alike (the same letter) share the curves the renderer
+/// uploads for them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaneGlyph {
+    /// Closed contours filled with the nonzero rule, in their own units.
+    pub outline: Arc<BezPath>,
+    /// From the outline's units to the drawable's plane.
+    pub placement: Affine,
+    pub color: gaanim_core::peniko::Color,
+}
+
 #[cfg(test)]
 mod material_3d_tests {
     use super::*;

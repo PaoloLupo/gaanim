@@ -1343,6 +1343,25 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Geometry.text_plane",
+  kind: "factory",
+  params: (
+    (name: "source", type: "Drawable", desc: [Drawable 2D cuyo relleno se lleva al mundo 3D: texto, ecuación, forma, grupo o SVG.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Con él, el relleno se ilumina y recibe sombras como una superficie; sin él, conserva sus colores sin iluminar.]),
+    (name: "keep_source", type: "bool", default: "False", desc: [Mantiene visible el drawable de origen.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Drawable 3D plano con los contornos del origen en su plano z = 0.]),
+  desc: [Experimental. Los contornos se leen al compilar la escena, como en `extrude`, y quedan en el plano z = 0 de un drawable 3D centrado donde está el origen, en sus colores de relleno sólidos (regla nonzero). El pase 3D los rellena a partir de sus curvas, píxel a píxel: los bordes siguen nítidos a cualquier tamaño y bajo perspectiva, y las mallas que están delante los ocultan píxel a píxel. No proyectan sombras ni dibujan trazos ni degradados. El origen queda oculto desde el cursor salvo con `keep_source`. Un origen de otra escena, 3D, imagen, video o Lottie lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+sign = scene.geometry.text_plane(scene.text("Gaanim", size=0.8)).rotate_to_3d(-1.2, 0, 0)
+floor = scene.geometry.text_plane(scene.text("bajo la luz"), material=Material3D.matte(WHITE))
+```
+]
+
+#api-entry(
   name: "Primitive3D.material",
   kind: "method",
   desc: [Cambia el material al instante; `.animate.material(...)` lo interpola.],

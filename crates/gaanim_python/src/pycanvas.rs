@@ -5156,6 +5156,26 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
+    /// Lay the area a 2D drawable fills in the 3D world, drawn from its
+    /// curves.
+    #[pyo3(signature = (source, *, material=None, keep_source=false))]
+    fn text_plane<'py>(
+        &self,
+        py: Python<'py>,
+        source: &PyDrawable,
+        material: Option<PyMaterial3D>,
+        keep_source: bool,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .text_plane(&source.0, material.map(|value| value.0), keep_source)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
     #[pyo3(signature = (size=2.0, *, material=None))]
     fn cube<'py>(
         &self,

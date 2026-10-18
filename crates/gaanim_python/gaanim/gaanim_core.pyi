@@ -8415,6 +8415,28 @@ class Geometry:
             word = scene.geometry.extrude(scene.text("HOLA"), depth=0.2)
         """
         ...
+    def text_plane(
+        self,
+        source: Drawable,
+        *,
+        material: Optional[Material3D] = None,
+        keep_source: bool = False,
+    ) -> Primitive3D:
+        """Lay the area a 2D drawable fills in the 3D world, drawn from its curves.
+
+        Experimental. The outlines are read when the scene compiles, as for
+        ``extrude``, and lie in the z = 0 plane of a 3D drawable centered on
+        the source's place, in the source's fill colors. The 3D pass fills
+        them from their curves per pixel, so edges stay sharp at any size,
+        tilt with perspective, and meshes in front hide them pixel by pixel.
+        Without a ``material`` they keep their colors unlit; with one they
+        are lit and shadowed as a surface. The source is hidden from the
+        cursor on unless ``keep_source``.
+
+        Example:
+            sign = scene.geometry.text_plane(scene.text("Gaanim")).rotate_to_3d(-1.2, 0, 0)
+        """
+        ...
     def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:
         """Create a centered cube with flat faces."""
         ...

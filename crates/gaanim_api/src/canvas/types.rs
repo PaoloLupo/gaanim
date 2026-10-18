@@ -1073,6 +1073,9 @@ pub struct ObjectSpec {
     pub text_path: Option<super::text_path::TextPathSpec>,
     /// The drawable a `Primitive3D` is extruded from (`SceneModel::extrude`).
     pub extrusion: Option<super::extrude::ExtrusionSpec>,
+    /// The drawable a `Primitive3D` lays in its plane and fills from its
+    /// curves (`SceneModel::text_plane`).
+    pub plane_fill: Option<ObjectId>,
     /// If true, this object was attached to a coordinate space as data.
     /// Its parent's Create/Write animations should not include it as a leaf
     /// (otherwise a plane.create() would also draw every plot).
@@ -1262,6 +1265,7 @@ impl ObjectSpec {
             parallax_depth: None,
             text_path: None,
             extrusion: None,
+            plane_fill: None,
             exclude_from_parent_draw: false,
             fragment_fills: Vec::new(),
             fragment_tags: Vec::new(),

@@ -97,4 +97,46 @@ impl SceneModel {
         }
         Ok(mesh)
     }
+
+    /// Lay the area `source` fills in the z = 0 plane of a 3D drawable,
+    /// centered on the source's place, which the 3D pass fills from the
+    /// source's curves, in its colors: text that lives in the 3D world, hidden
+    /// by meshes in front of it pixel by pixel. With a `material` it is lit
+    /// as a surface. Unless `keep_source`, the source is hidden from here on.
+    pub fn text_plane(
+        &mut self,
+        source: &DrawableHandle,
+        material: Option<Material3D>,
+        keep_source: bool,
+    ) -> Result<DrawableHandle, String> {
+        if !Arc::ptr_eq(&source.state, &self.state) {
+            return Err("the drawable to lay in 3D must belong to this scene".to_string());
+        }
+        if matches!(
+            source.spec.lock().expect("object spec poisoned").kind,
+            SpawnKind::Primitive3D(_)
+                | SpawnKind::SurfaceMesh { .. }
+                | SpawnKind::Polyline3D { .. }
+                | SpawnKind::LineSegments3D { .. }
+                | SpawnKind::Image { .. }
+                | SpawnKind::Video { .. }
+                | SpawnKind::Lottie { .. }
+        ) {
+            return Err("only 2D vector drawables can be laid in 3D".to_string());
+        }
+        let plane = self.spawn(SpawnKind::Primitive3D(TriangleMeshData {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            normals: None,
+            uvs: None,
+            color: None,
+            colors: None,
+            material,
+        }));
+        plane.spec.lock().expect("object spec poisoned").plane_fill = Some(source.id);
+        if !keep_source {
+            source.clone().opacity(0.0);
+        }
+        Ok(plane)
+    }
 }

@@ -1513,6 +1513,31 @@ def validate_extrude_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_text_plane_contract(module: object) -> list[str]:
+    """Exercise text laid in the 3D world, filled from its curves."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    for source in (scene.text("HOLA"), scene.text.equation("e^(i pi)"), scene.geometry.star(5, 1.0, 0.4)):
+        plane = scene.geometry.text_plane(source)
+        if not isinstance(plane, module.Primitive3D):
+            failures.append("Geometry.text_plane did not return a Primitive3D")
+    lit = scene.geometry.text_plane(scene.text("lit"), material=module.Material3D.matte(module.BLUE), keep_source=True)
+    if lit.material(module.Material3D.matte(module.RED)) is not lit:
+        failures.append("a text plane does not take a material")
+    other = module.Scene(frame=(16, 9))
+    for call in (
+        lambda: scene.geometry.text_plane(scene.geometry.cube()),
+        lambda: scene.geometry.text_plane(other.text("elsewhere")),
+    ):
+        try:
+            call()
+        except ValueError:
+            pass
+        else:
+            failures.append("Geometry.text_plane accepted an invalid source")
+    return failures
+
+
 def validate_matrix_contract(module: object) -> list[str]:
     """Exercise matrix construction, selectors, ordering, and mutations."""
     failures: list[str] = []
@@ -3490,6 +3515,7 @@ def main() -> int:
     missing.extend(validate_text_on_path_contract(module))
     missing.extend(validate_rough_notation_contract(module))
     missing.extend(validate_extrude_contract(module))
+    missing.extend(validate_text_plane_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())

@@ -2984,6 +2984,86 @@ impl SceneModel {
         }
     }
 
+    /// The outlines `source`'s filled leaves draw, laid in a plane around
+    /// the center of their box, the mesh that bounds them (its corners, no
+    /// triangle) and that center; `None` when no leaf fills an outline.
+    fn plane_fill(
+        builder: &SceneBuilder<'_, '_, '_>,
+        source: ObjectId,
+        template: &gaanim_scene::TriangleMeshData,
+    ) -> Option<(
+        gaanim_scene::TriangleMeshData,
+        gaanim_core::kurbo::Point,
+        gaanim_scene::PlaneFillData,
+    )> {
+        use gaanim_core::kurbo::{Affine, Shape};
+        let mut glyphs = Vec::new();
+        let mut bounds: Option<gaanim_core::kurbo::Rect> = None;
+        // Outlines laid at their box's corner, by their points on a grid a
+        // 65536th of their size: the letters of a text carry their place in
+        // their outlines or not, and the same letter again shares the first
+        // one's outline, whose curves the renderer and recordings then keep
+        // once.
+        let mut outlines: HashMap<Vec<i64>, std::sync::Arc<gaanim_core::kurbo::BezPath>> =
+            HashMap::new();
+        for id in Self::visual_leaf_ids(builder, source) {
+            let Some(state) = builder.states.get(id) else {
+                continue;
+            };
+            let color = match state.fill.as_ref() {
+                Some(gaanim_core::peniko::Brush::Solid(color)) => *color,
+                _ => continue,
+            };
+            let own = state.path.bounding_box();
+            let step = own.width().max(own.height()) / 65536.0;
+            if state.path.elements().is_empty() || !(step.is_finite() && step > 0.0) {
+                continue;
+            }
+            let placement = builder.get_world_transform(id).to_affine_2d();
+            let world = (placement * own.to_path(0.0)).bounding_box();
+            bounds = Some(bounds.map_or(world, |bounds| bounds.union(world)));
+            let corner = Affine::translate(own.origin().to_vec2());
+            let mut key = Vec::new();
+            for element in state.path.elements() {
+                use gaanim_core::kurbo::PathEl;
+                let (tag, points): (i64, &[gaanim_core::kurbo::Point]) = match element {
+                    PathEl::MoveTo(p) => (0, std::slice::from_ref(p)),
+                    PathEl::LineTo(p) => (1, std::slice::from_ref(p)),
+                    PathEl::QuadTo(a, b) => (2, &[*a, *b]),
+                    PathEl::CurveTo(a, b, c) => (3, &[*a, *b, *c]),
+                    PathEl::ClosePath => (4, &[]),
+                };
+                key.push(tag);
+                for point in points {
+                    let at = *point - own.origin();
+                    key.push((at.x / step).round() as i64);
+                    key.push((at.y / step).round() as i64);
+                }
+            }
+            let outline = outlines
+                .entry(key)
+                .or_insert_with(|| std::sync::Arc::new(corner.inverse() * (*state.path).clone()));
+            glyphs.push(gaanim_scene::PlaneGlyph {
+                outline: std::sync::Arc::clone(outline),
+                placement: placement * corner,
+                color,
+            });
+        }
+        let bounds = bounds?;
+        let center = bounds.center();
+        let to_plane = Affine::translate(-center.to_vec2());
+        for glyph in &mut glyphs {
+            glyph.placement = to_plane * glyph.placement;
+        }
+        let (x, y) = (bounds.width() as f32 * 0.5, bounds.height() as f32 * 0.5);
+        let mesh = gaanim_scene::TriangleMeshData {
+            vertices: vec![[-x, -y, 0.0], [x, -y, 0.0], [x, y, 0.0], [-x, y, 0.0]],
+            indices: Vec::new(),
+            ..template.clone()
+        };
+        Some((mesh, center, gaanim_scene::PlaneFillData { glyphs }))
+    }
+
     fn mask_path_in_world(
         builder: &SceneBuilder<'_, '_, '_>,
         root: ObjectId,
@@ -11559,11 +11639,21 @@ impl SceneModel {
                     let source = id_map.get(&extrusion.source).copied()?;
                     Self::extruded_mesh(builder, source, extrusion)
                 });
-                let (mesh, center) = match extruded {
-                    Some((mesh, center)) => (mesh, Some(center)),
-                    None => (mesh.clone(), None),
+                let plane = spec.plane_fill.and_then(|source| {
+                    let source = id_map.get(&source).copied()?;
+                    Self::plane_fill(builder, source, mesh)
+                });
+                let (mesh, center, fill) = match (extruded, plane) {
+                    (Some((mesh, center)), _) => (mesh, Some(center), None),
+                    (None, Some((mesh, center, fill))) => (mesh, Some(center), Some(fill)),
+                    (None, None) => (mesh.clone(), None, None),
                 };
                 let mref = builder.spawn_triangle_mesh_data(mesh);
+                if let Some(fill) = fill
+                    && let Some(state) = builder.states.get(mref.id)
+                {
+                    builder.commands.entity(state.entity).insert(fill);
+                }
                 // The mesh is centered on its own origin, so moves, pivots
                 // and `create()` behave as for other primitives.
                 if let Some(center) = center

@@ -2280,6 +2280,64 @@ mod tests {
         assert!(!bundle.manifest.entries.contains_key(UNPROCESSED));
     }
 
+    /// Outlines filled in a 3D drawable's plane come back with their
+    /// outlines, placements and colors, each outline stored once.
+    #[test]
+    fn filled_outlines_of_3d_frames_round_trip() {
+        use gaanim_core::kurbo::{Affine, Rect, Shape};
+        use gaanim_core::peniko::Color;
+        let square = Arc::new(Rect::new(0.0, 0.0, 1.0, 1.0).to_path(0.1));
+        let glyph = |x: f64, color: Color| gaanim_scene::PlaneGlyph {
+            outline: Arc::clone(&square),
+            placement: Affine::translate((x, 0.5)) * Affine::scale(0.25),
+            color,
+        };
+        let (red, blue) = (Color::from_rgb8(255, 0, 0), Color::from_rgb8(0, 0, 255));
+        let fill = gaanim_scene::PlaneFillData {
+            glyphs: vec![glyph(0.0, red), glyph(1.5, blue), glyph(3.0, red)],
+        };
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        let mut first = frame(0.0);
+        first.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
+            sources: vec![gaanim_renderer::pipeline::CapturedThreeDSource {
+                entity: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
+                transform: gaanim_core::glam::DMat4::IDENTITY,
+                opacity: 1.0,
+                mesh: None,
+                lines: None,
+                material: None,
+                line_width: None,
+                line_range: None,
+                fill: Some(Arc::new(fill.clone())),
+                composition: gaanim_renderer::pipeline::ThreeDComposition {
+                    in_views: true,
+                    post_exempt: false,
+                    layer: None,
+                    transition_side: Default::default(),
+                    lineage: Vec::new(),
+                },
+            }],
+            ..Default::default()
+        });
+        writer.push_frame(&first, [0; 32]).unwrap();
+        let scene = SceneData {
+            fps: 60,
+            duration: 1.0 / 60.0,
+            ..Default::default()
+        };
+        let mut bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        let decoded = bundle.frame(0).unwrap();
+        let three_d = decoded.capture.three_d.unwrap();
+        let back = three_d.sources[0].fill.as_deref().unwrap();
+        assert_eq!(back, &fill);
+        // The three glyphs share one outline.
+        assert!(Arc::ptr_eq(
+            &back.glyphs[0].outline,
+            &back.glyphs[2].outline
+        ));
+    }
+
     /// A bundle says when its frames draw glass, which players without GPU
     /// passes hand to the web player.
     #[test]
