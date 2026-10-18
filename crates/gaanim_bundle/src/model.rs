@@ -1043,7 +1043,7 @@ fn write_three_d(
     }
     if !fills.is_empty() {
         w.len(fills.len());
-        for (index, fill) in fills {
+        for &(index, fill) in &fills {
             w.len(index);
             let mut colors: Vec<peniko::Color> = Vec::new();
             let mut color_of = Vec::with_capacity(fill.glyphs.len());
@@ -1067,6 +1067,35 @@ fn write_three_d(
                     w.f32(value as f32);
                 }
                 w.len(color);
+            }
+        }
+    }
+    // Then the gradients outlines are filled with instead of their color:
+    // by source, each glyph's index, its gradient and the map to it. Readers
+    // that predate them stop before, and draw the gradients' first colors.
+    let gradients: Vec<(usize, Vec<(usize, &(Arc<peniko::Gradient>, kurbo::Affine))>)> = fills
+        .iter()
+        .filter_map(|&(index, fill)| {
+            let glyphs: Vec<_> = fill
+                .glyphs
+                .iter()
+                .enumerate()
+                .filter_map(|(glyph, filled)| filled.gradient.as_ref().map(|paint| (glyph, paint)))
+                .collect();
+            (!glyphs.is_empty()).then_some((index, glyphs))
+        })
+        .collect();
+    if !gradients.is_empty() {
+        w.len(gradients.len());
+        for (index, glyphs) in gradients {
+            w.len(index);
+            w.len(glyphs.len());
+            for (glyph, (gradient, to_gradient)) in glyphs {
+                w.len(glyph);
+                codec::write_gradient(w, gradient);
+                for value in to_gradient.as_coeffs() {
+                    w.f32(value as f32);
+                }
             }
         }
     }
@@ -1167,6 +1196,7 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
             }
         }
     }
+    let mut fills = Vec::new();
     if !r.is_empty() {
         for _ in 0..r.len()? {
             let index = r.len()?;
@@ -1188,13 +1218,38 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                     outline,
                     placement: kurbo::Affine::new(placement),
                     color,
+                    gradient: None,
                 });
             }
-            sources
-                .get_mut(index)
-                .ok_or_else(|| corrupt("filled outlines of no 3D source"))?
-                .fill = Some(Arc::new(gaanim_scene::PlaneFillData { glyphs }));
+            if index >= sources.len() {
+                return Err(corrupt("filled outlines of no 3D source"));
+            }
+            fills.push((index, glyphs));
         }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let (_, glyphs) = fills
+                .iter_mut()
+                .find(|(filled, _)| *filled == index)
+                .ok_or_else(|| corrupt("gradients of no filled outlines"))?;
+            for _ in 0..r.len()? {
+                let glyph = r.len()?;
+                let gradient = codec::read_gradient(r)?;
+                let mut to_gradient = [0.0; 6];
+                for value in &mut to_gradient {
+                    *value = f64::from(r.f32()?);
+                }
+                glyphs
+                    .get_mut(glyph)
+                    .ok_or_else(|| corrupt("a gradient of no filled outline"))?
+                    .gradient = Some((Arc::new(gradient), kurbo::Affine::new(to_gradient)));
+            }
+        }
+    }
+    for (index, glyphs) in fills {
+        sources[index].fill = Some(Arc::new(gaanim_scene::PlaneFillData { glyphs }));
     }
     Ok(CapturedThreeD {
         lighting,

@@ -7,6 +7,10 @@
 //! pixel. Each outline's curves are split into horizontal and vertical bands
 //! so that a pixel only tests the curves of the two bands it lies in.
 //!
+//! An outline filled with a gradient reads it per pixel from a record of
+//! its geometry and a ramp of its colors, sampled as Vello samples them, so
+//! it matches the 2D drawing.
+//!
 //! [`SHADER`] is a WGSL port of the reference shaders of the Slug algorithm
 //! (<https://github.com/EricLengyel/Slug>), MIT licensed, copyright 2017 by
 //! Eric Lengyel.
@@ -15,19 +19,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gaanim_core::glam::DVec3;
-use gaanim_core::kurbo::{self, BezPath, PathEl, Point};
+use gaanim_core::kurbo::{self, Affine, BezPath, PathEl, Point};
+use gaanim_core::peniko;
 use gaanim_scene::PlaneFillData;
 
 use crate::three_d::{push_f32s, to_linear};
 
 /// Bytes of an outline's instance (`FillIn` in [`SHADER`]): its box, its
-/// placement in the plane, its bands' transform, where its bands start and
-/// how many there are, and its linear color.
+/// placement in the plane, its bands' transform, where its bands start, how
+/// many there are and its gradient's record, and its linear color.
 pub(crate) const GLYPH_BYTES: usize = 96;
 /// Most bands an outline is split into, each way.
 const MAX_BANDS: usize = 16;
 /// How close quadratics follow a cubic, as a fraction of its outline's size.
 const CUBIC_TOLERANCE: f64 = 1.0 / 4000.0;
+/// Colors of a gradient's ramp, as Vello samples them.
+const RAMP: usize = 512;
+/// `vec4<f32>` texels of a gradient's record (`fill_paints` in [`SHADER`]).
+const PAINT_TEXELS: usize = 4;
 
 /// What the shader reads of a [`PlaneFillData`]: an instance per outline
 /// drawn, and the curves and bands of its distinct outlines.
@@ -38,6 +47,12 @@ pub(crate) struct Fill {
     pub(crate) curves: Vec<u8>,
     /// `u32` words of band headers and curve lists (`fill_bands`).
     pub(crate) bands: Vec<u8>,
+    /// `vec4<f32>` texels of the gradients' records (`fill_paints`); a
+    /// texel of zeros when no outline has a gradient, as a binding needs one.
+    pub(crate) paints: Vec<u8>,
+    /// `u32` premultiplied sRGB colors of the gradients' ramps
+    /// (`fill_ramps`); one when none has.
+    pub(crate) ramps: Vec<u8>,
     /// The corners of the outlines' boxes in the plane.
     pub(crate) corners: Vec<DVec3>,
     pub(crate) opaque: bool,
@@ -68,6 +83,10 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
     let mut corners = Vec::new();
     let mut count = 0;
     let mut opaque = true;
+    let mut paints: Vec<[f32; 4]> = Vec::new();
+    let mut ramps: Vec<u32> = Vec::new();
+    // Ramps by their stops, which the gradients of a text's letters share.
+    let mut ramp_of: HashMap<Vec<u32>, u32> = HashMap::new();
     for glyph in &fill.glyphs {
         let packed = *by_address
             .entry(Arc::as_ptr(&glyph.outline))
@@ -99,12 +118,29 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
         }
         let [a, b, c, d, e, f] = placement.map(|value| value as f32);
         let color = to_linear(glyph.color);
-        opaque &= color[3] >= 0.999;
+        // Its gradient's record, counted from 1; 0 for its color.
+        let paint = glyph.gradient.as_ref().and_then(|(gradient, to_gradient)| {
+            let record = paint_record(gradient, *to_gradient, &mut ramps, &mut ramp_of)?;
+            paints.extend(record);
+            opaque &= gradient
+                .stops
+                .iter()
+                .all(|stop| stop.color.components[3] >= 0.999);
+            Some((paints.len() / PAINT_TEXELS) as u32)
+        });
+        if paint.is_none() {
+            opaque &= color[3] >= 0.999;
+        }
         let start = instances.len();
         push_f32s(&mut instances, &packed.bounds);
         push_f32s(&mut instances, &[a, b, c, d, e, f, 0.0, 0.0]);
         push_f32s(&mut instances, &packed.transform);
-        for word in [packed.start, packed.last[0], packed.last[1], 0] {
+        for word in [
+            packed.start,
+            packed.last[0],
+            packed.last[1],
+            paint.unwrap_or(0),
+        ] {
             instances.extend_from_slice(&word.to_le_bytes());
         }
         push_f32s(&mut instances, &color);
@@ -122,13 +158,125 @@ pub(crate) fn build(fill: &PlaneFillData) -> Option<Fill> {
     for word in &bands {
         band_bytes.extend_from_slice(&word.to_le_bytes());
     }
+    if paints.is_empty() {
+        paints.push([0.0; 4]);
+        ramps.push(0);
+    }
+    let mut paint_bytes = Vec::with_capacity(paints.len() * 16);
+    for texel in &paints {
+        push_f32s(&mut paint_bytes, texel);
+    }
+    let ramp_bytes = ramps.iter().flat_map(|color| color.to_le_bytes()).collect();
     Some(Fill {
         instances,
         count,
         curves: curve_bytes,
         bands: band_bytes,
+        paints: paint_bytes,
+        ramps: ramp_bytes,
         corners,
         opaque,
+    })
+}
+
+/// The record of `gradient` in `fill_paints` (see [`SHADER`]), mapped from
+/// an outline's units by `to_gradient`: that map's linear part's columns and
+/// its offset, the gradient's kind and extend, its geometry, and its radii
+/// and ramp, which is added to `ramps` unless one of the same stops is
+/// there. `None` for a gradient without stops or with a non-finite value.
+fn paint_record(
+    gradient: &peniko::Gradient,
+    to_gradient: Affine,
+    ramps: &mut Vec<u32>,
+    ramp_of: &mut HashMap<Vec<u32>, u32>,
+) -> Option<[[f32; 4]; PAINT_TEXELS]> {
+    let stops: Vec<(f32, peniko::color::PremulColor<peniko::color::Srgb>)> = gradient
+        .stops
+        .iter()
+        .map(|stop| {
+            (
+                stop.offset,
+                stop.color
+                    .to_alpha_color::<peniko::color::Srgb>()
+                    .premultiply(),
+            )
+        })
+        .collect();
+    if stops.is_empty() {
+        return None;
+    }
+    let key: Vec<u32> = stops
+        .iter()
+        .flat_map(|(offset, color)| {
+            std::iter::once(offset.to_bits()).chain(color.components.map(f32::to_bits))
+        })
+        .collect();
+    let ramp = *ramp_of.entry(key).or_insert_with(|| {
+        let index = (ramps.len() / RAMP) as u32;
+        ramps.extend(ramp(&stops));
+        index
+    });
+    let [a, b, c, d, e, f] = to_gradient.as_coeffs().map(|value| value as f32);
+    let extend = match gradient.extend {
+        peniko::Extend::Pad => 0.0,
+        peniko::Extend::Repeat => 1.0,
+        peniko::Extend::Reflect => 2.0,
+    };
+    let point = |point: kurbo::Point| [point.x as f32, point.y as f32];
+    let (kind, [x0, y0], [x1, y1], radii) = match gradient.kind {
+        peniko::GradientKind::Linear(line) => (0.0, point(line.start), point(line.end), [0.0; 2]),
+        peniko::GradientKind::Radial(circles) => (
+            1.0,
+            point(circles.start_center),
+            point(circles.end_center),
+            [circles.start_radius, circles.end_radius],
+        ),
+        peniko::GradientKind::Sweep(sweep) => (
+            2.0,
+            point(sweep.center),
+            [
+                sweep.start_angle / std::f32::consts::TAU,
+                sweep.end_angle / std::f32::consts::TAU,
+            ],
+            [0.0; 2],
+        ),
+    };
+    let record = [
+        [a, b, c, d],
+        [e, f, kind, extend],
+        [x0, y0, x1, y1],
+        [radii[0], radii[1], ramp as f32, 0.0],
+    ];
+    record
+        .iter()
+        .flatten()
+        .all(|value| value.is_finite())
+        .then_some(record)
+}
+
+/// The [`RAMP`] colors of `stops`, premultiplied sRGB bytes, as Vello's
+/// ramps sample them: each between the stops around it, interpolated in
+/// premultiplied sRGB.
+fn ramp(
+    stops: &[(f32, peniko::color::PremulColor<peniko::color::Srgb>)],
+) -> impl Iterator<Item = u32> + '_ {
+    (0..RAMP).map(move |index| {
+        let at = index as f32 / (RAMP - 1) as f32;
+        let color = match stops.iter().position(|(offset, _)| *offset > at) {
+            None => stops[stops.len() - 1].1,
+            Some(0) => stops[0].1,
+            Some(next) => {
+                let (from, start) = stops[next - 1];
+                let (to, end) = stops[next];
+                if to - from < 1e-9 {
+                    end
+                } else {
+                    start.lerp_rect(end, (at - from) / (to - from))
+                }
+            }
+        };
+        let bytes = color.to_rgba8();
+        u32::from_le_bytes([bytes.r, bytes.g, bytes.b, bytes.a])
     })
 }
 
@@ -452,6 +600,14 @@ pub(crate) const SHADER: &str = r#"
 // and where their list starts, from the outline's first word; then the
 // lists, of the curves' first texels.
 @group(2) @binding(1) var<storage, read> fill_bands: array<u32>;
+// Each gradient fill's record, four texels: the map from its outline's
+// units to the gradient's (the linear part's columns, then the offset), the
+// gradient's kind (0 linear, 1 radial, 2 sweep) and extend (0 pad, 1
+// repeat, 2 reflect), its points (a sweep's center and its start and end
+// as fractions of a turn), and its radii and ramp.
+@group(2) @binding(2) var<storage, read> fill_paints: array<vec4<f32>>;
+// The gradients' ramps, 512 premultiplied sRGB colors each, as Vello's.
+@group(2) @binding(3) var<storage, read> fill_ramps: array<u32>;
 
 struct FillIn {
     // The outline's box in its own units.
@@ -462,7 +618,8 @@ struct FillIn {
     @location(2) offset: vec4<f32>,
     // Scale and offset from its units to band indexes.
     @location(3) band: vec4<f32>,
-    // Its first band word, its last vertical and horizontal band.
+    // Its first band word, its last vertical and horizontal band, and its
+    // gradient's record, counted from 1 (0 for its color).
     @location(4) glyph: vec4<u32>,
     // Linear color.
     @location(5) color: vec4<f32>,
@@ -661,10 +818,97 @@ fn fill_coverage(coord: vec2<f32>, band: vec4<f32>, glyph: vec4<u32>) -> f32 {
     return saturate(coverage);
 }
 
+// Vello's extend modes, on a gradient's parameter.
+fn fill_extend(t: f32, mode: u32) -> f32 {
+    switch mode {
+        case 0u: {
+            return clamp(t, 0.0, 1.0);
+        }
+        case 1u: {
+            return fract(t);
+        }
+        default: {
+            return abs(t - 2.0 * round(0.5 * t));
+        }
+    }
+}
+
+fn fill_srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    return select(pow((c + 0.055) / 1.055, vec3<f32>(2.4)), c / 12.92, c <= vec3<f32>(0.04045));
+}
+
+// The linear color of gradient record `paint` at `at`, in the outline's
+// units; transparent where a radial gradient has no circle through it.
+fn fill_gradient(paint: u32, at: vec2<f32>) -> vec4<f32> {
+    let base = (paint - 1u) * 4u;
+    let m = fill_paints[base];
+    let o = fill_paints[base + 1u];
+    let g = fill_paints[base + 2u];
+    let h = fill_paints[base + 3u];
+    let p = m.xy * at.x + m.zw * at.y + o.xy;
+    var t = 0.0;
+    switch u32(o.z) {
+        case 0u: {
+            let d = g.zw - g.xy;
+            t = dot(p - g.xy, d) / max(dot(d, d), 1e-20);
+        }
+        case 1u: {
+            // The greatest t whose circle, from the start one toward the
+            // end one, passes through p with a radius of at least 0.
+            let dc = g.zw - g.xy;
+            let dr = h.y - h.x;
+            let q = p - g.xy;
+            let a = dot(dc, dc) - dr * dr;
+            let b = dot(q, dc) + h.x * dr;
+            let c = dot(q, q) - h.x * h.x;
+            if abs(a) < 1e-9 {
+                if abs(b) < 1e-9 {
+                    return vec4<f32>(0.0);
+                }
+                t = c / (2.0 * b);
+                if h.x + t * dr < 0.0 {
+                    return vec4<f32>(0.0);
+                }
+            } else {
+                let discriminant = b * b - a * c;
+                if discriminant < 0.0 {
+                    return vec4<f32>(0.0);
+                }
+                let root = sqrt(discriminant);
+                let high = max((b + root) / a, (b - root) / a);
+                let low = min((b + root) / a, (b - root) / a);
+                if h.x + high * dr >= 0.0 {
+                    t = high;
+                } else if h.x + low * dr >= 0.0 {
+                    t = low;
+                } else {
+                    return vec4<f32>(0.0);
+                }
+            }
+        }
+        default: {
+            var turn = atan2(p.y - g.y, p.x - g.x) / 6.283185307179586;
+            if turn < 0.0 {
+                turn += 1.0;
+            }
+            t = (turn - g.z) / (g.w - g.z);
+        }
+    }
+    let slot = u32(round(fill_extend(t, u32(o.w)) * 511.0));
+    let color = unpack4x8unorm(fill_ramps[u32(h.z) * 512u + slot]);
+    if color.a <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(fill_srgb_to_linear(color.rgb / color.a), color.a);
+}
+
 @fragment
 fn fragment_fill(in: FillOut) -> @location(0) vec4<f32> {
     let coverage = fill_coverage(in.outline, in.band, in.glyph);
     var color = in.color;
+    if in.glyph.w != 0u {
+        color = fill_gradient(in.glyph.w, in.outline);
+    }
     if draw.material.z > 0.5 {
         // Lit as the plane, from the side the viewer sees.
         let viewer = toward_viewer(in.world);
@@ -684,9 +928,57 @@ fn fragment_fill(in: FillOut) -> @location(0) vec4<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gaanim_core::kurbo::{Affine, Circle, Rect, Shape};
-    use gaanim_core::peniko;
+    use gaanim_core::kurbo::{Circle, Rect, Shape};
     use gaanim_scene::PlaneGlyph;
+
+    #[test]
+    fn gradients_are_recorded_with_ramps_shared_by_their_stops() {
+        let (red, blue) = (
+            peniko::Color::from_rgb8(255, 0, 0),
+            peniko::Color::from_rgb8(0, 0, 255),
+        );
+        let gradient =
+            Arc::new(peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0)).with_stops([red, blue]));
+        let square = Arc::new(Rect::new(0.0, 0.0, 1.0, 1.0).to_path(0.0));
+        let glyph = |x: f64, gradient: Option<Arc<peniko::Gradient>>| PlaneGlyph {
+            outline: Arc::clone(&square),
+            placement: Affine::translate((x, 0.0)),
+            color: red,
+            gradient: gradient.map(|gradient| (gradient, Affine::translate((x, 0.0)))),
+        };
+        let fill = build(&PlaneFillData {
+            glyphs: vec![
+                glyph(0.0, None),
+                glyph(2.0, Some(Arc::clone(&gradient))),
+                glyph(4.0, Some(gradient)),
+            ],
+        })
+        .unwrap();
+        // Each outline names its record, counted from 1, or 0 for its color.
+        let paint = |glyph: usize| {
+            let at = glyph * GLYPH_BYTES + 76;
+            u32::from_le_bytes(fill.instances[at..at + 4].try_into().unwrap())
+        };
+        assert_eq!([paint(0), paint(1), paint(2)], [0, 1, 2]);
+        assert_eq!(fill.paints.len(), 2 * PAINT_TEXELS * 16);
+        // Both records share one ramp, red to blue in premultiplied sRGB.
+        assert_eq!(fill.ramps.len(), RAMP * 4);
+        assert_eq!(fill.ramps[..4], [255, 0, 0, 255]);
+        assert_eq!(fill.ramps[(RAMP - 1) * 4..], [0, 0, 255, 255]);
+        let middle = &fill.ramps[(RAMP / 2) * 4..(RAMP / 2) * 4 + 4];
+        assert!(
+            (126..=129).contains(&middle[0]) && middle[1] == 0,
+            "{middle:?}"
+        );
+        // The second record's map starts the gradient at its outline's corner.
+        let texel = |index: usize| -> [f32; 4] {
+            std::array::from_fn(|lane| {
+                let at = index * 16 + lane * 4;
+                f32::from_le_bytes(fill.paints[at..at + 4].try_into().unwrap())
+            })
+        };
+        assert_eq!(texel(PAINT_TEXELS + 1)[..2], [4.0, 0.0]);
+    }
 
     fn fill_of(outlines: &[BezPath]) -> Fill {
         let fill = PlaneFillData {
@@ -696,6 +988,7 @@ mod tests {
                     outline: Arc::new(outline.clone()),
                     placement: Affine::IDENTITY,
                     color: peniko::Color::WHITE,
+                    gradient: None,
                 })
                 .collect(),
         };

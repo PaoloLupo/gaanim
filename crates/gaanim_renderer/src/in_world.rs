@@ -4,9 +4,9 @@
 //! fills from their curves (see [`crate::plane_fill`]); the 2D renderer
 //! leaves the parts, marked [`DrawnIn3D`], to it.
 //!
-//! A part's fill and stroke keep their colors, its opacity and the progress
-//! of a write; gradients draw in their first color, and shadows, glows,
-//! blurs, chalk, rasters and Lottie scenes are left out.
+//! A part's fill and stroke keep their colors and gradients, its opacity and
+//! the progress of a write; shadows, glows, blurs, chalk, rasters and Lottie
+//! scenes are left out.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
@@ -25,8 +25,58 @@ use crate::effects::{StrokeAlign, StrokeProfile, StrokeScalesWithObject};
 use crate::fragment::{FragmentParts, FragmentRecipe, fragment_recipe};
 
 /// What a part draws at full opacity: outlines laid at their box's corner,
-/// that corner, and their colors.
-type Drawn = Arc<[(Arc<BezPath>, kurbo::Vec2, peniko::Color)]>;
+/// that corner, and their paints.
+type Drawn = Arc<[(Arc<BezPath>, kurbo::Vec2, Paint)]>;
+
+/// What an outline is filled with: a color, or a gradient in the part's own
+/// units, as the 2D renderer paints it.
+#[derive(Clone, Debug, PartialEq)]
+enum Paint {
+    Solid(peniko::Color),
+    Gradient(Arc<peniko::Gradient>),
+}
+
+impl Paint {
+    /// The paint `brush` fills with; none for an image or a gradient
+    /// without stops.
+    fn of(brush: &peniko::Brush) -> Option<Self> {
+        match brush {
+            peniko::Brush::Solid(color) => Some(Self::Solid(*color)),
+            peniko::Brush::Gradient(gradient) if !gradient.stops.is_empty() => {
+                Some(Self::Gradient(Arc::new(gradient.clone())))
+            }
+            peniko::Brush::Gradient(_) | peniko::Brush::Image(_) => None,
+        }
+    }
+
+    fn multiply_alpha(self, alpha: f32) -> Self {
+        if alpha >= 1.0 {
+            return self;
+        }
+        match self {
+            Self::Solid(color) => Self::Solid(color.multiply_alpha(alpha)),
+            Self::Gradient(gradient) => {
+                Self::Gradient(Arc::new(gradient.as_ref().clone().multiply_alpha(alpha)))
+            }
+        }
+    }
+
+    /// The color and gradient of a glyph of an outline laid at `corner`,
+    /// at `alpha`.
+    fn glyph(
+        &self,
+        alpha: f32,
+        corner: kurbo::Vec2,
+    ) -> (peniko::Color, Option<(Arc<peniko::Gradient>, Affine)>) {
+        match self.clone().multiply_alpha(alpha) {
+            Self::Solid(color) => (color, None),
+            Self::Gradient(gradient) => (
+                gradient.stops[0].color.to_alpha_color(),
+                Some((gradient, Affine::translate(corner))),
+            ),
+        }
+    }
+}
 
 /// The outlines parts drew, by part, while their recipe stays the same, and
 /// outlines alike, shared: the same letter again packs and records once.
@@ -155,11 +205,13 @@ pub(crate) fn sync_in_world_system(
             };
             let placement = to_root * transform.affine_2d;
             let alpha = (opacity.0 / root_opacity).clamp(0.0, 1.0);
-            for (outline, corner, color) in drawn.iter() {
+            for (outline, corner, paint) in drawn.iter() {
+                let (color, gradient) = paint.glyph(alpha, *corner);
                 glyphs.push(PlaneGlyph {
                     outline: Arc::clone(outline),
                     placement: placement * Affine::translate(*corner),
-                    color: color.multiply_alpha(alpha),
+                    color,
+                    gradient,
                 });
             }
         }
@@ -181,6 +233,7 @@ fn same_glyphs(a: &[PlaneGlyph], b: &[PlaneGlyph]) -> bool {
         && a.iter().zip(b).all(|(a, b)| {
             a.placement == b.placement
                 && a.color == b.color
+                && a.gradient == b.gradient
                 && (Arc::ptr_eq(&a.outline, &b.outline) || a.outline == b.outline)
         })
 }
@@ -212,16 +265,16 @@ fn drawn(recipe: &FragmentRecipe, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) 
     };
     if !trimmed_closed
         && fill_alpha > 0.0
-        && let Some(color) = recipe.fill.as_ref().and_then(brush_color)
+        && let Some(paint) = recipe.fill.as_ref().and_then(Paint::of)
     {
-        drawn.extend(laid(path.clone(), color.multiply_alpha(fill_alpha), alike));
+        drawn.extend(laid(path.clone(), paint.multiply_alpha(fill_alpha), alike));
     }
     if let Some(stroke) = &recipe.stroke
         && let Some(brush) = &stroke.brush
     {
         let (brush, style) = crate::pipeline::animated_stroke_paint(brush, &stroke.style, wave);
         let style = crate::stroke::drawable_pen(&style);
-        if let Some(color) = brush_color(&brush)
+        if let Some(paint) = Paint::of(&brush)
             && style.width.is_finite()
             && style.width > 0.0
         {
@@ -238,31 +291,19 @@ fn drawn(recipe: &FragmentRecipe, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) 
                 Some(view) => view.inverse() * widen(&(view * path.clone())),
                 None => widen(path),
             };
-            drawn.extend(laid(outline, color, alike));
+            drawn.extend(laid(outline, paint, alike));
         }
     }
     drawn.into()
 }
 
-/// The color a brush paints with: a gradient's first, none for an image.
-fn brush_color(brush: &peniko::Brush) -> Option<peniko::Color> {
-    match brush {
-        peniko::Brush::Solid(color) => Some(*color),
-        peniko::Brush::Gradient(gradient) => gradient
-            .stops
-            .first()
-            .map(|stop| stop.color.to_alpha_color()),
-        peniko::Brush::Image(_) => None,
-    }
-}
-
 /// `outline` laid at its box's corner, shared with an outline alike, with
-/// that corner and `color`; nothing for an empty outline.
+/// that corner and `paint`; nothing for an empty outline.
 fn laid(
     outline: BezPath,
-    color: peniko::Color,
+    paint: Paint,
     alike: &mut HashMap<Vec<i64>, Weak<BezPath>>,
-) -> Option<(Arc<BezPath>, kurbo::Vec2, peniko::Color)> {
+) -> Option<(Arc<BezPath>, kurbo::Vec2, Paint)> {
     let bounds = outline.bounding_box();
     let step = bounds.width().max(bounds.height()) / 65536.0;
     if outline.elements().is_empty() || !(step.is_finite() && step > 0.0) {
@@ -296,7 +337,7 @@ fn laid(
             shared
         }
     };
-    Some((shared, corner, color))
+    Some((shared, corner, paint))
 }
 
 #[cfg(test)]
@@ -404,10 +445,37 @@ mod tests {
         };
         let drawn = drawn(&recipe, &mut HashMap::new());
         assert_eq!(drawn.len(), 1);
-        let (outline, corner, color) = &drawn[0];
-        assert_eq!(*color, peniko::Color::BLACK);
+        let (outline, corner, paint) = &drawn[0];
+        assert_eq!(*paint, Paint::Solid(peniko::Color::BLACK));
         let bounds = outline.bounding_box() + *corner;
         assert!((bounds.height() - 0.2).abs() < 1e-6, "{bounds:?}");
         assert!((bounds.width() - 2.0).abs() < 0.21, "{bounds:?}");
+    }
+
+    #[test]
+    fn a_gradient_fills_its_outlines_in_the_part_units() {
+        let (red, blue) = (
+            peniko::Color::from_rgb8(255, 0, 0),
+            peniko::Color::from_rgb8(0, 0, 255),
+        );
+        let (mut world, root, parts) = world_with_text(red);
+        let gradient =
+            peniko::Gradient::new_linear((10.0, 0.0), (14.0, 0.0)).with_stops([red, blue]);
+        world.get_mut::<FillBrush>(parts[1]).unwrap().0 =
+            Some(peniko::Brush::Gradient(gradient.clone()));
+        run(&mut world);
+        let fill = world.get::<PlaneFillData>(root).unwrap();
+        assert!(fill.glyphs[0].gradient.is_none());
+        let glyph = &fill.glyphs[1];
+        let (painted, to_gradient) = glyph.gradient.as_ref().unwrap();
+        // At the part's opacity, its first color drawn by older readers.
+        assert_eq!(**painted, gradient.multiply_alpha(0.5));
+        assert_eq!(glyph.color, red.multiply_alpha(0.5));
+        // The outline, laid at its corner, maps back to the part's units.
+        let start = *to_gradient * kurbo::Point::ZERO;
+        assert!(
+            (start - kurbo::Point::new(13.0, 0.0)).hypot() < 1e-9,
+            "{start:?}"
+        );
     }
 }

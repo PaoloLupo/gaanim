@@ -4612,11 +4612,11 @@ class Drawable:
         world under the perspective camera. The 3D pass draws it from its
         outlines, so its edges stay sharp at any size and meshes in front of
         it hide it pixel by pixel, instead of drawing it above all 3D content.
-        It keeps its animations, colors and strokes: a write, a fade or a
-        color change plays as in 2D. Without a ``material`` it keeps its
-        colors unlit; with one it is lit, and receives shadows, as a surface.
-        Gradients draw in their first color; shadows, glows, blurs, chalk,
-        images and Lottie scenes are left out. ``billboard`` instead keeps a
+        It keeps its animations, colors, gradients and strokes: a write, a
+        fade or a color change plays as in 2D. Without a ``material`` it keeps
+        its colors unlit; with one it is lit, and receives shadows, as a
+        surface. Shadows, glows, blurs, chalk, images and Lottie scenes are
+        left out. ``billboard`` instead keeps a
         drawable facing the camera, and ``hud`` pins it to the frame. The
         method is chainable and returns the same ``Drawable``.
 

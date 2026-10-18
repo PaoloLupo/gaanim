@@ -653,7 +653,7 @@ fn read_extend(r: &mut Reader<'_>) -> Result<peniko::Extend> {
     }
 }
 
-fn write_gradient(w: &mut Writer, gradient: &peniko::Gradient) {
+pub(crate) fn write_gradient(w: &mut Writer, gradient: &peniko::Gradient) {
     match &gradient.kind {
         peniko::GradientKind::Linear(position) => {
             w.u8(0);
@@ -694,7 +694,7 @@ fn write_gradient(w: &mut Writer, gradient: &peniko::Gradient) {
     }
 }
 
-fn read_gradient(r: &mut Reader<'_>) -> Result<peniko::Gradient> {
+pub(crate) fn read_gradient(r: &mut Reader<'_>) -> Result<peniko::Gradient> {
     let kind = match r.u8()? {
         0 => peniko::GradientKind::Linear(peniko::LinearGradientPosition {
             start: r.point()?,
