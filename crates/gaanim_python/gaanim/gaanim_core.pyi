@@ -8623,6 +8623,62 @@ class Geometry:
             knot = scene.geometry.tube(points, 0.12, closed=True, material=Material3D.metal(GOLD))
         """
         ...
+    def mesh(
+        self,
+        vertices: Sequence[tuple[float, float, float]],
+        triangles: Sequence[tuple[int, int, int]],
+        *,
+        colors: Optional[Sequence[ColorLike]] = None,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create a lit mesh from ``vertices`` and the ``triangles`` that index them.
+
+        Vertices are in the mesh's own coordinates, whose origin stays the
+        drawable's: ``move_to_3d`` places it and turns are about it, so a
+        part modelled from its pivot turns about the pivot. Each triangle
+        faces the side from which its vertices run counterclockwise; a lit
+        mesh hides the faces turned away. ``colors`` gives one color per
+        vertex, blended across each triangle and kept when the mesh is lit by
+        ``material`` (matte white by default). Normals are generated, smooth
+        across shared vertices: repeat a vertex for a crease. Numpy arrays of
+        shape ``(n, 3)`` work for both sequences. Non-finite vertices, no
+        triangles, an index past the vertices or a ``colors`` of another
+        length raise ``ValueError``.
+
+        Example:
+            tetra = scene.geometry.mesh(
+                [(1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)],
+                [(0, 1, 2), (0, 3, 1), (0, 2, 3), (1, 3, 2)],
+                colors=[RED, GREEN, BLUE, GOLD],
+            )
+        """
+        ...
+    def revolve(
+        self,
+        profile: Sequence[tuple[float, float]],
+        *,
+        segments: int = 64,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create the lit solid a ``(r, y)`` profile sweeps turning around the y axis, as on a lathe.
+
+        ``r`` is the distance from the axis (at least ``0``) and ``y`` the
+        height. List the profile counterclockwise in the (r, y) half-plane,
+        up an outer wall, so the surface faces out; starting and ending on
+        the axis (``r = 0``) closes the solid. Turns sharper than 35° leave
+        an edge and gentler ones (sampled curves) stay smooth; ``segments``
+        steps go around. The profile's origin, on the axis, is the
+        drawable's: ``move_to_3d`` places it and turns are about it. Fewer
+        than two distinct points, a negative ``r``, non-finite points or
+        fewer than 3 ``segments`` raise ``ValueError``.
+
+        Example:
+            vase = scene.geometry.revolve(
+                [(0, 0), (0.6, 0), (0.8, 0.6), (0.4, 1.4), (0.5, 2.0), (0, 2.0)],
+                material=Material3D.matte(GOLD),
+            )
+        """
+        ...
     def lighting_3d(self, preset: Literal["studio", "none"] = "studio", intensity: float = 1.0, shadows: bool = True) -> None:
         """Configure the light of lit 3D primitives.
 

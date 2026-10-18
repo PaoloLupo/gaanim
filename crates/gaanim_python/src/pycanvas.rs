@@ -5393,6 +5393,54 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
+    /// A lit mesh from vertices and triangles in its own coordinates.
+    #[pyo3(signature = (vertices, triangles, *, colors=None, material=None))]
+    fn mesh<'py>(
+        &self,
+        py: Python<'py>,
+        vertices: Vec<[f64; 3]>,
+        triangles: Vec<[u32; 3]>,
+        colors: Option<Vec<PyColor>>,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .mesh_3d(
+                &vertices,
+                &triangles,
+                colors.map(|colors| colors.into_iter().map(|color| color.0).collect()),
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
+    /// A lit solid of revolution: a `(r, y)` profile swept around the y axis.
+    #[pyo3(signature = (profile, *, segments=64, material=None))]
+    fn revolve<'py>(
+        &self,
+        py: Python<'py>,
+        profile: Vec<[f64; 2]>,
+        segments: u32,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let handle = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .revolve(
+                &profile,
+                segments,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
     /// Lay the outline a 2D drawable fills flat as a two-sided 3D sheet.
     #[pyo3(signature = (source, *, material=None, tolerance=0.01, keep_source=false))]
     fn flat_3d<'py>(

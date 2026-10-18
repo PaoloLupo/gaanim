@@ -2,7 +2,7 @@
 
 use std::f64::consts::TAU;
 
-use gaanim_core::glam::{DQuat, DVec3, Vec2, Vec3};
+use gaanim_core::glam::{DQuat, DVec2, DVec3, Vec2, Vec3};
 use gaanim_scene::{Material3D, TriangleMeshData};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -27,6 +27,12 @@ pub enum Primitive3DError {
     ZeroLengthArrow,
     #[error("an arrow's head must be shorter than the arrow and wider than its shaft")]
     InvalidArrowHead,
+    #[error("a 3D mesh needs at least one triangle, and every triangle must index its vertices")]
+    InvalidTriangles,
+    #[error("a 3D mesh needs one color per vertex")]
+    InvalidColors,
+    #[error("a revolved profile needs two distinct points with r >= 0")]
+    InvalidProfile,
 }
 
 fn dimension(value: f64) -> Result<f32, Primitive3DError> {
@@ -724,6 +730,139 @@ pub fn tube(
     })
 }
 
+/// A mesh of `vertices` in its own coordinates, whose origin stays the
+/// drawable's: `move_to_3d` places it and turns are about it. `triangles`
+/// index the vertices and face the side from which they run
+/// counterclockwise; a lit mesh hides the faces turned away. `colors` holds
+/// one sRGB color (0 to 1) per vertex, blended across each triangle and kept
+/// when the mesh is lit. Normals are generated, smooth across shared
+/// vertices: repeat a vertex for a crease.
+pub fn custom_mesh(
+    vertices: &[DVec3],
+    triangles: &[[u32; 3]],
+    colors: Option<Vec<[f32; 4]>>,
+    material: Material3D,
+) -> Result<TriangleMeshData, Primitive3DError> {
+    if !vertices.iter().all(|vertex| vertex.is_finite()) {
+        return Err(Primitive3DError::InvalidPoint);
+    }
+    let count = vertices.len() as u64;
+    if triangles.is_empty()
+        || triangles
+            .iter()
+            .flatten()
+            .any(|&index| u64::from(index) >= count)
+    {
+        return Err(Primitive3DError::InvalidTriangles);
+    }
+    if colors
+        .as_ref()
+        .is_some_and(|colors| colors.len() != vertices.len())
+    {
+        return Err(Primitive3DError::InvalidColors);
+    }
+    Ok(TriangleMeshData {
+        vertices: vertices
+            .iter()
+            .map(|vertex| vertex.as_vec3().to_array())
+            .collect(),
+        indices: triangles.iter().flatten().copied().collect(),
+        normals: None,
+        uvs: None,
+        color: None,
+        colors,
+        material: Some(material),
+    })
+}
+
+/// The solid swept by a `profile` of `(r, y)` points turning once around
+/// the y axis, as on a lathe: `segments` steps around. The profile runs
+/// counterclockwise in the (r, y) half-plane, from the bottom up along an
+/// outer wall, so its surface faces out; a profile that starts and ends on
+/// the axis (r = 0) closes the solid. Turns sharper than a tube's crease
+/// angle give a sharp edge, gentler ones (sampled curves) stay smooth. The
+/// origin of the profile is the drawable's, on the axis.
+pub fn revolve(
+    profile: &[DVec2],
+    segments: u32,
+    material: Material3D,
+) -> Result<TriangleMeshData, Primitive3DError> {
+    if segments < 3 {
+        return Err(Primitive3DError::InvalidSegments);
+    }
+    if !profile.iter().all(|point| point.is_finite()) {
+        return Err(Primitive3DError::InvalidPoint);
+    }
+    if profile.iter().any(|point| point.x < 0.0) {
+        return Err(Primitive3DError::InvalidProfile);
+    }
+    let (min, max) = profile.iter().fold(
+        (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+        |(min, max), point| (min.min(*point), max.max(*point)),
+    );
+    let epsilon = (max - min).max_element().max(1.0) * 1e-9;
+    let mut path: Vec<DVec2> = Vec::with_capacity(profile.len());
+    for point in profile {
+        if path
+            .last()
+            .is_none_or(|last| last.distance(*point) > epsilon)
+        {
+            path.push(*point);
+        }
+    }
+    if path.len() < 2 {
+        return Err(Primitive3DError::InvalidProfile);
+    }
+    let count = path.len();
+    let directions: Vec<DVec2> = path
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).normalize())
+        .collect();
+    let incoming = |i: usize| directions[i.saturating_sub(1)];
+    let outgoing = |i: usize| directions[i.min(count - 2)];
+    // Outward in the (r, y) plane: the direction turned clockwise.
+    let outward = |direction: DVec2| DVec2::new(direction.y, -direction.x);
+    let mut along = Vec::with_capacity(count);
+    let mut total = 0.0;
+    for i in 0..count {
+        along.push(total);
+        if i + 1 < count {
+            total += path[i].distance(path[i + 1]);
+        }
+    }
+    let mut builder = RingBuilder::default();
+    // Counterclockwise seen from the top of the axis.
+    let radial = |j: u32| around(DVec3::X, DVec3::Y.cross(DVec3::X), j, segments);
+    let ring = |builder: &mut RingBuilder, i: usize, normal: DVec2| {
+        let point = path[i];
+        builder.ring(segments, |j| {
+            let side = radial(j);
+            (
+                side * point.x + DVec3::Y * point.y,
+                side * normal.x + DVec3::Y * normal.y,
+                [f64::from(j) / f64::from(segments), along[i] / total],
+            )
+        })
+    };
+    let mut starts = Vec::with_capacity(count);
+    let mut ends = Vec::with_capacity(count);
+    for i in 0..count {
+        let (from, to) = (incoming(i), outgoing(i));
+        if from.dot(to) >= TUBE_SMOOTH_ANGLE.cos() {
+            let shared = ring(&mut builder, i, outward(from) + outward(to));
+            ends.push(shared);
+            starts.push(shared);
+        } else {
+            ends.push(ring(&mut builder, i, outward(from)));
+            starts.push(ring(&mut builder, i, outward(to)));
+        }
+    }
+    for k in 0..count - 1 {
+        builder.band(starts[k], ends[k + 1], segments);
+    }
+    Ok(builder.finish(material))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1068,6 +1207,80 @@ mod tests {
             .unwrap()
             .mesh;
         assert_eq!(same.vertices, mesh.vertices);
+    }
+
+    #[test]
+    fn a_revolved_outline_is_closed_and_faces_out() {
+        // A cylinder of radius 1 and height 2, its caps from the axis.
+        let profile = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(1.0, 0.0),
+            DVec2::new(1.0, 2.0),
+            DVec2::new(0.0, 2.0),
+        ];
+        let mesh = revolve(&profile, 64, Material3D::default()).unwrap();
+        assert_valid(&mesh);
+        let volume = signed_volume(&mesh);
+        let expected = std::f32::consts::PI
+            * 2.0
+            * (64.0 / std::f32::consts::TAU)
+            * (std::f32::consts::TAU / 64.0).sin();
+        assert!((volume - expected).abs() < 1e-3, "{volume} {expected}");
+        // The rim is a crease: the wall's normals point straight out.
+        let normals = mesh.normals.as_ref().unwrap();
+        for (vertex, normal) in mesh.vertices.iter().zip(normals) {
+            if vertex[1] > 0.5 && vertex[1] < 1.5 {
+                assert!(normal[1].abs() < 1e-6);
+            }
+        }
+        // The profile's origin stays the mesh's.
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex[1] >= 0.0 && vertex[1] <= 2.0)
+        );
+    }
+
+    #[test]
+    fn a_custom_mesh_keeps_its_coordinates_and_colors() {
+        let vertices = [
+            DVec3::new(1.0, 0.0, 0.0),
+            DVec3::new(0.0, 1.0, 0.0),
+            DVec3::new(0.0, 0.0, 1.0),
+        ];
+        let colors = vec![[1.0, 0.0, 0.0, 1.0]; 3];
+        let mesh =
+            custom_mesh(&vertices, &[[0, 1, 2]], Some(colors), Material3D::default()).unwrap();
+        assert_eq!(mesh.vertices[1], [0.0, 1.0, 0.0]);
+        assert_eq!(mesh.indices, vec![0, 1, 2]);
+        assert_eq!(mesh.colors.as_ref().map(Vec::len), Some(3));
+        assert_eq!(
+            custom_mesh(&vertices, &[[0, 1, 3]], None, Material3D::default()).unwrap_err(),
+            Primitive3DError::InvalidTriangles
+        );
+        assert_eq!(
+            custom_mesh(&vertices, &[], None, Material3D::default()).unwrap_err(),
+            Primitive3DError::InvalidTriangles
+        );
+        assert_eq!(
+            custom_mesh(
+                &vertices,
+                &[[0, 1, 2]],
+                Some(vec![[0.0; 4]; 2]),
+                Material3D::default()
+            )
+            .unwrap_err(),
+            Primitive3DError::InvalidColors
+        );
+        assert_eq!(
+            revolve(
+                &[DVec2::new(-1.0, 0.0), DVec2::new(1.0, 1.0)],
+                8,
+                Material3D::default()
+            )
+            .unwrap_err(),
+            Primitive3DError::InvalidProfile
+        );
     }
 
     #[test]

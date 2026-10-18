@@ -304,6 +304,10 @@ scene.render()
 - `scene.geometry` crea primitivas 3D: `cube`, `sphere`, `cylinder`, `cone`,
   `plane` y `torus`. `arrow_3d`, `tube` y `flat_3d` construyen flechas,
   tubos y láminas a partir de puntos o de un dibujo 2D (ver más abajo).
+- `mesh(vertices, triangles, colors=)` crea una malla con los vértices y
+  triángulos que le des, y `revolve(profile)` el sólido que barre un perfil
+  `(r, y)` al girar alrededor del eje y. Ambos conservan el origen de sus
+  coordenadas, así que una pieza modelada desde su pivote gira sobre él.
 - `Material3D.matte(color)`, `Material3D.metal(color)` y
   `Material3D.emissive(color, strength)` son puntos de partida; el constructor
   `Material3D(color, roughness=, metallic=)` permite ajustarlos.

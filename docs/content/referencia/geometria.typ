@@ -1377,6 +1377,50 @@ trefoil = scene.geometry.tube(knot, 0.25, closed=True, material=Material3D.metal
 ]
 
 #api-entry(
+  name: "Geometry.mesh",
+  kind: "factory",
+  params: (
+    (name: "vertices", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Vértices en las coordenadas propias de la malla; su origen es el del objeto.]),
+    (name: "triangles", type: "Sequence[tuple[int, int, int]]", default: none, desc: [Índices de los vértices de cada triángulo, en sentido antihorario visto desde la cara que muestra.]),
+    (name: "colors", type: "Sequence[ColorLike] | None", default: "None", desc: [Un color por vértice, mezclado dentro de cada triángulo.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Malla iluminada.]),
+  desc: [Para sólidos que no dan las primitivas. El origen de las coordenadas de los vértices sigue siendo el del objeto: `move_to_3d` lo coloca y los giros son a su alrededor, así que una pieza modelada desde su pivote gira sobre él. Una malla con material oculta las caras que miran hacia atrás. Los colores por vértice se conservan con la luz. Las normales se generan suaves entre vértices compartidos; repite un vértice para una arista. Sirven arrays de numpy de forma `(n, 3)`. Vértices no finitos, ningún triángulo, un índice fuera de los vértices o `colors` de otra longitud lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+tetra = scene.geometry.mesh(
+    [(1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)],
+    [(0, 1, 2), (0, 3, 1), (0, 2, 3), (1, 3, 2)],
+    colors=[RED, GREEN, BLUE, GOLD],
+)
+```
+]
+
+#api-entry(
+  name: "Geometry.revolve",
+  kind: "factory",
+  params: (
+    (name: "profile", type: "Sequence[tuple[float, float]]", default: none, desc: [Perfil `(r, y)`: distancia al eje (al menos `0`) y altura.]),
+    (name: "segments", type: "int", default: "64", desc: [Pasos alrededor del eje; al menos 3.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Sólido de revolución iluminado.]),
+  desc: [El sólido que barre el perfil al girar alrededor del eje y, como en un torno: jarrones, peonzas, campanas. Recorre el perfil en sentido antihorario en el semiplano (r, y), subiendo por la pared exterior, para que la superficie mire hacia fuera; si empieza y termina en el eje (`r = 0`), el sólido queda cerrado. Los giros de más de 35° dejan una arista y los más suaves quedan lisos. El origen del perfil, sobre el eje, es el del objeto: `move_to_3d` lo coloca y los giros son a su alrededor. Menos de dos puntos distintos, un `r` negativo, puntos no finitos o menos de 3 `segments` lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+vase = scene.geometry.revolve(
+    [(0, 0), (0.6, 0), (0.8, 0.6), (0.4, 1.4), (0.5, 2.0), (0, 2.0)],
+    material=Material3D.matte(GOLD),
+)
+```
+]
+
+#api-entry(
   name: "Geometry.lighting_3d",
   kind: "method",
   desc: [Configura el único equipo automático de luces 3D de la escena. `"studio"` ilumina las primitivas con material al estilo de Gaanim (luz del cielo y del suelo, una luz principal suave desde arriba a la izquierda y un brillo leve en los bordes), escalada por `intensity`; `"none"` deja solo la emisión. Con `shadows` (por defecto), las mallas 3D opacas (primitivas, superficies y gráficos) proyectan sombra de la luz principal, o de las cuatro primeras luces de `light_3d`, sobre lo que recibe luz, con un borde nítido al contacto que se suaviza con la distancia; las que brillan (emisivas), que pueden contener una luz, no. `shadows=False` las quita. Las superficies sin material, los gráficos 3D y las líneas no reciben luz. Las luces de `light_3d` sustituyen a la luz principal.],
