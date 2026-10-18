@@ -789,8 +789,9 @@ struct Pending {
 }
 
 impl Pending {
-    /// Whether it is drawn into the shadow maps: an opaque mesh that does
-    /// not glow, since a glowing mesh may hold the light that makes it glow.
+    /// Whether it is drawn into the shadow maps: an opaque mesh, or filled
+    /// outlines, whose texels test their own opacity, that do not glow,
+    /// since a glowing mesh may hold the light that makes it glow.
     fn casts(&self) -> bool {
         let glows = self.material.is_some_and(|material| {
             material.emissive_strength > 0.0
@@ -799,7 +800,7 @@ impl Pending {
                     .any(|value| *value > 0.0)
                 && material.emissive.components[3] > 0.0
         });
-        !self.translucent && self.source.is_mesh() && !glows
+        !glows && (self.source.fill.is_some() || (!self.translucent && self.source.is_mesh()))
     }
 }
 
@@ -1654,6 +1655,8 @@ struct Pipelines {
     /// The outlines of opaque meshes, by `[closed]`: a closed mesh's
     /// outline draws the faces turned away, an open mesh's both faces.
     outline: [wgpu::RenderPipeline; 2],
+    /// Filled outlines into a shadow map.
+    shadow_fill: wgpu::RenderPipeline,
     /// Opaque meshes into a shadow map, by `[closed]`: an open mesh casts
     /// with both faces, a closed one with the faces turned away from the
     /// light, so that it never shadows the side that faces it.
@@ -1768,6 +1771,11 @@ impl Pipelines {
         let filling = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gaanim-3d-fill"),
             bind_group_layouts: &[Some(&layout), Some(&shadow_layout), Some(&fill_layout)],
+            immediate_size: 0,
+        });
+        let fill_casting = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("gaanim-3d-shadow-fill"),
+            bind_group_layouts: &[Some(&layout), Some(&caster_layout), Some(&fill_layout)],
             immediate_size: 0,
         });
         let layered = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2054,6 +2062,47 @@ impl Pipelines {
             multiview_mask: None,
             cache: None,
         });
+        let shadow_fill = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("gaanim-3d-shadow-fill"),
+            layout: Some(&fill_casting),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vertex_fill_shadow"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: crate::plane_fill::GLYPH_BYTES as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &fill_attributes,
+                }],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                // As meshes: keeps an outline from shadowing itself.
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fragment_fill_shadow"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         Self {
             layout,
             depth_layout,
@@ -2065,6 +2114,7 @@ impl Pipelines {
             lines: passes(true, false),
             outline: [outline(false), outline(true)],
             shadow: [shadow(false), shadow(true)],
+            shadow_fill,
             fill,
         }
     }
@@ -2473,6 +2523,15 @@ impl GpuThreeD {
                     else {
                         continue;
                     };
+                    if let Some(fill) = &uploaded.fill {
+                        // A quad per outline, which tests its texels.
+                        pass.set_pipeline(&pipelines.shadow_fill);
+                        pass.set_bind_group(0, bind_group, &[(first * DRAW_STRIDE) as u32]);
+                        pass.set_bind_group(2, fill, &[]);
+                        pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                        pass.draw(0..6, draw.instances.clone());
+                        continue;
+                    }
                     let Some(indices) = &uploaded.indices else {
                         continue;
                     };
@@ -3785,6 +3844,101 @@ mod tests {
             u16::from(shadow) + 40 < u16::from(light),
             "shadow {shadow}, light {light}"
         );
+    }
+
+    #[test]
+    fn filled_outlines_shadow_the_lit_floor_through_their_holes() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let lit = lit_quad();
+        let floor = placed(1.0, DVec3::ZERO);
+        // A square frame, half a unit on a side with a hole a fifth of a unit
+        // across, a unit above the floor and right of the middle: light from
+        // the right throws its shadow a unit left of it.
+        let mut frame = kurbo::BezPath::new();
+        frame.move_to((0.25, -0.25));
+        frame.line_to((0.75, -0.25));
+        frame.line_to((0.75, 0.25));
+        frame.line_to((0.25, 0.25));
+        frame.close_path();
+        frame.move_to((0.4, -0.1));
+        frame.line_to((0.4, 0.1));
+        frame.line_to((0.6, 0.1));
+        frame.line_to((0.6, -0.1));
+        frame.close_path();
+        let fill = PlaneFillData {
+            glyphs: vec![gaanim_scene::PlaneGlyph {
+                outline: Arc::new(frame),
+                placement: kurbo::Affine::IDENTITY,
+                color: peniko::Color::from_rgb8(255, 0, 0),
+                gradient: None,
+            }],
+        };
+        let above = placed(1.0, DVec3::new(0.0, 0.0, 1.0));
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        meshes.push(
+            0,
+            [(1, 1), (1, 1)],
+            [None, None],
+            &Content {
+                transform: &floor,
+                opacity: &opacity,
+                mesh: Some(&lit),
+                lines: None,
+                material: lit.material.as_ref(),
+                line_width: None,
+                line_range: None,
+                fill: None,
+            },
+        );
+        assert!(meshes.push_fill(
+            0,
+            (2, 1),
+            None,
+            &Content {
+                transform: &above,
+                opacity: &opacity,
+                mesh: None,
+                lines: None,
+                material: None,
+                line_width: None,
+                line_range: None,
+                fill: Some(&fill),
+            },
+        ));
+        let illumination = Illumination {
+            lighting: Lighting3D::default(),
+            lights: vec![Light {
+                position: DVec3::new(1.0, 0.0, 1.0),
+                directional: true,
+                color: [1.0; 3],
+            }],
+        };
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        assert!(three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames));
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        let pixels = gpu.read(&target);
+        let pixel = |x: usize, y: usize| u16::from(pixels[(y * 64 + x) * 4]);
+        // At 16 pixels per unit: the frame's shadow at (-0.67, 0), its hole's
+        // at (-0.5, 0), and the floor in the light at (-0.67, 0.75).
+        let (shadow, hole, light) = (pixel(21, 32), pixel(24, 32), pixel(21, 20));
+        assert!(shadow + 40 < light, "shadow {shadow}, light {light}");
+        assert!(hole + 10 > light, "hole {hole}, light {light}");
     }
 
     /// The red channel at `pixels` of a 64 x 64 render of a lit floor 2

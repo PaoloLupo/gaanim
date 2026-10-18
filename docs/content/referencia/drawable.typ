@@ -1438,7 +1438,7 @@ panel = scene.geometry.rect(2, 1).move_to_3d(0, 0, 0).rotate_to_3d(0.3, 0.6, 0)
   params: (
     (name: "material", type: "Material3D | None", default: "None", desc: [Con él, el objeto se ilumina y recibe sombras como una superficie; sin él, conserva sus colores sin iluminar.]),
   ),
-  desc: [Coloca el objeto en el mundo 3D: `move_to_3d` y `rotate_to_3d` lo sitúan y lo inclinan bajo la cámara en perspectiva, y las mallas que tiene delante lo tapan píxel a píxel, en vez de dibujarse encima de todo el 3D. El pase 3D lo dibuja a partir de sus contornos, así que los bordes siguen nítidos a cualquier tamaño. Conserva sus animaciones, colores, degradados y trazos: `write`, un fundido o un cambio de color se ven como en 2D. Las sombras, el brillo, el desenfoque, la tiza, las imágenes y las escenas Lottie se omiten. A diferencia de `billboard`, que mantiene el objeto de frente a la cámara, gira con la escena; `hud` lo fija a la imagen.],
+  desc: [Coloca el objeto en el mundo 3D: `move_to_3d` y `rotate_to_3d` lo sitúan y lo inclinan bajo la cámara en perspectiva, y las mallas que tiene delante lo tapan píxel a píxel, en vez de dibujarse encima de todo el 3D. El pase 3D lo dibuja a partir de sus contornos, así que los bordes siguen nítidos a cualquier tamaño. Conserva sus animaciones, colores, degradados y trazos: `write`, un fundido o un cambio de color se ven como en 2D. Proyecta sombra sobre el 3D iluminado, como una malla opaca, donde es al menos medio opaco. Sus sombras paralelas 2D, el brillo, el desenfoque, la tiza, las imágenes y las escenas Lottie se omiten. A diferencia de `billboard`, que mantiene el objeto de frente a la cámara, gira con la escena; `hud` lo fija a la imagen.],
 )[
 ```python
 >>>from gaanim import *

@@ -11,6 +11,9 @@
 //! its geometry and a ramp of its colors, sampled as Vello samples them, so
 //! it matches the 2D drawing.
 //!
+//! Outlines cast shadows: the shadow maps hold the texels an outline covers
+//! at least half of, where it is at least half opaque.
+//!
 //! [`SHADER`] is a WGSL port of the reference shaders of the Slug algorithm
 //! (<https://github.com/EricLengyel/Slug>), MIT licensed, copyright 2017 by
 //! Eric Lengyel.
@@ -922,6 +925,46 @@ fn fragment_fill(in: FillOut) -> @location(0) vec4<f32> {
         discard;
     }
     return output(color) * coverage;
+}
+
+struct FillShadowOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) @interpolate(flat) alpha: f32,
+    @location(1) outline: vec2<f32>,
+    @location(2) @interpolate(flat) band: vec4<f32>,
+    @location(3) @interpolate(flat) glyph: vec4<u32>,
+}
+
+// An outline's box in a shadow map layer, grown by a 32nd of its size so
+// that the texels along its edges are tested too.
+@vertex
+fn vertex_fill_shadow(@builtin(vertex_index) index: u32, in: FillIn) -> FillShadowOut {
+    var corners = FILL_CORNERS;
+    let corner = corners[index];
+    let size = max(in.rect.z - in.rect.x, in.rect.w - in.rect.y);
+    let outline = mix(in.rect.xy, in.rect.zw, corner) + (corner * 2.0 - 1.0) * size / 32.0;
+    let linear = mat2x2<f32>(in.linear.xy, in.linear.zw);
+    let plane = linear * outline + in.offset.xy;
+    var out: FillShadowOut;
+    out.clip = caster.view_proj * (draw.model * vec4<f32>(plane, 0.0, 1.0));
+    out.alpha = in.color.a;
+    out.outline = outline;
+    out.band = in.band;
+    out.glyph = in.glyph;
+    return out;
+}
+
+// The texels an outline casts a shadow from: those it covers at least half
+// of, at least half opaque, its drawable's opacity included.
+@fragment
+fn fragment_fill_shadow(in: FillShadowOut) {
+    var alpha = in.alpha;
+    if in.glyph.w != 0u {
+        alpha = fill_gradient(in.glyph.w, in.outline).a;
+    }
+    if fill_coverage(in.outline, in.band, in.glyph) * alpha * draw.emissive.w < 0.5 {
+        discard;
+    }
 }
 "#;
 
