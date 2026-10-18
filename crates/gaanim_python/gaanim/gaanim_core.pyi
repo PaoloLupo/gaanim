@@ -2299,7 +2299,9 @@ class Anim:
     def trim(self, start: Optional[float] = None, end: Optional[float] = None, offset: Optional[float] = None) -> Anim:
         """Animate the visible window of the drawn path (see ``Drawable.trim``).
 
-        Omitted values keep their current setting. ``offset`` slides the
+        Omitted values keep their current setting. On a 3D line the window
+        counts segments, so ``Easing.LINEAR`` moves its end one sample per
+        equal step of time. ``offset`` slides the
         window and wraps around the path, so animating it makes a segment
         travel. Values outside ``[0, 1]`` for ``start``/``end`` raise
         ``ValueError``.
@@ -3978,8 +3980,10 @@ class Drawable:
         """Show only the window ``[start, end]`` of the drawn path, shifted by ``offset``.
 
         Values are arc-length fractions; omitted ones keep their current
-        setting (initially ``0``, ``1`` and ``0``). ``offset`` wraps around
-        the end of the path. ``"simultaneous"`` (default) trims every
+        setting (initially ``0``, ``1`` and ``0``). A 3D line
+        (``polyline_3d``) is trimmed by fractions of its segments instead, so
+        a line of samples evenly spaced in time grows at a steady rate.
+        ``offset`` wraps around the end of the path. ``"simultaneous"`` (default) trims every
         sub-path and every drawn descendant at once; ``"sequential"`` trims
         the total length, so sub-paths appear one after another. Animate it
         with ``animate.trim(...)``.

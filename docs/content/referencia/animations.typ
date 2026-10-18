@@ -1396,11 +1396,11 @@ scene.play(card.animate.shadow(BLACK, 0, -0.25, 0.4).scale_to(1.04))   # levanta
   name: "Anim.trim",
   kind: "method",
   params: (
-    (name: "start, end", type: "float | None", default: "None", desc: [Ventana visible del trazo, en fracciones de longitud de arco en `[0, 1]`.]),
+    (name: "start, end", type: "float | None", default: "None", desc: [Ventana visible del trazo, en fracciones de longitud de arco en `[0, 1]`; en una línea 3D, fracciones de sus segmentos.]),
     (name: "offset", type: "float | None", default: "None", desc: [Desplaza la ventana y da la vuelta al final del camino.]),
   ),
   returns: (type: "Anim", desc: [Recorte animado del trazo.]),
-  desc: [Los valores omitidos conservan el actual. Animar `offset` hace viajar un segmento. El recorte también se mantiene en trazos que se regeneran en cada fotograma, como conectores, líneas entre extremos y curvas reactivas. Ver #link("/referencia/drawable/#api-drawable-trim")[`Drawable.trim`].],
+  desc: [Los valores omitidos conservan el actual. Animar `offset` hace viajar un segmento. El recorte también se mantiene en trazos que se regeneran en cada fotograma, como conectores, líneas entre extremos y curvas reactivas. Una línea 3D (`polyline_3d`) se recorta por segmentos: con muestras a intervalos iguales de tiempo y `Easing.LINEAR`, su extremo avanza al ritmo de las muestras. Ver #link("/referencia/drawable/#api-drawable-trim")[`Drawable.trim`].],
 )[
 ```python
 >>>from gaanim import *

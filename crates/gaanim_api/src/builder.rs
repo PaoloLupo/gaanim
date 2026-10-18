@@ -1159,6 +1159,8 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub float_signals: HashMap<ObjectId, f64>,
     /// Current `[start, end, offset]` trim and mode of trimmed paths.
     pub(crate) path_trims: HashMap<ObjectId, ([f64; 3], bool)>,
+    /// 3D line strips, which `trim` trims by segments.
+    pub(crate) line_strips: HashSet<ObjectId>,
     /// Current renderer effects of objects that carry any.
     pub(crate) effects: HashMap<ObjectId, crate::effect_lens::EffectState>,
     /// Arc angle for the translation channel being expanded from a property
@@ -1272,6 +1274,7 @@ pub(crate) struct SceneBuilderState {
     current_scene: Option<SceneId>,
     float_signals: HashMap<ObjectId, f64>,
     path_trims: HashMap<ObjectId, ([f64; 3], bool)>,
+    line_strips: HashSet<ObjectId>,
     effects: HashMap<ObjectId, crate::effect_lens::EffectState>,
     media_frames: HashMap<ObjectId, gaanim_scene::MediaFrame>,
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
@@ -1323,6 +1326,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_scene: self.current_scene,
             float_signals: self.float_signals.clone(),
             path_trims: self.path_trims.clone(),
+            line_strips: self.line_strips.clone(),
             effects: self.effects.clone(),
             media_frames: self.media_frames.clone(),
             arrow_shapes: self.arrow_shapes.clone(),
@@ -1375,6 +1379,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_scene,
             float_signals,
             path_trims,
+            line_strips,
             effects,
             media_frames,
             arrow_shapes,
@@ -1429,6 +1434,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_scene,
             float_signals,
             path_trims,
+            line_strips,
             effects,
             path_arc: None,
             media_frames,
@@ -1884,6 +1890,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             current_scene: None,
             float_signals: HashMap::new(),
             path_trims: HashMap::new(),
+            line_strips: HashSet::new(),
             effects: HashMap::new(),
             path_arc: None,
             media_frames: HashMap::new(),
@@ -7094,14 +7101,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         else {
             return;
         };
-        // Trim every drawn path in the hierarchy, as `create` does.
+        // Trim every drawn path and 3D line strip in the hierarchy, as `create` does.
         let targets: Vec<ObjectId> = self
             .hierarchy_ids(anim.target)
             .into_iter()
             .filter(|id| {
-                self.states
-                    .get(*id)
-                    .is_some_and(|state| !state.path.elements().is_empty())
+                self.line_strips.contains(id)
+                    || self
+                        .states
+                        .get(*id)
+                        .is_some_and(|state| !state.path.elements().is_empty())
             })
             .collect();
         for target in targets {
@@ -8854,6 +8863,9 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             ))
             .id();
         self.tag_entity(entity);
+        if strip {
+            self.line_strips.insert(id);
+        }
         let state = MobjectState {
             fill_level: 0.0,
             path: std::sync::Arc::new(kurbo::BezPath::new()),

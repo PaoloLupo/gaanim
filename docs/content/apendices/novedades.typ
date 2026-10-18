@@ -186,6 +186,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   malla opaca, y con `in_3d(material)` se ilumina y recibe sombras. Tapa lo
   translúcido que tiene detrás, como una superficie opaca, donde es al
   menos medio opaco. Lo muestra `3d/drawables_in_3d`.
+- `trim()` y `animate.trim(...)` recortan también las líneas 3D de
+  `polyline_3d`, que antes se quedaban enteras. Cuentan segmentos, no
+  longitud: una línea de muestras tomadas a intervalos iguales de tiempo,
+  recortada de `end=0` a `end=1` con `Easing.LINEAR`, crece con su extremo
+  sobre el objeto que la traza. Lo muestra `gallery/heavy_top`.
 
 == Editor
 

@@ -1062,7 +1062,7 @@ scene.render()
   name: "Drawable.trim",
   kind: "method",
   params: ((name: "start / end", type: "float | None", default: "None", desc: [Ventana visible del camino como fracción de su longitud; al principio valen 0 y 1.]), (name: "offset", type: "float | None", default: "None", desc: [Desplaza la ventana; da la vuelta al final del camino.]), (name: "mode", type: "str | None", default: "None", desc: [`"simultaneous"` (predeterminado) recorta cada subcamino a la vez; `"sequential"` recorta la longitud total y los subcaminos aparecen uno tras otro.])),
-  desc: [Muestra solo una parte del trazo, como los _trim paths_ de After Effects. Los valores omitidos conservan el ajuste anterior. Anímalo con `animate.trim(...)`.],
+  desc: [Muestra solo una parte del trazo, como los _trim paths_ de After Effects. Los valores omitidos conservan el ajuste anterior. Anímalo con `animate.trim(...)`. Una línea 3D (`polyline_3d`) se recorta por fracciones de sus segmentos en lugar de su longitud, así que una línea de muestras tomadas a intervalos iguales de tiempo crece a ritmo constante.],
 )[
 ```python
 # show-code: true
