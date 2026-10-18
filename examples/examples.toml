@@ -868,6 +868,12 @@ description = "Eight paths of the Lorenz system that start a ten-thousandth apar
 allow = ["theme"]
 
 [[example]]
+path = "gallery/heavy_top.py"
+group = "Camera and 3D"
+description = "Three identical spinning tops under glass, tilted alike and let go three ways: none of them falls, each precesses and nods between two circles."
+allow = ["theme"]
+
+[[example]]
 path = "gallery/warped_grid.py"
 group = "Advanced"
 description = "A sentence and an equation that write themselves and transform, then a grid bent by a nonlinear function."
