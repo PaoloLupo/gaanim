@@ -141,9 +141,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   tamaño de su texto, y las mallas y las líneas que tienen delante las
   tapan píxel a píxel. Se acercan a la cámara la mitad de su lado mayor,
   así que una superficie en la que se apoyan no las corta, y los números
-  que se ven sobre la caja de sus ejes quedan delante de su rejilla y su
-  gráfico. Las que contienen una imagen, una escena Lottie o un efecto 2D
-  se dibujan encima del 3D y se desvanecen enteras tras las mallas opacas.
+  que se ven a través de la caja de sus ejes quedan justo delante de su
+  rejilla, detrás del gráfico, que los tapa. Las que contienen una imagen,
+  una escena Lottie o un efecto 2D se dibujan encima del 3D y se desvanecen
+  enteras tras las mallas opacas.
   Con la cámara en perspectiva aparecen en su punto 3D; antes caían fuera
   de la imagen.
 - Nuevas primitivas iluminadas: `scene.geometry.torus(...)` crea toros;

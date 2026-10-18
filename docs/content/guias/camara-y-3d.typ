@@ -460,9 +460,9 @@ puntos se reproducen a la frecuencia de la pantalla.
   con `.billboard()` y los números y títulos de los ejes 3D, de frente a la
   cámara y del tamaño de su texto. Una etiqueta se acerca a la cámara la
   mitad de su lado mayor, así que una superficie en la que se apoya no la
-  corta, y un número o un título que se ve sobre la caja de sus ejes queda
-  delante de ella: su rejilla y su gráfico no lo tapan, pero lo que está
-  delante de la caja sí. Si contiene una imagen, una escena Lottie o un
+  corta. Un número o un título que se ve a través de la caja de sus ejes
+  queda justo delante de las caras del fondo: su rejilla no lo cruza, pero
+  el gráfico de la caja y lo que está delante de ella lo tapan. Si contiene una imagen, una escena Lottie o un
   efecto 2D, se dibuja encima del 3D y se desvanece entera mientras una
   malla opaca queda entre su punto y la cámara.
 
