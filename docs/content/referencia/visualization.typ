@@ -235,7 +235,7 @@ eje. Es inmutable: cada método devuelve una copia.
   name: "Axis.linear / log / symlog / power / time / category",
   kind: "method",
   signature: "linear(min, max) · log(min, max, base=10) · symlog(min, max, *, base=10, threshold=1) · power(min, max, exponent) · time(min_ts, max_ts) · category(values)",
-  desc: [Constructores estáticos. Elige según el significado: `linear` para diferencias uniformes, `log` para órdenes de magnitud positivos, `symlog` para datos con signo alrededor de cero, `power` para potencias, `time` para marcas de tiempo en segundos y `category` para grupos discretos.],
+  desc: [Constructores estáticos. Elige según el significado: `linear` para diferencias uniformes, `log` para órdenes de magnitud positivos, `symlog` para datos con signo alrededor de cero, `power` para potencias, `time` para marcas de tiempo en segundos y `category` para grupos discretos. Un eje `log` marca cada potencia de la base entre sus extremos, incluidos ambos. Un eje `symlog` marca el 0 y las potencias de la base desde `threshold`, donde acaba la región lineal, a cada lado: con `threshold=1`, `Axis.symlog(-100, 100)` marca −100, −10, −1, 0, 1, 10 y 100. Con `ticks(step)` usa ese paso lineal, y si el dominio no sale de la región lineal, pasos lineales automáticos.],
 )[
 ```python
 >>>from gaanim import *
