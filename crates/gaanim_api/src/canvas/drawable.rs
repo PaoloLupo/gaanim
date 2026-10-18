@@ -1397,6 +1397,20 @@ impl DrawableHandle {
         self
     }
 
+    /// Trace an `outline` around what this drawable and its descendants
+    /// cover, from their alpha, like a sticker's border: drawn beneath them,
+    /// after any shader effect's passes, and with its shadow cast from the
+    /// result. `None` removes it. Declaration state: it applies for the
+    /// whole timeline.
+    pub fn outline(self, outline: Option<super::types::OutlineSpec>) -> Self {
+        let outline = outline.filter(|outline| outline.width.is_finite() && outline.width > 0.0);
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .set_outline(&self.spec, outline);
+        self
+    }
+
     /// The scene this drawable belongs to, while it is shared.
     pub fn owning_scene(&self) -> Option<std::sync::Arc<std::sync::Mutex<super::SceneModel>>> {
         self.state

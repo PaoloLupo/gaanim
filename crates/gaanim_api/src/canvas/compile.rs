@@ -66,6 +66,10 @@ use gaanim_math::{RateFunc, SpatialTransform};
 /// Typst's default text size, in points.
 const TYPST_DEFAULT_TEXT_PT: f64 = 11.0;
 
+/// Room, in scene units, an outline's antialiased edge takes beyond its
+/// width in a shader effect's texture.
+const OUTLINE_ANTIALIAS_MARGIN: f64 = 0.02;
+
 /// The polyline through `points` evaluated at `time`; a point whose source
 /// cannot be evaluated is left out.
 fn reactive_polyline_path(
@@ -3352,23 +3356,36 @@ impl SceneModel {
         // resolve once every object exists; echo copies then carry them.
         let mut effects: Vec<_> = object_specs
             .iter()
+            .filter(|(_, spec)| spec.shader_effect.is_some() || spec.outline.is_some())
             .filter_map(|(logical, spec)| {
-                Some((*id_map.get(logical)?, spec.shader_effect.clone()?))
+                Some((
+                    *id_map.get(logical)?,
+                    spec.shader_effect.clone(),
+                    spec.outline,
+                ))
             })
             .collect();
-        effects.sort_by_key(|(id, _)| *id);
-        for (id, effect) in effects {
+        effects.sort_by_key(|(id, _, _)| *id);
+        for (id, effect, outline) in effects {
             let Some(entity) = builder.states.get(id).map(|state| state.entity) else {
                 continue;
             };
-            let post = Self::compiled_post_process(&builder, &id_map, effect.passes, Vec::new());
+            let (mut passes, mut margin) =
+                effect.map_or((Vec::new(), 0.0), |effect| (effect.passes, effect.margin));
+            // An outline traces what the effect's passes leave, beyond
+            // their reach.
+            if let Some(outline) = outline
+                && let Some(outline_passes) =
+                    gaanim_renderer::object_effects::outline_passes(outline.width, outline.color)
+            {
+                passes.extend(outline_passes);
+                margin += outline.width + OUTLINE_ANTIALIAS_MARGIN;
+            }
+            let post = Self::compiled_post_process(&builder, &id_map, passes, Vec::new());
             builder
                 .commands
                 .entity(entity)
-                .insert(gaanim_renderer::object_effects::ShaderEffect {
-                    post,
-                    margin: effect.margin,
-                });
+                .insert(gaanim_renderer::object_effects::ShaderEffect { post, margin });
         }
 
         // A matte names another drawable, which then only draws as the
@@ -22365,6 +22382,60 @@ mod tests {
         // A frame on a cut belongs to the segment it enters.
         assert_eq!(windows.at(1.0), Some(blur(360.0)));
         assert_eq!(windows.at(2.0), None);
+    }
+
+    #[test]
+    fn an_outline_follows_the_shader_effect_passes() {
+        use gaanim_renderer::object_effects::{ShaderEffect, is_outline_shader};
+        let mut canvas = SceneModel::new(640, 360);
+        let outline = crate::canvas::OutlineSpec {
+            color: PenikoColor::WHITE,
+            width: 0.1,
+        };
+        let plain = canvas.rect(1.0, 1.0).outline(Some(outline));
+        let grade = gaanim_renderer::post_presets::PostPreset::ColorGrade.shader();
+        let graded = canvas
+            .rect(1.0, 1.0)
+            .move_to(3.0, 0.0)
+            .outline(Some(outline))
+            .shader_effect(
+                vec![
+                    gaanim_renderer::post_process::PostProcessPass::constant(
+                        grade,
+                        &[0.0, 1.0, 0.0, 0.0],
+                    )
+                    .unwrap(),
+                ],
+                0.3,
+            );
+        let removed = canvas
+            .rect(1.0, 1.0)
+            .move_to(-3.0, 0.0)
+            .outline(Some(outline))
+            .outline(None);
+        let _ = (plain, graded, removed);
+        let (mut world, _) = compiled_world(&canvas);
+        let mut effects: Vec<(Vec<bool>, f64)> = world
+            .query::<&ShaderEffect>()
+            .iter(&world)
+            .map(|effect| {
+                let outlined = effect
+                    .post
+                    .passes
+                    .iter()
+                    .map(|pass| is_outline_shader(&pass.shader))
+                    .collect();
+                (outlined, effect.margin)
+            })
+            .collect();
+        effects.sort_by_key(|(passes, _)| passes.len());
+        // The removed outline leaves no effect; the plain one is two passes.
+        assert_eq!(effects.len(), 2);
+        assert_eq!(effects[0].0, vec![true, true]);
+        assert!((effects[0].1 - (0.1 + OUTLINE_ANTIALIAS_MARGIN)).abs() < 1e-12);
+        // The outline traces what the effect's passes leave, beyond their reach.
+        assert_eq!(effects[1].0, vec![false, true, true]);
+        assert!((effects[1].1 - (0.3 + 0.1 + OUTLINE_ANTIALIAS_MARGIN)).abs() < 1e-12);
     }
 
     #[test]

@@ -389,6 +389,10 @@ path = "effects/glow_blur_shadow.py"
 description = "Glow, blur and drop shadow: their parameters, the drawables they apply to, and how they animate."
 
 [[example]]
+path = "effects/outlines.py"
+description = "Sticker outlines traced from a drawable's alpha, on an image, text, a shape and a group, with a shadow and after a shader effect."
+
+[[example]]
 path = "effects/echo.py"
 description = "Trails of delayed copies with their count, delay and decay, what they replay, held trails and onion skins."
 

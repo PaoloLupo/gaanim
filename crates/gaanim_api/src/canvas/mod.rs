@@ -33,8 +33,8 @@ pub use types::{
     Anim, AxesConfig, BooleanOperation, BooleanRule, CurveControl, CurveElement, EchoSpec,
     FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError, LayoutMemberSpec,
     LayoutOp, LayoutSpec, LayoutTreeSnapshot, LayoutWithin, LinearMap2D, LinearMapError,
-    LottieOptions, MAX_ECHO_COUNT, Margin, ObjectSpec, OptDuration, SceneFrame, ShaderEffectSpec,
-    SpawnKind, SurfaceColor, VideoOptions,
+    LottieOptions, MAX_ECHO_COUNT, Margin, ObjectSpec, OptDuration, OutlineSpec, SceneFrame,
+    ShaderEffectSpec, SpawnKind, SurfaceColor, VideoOptions,
 };
 /// Raster image handle; remains compatible with every DrawableHandle consumer.
 pub type ImageHandle = DrawableHandle;

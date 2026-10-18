@@ -372,8 +372,8 @@ pub struct GaanimRenderCache {
     /// Layers of the soft effects of fragments built for a canvas that runs
     /// object effects (see [`crate::soft_effects`]).
     soft_layers: HashMap<ObjectId, Arc<[crate::object_effects::EffectLayer]>>,
-    /// Fragments without their drop shadow, for drawables that are the root
-    /// of their shader effect (see [`ExtractedElement::effect_shadow`]).
+    /// Fragments without their drop shadow, for drawables inside a shader
+    /// effect (see [`ExtractedElement::effect_shadow`]).
     effect_shadows: HashMap<ObjectId, Arc<crate::fragment::EffectShadow>>,
 }
 
@@ -459,10 +459,11 @@ pub struct ExtractedElement {
     /// The member's drop shadow, left out of `scene` and drawn once for the
     /// run of members that share it.
     group_shadow: Option<Arc<crate::fragment::GroupShadow>>,
-    /// The element's own drop shadow and its fragment without it, when the
-    /// element is the root of its shader effect: the effect draws that
-    /// fragment and casts the shadow from what its passes draw. `scene`
-    /// keeps the shadow for frames the effect is not drawn.
+    /// The element's drop shadow and its fragment without it, inside a
+    /// shader effect: when its members' shadows are all the same, the
+    /// effect draws these fragments and casts the shadow from what its
+    /// passes draw. `scene` keeps the shadow for frames the effect is not
+    /// drawn and for effects whose members' shadows differ.
     effect_shadow: Option<Arc<crate::fragment::EffectShadow>>,
     /// The outermost ancestor (or the element itself) with a
     /// [`crate::object_effects::ShaderEffect`], whose effect draws it.
@@ -2912,7 +2913,7 @@ struct ExtractedFragment {
     /// effects (see [`crate::fragment::build_fragment_with`]).
     gpu: bool,
     soft: Arc<[crate::object_effects::EffectLayer]>,
-    /// Built the first time the drawable is its shader effect's root.
+    /// Built the first time the drawable is drawn inside a shader effect.
     effect_shadow: Option<Arc<crate::fragment::EffectShadow>>,
 }
 
@@ -3204,21 +3205,21 @@ fn extract_world(
             screen: camera_view.is_some(),
             chalk: chalk_opt,
         };
-        // The root of a shader effect casts its own shadow from what the
-        // effect draws, not into the effect's texture.
-        let effect_casts_shadow = gpu && effect_root == Some(entity) && shadow_opt.is_some();
         let group_shadow = crate::fragment::group_shadow(
             &parts,
             opacity_group != entity
                 && clip_opt.is_none()
                 && blend.is_none()
-                && camera_view.is_none()
-                && !effect_casts_shadow,
+                && camera_view.is_none(),
         )
         .map(Arc::new);
         if group_shadow.is_some() {
             parts.shadow = None;
         }
+        // Inside a shader effect, a drawable's own shadow may be cast from
+        // what the effect draws instead (see `divert_effects`), so the
+        // fragment without it is built too.
+        let effect_casts_shadow = gpu && effect_root.is_some() && parts.shadow.is_some();
         let recipe = fragment_recipe(parts);
         let lottie_scene = lottie_opt.map(|lottie| lottie.scene());
         let mut fragment = previous_fragments
@@ -3298,7 +3299,7 @@ fn extract_world(
                         })
                         .as_deref(),
                     stroke_view,
-                    shadow_opt.filter(|_| !effect_casts_shadow),
+                    shadow_opt,
                     glow_opt,
                     blur_opt,
                 )
@@ -4525,10 +4526,20 @@ fn shadow_in_world(shadow: &DropShadow, transform: kurbo::Affine) -> DropShadow 
     }
 }
 
+/// The drop shadow of a member of a shader effect: in its fragment or,
+/// shared with its group, drawn once for the run of members.
+fn member_shadow(element: &ExtractedElement) -> Option<&DropShadow> {
+    element
+        .effect_shadow
+        .as_ref()
+        .map(|effect_shadow| &effect_shadow.shadow)
+        .or(element.group_shadow.as_ref().map(|shared| &shared.shadow))
+}
+
 /// Take the elements of each drawable in `effects` out of `elements` and
 /// draw an image in their place, at the first one's position in draw
-/// order. A drawable's own drop shadow (see
-/// [`ExtractedElement::effect_shadow`]) is cast beneath the image from its
+/// order. The drawables' drop shadow, when they share one (see
+/// [`ExtractedElement::effect_shadow`]), is cast beneath the image from its
 /// alpha. Returns the layers that draw those images: their elements
 /// composed in world coordinates, a texture at `pixels_per_unit` around
 /// their bounds and the effect's passes at `time_seconds`. A drawable whose
@@ -4581,6 +4592,19 @@ fn divert_effects(
         } else {
             pixels_per_unit
         };
+        // So is an outline's width, which bounds how far its passes look.
+        let is_outline = crate::object_effects::is_outline_shader;
+        let outline_width = effect
+            .passes
+            .iter()
+            .filter(|(shader, _)| is_outline(shader))
+            .filter_map(|(_, values)| values.first().copied())
+            .fold(0.0_f64, |widest, width| widest.max(f64::from(width)));
+        let pixels_per_unit = if outline_width > 0.0 {
+            pixels_per_unit.min(crate::object_effects::MAX_OUTLINE_PIXELS / outline_width)
+        } else {
+            pixels_per_unit
+        };
         let Some((width, height, density)) = effect_texture_size(bounds, pixels_per_unit) else {
             continue;
         };
@@ -4590,10 +4614,10 @@ fn divert_effects(
             .iter()
             .map(|(shader, values)| {
                 let mut values = values.clone();
-                if is_depth_blur(shader)
-                    && let Some(sigma) = values.first_mut()
+                if (is_depth_blur(shader) || is_outline(shader))
+                    && let Some(length) = values.first_mut()
                 {
-                    *sigma *= density as f32;
+                    *length *= density as f32;
                 }
                 (shader.clone(), values)
             })
@@ -4605,19 +4629,34 @@ fn divert_effects(
             transition: None,
         };
         let mut scene = vello::Scene::new();
-        // The root's own shadow stays out of the texture; the effect casts
-        // it from what its passes draw.
+        // When the drawables' shadows are all the same (a drawable's own, a
+        // text's glyphs', a group's style), they stay out of the texture and
+        // the effect casts that one shadow from what its passes draw.
+        // Different shadows stay inside, drawn with their drawables.
+        let mut shadows = members
+            .iter()
+            .filter_map(|&index| member_shadow(&elements[index]));
+        let lifted = shadows
+            .next()
+            .is_some_and(|first| shadows.all(|shadow| shadow == first));
         let mut cast = None;
         let drawn: Vec<ExtractedElement> = members
             .iter()
             .map(|&index| {
                 let mut member = elements[index].clone();
                 member.effect_root = None;
-                if let Some(effect_shadow) = member.effect_shadow.take() {
+                let effect_shadow = member.effect_shadow.take();
+                if !lifted {
+                    return member;
+                }
+                if let Some(shadow) = member_shadow(&elements[index]) {
+                    cast.get_or_insert_with(|| shadow_in_world(shadow, member.transform));
+                }
+                member.group_shadow = None;
+                if let Some(effect_shadow) = effect_shadow {
                     member.scene = Arc::clone(&effect_shadow.scene);
                     // Its glow and blur images draw before the texture.
                     layers.extend(effect_shadow.soft.iter().cloned());
-                    cast = Some(shadow_in_world(&effect_shadow.shadow, member.transform));
                 }
                 member
             })
@@ -5306,12 +5345,11 @@ fn compose_captured_layers(
             element.lottie.as_ref(),
             effect_density.is_some(),
         );
-        // As in `extract_world`, the root of a shader effect casts its own
-        // shadow from what the effect draws.
-        let effect_shadow = (effect_density.is_some()
-            && element.effect_root == Some(element.entity))
-        .then(|| store.effect_shadow(&element.recipe, element.lottie.as_ref()))
-        .flatten();
+        // As in `extract_world`, a drawable inside a shader effect also has
+        // its fragment without its shadow.
+        let effect_shadow = (effect_density.is_some() && element.effect_root.is_some())
+            .then(|| store.effect_shadow(&element.recipe, element.lottie.as_ref()))
+            .flatten();
         ExtractedElement {
             soft,
             persistent: false,
@@ -6094,20 +6132,20 @@ pub fn gaanim_render_system(
             chalk: chalk_ref.as_deref(),
         };
         let gpu = effect_layers.is_some();
-        // The root of a shader effect casts its own shadow from what the
-        // effect draws, not into the effect's texture.
-        let effect_casts_shadow = gpu && effect_root == Some(entity) && shadow_ref.is_some();
         let group_shadow = crate::fragment::group_shadow(
             &parts,
             opacity_group != entity
                 && clip_ref.is_none()
                 && blend.is_none()
-                && camera_view.is_none()
-                && !effect_casts_shadow,
+                && camera_view.is_none(),
         )
         .map(Arc::new);
         // A fragment keeps its shadow only while its group does not draw it.
         let shared = group_shadow.is_some();
+        // Inside a shader effect, a drawable's own shadow may be cast from
+        // what the effect draws instead (see `divert_effects`), so the
+        // fragment without it is built too.
+        let effect_casts_shadow = gpu && effect_root.is_some() && shadow_ref.is_some() && !shared;
         if cache.shared_shadows.contains(&mobj_id.0) != shared {
             cache.fragment_cache.remove(&mobj_id.0);
             if shared {
@@ -6238,7 +6276,7 @@ pub fn gaanim_render_system(
                     transform.affine_2d,
                     stroke_style.as_deref(),
                     stroke_view,
-                    shadow_ref.as_deref().filter(|_| !effect_casts_shadow),
+                    shadow_ref.as_deref(),
                     glow_ref.as_deref(),
                     blur_ref.as_deref(),
                 )
@@ -7882,6 +7920,75 @@ mod tests {
         assert_eq!(
             crate::fragment::tests::image_draws(&plain.scene, shadow.image.data.id()),
             1
+        );
+    }
+
+    #[test]
+    fn a_shader_effect_casts_its_members_shared_shadow_once() {
+        let compose = |second: DropShadow| {
+            let mut world = World::new();
+            let root = world
+                .spawn((
+                    gaanim_math::SpatialTransform::default(),
+                    GlobalSpatialTransform::default(),
+                    GlobalOpacity(1.0),
+                    crate::object_effects::ShaderEffect {
+                        post: crate::post_process::CanvasPostProcess {
+                            passes: vec![identity_pass()],
+                            ..Default::default()
+                        },
+                        margin: 0.2,
+                    },
+                ))
+                .id();
+            for (raw, x, shadow) in [(41, 0.0, DropShadow::default()), (42, 2.0, second)] {
+                world.spawn((
+                    MobjectId(ObjectId::from_raw(raw)),
+                    gaanim_math::SpatialTransform::default(),
+                    GlobalSpatialTransform::default(),
+                    GlobalOpacity(1.0),
+                    RenderOrder::default(),
+                    RenderLayer::Vello2D,
+                    Path2D(rect_path(x, 0.0, x + 1.0, 1.0)),
+                    FillBrush(Some(peniko::Brush::Solid(peniko::Color::WHITE))),
+                    shadow,
+                    Visible,
+                    ChildOf(root),
+                ));
+            }
+            compile_frame_from_world(&mut world, None)
+        };
+        // Members with the same shadow, as a group's style gives them.
+        let shared = compose(DropShadow::default());
+        assert_shadow_cast_from_effect(&shared.effects, &shared.scene);
+
+        // Different shadows stay inside the texture, with their members.
+        let mixed = compose(DropShadow {
+            blur_radius: 0.2,
+            ..DropShadow::default()
+        });
+        let texture = mixed
+            .effects
+            .iter()
+            .find(|layer| layer.request.passes.len() == 1)
+            .expect("the effect's texture");
+        let texture_id = texture.image.data.id();
+        assert!(
+            mixed
+                .effects
+                .iter()
+                .all(|layer| crate::fragment::tests::image_draws(&layer.scene, texture_id) == 0),
+            "nothing is cast from the texture"
+        );
+        assert!(
+            mixed
+                .effects
+                .iter()
+                .filter(|layer| layer.fixed)
+                .any(|layer| {
+                    crate::fragment::tests::image_draws(&texture.scene, layer.image.data.id()) > 0
+                }),
+            "the texture draws the members' shadows"
         );
     }
 

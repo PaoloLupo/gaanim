@@ -2118,6 +2118,87 @@ mod tests {
     }
 
     #[test]
+    fn gpu_outline_rings_the_covered_texels_with_round_corners() {
+        let Some(gpu) = test_gpu() else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let (width, height) = (24_u32, 16_u32);
+        // A red 4x4 square at x 10..14, y 6..10 on transparent texels.
+        let inside = |x: u32, y: u32| (10..14).contains(&x) && (6..10).contains(&y);
+        let pixels: Vec<u8> = (0..width * height)
+            .flat_map(|index| {
+                if inside(index % width, index / width) {
+                    [200, 40, 40, 255]
+                } else {
+                    [0, 0, 0, 0]
+                }
+            })
+            .collect();
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        gpu.queue.write_texture(
+            target.as_image_copy(),
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: None,
+            },
+            target.size(),
+        );
+        // Three pixels wide, white.
+        let passes =
+            crate::object_effects::outline_passes(3.0, gaanim_core::peniko::Color::WHITE).unwrap();
+        let request = CanvasPostProcess {
+            passes,
+            ..Default::default()
+        }
+        .request(0.0, kurbo::Rect::new(0.0, 0.0, 24.0, 16.0))
+        .unwrap();
+        let mut post = GpuPostProcess::default();
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None, None));
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        post.encode(&mut encoder);
+        gpu.queue.submit(Some(encoder.finish()));
+        let out = gpu.read(&target);
+        let at = |x: u32, y: u32| {
+            let index = ((y * width + x) * 4) as usize;
+            [out[index], out[index + 1], out[index + 2], out[index + 3]]
+        };
+        assert_eq!(at(11, 7), [200, 40, 40, 255], "the square keeps its color");
+        for x in 7..10 {
+            assert_eq!(at(x, 7), [255, 255, 255, 255], "the ring at x {x}");
+        }
+        assert_eq!(at(6, 7)[3], 0, "the ring is three pixels wide");
+        assert_eq!(at(14, 7), [255, 255, 255, 255]);
+        assert_eq!(at(17, 7)[3], 0);
+        // Its corners are round: 2.5 pixels away diagonally is inside,
+        // 3.9 is outside.
+        assert_eq!(at(8, 4)[3], 255);
+        assert_eq!(at(7, 3)[3], 0);
+        // Nothing appears along the texture's edges.
+        for x in 0..width {
+            assert_eq!(at(x, 0)[3], 0, "top row at x {x}");
+            assert_eq!(at(x, height - 1)[3], 0, "bottom row at x {x}");
+        }
+    }
+
+    #[test]
     fn gpu_bloom_spreads_light_around_bright_pixels_only() {
         let Some(gpu) = test_gpu() else {
             eprintln!("skipped: no GPU adapter");

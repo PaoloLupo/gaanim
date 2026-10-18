@@ -3961,8 +3961,10 @@ class Drawable:
         (transparent around it), ``uv`` spans its box with the margin,
         ``resolution`` is the texture size in pixels and ``time`` the scene
         time. Uniforms take Parameters, Computeds and audio signals, and the
-        ``PostProcess`` presets work too. The ``shadow`` of an image or shape
-        stays out of the texture and is cast from the result, beneath it.
+        ``PostProcess`` presets work too. A ``shadow`` the drawables inside
+        share (a drawable's own, a text's, a group's style) stays out of the
+        texture and is cast from the result, beneath it; members with
+        different shadows keep them inside.
         ``None`` removes the effect. It is
         declaration state for the whole timeline; a drawable with an effect
         inside another one is drawn by the outer effect. Previews, exports
@@ -3971,6 +3973,22 @@ class Drawable:
 
         Example:
             title.shader_effect(PostProcess.shader(ripple_src, uniforms={"amount": level}), margin=0.4)
+        """
+        ...
+    def outline(self, color: Optional[ColorLike], width: float = 0.06) -> Self:
+        """Trace a ``color`` border ``width`` scene units wide around this drawable, like a sticker's.
+
+        The border follows the alpha of the drawable and its descendants,
+        not their box: around the opaque pixels of a cutout image, the
+        glyphs of a text or the members of a group, with an antialiased
+        edge, and drawn beneath them. It is traced after any
+        ``shader_effect`` passes, around what they leave, and a ``shadow``
+        is then cast from the outlined result. ``None`` removes it. It is
+        declaration state for the whole timeline. A ``width`` that is not
+        finite and positive raises ``ValueError``.
+
+        Example:
+            photo.outline(WHITE, width=0.08).shadow("#00000088", 0.1, -0.1, 0.05)
         """
         ...
     def chalk(self, seed: int = 0, roughness: float = 0.01) -> Self:
@@ -4055,8 +4073,9 @@ class Drawable:
         silhouette of its filled members, beneath all of them, like CSS
         ``drop-shadow`` on a group: overlaps do not darken and the cost does
         not grow with each glyph. Members that are clipped, blended or only
-        stroked cast their own. An image or shape with a ``shader_effect``
-        casts its shadow from what the effect draws, whichever is set first.
+        stroked cast their own. With a ``shader_effect`` the shadow is cast
+        from what the effect draws, whichever is set first (on a text or
+        group, when its members share one shadow, as its style gives them).
 
         Example:
             result = drawable.shadow(BLUE)
