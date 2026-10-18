@@ -5469,9 +5469,10 @@ class TextSelectionAnimation:
         Every line spanned by the selection gets one band that covers the
         full glyph height of that line plus ``padding`` (world units; ``None``
         uses 10% of the line height). Bands grow from the left edge, one line
-        after another, sharing the animation duration by band length. They are
-        drawn behind the glyphs but above objects authored before the text,
-        and stay on screen afterwards.
+        after another, sharing the animation duration by band length. On a
+        rotated text, or one inside a rotated group, the bands follow its
+        lines and turn with it. They are drawn behind the glyphs but above
+        objects authored before the text, and stay on screen afterwards.
 
         ``color`` defaults to a highlighter yellow and its alpha is multiplied
         by ``opacity``. ``skew`` tilts each band in radians (positive rises to

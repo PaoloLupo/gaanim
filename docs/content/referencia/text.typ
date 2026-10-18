@@ -569,7 +569,7 @@ scene.play([eq["c"].animate.annotate("velocidad de la luz", offset=(0, 0.8))])
     (name: "opacity", type: "float", default: "0.45", desc: [De 0 a 1.]),
     (name: "padding", type: "float | None", default: "None", desc: [Margen en unidades del mundo; `None` usa el 10 % de la altura de línea.]),
   ),
-  desc: [Pasa un rotulador detrás de cada línea que abarca la selección. Cada banda cubre la altura de los glifos de su línea más `padding` y crece desde la izquierda; las líneas se suceden y se reparten la duración según su longitud. Las bandas quedan detrás de los glifos pero delante de lo creado antes del texto, y permanecen. Un `blend` desconocido, un `skew` no finito, una opacidad fuera de `[0, 1]` o un `padding` negativo lanzan `ValueError`.],
+  desc: [Pasa un rotulador detrás de cada línea que abarca la selección. Cada banda cubre la altura de los glifos de su línea más `padding` y crece desde la izquierda; las líneas se suceden y se reparten la duración según su longitud. En un texto girado, o dentro de un grupo girado, las bandas siguen sus líneas y giran con él. Las bandas quedan detrás de los glifos pero delante de lo creado antes del texto, y permanecen. Un `blend` desconocido, un `skew` no finito, una opacidad fuera de `[0, 1]` o un `padding` negativo lanzan `ValueError`.],
 )[
 ```python
 # show-code: true
