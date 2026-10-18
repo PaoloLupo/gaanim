@@ -50,7 +50,9 @@ scene.render()
   unidad. Los píxeles solo aparecen al exportar, así que la misma escena sale
   igual a 1280 × 720 que a 3840 × 2160.
 - Un objeto nuevo aparece en el origen hasta que lo mueves.
-- Los tiempos se expresan en segundos y los ángulos, en radianes.
+- Los tiempos se expresan en segundos y los ángulos, en radianes:
+  `deg(90)` convierte grados, así que `rotate_to(deg(90))` equivale a
+  `rotate_to(math.pi / 2)`.
 
 `frame` admite otras proporciones, por ejemplo `(9, 16)` para video vertical.
 `margin` define un área segura que usan el layout y las plantillas.

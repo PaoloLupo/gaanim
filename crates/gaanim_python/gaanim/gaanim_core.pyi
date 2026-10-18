@@ -6939,6 +6939,24 @@ def computed(callback: Callable[..., float], *, inputs: Sequence[Parameter | Var
     """
     ...
 
+@overload
+def deg(value: Parameter | Variable | Computed | TimeInput) -> Computed: ...
+@overload
+def deg(value: float) -> float:
+    """Convert ``value`` degrees to the radians that angle parameters take.
+
+    A number gives a number, ``deg(90) == math.pi / 2``. A ``Parameter``,
+    ``Variable``, ``Computed`` or ``scene.time`` gives a ``Computed`` that
+    follows it, for reactive angles such as ``rotate_to(deg(angle))``. A
+    non-finite number raises ``ValueError``; another type, ``TypeError``.
+
+    Example:
+        card.rotate_to_3d(deg(-30), deg(45), 0)
+        scene.play([scene.camera.animate.orbit(delta_yaw=deg(90), delta_pitch=0)])
+        needle.rotate_to(deg(heading))
+    """
+    ...
+
 class Poll:
     """An audience poll created with ``scene.poll`` or ``scene.quiz``: its
     data, for the scene to present as it likes.

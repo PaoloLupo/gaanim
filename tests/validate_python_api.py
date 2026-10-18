@@ -1575,6 +1575,43 @@ def validate_in_3d_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_deg_contract(module: object) -> list[str]:
+    """Exercise deg(), which converts degrees to radians for angle parameters."""
+    failures: list[str] = []
+    if module.deg(180) != math.pi or module.deg(-45.0) != math.radians(-45.0):
+        failures.append("deg() did not convert degrees to radians")
+    if not isinstance(module.deg(90), float):
+        failures.append("deg() of a number did not return a float")
+    scene = module.Scene(frame=(16, 9))
+    angle = scene.viz.parameter(30.0)
+    sources = {
+        "Parameter": angle,
+        "Variable": scene.viz.variable(10.0, label="$k$"),
+        "Computed": module.computed(lambda value: value, inputs=[angle]),
+        "scene.time": scene.time,
+    }
+    for name, source in sources.items():
+        if not isinstance(module.deg(source), module.Computed):
+            failures.append(f"deg() of a {name} did not return Computed")
+    needle = scene.geometry.rect(2.0, 0.1).rotate_to(module.deg(angle))
+    card = scene.geometry.square(1.0).rotate_to_3d(module.deg(-30), module.deg(angle), 0)
+    if not isinstance(needle, module.Drawable) or not isinstance(card, module.Drawable):
+        failures.append("rotations did not take angles from deg()")
+    for value, error in (("90", TypeError), (math.inf, ValueError)):
+        try:
+            module.deg(value)
+            failures.append(f"deg() accepted {value!r}")
+        except error:
+            pass
+    foreign = module.deg(module.Scene().viz.parameter(1.0))
+    try:
+        needle.rotate_to(foreign)
+        failures.append("deg() let a parameter of another Scene through")
+    except ValueError:
+        pass
+    return failures
+
+
 def validate_matrix_contract(module: object) -> list[str]:
     """Exercise matrix construction, selectors, ordering, and mutations."""
     failures: list[str] = []
@@ -3554,6 +3591,7 @@ def main() -> int:
     missing.extend(validate_extrude_contract(module))
     missing.extend(validate_primitives_3d_contract(module))
     missing.extend(validate_in_3d_contract(module))
+    missing.extend(validate_deg_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())
