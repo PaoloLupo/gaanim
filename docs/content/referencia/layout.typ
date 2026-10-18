@@ -176,6 +176,15 @@ Las mismas propiedades valen para `box`, `row`, `column`, `grid`, `stack`,
   usa el color `shadow` del tema, que también es el `color` por defecto del
   diccionario: negro suave sobre fondos claros y casi opaco sobre fondos
   oscuros, donde uno suave no se vería.
+- `edge` rasga el borde del fondo como un papel recortado: `True`, o un
+  diccionario con los ajustes de
+  #link("/referencia/drawable/#api-pathmodifiers-wiggle_path")[`wiggle_path`]
+  `size` (6 px por defecto), `detail` (10 puntos por lado), `frequency`
+  (0, quieto), `hold` y `seed`. El borde se rehace cuando la caja cambia de
+  tamaño, así que una tira rasgada se ajusta sola a su texto, y la sombra y
+  `clip` siguen su forma. Con `frequency` y `hold=True` el borde «hierve».
+  Después, `set(edge=...)` cambia `size` y `frequency` del mismo borde
+  (`False` lo endereza); `detail`, `hold` y `seed` quedan fijos al crearlo.
 
 *Tipografía* (la heredan las cadenas hijas)
 

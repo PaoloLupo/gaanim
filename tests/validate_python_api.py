@@ -3001,6 +3001,17 @@ def validate_layout_box_contract(module):
         failures.append("positioning lost the Box subclass")
     if L.stack().background is not None:
         failures.append("an undecorated box unexpectedly has a background")
+    torn = L.box("torn", background="white", edge=True)
+    if torn.background is None:
+        failures.append("edge=True left the box without a background")
+    torn.set(edge={"size": "10px", "frequency": 8})
+    torn.set(edge=False)
+    for bad, error in (({"seed": 3}, ValueError), ({"angle": 1}, ValueError), ("torn", TypeError)):
+        try:
+            torn.set(edge=bad)
+            failures.append(f"edge={bad!r} did not raise {error.__name__}")
+        except error:
+            pass
     added = scene.geometry.rect(2, 1)
     card.add(added, at=0)
     card.remove(added)

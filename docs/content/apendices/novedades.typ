@@ -243,6 +243,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   sobre todo el cuadro y la mezcla con lo de debajo (`multiply`, `screen`,
   `overlay` o `normal`): una textura de papel o de grano se pone una vez en
   la escena, no en cada segmento.
+- `scene.layout.box(..., edge=True)` rasga el borde del fondo de una caja
+  como un papel recortado, y el borde se rehace cuando la caja cambia de
+  tamaño: una tira rasgada se ajusta sola a su texto, sin medirlo ni subir
+  su `z_index`. Un diccionario ajusta `size`, `detail`, `frequency`, `hold`
+  y `seed` de `wiggle_path`, y funciona también en `BoxStyle` y en clases.
 
 == Editor
 

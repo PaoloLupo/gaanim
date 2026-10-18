@@ -1,10 +1,10 @@
 """The box model: padding, decoration and size rules of a layout box.
 
 A box keeps its padding between its edge and its content, draws its own
-background, border, rounded corners and shadow, and takes its size from its
-content, a length, a share of its parent or the free space. Each segment
-covers one part of the model, and each label is the code that differs
-between the boxes.
+background, border, rounded corners, shadow and torn edge, and takes its
+size from its content, a length, a share of its parent or the free space.
+Each segment covers one part of the model, and each label is the code that
+differs between the boxes.
 """
 
 import os
@@ -142,6 +142,24 @@ table(
         ('height="160px"', L.row(L.box("160px", style=chip, height="160px"), style=lane)),
         ('width="480px", aspect_ratio=4', L.row(L.box("4:1", style=chip, width="480px", aspect_ratio=4),
                                                 style=lane)),
+    ],
+    SPLIT,
+)
+
+# edge tears the background like cut paper, through wiggle_path, and the
+# tear follows the box's size, so a strip fits its text by itself. A dict
+# sets the wiggle's size, detail and seed, or a frequency with hold=True for
+# an edge that boils; a shadow follows the torn shape.
+scene.segment("edge")
+SPLIT = ("1fr", "1fr")
+table(
+    [
+        ('"torn", edge=True', L.box("torn", style=chip, edge=True)),
+        ('"hugs its text", edge=True', L.box("hugs its text", style=chip, edge=True)),
+        ('edge={"size": "14px", "seed": 3}', L.box("size", style=chip, edge={"size": "14px", "seed": 3})),
+        ('edge={"detail": 4}', L.box("detail", style=chip, edge={"detail": 4})),
+        ('edge={"frequency": 8, "hold": True}', L.box("boil", style=chip, edge={"frequency": 8, "hold": True})),
+        ("edge=True, shadow=True", L.box("shadow", style=chip, edge=True, shadow=True)),
     ],
     SPLIT,
 )

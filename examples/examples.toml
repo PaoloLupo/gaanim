@@ -282,7 +282,7 @@ web = false
 
 [[example]]
 path = "layout/boxes.py"
-description = "The box model: padding in every CSS shorthand, backgrounds, borders, radii, shadows, clipping and size rules."
+description = "The box model: padding in every CSS shorthand, backgrounds, borders, radii, shadows, clipping, size rules and torn edges that fit their text."
 
 [[example]]
 path = "layout/box_styles.py"
