@@ -165,17 +165,18 @@ scene.wait(HOLD)
 
 
 # scene.fx.spotlight dims everything outside its target, to dim at most,
-# and lights it all again: padding and corner_radius shape the hole, which
-# can frame a text selection, and several targets get a hole each. With
-# Easing.SMOOTH the dim stays at the end. Each card is labelled with the
-# call that lights it, abbreviating scene.fx.spotlight(...).
+# and lights it all again: padding and corner_radius shape the hole. A text
+# selection gets one hole per line it spans, around its words only, and
+# several targets get a hole each. With Easing.SMOOTH the dim stays at the
+# end. Each card is labelled with the call that lights it, abbreviating
+# scene.fx.spotlight(...).
 scene.segment("spotlight")
 grid = scene.layout.zones(Zones.grid(rows=3, columns=2, gap="64px", padding="page_padding"))
 CALLS = [
     "spotlight(card)",
     "spotlight(card, dim=0.95)",
     "spotlight(card, padding=0.5,\n          corner_radius=0.5)",
-    'spotlight(line["gap"])',
+    "spotlight(lines.words[1:5])",
     "spotlight([card, cards[5]])",
     "spotlight(card)\n    .easing(Easing.SMOOTH)",
 ]
@@ -184,13 +185,13 @@ for zone, call in zip(grid, CALLS):
     box = zone.inset("24px")
     cards.append(geometry.rounded_rect(box.width, box.height, 0.12).fill(panel).stroke(rule, 0.02).place(box))
     scene.text(call, role="code").place(box.inset("24px"), anchor="top_left")
-gap_line = scene.text("Mind the gap", size=0.7).place(grid[3].inset("48px"), anchor="bottom_right")
+two_lines = scene.text("Mind the gap\nbetween lines", size=0.55).place(grid[3].inset("48px"), anchor="bottom_right")
 fx = scene.fx
 for light in [
     fx.spotlight(cards[0]),
     fx.spotlight(cards[1], dim=0.95),
     fx.spotlight(cards[2], padding=0.5, corner_radius=0.5),
-    fx.spotlight(gap_line["gap"]),
+    fx.spotlight(two_lines.words[1:5]),
     fx.spotlight([cards[4], cards[5]]),
     fx.spotlight(cards[5]).easing(Easing.SMOOTH),
 ]:

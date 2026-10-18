@@ -12,6 +12,7 @@ pub mod prelude;
 pub mod random;
 pub mod rough;
 pub mod spatial;
+pub mod text_lines;
 pub mod time_warp;
 
 pub use arc_slice::ArcSlice;

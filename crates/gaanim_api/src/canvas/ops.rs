@@ -897,6 +897,14 @@ pub(crate) enum Op {
         padding: [f64; 4],
         corner_radius: f64,
     },
+    /// Attach live frames, one per rendered line, to compiled
+    /// text-selection bounds; they turn with the text.
+    AttachLineFrames {
+        target: ObjectId,
+        sources: Vec<crate::anim::BoundsTarget>,
+        padding: [f64; 4],
+        corner_radius: f64,
+    },
     /// Attach a helical spring whose endpoints follow entities or fixed positions.
     AttachTrackingSpring {
         target: ObjectId,

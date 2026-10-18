@@ -206,6 +206,12 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   mientras se acerca o se aleja, en un solo movimiento: `orbit` y `dolly` no
   se pueden reproducir a la vez.
 
+== Efectos
+
+- `scene.fx.spotlight` sobre una selección de texto abre un hueco por cada
+  línea que abarca, solo alrededor de sus glifos, en lugar del rectángulo de
+  las líneas enteras, y los huecos giran con un texto girado.
+
 == Editor
 
 - Al reproducir un paquete `.gaanim`, la barra de overlays, la paleta de

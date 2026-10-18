@@ -10865,7 +10865,9 @@ class Fx:
         whole cycle, and an easing such as ``Easing.SMOOTH`` keeps it dimmed at
         the end. The hole is a live frame around the target's bounds,
         ``padding`` away (0.2 by default) and rounded by ``corner_radius``; it
-        follows the target if it moves. A sequence of targets cuts one hole
+        follows the target if it moves. A text selection gets one hole per
+        line it spans, around its glyphs only, which turns with a rotated
+        text, as ``marker`` bands do. A sequence of targets cuts one hole
         around each, and holes that overlap merge: group the targets to light
         their joint box instead. The returned animation plays on the
         overlay. An empty sequence, a ``dim`` out of range or a target of
