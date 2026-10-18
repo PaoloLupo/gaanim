@@ -349,6 +349,18 @@ pub struct SegmentMetadata {
     pub stops: Vec<SegmentStop>,
 }
 
+/// A stretch of the timeline that plays in stepped time, like stop-motion:
+/// a seek inside `[start, end)` evaluates the world at the last of `rate`
+/// steps a second from `start`. The instant at `end` evaluates exactly, so
+/// a presentation resting on a stop shows its finished frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StepWindow {
+    pub start: f64,
+    pub end: f64,
+    pub rate: f64,
+}
+
 /// The current semantic location in the authored segment sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -467,6 +479,14 @@ pub struct Timeline {
     /// condition, by time.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub stop_gates: Vec<StopGate>,
+    /// Stretches that play in stepped time, by start; see
+    /// [`Self::step_time`].
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub step_windows: Vec<StepWindow>,
+    /// Whether some drawable steps its own time with a
+    /// [`gaanim_scene::StepRate`], which its clips then follow.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub stepped_objects: bool,
 }
 
 /// A musical tempo: `bpm` beats per minute from `offset` seconds, grouped
@@ -837,6 +857,8 @@ impl Default for Timeline {
             polls: Vec::new(),
             poll_session: None,
             stop_gates: Vec::new(),
+            step_windows: Vec::new(),
+            stepped_objects: false,
         }
     }
 }
@@ -952,6 +974,33 @@ impl Timeline {
             .iter()
             .find(|marker| marker.name == name)
             .map(|marker| marker.time)
+    }
+
+    /// Replace the stretches that play in stepped time.
+    pub fn set_step_windows(&mut self, mut windows: Vec<StepWindow>) {
+        windows.retain(|window| window.rate.is_finite() && window.rate > 0.0);
+        windows.sort_by(|left, right| left.start.total_cmp(&right.start));
+        self.step_windows = windows;
+    }
+
+    /// The instant a seek to `time` shows: the step at or before it inside
+    /// a [`StepWindow`], else `time` itself.
+    pub fn step_time(&self, time: f64) -> f64 {
+        let index = self
+            .step_windows
+            .partition_point(|window| window.start <= time);
+        match index.checked_sub(1).map(|index| self.step_windows[index]) {
+            Some(window) if time < window.end => {
+                gaanim_math::step_time(time, window.start, window.rate)
+            }
+            _ => time,
+        }
+    }
+
+    /// The instant the world shows: the playhead, [`Self::current_time`],
+    /// as its seek evaluated it in stepped time.
+    pub fn evaluation_time(&self) -> f64 {
+        self.step_time(self.current_time)
     }
 
     /// Replace the semantic segment metadata compiled from the current canvas.
@@ -1786,7 +1835,7 @@ impl Timeline {
         let current_time = self.current_time;
         let segment_position = self.segment_position;
         let started = bevy::platform::time::Instant::now();
-        self.seek_with(world, time.0, Some(time.0));
+        self.seek_with(world, time.0, Some(time.0), false);
         let replayed = started.elapsed();
         let snapshot = WorldSnapshot::capture(world);
         if std::env::var_os("GAANIM_CHECKPOINT_TIMINGS").is_some() {
@@ -2011,7 +2060,9 @@ impl Timeline {
             world.insert_resource(gaanim_animation::PreparingPropertySources);
             for (time, lenses) in starts {
                 self.last_restore_kf_time = None;
-                self.seek(world, time.into_inner());
+                // A clip starts from the state exactly at its start, which a
+                // step would show earlier.
+                self.seek_with(world, time.into_inner(), None, false);
                 let entities = world
                     .query::<(Entity, &MobjectId)>()
                     .iter(world)
@@ -2053,34 +2104,50 @@ impl Timeline {
     /// into it, replaying incrementally from the previous one, or when a second seek in a row
     /// lands past it, so a one-off seek never pays for it (see [`Self::segment_checkpoints`]).
     pub fn seek(&mut self, world: &mut World, target_time: f64) {
-        self.seek_with(world, target_time, None);
+        self.seek_with(world, target_time, None, true);
     }
 
     /// [`Self::seek`], or with `before` the state a checkpoint at `before`
     /// holds: every clip that starts before it settled at its end and the
     /// later ones held at their initial values, replayed from the latest
-    /// keyframe or checkpoint before it.
-    fn seek_with(&mut self, world: &mut World, target_time: f64, before: Option<f64>) {
+    /// keyframe or checkpoint before it. With `step` a seek inside a
+    /// [`StepWindow`] evaluates the step it falls in, while
+    /// [`Self::current_time`] keeps the playhead.
+    fn seek_with(&mut self, world: &mut World, target_time: f64, before: Option<f64>, step: bool) {
         self.prepare_property_starts(world);
         let max_time = self
             .loop_range
             .map(|(_, end)| end)
             .unwrap_or(self.cached_duration);
-        let clamped_target = target_time.clamp(0.0, max_time);
-        let previous_time = self.current_time;
+        let playhead = target_time.clamp(0.0, max_time);
+        let clamped_target = if step && before.is_none() {
+            self.step_time(playhead)
+        } else {
+            playhead
+        };
+        let previous_time = self.step_time(self.current_time);
+        // Stepped time holds and then jumps a whole step: whether the seek
+        // moves on in small steps reads the playhead, and the world moves
+        // by the evaluated time.
+        let stepped = clamped_target != playhead || previous_time != self.current_time;
+        let moved = if stepped {
+            playhead - self.current_time
+        } else {
+            clamped_target - previous_time
+        }
+        .max(0.0);
         let expected_forward_dt = world
             .get_resource::<gaanim_animation::PlaybackState>()
             .map(|s| s.scaled_dt)
             .unwrap_or(0.0);
         let forward_delta = (clamped_target - previous_time).max(0.0);
-        let realtime_forward = expected_forward_dt > 0.0
-            && forward_delta <= (expected_forward_dt * 1.5).max(1.0 / 120.0);
+        let realtime_forward =
+            expected_forward_dt > 0.0 && moved <= (expected_forward_dt * 1.5).max(1.0 / 120.0);
         // Exporters and paused scrubbing drive the timeline through explicit
         // monotonic seeks. Preserve the already reconstructed simulation for
         // nearby frames and advance it by the exact seek delta instead of
         // replaying from t=0 for every exported frame.
-        let explicit_forward =
-            expected_forward_dt <= 0.0 && forward_delta > 0.0 && forward_delta <= 0.25;
+        let explicit_forward = expected_forward_dt <= 0.0 && moved > 0.0 && moved <= 0.25;
         // Motion blur samples each frame slightly before it. Rebuilding every
         // trace from t=0 for each of those short backward seeks made blurred
         // exports quadratic; keep the traces and drop their newer points.
@@ -2090,7 +2157,10 @@ impl Timeline {
             && has_traced_paths(world);
         let preserve_reactive_state = short_backward
             || clamped_target >= previous_time && (realtime_forward || explicit_forward);
-        let advance_reactive_during_seek = preserve_reactive_state && explicit_forward;
+        // Playback advances the updaters by the frame time after the seek;
+        // a stepped seek moves them by the step instead.
+        let advance_reactive_during_seek =
+            preserve_reactive_state && (explicit_forward || stepped && realtime_forward);
         let reactive_state = if preserve_reactive_state {
             capture_reactive_state(world)
         } else {
@@ -2308,9 +2378,15 @@ impl Timeline {
                             apply_lens_spec(world, target_entity, &anim.lens, final_t, true);
                         } else if clip.start <= self.current_time && clip.end() > self.current_time
                         {
-                            // Animation is actively running at seek head: interpolate
-                            let progress =
-                                ((self.current_time - clip.start) / clip.duration).clamp(0.0, 1.0);
+                            // Animation is actively running at seek head: interpolate,
+                            // at the step of a drawable that steps its time.
+                            let at = if self.stepped_objects {
+                                let rate = world.get::<gaanim_scene::StepRate>(target_entity);
+                                gaanim_scene::stepped(rate.copied().as_ref(), self.current_time)
+                            } else {
+                                self.current_time
+                            };
+                            let progress = ((at - clip.start) / clip.duration).clamp(0.0, 1.0);
                             let t = anim.rate_func.evaluate(progress);
                             apply_lens_spec(world, target_entity, &anim.lens, t, false);
                         }
@@ -2654,7 +2730,9 @@ impl Timeline {
             world.get_resource_mut::<gaanim_animation::PlaybackState>()
         {
             playback_state.current_time = self.current_time;
+            playback_state.updaters_current = stepped && expected_forward_dt > 0.0;
         }
+        self.current_time = playhead;
     }
 
     /// Show every [`gaanim_animation::EchoGhost`] as its source was `lag`
@@ -5866,6 +5944,96 @@ mod tests {
         (world, timeline, entity)
     }
 
+    fn translation_x(world: &World, entity: Entity) -> f64 {
+        world.get::<SpatialTransform>(entity).unwrap().translation.x
+    }
+
+    #[test]
+    fn a_step_window_shows_each_step_and_keeps_the_playhead() {
+        // The fixture moves x from 0 to 40 over [0.5, 1.5].
+        let (mut world, mut timeline, entity) = absolute_seek_fixture();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        timeline.set_step_windows(vec![StepWindow {
+            start: 0.5,
+            end: 1.25,
+            rate: 4.0,
+        }]);
+        timeline.seek(&mut world, 0.7);
+        assert_eq!(translation_x(&world, entity), 0.0);
+        assert_eq!(timeline.current_time, 0.7);
+        assert_eq!(timeline.evaluation_time(), 0.5);
+        assert_eq!(
+            world
+                .resource::<gaanim_animation::PlaybackState>()
+                .current_time,
+            0.5
+        );
+        timeline.seek(&mut world, 0.99);
+        assert!((translation_x(&world, entity) - 10.0).abs() < 1e-9);
+        // The window's end shows its exact frame, and time is smooth after.
+        timeline.seek(&mut world, 1.25);
+        assert!((translation_x(&world, entity) - 30.0).abs() < 1e-9);
+        timeline.seek(&mut world, 1.3);
+        assert!((translation_x(&world, entity) - 32.0).abs() < 1e-9);
+        // Seeking back into the window steps again.
+        timeline.seek(&mut world, 1.2);
+        assert!((translation_x(&world, entity) - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_drawable_with_a_step_rate_steps_its_clips_and_ends_on_their_value() {
+        let (mut world, mut timeline, entity) = absolute_seek_fixture();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        world.entity_mut(entity).insert(gaanim_scene::StepRate(3.0));
+        timeline.stepped_objects = true;
+        // Steps of a third of a second: 0.7 shows 2/3, 1.45 shows 4/3.
+        timeline.seek(&mut world, 0.7);
+        assert!((translation_x(&world, entity) - 40.0 * (2.0 / 3.0 - 0.5)).abs() < 1e-9);
+        timeline.seek(&mut world, 1.45);
+        assert!((translation_x(&world, entity) - 40.0 * (4.0 / 3.0 - 0.5)).abs() < 1e-9);
+        // The playhead and the world's time stay smooth for the others.
+        assert_eq!(timeline.evaluation_time(), 1.45);
+        timeline.seek(&mut world, 1.5);
+        assert_eq!(translation_x(&world, entity), 40.0);
+    }
+
+    #[test]
+    fn stepped_playback_moves_updaters_a_whole_step_at_a_time() {
+        let (mut world, mut timeline, entity) = absolute_seek_fixture();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = seen.clone();
+        world
+            .entity_mut(entity)
+            .insert(gaanim_animation::Updater::new(move |_, elapsed, _, _| {
+                record.lock().unwrap().push(elapsed);
+                true
+            }));
+        world.insert_resource(gaanim_animation::PlaybackState {
+            is_playing: true,
+            scaled_dt: 0.1,
+            current_time: 0.0,
+            updaters_current: false,
+        });
+        timeline.set_step_windows(vec![StepWindow {
+            start: 0.0,
+            end: 2.0,
+            rate: 4.0,
+        }]);
+        timeline.seek(&mut world, 0.0);
+        seen.lock().unwrap().clear();
+        for frame in 1..=6 {
+            timeline.seek(&mut world, frame as f64 * 0.1);
+            assert!(
+                world
+                    .resource::<gaanim_animation::PlaybackState>()
+                    .updaters_current
+            );
+            // Playback leaves the updaters where the seek put them.
+            gaanim_animation::updater_system(&mut world);
+        }
+        assert_eq!(*seen.lock().unwrap(), [0.0, 0.0, 0.25, 0.25, 0.5, 0.5]);
+    }
+
     /// The absolute seek fixture with a visible source, as a scene shows it.
     fn visible_echo_fixture() -> (World, Timeline, Entity) {
         let (mut world, _, entity) = absolute_seek_fixture();
@@ -6548,6 +6716,7 @@ mod tests {
             is_playing: false,
             scaled_dt: 0.0,
             current_time: 0.0,
+            updaters_current: false,
         });
         let object_id = ObjectId::from_raw(0);
         let updater = gaanim_animation::Updater::new_simulation(

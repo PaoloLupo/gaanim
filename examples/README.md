@@ -138,6 +138,7 @@ Easing, keyframes, timing, motion paths and procedural motion.
 | [Motion paths](animation/motion_paths.py) | Travelling along circles, waves and arrows with move_along and its options, and straight moves bent into arcs with path_arc. |
 | [Secondary motion](animation/secondary_motion.py) | Follow-through with settle, trailing followers, squash and stretch, and exact light physics with throw and inertia. |
 | [Procedural motion](animation/procedural_motion.py) | Oscillators on every channel and waveform, wiggle, the other Updater presets, seeded randomness and smooth noise. |
+| [Stepped time](animation/stepped_time.py) | Stop-motion time: drawables at several step rates, outlines and jitter that boil with hold=True, and a whole segment stepped, camera included. |
 
 ## Transforms
 

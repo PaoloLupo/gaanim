@@ -947,6 +947,8 @@ pub struct ObjectSpec {
     pub motion_blur_exempt: bool,
     /// Leave the drawable out of the scene post-process.
     pub post_exempt: bool,
+    /// Steps of the drawable's own time a second, like stop-motion.
+    pub step_rate: Option<f64>,
     /// Squash and stretch along the velocity: `(amount, max_ratio)`.
     pub squash_stretch: Option<(f64, f64)>,
     /// Repeater groups: `(copies, count)`, the copies declared and how many
@@ -1166,6 +1168,7 @@ impl ObjectSpec {
             echo: None,
             motion_blur_exempt: false,
             post_exempt: false,
+            step_rate: None,
             squash_stretch: None,
             stroke_profile: None,
             opacity: 1.0,

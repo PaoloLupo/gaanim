@@ -131,6 +131,7 @@ pub fn timeline_playback_system(
     if let Some(mut playback_state) = playback_state {
         playback_state.is_playing = timeline.is_playing;
         playback_state.scaled_dt = scaled_dt;
+        playback_state.updaters_current = false;
     }
     if timeline.is_playing && timeline.seek_request.is_none() {
         let delta = scaled_dt;
@@ -270,7 +271,7 @@ pub fn timeline_seek_system(world: &mut World) {
 pub fn camera_binding_system(world: &mut World) {
     let time = world
         .get_resource::<Timeline>()
-        .map_or(0.0, |timeline| timeline.current_time);
+        .map_or(0.0, |timeline| timeline.evaluation_time());
     let Some(authored) = world.get_resource::<gaanim_math::Camera>().copied() else {
         return;
     };
@@ -334,7 +335,7 @@ pub fn camera_rig_system(world: &mut World) {
     let camera_clips =
         world.resource_scope(|world, timeline: Mut<Timeline>| camera_clip_ids(&timeline, world));
     let timeline = world.resource::<Timeline>();
-    let current_time = timeline.current_time;
+    let current_time = timeline.evaluation_time();
     let follow = camera_clips
         .iter()
         .filter_map(|id| timeline.clips.get(*id))

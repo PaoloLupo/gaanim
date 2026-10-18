@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 use gaanim_core::peniko::{Blob, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
-use gaanim_scene::{RasterImage, SceneSet};
+use gaanim_scene::{RasterImage, SceneSet, StepRate, stepped};
 use gaanim_timeline::timeline::Timeline;
 use serde::Deserialize;
 
@@ -903,7 +903,8 @@ fn replace_raster_image(raster: &mut RasterImage, image: gaanim_core::peniko::Im
 }
 
 fn sample_video_system(world: &mut World) {
-    let scene_time = world.resource::<Timeline>().current_time;
+    // Frames follow stepped time; preview audio keeps the playhead.
+    let scene_time = world.resource::<Timeline>().evaluation_time();
     let mode = *world.resource::<VideoSamplingMode>();
     let mut decoder = world.remove_resource::<VideoDecoder>().unwrap_or_default();
 
@@ -918,9 +919,10 @@ fn sample_video_system(world: &mut World) {
             let Some(playback) = world.get::<VideoPlayback>(response.entity) else {
                 continue;
             };
+            let time = stepped(world.get::<StepRate>(response.entity), scene_time);
             // A response may arrive after a scrub reached a frame that the
             // cache supplied; it must not replace the frame shown now.
-            let shows_wanted_frame = playback.last_frame == Some(playback.frame_index(scene_time));
+            let shows_wanted_frame = playback.last_frame == Some(playback.frame_index(time));
             decoder.insert_cache((playback.path.clone(), response.frame), image.clone());
             if shows_wanted_frame {
                 continue;
@@ -935,14 +937,14 @@ fn sample_video_system(world: &mut World) {
     }
 
     let targets = world
-        .query::<(Entity, &VideoPlayback)>()
+        .query::<(Entity, &VideoPlayback, Option<&StepRate>)>()
         .iter(world)
-        .map(|(entity, playback)| {
+        .map(|(entity, playback, step)| {
             (
                 entity,
                 playback.path.clone(),
                 playback.metadata.clone(),
-                playback.frame_index(scene_time),
+                playback.frame_index(stepped(step, scene_time)),
                 playback.last_frame,
             )
         })

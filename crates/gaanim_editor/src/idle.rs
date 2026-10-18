@@ -122,7 +122,10 @@ fn note_input_system(
 fn note_playback_system(
     mut state: ResMut<IdleState>,
     timeline: Res<Timeline>,
-    videos: Query<&gaanim_media::VideoPlayback>,
+    videos: Query<(
+        &gaanim_media::VideoPlayback,
+        Option<&gaanim_scene::StepRate>,
+    )>,
     sinks: Query<&AudioSink>,
 ) {
     let time = timeline.current_time;
@@ -131,10 +134,11 @@ fn note_playback_system(
     state.previous_time = time.to_bits();
     state.previous_duration = timeline.cached_duration.to_bits();
     // A realtime video frame arrives from the decoder thread, polled once
-    // per update until the playhead's frame is shown.
-    let decoding = videos
-        .iter()
-        .any(|video| video.last_frame != Some(video.frame_index(time)));
+    // per update until the playhead's frame, in stepped time, is shown.
+    let shown = timeline.evaluation_time();
+    let decoding = videos.iter().any(|(video, step)| {
+        video.last_frame != Some(video.frame_index(gaanim_scene::stepped(step, shown)))
+    });
     let sounding = sinks.iter().any(|sink| !sink.is_paused() && !sink.empty());
     state.active |=
         moved || timeline.is_playing || timeline.seek_request.is_some() || decoding || sounding;

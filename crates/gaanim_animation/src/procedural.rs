@@ -14,7 +14,7 @@ use gaanim_core::ObjectId;
 use gaanim_core::glam::{DQuat, DVec3};
 use gaanim_core::peniko::{Brush, Color};
 use gaanim_math::{Noise, RateFunc, SpatialTransform};
-use gaanim_scene::{Opacity, StrokeBrush};
+use gaanim_scene::{Opacity, StepRate, StrokeBrush, stepped};
 
 use crate::signals::FloatSignal;
 use crate::updaters::PlaybackState;
@@ -304,13 +304,16 @@ pub enum ProceduralLayer {
     /// Organic jitter: seeded fBm noise on position, rotation, and scale.
     /// A fixed `frequency` lives in `noise`; a signal one keeps the noise at
     /// frequency 1 and advances it by the integrated frequency, so changing
-    /// it changes the pace without jumping.
+    /// it changes the pace without jumping. With `hold` the jitter keeps
+    /// each offset and jumps to a new one once per period, as stop-motion
+    /// does.
     Wiggle {
         noise: Noise,
         position: LayerParam,
         rotation: LayerParam,
         scale: LayerParam,
         frequency: LayerParam,
+        hold: bool,
     },
     /// A turn about z at `speed` radians per second; with a signal speed the
     /// angle is its integral, so it speeds up and slows down smoothly.
@@ -427,10 +430,17 @@ impl ProceduralMotion {
                     rotation,
                     scale,
                     frequency,
+                    hold,
                 } => {
                     let x = match frequency {
                         LayerParam::Fixed(_) => local,
                         _ => frequency.integral(scheduled.start, time, live),
+                    };
+                    // The noise runs at `noise.frequency` periods per unit of x.
+                    let x = if *hold {
+                        Noise::held(x * noise.frequency) / noise.frequency
+                    } else {
+                        x
                     };
                     // Subtracting the value at the layer's start avoids a jump.
                     let channel = |index| noise.at_time(x, index) - noise.at_time(0.0, index);
@@ -471,13 +481,14 @@ pub fn apply_procedural_motion_system(
         &mut ProceduralMotion,
         &mut SpatialTransform,
         Option<&mut Opacity>,
+        Option<&StepRate>,
     )>,
     signals: Query<&FloatSignal>,
 ) {
     let time = playback.map_or(0.0, |state| state.current_time);
     let live = |entity: Entity| signals.get(entity).ok().map(|signal| signal.value);
-    for (mut motion, mut transform, opacity) in &mut query {
-        let offset = motion.offset_with(time, &live);
+    for (mut motion, mut transform, opacity, step) in &mut query {
+        let offset = motion.offset_with(stepped(step, time), &live);
         let base = *transform;
         transform.translation += offset.translation;
         transform.rotation = base.rotation * DQuat::from_rotation_z(offset.rotation);
@@ -554,13 +565,13 @@ impl DashFlow {
 /// Adds the travelled distance to the stroke right before extraction.
 pub fn apply_dash_flow_system(
     playback: Option<Res<PlaybackState>>,
-    mut query: Query<(&mut DashFlow, &mut StrokeBrush)>,
+    mut query: Query<(&mut DashFlow, &mut StrokeBrush, Option<&StepRate>)>,
 ) {
     let time = playback.map_or(0.0, |state| state.current_time);
-    for (mut flow, mut stroke) in &mut query {
+    for (mut flow, mut stroke, step) in &mut query {
         // A larger dash offset moves the pattern back toward the start, so
         // a positive speed subtracts to flow forward along the path.
-        let shift = -flow.travel_at(time);
+        let shift = -flow.travel_at(stepped(step, time));
         if shift != 0.0 {
             let authored = stroke.style.dash_offset;
             let shifted = authored + shift;
@@ -634,15 +645,15 @@ impl StrokeCycle {
 /// Puts the cycled color on the stroke right before extraction.
 pub fn apply_stroke_cycle_system(
     playback: Option<Res<PlaybackState>>,
-    mut query: Query<(&mut StrokeCycle, &mut StrokeBrush)>,
+    mut query: Query<(&mut StrokeCycle, &mut StrokeBrush, Option<&StepRate>)>,
 ) {
     let time = playback.map_or(0.0, |state| state.current_time);
-    for (mut cycle, mut stroke) in &mut query {
+    for (mut cycle, mut stroke, step) in &mut query {
         if cycle.colors.is_empty() {
             continue;
         }
         let authored = stroke.brush.clone();
-        let cycled = Brush::Solid(cycle.color_at(time));
+        let cycled = Brush::Solid(cycle.color_at(stepped(step, time)));
         stroke.brush = Some(cycled.clone());
         cycle.applied = Some((authored, cycled));
     }
@@ -671,6 +682,7 @@ mod tests {
             rotation: 0.05.into(),
             scale: 0.0.into(),
             frequency: 2.0.into(),
+            hold: false,
         }
     }
 
@@ -778,6 +790,7 @@ mod tests {
                 rotation: 0.0.into(),
                 scale: 0.0.into(),
                 frequency: 2.0.into(),
+                hold: false,
             },
             0.0,
         );
@@ -785,6 +798,22 @@ mod tests {
         assert_eq!(at(0.0), DVec3::ZERO);
         assert!((at(0.2) - 2.0 * at(0.1)).length() < 1e-12);
         assert!(at(0.1).length() > 0.0);
+    }
+
+    #[test]
+    fn a_held_wiggle_jumps_once_per_period() {
+        let mut motion = ProceduralMotion::default();
+        let mut layer = wiggle();
+        if let ProceduralLayer::Wiggle { hold, .. } = &mut layer {
+            *hold = true;
+        }
+        motion.push(layer, 1.0);
+        let at = |time| motion.offset_at(time).translation;
+        // Two periods a second from second 1: still over the first one.
+        assert_eq!(at(1.1), DVec3::ZERO);
+        assert_eq!(at(1.6), at(1.9));
+        assert_ne!(at(1.9), at(2.0));
+        assert!(at(1.6).length() > 0.0);
     }
 
     #[test]

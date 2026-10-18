@@ -98,6 +98,41 @@ fn reactive_polyline_path(
     path
 }
 
+/// The stretches of stepped time: each segment with a step rate, cut at its
+/// stops so that the steps start again at each one.
+fn step_windows(
+    segments: &[crate::canvas::ops::Segment],
+    metadata: &[SegmentMetadata],
+) -> Vec<gaanim_timeline::timeline::StepWindow> {
+    let mut windows = Vec::new();
+    for (segment, metadata) in segments.iter().zip(metadata) {
+        let Some(rate) = segment.step_rate else {
+            continue;
+        };
+        let (start, end) = (metadata.start_time, metadata.end_time);
+        let mut bounds = vec![start];
+        bounds.extend(
+            metadata
+                .stops
+                .iter()
+                .map(|stop| stop.time)
+                .filter(|&time| time > start && time < end),
+        );
+        bounds.push(end);
+        windows.extend(
+            bounds
+                .windows(2)
+                .filter(|pair| pair[1] > pair[0])
+                .map(|pair| gaanim_timeline::timeline::StepWindow {
+                    start: pair[0],
+                    end: pair[1],
+                    rate,
+                }),
+        );
+    }
+    windows
+}
+
 /// `entity` as a metaball: the center of its local bounds and half their
 /// larger side, in scene coordinates.
 fn metaball_of(
@@ -3215,6 +3250,9 @@ impl SceneModel {
                 })
                 .collect(),
         );
+        builder
+            .timeline
+            .set_step_windows(step_windows(&segments, &segment_metadata));
         builder.timeline.set_segments(segment_metadata);
         builder.timeline.talk_target = self.talk_target;
 
@@ -11702,6 +11740,18 @@ impl SceneModel {
                     .commands
                     .entity(entity)
                     .insert(gaanim_renderer::effects::PostProcessExempt);
+            }
+        }
+        if let Some(rate) = spec.step_rate {
+            builder.timeline.stepped_objects = true;
+            // A member's own rate wins over its group's.
+            for (entity, own) in Self::hierarchy_entities(builder, mref.id) {
+                let mut entity = builder.commands.entity(entity);
+                if own {
+                    entity.insert(gaanim_scene::StepRate(rate));
+                } else {
+                    entity.insert_if_new(gaanim_scene::StepRate(rate));
+                }
             }
         }
         if let Some(tips) = &spec.tips {
@@ -22356,6 +22406,60 @@ mod tests {
             .count();
         // The group and its two members, not the other rectangle.
         assert_eq!(exempt, 3);
+    }
+
+    #[test]
+    fn a_stepped_segment_steps_from_its_start_and_again_from_each_stop() {
+        use gaanim_timeline::timeline::StepWindow;
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.segment_with("smooth", None, None, None).unwrap();
+        canvas.wait(1.0);
+        let collage = canvas.segment_with("collage", None, None, None).unwrap();
+        canvas.wait(1.1);
+        canvas.stop(None).unwrap();
+        canvas.wait(0.5);
+        canvas.set_segment_step_rate(&collage, Some(12.0)).unwrap();
+        assert!(canvas.set_segment_step_rate(&collage, Some(0.0)).is_err());
+        let (_, timeline) = compiled_world(&canvas);
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let windows = &timeline.step_windows;
+        assert_eq!(windows.len(), 2, "{windows:?}");
+        let expected = [(1.0, 2.1), (2.1, 2.6)];
+        for (window, (start, end)) in windows.iter().zip(expected) {
+            assert!(
+                close(window.start, start) && close(window.end, end),
+                "{window:?}"
+            );
+            assert_eq!(window.rate, 12.0);
+        }
+        assert!(close(timeline.step_time(0.55), 0.55));
+        assert!(close(timeline.step_time(1.1), 1.0 + 1.0 / 12.0));
+        // The stop shows its exact frame, then the steps start from it.
+        assert!(close(timeline.step_time(2.1), 2.1));
+        assert!(close(timeline.step_time(2.15), 2.1));
+        let _: &[StepWindow] = windows;
+    }
+
+    #[test]
+    fn a_step_rate_marks_a_group_and_its_members() {
+        let mut canvas = SceneModel::new(640, 360);
+        let a = canvas.rect(1.0, 1.0);
+        let b = canvas.circle(0.5);
+        let _cutout = canvas.group(&[&a, &b]).step_rate(Some(12.0)).unwrap();
+        b.step_rate(Some(6.0)).unwrap();
+        let _smooth = canvas.rect(2.0, 1.0);
+        assert!(canvas.rect(1.0, 1.0).step_rate(Some(f64::NAN)).is_err());
+        canvas.wait(0.5);
+        let (mut world, timeline) = compiled_world(&canvas);
+        assert!(timeline.stepped_objects);
+        let mut rates: Vec<f64> = world
+            .query::<&gaanim_scene::StepRate>()
+            .iter(&world)
+            .map(|rate| rate.0)
+            .collect();
+        rates.sort_by(f64::total_cmp);
+        // The circle keeps its own rate; the group and the rectangle take 12.
+        assert_eq!(rates, [6.0, 12.0, 12.0]);
     }
 
     #[test]

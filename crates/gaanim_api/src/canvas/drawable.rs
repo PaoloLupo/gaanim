@@ -1694,6 +1694,21 @@ impl DrawableHandle {
         self.update_style(|spec| spec.post_exempt = !enabled)
     }
 
+    /// Step this drawable's time like stop-motion: its animations, updaters,
+    /// procedural motion (wiggle, oscillate, spin), path modifiers, dash
+    /// flow and video or Lottie frames, and those of its members, are
+    /// evaluated `rate` times a second and hold in between. The steps sit
+    /// on a grid from timeline second 0, so drawables with the same rate
+    /// change together, and an animation still ends on its final value at
+    /// its end. `None` restores smooth time. A rate that is not positive
+    /// and finite is an error.
+    pub fn step_rate(self, rate: Option<f64>) -> Result<Self, String> {
+        if rate.is_some_and(|rate| !(rate.is_finite() && rate > 0.0)) {
+            return Err("step_rate must be a positive number of steps per second".into());
+        }
+        Ok(self.update_style(|spec| spec.step_rate = rate))
+    }
+
     /// Draw `start` and `end` tips on the path's ends, filled with its stroke
     /// paint; both `None` removes them. Arrowheads shorten the stroke under
     /// them and follow the path's current ends, so trims, `create` and

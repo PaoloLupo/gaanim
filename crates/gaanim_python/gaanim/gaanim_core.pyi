@@ -3447,6 +3447,7 @@ class Updater:
         frequency: float | Parameter | Computed = 2.0,
         octaves: int = 2,
         seed: int = 0,
+        hold: bool = False,
     ) -> Updater:
         """Layer organic, seeded jitter over the drawable's own animation.
 
@@ -3459,11 +3460,15 @@ class Updater:
         ``Parameter``: animating an amplitude to 0 calms the jitter instead of
         cutting it, and a changing frequency changes the pace without jumps.
         They also accept a ``Computed`` of the time alone, such as
-        ``music.level()``, to shake with the sound. Invalid values raise
+        ``music.level()``, to shake with the sound. With ``hold=True`` the
+        offset keeps each value and jumps to an unrelated one ``frequency``
+        times a second, as a stop-motion cutout trembles, instead of drifting;
+        the first period keeps the drawable in place. Invalid values raise
         ``ValueError``.
 
         Example:
             logo.add_updater(Updater.wiggle(position=0.08, rotation=0.03, frequency=2.0, seed=1))
+            sticker.add_updater(Updater.wiggle(position=0.03, rotation=0.02, frequency=8, hold=True))
             shake = scene.viz.parameter(0.15)
             logo.add_updater(Updater.wiggle(position=shake))
             scene.play([shake.animate.set(0).duration(1.5)])
@@ -3673,14 +3678,20 @@ class PathModifiers:
         The turn fades to nothing at the farthest vertex. Animates ``angle``.
         """
         ...
-    def wiggle_path(self, size: float = 0.1, *, detail: int = 6, frequency: float = 1.0, seed: int = 0) -> PathModifier:
+    def wiggle_path(self, size: float = 0.1, *, detail: int = 6, frequency: float = 1.0, seed: int = 0, hold: bool = False) -> PathModifier:
         """Wiggle the outline with seeded noise, alive in time.
 
         ``detail`` points per segment move along the path's normal by up to
         ``size`` units, changing ``frequency`` times a second from the
         moment the modifier is added; the points are joined smoothly. The
-        same seed gives the same wiggle at the same time. Animates ``size``
-        and ``frequency``.
+        same seed gives the same wiggle at the same time. With ``hold=True``
+        the outline keeps each shape and jumps to a new, unrelated one
+        ``frequency`` times a second: the line boil of hand-drawn animation
+        (8 to 12 is typical). ``frequency=0`` keeps one rough shape still.
+        Animates ``size`` and ``frequency``.
+
+        Example:
+            badge.modifiers.wiggle_path(0.03, detail=8, frequency=8, hold=True)
         """
         ...
     def offset(self, amount: float, *, join: Literal["miter", "round", "bevel"] = "miter", copies: int = 1) -> PathModifier:
@@ -4282,6 +4293,26 @@ class Drawable:
 
         Example:
             label = scene.text("Live").hud().move_to(-6, 4).post_process(False)
+        """
+        ...
+    def step_rate(self, rate: Optional[float]) -> Drawable:
+        """Step this drawable's time like stop-motion, ``rate`` times a second.
+
+        Its animations, updaters, ``Updater.wiggle``/``oscillate``/``rotate``
+        motion, path modifiers such as ``wiggle_path``, dash flow and video or
+        Lottie frames, and those of its members, are evaluated ``rate`` times
+        a second and hold in between, as cutouts animated "on twos" (12 at
+        24 fps). The steps sit on a grid from timeline second 0, so drawables
+        with the same rate change together, and an animation still lands on
+        its final value at its end. The rest of the scene stays smooth; to
+        step a whole segment, camera included, use
+        ``scene.segment(..., step_rate=...)``. ``None`` restores smooth time.
+        It is declaration state: it holds for the whole timeline. A rate that
+        is not a positive number raises ``ValueError``.
+
+        Example:
+            cutout = scene.media.image("assets/badge.png").step_rate(12)
+            scene.play([cutout.animate.move_to(4, 0).duration(1.5)])
         """
         ...
     def echo(
@@ -11351,6 +11382,7 @@ class Scene:
         background: Optional[BackgroundLike] = None,
         post: Optional[PostProcess | Sequence[PostProcess] | Literal[False]] = None,
         target: Optional[float] = None,
+        step_rate: Optional[float] = None,
     ) -> Segment:
         """Create and activate a named structural segment.
 
@@ -11365,13 +11397,22 @@ class Scene:
         spent on it with the plan. ``notes`` are the speaker notes Presenter
         View shows; a line ``[stop]`` or ``[stop name]`` in them marks where
         you advance. The narration script's ``## name`` section, when it has
-        one, replaces them (see ``narration_script``). Empty or duplicate
-        names, a transition on the first segment, a target that is not a
-        positive number of seconds, and a narration script that cannot be read
-        raise ``ValueError``.
+        one, replaces them (see ``narration_script``). ``step_rate`` plays the
+        segment in stepped time, like stop-motion: every frame shows the world
+        at the last of ``step_rate`` steps a second, counted from the
+        segment's start and again from each of its stops, so a stop and the
+        segment's end show their finished frame. Animations, updaters, the
+        camera, video, particles and the time of shader backgrounds and
+        post-processing all step; audio and the playhead keep running
+        smoothly. See ``Drawable.step_rate`` to step one drawable. Empty or
+        duplicate names, a transition on the first segment, a target that is
+        not a positive number of seconds, a step rate that is not a positive
+        number, and a narration script that cannot be read raise
+        ``ValueError``.
 
         Example:
             result = scene.segment("example", background="#0f172a")
+            collage = scene.segment("collage", step_rate=12)
         """
         ...
     def link(self, from_: Segment, to: Segment, transition: Transition) -> None:

@@ -7089,7 +7089,7 @@ impl PyTypography {
 
 #[pymethods]
 impl PyScene {
-    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None, post=None, target=None))]
+    #[pyo3(signature = (name, transition=None, *, notes=None, template=None, background=None, post=None, target=None, step_rate=None))]
     #[allow(clippy::too_many_arguments)]
     fn segment<'py>(
         slf: &Bound<'py, Self>,
@@ -7100,11 +7100,14 @@ impl PyScene {
         background: Option<crate::brush::PyBackgroundInput>,
         post: Option<&Bound<'py, PyAny>>,
         target: Option<f64>,
+        step_rate: Option<f64>,
     ) -> PyResult<PySegment> {
         crate::custom::ensure_authoring_allowed()?;
         let post = crate::brush::segment_post_process(post, &slf.borrow().inner)?;
         // Checked before the segment exists, so a bad target leaves none.
         let target = gaanim_api::canvas::segment_target(target)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        let step_rate = gaanim_api::canvas::segment_step_rate(step_rate)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         let template_name = template.and_then(|template| {
             template
@@ -7135,6 +7138,9 @@ impl PyScene {
                 .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
             canvas
                 .set_segment_target(&handle, target)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            canvas
+                .set_segment_step_rate(&handle, step_rate)
                 .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
             handle
         };

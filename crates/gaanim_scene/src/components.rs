@@ -183,6 +183,25 @@ pub struct ShapeDeform(pub gaanim_core::kurbo::Affine);
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct Presence(pub f32);
 
+/// Steps a drawable's time like stop-motion: its animations, updaters,
+/// procedural motion, path modifiers and video frames are evaluated this
+/// many times a second, on a grid from timeline second 0, and hold in
+/// between.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct StepRate(pub f64);
+
+impl StepRate {
+    /// The step at or before `time`.
+    pub fn step(self, time: f64) -> f64 {
+        gaanim_math::step_time(time, 0.0, self.0)
+    }
+}
+
+/// `time` as an entity with `rate` sees it.
+pub fn stepped(rate: Option<&StepRate>, time: f64) -> f64 {
+    rate.map_or(time, |rate| rate.step(time))
+}
+
 /// Local Y coordinate of a text object's typographic baseline.
 ///
 /// Unlike visual bounds, this metric is stable across ascenders, descenders,

@@ -42,16 +42,20 @@ impl PyPathModifiers {
         added(self.drawable.twist(angle))
     }
 
-    #[pyo3(signature = (size=0.1, *, detail=6, frequency=1.0, seed=0))]
+    #[pyo3(signature = (size=0.1, *, detail=6, frequency=1.0, seed=0, hold=false))]
     fn wiggle_path(
         &self,
         size: f64,
         detail: u32,
         frequency: f64,
         seed: u64,
+        hold: bool,
     ) -> PyResult<PyPathModifier> {
         crate::custom::ensure_authoring_allowed()?;
-        added(self.drawable.wiggle_path(size, detail, frequency, seed))
+        added(
+            self.drawable
+                .wiggle_path(size, detail, frequency, seed, hold),
+        )
     }
 
     #[pyo3(signature = (amount, *, join="miter", copies=1))]

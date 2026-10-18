@@ -2485,6 +2485,15 @@ impl PyDrawable {
         Ok(Self(self.0.clone().post_process(enabled)))
     }
 
+    pub(crate) fn step_rate_impl(&self, rate: Option<f64>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.0
+            .clone()
+            .step_rate(rate)
+            .map(Self)
+            .map_err(PyValueError::new_err)
+    }
+
     pub(crate) fn echo_impl(
         &self,
         count: u32,
@@ -3758,6 +3767,12 @@ impl PyDrawable {
     #[pyo3(signature = (enabled=true))]
     fn post_process<'py>(slf: &Bound<'py, Self>, enabled: bool) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().post_process_impl(enabled);
+        same_drawable(slf, result)
+    }
+    /// Step this drawable's time like stop-motion, `rate` times a second.
+    #[pyo3(signature = (rate))]
+    fn step_rate<'py>(slf: &Bound<'py, Self>, rate: Option<f64>) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().step_rate_impl(rate);
         same_drawable(slf, result)
     }
     /// Trail the drawable with fading copies of itself as it was earlier.

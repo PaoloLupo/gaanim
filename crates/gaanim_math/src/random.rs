@@ -108,6 +108,15 @@ impl Noise {
         self.sample(time, channel as f64 * 31.7 + 0.5)
     }
 
+    /// `phase` held at its whole part and spread out, so that noise sampled
+    /// there keeps one value per unit and jumps to an unrelated one at the
+    /// next, like the redrawn frames of a line boil.
+    pub fn held(phase: f64) -> f64 {
+        // Several noise features apart, so consecutive values are unrelated.
+        const SPACING: f64 = 5.3;
+        phase.floor() * SPACING
+    }
+
     fn simplex(&self, x: f64, y: f64) -> f64 {
         const F2: f64 = 0.366_025_403_784_438_6; // (sqrt(3) - 1) / 2
         const G2: f64 = 0.211_324_865_405_187_1; // (3 - sqrt(3)) / 6
