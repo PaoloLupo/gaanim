@@ -8249,6 +8249,9 @@ impl SceneModel {
                             && p.offset.is_finite()
                     }
                     CanvasEndpoint::Expression { x, y } => scalar(x) && scalar(y),
+                    CanvasEndpoint::MediaPixel { object, x, y } => {
+                        state.object_specs.contains_key(object) && x.is_finite() && y.is_finite()
+                    }
                     CanvasEndpoint::LocalExpression { space, x, y, z } => {
                         state.object_specs.contains_key(space)
                             && scalar(x)

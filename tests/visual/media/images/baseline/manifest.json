@@ -32,6 +32,21 @@
       "id": "seek_0005_t_4_800000",
       "time_seconds": 4.8,
       "file": "seek_0005_t_4_800000.png"
+    },
+    {
+      "id": "seek_0006_t_6_400000",
+      "time_seconds": 6.3999999999999995,
+      "file": "seek_0006_t_6_400000.png"
+    },
+    {
+      "id": "seek_0007_t_7_200000",
+      "time_seconds": 7.199999999999999,
+      "file": "seek_0007_t_7_200000.png"
+    },
+    {
+      "id": "seek_0008_t_8_500000",
+      "time_seconds": 8.5,
+      "file": "seek_0008_t_8_500000.png"
     }
   ]
 }

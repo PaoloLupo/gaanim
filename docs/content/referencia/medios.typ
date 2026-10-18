@@ -81,6 +81,46 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Image.point_ref",
+  kind: "method",
+  signature: "point_ref(x, y, *, normalized=False) -> PointRef",
+  params: (
+    (name: "x, y", type: "float", default: none, desc: [Píxel de la fuente, desde la esquina superior izquierda con Y hacia abajo, en la resolución del archivo.]),
+    (name: "normalized", type: "bool", default: "False", desc: [`True` toma `x` e `y` como fracciones del tamaño original.]),
+  ),
+  returns: (type: "PointRef", desc: [Un punto que sigue a ese detalle.]),
+  desc: [Un punto sobre un detalle de la imagen que se recalcula en cada fotograma a través del marco, el ajuste y el recorte actual: se queda en el mismo detalle mientras `animate.crop` hace un paneo o un zoom (un Ken Burns), y sigue a la imagen y a sus grupos si se mueven, escalan o giran. Sirve donde va un `PointRef`: `geometry.connector`, `line`, `follow`, `camera.pan_to` o `camera.inset(..., follow=True)`. A diferencia de `Drawable.pixel`, que mide con el recorte del momento en que se llama, sigue un recorte posterior o animado. Coordenadas no finitas lanzan `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "Image.region",
+  kind: "method",
+  signature: "region(x, y, width, height, *, normalized=False) -> Drawable",
+  params: (
+    (name: "x, y, width, height", type: "float", default: none, desc: [Rectángulo de la fuente en píxeles, contado como en `point_ref`.]),
+    (name: "normalized", type: "bool", default: "False", desc: [`True` usa fracciones del tamaño original.]),
+  ),
+  returns: (type: "Drawable", desc: [Un objeto invisible sobre esos píxeles.]),
+  desc: [Un objeto que no dibuja nada y se queda sobre un rectángulo de la imagen como `point_ref` sobre su punto, a través de recortes, zooms y transformaciones. Sirve de objetivo para `annotate`, `scene.fx.spotlight`, `geometry.surrounding_rect` y los conectores, como cualquier otro objeto, así que una marca sigue al detalle durante un Ken Burns. Una región que el recorte deja fuera del marco visible queda fuera también. Un rectángulo vacío o valores no finitos lanzan `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+foto = scene.media.image("foto.jpg").frame(8, 4.5, fit="cover")
+detalle = foto.region(0.55, 0.3, 0.15, 0.2, normalized=True)
+aro = detalle.annotate.circle(color=CORAL)
+nota = scene.text("detalle", size=0.5).move_to(-5.5, 3)
+scene.geometry.connector(nota, foto.point_ref(0.62, 0.4, normalized=True)).fill(CORAL)
+scene.play([aro.animate.create().duration(0.6)])
+scene.play([foto.animate.crop(0.4, 0.2, 0.4, 0.4, normalized=True).duration(2)])
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Image.quality",
   kind: "method",
   desc: [Cambia la calidad de muestreo (`"low"`, `"medium"` o `"high"`) en el cursor.],
@@ -191,10 +231,10 @@ scene.play([video.segment(start=5, end=8, speed=2)])
 ]
 
 #api-entry(
-  name: "Video.frame / crop / quality",
+  name: "Video.frame / crop / quality / point_ref / region",
   kind: "method",
-  signature: "frame(width, height, fit=\"contain\") · crop(x, y, width, height, *, normalized=False) · quality(value) -> Self",
-  desc: [Mismo comportamiento que en `Image`; los cambios de fotograma conservan la calidad.],
+  signature: "frame(width, height, fit=\"contain\") · crop(x, y, width, height, *, normalized=False) · quality(value) -> Self · point_ref(x, y, *, normalized=False) -> PointRef · region(x, y, width, height, *, normalized=False) -> Drawable",
+  desc: [Mismo comportamiento que en `Image`; los cambios de fotograma conservan la calidad, y `point_ref` y `region` siguen los píxeles de la fuente en cualquier fotograma.],
   none,
 )
 

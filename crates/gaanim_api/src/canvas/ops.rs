@@ -913,6 +913,13 @@ pub(crate) enum Op {
         padding: [f64; 4],
         corner_radius: f64,
     },
+    /// Keep `target`'s path on the source pixels `rect` (`[x0, y0, x1, y1]`,
+    /// from the top-left corner with y down) of the image or video `media`.
+    AttachMediaRegion {
+        target: ObjectId,
+        media: ObjectId,
+        rect: [f64; 4],
+    },
     /// Attach live frames, one per rendered line, to compiled
     /// text-selection bounds; they turn with the text.
     AttachLineFrames {
@@ -1187,6 +1194,9 @@ pub enum CanvasEndpoint {
         radius: ScalarSource,
         angle: ScalarSource,
     },
+    /// A source pixel of an image or video, from its top-left corner with y
+    /// down, through the media's frame, crop and transforms.
+    MediaPixel { object: ObjectId, x: f64, y: f64 },
 }
 
 /// Lightweight public reference to a derived, non-rendered endpoint.

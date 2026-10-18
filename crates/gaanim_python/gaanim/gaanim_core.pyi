@@ -4669,7 +4669,9 @@ class Drawable:
         fit modes are accounted for, so measure on the original file rather
         than on a reduced screenshot. The point follows the drawable when it
         moves, scales or turns, and works wherever an anchor point does
-        (``move_to``, ``camera.inset``, ``pan_to``, connectors). Raises
+        (``move_to``, ``camera.inset``, ``pan_to``, connectors). It is
+        measured with the frame and crop the drawable has when it is called;
+        ``Image.point_ref`` follows a later or animated crop. Raises
         ``ValueError`` on other drawables or non-finite coordinates.
 
         Example:
@@ -8471,6 +8473,40 @@ class Image(Drawable):
         Invalid values raise ValueError. Video frame changes preserve quality.
         """
         ...
+    def point_ref(self, x: float, y: float, *, normalized: bool = False) -> PointRef:
+        """Point at source pixel ``(x, y)``, kept on that detail every frame.
+
+        Pixels count from the source's top-left corner with y down, in the
+        file's own resolution; ``normalized=True`` takes fractions of its
+        size. The point is read every frame through the frame, the fit and
+        the current crop, so it stays on the same detail while
+        ``animate.crop`` pans or zooms (a Ken Burns), and it follows the
+        image and its groups as they move, scale or turn. Use it wherever a
+        ``PointRef`` goes: ``geometry.connector``, ``line``, ``follow``,
+        ``camera.pan_to`` or ``camera.inset(..., follow=True)``.
+        Non-finite coordinates raise ``ValueError``.
+
+        Example:
+            face = photo.point_ref(812, 240)
+            scene.geometry.connector(label, face)
+        """
+        ...
+    def region(self, x: float, y: float, width: float, height: float, *, normalized: bool = False) -> Drawable:
+        """An invisible drawable over the source pixels ``x, y, width, height``.
+
+        Pixels count as in ``point_ref``, and the region stays on them the
+        same way, through crops, zooms and transforms. It draws nothing:
+        ``annotate``, ``scene.fx.spotlight``, ``geometry.surrounding_rect``
+        and connectors take it as their target, as they would any drawable.
+        A region that a crop leaves outside the visible frame lies outside it
+        too. An empty rectangle or non-finite values raise ``ValueError``.
+
+        Example:
+            face = photo.region(760, 180, 120, 140)
+            ring = face.annotate.circle(color=scene.canvas.color("accent"))
+            scene.play([ring.animate.create()])
+        """
+        ...
     @property
     def source_width(self) -> int:
         """Original source width in pixels, independent of crop and transforms."""
@@ -8505,6 +8541,40 @@ class Video(Drawable):
         """Set raster sampling quality at the cursor; return this object.
 
         Invalid values raise ValueError. Video frame changes preserve quality.
+        """
+        ...
+    def point_ref(self, x: float, y: float, *, normalized: bool = False) -> PointRef:
+        """Point at source pixel ``(x, y)``, kept on that detail every frame.
+
+        Pixels count from the source's top-left corner with y down, in the
+        file's own resolution; ``normalized=True`` takes fractions of its
+        size. The point is read every frame through the frame, the fit and
+        the current crop, so it stays on the same detail while
+        ``animate.crop`` pans or zooms (a Ken Burns), and it follows the
+        video and its groups as they move, scale or turn. Use it wherever a
+        ``PointRef`` goes: ``geometry.connector``, ``line``, ``follow``,
+        ``camera.pan_to`` or ``camera.inset(..., follow=True)``.
+        Non-finite coordinates raise ``ValueError``.
+
+        Example:
+            face = photo.point_ref(812, 240)
+            scene.geometry.connector(label, face)
+        """
+        ...
+    def region(self, x: float, y: float, width: float, height: float, *, normalized: bool = False) -> Drawable:
+        """An invisible drawable over the source pixels ``x, y, width, height``.
+
+        Pixels count as in ``point_ref``, and the region stays on them the
+        same way, through crops, zooms and transforms. It draws nothing:
+        ``annotate``, ``scene.fx.spotlight``, ``geometry.surrounding_rect``
+        and connectors take it as their target, as they would any drawable.
+        A region that a crop leaves outside the visible frame lies outside it
+        too. An empty rectangle or non-finite values raise ``ValueError``.
+
+        Example:
+            face = photo.region(760, 180, 120, 140)
+            ring = face.annotate.circle(color=scene.canvas.color("accent"))
+            scene.play([ring.animate.create()])
         """
         ...
     @property

@@ -48,10 +48,12 @@ pub struct DrawableHandle {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ImagePixelError {
-    #[error("pixel() needs an image or a video drawable")]
+    #[error("pixel(), point_ref() and region() need an image or a video drawable")]
     NotImage,
     #[error("pixel coordinates must be finite")]
     NonFinite,
+    #[error("a region needs a positive width and height")]
+    EmptyRegion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -343,6 +345,81 @@ impl DrawableHandle {
             0.0,
         );
         Ok(self.anchor_point(Anchor::Center, local))
+    }
+
+    /// Pixel `(x, y)` of an image's or a video's source file, from its
+    /// top-left corner with y down, or as fractions of the source's size
+    /// with `normalized`. Unlike [`Self::pixel`] the point is read every
+    /// frame through the drawable's frame and its current crop, so it stays
+    /// on the same detail while `animate.crop` pans or zooms, and it follows
+    /// the drawable and its parents as they move, scale or turn.
+    pub fn media_point(
+        &self,
+        x: f64,
+        y: f64,
+        normalized: bool,
+    ) -> Result<super::PointRef, ImagePixelError> {
+        let (x, y) = self.source_pixel(x, y, normalized)?;
+        Ok(super::PointRef(super::CanvasEndpoint::MediaPixel {
+            object: self.id,
+            x,
+            y,
+        }))
+    }
+
+    /// An invisible drawable over the source pixels `x, y, width, height`
+    /// of an image or video (from the top-left corner with y down, or
+    /// fractions of the source with `normalized`), kept on them as
+    /// [`Self::media_point`] keeps a point. It has no paint: frames,
+    /// notations, spotlights and connectors take it as a target. A region
+    /// that a crop leaves outside the visible frame lies outside it too.
+    pub fn media_region(
+        &self,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        normalized: bool,
+    ) -> Result<DrawableHandle, ImagePixelError> {
+        let (x0, y0) = self.source_pixel(x, y, normalized)?;
+        let (x1, y1) = self.source_pixel(x + width, y + height, normalized)?;
+        if !(x1 > x0 && y1 > y0) {
+            return Err(ImagePixelError::EmptyRegion);
+        }
+        let region = super::canvas_impl::spawn_in(&self.state, SpawnKind::SurroundingRect, true)
+            .no_fill()
+            .no_stroke();
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachMediaRegion {
+                target: region.id,
+                media: self.id,
+                rect: [x0, y0, x1, y1],
+            });
+        Ok(region)
+    }
+
+    /// `(x, y)` in source pixels of this image or video.
+    fn source_pixel(
+        &self,
+        x: f64,
+        y: f64,
+        normalized: bool,
+    ) -> Result<(f64, f64), ImagePixelError> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(ImagePixelError::NonFinite);
+        }
+        let spec = self.spec.lock().expect("object spec poisoned");
+        let (width, height) =
+            super::types::media_dimensions(&spec).map_err(|_| ImagePixelError::NotImage)?;
+        Ok(if normalized {
+            (x * f64::from(width), y * f64::from(height))
+        } else {
+            (x, y)
+        })
     }
 
     /// Define a unique named anchor; existing point references remain immutable.

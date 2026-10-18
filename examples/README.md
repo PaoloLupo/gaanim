@@ -296,7 +296,7 @@ Images, SVG, video and Lottie animations.
 
 | Example | Description |
 | --- | --- |
-| [Images](media/images.py) | Raster images fitted to a frame in every mode, cropped by pixels or fractions, panned and zoomed by animating the crop, and sampled at every quality. |
+| [Images](media/images.py) | Raster images fitted to a frame in every mode, cropped by pixels or fractions, panned and zoomed by animating the crop, sampled at every quality, and points and regions that stay on their pixels through a zoom. |
 | [Svg](media/svg.py) | SVG files imported with their gradients, clip paths and filters, drawn in with write, create and fade_in, and parts addressed by id, restyled and animated. |
 | [Video](media/video.py) | MP4 clips synchronized with the timeline: fitted and cropped, trimmed, looped, sped up and slowed down, and cut into segments. |
 | [Lottie](media/lottie.py) | Lottie JSON clips trimmed, looped and sped up, drawn in before they play, and a dotLottie state machine driven by inputs, events and themes. |

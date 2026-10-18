@@ -659,7 +659,7 @@ description = "Voiceover blocks timed by their takes, markers in the text, a nar
 
 [[example]]
 path = "media/images.py"
-description = "Raster images fitted to a frame in every mode, cropped by pixels or fractions, panned and zoomed by animating the crop, and sampled at every quality."
+description = "Raster images fitted to a frame in every mode, cropped by pixels or fractions, panned and zoomed by animating the crop, sampled at every quality, and points and regions that stay on their pixels through a zoom."
 
 [[example]]
 path = "media/svg.py"
