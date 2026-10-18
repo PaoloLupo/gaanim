@@ -225,18 +225,36 @@ fn rough_ellipse(
         angle += step;
     }
     let unit = |point: Point| Point::new(point.x / PIXELS_PER_UNIT, point.y / PIXELS_PER_UNIT);
-    // Catmull-Rom through the points, the ends repeated as their own neighbors.
+    // A rough stroke overshoots its start, as a hand keeps going, and keeps
+    // its open ends. A clean one ends on its first point: it is closed, so
+    // the seam is as smooth as the rest of the ellipse.
+    let closed = overlap == 0.0;
+    if closed {
+        while points.len() > 2 && (points[points.len() - 1] - points[0]).hypot() < 1e-9 {
+            points.pop();
+        }
+    }
+    let count = points.len() as isize;
+    let at = |index: isize| {
+        points[if closed {
+            index.rem_euclid(count)
+        } else {
+            index.clamp(0, count - 1)
+        } as usize]
+    };
+    // Catmull-Rom through the points; an open stroke repeats each end as its
+    // own neighbor.
     path.move_to(unit(points[0]));
-    for index in 0..points.len() - 1 {
-        let before = points[index.saturating_sub(1)];
-        let from = points[index];
-        let to = points[index + 1];
-        let after = points[(index + 2).min(points.len() - 1)];
+    for index in 0..if closed { count } else { count - 1 } {
+        let (before, from, to, after) = (at(index - 1), at(index), at(index + 1), at(index + 2));
         path.curve_to(
             unit(from + (to - before) / 6.0),
             unit(to - (after - from) / 6.0),
             unit(to),
         );
+    }
+    if closed {
+        path.close_path();
     }
 }
 
@@ -324,6 +342,27 @@ mod tests {
             };
             assert_ne!(path, other.path(rect));
         }
+        // A clean circle closes without a corner at its seam: the tangent it
+        // starts with is the one it ends with.
+        let clean = RoughNotation {
+            passes: 1,
+            ..notation(NotationShape::Circle, 0.0)
+        }
+        .path(rect);
+        let elements = clean.elements();
+        assert!(matches!(elements.last(), Some(kurbo::PathEl::ClosePath)));
+        let kurbo::PathEl::MoveTo(start) = elements[0] else {
+            panic!("{elements:?}");
+        };
+        let kurbo::PathEl::CurveTo(first, ..) = elements[1] else {
+            panic!("{elements:?}");
+        };
+        let kurbo::PathEl::CurveTo(_, last, end) = elements[elements.len() - 2] else {
+            panic!("{elements:?}");
+        };
+        assert!((end - start).hypot() < 1e-9);
+        let (out, into) = ((first - start).normalize(), (end - last).normalize());
+        assert!((out - into).hypot() < 1e-6, "{out:?} {into:?}");
         // Moving the rectangle moves the scribble without redrawing it.
         let moved = notation(NotationShape::Circle, 1.0).path(rect + Vec2::new(5.0, -2.0));
         let mut expected = notation(NotationShape::Circle, 1.0).path(rect);
