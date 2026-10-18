@@ -1208,6 +1208,10 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// reflow keeps the child's own offset from it, so a child animated
     /// inside its box stays where it was moved.
     pub(crate) layout_rests: HashMap<ObjectId, LayoutRest>,
+    /// Where each box's own placement (`place`, `at`, an anchor) put it the
+    /// last time it was laid out, keyed by compiled box. A later reflow
+    /// moves the box by the change from there, from its cursor on.
+    pub(crate) layout_root_rests: HashMap<ObjectId, SpatialTransform>,
     /// The lowest creation order each box background has been drawn
     /// before, keyed by compiled background. The order holds for the whole
     /// timeline, so it never rises: the background stays beneath every
@@ -1298,6 +1302,7 @@ pub(crate) struct SceneBuilderState {
     text_cancellation_marks: HashMap<ObjectId, Vec<ObjectId>>,
     text_canceled_term_children: HashMap<ObjectId, Vec<ObjectId>>,
     layout_rests: HashMap<ObjectId, LayoutRest>,
+    layout_root_rests: HashMap<ObjectId, SpatialTransform>,
     declared_pivots: HashMap<ObjectId, (DVec3, DVec3)>,
     faded_opacities: HashMap<ObjectId, f32>,
     backdrop_orders: HashMap<ObjectId, u64>,
@@ -1344,6 +1349,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: self.text_cancellation_marks.clone(),
             text_canceled_term_children: self.text_canceled_term_children.clone(),
             layout_rests: self.layout_rests.clone(),
+            layout_root_rests: self.layout_root_rests.clone(),
             declared_pivots: self.declared_pivots.clone(),
             faded_opacities: self.faded_opacities.clone(),
             authored_follows: self.authored_follows.clone(),
@@ -1397,6 +1403,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            layout_root_rests,
             declared_pivots,
             faded_opacities,
             backdrop_orders,
@@ -1453,6 +1460,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks,
             text_canceled_term_children,
             layout_rests,
+            layout_root_rests,
             declared_pivots,
             faded_opacities,
             backdrop_orders,
@@ -1911,6 +1919,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_cancellation_marks: HashMap::new(),
             text_canceled_term_children: HashMap::new(),
             layout_rests: HashMap::new(),
+            layout_root_rests: HashMap::new(),
             declared_pivots: HashMap::new(),
             faded_opacities: HashMap::new(),
             authored_follows: HashMap::new(),

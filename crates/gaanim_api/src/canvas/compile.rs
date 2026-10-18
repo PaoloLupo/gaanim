@@ -5450,6 +5450,8 @@ impl SceneModel {
                         root_box.bounds.width() * 0.5,
                         root_box.bounds.height() * 0.5,
                     );
+                    // Where the box stands now, moved by its own animations.
+                    let root_before = builder.states.get(container).map(|state| state.transform);
                     if let Some(state) = builder.states.get_mut(container) {
                         state.bounds = local_root_bounds;
                         state.transform = SpatialTransform::identity();
@@ -5479,6 +5481,30 @@ impl SceneModel {
                         // final box. Otherwise the solve overwrites `at()` and
                         // anchor/edge positioning, or retains a stale pivot.
                         Self::apply_layout(builder, container, root_spec, id_map, frame_bounds);
+                    }
+                    // That replay wrote the box's base transform, which holds
+                    // from the start of the timeline. A later reflow keeps the
+                    // base it had and moves the box by the change of its
+                    // placement from the cursor on, over the transition, so
+                    // the box stands where it was until then and keeps the
+                    // moves its own animations gave it.
+                    let mut root_shift = None;
+                    if let Some(placed) = builder.states.get(container).map(|state| state.transform)
+                    {
+                        let previous = builder.layout_root_rests.insert(container, placed);
+                        if let (Some(previous), Some(before)) = (previous, root_before) {
+                            let entity = builder.states.get(container).map(|state| state.entity);
+                            if let Some(entity) = entity {
+                                Self::insert_transform_keeping_grow(builder, entity, previous);
+                            }
+                            if let Some(state) = builder.states.get_mut(container) {
+                                state.transform = before;
+                            }
+                            let delta = placed.translation - previous.translation;
+                            if delta.length_squared() > 1e-18 {
+                                root_shift = Some(delta);
+                            }
+                        }
                     }
 
                     let mut targets = Vec::new();
@@ -5775,6 +5801,15 @@ impl SceneModel {
                             std::iter::once(translate).chain(scale)
                         })
                         .collect();
+                    if let Some(delta) = root_shift {
+                        animations.push(AnimationBuilder {
+                            target: container,
+                            anim_type: AnimationType::TranslateBy { delta },
+                            duration: transition_duration,
+                            rate_func: RateFunc::Smooth,
+                            delay: 0.0,
+                        });
+                    }
                     // The grow starts from the scale the layout gave.
                     for (member, scale) in &held_scale {
                         if let Some(state) = builder.states.get_mut(*member) {
@@ -21045,6 +21080,59 @@ mod tests {
         // Less room than the ink really rewraps.
         let narrow = measure(first.x * 0.5);
         assert!(narrow.y > first.y, "narrow={narrow:?}, first={first:?}");
+    }
+
+    #[test]
+    fn a_placed_box_moves_for_a_later_reflow_only_from_its_cursor() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let first = canvas.rect(1.0, 1.0);
+        let row = canvas.group(&[&first]);
+        first.claim_layout(&row).unwrap();
+        let spec = crate::canvas::LayoutSpec {
+            kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+            style: gaanim_layout::LayoutStyle::default(),
+            within: LayoutWithin::Intrinsic,
+        };
+        let member = |handle: &DrawableHandle| crate::canvas::LayoutMemberSpec {
+            id: handle.id,
+            style: gaanim_layout::LayoutItemStyle::default(),
+        };
+        canvas.reflow_layout(
+            &row,
+            vec![member(&first)],
+            spec.clone(),
+            1,
+            None,
+            None,
+            None,
+        );
+        // Its left edge at x = -4, as `place(zone, anchor="left")` puts it.
+        let row = row.at_anchor(-4.0, 0.0, crate::canvas::Anchor::Left);
+        canvas.wait(1.0);
+        let second = canvas.rect(2.0, 1.0);
+        second.claim_layout(&row).unwrap();
+        canvas.set_group_members(&row, &[&first, &second]);
+        canvas.reflow_layout(
+            &row,
+            vec![member(&first), member(&second)],
+            spec,
+            2,
+            Some(1.0),
+            Some(&second),
+            None,
+        );
+        canvas.wait(1.0);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let x = |world: &mut World, timeline: &mut Timeline, time: f64| {
+            timeline.seek(world, time);
+            transform_of(world, &row).translation.x
+        };
+        // One unit wide, centered at -3.5 until the reflow; three wide,
+        // centered at -2.5 once it ends; on its way in between.
+        assert!((x(&mut world, &mut timeline, 0.5) + 3.5).abs() < 1e-9);
+        let midway = x(&mut world, &mut timeline, 1.5);
+        assert!(midway > -3.5 && midway < -2.5, "{midway}");
+        assert!((x(&mut world, &mut timeline, 2.5) + 2.5).abs() < 1e-9);
     }
 
     #[test]
