@@ -2875,7 +2875,9 @@ impl DrawableHandle {
     /// (captured lazily on first evaluation): `base + offset + scale * sample`.
     /// Uniform scale, opacity, and float signals are absolute:
     /// `offset + scale * sample`. Seeks and paused scrubbing are exact because
-    /// the driver accumulates no state. Call `remove_updater` to detach it.
+    /// the driver accumulates no state. The series starts at the cursor;
+    /// before it, the channel keeps what earlier animations give it. Call
+    /// `remove_updater` to detach it.
     pub fn drive_from_samples(
         &self,
         times: Vec<f64>,
@@ -2909,7 +2911,7 @@ impl DrawableHandle {
         Ok(self.attach_sampled_series(driver))
     }
 
-    fn attach_sampled_series(&self, driver: SampledSeriesDriver) -> Self {
+    pub(crate) fn attach_sampled_series(&self, driver: SampledSeriesDriver) -> Self {
         let driven = matches!(driver.property, SampledProperty::Signal).then(|| {
             driver
                 .values

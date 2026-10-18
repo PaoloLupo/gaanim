@@ -1217,6 +1217,10 @@ pub struct InvalidSampledSeries;
 /// evaluación: `base + offset + scale * muestra`. Para `UniformScale`,
 /// `Opacity` y `Signal` la salida es absoluta: `offset + scale * muestra`.
 ///
+/// Antes de `start_at` el driver no escribe: el canal queda en manos de lo
+/// que lo animara antes (un `fade_in`, un `.animate`), salvo que el driver
+/// se cree con `holding_before_start`.
+///
 /// Una entidad guarda sus drivers en `SampledSeriesDrivers`, un canal por
 /// propiedad, de modo que conducir `x` e `y` por separado no se pisa.
 #[derive(Clone)]
@@ -1236,6 +1240,8 @@ pub struct SampledSeriesDriver {
     pub base: Option<f64>,
     /// Rampa de colores del canal `Fill`.
     pub colors: Option<SampledColors>,
+    /// Mantener la primera muestra también antes de `start_at`.
+    pub hold_before_start: bool,
 }
 
 impl std::fmt::Debug for SampledSeriesDriver {
@@ -1250,7 +1256,8 @@ impl std::fmt::Debug for SampledSeriesDriver {
             .field("start_at", &self.start_at)
             .field("stop_at", &self.stop_at)
             .field("base", &self.base)
-            .field("colors", &self.colors);
+            .field("colors", &self.colors)
+            .field("hold_before_start", &self.hold_before_start);
         if gaanim_core::fingerprint::identity_debug() {
             debug
                 .field("times", &self.times)
@@ -1304,7 +1311,20 @@ impl SampledSeriesDriver {
             stop_at: None,
             base: None,
             colors: None,
+            hold_before_start: false,
         })
+    }
+
+    /// Mantiene la primera muestra antes de `start_at` en lugar de dejar el
+    /// canal a lo que lo animara antes (los valores en vivo de una votación).
+    pub fn holding_before_start(mut self) -> Self {
+        self.hold_before_start = true;
+        self
+    }
+
+    /// Si la serie ya empezó en `time`.
+    pub fn has_started(&self, time: f64) -> bool {
+        time + f64::EPSILON >= self.start_at
     }
 
     /// Da al driver la rampa de su canal `Fill`: el valor
@@ -1387,21 +1407,38 @@ impl From<SampledSeriesDriver> for SampledSeriesDrivers {
 }
 
 impl SampledSeriesDrivers {
-    /// Añade el driver o reemplaza el que ya conducía la misma propiedad.
+    /// Añade el driver. Sobre la misma propiedad, reemplaza los drivers que
+    /// empiezan en su mismo instante o después y releva a los anteriores
+    /// desde su inicio, sin borrar lo que condujeron antes.
     pub fn attach(&mut self, driver: SampledSeriesDriver) {
-        match self
-            .0
-            .iter_mut()
-            .find(|existing| existing.property == driver.property)
-        {
-            Some(existing) => *existing = driver,
-            None => self.0.push(driver),
-        }
+        self.0.retain(|existing| {
+            existing.property != driver.property
+                || existing.start_at + f64::EPSILON < driver.start_at
+        });
+        self.0.push(driver);
     }
 
-    /// Driver del canal `property`, si existe.
+    /// Primer driver del canal `property`, si existe.
     pub fn get(&self, property: SampledProperty) -> Option<&SampledSeriesDriver> {
         self.0.iter().find(|driver| driver.property == property)
+    }
+
+    /// Driver que conduce el canal `property` en `time`: el último que ya
+    /// empezó, o uno que mantenga su primera muestra antes de empezar.
+    pub fn active(&self, property: SampledProperty, time: f64) -> Option<&SampledSeriesDriver> {
+        let channel = || {
+            self.0
+                .iter()
+                .filter(move |driver| driver.property == property)
+        };
+        channel()
+            .filter(|driver| driver.has_started(time))
+            .max_by(|left, right| left.start_at.total_cmp(&right.start_at))
+            .or_else(|| {
+                channel()
+                    .filter(|driver| driver.hold_before_start)
+                    .min_by(|left, right| left.start_at.total_cmp(&right.start_at))
+            })
     }
 
     /// Congela en `time` los canales que ya corrían en ese instante
@@ -2913,6 +2950,12 @@ pub fn sampled_series_system(world: &mut World) {
                 } else {
                     0.0
                 };
+                if !drivers
+                    .active(driver.property, current_time)
+                    .is_some_and(|active| std::ptr::eq(active, driver))
+                {
+                    continue;
+                }
 
                 let effective_time = match driver.stop_at {
                     Some(stop_at) => current_time.min(stop_at),
@@ -4262,7 +4305,7 @@ mod tests {
             ))
             .id();
 
-        // Antes de start_at la serie corre desde elapsed = 0 → muestra values[0].
+        // Antes de start_at la serie no escribe: queda la pose declarada.
         world.resource_mut::<PlaybackState>().current_time = 0.5;
         sampled_series_system(&mut world);
         assert_eq!(
@@ -4333,6 +4376,96 @@ mod tests {
         assert_eq!(
             world.get::<SpatialTransform>(entity).unwrap().translation,
             DVec3::new(11.0, 7.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn sampled_series_leaves_the_channel_alone_before_its_start() {
+        // A fade_in wrote 0.25 at t = 0.5; the series only starts at t = 2.
+        let mut world = sampled_world();
+        let entity = world
+            .spawn(gaanim_scene::Opacity(0.25))
+            .insert(SampledSeriesDrivers::from(
+                SampledSeriesDriver::new(
+                    vec![0.0, 1.0],
+                    vec![1.0, 0.0],
+                    SampledProperty::Opacity,
+                    SampledInterpolation::Linear,
+                    1.0,
+                    0.0,
+                )
+                .unwrap()
+                .starting_at(2.0),
+            ))
+            .id();
+
+        world.resource_mut::<PlaybackState>().current_time = 0.5;
+        sampled_series_system(&mut world);
+        assert_eq!(world.get::<gaanim_scene::Opacity>(entity).unwrap().0, 0.25);
+
+        world.resource_mut::<PlaybackState>().current_time = 2.5;
+        sampled_series_system(&mut world);
+        assert_eq!(world.get::<gaanim_scene::Opacity>(entity).unwrap().0, 0.5);
+    }
+
+    #[test]
+    fn sampled_series_on_the_same_channel_takes_over_from_its_start() {
+        let series = |values: Vec<f64>| {
+            SampledSeriesDriver::new(
+                vec![0.0, 1.0],
+                values,
+                SampledProperty::TranslateX,
+                SampledInterpolation::Linear,
+                1.0,
+                0.0,
+            )
+            .unwrap()
+        };
+        let mut drivers = SampledSeriesDrivers::from(series(vec![0.0, 1.0]));
+        drivers.attach(series(vec![5.0, 6.0]).starting_at(4.0));
+        assert_eq!(drivers.0.len(), 2, "a later series keeps the earlier one");
+        drivers.attach(series(vec![7.0, 8.0]).starting_at(4.0));
+        assert_eq!(drivers.0.len(), 2, "a series at the same cursor replaces");
+
+        let mut world = sampled_world();
+        let entity = world.spawn((SpatialTransform::default(), drivers)).id();
+        let x_at = |world: &mut World, time: f64| {
+            world.resource_mut::<PlaybackState>().current_time = time;
+            sampled_series_system(world);
+            world.get::<SpatialTransform>(entity).unwrap().translation.x
+        };
+        assert_eq!(x_at(&mut world, 0.5), 0.5);
+        assert_eq!(x_at(&mut world, 3.0), 1.0);
+        assert_eq!(x_at(&mut world, 4.5), 7.5);
+        assert_eq!(x_at(&mut world, 2.0), 1.0, "seeking back hands it back");
+    }
+
+    #[test]
+    fn sampled_series_holding_before_start_shows_its_first_sample() {
+        let mut world = sampled_world();
+        let entity = world
+            .spawn(crate::signals::FloatSignal::new(99.0))
+            .insert(SampledSeriesDrivers::from(
+                SampledSeriesDriver::new(
+                    vec![0.0, 1.0],
+                    vec![3.0, 4.0],
+                    SampledProperty::Signal,
+                    SampledInterpolation::Linear,
+                    1.0,
+                    0.0,
+                )
+                .unwrap()
+                .starting_at(2.0)
+                .holding_before_start(),
+            ))
+            .id();
+        sampled_series_system(&mut world);
+        assert_eq!(
+            world
+                .get::<crate::signals::FloatSignal>(entity)
+                .unwrap()
+                .value,
+            3.0
         );
     }
 

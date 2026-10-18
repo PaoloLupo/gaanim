@@ -14839,6 +14839,10 @@ mod tests {
         app.update();
         crate::runtime::replay_canvas_into(app.world_mut(), canvas);
         app.update();
+        // As a host does after a replay: the t=0 keyframe holds the scene, so
+        // seeking back restores the signal the reveal has not driven yet.
+        app.world_mut().resource_mut::<Timeline>().keyframes.clear();
+        gaanim_timeline::capture_reload_keyframe(app.world_mut());
         let mut value_at = |time: f64| {
             app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
             app.update();

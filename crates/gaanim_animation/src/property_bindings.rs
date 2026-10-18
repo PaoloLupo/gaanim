@@ -217,7 +217,7 @@ impl ResolvedPropertySources {
             if frozen {
                 if let Some(driver) = world
                     .get::<crate::SampledSeriesDrivers>(parameter.entity)
-                    .and_then(|drivers| drivers.get(crate::SampledProperty::Signal))
+                    .and_then(|drivers| drivers.active(crate::SampledProperty::Signal, time))
                 {
                     let mut driver = driver.clone();
                     driver.stop_at = world
@@ -261,12 +261,12 @@ impl ResolvedPropertySources {
     }
 }
 
-/// A parameter's value at `time` while playing: its sampled series, or its
-/// signal.
+/// A parameter's value at `time` while playing: its sampled series once it
+/// has started, or its signal.
 fn live_parameter(world: &World, parameter: &PropertyParameter, time: f64) -> Option<f64> {
     if let Some(driver) = world
         .get::<crate::SampledSeriesDrivers>(parameter.entity)
-        .and_then(|drivers| drivers.get(crate::SampledProperty::Signal))
+        .and_then(|drivers| drivers.active(crate::SampledProperty::Signal, time))
     {
         let mut driver = driver.clone();
         if let Some(stops) = world.get_resource::<PropertySignalStops>() {

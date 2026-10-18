@@ -63,6 +63,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - `drive_from_samples(..., absolute=True)` toma las muestras de `x`, `y`,
   `xy` y `rotation` como posiciones y ángulos propios, sin restar la pose
   inicial.
+- Una serie de `drive_from_samples` no toca su canal antes del cursor donde
+  se declara: un objeto que entra con `fade_in()` y después tiene su
+  `opacity` conducida por una serie se ve fundir. Volver a conducir el mismo
+  canal más adelante toma el relevo desde el nuevo cursor en lugar de borrar
+  la serie anterior.
 - `scene.geometry.group(a, b)` acepta los miembros sueltos además de una
   lista.
 - `deg(90)` convierte grados a los radianes que piden los ángulos, como en
@@ -201,6 +206,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   sin `colors` toma la paleta del tema (`gaanim`) en lugar de `tableau10`.
   Para recuperar sus colores, pasa `colors=Palette("tableau10").colors()` o
   usa `Theme(palette="tableau10")`.
+- Una serie de `drive_from_samples` declarada después del inicio ya no fija
+  su primera muestra desde el segundo 0: hasta su cursor, el canal muestra la
+  pose declarada o lo que lo anime antes. Si contabas con ese valor previo,
+  declara la serie antes o ajusta la pose.
 
 = 0.14.0
 
