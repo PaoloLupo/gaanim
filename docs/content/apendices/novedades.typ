@@ -223,6 +223,18 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - `scene.camera.animate.orbit(..., dolly=0.8)` gira alrededor del objetivo
   mientras se acerca o se aleja, en un solo movimiento: `orbit` y `dolly` no
   se pueden reproducir a la vez.
+- Los ejes de `scene.viz.cartesian_3d` siguen a la cámara, como en las
+  bibliotecas de gráficos: cada plano de la rejilla va a la cara de la caja
+  que queda detrás de su contenido, así que ya no cruza por delante de una
+  superficie o de unos sólidos, y cada eje, con sus marcas, números y
+  título, a una arista del contorno de la caja, donde sus números quedan
+  fuera de ella. Los dos ejes perpendiculares al `up` de la cámara recorren
+  las aristas del suelo más cercanas a ella y el vertical sube por la arista
+  izquierda del contorno. Cada título queda junto al centro de su eje,
+  pasados sus números, y donde se juntan dos ejes solo escribe su número el
+  primero. Al girar la cámara, saltan al otro lado cuando
+  cruza el plano que pasa por el centro de la caja. `sides="fixed"` los deja
+  donde estaban, en la esquina más baja.
 
 == Efectos
 
@@ -266,6 +278,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - Una etiqueta con `.billboard()` ya no queda encima de todo el 3D: lo que
   tiene delante la tapa píxel a píxel. Si debe verse siempre, fíjala a la
   imagen con `.hud()` o acércala a la cámara.
+- Los planos y los ejes de `scene.viz.cartesian_3d` cambian de lado según
+  la cámara: con la cámara en `-y`, como en muchas escenas, el plano `xz`
+  pasa de `y` mínima a `y` máxima, el eje `y` a la arista del suelo de `x`
+  máxima y los títulos al centro de sus ejes. Para conservar la colocación
+  anterior, pasa `sides="fixed"`.
 - Las líneas 3D con `.stroke(color, ancho)` miden ese ancho; quita el ancho
   o ajústalo si las querías de 1,5 px. Las que no tienen trazo miden 2 px a
   1080p en lugar de 1,5 px a cualquier tamaño.

@@ -431,6 +431,12 @@ scene.render()
 La coordenada `z` de los datos apunta hacia el espectador, así que para ver la
 superficie como un relieve se usa `up=(0, 0, 1)` en `look_at`.
 
+Como en las bibliotecas de gráficos, los ejes siguen a la cámara: cada plano
+de la rejilla va a la cara de la caja que queda detrás de la superficie, y
+cada eje, con sus números, a una arista del contorno de la caja. Al orbitar,
+cambian de lado cuando la cámara cruza el plano que pasa por el centro de la
+caja. Con `sides="fixed"` se quedan en la esquina más baja de la caja.
+
 == Cómo se dibuja el 3D
 
 Gaanim rasteriza el 3D en la GPU. Cada malla y cada línea se sube una vez,

@@ -1,17 +1,19 @@
-"""3D axes: scene.viz.cartesian_3d with its grid planes, box sizes, axis scales and layers.
+"""3D axes: scene.viz.cartesian_3d with its grid planes, box sizes, axis scales, layers and sides.
 
 A distant perspective camera looks at every space from the front right with
 z pointing up. Segments cover which planes and axes a space draws, the size
-of its box, the scales of its axes, and animating its layers one by one.
+of its box, the scales of its axes, animating its layers one by one, and the
+sides of the box its planes and axes take as it turns.
 """
 
 import math
 import os
 
-from gaanim import Axis, Scene, Zones
+from gaanim import Axis, Easing, Scene, Zones
 
 DRAW = 1.4
 HOLD = 0.8
+TURN = 6.0
 
 X = Axis.linear(-2, 2).ticks(1).label("x")
 Y = Axis.linear(-2, 2).ticks(1).label("y")
@@ -42,25 +44,27 @@ def on_screen(zone):
 def gallery(variants, rows=2):
     """Lay out (label, build) pairs in a grid, each space above its label.
 
-    ``build()`` returns a new space, which moves under its zone.
+    ``build()`` returns a new space, which moves under its zone. Returns
+    the spaces.
     """
     columns = -(-len(variants) // rows)
     grid = scene.layout.zones(Zones.grid(rows=rows, columns=columns, gap="48px", padding="page_padding"))
     spaces = []
     for zone, (label, build) in zip(grid, variants):
-        art, caption = zone.split(Zones.rows(["1fr", 0.5 * (label.count("\n") + 1)], gap="72px"))
+        art, caption = zone.split(Zones.rows(["1fr", 0.5 * (label.count("\n") + 1)], gap="96px"))
         scene.text(label, role="code").place(caption)
         spaces.append(build().move_to_3d(*on_screen(art)))
     scene.play([space.animate.create() for space in spaces], duration=DRAW)
     scene.wait(HOLD)
+    return spaces
 
 
-def space(size=(2.6, 2.6, 1.8), **options):
+def space(size=(2.2, 2.2, 1.5), **options):
     """A space of X, Y and Z in a box of ``size``, with ``options``."""
     return lambda: scene.viz.cartesian_3d(X, Y, Z, size=size, **options)
 
 
-# Each label is the options passed to scene.viz.cartesian_3d(X, Y, Z, size=(2.6, 2.6, 1.8), ...).
+# Each label is the options passed to scene.viz.cartesian_3d(X, Y, Z, size=(2.2, 2.2, 1.5), ...).
 # grid switches the three planes at once; xy_grid, xz_grid and yz_grid
 # override it for one plane.
 scene.segment("planes")
@@ -71,14 +75,14 @@ gallery([
     ("xy_grid=False, yz_grid=False", space(xy_grid=False, yz_grid=False)),
 ])
 
-# axes switches the three axis lines, which run from the box's lowest
-# corner; x_axis, y_axis and z_axis override it for one line.
+# axes switches the three axis lines, which run along edges of the box's
+# outline; x_axis, y_axis and z_axis override it for one line.
 scene.segment("axes")
 gallery(
     [
-        ("grid=False", space((3.2, 3.2, 2.2), grid=False)),
-        ("grid=False,\nz_axis=False", space((3.2, 3.2, 2.2), grid=False, z_axis=False)),
-        ("axes=False", space((3.2, 3.2, 2.2), axes=False)),
+        ("grid=False", space((2.6, 2.6, 1.8), grid=False)),
+        ("grid=False,\nz_axis=False", space((2.6, 2.6, 1.8), grid=False, z_axis=False)),
+        ("axes=False", space((2.6, 2.6, 1.8), axes=False)),
     ],
     rows=1,
 )
@@ -88,9 +92,9 @@ gallery(
 scene.segment("size")
 gallery(
     [
-        ("size=(3.2, 3.2, 1.2)", space((3.2, 3.2, 1.2), xz_grid=False)),
-        ("size=(2.2, 2.2, 4)", space((2.2, 2.2, 4), xz_grid=False)),
-        ("size=(4, 2, 1.4)", space((4, 2, 1.4), xz_grid=False)),
+        ("size=(2.8, 2.8, 1)", space((2.8, 2.8, 1), xz_grid=False)),
+        ("size=(1.8, 1.8, 3.4)", space((1.8, 1.8, 3.4), xz_grid=False)),
+        ("size=(3.4, 1.7, 1.2)", space((3.4, 1.7, 1.2), xz_grid=False)),
     ],
     rows=1,
 )
@@ -99,7 +103,7 @@ gallery(
 # Any Axis scale works on any axis; here x changes and y and z stay linear,
 # so the grid lines across x show how each scale spaces its ticks.
 def scaled(x_axis):
-    return lambda: scene.viz.cartesian_3d(x_axis, Y, Z, size=(2.6, 2.6, 1.8), yz_grid=False)
+    return lambda: scene.viz.cartesian_3d(x_axis, Y, Z, size=(3, 1.8, 1.4), yz_grid=False)
 
 
 scene.segment("scales")
@@ -112,11 +116,11 @@ gallery([
 
 # Every space keeps its parts in layers that animate on their own: "grid",
 # "axes", "ticks", "numbers" and "labels". Axis.style colors the axis lines
-# and their ticks. The axes draw the box's lowest edges, so they come first.
+# and their ticks. The axes draw edges of the box's outline, so they come first.
 scene.segment("layers")
-label_column, stage = scene.layout.zones(Zones.columns(["4fr", "3fr"], gap="48px", padding="page_padding"))
+label_column, stage = scene.layout.zones(Zones.columns(["4fr", "3fr"], gap="120px", padding="page_padding"))
 styled = [axis.style(color=accent, tick_color=accent) for axis in (X, Y, Z)]
-world = scene.viz.cartesian_3d(*styled, size=(4, 4, 2.8)).move_to_3d(*on_screen(stage))
+world = scene.viz.cartesian_3d(*styled, size=(3.2, 3.2, 2.2)).move_to_3d(*on_screen(stage))
 steps = [
     ('world.layer("axes").animate.create()', world.layer("axes").animate.create()),
     ('world.layer("grid").animate.fade_in()', world.layer("grid").animate.fade_in()),
@@ -131,11 +135,29 @@ for _, step in steps:
     scene.play([step], duration=DRAW / 2)
 scene.wait(HOLD)
 
+# sides chooses where the planes and axes sit on the box. "view", the
+# default, puts each plane on the face behind the box's content and each axis
+# on an edge of the box's outline, as the camera sees it; "fixed" keeps them
+# at the box's lowest corner. Both boxes turn a full turn about z.
+scene.segment("sides")
+turning = gallery(
+    [
+        ('sides="view"', space((2.8, 2.8, 1.9), sides="view")),
+        ('sides="fixed"', space((2.8, 2.8, 1.9), sides="fixed")),
+    ],
+    rows=1,
+)
+scene.play([turn.animate.rotate_by_3d("z", math.tau) for turn in turning], duration=TURN, easing=Easing.LINEAR)
+scene.wait(HOLD)
+
 # Drawing and settled in the first four segments, then each layer step.
 segment = DRAW + HOLD
 seeks = [segment * index + t for index in range(4) for t in (0.6, DRAW + 0.4)]
 seeks += [4 * segment + DRAW / 2 * step + 0.6 for step in range(len(steps))]
 seeks += [4 * segment + DRAW / 2 * len(steps) + 0.4]
+# Each box drawn, then turned to each quarter.
+sides_start = 4 * segment + DRAW / 2 * len(steps) + HOLD
+seeks += [sides_start + DRAW + HOLD + TURN * eighth / 8 for eighth in (1, 3, 5, 7)]
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, seeks)
 else:

@@ -488,6 +488,14 @@ pub struct AxisLabelGap {
     /// For a title, half the size of the widest number beside the axis's
     /// end, which it clears too; `None` for a number.
     pub title: Option<gaanim_core::glam::DVec2>,
+    /// Whether a title stands beside its axis, anchored at its middle, past
+    /// its numbers on the side they take, rather than past the axis's end.
+    pub beside: bool,
+    /// The dimension of the axis whose edge the label follows to where the
+    /// camera shows the box best (see [`crate::AxisBoxLayout::for_view`]):
+    /// its anchor lies on that axis's edge from the box's lowest corner.
+    /// `None` keeps it at its anchor.
+    pub follows: Option<usize>,
 }
 
 /// Box background marker: drawn before the box content it shares a render

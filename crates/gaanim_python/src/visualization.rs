@@ -3471,7 +3471,7 @@ impl PyVisualization {
         xy_grid=None, xz_grid=None, yz_grid=None,
         x_ticks=None, y_ticks=None, z_ticks=None,
         x_numbers=None, y_numbers=None, z_numbers=None,
-        x_labels=None, y_labels=None, z_labels=None
+        x_labels=None, y_labels=None, z_labels=None, sides="view"
     ))]
     #[allow(clippy::too_many_arguments)]
     fn cartesian_3d(
@@ -3500,8 +3500,18 @@ impl PyVisualization {
         x_labels: Option<bool>,
         y_labels: Option<bool>,
         z_labels: Option<bool>,
+        sides: &str,
     ) -> PyResult<PyCoordinateSpace3D> {
         crate::custom::ensure_authoring_allowed()?;
+        let sides = match sides {
+            "view" => gaanim_scene::AxisBoxSides::View,
+            "fixed" => gaanim_scene::AxisBoxSides::Fixed,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "sides must be 'view' or 'fixed', got {other:?}"
+                )));
+            }
+        };
         let visibility = Cartesian3DVisibility {
             x_axis: x_axis.unwrap_or(axes),
             y_axis: y_axis.unwrap_or(axes),
@@ -3523,12 +3533,13 @@ impl PyVisualization {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .coordinate_axes_3d_with_visibility(
+            .coordinate_axes_3d_with_sides(
                 x.0.clone(),
                 y.0.clone(),
                 z.0.clone(),
                 [size.0, size.1, size.2],
                 visibility,
+                sides,
             )
             .map_err(value_error)?;
         Ok(PyCoordinateSpace3D::new(inner, self.inner.clone()))

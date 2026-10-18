@@ -1,5 +1,6 @@
 pub mod media_frame;
 pub use media_frame::{ImageFit, MediaFrame};
+pub mod axis_box;
 pub mod components;
 pub mod hierarchy;
 pub mod occlusion;
@@ -26,6 +27,7 @@ pub use components::{
     RenderLayer, RenderOrder, SegmentContent, ShapeDeform, StepRate, StrokeBrush, TextBaseline,
     TriangleMeshData, Visible, WorldBounds, ZLayer, stepped,
 };
+pub use axis_box::{AxisBoxLayout, AxisBoxPart, AxisBoxRole, AxisBoxShown, AxisBoxSides, PlaneEdge};
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use occlusion::Occlusion;
 
