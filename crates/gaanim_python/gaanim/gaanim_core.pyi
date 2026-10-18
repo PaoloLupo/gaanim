@@ -4914,11 +4914,14 @@ class Drawable:
         callbacks, exact under seeks and paused scrubbing. Translation axes
         and ``rotation`` are relative to the authored pose
         (``base + offset + scale * sample``); ``scale``, ``opacity``, and
-        ``signal`` are absolute (``offset + scale * sample``). Samples outside
-        the series clamp to its first/last value. ``times`` are relative to
-        the timeline cursor where this call is made. Each property is an
-        independent channel: driving ``"x"`` and then ``"y"`` keeps both,
-        while driving the same property again replaces it. Detach with
+        ``signal`` are absolute (``offset + scale * sample``). ``times`` are
+        relative to the timeline cursor where this call is made. Before that
+        cursor the series leaves the channel to earlier animations, so a
+        ``fade_in`` followed by an ``"opacity"`` series shows the fade; between
+        and after its samples it holds the first/last value. Each property is
+        an independent channel: driving ``"x"`` and then ``"y"`` keeps both,
+        while driving the same property again takes over from the new cursor
+        (or replaces a series made at the same cursor). Detach with
         ``remove_updater()``.
 
         Example:
@@ -7497,7 +7500,8 @@ class Parameter:
         The value becomes ``offset + scale * sample`` as a pure function of
         timeline time, so computed values, readouts, and reactive plots
         referencing this parameter follow the series without Python callbacks.
-        ``times`` are relative to the timeline cursor where this call is made.
+        ``times`` are relative to the timeline cursor where this call is made;
+        before it the parameter keeps its value or earlier animations.
 
         Example:
             phase = scene.viz.parameter(0.0)

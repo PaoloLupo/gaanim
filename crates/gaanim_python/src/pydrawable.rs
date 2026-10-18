@@ -4145,10 +4145,12 @@ impl PyDrawable {
     /// Translation axes and rotation are relative to the authored pose:
     /// `base + offset + scale * sample`, or with `absolute=True` positions
     /// and angles of their own: `offset + scale * sample`. Scale, opacity, and signal are
-    /// absolute: `offset + scale * sample`. Samples outside the series are
-    /// clamped to its first/last value. `times` are relative to the timeline
-    /// cursor where this call is made. Each property is an independent
-    /// channel; driving the same property again replaces it.
+    /// absolute: `offset + scale * sample`. `times` are relative to the
+    /// timeline cursor where this call is made. Before that cursor the series
+    /// leaves the channel to earlier animations (a `fade_in`, an `.animate`
+    /// move); past its samples it holds the first/last value. Each property
+    /// is an independent channel; driving the same property again takes over
+    /// from the new cursor, or replaces the series made at the same cursor.
     ///
     /// ```python
     /// times = [i * 0.02 for i in range(len(accel))]

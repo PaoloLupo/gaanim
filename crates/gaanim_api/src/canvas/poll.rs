@@ -18,7 +18,7 @@ use gaanim_animation::polls::{
     TextAlign, leader_fraction,
 };
 use gaanim_animation::rehearsal::{Lean, MAX_PLAYERS, RehearsalSpec};
-use gaanim_animation::{SampledInterpolation, SampledProperty};
+use gaanim_animation::{SampledInterpolation, SampledProperty, SampledSeriesDriver};
 use gaanim_core::peniko::Color;
 pub use gaanim_timeline::timeline::GateCondition;
 pub use gaanim_timeline::timeline::PollImage;
@@ -792,17 +792,19 @@ fn live_parameter(
             .expect("canvas state poisoned")
             .widen_parameter_range(parameter.drawable().id, [low, high]);
     }
-    parameter
-        .drawable()
-        .drive_from_samples(
-            times,
-            values.clone(),
-            SampledProperty::Signal,
-            interpolation,
-            1.0,
-            0.0,
-        )
-        .map_err(|_| PollError::Invalid("could not drive the poll value".into()))?;
+    // The live value shows from the start of the timeline, not only from
+    // the cursor where the value was made.
+    let driver = SampledSeriesDriver::new(
+        times,
+        values.clone(),
+        SampledProperty::Signal,
+        interpolation,
+        1.0,
+        0.0,
+    )
+    .map_err(|_| PollError::Invalid("could not drive the poll value".into()))?
+    .holding_before_start();
+    parameter.drawable().attach_sampled_series(driver);
     state
         .lock()
         .expect("canvas state poisoned")
