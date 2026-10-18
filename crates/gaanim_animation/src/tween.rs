@@ -83,10 +83,24 @@ impl Tween {
 /// shared by its clones: every later frame only interpolates. It belongs to
 /// the `from` and `to` paths beside it, so tables always compare equal.
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct MorphTable(
-    #[cfg_attr(feature = "serde", serde(skip))] Arc<std::sync::OnceLock<gaanim_math::MorphPlan>>,
-);
+pub struct MorphTable(Arc<std::sync::OnceLock<gaanim_math::MorphPlan>>);
+
+/// A table is a cache rebuilt on its first frame: it is written empty and
+/// read back as a new one.
+#[cfg(feature = "serde")]
+impl serde::Serialize for MorphTable {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_unit_struct("MorphTable")
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MorphTable {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer)?;
+        Ok(Self::default())
+    }
+}
 
 impl MorphTable {
     /// The morph from `from` to `to` at `t`, as

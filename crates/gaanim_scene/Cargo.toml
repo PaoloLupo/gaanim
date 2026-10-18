@@ -18,7 +18,7 @@ glam = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 thiserror = { workspace = true }
-serde = { version = "1.0", features = ["derive"], optional = true }
+serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 
 # The playground's Pyodide extension (wasm32-unknown-emscripten) records scenes
 # without assets, logging or rendering: on wasm32 these Bevy subsystems enable
