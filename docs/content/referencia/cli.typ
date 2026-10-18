@@ -60,6 +60,9 @@ volver a uno de los diez proyectos recientes. Con un script o proyecto abre el
 editor, que vuelve a ejecutar el script al guardar (hot reload) y recarga la
 escena cuando cambia un asset del proyecto. Con un paquete `.gaanim`, `gaanim`
 reproduce los fotogramas grabados con las mismas opciones, sin cargar Python.
+El paquete guarda fotogramas y cámaras, no los objetos de la escena: la barra
+de overlays deja fuera el layout y el panel de animaciones, y el inspector
+muestra la cámara grabada.
 
 #table(
   columns: (auto, 1fr),

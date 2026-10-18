@@ -240,8 +240,10 @@ pub fn animation_timeline_keys_system(
     keys: Res<ButtonInput<KeyCode>>,
     presentation: Res<PresentationMode>,
     mut panel: ResMut<AnimationTimeline>,
+    bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
 ) {
-    if presentation.active || egui_wants.wants_keyboard_input() {
+    // A bundle records frames, not the animations that made them.
+    if presentation.active || egui_wants.wants_keyboard_input() || bundle.is_some() {
         return;
     }
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
@@ -356,8 +358,9 @@ pub fn animation_timeline_panel_system(
     mut overlays: ResMut<EditorOverlays>,
     authored: Option<Res<AuthoredObjects>>,
     presentation: Res<PresentationMode>,
+    bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
 ) {
-    if presentation.active || !panel.open {
+    if presentation.active || !panel.open || bundle.is_some() {
         panel.height = 0.0;
         return;
     }

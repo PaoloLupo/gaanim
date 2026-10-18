@@ -138,6 +138,13 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   con `move_to_3d` y `rotate_to_3d`: texto en el suelo, en una pared o en la
   cara de un sólido. El ejemplo `3d/shapes_3d` muestra las cuatro.
 
+== Editor
+
+- Al reproducir un paquete `.gaanim`, la barra de overlays, la paleta de
+  comandos y la hoja de atajos dejan fuera el layout y el panel de
+  animaciones, que el paquete no guarda, y el inspector muestra la cámara
+  grabada.
+
 == Al actualizar
 
 - El 3D cambia de aspecto: bordes con MSAA en lugar del antialiasing de
