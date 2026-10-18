@@ -585,6 +585,22 @@ siempre el mismo. Un número fuera de rango lanza `ValueError`.
 )
 
 #api-entry(
+  name: "PostProcess.tint",
+  kind: "factory",
+  signature: "tint(color, amount=1.0) -> PostProcess",
+  desc: [Monocromo en `color`, como una copia en sepia: el brillo de cada píxel va del negro a `color` (donde el píxel brilla tanto como `color`) y luego al blanco, así que la imagen conserva su brillo. `amount` (0 a 1) lo mezcla con los colores originales; el alfa del color se ignora. Sirve también como `shader_effect`, para teñir una sola foto. Un `amount` fuera de 0 a 1 lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "PostProcess.duotone",
+  kind: "factory",
+  signature: "duotone(shadows, highlights, amount=1.0) -> PostProcess",
+  desc: [Duotono: el brillo de cada píxel va de `shadows` (el negro) a `highlights` (el blanco) y los medios tonos mezclan los dos, como una impresión a dos tintas. `amount` (0 a 1) lo mezcla con los colores originales; el alfa de los colores se ignora. Sirve también como `shader_effect`, para poner una foto en los colores de una marca. Un `amount` fuera de 0 a 1 lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
   name: "PostProcess.lut",
   kind: "factory",
   signature: "lut(path, strength=1.0) -> PostProcess",

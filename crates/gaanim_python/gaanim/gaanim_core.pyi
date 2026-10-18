@@ -686,6 +686,38 @@ class PostProcess:
         ``saturation`` about luma (1 keeps them)."""
         ...
     @staticmethod
+    def tint(color: ColorLike, amount: float | Parameter | Computed = 1.0) -> PostProcess:
+        """Turn the frame into a monochrome in ``color``, like a sepia print.
+
+        Each pixel's brightness runs from black through ``color`` (where the
+        pixel is as bright as ``color``) to white, so the image keeps its
+        brightness. ``amount`` (0..1) blends the result with the original
+        colors; the color's alpha is ignored. Works as a ``shader_effect``
+        too, to tint one photo. An ``amount`` outside 0..1 raises
+        ``ValueError``.
+
+        Example:
+            photo.shader_effect(PostProcess.tint("#704214"))
+        """
+        ...
+    @staticmethod
+    def duotone(
+        shadows: ColorLike,
+        highlights: ColorLike,
+        amount: float | Parameter | Computed = 1.0,
+    ) -> PostProcess:
+        """Map each pixel's brightness from ``shadows`` (black) to ``highlights`` (white).
+
+        Midtones mix the two colors, as in a two-ink print. ``amount``
+        (0..1) blends the result with the original colors; the colors' alpha
+        is ignored. Works as a ``shader_effect`` too, to set one photo in a
+        brand's colors. An ``amount`` outside 0..1 raises ``ValueError``.
+
+        Example:
+            photo.shader_effect(PostProcess.duotone("#1d2b53", "#ffcc66"))
+        """
+        ...
+    @staticmethod
     def lut(path: str | os.PathLike[str], strength: float | Parameter | Computed = 1.0) -> PostProcess:
         """Grade through the 3D lookup table of a ``.cube`` file, blended by ``strength`` (0..1).
 
@@ -5492,9 +5524,10 @@ class TextSelectionAnimation:
         Every line spanned by the selection gets one band that covers the
         full glyph height of that line plus ``padding`` (world units; ``None``
         uses 10% of the line height). Bands grow from the left edge, one line
-        after another, sharing the animation duration by band length. They are
-        drawn behind the glyphs but above objects authored before the text,
-        and stay on screen afterwards.
+        after another, sharing the animation duration by band length. On a
+        rotated text, or one inside a rotated group, the bands follow its
+        lines and turn with it. They are drawn behind the glyphs but above
+        objects authored before the text, and stay on screen afterwards.
 
         ``color`` defaults to a highlighter yellow and its alpha is multiplied
         by ``opacity``. ``skew`` tilts each band in radians (positive rises to
@@ -10887,7 +10920,9 @@ class Fx:
         whole cycle, and an easing such as ``Easing.SMOOTH`` keeps it dimmed at
         the end. The hole is a live frame around the target's bounds,
         ``padding`` away (0.2 by default) and rounded by ``corner_radius``; it
-        follows the target if it moves. A sequence of targets cuts one hole
+        follows the target if it moves. A text selection gets one hole per
+        line it spans, around its glyphs only, which turns with a rotated
+        text, as ``marker`` bands do. A sequence of targets cuts one hole
         around each, and holes that overlap merge: group the targets to light
         their joint box instead. The returned animation plays on the
         overlay. An empty sequence, a ``dim`` out of range or a target of

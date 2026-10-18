@@ -6969,6 +6969,25 @@ impl SceneModel {
                         );
                     }
                 }
+                Op::AttachLineFrames {
+                    target,
+                    sources,
+                    padding,
+                    corner_radius,
+                } => {
+                    let compiled = Self::bounds_source_ids(builder, id_map, sources);
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(state) = builder.states.get(target_id)
+                    {
+                        builder.commands.entity(state.entity).insert(
+                            gaanim_animation::SurroundingRect::lines(
+                                compiled,
+                                *padding,
+                                *corner_radius,
+                            ),
+                        );
+                    }
+                }
                 Op::AttachUnderline {
                     target,
                     sources,
@@ -22445,6 +22464,44 @@ mod tests {
         // The cover, then one hole per target.
         assert_eq!(operands, vec![3]);
         assert!(canvas.spotlight(Vec::new(), 0.7, [0.1; 4], 0.05).is_err());
+    }
+
+    #[test]
+    fn a_spotlight_on_a_text_selection_cuts_one_hole_per_line() {
+        let mut canvas = SceneModel::new(640, 360);
+        let card = canvas.rect(1.0, 1.0).move_to(-4.0, 0.0);
+        let text = canvas.text("uno dos tres");
+        let anim = canvas
+            .spotlight(
+                vec![
+                    crate::canvas::BoundsTarget::Drawable(card.id),
+                    crate::canvas::BoundsTarget::TextSelection {
+                        target: text.id,
+                        fragment: "dos".into(),
+                        occurrence: None,
+                    },
+                ],
+                0.7,
+                [0.1; 4],
+                0.05,
+            )
+            .unwrap();
+        canvas.play(vec![anim]);
+        let (mut world, _) = compiled_world(&canvas);
+        let mut shapes: Vec<(gaanim_animation::SurroundingShape, usize)> = world
+            .query::<&gaanim_animation::SurroundingRect>()
+            .iter(&world)
+            .map(|frame| (frame.shape, frame.to.len()))
+            .collect();
+        shapes.sort_by_key(|(shape, _)| *shape == gaanim_animation::SurroundingShape::Lines);
+        // The card keeps its frame; the selection's three glyphs get lines.
+        assert_eq!(
+            shapes,
+            vec![
+                (gaanim_animation::SurroundingShape::Frame, 1),
+                (gaanim_animation::SurroundingShape::Lines, 3),
+            ]
+        );
     }
 
     #[test]
