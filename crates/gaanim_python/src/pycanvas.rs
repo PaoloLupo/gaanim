@@ -6006,9 +6006,15 @@ impl PyMediaLibrary {
 
 #[pymethods]
 impl PyGeometry {
-    /// Members as a sequence, `group([a, b])`, or one by one, `group(a, b)`.
-    #[pyo3(signature = (*members))]
-    fn group(&self, members: &Bound<'_, PyTuple>) -> PyResult<PyDrawable> {
+    /// Members as a sequence, `group([a, b])`, or one by one, `group(a, b)`;
+    /// `origin` is the point, in scene coordinates, it turns about and that
+    /// `move_to` places, instead of the center of its members' box.
+    #[pyo3(signature = (*members, origin=None))]
+    fn group(
+        &self,
+        members: &Bound<'_, PyTuple>,
+        origin: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         let mut flat = Vec::with_capacity(members.len());
         for member in members.iter() {
@@ -6025,16 +6031,27 @@ impl PyGeometry {
             }
         }
         let members = flat;
-        Ok({
-            let refs: Vec<&gaanim_api::canvas::DrawableHandle> =
-                members.iter().map(|m| &m.0).collect();
-            PyDrawable(
-                self.inner
-                    .lock()
-                    .expect("scene canvas poisoned")
-                    .group(&refs),
-            )
-        })
+        let origin = origin
+            .map(|origin| {
+                origin
+                    .extract::<(f64, f64, f64)>()
+                    .or_else(|_| origin.extract::<(f64, f64)>().map(|(x, y)| (x, y, 0.0)))
+                    .ok()
+                    .map(|(x, y, z)| gaanim_core::glam::DVec3::new(x, y, z))
+                    .filter(|origin| origin.is_finite())
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyValueError::new_err(
+                            "origin must be a finite (x, y) or (x, y, z) point",
+                        )
+                    })
+            })
+            .transpose()?;
+        let refs: Vec<&gaanim_api::canvas::DrawableHandle> = members.iter().map(|m| &m.0).collect();
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        Ok(PyDrawable(match origin {
+            Some(origin) => canvas.group_about(&refs, origin),
+            None => canvas.group(&refs),
+        }))
     }
 
     /// `count` copies of `shape`, each turned, scaled and shifted by one more

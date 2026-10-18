@@ -8055,6 +8055,16 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// center as the transform pivot, so rotations and scales remain centered
     /// without rewriting coordinates consumed by child updaters.
     pub fn group(&mut self, children: &[MobjectRef]) -> MobjectRef {
+        self.group_about(children, None)
+    }
+
+    /// A group pivoting on `origin`, in scene coordinates, or on the center
+    /// of its children's box when `None`.
+    pub fn group_about(
+        &mut self,
+        children: &[MobjectRef],
+        origin: Option<gaanim_core::glam::DVec3>,
+    ) -> MobjectRef {
         let id = self.next_id();
 
         // 1. Calculate the collective bounds of the children in world space
@@ -8078,10 +8088,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // 2. Keep the group matrix at identity and use the visual center only as
         // its pivot. Re-centering every child would change the local coordinate
         // system seen by custom updaters after grouping.
-        let center = if has_bounds {
-            union_bounds.center()
-        } else {
-            gaanim_core::glam::DVec3::ZERO
+        let center = match origin {
+            Some(origin) => origin,
+            None if has_bounds => union_bounds.center(),
+            None => gaanim_core::glam::DVec3::ZERO,
         };
         let group_transform = SpatialTransform::identity().with_anchor(center);
 

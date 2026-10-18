@@ -339,6 +339,11 @@ scene.render()
 - Los drawables tienen versiones 3D de sus transformaciones: `move_to_3d`,
   `shift_by_3d`, `rotate_by_3d(eje, radianes)` y `scale_by_3d`, tanto
   inmediatas como bajo `.animate`.
+- Un sólido rígido se arma con `group(..., origin=(x, y, z))`: el grupo gira
+  alrededor de ese punto y `move_to_3d` lo coloca, así que una peonza modelada
+  desde su punta se inclina sobre ella. Para moverlo con una simulación,
+  `drive_from_samples(tiempos, cuaterniones, "orientation")` lo orienta en
+  cada instante sin llamar a Python en cada fotograma.
 
 Los ejes son los de la escena 2D: `x` hacia la derecha, `y` hacia arriba y `z`
 hacia el espectador.

@@ -4910,8 +4910,8 @@ class Drawable:
     def drive_from_samples(
         self,
         times: Sequence[float],
-        values: Sequence[float] | Sequence[tuple[float, float]],
-        property: Literal["x", "y", "xy", "z", "rotation", "scale", "opacity", "signal", "fill"] = "x",
+        values: Sequence[float] | Sequence[tuple[float, float]] | Sequence[tuple[float, float, float, float]],
+        property: Literal["x", "y", "xy", "z", "rotation", "orientation", "scale", "opacity", "signal", "fill"] = "x",
         *,
         interpolation: Literal["linear", "step"] = "linear",
         scale: float = 1.0,
@@ -4967,6 +4967,16 @@ class Drawable:
 
             path = [ring_point(p) for p in positions]
             car.drive_from_samples(times, path, "xy", absolute=True)
+
+        ``property="orientation"`` turns the drawable in 3D: each value is a
+        ``(w, x, y, z)`` quaternion (normalized for you), its orientation in
+        the parent's frame at that time, whatever the authored one; between
+        samples ``"linear"`` turns the shorter way (slerp). It suits a rigid
+        body from a simulation, whatever Euler convention computed it, with
+        no Python per frame. ``scale`` and ``offset`` do not apply and raise
+        ``ValueError``, as does a zero or non-finite quaternion::
+
+            top.drive_from_samples(times, quaternions, "orientation")
         """
         ...
     def bind_y_from(self, source: Drawable) -> None:
@@ -9196,11 +9206,23 @@ class Geometry:
             scene.geometry.transform_matching(source, target, mode="tex")
         """
         ...
-    def group(self, *members: Drawable | Sequence[Drawable]) -> Drawable:
+    def group(
+        self,
+        *members: Drawable | Sequence[Drawable],
+        origin: tuple[float, float] | tuple[float, float, float] | None = None,
+    ) -> Drawable:
         """Gather ``members`` into one drawable that moves, styles and animates as a whole.
 
         Pass the members one by one, ``group(a, b)``, or as a sequence,
         ``group([a, b])``; anything else raises ``TypeError``.
+
+        A group turns, scales and skews about the center of its members' box,
+        and ``move_to`` places that center. ``origin``, a point in scene
+        coordinates, takes its place: the group turns about it and
+        ``move_to``/``move_to_3d`` put it where they say, as the pivot of a
+        rigid body. A top built upright from its tip at ``(0, 0, 0)`` and
+        grouped with ``origin=(0, 0, 0)`` tilts about the tip wherever it is
+        moved. A non-finite ``origin`` raises ``ValueError``.
 
         Grouping preserves each member's authored local coordinates, including
         coordinates returned by ``add_updater_fn``. Existing visible members do
@@ -9210,6 +9232,7 @@ class Geometry:
 
         Example:
             result = scene.geometry.group([drawable])
+            top = scene.geometry.group(cone, disk, origin=(0, 0, 0)).move_to_3d(2, 0, 0)
         """
         ...
     def repeat(

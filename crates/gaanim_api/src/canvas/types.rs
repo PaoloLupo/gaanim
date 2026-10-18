@@ -1010,6 +1010,9 @@ pub struct ObjectSpec {
     pub material_animation_cursor: Option<gaanim_scene::Material3D>,
     pub layout_ops: Vec<LayoutOp>,
     pub(crate) reactive_readout_layout: Option<ReactiveReadoutLayoutSpec>,
+    /// A group's origin in scene coordinates: its pivot, and the point that
+    /// `move_to` places. `None` uses the center of its members' box.
+    pub(crate) group_origin: Option<DVec3>,
     pub fill_level_cursor: Option<f64>,
     /// Typed state after queued typewriter/scramble motions, keyed by the
     /// Text spec version it applies to.
@@ -1182,6 +1185,7 @@ impl ObjectSpec {
             material_animation_cursor: None,
             layout_ops: Vec::new(),
             reactive_readout_layout: None,
+            group_origin: None,
             fill_level_cursor: None,
             repeat_count: None,
             typed_text: None,

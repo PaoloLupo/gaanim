@@ -4875,6 +4875,15 @@ impl SceneModel {
             )
     }
 
+    /// A group whose origin is `origin`, in scene coordinates, instead of
+    /// the center of its members' box: it turns, scales and skews about that
+    /// point, and `move_to` places it, as the pivot of a rigid body.
+    pub fn group_about(&mut self, members: &[&DrawableHandle], origin: DVec3) -> DrawableHandle {
+        let group = self.group(members);
+        group.spec.lock().expect("group spec poisoned").group_origin = Some(origin);
+        group
+    }
+
     /// Build the stable, equation-style row used by reactive numeric readouts.
     #[doc(hidden)]
     pub fn reactive_readout_group(

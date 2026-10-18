@@ -146,8 +146,8 @@ fn parse_sampled_property(value: &str) -> PyResult<gaanim_animation::SampledProp
         "opacity" => Ok(gaanim_animation::SampledProperty::Opacity),
         "signal" => Ok(gaanim_animation::SampledProperty::Signal),
         _ => Err(PyValueError::new_err(
-            "property must be one of 'x', 'y', 'xy', 'z', 'rotation', 'scale', 'opacity', \
-             'signal', 'fill'",
+            "property must be one of 'x', 'y', 'xy', 'z', 'rotation', 'orientation', 'scale', \
+             'opacity', 'signal', 'fill'",
         )),
     }
 }
@@ -3043,6 +3043,39 @@ impl PyDrawable {
             return Err(PyValueError::new_err(
                 "colors= and domain= apply only to property 'fill'",
             ));
+        }
+        if property == "orientation" {
+            if scale != 1.0 || offset != 0.0 {
+                return Err(PyValueError::new_err(
+                    "scale= and offset= do not apply to property 'orientation'",
+                ));
+            }
+            let rows = values.extract::<Vec<Vec<f64>>>().map_err(|_| {
+                PyValueError::new_err(
+                    "property 'orientation' requires values as (w, x, y, z) quaternions",
+                )
+            })?;
+            let orientations = rows
+                .iter()
+                .map(|row| match row.as_slice() {
+                    [w, x, y, z] => Some(gaanim_core::glam::DQuat::from_xyzw(*x, *y, *z, *w)),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    PyValueError::new_err(
+                        "property 'orientation' requires values as (w, x, y, z) quaternions",
+                    )
+                })?;
+            self.0
+                .drive_orientation_from_samples(times, orientations, interpolation)
+                .map_err(|_| {
+                    PyValueError::new_err(
+                        "drive_from_samples requires non-empty matching times/values, \
+                         non-zero finite quaternions, and non-decreasing times",
+                    )
+                })?;
+            return Ok(self.clone());
         }
         let drive = if absolute {
             gaanim_api::canvas::DrawableHandle::drive_absolute_from_samples

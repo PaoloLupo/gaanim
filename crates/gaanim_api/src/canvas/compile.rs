@@ -11481,7 +11481,7 @@ impl SceneModel {
                     .reactive_readout_layout
                     .as_ref()
                     .and_then(|layout| Self::lay_out_readout_row(builder, id_map, layout));
-                let mr = builder.group(&refs);
+                let mr = builder.group_about(&refs, spec.group_origin);
                 // A readout is one line of text: its text anchors use the
                 // row's baseline.
                 if let Some(baseline) = baseline {
@@ -12532,7 +12532,7 @@ impl SceneModel {
                 LayoutOp::SetTranslation(translation) => {
                     pending_text_anchor = None;
                     transform.translation = if matches!(spec.kind, SpawnKind::Group(_)) {
-                        *translation - bounds.center()
+                        *translation - spec.group_origin.unwrap_or_else(|| bounds.center())
                     } else {
                         *translation
                     };
@@ -14403,6 +14403,33 @@ mod tests {
             let expected = (target - camera.position).normalize();
             assert!(forward.dot(expected) > 1.0 - 1e-9);
         }
+    }
+
+    /// A group about a chosen origin pivots on it and `move_to` places it,
+    /// so a rigid body modelled from its tip turns about the tip.
+    #[test]
+    fn a_group_about_a_point_turns_about_it_and_is_placed_by_it() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let stick = canvas.circle(0.1).move_to_3d(0.0, 1.0, 0.0);
+        let knob = canvas.circle(0.2).move_to_3d(0.0, 2.0, 0.0);
+        canvas
+            .group_about(&[&stick, &knob], DVec3::ZERO)
+            .rotate_to_3d(0.0, 0.0, 1.0)
+            .move_to_3d(-6.0, -1.5, 0.0);
+        let (mut world, _) = compile_camera_timeline(canvas);
+        let mut groups = world
+            .query_filtered::<&gaanim_math::SpatialTransform, With<gaanim_scene::GroupMarker>>();
+        let transforms: Vec<_> = groups.iter(&world).copied().collect();
+        assert_eq!(transforms.len(), 1);
+        let matrix = transforms[0].to_mat4();
+        let tip = matrix.transform_point3(DVec3::ZERO);
+        assert!(
+            (tip - DVec3::new(-6.0, -1.5, 0.0)).length() < 1e-9,
+            "{tip:?}"
+        );
+        let top = matrix.transform_point3(DVec3::new(0.0, 2.0, 0.0));
+        let expected = DVec3::new(-6.0 - 2.0 * 1f64.sin(), -1.5 + 2.0 * 1f64.cos(), 0.0);
+        assert!((top - expected).length() < 1e-9, "{top:?}");
     }
 
     #[test]

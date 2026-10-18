@@ -1166,6 +1166,9 @@ pub enum SampledProperty {
     Signal,
     /// Relleno: el valor elige un color de la rampa de `SampledColors`.
     Fill,
+    /// Orientación 3D completa: cada muestra es un cuaternión en el marco del
+    /// padre, interpolado por el arco más corto.
+    Orientation,
 }
 
 /// Rampa de un canal `Fill`: el valor muestreado se lee en `domain` y elige
@@ -1242,6 +1245,8 @@ pub struct SampledSeriesDriver {
     pub colors: Option<SampledColors>,
     /// Mantener la primera muestra también antes de `start_at`.
     pub hold_before_start: bool,
+    /// Cuaterniones del canal `Orientation`, uno por instante.
+    pub orientations: Option<Arc<[DQuat]>>,
 }
 
 impl std::fmt::Debug for SampledSeriesDriver {
@@ -1257,7 +1262,14 @@ impl std::fmt::Debug for SampledSeriesDriver {
             .field("stop_at", &self.stop_at)
             .field("base", &self.base)
             .field("colors", &self.colors)
-            .field("hold_before_start", &self.hold_before_start);
+            .field("hold_before_start", &self.hold_before_start)
+            .field(
+                "orientations",
+                &self
+                    .orientations
+                    .as_ref()
+                    .map(|orientations| orientations.len()),
+            );
         if gaanim_core::fingerprint::identity_debug() {
             debug
                 .field("times", &self.times)
@@ -1312,6 +1324,63 @@ impl SampledSeriesDriver {
             base: None,
             colors: None,
             hold_before_start: false,
+            orientations: None,
+        })
+    }
+
+    /// Un driver del canal `Orientation`: en cada instante de `times`, la
+    /// orientación absoluta `orientations` (normalizada) en el marco del
+    /// padre. `Linear` interpola por el arco más corto (slerp).
+    pub fn orientations(
+        times: Vec<f64>,
+        orientations: Vec<DQuat>,
+        interpolation: SampledInterpolation,
+    ) -> Result<Self, InvalidSampledSeries> {
+        if orientations.len() != times.len()
+            || !orientations
+                .iter()
+                .all(|rotation| rotation.is_finite() && rotation.length_squared() > 1e-12)
+        {
+            return Err(InvalidSampledSeries);
+        }
+        let mut driver = Self::new(
+            times,
+            vec![0.0; orientations.len()],
+            SampledProperty::Orientation,
+            interpolation,
+            1.0,
+            0.0,
+        )?;
+        driver.orientations = Some(orientations.into_iter().map(DQuat::normalize).collect());
+        driver.base = Some(0.0);
+        Ok(driver)
+    }
+
+    /// Orientación en `elapsed` segundos desde `start_at`, con clamp a los
+    /// extremos de la serie; `None` fuera del canal `Orientation`.
+    fn sample_orientation(&self, elapsed: f64) -> Option<DQuat> {
+        let orientations = self.orientations.as_ref()?;
+        let last = self.times.len() - 1;
+        if elapsed <= self.times[0] {
+            return Some(orientations[0]);
+        }
+        if elapsed >= self.times[last] {
+            return Some(orientations[last]);
+        }
+        let index = self.times.partition_point(|time| *time <= elapsed) - 1;
+        let (from, to) = (orientations[index], orientations[index + 1]);
+        Some(match self.interpolation {
+            SampledInterpolation::Step => from,
+            SampledInterpolation::Linear => {
+                let (t0, t1) = (self.times[index], self.times[index + 1]);
+                if t1 <= t0 {
+                    to
+                } else {
+                    // The shorter way round: q and -q are the same turn.
+                    let to = if from.dot(to) < 0.0 { -to } else { to };
+                    from.slerp(to, (elapsed - t0) / (t1 - t0))
+                }
+            }
         })
     }
 
@@ -2912,6 +2981,7 @@ pub fn sampled_series_system(world: &mut World) {
         Option<gaanim_core::peniko::Color>,
     )> = Vec::new();
     let mut new_bases: Vec<(Entity, usize, f64)> = Vec::new();
+    let mut orientations: Vec<(Entity, DQuat)> = Vec::new();
     {
         let mut query = world.query::<(Entity, &SampledSeriesDrivers)>();
         for (entity, drivers) in query.iter(world) {
@@ -2962,6 +3032,10 @@ pub fn sampled_series_system(world: &mut World) {
                     None => current_time,
                 };
                 let elapsed = (effective_time - driver.start_at).max(0.0);
+                if let Some(orientation) = driver.sample_orientation(elapsed) {
+                    orientations.push((entity, orientation));
+                    continue;
+                }
                 let sampled = driver.sample(elapsed);
                 let output = if relative {
                     base + driver.offset + driver.scale * sampled
@@ -3024,6 +3098,15 @@ pub fn sampled_series_system(world: &mut World) {
                     set_sampled_fill(world, entity, color);
                 }
             }
+            SampledProperty::Orientation => {}
+        }
+    }
+
+    for (entity, orientation) in orientations {
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity)
+            && transform.rotation != orientation
+        {
+            transform.rotation = orientation;
         }
     }
 }
@@ -3051,6 +3134,47 @@ mod tests {
     use super::*;
     use bevy::prelude::BuildChildrenTransformExt;
     use gaanim_core::kurbo::Shape;
+
+    #[test]
+    fn orientation_samples_turn_the_shorter_way() {
+        let quarter = DQuat::from_rotation_y(std::f64::consts::FRAC_PI_2);
+        // The second sample is the same turn written as -q: halfway is an
+        // eighth of a turn, not a turn the long way round.
+        let driver = SampledSeriesDriver::orientations(
+            vec![0.0, 1.0],
+            vec![DQuat::IDENTITY, -quarter * 2.0],
+            SampledInterpolation::Linear,
+        )
+        .unwrap();
+        let half = driver.sample_orientation(0.5).unwrap();
+        let expected = DQuat::from_rotation_y(std::f64::consts::FRAC_PI_4);
+        assert!(half.dot(expected).abs() > 1.0 - 1e-12, "{half:?}");
+        assert!(driver.sample_orientation(2.0).unwrap().dot(quarter).abs() > 1.0 - 1e-12);
+        assert!(
+            SampledSeriesDriver::orientations(
+                vec![0.0, 1.0],
+                vec![DQuat::IDENTITY, DQuat::from_xyzw(0.0, 0.0, 0.0, 0.0)],
+                SampledInterpolation::Linear,
+            )
+            .is_err()
+        );
+
+        let mut world = World::new();
+        world.insert_resource(PlaybackState {
+            current_time: 0.25,
+            ..Default::default()
+        });
+        let entity = world
+            .spawn((
+                SpatialTransform::default(),
+                SampledSeriesDrivers::from(driver),
+            ))
+            .id();
+        sampled_series_system(&mut world);
+        let rotation = world.get::<SpatialTransform>(entity).unwrap().rotation;
+        let expected = DQuat::from_rotation_y(std::f64::consts::FRAC_PI_8);
+        assert!(rotation.dot(expected).abs() > 1.0 - 1e-12, "{rotation:?}");
+    }
 
     #[test]
     fn anchors_on_hud_overlays_follow_their_pinned_place() {

@@ -558,7 +558,7 @@ Agrupa objetos para moverlos como uno o dibuja un marco vivo a su alrededor.
 #api-entry(
   name: "Geometry.group",
   kind: "factory",
-  desc: [Agrupa objetos para moverlos, rotarlos y escalarlos como uno: `group(a, b)` o `group([a, b])`, conservando las coordenadas locales de cada miembro (también las de sus updaters). Los miembros ya visibles no se ocultan al unirse a un grupo que contiene un trazo o una fuerza diferidos. `write`, `create` y los fundidos del grupo son entradas explícitas de todo el subárbol. Para distribuir miembros usa #link("/referencia/layout/")[Layout].],
+  desc: [Agrupa objetos para moverlos, rotarlos y escalarlos como uno: `group(a, b)` o `group([a, b])`, conservando las coordenadas locales de cada miembro (también las de sus updaters). El grupo gira, escala y se inclina alrededor del centro de la caja de sus miembros, y `move_to` coloca ese centro; con `origin=(x, y)` o `(x, y, z)`, un punto en coordenadas de la escena, ese punto ocupa su lugar: el grupo gira alrededor de él y `move_to` y `move_to_3d` lo colocan, como el pivote de un sólido rígido. Un `origin` no finito lanza `ValueError`. Los miembros ya visibles no se ocultan al unirse a un grupo que contiene un trazo o una fuerza diferidos. `write`, `create` y los fundidos del grupo son entradas explícitas de todo el subárbol. Para distribuir miembros usa #link("/referencia/layout/")[Layout].],
 )[
 ```python
 # show-code: true
