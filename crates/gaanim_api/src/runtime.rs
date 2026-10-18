@@ -1326,6 +1326,7 @@ Buenos días.
             is_playing: true,
             scaled_dt: DT,
             current_time: from,
+            updaters_current: false,
         });
         let mut time = from;
         while time < to {
@@ -1339,6 +1340,7 @@ Buenos días.
             is_playing: false,
             scaled_dt: 0.0,
             current_time: to,
+            updaters_current: false,
         });
     }
 
@@ -1417,6 +1419,7 @@ Buenos días.
             is_playing: true,
             scaled_dt: 1.0 / 60.0,
             current_time: 0.0,
+            updaters_current: false,
         });
         hot_reload(app.world_mut(), drawn_cards_deck(3, 0));
         let duration = app.world().resource::<Timeline>().cached_duration;

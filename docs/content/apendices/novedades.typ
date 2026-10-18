@@ -106,6 +106,18 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - `Theme(font_files={clave: archivo})` avisa con un `UserWarning` cuando la
   clave no es la familia que declara el archivo, y nombra esa familia: el
   texto solo encuentra la fuente por ella.
+- `scene.segment(..., step_rate=12)` reproduce un segmento a saltos, como el
+  stop-motion: cada cuadro muestra el último de 12 pasos por segundo,
+  contados desde el inicio del segmento y desde cada parada. Saltan las
+  animaciones, los updaters, la cámara, el vídeo y las partículas; el audio
+  sigue continuo.
+- `drawable.step_rate(12)` mueve a saltos un solo objeto y sus miembros
+  (animaciones, updaters, temblores, modificadores de camino y fotogramas de
+  vídeo) mientras el resto de la escena sigue continuo.
+- `modifiers.wiggle_path(..., hold=True)` y `Updater.wiggle(..., hold=True)`
+  conservan cada forma o desplazamiento y saltan a otro `frequency` veces por
+  segundo: el _line boil_ de la animación dibujada a mano, en lugar de un
+  ruido que fluye.
 
 == 3D
 

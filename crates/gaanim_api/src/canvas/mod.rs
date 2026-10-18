@@ -26,11 +26,11 @@ pub use gaanim_layout::{Anchor, Direction};
 pub use gaanim_renderer::object_effects::{Glass, MatteMode};
 pub use gaanim_text::prelude::TextAnchor;
 pub use segment::SceneMarker;
-pub use segment::segment_target;
 pub use segment::{
     PresentationBrand, SegmentError, SegmentHandle, SegmentId, SegmentManifest, SegmentSpec,
     SegmentStop,
 };
+pub use segment::{segment_step_rate, segment_target};
 pub use types::{
     Anim, AxesConfig, BooleanOperation, BooleanRule, CurveControl, CurveElement, EchoSpec,
     FillLevelDirection, ImageCrop, ImageFit, ImageOptions, ImageOptionsError, LayoutMemberSpec,

@@ -1025,9 +1025,10 @@ scene.render()
     (name: "detail", type: "int", default: "6", desc: [Puntos por segmento, de 1 a 256.]),
     (name: "frequency", type: "float", default: "1.0", desc: [Cambios por segundo. Animable.]),
     (name: "seed", type: "int", default: "0", desc: [Semilla del ruido.]),
+    (name: "hold", type: "bool", default: "False", desc: [Mantiene cada forma y salta a otra `frequency` veces por segundo.]),
   ),
   returns: (type: "PathModifier", desc: [El modificador, que anima `size` y `frequency`.]),
-  desc: [Contorno vivo con ruido coherente con semilla, desde el instante en que se añade; los puntos se unen con curvas suaves. La misma semilla da la misma forma en el mismo tiempo, así que un seek es exacto.],
+  desc: [Contorno vivo con ruido coherente con semilla, desde el instante en que se añade; los puntos se unen con curvas suaves. La misma semilla da la misma forma en el mismo tiempo, así que un seek es exacto. Con `hold=True` el contorno no fluye: conserva cada forma y salta a otra sin relación con la anterior `frequency` veces por segundo, el _line boil_ de la animación dibujada a mano (entre 8 y 12 es lo habitual). Con `frequency=0` queda una sola forma irregular y quieta, como el borde de un papel rasgado.],
   none,
 )
 
@@ -1075,6 +1076,27 @@ scene.geometry.circle(2).fill(CORAL).move_to(-3, 0)
 scene.text("pixelado", size=0.9).move_to(-3, -3)
 scene.text("legible", size=0.9).move_to(3, -3).post_process(False)
 scene.wait(0.5)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.step_rate",
+  kind: "method",
+  params: ((name: "rate", type: "float | None", default: none, desc: [Pasos por segundo del tiempo del objeto; `None` vuelve al tiempo continuo.]),),
+  desc: [Mueve el objeto a saltos, como el stop-motion: sus animaciones, sus updaters, el movimiento de `Updater.wiggle`, `oscillate` y `rotate`, sus modificadores de camino como `wiggle_path`, el flujo de guiones y los fotogramas de un vídeo o un Lottie, y los de sus miembros, se evalúan `rate` veces por segundo y se mantienen entre medias, como los recortes animados «a dos» (12 a 24 fps). Los pasos caen en una rejilla desde el segundo 0, así que los objetos con el mismo ritmo cambian a la vez, y una animación sigue terminando en su valor final. El resto de la escena sigue continuo; para mover a saltos un segmento entero, cámara incluida, usa `scene.segment(..., step_rate=...)`. Es estado de declaración: vale para toda la línea de tiempo. Un ritmo que no sea un número positivo lanza `ValueError`.],
+)[
+```python
+# show-code: true
+from gaanim import CORAL, Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+smooth = scene.geometry.circle(0.8).fill("#2dd4bf").move_to(-5, 1.5)
+stepped = scene.geometry.circle(0.8).fill(CORAL).move_to(-5, -1.5).step_rate(8)
+scene.play([
+    smooth.animate.move_to(5, 1.5).duration(2),
+    stepped.animate.move_to(5, -1.5).duration(2),
+])
 # output: preview.webp
 scene.render()
 ```

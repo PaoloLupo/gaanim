@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use gaanim_core::kurbo::{BezPath, Shape};
 use gaanim_math::{Bounds3D, path_modifiers};
 use gaanim_objects::offset::{OffsetJoin, offset_copies};
-use gaanim_scene::{LocalBounds, Path2D, PathSource};
+use gaanim_scene::{LocalBounds, Path2D, PathSource, StepRate, stepped};
 
 use crate::signals::FloatSignal;
 
@@ -32,8 +32,9 @@ pub enum ModifierKind {
     PuckerBloat,
     /// Parameters: angle in radians.
     Twist,
-    /// Parameters: size, frequency.
-    Wiggle { detail: u32, seed: u64 },
+    /// Parameters: size, frequency. `hold` keeps each shape until the next
+    /// one, as a line boil.
+    Wiggle { detail: u32, seed: u64, hold: bool },
     /// Parameters: amount.
     Offset { join: OffsetJoin, copies: u32 },
 }
@@ -58,20 +59,31 @@ impl PathModifier {
             ModifierKind::RoundCorners => path_modifiers::round_corners(path, value(0)),
             ModifierKind::PuckerBloat => path_modifiers::pucker_bloat(path, value(0)),
             ModifierKind::Twist => path_modifiers::twist(path, value(0)),
-            ModifierKind::Wiggle { detail, seed } => path_modifiers::wiggle(
+            ModifierKind::Wiggle { detail, seed, hold } => path_modifiers::wiggle(
                 path,
                 value(0),
                 detail,
                 value(1),
                 seed,
                 (time - self.from).max(0.0),
+                hold,
             ),
             ModifierKind::Offset { join, copies } => offset_copies(path, value(0), join, copies),
         }
     }
 
-    fn live(&self) -> bool {
-        matches!(self.kind, ModifierKind::Wiggle { .. })
+    /// What of `time` the result depends on, given the parameter `values`:
+    /// nothing for most modifiers, a wiggle's time, or the shape a held
+    /// wiggle shows then.
+    fn time_key(&self, time: f64, values: &[f64]) -> Option<u64> {
+        match self.kind {
+            ModifierKind::Wiggle { hold: true, .. } => {
+                let frequency = values.get(1).copied().unwrap_or(0.0);
+                Some(((time - self.from).max(0.0) * frequency).floor().to_bits())
+            }
+            ModifierKind::Wiggle { .. } => Some(time.to_bits()),
+            _ => None,
+        }
     }
 }
 
@@ -152,11 +164,13 @@ pub fn apply_path_modifiers_system(
         &mut Path2D,
         Option<&mut PathSource>,
         Option<&mut LocalBounds>,
+        Option<&StepRate>,
     )>,
     signals: Query<&FloatSignal>,
 ) {
-    let time = playback.map_or(0.0, |state| state.current_time);
-    for (mut modifiers, mut path, source, bounds) in &mut paths {
+    let scene_time = playback.map_or(0.0, |state| state.current_time);
+    for (mut modifiers, mut path, source, bounds, step) in &mut paths {
+        let time = stepped(step, scene_time);
         if modifiers.active(time).next().is_none() {
             continue;
         }
@@ -165,16 +179,17 @@ pub fn apply_path_modifiers_system(
         let base = authored_source
             .clone()
             .unwrap_or_else(|| authored_path.clone());
-        // Parameter values (and the time, for a live wiggle) decide the result.
+        // Parameter values (and the time, for a wiggle) decide the result.
         let mut key = Vec::new();
         for modifier in modifiers.active(time) {
             key.push(modifier.stack_key());
-            for param in &modifier.params {
-                key.push(param_value(*param, &signals).to_bits());
-            }
-            if modifier.live() {
-                key.push(time.to_bits());
-            }
+            let values: Vec<f64> = modifier
+                .params
+                .iter()
+                .map(|param| param_value(*param, &signals))
+                .collect();
+            key.extend(values.iter().map(|value| value.to_bits()));
+            key.extend(modifier.time_key(time, &values));
         }
         let cached = modifiers.cache.as_ref().filter(|cache| {
             Arc::ptr_eq(&cache.source, &base)
@@ -345,5 +360,50 @@ mod tests {
             .current_time = 2.0;
         world.run_system_once(apply_path_modifiers_system).unwrap();
         assert_ne!(*world.get::<Path2D>(entity).unwrap().0, square());
+    }
+
+    fn wiggled_at(hold: bool, step: Option<f64>, time: f64) -> Arc<BezPath> {
+        let mut world = World::new();
+        world.insert_resource(crate::updaters::PlaybackState {
+            current_time: time,
+            ..Default::default()
+        });
+        let path = Arc::new(square());
+        let mut entity = world.spawn((
+            Path2D(path.clone()),
+            PathSource(path),
+            PathModifiers::new(vec![PathModifier {
+                kind: ModifierKind::Wiggle {
+                    detail: 6,
+                    seed: 2,
+                    hold,
+                },
+                params: vec![ModifierParam::Fixed(0.1), ModifierParam::Fixed(4.0)],
+                from: 0.0,
+            }]),
+        ));
+        if let Some(rate) = step {
+            entity.insert(StepRate(rate));
+        }
+        let entity = entity.id();
+        world.run_system_once(apply_path_modifiers_system).unwrap();
+        world.get::<Path2D>(entity).unwrap().0.clone()
+    }
+
+    #[test]
+    fn a_held_wiggle_boils_and_a_step_rate_holds_a_live_one() {
+        // Held: four shapes a second.
+        assert_eq!(wiggled_at(true, None, 0.3), wiggled_at(true, None, 0.45));
+        assert_ne!(wiggled_at(true, None, 0.45), wiggled_at(true, None, 0.5));
+        // Live, it moves every instant, unless the drawable steps its time.
+        assert_ne!(wiggled_at(false, None, 0.3), wiggled_at(false, None, 0.31));
+        assert_eq!(
+            wiggled_at(false, Some(2.0), 0.5),
+            wiggled_at(false, Some(2.0), 0.99)
+        );
+        assert_eq!(
+            wiggled_at(false, Some(2.0), 0.99),
+            wiggled_at(false, None, 0.5)
+        );
     }
 }

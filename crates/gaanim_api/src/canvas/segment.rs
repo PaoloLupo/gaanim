@@ -131,6 +131,17 @@ pub fn segment_target(target: Option<f64>) -> Result<Option<f64>, SegmentError> 
     }
 }
 
+/// `rate` when it is a positive number of steps a second, as a segment's
+/// stepped time must be.
+pub fn segment_step_rate(rate: Option<f64>) -> Result<Option<f64>, SegmentError> {
+    match rate {
+        Some(rate) if !(rate.is_finite() && rate > 0.0) => {
+            Err(SegmentError::InvalidStepRate { rate })
+        }
+        rate => Ok(rate),
+    }
+}
+
 /// Errors raised while defining or selecting segments and stops.
 #[derive(Debug, thiserror::Error)]
 pub enum SegmentError {
@@ -162,6 +173,8 @@ pub enum SegmentError {
     DuplicateMarker { name: String, time: f64 },
     #[error("a presentation target must be a positive number of seconds, not {target}")]
     InvalidTarget { target: f64 },
+    #[error("a step rate must be a positive number of steps per second, not {rate}")]
+    InvalidStepRate { rate: f64 },
     #[error("invalid transition sound: {0}")]
     Sound(#[source] crate::export::AudioTrackError),
     #[error(transparent)]

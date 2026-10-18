@@ -184,6 +184,7 @@ fn add_segment(
         background,
         post_process,
         motion_blur,
+        step_rate,
         stops,
         markers,
         explicit,
@@ -201,6 +202,7 @@ fn add_segment(
     fingerprint.add(background);
     fingerprint.add(post_process);
     fingerprint.add(motion_blur);
+    fingerprint.add(step_rate);
     fingerprint.add(stops);
     fingerprint.add(markers);
     fingerprint.add(explicit);

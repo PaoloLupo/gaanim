@@ -2304,9 +2304,10 @@ scene.wait(2)
     (name: "frequency", type: "float | Parameter | Computed", default: "2.0", desc: [Rapidez del temblor.]),
     (name: "octaves", type: "int", default: "2", desc: [Capas de detalle, de 1 a 8.]),
     (name: "seed", type: "int", default: "0", desc: [Semilla del ruido.]),
+    (name: "hold", type: "bool", default: "False", desc: [Mantiene cada desplazamiento y salta a otro `frequency` veces por segundo.]),
   ),
   returns: (type: "Updater", desc: [Temblor orgánico con semilla.]),
-  desc: [Es una capa sobre la animación del objeto: empieza en cero, es función pura del tiempo de la línea de tiempo y se suma a `animate.move_to` y a otros clips en lugar de sustituirlos. Un seek cae en el mismo fotograma que la reproducción. Las amplitudes y la frecuencia aceptan un `Parameter`: animar la amplitud a 0 apaga el temblor poco a poco en lugar de cortarlo con `remove_updater()`, y cambiar la frecuencia cambia el ritmo sin saltos. También aceptan un `Computed` del tiempo, como `musica.pulse()`, para temblar con el sonido. Valores inválidos lanzan `ValueError`.],
+  desc: [Es una capa sobre la animación del objeto: empieza en cero, es función pura del tiempo de la línea de tiempo y se suma a `animate.move_to` y a otros clips en lugar de sustituirlos. Un seek cae en el mismo fotograma que la reproducción. Las amplitudes y la frecuencia aceptan un `Parameter`: animar la amplitud a 0 apaga el temblor poco a poco en lugar de cortarlo con `remove_updater()`, y cambiar la frecuencia cambia el ritmo sin saltos. También aceptan un `Computed` del tiempo, como `musica.pulse()`, para temblar con el sonido. Con `hold=True` el temblor no deriva: conserva cada desplazamiento y salta a otro sin relación con el anterior `frequency` veces por segundo, como tiembla un recorte en stop-motion; durante el primer periodo el objeto sigue en su sitio. Valores inválidos lanzan `ValueError`.],
 )[
 ```python
 >>>from gaanim import *

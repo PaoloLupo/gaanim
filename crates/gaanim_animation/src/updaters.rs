@@ -5,7 +5,7 @@ use gaanim_core::glam::{DMat4, DQuat, DVec2, DVec3};
 use gaanim_core::kurbo::{BezPath, Shape};
 use gaanim_math::SpatialTransform;
 use gaanim_scene::prelude::{ChildOf, Entity, World};
-use gaanim_scene::{LocalBounds, Path2D, PathSource, WorldBounds};
+use gaanim_scene::{LocalBounds, Path2D, PathSource, StepRate, WorldBounds, stepped};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -19,6 +19,10 @@ pub struct PlaybackState {
     pub scaled_dt: f64,
     /// Posición absoluta del cabezal de la timeline.
     pub current_time: f64,
+    /// Set by a seek that already brought the updaters to `current_time`,
+    /// as a seek through stepped time does: `updater_system` leaves them
+    /// for the rest of the frame.
+    pub updaters_current: bool,
 }
 
 impl Default for PlaybackState {
@@ -27,6 +31,7 @@ impl Default for PlaybackState {
             is_playing: true,
             scaled_dt: 0.0,
             current_time: 0.0,
+            updaters_current: false,
         }
     }
 }
@@ -241,8 +246,13 @@ pub fn advance_updaters_by(world: &mut World, dt: f64) {
     let dt = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
     let mut simulation_jobs = Vec::new();
     let mut frame_jobs = Vec::new();
-    let mut query = world.query::<(Entity, &mut Updater, Option<&SpatialTransform>)>();
-    for (entity, mut updater, transform) in query.iter_mut(world) {
+    let mut query = world.query::<(
+        Entity,
+        &mut Updater,
+        Option<&SpatialTransform>,
+        Option<&StepRate>,
+    )>();
+    for (entity, mut updater, transform, step) in query.iter_mut(world) {
         if updater.fixed_dt.is_some() && updater.initial_translation.is_none() {
             updater.initial_translation = transform.map(|transform| transform.translation);
         }
@@ -254,8 +264,9 @@ pub fn advance_updaters_by(world: &mut World, dt: f64) {
         };
         updater.elapsed = next_elapsed;
 
-        let previous_active_elapsed = (previous_elapsed - updater.start_at).max(0.0);
-        let next_active_elapsed = (next_elapsed - updater.start_at).max(0.0);
+        // A stepped drawable's updaters see its time on its grid.
+        let previous_active_elapsed = (stepped(step, previous_elapsed) - updater.start_at).max(0.0);
+        let next_active_elapsed = (stepped(step, next_elapsed) - updater.start_at).max(0.0);
         let effective_dt = (next_active_elapsed - previous_active_elapsed).max(0.0);
 
         if let Some(fixed_dt) = updater.fixed_dt {
@@ -309,14 +320,19 @@ pub fn seek_updaters(world: &mut World, target_time: f64) {
     };
     let mut simulation_jobs = Vec::new();
     let mut frame_jobs = Vec::new();
-    let mut query = world.query::<(Entity, &mut Updater, Option<&SpatialTransform>)>();
-    for (entity, mut updater, transform) in query.iter_mut(world) {
+    let mut query = world.query::<(
+        Entity,
+        &mut Updater,
+        Option<&SpatialTransform>,
+        Option<&StepRate>,
+    )>();
+    for (entity, mut updater, transform, step) in query.iter_mut(world) {
         let elapsed = updater
             .stop_at
             .map(|stop_at| target_time.min(stop_at))
             .unwrap_or(target_time);
         updater.elapsed = elapsed;
-        let active_elapsed = (elapsed - updater.start_at).max(0.0);
+        let active_elapsed = (stepped(step, elapsed) - updater.start_at).max(0.0);
 
         if let Some(fixed_dt) = updater.fixed_dt {
             if updater.initial_translation.is_none() {
@@ -359,12 +375,11 @@ pub fn updater_system(world: &mut World) {
         .filter(|dt| *dt > 0.0)
         .or_else(|| world.get_resource::<DeltaTime>().map(|d| d.dt))
         .unwrap_or(0.0);
-    let is_playing = world
+    let (is_playing, current) = world
         .get_resource::<PlaybackState>()
-        .map(|s| s.is_playing)
-        .unwrap_or(true);
+        .map_or((true, false), |s| (s.is_playing, s.updaters_current));
 
-    if !is_playing {
+    if !is_playing || current {
         return;
     }
     advance_updaters_by(world, dt);
@@ -3246,6 +3261,35 @@ mod tests {
     use super::*;
     use bevy::prelude::BuildChildrenTransformExt;
     use gaanim_core::kurbo::Shape;
+
+    #[test]
+    fn a_stepped_drawable_runs_its_updaters_on_its_steps() {
+        let mut world = World::new();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = seen.clone();
+        world.spawn((
+            StepRate(4.0),
+            Updater::new(move |dt, elapsed, _, _| {
+                record.lock().unwrap().push((dt, elapsed));
+                true
+            }),
+        ));
+        for _ in 0..3 {
+            advance_updaters_by(&mut world, 0.1);
+        }
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let seen_now = seen.lock().unwrap().clone();
+        let expected = [(0.0, 0.0), (0.0, 0.0), (0.25, 0.25)];
+        assert!(
+            seen_now
+                .iter()
+                .zip(expected)
+                .all(|(&(dt, at), (want_dt, want_at))| close(dt, want_dt) && close(at, want_at)),
+            "{seen_now:?}"
+        );
+        seek_updaters(&mut world, 0.6);
+        assert_eq!(seen.lock().unwrap().last(), Some(&(0.0, 0.5)));
+    }
 
     #[test]
     fn orientation_samples_turn_the_shorter_way() {

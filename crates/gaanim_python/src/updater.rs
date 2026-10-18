@@ -93,7 +93,8 @@ impl PyUpdater {
 
     /// Organic jitter layered over the drawable's animation.
     #[staticmethod]
-    #[pyo3(signature = (*, position=None, rotation=None, scale=None, frequency=None, octaves=2, seed=0))]
+    #[pyo3(signature = (*, position=None, rotation=None, scale=None, frequency=None, octaves=2, seed=0, hold=false))]
+    #[allow(clippy::too_many_arguments)]
     fn wiggle(
         position: Option<&Bound<'_, PyAny>>,
         rotation: Option<&Bound<'_, PyAny>>,
@@ -101,6 +102,7 @@ impl PyUpdater {
         frequency: Option<&Bound<'_, PyAny>>,
         octaves: u32,
         seed: u64,
+        hold: bool,
     ) -> PyResult<Self> {
         let amplitude = |name: &str, value: Option<&Bound<'_, PyAny>>, default: f64| {
             value.map_or(Ok(LayerParam::Fixed(default)), |value| {
@@ -137,6 +139,7 @@ impl PyUpdater {
             rotation,
             scale,
             frequency,
+            hold,
         })))
     }
 

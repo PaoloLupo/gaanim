@@ -2646,6 +2646,32 @@ impl SceneModel {
         Ok(())
     }
 
+    /// Play one segment of this scene in stepped time, `rate` steps a
+    /// second like stop-motion: every seek inside it shows the world at the
+    /// step it falls in, counted from the segment's start and again from
+    /// each of its stops, so a stop and the segment's end show their exact
+    /// frame. Animations, updaters, the camera, video, particles and the
+    /// time of shader backgrounds and post-processing all step; audio and
+    /// the playhead do not. `None` plays the segment smoothly.
+    pub fn set_segment_step_rate(
+        &mut self,
+        segment: &SegmentHandle,
+        rate: Option<f64>,
+    ) -> Result<(), SegmentError> {
+        if !segment.belongs_to(&self.state) {
+            return Err(SegmentError::ForeignSegment);
+        }
+        let rate = super::segment::segment_step_rate(rate)?;
+        let mut guard = self.state.lock().expect("canvas state poisoned");
+        let target = guard
+            .segments
+            .iter_mut()
+            .find(|candidate| candidate.id == segment.id)
+            .ok_or(SegmentError::UnknownSegment { id: segment.id })?;
+        target.step_rate = rate;
+        Ok(())
+    }
+
     /// Apply one of the built-in visual themes.
     ///
     /// `technical` is the quiet dark style used by the built-in technical

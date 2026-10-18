@@ -448,11 +448,14 @@ fn capture(
         Some(pins) => capture_frame_pinned(app.world_mut(), Some(&camera), pins),
         None => capture_frame(app.world_mut(), Some(&camera)),
     };
+    // The post-process runs at the time the frame shows, which stepped
+    // time holds, as an export reads it.
+    let shown = app.world().resource::<Timeline>().step_time(time);
     Ok(Frame {
         time,
         camera,
         capture,
-        post: post_passes(app.world(), post_shaders, time)?,
+        post: post_passes(app.world(), post_shaders, shown)?,
         motion_blur: Vec::new(),
     })
 }

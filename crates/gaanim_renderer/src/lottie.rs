@@ -816,12 +816,14 @@ pub fn sample_lottie_system(
         Option<&gaanim_animation::PathReveal>,
         Option<&gaanim_animation::FillDrawProgress>,
         Option<&gaanim_scene::StrokeBrush>,
+        Option<&gaanim_scene::StepRate>,
     )>,
 ) {
     let scene_time = playback_state
         .as_ref()
         .map_or(0.0, |state| state.current_time);
-    for (mut player, reveal, fill, stroke) in &mut players {
+    for (mut player, reveal, fill, stroke, step) in &mut players {
+        let scene_time = gaanim_scene::stepped(step, scene_time);
         let draw_state = LottieDrawState {
             reveal: reveal.map_or(1.0, |value| value.0.clamp(0.0, 1.0)),
             fill: fill.map_or(1.0, |value| value.0.clamp(0.0, 1.0)),

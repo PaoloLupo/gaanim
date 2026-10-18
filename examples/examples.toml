@@ -357,6 +357,10 @@ path = "animation/procedural_motion.py"
 description = "Oscillators on every channel and waveform, wiggle, the other Updater presets, seeded randomness and smooth noise."
 
 [[example]]
+path = "animation/stepped_time.py"
+description = "Stop-motion time: drawables at several step rates, outlines and jitter that boil with hold=True, and a whole segment stepped, camera included."
+
+[[example]]
 path = "transforms/transform_to.py"
 description = "Morphs between shapes and their mirror images, open strokes, solid and gradient fills, transform_to against replacement and fade transforms, fading while morphing, and text to text, equation and shape."
 

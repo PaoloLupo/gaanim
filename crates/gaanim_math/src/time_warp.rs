@@ -275,12 +275,43 @@ impl TimeMap {
     }
 }
 
+/// `time` on a grid of `rate` steps a second from `origin`: the last step at
+/// or before it, as stop-motion holds each drawing until the next one. A
+/// time before `origin`, or a rate that is not positive and finite, passes
+/// through.
+pub fn step_time(time: f64, origin: f64, rate: f64) -> f64 {
+    if !(rate.is_finite() && rate > 0.0) || time <= origin {
+        return time;
+    }
+    // A time on a step, summed from float frame durations, can fall a hair
+    // short of it.
+    let steps = ((time - origin) * rate + 1e-6).floor();
+    (origin + steps / rate).min(time)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn step_time_holds_each_step_until_the_next() {
+        assert_eq!(step_time(1.0, 1.0, 12.0), 1.0);
+        assert!(close(step_time(1.05, 1.0, 12.0), 1.0));
+        assert!(close(
+            step_time(1.0 + 1.0 / 12.0, 1.0, 12.0),
+            1.0 + 1.0 / 12.0
+        ));
+        // Summed frame durations that fall a hair short still reach the step.
+        let summed = (0..10).fold(1.0, |time, _| time + 1.0 / 120.0);
+        assert!(close(step_time(summed, 1.0, 12.0), summed));
+        assert!(close(step_time(1.2, 1.0, 12.0), 1.0 + 2.0 / 12.0));
+        assert_eq!(step_time(0.5, 1.0, 12.0), 0.5);
+        assert_eq!(step_time(1.05, 1.0, 0.0), 1.05);
+        assert_eq!(step_time(1.05, 1.0, f64::NAN), 1.05);
     }
 
     #[test]

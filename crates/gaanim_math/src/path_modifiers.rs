@@ -356,7 +356,9 @@ pub fn twist(path: &BezPath, angle: f64) -> BezPath {
 
 /// Wiggle: `detail` points on every segment, each pushed along the path's
 /// normal by seeded noise of up to `size`, changing `frequency` times a
-/// second at `time`. The points are joined smoothly.
+/// second at `time`. The points are joined smoothly. With `hold` the
+/// outline keeps each shape and jumps to a new one `frequency` times a
+/// second, as a line boil does.
 pub fn wiggle(
     path: &BezPath,
     size: f64,
@@ -364,9 +366,15 @@ pub fn wiggle(
     frequency: f64,
     seed: u64,
     time: f64,
+    hold: bool,
 ) -> BezPath {
     let detail = detail.max(1) as usize;
     let noise = Noise::new(seed, 1.0, 1.0, 2);
+    let phase = if hold {
+        Noise::held(time * frequency)
+    } else {
+        time * frequency
+    };
     let mut result = BezPath::new();
     for (contour_index, contour) in contours(path).into_iter().enumerate() {
         let first = &contour.segments[0];
@@ -382,7 +390,7 @@ pub fn wiggle(
             .iter()
             .enumerate()
             .map(|(index, (point, normal))| {
-                let offset = noise.sample(index as f64 * 0.61 + channel, time * frequency);
+                let offset = noise.sample(index as f64 * 0.61 + channel, phase);
                 *point + *normal * size * offset
             })
             .collect();
@@ -485,17 +493,30 @@ mod tests {
     #[test]
     fn wiggle_is_a_pure_function_of_time_and_seed() {
         let circle = kurbo::Circle::new((0.0, 0.0), 1.0).to_path(1e-3);
-        let a = wiggle(&circle, 0.1, 6, 2.0, 3, 0.5);
-        assert_eq!(a, wiggle(&circle, 0.1, 6, 2.0, 3, 0.5));
-        assert_ne!(a, wiggle(&circle, 0.1, 6, 2.0, 3, 0.75));
-        assert_ne!(a, wiggle(&circle, 0.1, 6, 2.0, 4, 0.5));
+        let a = wiggle(&circle, 0.1, 6, 2.0, 3, 0.5, false);
+        assert_eq!(a, wiggle(&circle, 0.1, 6, 2.0, 3, 0.5, false));
+        assert_ne!(a, wiggle(&circle, 0.1, 6, 2.0, 3, 0.75, false));
+        assert_ne!(a, wiggle(&circle, 0.1, 6, 2.0, 4, 0.5, false));
         // Stays within size of the outline.
         for point in points(&a) {
             assert!((point.distance(Point::ORIGIN) - 1.0).abs() <= 0.1 + 1e-6);
         }
         // Size 0 lies on the outline.
-        for point in points(&wiggle(&circle, 0.0, 6, 2.0, 3, 0.5)) {
+        for point in points(&wiggle(&circle, 0.0, 6, 2.0, 3, 0.5, false)) {
             assert!((point.distance(Point::ORIGIN) - 1.0).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn a_held_wiggle_keeps_each_shape_until_the_next() {
+        let circle = kurbo::Circle::new((0.0, 0.0), 1.0).to_path(1e-3);
+        let at = |time| wiggle(&circle, 0.1, 6, 4.0, 3, time, true);
+        // Four shapes a second: one over [0.25, 0.5), another from 0.5.
+        assert_eq!(at(0.3), at(0.45));
+        assert_ne!(at(0.45), at(0.5));
+        assert_ne!(at(0.5), at(0.75));
+        for point in points(&at(0.6)) {
+            assert!((point.distance(Point::ORIGIN) - 1.0).abs() <= 0.1 + 1e-6);
         }
     }
 }

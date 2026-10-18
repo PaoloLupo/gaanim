@@ -150,19 +150,22 @@ impl DrawableHandle {
     }
 
     /// Wiggle: `detail` points per segment moved by seeded noise of up to
-    /// `size`, changing `frequency` times a second.
+    /// `size`, changing `frequency` times a second. With `hold` the outline
+    /// keeps each shape and jumps to a new one `frequency` times a second,
+    /// as a line boil.
     pub fn wiggle_path(
         &self,
         size: f64,
         detail: u32,
         frequency: f64,
         seed: u64,
+        hold: bool,
     ) -> Result<PathModifierHandle, String> {
         if !(1..=MAX_DETAIL).contains(&detail) {
             return Err(format!("detail must be within 1..={MAX_DETAIL}"));
         }
         self.path_modifier(
-            ModifierKind::Wiggle { detail, seed },
+            ModifierKind::Wiggle { detail, seed, hold },
             vec![("size", size), ("frequency", frequency)],
         )
     }
