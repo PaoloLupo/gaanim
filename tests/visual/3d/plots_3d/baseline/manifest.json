@@ -52,6 +52,16 @@
       "id": "seek_0009_t_10_900000",
       "time_seconds": 10.9,
       "file": "seek_0009_t_10_900000.png"
+    },
+    {
+      "id": "seek_0010_t_11_800000",
+      "time_seconds": 11.8,
+      "file": "seek_0010_t_11_800000.png"
+    },
+    {
+      "id": "seek_0011_t_13_100000",
+      "time_seconds": 13.1,
+      "file": "seek_0011_t_13_100000.png"
     }
   ]
 }
