@@ -8,7 +8,8 @@ degrees and spun at 2.2 turns a second are let go at rest, pushed back and
 pushed forward; the knob on each spindle writes cusps, loops or waves on its
 glass globe between the two circles where theta turns. The moments of inertia
 come from the drawn parts, the motion is integrated with fourth-order
-Runge-Kutta, and every part is placed from scene time, so seeks are exact.
+Runge-Kutta, and each top, turned on a lathe and grouped about its tip, follows its
+sampled orientations natively, so seeks are exact.
 """
 
 import math
@@ -92,6 +93,7 @@ def axis_of(theta, phi):
 
 rate = steady_rate()
 motions = [simulate(push * rate, END - release) for push, release in zip(PUSHES, RELEASES)]
+FRAMES = [i / RATE for i in range(round(END * RATE) + 1)]  # the instants the tops are sampled at
 
 
 def pose(k, t):
@@ -105,6 +107,30 @@ def pose(k, t):
     a, b = samples[i], samples[i + 1]
     theta, phi, psi = (x + (y - x) * f for x, y in zip(a, b))
     return theta, phi + FACING, psi + SPIN * RELEASES[k]
+
+
+def turn(axis, angle):
+    """The quaternion (w, x, y, z) of a turn by ``angle`` about a unit ``axis``."""
+    half = angle / 2
+    return (math.cos(half), *(math.sin(half) * a for a in axis))
+
+
+def compose(p, q):
+    """The quaternion of turning by q, then by p."""
+    pw, px, py, pz = p
+    qw, qx, qy, qz = q
+    return (
+        pw * qw - px * qx - py * qy - pz * qz,
+        pw * qx + px * qw + py * qz - pz * qy,
+        pw * qy - px * qz + py * qw + pz * qx,
+        pw * qz + px * qy - py * qx + pz * qw,
+    )
+
+
+def orientation(theta, phi, psi):
+    """The top's orientation for Euler angles in the scene, y up: spun by psi about its axis,
+    tilted by theta about x, turned by phi about y."""
+    return compose(compose(turn((0, 1, 0), phi), turn((1, 0, 0), theta)), turn((0, 1, 0), psi))
 
 
 def bounds(k):
@@ -127,28 +153,34 @@ COLORS = [gold, violet, lilac]
 steel = Material3D(paper, roughness=0.25, metallic=0.9)
 
 
+def rim(bottom, top, radius, bevel=0.05, steps=4):
+    """The (r, y) profile of a disk with rounded edges, from the axis at its bottom to the axis
+    at its top."""
+    corner = [(bevel * math.sin(a), bevel * (1 - math.cos(a))) for a in
+              (math.pi / 2 * i / steps for i in range(steps + 1))]
+    low = [(radius - bevel + dr, bottom + dy) for dr, dy in corner]
+    high = [(radius - bevel + dr, top - dy) for dr, dy in reversed(corner)]
+    return [(0, bottom), *low, *high, (0, top)]
+
+
 def top(k):
-    """Top k standing upright on its tip, inside three nested groups that turn about the tip:
-    by phi about y, tilting by theta about x, and spinning by psi about y."""
-    x, y, z = SPOTS[k]
+    """Top k, turned on a lathe and built upright from its tip at the origin, grouped about the
+    tip and turned by the simulation: one orientation sample per frame, from the start."""
     color = COLORS[k]
-    cone = geometry.cone(CONE_R, CONE_H, segments=48, material=steel).rotate_to_3d(math.pi, 0, 0)
-    cone.move_to_3d(x, y + CONE_H / 2, z)
-    disk = geometry.cylinder(DISK_R, DISK_T, segments=72, material=Material3D(color, roughness=0.35))
-    disk.move_to_3d(x, y + DISK_Y, z)
+    cone = geometry.revolve([(0, 0), (CONE_R, CONE_H), (0, CONE_H)], material=steel)
+    disk = geometry.revolve(rim(DISK_Y - DISK_T / 2, DISK_Y + DISK_T / 2, DISK_R),
+                            material=Material3D(color, roughness=0.35))
     beads = [
         geometry.sphere(0.07, material=Material3D.matte(paper)).move_to_3d(
-            x + 0.8 * DISK_R * math.cos(a), y + DISK_Y + DISK_T / 2, z + 0.8 * DISK_R * math.sin(a)
+            0.8 * DISK_R * math.cos(a), DISK_Y + DISK_T / 2, 0.8 * DISK_R * math.sin(a)
         )
         for a in (0, math.tau / 3, 2 * math.tau / 3)
     ]
-    spindle = geometry.cylinder(SPINDLE_R, PEN - DISK_Y, segments=16, material=steel)
-    spindle.move_to_3d(x, y + (PEN + DISK_Y) / 2, z)
-    knob = geometry.sphere(KNOB_R, material=Material3D.emissive(color, strength=1.5)).move_to_3d(x, y + PEN, z)
-    theta, phi, psi = (computed(lambda t, j=j: pose(k, t)[j], inputs=[scene.time]) for j in range(3))
-    spin = geometry.group(cone, disk, *beads, spindle, knob).with_pivot_3d(x, y, z).rotate_to_3d(0, psi, 0)
-    tilt = geometry.group(spin).with_pivot_3d(x, y, z).rotate_to_3d(theta, 0, 0)
-    return geometry.group(tilt).with_pivot_3d(x, y, z).rotate_to_3d(0, phi, 0)
+    spindle = geometry.revolve([(0, DISK_Y), (SPINDLE_R, DISK_Y), (SPINDLE_R, PEN), (0, PEN)], segments=16,
+                               material=steel)
+    knob = geometry.sphere(KNOB_R, material=Material3D.emissive(color, strength=1.5)).move_to_3d(0, PEN, 0)
+    body = geometry.group(cone, disk, *beads, spindle, knob, origin=(0, 0, 0)).move_to_3d(*SPOTS[k])
+    return body.drive_from_samples(FRAMES, [orientation(*pose(k, t)) for t in FRAMES], "orientation")
 
 
 def jar(k):
@@ -193,9 +225,10 @@ stands = [jar(k) for k in range(3)]
 tops = [top(k) for k in range(3)]
 rings = [circles(k) for k in range(3)]
 traces = [trace(k) for k in range(3)]
+# Hidden until they fade in, the globes keep their own opacity.
 for k in range(3):
     for part in [*stands[k], tops[k]]:
-        part.opacity(0.0)
+        part.hidden()
 
 # The heads-up display of the first top: its effective potential, shifted so that its energy
 # is the zero line. The tilt lives where V - E is below the line; the dot rides the line at
@@ -219,7 +252,8 @@ axes = plane.drawable()
 axes.hud().opacity(0.0)
 well = plane.plot(lambda d: potential(math.radians(d), p_phi) - energy, (TH0 + 2, TH1)).stroke(paper, 0.04)
 level = geometry.tracking_line(plane.data_to_scene(TH0, 0), plane.data_to_scene(TH1, 0)).stroke(gold, 0.03)
-tilt = computed(lambda t: math.degrees(pose(0, t)[0]), inputs=[scene.time])
+tilt = scene.viz.parameter(math.degrees(TILT))
+tilt.drive_from_samples(FRAMES, [math.degrees(pose(0, t)[0]) for t in FRAMES])
 drop = computed(lambda d: potential(math.radians(d), p_phi) - energy, inputs=[tilt])
 rider = geometry.dot(0.11).fill(gold).follow(plane.point_ref(tilt, 0.0))
 kinetic = geometry.tracking_line(plane.point_ref(tilt, 0.0), plane.point_ref(tilt, drop)).stroke(gold, 0.035)
@@ -300,8 +334,8 @@ scene.play([caption.animate.fade_in() for caption in captions], duration=1.2)
 scene.wait(2.5)
 scene.play([c.animate.fade_in() for k in (1, 2) for c in rings[k]], duration=1.0)
 scene.wait_until(seconds=22.0)
-# 22-25 s: from higher up, where cusps, loops and waves are easiest to tell apart.
-scene.play(scene.camera.animate.orbit(delta_yaw=-0.1, delta_pitch=0.6), duration=3.0, easing=Easing.SMOOTH)
+# 22-25 s: from higher up and closer, where cusps, loops and waves are easiest to tell apart.
+scene.play(scene.camera.animate.orbit(delta_yaw=-0.1, delta_pitch=0.6, dolly=0.92), duration=3.0, easing=Easing.SMOOTH)
 scene.wait_until(seconds=28.0)
 scene.play(closing.animate.fade_in(), duration=1.2)
 scene.wait_until(seconds=END)
