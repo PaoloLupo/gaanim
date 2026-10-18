@@ -857,6 +857,21 @@ pub struct PlaneGlyph {
     /// A gradient it is filled with instead, its opacity included, and the
     /// map from the outline's units to the gradient's.
     pub gradient: Option<(Arc<gaanim_core::peniko::Gradient>, Affine)>,
+    /// A contour that keeps the part of it inside, or outside, as a stroke
+    /// aligned inside or outside its shape is drawn.
+    pub clip: Option<PlaneClip>,
+}
+
+/// The contour a [`PlaneGlyph`] is clipped to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaneClip {
+    /// Closed contours filled with the nonzero rule, in their own units.
+    pub outline: Arc<BezPath>,
+    /// From the glyph's outline's units to this one's.
+    pub offset: gaanim_core::kurbo::Vec2,
+    /// Whether the glyph keeps what lies outside the contour rather than
+    /// inside it.
+    pub outside: bool,
 }
 
 #[cfg(test)]

@@ -1661,7 +1661,7 @@ fn canvas_background_geometry(background: &CanvasBackground) -> (kurbo::Rect, ku
     )
 }
 
-fn stroke_clip_path<'a>(
+pub(crate) fn stroke_clip_path<'a>(
     visible_path: &'a kurbo::BezPath,
     source_path: Option<&'a kurbo::BezPath>,
 ) -> Option<&'a kurbo::BezPath> {
@@ -1686,7 +1686,7 @@ fn aligned_pen(style: &kurbo::Stroke, align: StrokeAlign) -> std::borrow::Cow<'_
 /// Pen an inside or outside stroke draws before the contour clips it: twice
 /// the authored width, so the half it keeps is the whole authored width,
 /// with dashes that keep their authored lengths in that half.
-fn clipped_pen(style: &kurbo::Stroke) -> kurbo::Stroke {
+pub(crate) fn clipped_pen(style: &kurbo::Stroke) -> kurbo::Stroke {
     let mut pen = style.clone();
     pen.width *= 2.0;
     crate::stroke::doubled_pen_dashes(style, &mut pen);

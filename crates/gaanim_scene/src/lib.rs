@@ -11,6 +11,9 @@ pub mod prelude;
 pub mod systems;
 pub mod transition_frame;
 
+/// Bevy's handlers of ECS errors no system or command handled, such as
+/// [`ecs_error::warn`], for an app to choose with `App::set_error_handler`.
+pub use bevy::ecs::error as ecs_error;
 pub use components::{
     AuthoredCall, AuthoredIndex, AuthoredObject, AuthoredObjects, Billboard, CoordinateLabelOffset,
     CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose, DepthOfField, DrawnIn3D, FillBrush,
@@ -18,14 +21,11 @@ pub use components::{
     LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame, LayoutInspectionKind,
     LayoutZoneRecord, LayoutZones, Light3D, LightKind3D, Lighting3D, LineListData, LineListSource,
     LocalBounds, Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
-    ParallaxLayer, Path2D, PathRevealOrder, PathSource, PlaneFillData, PlaneGlyph, Presence,
-    RasterImage, RenderLayer, RenderOrder, SegmentContent, ShapeDeform, StrokeBrush, TextBaseline,
-    TriangleMeshData, Visible, WorldBounds, ZLayer,
+    ParallaxLayer, Path2D, PathRevealOrder, PathSource, PlaneClip, PlaneFillData, PlaneGlyph,
+    Presence, RasterImage, RenderLayer, RenderOrder, SegmentContent, ShapeDeform, StrokeBrush,
+    TextBaseline, TriangleMeshData, Visible, WorldBounds, ZLayer,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
-/// Bevy's handlers of ECS errors no system or command handled, such as
-/// [`ecs_error::warn`], for an app to choose with `App::set_error_handler`.
-pub use bevy::ecs::error as ecs_error;
 pub use occlusion::Occlusion;
 
 /// Bevy's render visibility, which scene entities carry for Bevy's own

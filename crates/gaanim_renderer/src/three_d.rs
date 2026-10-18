@@ -2006,11 +2006,12 @@ impl Pipelines {
                 cache: None,
             })
         };
-        // An outline's instance: its box, placement, bands, band header and
-        // color (`FillIn` in the shader).
-        let fill_attributes: [wgpu::VertexAttribute; 6] =
+        // An outline's instance: its box, placement, bands, band header,
+        // color, and its clip's bands and band header (`FillIn` in the
+        // shader).
+        let fill_attributes: [wgpu::VertexAttribute; 8] =
             std::array::from_fn(|index| wgpu::VertexAttribute {
-                format: if index == 4 {
+                format: if index == 4 || index == 7 {
                     wgpu::VertexFormat::Uint32x4
                 } else {
                     wgpu::VertexFormat::Float32x4
@@ -3878,6 +3879,7 @@ mod tests {
                 placement: kurbo::Affine::IDENTITY,
                 color: peniko::Color::from_rgb8(255, 0, 0),
                 gradient: None,
+                clip: None,
             }],
         };
         let above = placed(1.0, DVec3::new(0.0, 0.0, 1.0));
@@ -4251,6 +4253,7 @@ mod tests {
                 placement: kurbo::Affine::IDENTITY,
                 color: peniko::Color::from_rgb8(255, 0, 0),
                 gradient: None,
+                clip: None,
             }],
         };
         let at_origin = GlobalSpatialTransform::default();
@@ -4316,6 +4319,117 @@ mod tests {
     }
 
     #[test]
+    fn strokes_aligned_inside_and_outside_cover_their_ring() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let at_origin = GlobalSpatialTransform::default();
+        // A circle of radius 1.2, stroked a quarter of a unit wide: 4 pixels.
+        let circle = kurbo::Shape::to_path(&kurbo::Circle::new((0.1, -0.05), 1.2), 1e-3);
+        let pen = kurbo::Stroke::new(0.25);
+        let at_corner = |path: kurbo::BezPath| {
+            let corner = kurbo::Shape::bounding_box(&path).origin().to_vec2();
+            (Arc::new(kurbo::Affine::translate(-corner) * path), corner)
+        };
+        for align in [
+            crate::effects::StrokeAlign::Inside,
+            crate::effects::StrokeAlign::Outside,
+        ] {
+            let doubled = crate::pipeline::clipped_pen(&pen);
+            let (outline, corner) = at_corner(kurbo::stroke(
+                circle.iter(),
+                &doubled,
+                &kurbo::StrokeOpts::default(),
+                1e-3,
+            ));
+            let (contour, contour_corner) = at_corner(circle.clone());
+            let fill = PlaneFillData {
+                glyphs: vec![gaanim_scene::PlaneGlyph {
+                    outline,
+                    placement: kurbo::Affine::translate(corner),
+                    color: peniko::Color::from_rgb8(255, 0, 0),
+                    gradient: None,
+                    clip: Some(gaanim_scene::PlaneClip {
+                        outline: contour,
+                        offset: corner - contour_corner,
+                        outside: align == crate::effects::StrokeAlign::Outside,
+                    }),
+                }],
+            };
+            let mut sources = MeshSources::default();
+            let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+            assert!(meshes.push_fill(
+                0,
+                (1, 1),
+                None,
+                &Content {
+                    transform: &at_origin,
+                    opacity: &opacity,
+                    mesh: None,
+                    lines: None,
+                    material: None,
+                    line_width: None,
+                    line_range: None,
+                    fill: Some(&fill),
+                },
+            ));
+            let frames: Vec<GpuMeshFrame> = meshes
+                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .into_iter()
+                .map(|(_, frame)| frame)
+                .collect();
+            let mut scene = vello::Scene::new();
+            scene.append(&frames[0].scene(), Some(placement));
+            let mut three_d = GpuThreeD::default();
+            three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+            let target = gpu.target(64, 64);
+            gpu.render(&scene, &target);
+            let drawn = gpu.read(&target);
+            // Alpha against the exact area of the ring the stroke keeps,
+            // within the circle or beyond it, by supersampling. (Vello's clip
+            // layers soften these edges more; the area is the reference.)
+            let (inner, outer) = match align {
+                crate::effects::StrokeAlign::Inside => (0.95, 1.2),
+                _ => (1.2, 1.45),
+            };
+            let exact = |x: usize, y: usize| {
+                let mut inside = 0;
+                for i in 0..8 {
+                    for j in 0..8 {
+                        let px = -2.0 + (x as f64 + (f64::from(i) + 0.5) / 8.0) / 16.0;
+                        let py = 2.0 - (y as f64 + (f64::from(j) + 0.5) / 8.0) / 16.0;
+                        let r = (px - 0.1).hypot(py + 0.05);
+                        inside += usize::from((inner..=outer).contains(&r));
+                    }
+                }
+                inside as f64 / 64.0 * 255.0
+            };
+            let (mut total, mut worst, mut count) = (0.0, 0.0_f64, 0);
+            for y in 0..64 {
+                for x in 0..64 {
+                    let truth = exact(x, y);
+                    let alpha = f64::from(drawn[(y * 64 + x) * 4 + 3]);
+                    if truth > 0.0 || alpha > 0.0 {
+                        total += (alpha - truth).abs();
+                        worst = worst.max((alpha - truth).abs());
+                        count += 1;
+                    }
+                }
+            }
+            let mean = total / f64::from(count);
+            assert!(
+                mean <= 5.0 && worst <= 40.0,
+                "{align:?}: off by {mean:.1} on average, {worst:.0} at most"
+            );
+        }
+    }
+
+    #[test]
     fn gradient_fills_match_their_2d_drawing() {
         let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
             return;
@@ -4348,6 +4462,7 @@ mod tests {
                     placement: kurbo::Affine::translate(corner),
                     color: red,
                     gradient: Some((Arc::new(gradient.clone()), kurbo::Affine::translate(corner))),
+                    clip: None,
                 }],
             };
             let mut sources = MeshSources::default();
@@ -4564,6 +4679,7 @@ mod tests {
                         placement: kurbo::Affine::translate((x, y)) * kurbo::Affine::scale(scale),
                         color: peniko::Color::from_rgb8(20, 20, 30),
                         gradient: None,
+                        clip: None,
                     });
                 }
                 x += advance * scale;

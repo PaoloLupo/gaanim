@@ -5,8 +5,8 @@
 //! leaves the parts, marked [`DrawnIn3D`], to it.
 //!
 //! A part's fill and stroke keep their colors and gradients, its opacity and
-//! the progress of a write; shadows, glows, blurs, chalk, rasters and Lottie
-//! scenes are left out.
+//! the progress of a write, and a stroke its alignment and profile; shadows,
+//! glows, blurs, chalk, rasters and Lottie scenes are left out.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
@@ -17,16 +17,26 @@ use gaanim_core::kurbo::{self, Affine, BezPath, Shape};
 use gaanim_core::peniko;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{
-    DrawnIn3D, FillBrush, GlobalOpacity, GroupMarker, InWorld3D, Path2D, PathSource, PlaneFillData,
-    PlaneGlyph, RenderLayer, StrokeBrush, Visible,
+    DrawnIn3D, FillBrush, GlobalOpacity, GroupMarker, InWorld3D, Path2D, PathSource, PlaneClip,
+    PlaneFillData, PlaneGlyph, RenderLayer, StrokeBrush, Visible,
 };
 
 use crate::effects::{StrokeAlign, StrokeProfile, StrokeScalesWithObject};
 use crate::fragment::{FragmentParts, FragmentRecipe, fragment_recipe};
 
-/// What a part draws at full opacity: outlines laid at their box's corner,
-/// that corner, and their paints.
-type Drawn = Arc<[(Arc<BezPath>, kurbo::Vec2, Paint)]>;
+/// What a part draws at full opacity.
+type Drawn = Arc<[Laid]>;
+
+/// An outline a part draws, laid at its box's corner, with that corner, its
+/// paint, and the contour that clips it, laid at its own corner, with that
+/// corner and whether it keeps what lies outside.
+#[derive(Clone, Debug, PartialEq)]
+struct Laid {
+    outline: Arc<BezPath>,
+    corner: kurbo::Vec2,
+    paint: Paint,
+    clip: Option<(Arc<BezPath>, kurbo::Vec2, bool)>,
+}
 
 /// What an outline is filled with: a color, or a gradient in the part's own
 /// units, as the 2D renderer paints it.
@@ -205,13 +215,21 @@ pub(crate) fn sync_in_world_system(
             };
             let placement = to_root * transform.affine_2d;
             let alpha = (opacity.0 / root_opacity).clamp(0.0, 1.0);
-            for (outline, corner, paint) in drawn.iter() {
-                let (color, gradient) = paint.glyph(alpha, *corner);
+            for laid in drawn.iter() {
+                let (color, gradient) = laid.paint.glyph(alpha, laid.corner);
                 glyphs.push(PlaneGlyph {
-                    outline: Arc::clone(outline),
-                    placement: placement * Affine::translate(*corner),
+                    outline: Arc::clone(&laid.outline),
+                    placement: placement * Affine::translate(laid.corner),
                     color,
                     gradient,
+                    clip: laid
+                        .clip
+                        .as_ref()
+                        .map(|(outline, corner, outside)| PlaneClip {
+                            outline: Arc::clone(outline),
+                            offset: laid.corner - *corner,
+                            outside: *outside,
+                        }),
                 });
             }
         }
@@ -234,6 +252,7 @@ fn same_glyphs(a: &[PlaneGlyph], b: &[PlaneGlyph]) -> bool {
             a.placement == b.placement
                 && a.color == b.color
                 && a.gradient == b.gradient
+                && a.clip == b.clip
                 && (Arc::ptr_eq(&a.outline, &b.outline) || a.outline == b.outline)
         })
 }
@@ -241,7 +260,7 @@ fn same_glyphs(a: &[PlaneGlyph], b: &[PlaneGlyph]) -> bool {
 /// The outlines `recipe` fills and strokes, as the 2D renderer draws them
 /// (see [`crate::fragment::build_fragment`]): the fill unless a write is
 /// still drawing a closed outline, faded by the write's fill progress, and
-/// the stroke widened into an outline of its own.
+/// the stroke as an outline of its own (see [`stroke_outline`]).
 fn drawn(recipe: &FragmentRecipe, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) -> Drawn {
     let empty = BezPath::new();
     let path = recipe.visible_path(&empty);
@@ -267,7 +286,12 @@ fn drawn(recipe: &FragmentRecipe, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) 
         && fill_alpha > 0.0
         && let Some(paint) = recipe.fill.as_ref().and_then(Paint::of)
     {
-        drawn.extend(laid(path.clone(), paint.multiply_alpha(fill_alpha), alike));
+        drawn.extend(laid(
+            path.clone(),
+            paint.multiply_alpha(fill_alpha),
+            None,
+            alike,
+        ));
     }
     if let Some(stroke) = &recipe.stroke
         && let Some(brush) = &stroke.brush
@@ -278,32 +302,80 @@ fn drawn(recipe: &FragmentRecipe, alike: &mut HashMap<Vec<i64>, Weak<BezPath>>) 
             && style.width.is_finite()
             && style.width > 0.0
         {
-            let widen = |path: &BezPath| {
-                let tolerance = (style.width * 0.01).max(1e-9);
-                kurbo::stroke(
-                    path.iter(),
-                    &style,
-                    &kurbo::StrokeOpts::default(),
-                    tolerance,
-                )
-            };
-            let outline = match recipe.stroke_view {
-                Some(view) => view.inverse() * widen(&(view * path.clone())),
-                None => widen(path),
-            };
-            drawn.extend(laid(outline, paint, alike));
+            let (outline, clip) = stroke_outline(recipe, path, &style);
+            let clip = clip.and_then(|(contour, outside)| {
+                let (contour, corner) = lay(contour.clone(), alike)?;
+                Some((contour, corner, outside))
+            });
+            drawn.extend(laid(outline, paint, clip, alike));
         }
     }
     drawn.into()
 }
 
+/// The outline a stroke of `style` along `path` draws, as
+/// [`crate::pipeline::draw_aligned_stroke`] draws it, and the contour that
+/// clips it with whether it keeps what lies outside: a profile's outline; for
+/// a stroke aligned inside or outside a closed contour, the stroke twice as
+/// wide, clipped to that contour; else the stroke widened.
+fn stroke_outline<'a>(
+    recipe: &'a FragmentRecipe,
+    path: &'a BezPath,
+    style: &kurbo::Stroke,
+) -> (BezPath, Option<(&'a BezPath, bool)>) {
+    let in_view = |outline: &dyn Fn(&BezPath) -> BezPath| match recipe.stroke_view {
+        Some(view) => view.inverse() * outline(&(view * path.clone())),
+        None => outline(path),
+    };
+    if let Some(profile) = &recipe.stroke_profile {
+        let half_width = style.width.abs() * 0.5;
+        let outline = in_view(&|path| crate::stroke::profiled_outline(path, half_width, profile));
+        return (outline, None);
+    }
+    let widen = |pen: &kurbo::Stroke| {
+        in_view(&|path| {
+            let tolerance = (pen.width * 0.01).max(1e-9);
+            kurbo::stroke(path.iter(), pen, &kurbo::StrokeOpts::default(), tolerance)
+        })
+    };
+    let clip = match recipe.stroke_align {
+        StrokeAlign::Center => None,
+        StrokeAlign::Inside | StrokeAlign::Outside => {
+            crate::pipeline::stroke_clip_path(path, recipe.source.as_deref())
+        }
+    };
+    match clip {
+        Some(contour) => (
+            widen(&crate::pipeline::clipped_pen(style)),
+            Some((contour, recipe.stroke_align == StrokeAlign::Outside)),
+        ),
+        None => (widen(style), None),
+    }
+}
+
 /// `outline` laid at its box's corner, shared with an outline alike, with
-/// that corner and `paint`; nothing for an empty outline.
+/// that corner, `paint` and `clip`; nothing for an empty outline.
 fn laid(
     outline: BezPath,
     paint: Paint,
+    clip: Option<(Arc<BezPath>, kurbo::Vec2, bool)>,
     alike: &mut HashMap<Vec<i64>, Weak<BezPath>>,
-) -> Option<(Arc<BezPath>, kurbo::Vec2, Paint)> {
+) -> Option<Laid> {
+    let (outline, corner) = lay(outline, alike)?;
+    Some(Laid {
+        outline,
+        corner,
+        paint,
+        clip,
+    })
+}
+
+/// `outline` laid at its box's corner, shared with an outline alike, and
+/// that corner; nothing for an empty outline.
+fn lay(
+    outline: BezPath,
+    alike: &mut HashMap<Vec<i64>, Weak<BezPath>>,
+) -> Option<(Arc<BezPath>, kurbo::Vec2)> {
     let bounds = outline.bounding_box();
     let step = bounds.width().max(bounds.height()) / 65536.0;
     if outline.elements().is_empty() || !(step.is_finite() && step > 0.0) {
@@ -337,7 +409,7 @@ fn laid(
             shared
         }
     };
-    Some((shared, corner, paint))
+    Some((shared, corner))
 }
 
 #[cfg(test)]
@@ -445,11 +517,47 @@ mod tests {
         };
         let drawn = drawn(&recipe, &mut HashMap::new());
         assert_eq!(drawn.len(), 1);
-        let (outline, corner, paint) = &drawn[0];
+        let Laid {
+            outline,
+            corner,
+            paint,
+            clip,
+        } = &drawn[0];
         assert_eq!(*paint, Paint::Solid(peniko::Color::BLACK));
+        // An open line strokes its centerline.
+        assert!(clip.is_none());
         let bounds = outline.bounding_box() + *corner;
         assert!((bounds.height() - 0.2).abs() < 1e-6, "{bounds:?}");
         assert!((bounds.width() - 2.0).abs() < 0.21, "{bounds:?}");
+    }
+
+    #[test]
+    fn strokes_aligned_inside_or_outside_are_twice_as_wide_and_clipped() {
+        let mut stroked = StrokeBrush::new(peniko::Color::BLACK, 0.2);
+        stroked.brush = Some(peniko::Brush::Solid(peniko::Color::BLACK));
+        let square = kurbo::Rect::new(1.0, 1.0, 3.0, 3.0).to_path(0.0);
+        let recipe = |align| FragmentRecipe {
+            path: Some(Arc::new(square.clone())),
+            stroke: Some(stroked.clone()),
+            stroke_align: align,
+            ..Default::default()
+        };
+        for (align, outside) in [(StrokeAlign::Inside, false), (StrokeAlign::Outside, true)] {
+            let drawn = drawn(&recipe(align), &mut HashMap::new());
+            let laid = &drawn[0];
+            let (contour, corner, kept_outside) = laid.clip.clone().unwrap();
+            assert_eq!(kept_outside, outside);
+            // The contour is the square, laid at its corner.
+            assert_eq!(corner, kurbo::Vec2::new(1.0, 1.0));
+            assert!((contour.bounding_box().width() - 2.0).abs() < 1e-9);
+            // The stroke reaches its whole width beyond the contour.
+            let bounds = laid.outline.bounding_box() + laid.corner;
+            assert!((bounds.x0 - 0.8).abs() < 1e-6, "{bounds:?}");
+        }
+        let centered = drawn(&recipe(StrokeAlign::Center), &mut HashMap::new());
+        assert!(centered[0].clip.is_none());
+        let bounds = centered[0].outline.bounding_box() + centered[0].corner;
+        assert!((bounds.x0 - 0.9).abs() < 1e-6, "{bounds:?}");
     }
 
     #[test]
