@@ -8190,8 +8190,9 @@ class CoordinateSpace3D:
         inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
         vectorized: bool = False,
         color_map: Optional[ColorMapLike] = None,
+        material: Optional[Material3D] = None,
     ) -> Drawable:
-        """Sample ``z = f(x, y)`` on a grid of ``resolution`` points and draw it as a lit mesh.
+        """Sample ``z = f(x, y)`` on a grid of ``resolution`` points and draw it as a mesh.
 
         ``function`` takes x, y and the current values of ``inputs`` (reactive,
         as in ``plot``) and returns z. Vertices are colored by height, lowest to
@@ -8206,8 +8207,13 @@ class CoordinateSpace3D:
         A NaN height leaves a hole. It needs numpy, and is much faster for
         large or animated grids.
 
+        With a ``material`` the surface is lit by the scene's ``lighting_3d``
+        on both sides, keeping its colors, and casts and receives shadows;
+        without one it is unlit.
+
         Example:
             hill = space.surface(lambda x, y: math.exp(-(x * x + y * y)), color_map="magma")
+            relief = space.surface(lambda x, y: math.sin(x) * math.cos(y), material=Material3D.matte())
             wave = space.surface(lambda x, y, t: np.sin(x + t) * np.cos(y), inputs=[phase], vectorized=True)
         """
         ...

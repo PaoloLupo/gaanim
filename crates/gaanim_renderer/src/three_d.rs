@@ -197,6 +197,9 @@ pub struct MeshSource {
     /// that run it in opposite directions, once vertices at one place are
     /// one. Only a lit mesh shadows itself, so only a lit one is checked.
     closed: bool,
+    /// A lit mesh that bounds no volume: an open one, or both sides of a
+    /// sheet, which is closed but holds nothing.
+    sheet: bool,
     /// A lit mesh's outline directions (see [`outline_directions`]); empty
     /// for others, which have no material to outline them.
     outline: Vec<u8>,
@@ -231,7 +234,7 @@ impl MeshSource {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.vertices.hash(&mut hasher);
         self.indices.hash(&mut hasher);
-        (self.lines, self.has_colors, self.closed).hash(&mut hasher);
+        (self.lines, self.has_colors, self.closed, self.sheet).hash(&mut hasher);
         if let Some(fill) = &self.fill {
             fill.curves.hash(&mut hasher);
             fill.bands.hash(&mut hasher);
@@ -252,6 +255,7 @@ impl MeshSource {
             && self.lines == other.lines
             && self.has_colors == other.has_colors
             && self.closed == other.closed
+            && self.sheet == other.sheet
             && self.vertices == other.vertices
             && self.indices == other.indices
             && match (&self.fill, &other.fill) {
@@ -312,6 +316,23 @@ fn encloses_places(place: &[u32], indices: &[u32]) -> bool {
         }
     }
     !edges.is_empty() && edges.values().all(|count| *count == 0)
+}
+
+/// Whether the closed triangles `indices` over `positions` hold a volume,
+/// rather than run both sides of a sheet, whose volumes cancel: more than a
+/// millionth of the cube of `radius`, the bounding sphere's about `center`.
+fn holds_volume(positions: &[DVec3], indices: &[u32], center: DVec3, radius: f64) -> bool {
+    let volume: f64 = indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|triangle| {
+            let [a, b, c] = triangle.map(|index| positions[index as usize] - center);
+            a.dot(b.cross(c))
+        })
+        .sum::<f64>()
+        / 6.0;
+    volume.abs() > 1e-6 * radius.powi(3)
 }
 
 /// The way an outline pushes each vertex out, 12 bytes a vertex. A closed
@@ -466,10 +487,12 @@ impl MeshSource {
         let closed = place
             .as_ref()
             .is_some_and(|place| encloses_places(place, &indices));
+        let sheet = lit && !(closed && holds_volume(&positions, &indices, center, radius));
         Some(Self {
             vertices,
             count: indices.len() as u32,
             closed,
+            sheet,
             outline: place
                 .as_ref()
                 .map(|place| outline_directions(&positions, &indices, place, closed))
@@ -500,6 +523,7 @@ impl MeshSource {
             center,
             radius,
             closed: false,
+            sheet: false,
             outline: Vec::new(),
             digest: 0,
             fill: Some(FillBuffers {
@@ -557,6 +581,7 @@ impl MeshSource {
             count: pairs.len() as u32,
             lines: true,
             closed: false,
+            sheet: false,
             outline: Vec::new(),
             digest: 0,
             fill: None,
@@ -1512,7 +1537,8 @@ fn push_draw_uniforms(
         .map_or([0.0; 4], |material| to_linear(material.outline));
     push_f32s(bytes, &outline);
     let open = f32::from(u8::from(!pending.source.closed));
-    push_f32s(bytes, &[outline_px as f32, open, 0.0, 0.0]);
+    let sheet = f32::from(u8::from(pending.source.sheet));
+    push_f32s(bytes, &[outline_px as f32, open, sheet, 0.0]);
     debug_assert_eq!(bytes.len() - start, DRAW_BYTES);
     bytes.resize(start + DRAW_STRIDE, 0);
 }
@@ -2784,8 +2810,8 @@ struct Draw {
     // Half the width of lines in pixels, and the segments shown, from and
     // to, fractional at the ends.
     line: vec4<f32>,
-    // The linear color of the outline, its width in pixels, and 1 for an
-    // open mesh.
+    // The linear color of the outline; its width in pixels, 1 for an open
+    // mesh, and 1 for a sheet (see `SHEET_SHADE`).
     outline: vec4<f32>,
     outline_size: vec4<f32>,
 }
@@ -2856,6 +2882,14 @@ const SKY: f32 = 0.5;
 const GROUND: f32 = 0.3;
 const SKY_TINT = vec3<f32>(0.86, 0.92, 1.0);
 const RIM: f32 = 0.22;
+
+// How far into the light a sheet's shadows fade in, in the cosine of the
+// light's angle to the side shaded. A sheet bounds no volume, so it shadows
+// the side it turns from the light, where a solid's far side, which casts,
+// does not: the wrapped light past its terminator would end at a shadow
+// stepped by the shadow map's texels. It fades out there instead, as on a
+// solid.
+const SHEET_SHADE: f32 = 0.2;
 
 // How much farther lines lie than they are, relative to their depth: a line
 // on a surface, as a floor grid under a plot, stays beneath it.
@@ -3075,7 +3109,10 @@ fn shade(
             toward_light = light.position.xyz - point;
         }
         toward_light = normalize_or_zero(toward_light);
-        let lit = shadowed(light, point, face, pixel);
+        var lit = shadowed(light, point, face, pixel);
+        if draw.outline_size.z > 0.5 {
+            lit = mix(1.0, lit, smoothstep(0.0, SHEET_SHADE, dot(normal, toward_light)));
+        }
         let key = max((dot(normal, toward_light) + KEY_WRAP) / (1.0 + KEY_WRAP), 0.0);
         let half = normalize_or_zero(toward_light + viewer);
         let shine = pow(max(dot(normal, half), 0.0), shininess) * polish * min(key, 1.0);
@@ -3485,11 +3522,31 @@ mod tests {
             indices: (0..12).collect(),
             ..quad(peniko::Color::WHITE)
         };
-        assert!(MeshSource::mesh(&tetrahedron, true).unwrap().closed);
-        // Without a face it is open.
+        let solid = MeshSource::mesh(&tetrahedron, true).unwrap();
+        assert!(solid.closed && !solid.sheet);
+        // Without a face it is open, and holds nothing.
         let mut open = tetrahedron.clone();
         open.indices.truncate(9);
-        assert!(!MeshSource::mesh(&open, true).unwrap().closed);
+        let open = MeshSource::mesh(&open, true).unwrap();
+        assert!(!open.closed && open.sheet);
+        // Both sides of a quad, far from the origin, are closed but hold
+        // nothing; unlit, it is neither.
+        let mut sides = quad(peniko::Color::WHITE);
+        for vertex in &mut sides.vertices {
+            vertex[0] += 1000.0;
+        }
+        let back: Vec<u32> = sides
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|[a, b, c]| [a + 4, c + 4, b + 4])
+            .collect();
+        sides.vertices.extend_from_within(..);
+        sides.indices.extend(back);
+        let two_sided = MeshSource::mesh(&sides, true).unwrap();
+        assert!(two_sided.closed && two_sided.sheet);
+        assert!(!MeshSource::mesh(&sides, false).unwrap().sheet);
         // Copies of a corner computed with different rounding still meet,
         // even across a cell of the grid that welds them (1e-5 here).
         let mut positions: Vec<DVec3> = tetrahedron

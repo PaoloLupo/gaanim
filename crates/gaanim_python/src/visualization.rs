@@ -2448,7 +2448,8 @@ impl PyCoordinateSpace3D {
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, *, resolution=(64, 48), inputs=Vec::new(), vectorized=false, color_map=None))]
+    #[pyo3(signature = (function, *, resolution=(64, 48), inputs=Vec::new(), vectorized=false, color_map=None, material=None))]
+    #[allow(clippy::too_many_arguments)]
     fn surface(
         &self,
         py: Python<'_>,
@@ -2457,6 +2458,7 @@ impl PyCoordinateSpace3D {
         inputs: Vec<Py<PyAny>>,
         vectorized: bool,
         color_map: Option<crate::color::PyColorMapArg>,
+        material: Option<crate::py3d::PyMaterial3D>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
         let function = if vectorized {
@@ -2484,6 +2486,7 @@ impl PyCoordinateSpace3D {
                 function,
                 [resolution.0, resolution.1],
                 color_map.map(|color_map| color_map.0),
+                material.map(|material| material.0),
             )
             .map(PyDrawable)
             .map_err(value_error)
