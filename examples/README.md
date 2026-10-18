@@ -183,7 +183,7 @@ Full-frame passes: color grading, bloom, motion blur and finishes.
 
 | Example | Description |
 | --- | --- |
-| [Color grading](post_processing/color_grading.py) | Exposure, contrast, saturation and temperature grades and a 3D lookup table, applied to the whole frame. |
+| [Color grading](post_processing/color_grading.py) | Exposure, contrast, saturation and temperature grades, a 3D lookup table, tint and duotone, applied to the whole frame. |
 | [Finishes](post_processing/finishes.py) | Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch passes, each ramped in through a Parameter, with labels kept out of the post-process. |
 | [Bloom](post_processing/bloom.py) | Bloom threshold, intensity and radius on neon outlines, and a glow that pulses with a Parameter. |
 | [Motion blur](post_processing/motion_blur.py) | Film-shutter motion blur that smears dots by speed, spinning, scaling and orbiting shapes, with one dot kept sharp, and segments with a shutter of their own. |

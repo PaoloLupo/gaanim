@@ -18,7 +18,7 @@ use gaanim_core::kurbo;
 use gaanim_core::peniko::{self, Blob, ImageAlphaType, ImageData, ImageFormat};
 
 use crate::effects::{DropShadow, Glow};
-use crate::object_effects::EffectLayer;
+use crate::object_effects::{EffectLayer, effect_image};
 use crate::post_process::{PostProcessRequest, PostProcessShader};
 
 /// Texels per sigma of a soft effect's texture.
@@ -103,6 +103,10 @@ enum Paint {
 /// an alpha of `1 - exp(-gain * coverage)`, and return the layer that
 /// fills it. `None` when the blur is not finite and positive, or the shader
 /// is unavailable.
+///
+/// Without a `key` the image belongs to one built fragment and keeps its
+/// pixels; with one, it is the image [`effect_image`] keeps for `key` and
+/// is drawn again every frame, for a silhouette whose pixels change.
 fn draw_soft_image(
     scene: &mut vello::Scene,
     silhouette: vello::Scene,
@@ -110,6 +114,7 @@ fn draw_soft_image(
     sigma: f64,
     paint: Paint,
     gain: f64,
+    key: Option<u64>,
 ) -> Option<EffectLayer> {
     let shader = soft_blur_shader()?;
     if !(sigma.is_finite() && sigma > 0.0 && bounds.is_finite()) {
@@ -127,13 +132,16 @@ fn draw_soft_image(
     }
     let side = |length: f64| (length * density).ceil().clamp(1.0, MAX_SOFT_TEXTURE) as u32;
     let (width, height) = (side(area.width()), side(area.height()));
-    // A new allocation per built fragment: its id names these pixels.
-    let image = ImageData {
-        data: Blob::from(vec![0_u8; width as usize * height as usize * 4]),
-        format: ImageFormat::Rgba8,
-        alpha_type: ImageAlphaType::Alpha,
-        width,
-        height,
+    let image = match key {
+        Some(key) => effect_image(key, width, height),
+        // A new allocation per built fragment: its id names these pixels.
+        None => ImageData {
+            data: Blob::from(vec![0_u8; width as usize * height as usize * 4]),
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::Alpha,
+            width,
+            height,
+        },
     };
     // Image pixels run top to bottom over the y-up local rectangle.
     let image_to_local = kurbo::Affine::translate((area.x0, area.y1))
@@ -170,7 +178,7 @@ fn draw_soft_image(
             time: 0.0,
             transition: None,
         },
-        fixed: true,
+        fixed: key.is_none(),
     })
 }
 
@@ -187,6 +195,19 @@ pub(crate) fn draw_shadow_image(
     bounds: kurbo::Rect,
     shadow: &DropShadow,
 ) -> Option<EffectLayer> {
+    draw_keyed_shadow_image(scene, silhouette, bounds, shadow, None)
+}
+
+/// [`draw_shadow_image`] into the image kept for `key`, if any (see
+/// [`draw_soft_image`]): the shadow of what a shader effect draws, which
+/// changes with the effect.
+pub(crate) fn draw_keyed_shadow_image(
+    scene: &mut vello::Scene,
+    silhouette: vello::Scene,
+    bounds: kurbo::Rect,
+    shadow: &DropShadow,
+    key: Option<u64>,
+) -> Option<EffectLayer> {
     draw_soft_image(
         scene,
         silhouette,
@@ -194,6 +215,7 @@ pub(crate) fn draw_shadow_image(
         shadow.blur_radius,
         Paint::Tint(shadow.color),
         -(1.0 - SHADOW_CORE).ln(),
+        key,
     )
 }
 
@@ -319,6 +341,7 @@ pub(crate) fn draw_blur_image(
         sigma,
         Paint::Own(alpha.clamp(0.0, 1.0)),
         -(1.0 - SHADOW_CORE).ln(),
+        None,
     )
 }
 
@@ -364,6 +387,7 @@ pub(crate) fn draw_glow_image(
         sigma,
         Paint::Tint(glow.color),
         gain,
+        None,
     )
 }
 

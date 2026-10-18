@@ -686,6 +686,38 @@ class PostProcess:
         ``saturation`` about luma (1 keeps them)."""
         ...
     @staticmethod
+    def tint(color: ColorLike, amount: float | Parameter | Computed = 1.0) -> PostProcess:
+        """Turn the frame into a monochrome in ``color``, like a sepia print.
+
+        Each pixel's brightness runs from black through ``color`` (where the
+        pixel is as bright as ``color``) to white, so the image keeps its
+        brightness. ``amount`` (0..1) blends the result with the original
+        colors; the color's alpha is ignored. Works as a ``shader_effect``
+        too, to tint one photo. An ``amount`` outside 0..1 raises
+        ``ValueError``.
+
+        Example:
+            photo.shader_effect(PostProcess.tint("#704214"))
+        """
+        ...
+    @staticmethod
+    def duotone(
+        shadows: ColorLike,
+        highlights: ColorLike,
+        amount: float | Parameter | Computed = 1.0,
+    ) -> PostProcess:
+        """Map each pixel's brightness from ``shadows`` (black) to ``highlights`` (white).
+
+        Midtones mix the two colors, as in a two-ink print. ``amount``
+        (0..1) blends the result with the original colors; the colors' alpha
+        is ignored. Works as a ``shader_effect`` too, to set one photo in a
+        brand's colors. An ``amount`` outside 0..1 raises ``ValueError``.
+
+        Example:
+            photo.shader_effect(PostProcess.duotone("#1d2b53", "#ffcc66"))
+        """
+        ...
+    @staticmethod
     def lut(path: str | os.PathLike[str], strength: float | Parameter | Computed = 1.0) -> PostProcess:
         """Grade through the 3D lookup table of a ``.cube`` file, blended by ``strength`` (0..1).
 
@@ -3929,7 +3961,9 @@ class Drawable:
         (transparent around it), ``uv`` spans its box with the margin,
         ``resolution`` is the texture size in pixels and ``time`` the scene
         time. Uniforms take Parameters, Computeds and audio signals, and the
-        ``PostProcess`` presets work too. ``None`` removes the effect. It is
+        ``PostProcess`` presets work too. The ``shadow`` of an image or shape
+        stays out of the texture and is cast from the result, beneath it.
+        ``None`` removes the effect. It is
         declaration state for the whole timeline; a drawable with an effect
         inside another one is drawn by the outer effect. Previews, exports
         and ``.gaanim`` bundles draw it; a bundle stores the uniforms of
@@ -4015,12 +4049,14 @@ class Drawable:
         """Apply shadow to this drawable and return the result.
 
         The shadow is ``color`` blurred by ``blur`` scene units and offset by
-        ``(x, y)``; the color's alpha scales its opacity continuously. On a
-        text or group, a blurred shadow is drawn once from the silhouette of
-        its filled members, beneath all of them, like CSS ``drop-shadow`` on
-        a group: overlaps do not darken and the cost does not grow with each
-        glyph. Members that are clipped, blended or only stroked cast their
-        own.
+        ``(x, y)``; the color's alpha scales its opacity continuously. An
+        image casts the shadow of its opaque pixels, not of its rectangle.
+        On a text or group, a blurred shadow is drawn once from the
+        silhouette of its filled members, beneath all of them, like CSS
+        ``drop-shadow`` on a group: overlaps do not darken and the cost does
+        not grow with each glyph. Members that are clipped, blended or only
+        stroked cast their own. An image or shape with a ``shader_effect``
+        casts its shadow from what the effect draws, whichever is set first.
 
         Example:
             result = drawable.shadow(BLUE)

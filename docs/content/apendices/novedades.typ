@@ -208,6 +208,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 
 == Efectos
 
+- `PostProcess.tint(color, amount)` pasa el cuadro, o una foto con
+  `shader_effect`, a un monocromo en ese color sin cambiar su brillo (un
+  sepia en un solo paso), y `PostProcess.duotone(shadows, highlights,
+  amount)` lo imprime a dos tintas.
 - `scene.fx.spotlight` sobre una selección de texto abre un hueco por cada
   línea que abarca, solo alrededor de sus glifos, en lugar del rectángulo de
   las líneas enteras, y los huecos giran con un texto girado.
