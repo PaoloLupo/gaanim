@@ -1080,7 +1080,8 @@ pub fn billboard_system(
         };
         let (scale, _rot, mut trans) = world.to_scale_rotation_translation();
         let mut at = project(trans);
-        // How near an axis label comes for its own plot not to cross it.
+        // How near an axis label seen through its box comes: in front of the
+        // far faces, where its grid lies, and behind what the box holds.
         let mut front = None;
         if let Some((gap, parent, _, bounds)) = axis_label {
             let turn = Affine::rotate(z_angle);
@@ -1144,7 +1145,7 @@ pub fn billboard_system(
             // Through its text's middle and corners.
             let middle = corners.iter().copied().sum::<DVec2>() / corners.len().max(1) as f64;
             let sights: Vec<DVec2> = corners.iter().copied().chain([middle]).collect();
-            front = box_entry_depth(&cam, parent, gap.bounds, trans, &sights);
+            front = box_exit_depth(&cam, parent, gap.bounds, trans, &sights);
         }
         let billboard_mat = DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
         billboard.mat4 = billboard_mat;
@@ -1162,11 +1163,18 @@ pub fn billboard_system(
                 .map_or(0.0, |size| {
                     0.5 * (size.x * scale.x.abs()).max(size.y * scale.y.abs())
                 });
-            // An axis label drawn over its box comes as near as where its
-            // lines of sight enter it, so that the lines and surfaces of its
-            // own plot do not cross it.
+            // An axis label behind its box comes to where its lines of sight
+            // leave it, just in front of its grid, so that the grid does not
+            // cross it and the plot inside the box still hides it; it comes
+            // no nearer, as a surface in the box may lie right by it.
+            let depth = (trans - cam.position).dot(cam.rotation * DVec3::NEG_Z);
+            let pull = if front.is_some_and(|front| front < depth) {
+                0.0
+            } else {
+                half
+            };
             let mut drawn = billboard;
-            if let Some((point, units)) = billboard_plane(&cam, trans, half, front) {
+            if let Some((point, units)) = billboard_plane(&cam, trans, pull, front) {
                 drawn.mat4 = DMat4::from_scale_rotation_translation(scale * units, cam_rot, point);
             }
             if plane.0 != drawn {
@@ -1202,11 +1210,13 @@ pub fn billboard_system(
     }
 }
 
-/// The depth along the view at which the lines of sight through `sights`
-/// first enter the box `bounds` of `parent`'s space: `sights` are canvas
-/// offsets on the plane facing the camera at `point`, as a billboard drawn
-/// in the 3D pass lies (see [`billboard_plane`]). `None` when none does.
-fn box_entry_depth(
+/// The nearest depth along the view at which the lines of sight through
+/// `sights` leave the box `bounds` of `parent`'s space, a hundredth of their
+/// way through it before its far face so that lines drawn on that face stay
+/// behind: `sights` are canvas offsets on the plane facing the camera at
+/// `point`, as a billboard drawn in the 3D pass lies (see
+/// [`billboard_plane`]). `None` when none crosses the box.
+fn box_exit_depth(
     camera: &gaanim_math::Camera,
     parent: gaanim_core::glam::DMat4,
     [low, high]: [gaanim_core::glam::DVec3; 2],
@@ -1255,7 +1265,8 @@ fn box_entry_depth(
                     exit = exit.min(near.max(far));
                 }
             }
-            (enter <= exit).then(|| (origin + direction * enter - camera.position).dot(forward))
+            let leave = exit - 0.01 * (exit - enter);
+            (enter <= exit).then(|| (origin + direction * leave - camera.position).dot(forward))
         })
         .filter(|depth| depth.is_finite())
         .reduce(f64::min)
@@ -1923,21 +1934,22 @@ mod tests {
     }
 
     #[test]
-    fn axis_labels_come_as_near_as_their_sight_enters_their_box() {
+    fn axis_labels_come_just_before_where_their_sight_leaves_their_box() {
         use gaanim_core::glam::{DMat4, DVec2, DVec3};
         let camera = axis_camera(DVec3::new(0.0, 0.0, 10.0));
         let unit_box = [DVec3::splat(-1.0), DVec3::splat(1.0)];
-        let entry = |point: DVec3| {
-            box_entry_depth(&camera, DMat4::IDENTITY, unit_box, point, &[DVec2::ZERO])
+        let exit = |point: DVec3| {
+            box_exit_depth(&camera, DMat4::IDENTITY, unit_box, point, &[DVec2::ZERO])
         };
-        // Seen through the box, a label behind it comes to its near face.
-        let through = entry(DVec3::new(0.0, 0.0, -3.0)).unwrap();
-        assert!((through - 9.0).abs() < 1e-9, "{through}");
+        // Seen through the box, a label behind it comes just before its far
+        // face, behind what the box holds: a hundredth of the 2 units across.
+        let through = exit(DVec3::new(0.0, 0.0, -3.0)).unwrap();
+        assert!((through - 10.98).abs() < 1e-9, "{through}");
         // Seen beside it, the box does not move it.
-        assert_eq!(entry(DVec3::new(4.0, 0.0, -3.0)), None);
+        assert_eq!(exit(DVec3::new(4.0, 0.0, -3.0)), None);
         // A box in a scaled space, seen through its side.
         let scaled = DMat4::from_scale(DVec3::splat(2.0));
-        let side = box_entry_depth(
+        let side = box_exit_depth(
             &camera,
             scaled,
             unit_box,
@@ -1945,7 +1957,7 @@ mod tests {
             &[DVec2::ZERO],
         )
         .unwrap();
-        assert!((side - 8.0).abs() < 1e-9, "{side}");
+        assert!((side - 11.96).abs() < 1e-9, "{side}");
     }
 
     #[test]
