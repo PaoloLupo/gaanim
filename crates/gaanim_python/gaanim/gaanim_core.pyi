@@ -6719,7 +6719,9 @@ class Axis:
     @staticmethod
     def linear(minimum: float, maximum: float) -> Axis: ...
     @staticmethod
-    def log(minimum: float, maximum: float, base: float = 10.0) -> Axis: ...
+    def log(minimum: float, maximum: float, base: float = 10.0) -> Axis:
+        """Logarithmic axis ticked at every power of ``base`` between its ends, both included."""
+        ...
     @staticmethod
     def symlog(
         minimum: float,
@@ -6727,7 +6729,15 @@ class Axis:
         *,
         base: float = 10.0,
         threshold: float = 1.0,
-    ) -> Axis: ...
+    ) -> Axis:
+        """Signed logarithmic axis, linear within ``threshold`` of zero.
+
+        It ticks 0 and the powers of ``base`` from ``threshold`` on each side:
+        ``Axis.symlog(-100, 100)`` ticks -100, -10, -1, 0, 1, 10 and 100.
+        ``ticks(step)`` uses that linear step instead, and a domain inside the
+        linear region takes automatic linear steps.
+        """
+        ...
     @staticmethod
     def power(minimum: float, maximum: float, exponent: float) -> Axis: ...
     @staticmethod

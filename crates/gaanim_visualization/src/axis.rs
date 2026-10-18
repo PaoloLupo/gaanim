@@ -474,19 +474,29 @@ impl Axis {
                 })
                 .collect());
         }
+        let major = |value: f64| Tick {
+            value,
+            label: self.format_value(value),
+            major: true,
+        };
         if let Scale::Log { base } = self.scale {
-            let start = self.min.log(base).ceil() as i32;
-            let end = self.max.log(base).floor() as i32;
+            // A tolerance keeps exact powers of the base: 1000f64.log(10.0)
+            // is 2.9999999999999996, which would drop the last decade.
+            let start = (self.min.log(base) - DECADE_TOLERANCE).ceil() as i32;
+            let end = (self.max.log(base) + DECADE_TOLERANCE).floor() as i32;
             return Ok((start..=end)
-                .map(|exponent| {
-                    let value = base.powi(exponent);
-                    Tick {
-                        value,
-                        label: self.format_value(value),
-                        major: true,
-                    }
-                })
+                .map(|exponent| major(base.powi(exponent)))
                 .collect());
+        }
+        if let Scale::SymLog { base, threshold } = self.scale
+            && self.major_step.is_none()
+        {
+            let values = symlog_decades(self.min, self.max, base, threshold);
+            // A range within the linear region has no decades to mark; it
+            // takes linear steps below.
+            if values.len() >= 2 {
+                return Ok(values.into_iter().map(major).collect());
+            }
         }
         let step = self
             .major_step
@@ -594,6 +604,40 @@ fn gcd(mut left: u64, mut right: u64) -> u64 {
     left
 }
 
+/// How far, in decades, a log tick may lie past a domain end it should
+/// reach: logarithms of exact powers of the base round below them.
+const DECADE_TOLERANCE: f64 = 1e-9;
+
+/// Ticks of a symlog axis over `min..=max`: zero when the domain holds it,
+/// then powers of `base` from `threshold`, where the linear region ends, on
+/// each side the domain reaches. Empty for a base below 1.
+fn symlog_decades(min: f64, max: f64, base: f64, threshold: f64) -> Vec<f64> {
+    if base <= 1.0 {
+        return Vec::new();
+    }
+    let mut values = Vec::new();
+    if min <= 0.0 && max >= 0.0 {
+        values.push(0.0);
+    }
+    let reach = min.abs().max(max.abs()) * (1.0 + DECADE_TOLERANCE);
+    let mut exponent = (threshold.log(base) - DECADE_TOLERANCE).ceil() as i32;
+    loop {
+        let value = base.powi(exponent);
+        if !value.is_finite() || value > reach {
+            break;
+        }
+        if value >= min && value <= max * (1.0 + DECADE_TOLERANCE) {
+            values.push(value);
+        }
+        if -value <= max && -value >= min * (1.0 + DECADE_TOLERANCE) {
+            values.push(-value);
+        }
+        exponent += 1;
+    }
+    values.sort_by(f64::total_cmp);
+    values
+}
+
 fn typographic_minus(label: String) -> String {
     let unsigned = label.strip_prefix('-').unwrap_or(&label);
     let rounds_to_zero = unsigned
@@ -641,6 +685,68 @@ mod tests {
                 assert!((axis.normalize(value).unwrap() - normalized).abs() < 1e-10);
             }
         }
+    }
+
+    /// Assert that `axis` ticks exactly `expected`, up to rounding.
+    fn assert_ticks(axis: &Axis, expected: &[f64]) {
+        let values: Vec<f64> = axis
+            .ticks_values(7)
+            .unwrap()
+            .iter()
+            .map(|tick| tick.value)
+            .collect();
+        assert!(
+            values.len() == expected.len()
+                && values
+                    .iter()
+                    .zip(expected)
+                    .all(|(value, expected)| (value - expected).abs()
+                        <= 1e-9 * expected.abs().max(1.0)),
+            "{values:?} != {expected:?}"
+        );
+    }
+
+    #[test]
+    fn log_ticks_keep_a_maximum_that_is_a_power_of_the_base() {
+        assert_ticks(
+            &Axis::log(1.0, 1000.0, 10.0).unwrap(),
+            &[1.0, 10.0, 100.0, 1000.0],
+        );
+        assert_ticks(
+            &Axis::log(1.0, 64.0, 2.0).unwrap(),
+            &[1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0],
+        );
+        assert_ticks(&Axis::log(0.001, 0.1, 10.0).unwrap(), &[0.001, 0.01, 0.1]);
+    }
+
+    #[test]
+    fn symlog_ticks_mark_decades_on_each_side_of_zero() {
+        assert_ticks(
+            &Axis::symlog(-100.0, 100.0, 10.0, 1.0).unwrap(),
+            &[-100.0, -10.0, -1.0, 0.0, 1.0, 10.0, 100.0],
+        );
+        // Decades start at the threshold, where the linear region ends.
+        assert_ticks(
+            &Axis::symlog(-100.0, 100.0, 10.0, 10.0).unwrap(),
+            &[-100.0, -10.0, 0.0, 10.0, 100.0],
+        );
+        assert_ticks(
+            &Axis::symlog(-5.0, 1000.0, 10.0, 1.0).unwrap(),
+            &[-1.0, 0.0, 1.0, 10.0, 100.0, 1000.0],
+        );
+        // Within the linear region there are no decades: linear steps.
+        assert_ticks(
+            &Axis::symlog(-0.5, 0.5, 10.0, 1.0).unwrap(),
+            &[-0.4, -0.2, 0.0, 0.2, 0.4],
+        );
+        // An explicit step is kept.
+        assert_ticks(
+            &Axis::symlog(-100.0, 100.0, 10.0, 1.0)
+                .unwrap()
+                .ticks(100.0)
+                .unwrap(),
+            &[-100.0, 0.0, 100.0],
+        );
     }
 
     #[test]

@@ -52,6 +52,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - `plane.point_ref(x, y)` es un punto en coordenadas de datos que sigue
   valores reactivos (un `Parameter` movido por `drive_from_samples`, un
   `Computed`), la ventana de `view_to` y la posición del plano.
+- Un eje `log` marca también su última potencia de la base:
+  `Axis.log(1, 1000)` perdía el 1000. Un eje `symlog` marca el 0 y las
+  potencias de la base a cada lado (−100, −10, −1, 0, 1, 10, 100) en lugar de
+  pasos lineales que se amontonaban en sus extremos; `ticks(step)` sigue
+  fijando un paso lineal.
 
 == Animación y geometría
 
