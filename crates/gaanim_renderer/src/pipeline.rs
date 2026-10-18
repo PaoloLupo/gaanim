@@ -232,17 +232,35 @@ fn resolve_canvas_background_brush(
         Ok(brush) => {
             // Shader rows run top to bottom (uv (0, 0) is the top-left
             // corner) while the world is y-up, so row 0 maps to the top edge.
-            let brush_transform = paint.is_shader().then(|| {
-                kurbo::Affine::translate((rect.x0, rect.y1))
-                    * kurbo::Affine::scale_non_uniform(
-                        rect.width() / f64::from(pixel_size.0),
-                        -rect.height() / f64::from(pixel_size.1),
-                    )
-            });
+            let brush_transform =
+                match paint {
+                    BackgroundPaint::Shader(_) => Some(
+                        kurbo::Affine::translate((rect.x0, rect.y1))
+                            * kurbo::Affine::scale_non_uniform(
+                                rect.width() / f64::from(pixel_size.0),
+                                -rect.height() / f64::from(pixel_size.1),
+                            ),
+                    ),
+                    BackgroundPaint::Brush(peniko::Brush::Image(image)) => Some(
+                        image_cover_transform(rect, image.image.width, image.image.height),
+                    ),
+                    BackgroundPaint::Brush(_) => None,
+                };
             (brush, brush_transform)
         }
         Err(_) => (peniko::Brush::Solid(paint.fallback_color()), None),
     }
+}
+
+/// Places an image `width` by `height` pixels over `rect` (y-up) so that it
+/// covers it, centered and scaled uniformly, as CSS `background-size:
+/// cover` does: the image's rows run top to bottom.
+fn image_cover_transform(rect: kurbo::Rect, width: u32, height: u32) -> kurbo::Affine {
+    let (width, height) = (f64::from(width.max(1)), f64::from(height.max(1)));
+    let scale = (rect.width() / width).max(rect.height() / height);
+    kurbo::Affine::translate(rect.center().to_vec2())
+        * kurbo::Affine::scale_non_uniform(scale, -scale)
+        * kurbo::Affine::translate((-width / 2.0, -height / 2.0))
 }
 
 /// Draw the canvas background into a scene in world coordinates and return
@@ -8506,6 +8524,21 @@ mod tests {
             interactive_background_pixel_size(&background, Some(&high_zoom_camera), None),
             (8192, 4608)
         );
+    }
+
+    #[test]
+    fn an_image_background_covers_the_frame_centered() {
+        let rect = kurbo::Rect::new(-8.0, -4.5, 8.0, 4.5);
+        // A square image covers the 16 x 9 frame at 16 x 16: it is cropped
+        // above and below, and its first row is the top.
+        let cover = image_cover_transform(rect, 100, 100);
+        let top_left = cover * kurbo::Point::new(0.0, 0.0);
+        let bottom_right = cover * kurbo::Point::new(100.0, 100.0);
+        assert!((top_left - kurbo::Point::new(-8.0, 8.0)).hypot() < 1e-9);
+        assert!((bottom_right - kurbo::Point::new(8.0, -8.0)).hypot() < 1e-9);
+        // A wide image is cropped at its sides.
+        let wide = image_cover_transform(rect, 400, 100) * kurbo::Point::new(0.0, 0.0);
+        assert!((wide - kurbo::Point::new(-18.0, 4.5)).hypot() < 1e-9);
     }
 
     #[test]

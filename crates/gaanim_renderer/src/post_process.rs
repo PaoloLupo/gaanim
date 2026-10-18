@@ -2199,6 +2199,88 @@ mod tests {
     }
 
     #[test]
+    fn gpu_overlay_covers_the_frame_and_blends_with_it() {
+        use crate::post_presets::{ImageOverlay, OverlayBlend};
+        // A white texel and a black one cover a 4x1 frame of mid gray.
+        let overlay = ImageOverlay::from_rgba8(2, 1, &[255, 255, 255, 255, 0, 0, 0, 255]).unwrap();
+        let run = |blend: OverlayBlend, opacity: f64| -> Option<Vec<u8>> {
+            let gpu = test_gpu()?;
+            let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: 4,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            gpu.queue.write_texture(
+                target.as_image_copy(),
+                &[128_u8, 128, 128, 255].repeat(4),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(16),
+                    rows_per_image: None,
+                },
+                target.size(),
+            );
+            let pass = PostProcessPass::constant(
+                overlay.shader().unwrap(),
+                &[2.0, 1.0, blend.mode(), opacity],
+            )
+            .unwrap();
+            let request = CanvasPostProcess {
+                passes: vec![pass],
+                ..Default::default()
+            }
+            .request(0.0, kurbo::Rect::new(0.0, 0.0, 4.0, 1.0))
+            .unwrap();
+            let mut post = GpuPostProcess::default();
+            assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None, None));
+            let mut encoder = gpu.device.create_command_encoder(&Default::default());
+            post.encode(&mut encoder);
+            gpu.queue.submit(Some(encoder.finish()));
+            Some(
+                gpu.read(&target)
+                    .chunks_exact(4)
+                    .map(|pixel| pixel[0])
+                    .collect(),
+            )
+        };
+        let Some(multiplied) = run(OverlayBlend::Multiply, 1.0) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        // White keeps the gray, black blacks it out, bilinear in between.
+        let near = |values: &[u8], expected: [u8; 4]| {
+            assert!(
+                values
+                    .iter()
+                    .zip(expected)
+                    .all(|(value, expected)| value.abs_diff(expected) <= 2),
+                "{values:?} is not {expected:?}"
+            );
+        };
+        near(&multiplied, [128, 96, 32, 0]);
+        near(
+            &run(OverlayBlend::Multiply, 0.5).unwrap(),
+            [128, 112, 80, 64],
+        );
+        near(
+            &run(OverlayBlend::Screen, 1.0).unwrap(),
+            [255, 223, 159, 128],
+        );
+        near(&run(OverlayBlend::Normal, 1.0).unwrap(), [255, 191, 64, 0]);
+    }
+
+    #[test]
     fn gpu_bloom_spreads_light_around_bright_pixels_only() {
         let Some(gpu) = test_gpu() else {
             eprintln!("skipped: no GPU adapter");

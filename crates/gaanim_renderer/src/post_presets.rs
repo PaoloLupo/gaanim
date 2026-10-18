@@ -377,6 +377,142 @@ impl PostPreset {
     }
 }
 
+/// Most texels an image overlay keeps on its long side: a larger image is
+/// downscaled when it is read, so its data stays a few megabytes.
+pub const MAX_OVERLAY_SIDE: u32 = 2048;
+
+/// How an image overlay composites with the frame beneath it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OverlayBlend {
+    /// The overlay over the frame.
+    Normal,
+    /// Darkens like ink or paper grain: white leaves the frame as it is.
+    #[default]
+    Multiply,
+    /// Lightens: black leaves the frame as it is.
+    Screen,
+    /// Multiplies the frame's darks and screens its lights.
+    Overlay,
+}
+
+impl OverlayBlend {
+    /// Parses `"normal"`, `"multiply"`, `"screen"` and `"overlay"`.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "normal" => Some(Self::Normal),
+            "multiply" => Some(Self::Multiply),
+            "screen" => Some(Self::Screen),
+            "overlay" => Some(Self::Overlay),
+            _ => None,
+        }
+    }
+
+    /// The `mode` uniform of the overlay shader.
+    pub fn mode(self) -> f64 {
+        match self {
+            Self::Normal => 0.0,
+            Self::Multiply => 1.0,
+            Self::Screen => 2.0,
+            Self::Overlay => 3.0,
+        }
+    }
+}
+
+/// Covers the frame with the overlay image, centered and cropped like CSS
+/// `background-size: cover`, sampled bilinearly from four RGBA8 texels per
+/// `gaanim_data` entry, and blends it with `mode` at `opacity`.
+const OVERLAY: &str = r#"
+fn gaanim_overlay_texel(x: i32, y: i32) -> vec4<f32> {
+    let width = i32(gaanim_uniforms.width);
+    let height = i32(gaanim_uniforms.height);
+    let index = clamp(y, 0, height - 1) * width + clamp(x, 0, width - 1);
+    let packed = gaanim_data[index / 4];
+    return unpack4x8unorm(bitcast<u32>(packed[index % 4]));
+}
+
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let color = gaanim_scene(uv);
+    let size = vec2<f32>(gaanim_uniforms.width, gaanim_uniforms.height);
+    let scale = max(resolution.x / size.x, resolution.y / size.y);
+    let p = (uv * resolution - 0.5 * resolution) / scale + 0.5 * size - vec2<f32>(0.5);
+    let base = floor(p);
+    let f = p - base;
+    let x = i32(base.x);
+    let y = i32(base.y);
+    let texel = mix(
+        mix(gaanim_overlay_texel(x, y), gaanim_overlay_texel(x + 1, y), f.x),
+        mix(gaanim_overlay_texel(x, y + 1), gaanim_overlay_texel(x + 1, y + 1), f.x),
+        f.y,
+    );
+    let mode = gaanim_uniforms.mode;
+    var blended = texel.rgb;
+    if (mode > 0.5 && mode < 1.5) {
+        blended = color.rgb * texel.rgb;
+    } else if (mode > 1.5 && mode < 2.5) {
+        blended = vec3<f32>(1.0) - (vec3<f32>(1.0) - color.rgb) * (vec3<f32>(1.0) - texel.rgb);
+    } else if (mode > 2.5) {
+        blended = select(
+            vec3<f32>(1.0) - 2.0 * (vec3<f32>(1.0) - color.rgb) * (vec3<f32>(1.0) - texel.rgb),
+            2.0 * color.rgb * texel.rgb,
+            color.rgb <= vec3<f32>(0.5),
+        );
+    }
+    let amount = clamp(gaanim_uniforms.opacity, 0.0, 1.0) * texel.a;
+    return vec4<f32>(mix(color.rgb, blended, amount), color.a);
+}
+"#;
+
+/// An image laid over the frame by a post-process pass (see [`OVERLAY`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageOverlay {
+    pub width: u32,
+    pub height: u32,
+    /// Four RGBA8 texels per entry, their bits as `f32`s.
+    pub data: Arc<[[f32; 4]]>,
+}
+
+impl ImageOverlay {
+    /// Pack `rgba`, `width` by `height` straight-alpha RGBA8 texels with the
+    /// top row first, at most [`MAX_OVERLAY_SIDE`] on either side.
+    pub fn from_rgba8(width: u32, height: u32, rgba: &[u8]) -> Result<Self, PostProcessError> {
+        let invalid = |message: String| PostProcessError::InvalidUniforms(message);
+        if width == 0 || height == 0 || width.max(height) > MAX_OVERLAY_SIDE {
+            return Err(invalid(format!(
+                "an overlay is 1 to {MAX_OVERLAY_SIDE} texels on each side, got {width}x{height}"
+            )));
+        }
+        if rgba.len() != width as usize * height as usize * 4 {
+            return Err(invalid("overlay texels do not match its size".to_string()));
+        }
+        let data: Vec<[f32; 4]> = rgba
+            .chunks(16)
+            .map(|block| {
+                let mut entry = [0.0_f32; 4];
+                for (lane, texel) in block.chunks_exact(4).enumerate() {
+                    let bits = u32::from_le_bytes([texel[0], texel[1], texel[2], texel[3]]);
+                    entry[lane] = f32::from_bits(bits);
+                }
+                entry
+            })
+            .collect();
+        Ok(Self {
+            width,
+            height,
+            data: data.into(),
+        })
+    }
+
+    /// The overlay's pass shader, whose uniforms are `width`, `height`,
+    /// `mode` ([`OverlayBlend::mode`]) and `opacity`.
+    pub fn shader(&self) -> Result<PostProcessShader, PostProcessError> {
+        PostProcessShader::with_data(
+            OVERLAY,
+            ["width", "height", "mode", "opacity"],
+            Arc::clone(&self.data),
+        )
+    }
+}
+
 /// A 3D lookup table parsed from an Adobe/Resolve `.cube` file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CubeLut {
@@ -499,6 +635,25 @@ impl CubeLut {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlays_pack_four_texels_per_entry() {
+        let texels: Vec<u8> = (0..5 * 4).map(|value| value as u8 * 13).collect();
+        let overlay = ImageOverlay::from_rgba8(5, 1, &texels).unwrap();
+        // Five texels take two entries; the last one's lanes are unused.
+        assert_eq!(overlay.data.len(), 2);
+        let bits = overlay.data[1][0].to_bits();
+        assert_eq!(
+            bits.to_le_bytes(),
+            [texels[16], texels[17], texels[18], texels[19]]
+        );
+        assert!(overlay.shader().is_ok());
+        assert!(ImageOverlay::from_rgba8(0, 1, &[]).is_err());
+        assert!(ImageOverlay::from_rgba8(2, 1, &texels).is_err());
+        assert!(ImageOverlay::from_rgba8(MAX_OVERLAY_SIDE + 1, 1, &[0; 4]).is_err());
+        assert_eq!(OverlayBlend::parse("screen"), Some(OverlayBlend::Screen));
+        assert_eq!(OverlayBlend::parse("darken"), None);
+    }
 
     #[test]
     fn every_preset_is_valid_wgsl_with_its_uniforms() {

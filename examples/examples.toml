@@ -203,7 +203,7 @@ allow = ["theme"]
 
 [[example]]
 path = "style/backgrounds.py"
-description = "The scene background, solid and gradient segment backgrounds, dot grids, mesh gradients, auroras and WGSL shader backgrounds."
+description = "The scene background, solid and gradient segment backgrounds, dot grids, mesh gradients, auroras, WGSL shader backgrounds and image backgrounds."
 allow = ["background"]
 
 [[example]]
@@ -435,7 +435,7 @@ allow = ["post"]
 
 [[example]]
 path = "post_processing/finishes.py"
-description = "Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch passes, each ramped in through a Parameter, with labels kept out of the post-process."
+description = "Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate, glitch and image overlay passes, each ramped in through a Parameter, with labels kept out of the post-process."
 allow = ["post"]
 
 [[example]]

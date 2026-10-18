@@ -72,7 +72,7 @@ Colors, gradients, blend modes, themes and backgrounds.
 | [Blend modes](style/blend_modes.py) | Every blend mode of a drawable over the same backdrop, and blended groups, member overrides and text. |
 | [Themes](style/themes.py) | The palette of every built-in theme and its aliases, side by side on the same small composition. |
 | [Custom themes](style/custom_themes.py) | A Theme derived from a built-in one with its own colors, fonts, text roles, style classes, spacing tokens and validation. |
-| [Backgrounds](style/backgrounds.py) | The scene background, solid and gradient segment backgrounds, dot grids, mesh gradients, auroras and WGSL shader backgrounds. |
+| [Backgrounds](style/backgrounds.py) | The scene background, solid and gradient segment backgrounds, dot grids, mesh gradients, auroras, WGSL shader backgrounds and image backgrounds. |
 
 ## Text
 
@@ -185,7 +185,7 @@ Full-frame passes: color grading, bloom, motion blur and finishes.
 | Example | Description |
 | --- | --- |
 | [Color grading](post_processing/color_grading.py) | Exposure, contrast, saturation and temperature grades, a 3D lookup table, tint and duotone, applied to the whole frame. |
-| [Finishes](post_processing/finishes.py) | Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch passes, each ramped in through a Parameter, with labels kept out of the post-process. |
+| [Finishes](post_processing/finishes.py) | Vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate, glitch and image overlay passes, each ramped in through a Parameter, with labels kept out of the post-process. |
 | [Bloom](post_processing/bloom.py) | Bloom threshold, intensity and radius on neon outlines, and a glow that pulses with a Parameter. |
 | [Motion blur](post_processing/motion_blur.py) | Film-shutter motion blur that smears dots by speed, spinning, scaling and orbiting shapes, with one dot kept sharp, and segments with a shutter of their own. |
 | [Post chains](post_processing/post_chains.py) | Chained passes in both orders, the scene post-process with segment overrides, and a custom WGSL pass whose uniform is a number, a Parameter or noise. |

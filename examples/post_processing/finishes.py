@@ -1,4 +1,4 @@
-"""Finishing passes: vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate and glitch.
+"""Finishing passes: vignette, grain, chromatic aberration, halftone, dither, CRT, pixelate, glitch and an image overlay.
 
 Each segment draws the same test card through one PostProcess preset, set
 for the whole frame with ``scene.segment(..., post=...)``. The preset's main
@@ -11,6 +11,7 @@ import os
 
 from gaanim import Brush, PostProcess, Scene, Zones
 
+PAPER = "assets/paper.png"
 LEAD = 0.3
 RAMP = 0.6
 HOLD = 0.6
@@ -78,6 +79,10 @@ FINISHES = [
     ("PostProcess.pixelate({})", lambda amount: PostProcess.pixelate(amount), 1, 16),
     ("PostProcess.glitch({})", lambda amount: PostProcess.glitch(amount), 0.0, 0.5),
     ("PostProcess.glitch({}, seed=3)", lambda amount: PostProcess.glitch(amount, seed=3), 0.0, 1.0),
+    # An image over the whole frame, covering it like a background, here a
+    # paper texture multiplied into the colors; blend can also be "normal",
+    # "screen" or "overlay".
+    ("PostProcess.overlay(PAPER, opacity={})", lambda amount: PostProcess.overlay(PAPER, opacity=amount), 0.0, 1.0),
 ]
 starts = {template.format(end): finish(template, build, start, end) for template, build, start, end in FINISHES}
 

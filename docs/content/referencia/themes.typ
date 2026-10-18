@@ -395,6 +395,14 @@ cambian el tiempo o el tamaño en píxeles. Las exportaciones y las capturas
 producen los mismos píxeles.
 
 #api-entry(
+  name: "Background.image",
+  kind: "factory",
+  signature: "Background.image(path) -> Background",
+  desc: [Cubre el cuadro de la escena con la imagen de `path`, como una textura de papel: centrada y escalada hasta cubrirlo, recortando lo que no cabe, como `background-size: cover` en CSS. Su color promedio es el de respaldo (el borrado de la ventana y el contraste del texto). Una ruta relativa se busca en el directorio de trabajo, luego en la carpeta `assets` del script y luego junto a él; la imagen se lee al crear el fondo y un archivo ilegible lanza `RuntimeError`.],
+  none,
+)
+
+#api-entry(
   name: "Background.fallback",
   kind: "property",
   returns: (type: "Color", desc: [El color representativo del fondo, usado para limpiar y para el contraste.]),
@@ -597,6 +605,14 @@ siempre el mismo. Un número fuera de rango lanza `ValueError`.
   kind: "factory",
   signature: "duotone(shadows, highlights, amount=1.0) -> PostProcess",
   desc: [Duotono: el brillo de cada píxel va de `shadows` (el negro) a `highlights` (el blanco) y los medios tonos mezclan los dos, como una impresión a dos tintas. `amount` (0 a 1) lo mezcla con los colores originales; el alfa de los colores se ignora. Sirve también como `shader_effect`, para poner una foto en los colores de una marca. Un `amount` fuera de 0 a 1 lanza `ValueError`.],
+  none,
+)
+
+#api-entry(
+  name: "PostProcess.overlay",
+  kind: "factory",
+  signature: "overlay(path, blend=\"multiply\", opacity=1.0) -> PostProcess",
+  desc: [Pone la imagen de `path` sobre el cuadro, como una textura de papel o de grano: lo cubre centrada y recortada, como `Background.image`, y se mezcla con lo de debajo. `"multiply"` oscurece como la tinta (el blanco no cambia nada), `"screen"` aclara, `"overlay"` hace las dos cosas y `"normal"` pinta encima; `opacity` (0 a 1) y el alfa de la imagen escalan la mezcla. Como pase de la escena o de un segmento cubre todos los objetos, así que la textura se pone una vez y no en cada segmento. Una imagen de más de 2048 píxeles en su lado largo se reduce al leerla. Un `blend` desconocido o una `opacity` fuera de 0 a 1 lanzan `ValueError`, y un archivo ilegible, `RuntimeError`.],
   none,
 )
 

@@ -1,4 +1,4 @@
-"""Backgrounds: the scene's background, solid and gradient segment backgrounds, living backgrounds and WGSL shaders.
+"""Backgrounds: the scene's background, solid and gradient segment backgrounds, living backgrounds, WGSL shaders and images.
 
 ``scene.canvas.background`` paints behind every segment; a segment's own
 ``background=`` replaces it while that segment plays, and a segment without
@@ -127,10 +127,15 @@ show('Background.shader(Path("assets/graph_paper.wgsl"))')
 scene.segment("scene_again")
 show('scene.segment("scene_again")')
 
+# An image covers the frame, centered and cropped to its shape, such as a
+# paper texture under a collage.
+scene.segment("image", background=Background.image("assets/paper.png"))
+show('Background.image("assets/paper.png")')
+
 STEP = SHOW + HOLD
 # Every segment settled; the ones that move also early on, to show them change.
 MOVING = (4, 7, 9, 10, 11, 12)
-SEEKS = [STEP * index + t for index in range(14) for t in ((0.5, 2.0) if index in MOVING else (2.0,))]
+SEEKS = [STEP * index + t for index in range(15) for t in ((0.5, 2.0) if index in MOVING else (2.0,))]
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, SEEKS)
 else:

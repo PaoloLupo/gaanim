@@ -219,6 +219,12 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   alfa de una imagen recortada, de los glifos de un texto o de los miembros
   de un grupo. Se combina con `shader_effect`, cuyo resultado contornea, y
   con `shadow`, que se proyecta desde el resultado contorneado.
+- `Background.image(ruta)` cubre el cuadro con una imagen, centrada y
+  recortada, como una textura de papel bajo un collage.
+- `PostProcess.overlay(ruta, blend="multiply", opacity=...)` pone una imagen
+  sobre todo el cuadro y la mezcla con lo de debajo (`multiply`, `screen`,
+  `overlay` o `normal`): una textura de papel o de grano se pone una vez en
+  la escena, no en cada segmento.
 
 == Editor
 
