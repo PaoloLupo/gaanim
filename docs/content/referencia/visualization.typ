@@ -1275,13 +1275,14 @@ world = scene.viz.cartesian_3d(
 #api-entry(
   name: "CoordinateSpace3D.surface",
   kind: "method",
-  desc: [Superficie `z = f(x, y)` muestreada en una rejilla de `resolution`, con `inputs` reactivas como `plot`. Los vértices se colorean por altura, de la más baja a la más alta, con `color_map`: un `ColorMap` o el nombre de un mapa integrado, como `"viridis"` o `"plasma"`. Sin él, usa una rampa de azul, verde y rojo. Con `vectorized=True`, `function` se llama una vez para toda la rejilla, cada vez que cambian sus entradas, en lugar de una vez por vértice: `x` e `y` son arrays de numpy de solo lectura con un valor por vértice, y devuelve el array de alturas (o un número para todas); una altura `NaN` deja un hueco. Necesita numpy y es mucho más rápido en rejillas grandes o animadas.],
+  desc: [Superficie `z = f(x, y)` muestreada en una rejilla de `resolution`, con `inputs` reactivas como `plot`. Los vértices se colorean por altura, de la más baja a la más alta, con `color_map`: un `ColorMap` o el nombre de un mapa integrado, como `"viridis"` o `"plasma"`. Sin él, usa una rampa de azul, verde y rojo. Con `vectorized=True`, `function` se llama una vez para toda la rejilla, cada vez que cambian sus entradas, en lugar de una vez por vértice: `x` e `y` son arrays de numpy de solo lectura con un valor por vértice, y devuelve el array de alturas (o un número para todas); una altura `NaN` deja un hueco. Necesita numpy y es mucho más rápido en rejillas grandes o animadas. Con `material` la superficie se ilumina por las dos caras con `lighting_3d`, conserva sus colores y proyecta y recibe sombras; sin él no se ilumina.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 >>>world = scene.viz.cartesian_3d(Axis.linear(-3, 3), Axis.linear(-3, 3), Axis.linear(-1, 1))
 saddle = world.surface(lambda x, y: 0.1 * (x * x - y * y), resolution=(32, 24))
+relief = world.surface(lambda x, y: 0.1 * (x * x - y * y), material=Material3D.matte())
 ```
 ]
 

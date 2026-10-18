@@ -640,6 +640,8 @@ pub enum SpawnKind {
         resolution: [usize; 2],
         /// Colors by height, lowest to highest; `None` keeps the default ramp.
         color_map: Option<gaanim_core::ColorMap>,
+        /// Lights the surface on both sides; `None` leaves it unlit.
+        material: Option<Box<gaanim_scene::Material3D>>,
     },
     /// A deterministic `(u, v) -> (x, y, z)` callback sampled into a 3D surface mesh.
     ReactiveParametricSurface3D {

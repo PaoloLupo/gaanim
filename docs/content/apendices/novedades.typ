@@ -81,6 +81,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - `space.surface(..., vectorized=True)` calcula toda la rejilla con una
   llamada con arrays de numpy, como `parametric_surface`, en lugar de una
   llamada de Python por vértice.
+- `space.surface(..., material=Material3D.matte())` ilumina la superficie
+  por las dos caras con `lighting_3d`, como `parametric_surface`: conserva
+  sus colores por altura, el relieve se ve por la luz y proyecta y recibe
+  sombras. Lo muestra `3d/plots_3d`.
 
 == 3D
 
@@ -104,6 +108,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   cuatro primeras luces de `light_3d`, sobre lo que recibe luz, con un borde
   nítido al contacto que se suaviza con la distancia. `lighting_3d(shadows=...)`, que se aceptaba sin efecto, las
   enciende (por defecto) o las apaga.
+- Una malla iluminada abierta o de dos caras, como una superficie con
+  `material` o un cono sin tapa, no se da sombra en la cara que aparta de
+  la luz, como ya pasaba con los sólidos: su sombra no acaba en un borde
+  escalonado ni la salpican puntos. Se nota en
+  `gallery/catenoid_helicoid`.
 - Contornos: `Material3D(..., outline=color, outline_width=...)` o
   `material.outlined(color)` dibujan la silueta y los pliegues de una malla, o
   el borde de un plano, en ese color, como el contorno de una ilustración;

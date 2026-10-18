@@ -755,6 +755,13 @@ def validate_visualization_contract(module: object) -> list[str]:
         resolution=(8, 8),
         inputs=[amplitude],
     )
+    space_3d.surface(lambda px, py: px * py, resolution=(4, 4), material=module.Material3D.matte())
+    try:
+        space_3d.surface(lambda px, py: px * py, resolution=(4, 4), material="matte")
+    except TypeError:
+        pass
+    else:
+        failures.append("CoordinateSpace3D.surface accepted a material that is not a Material3D")
     space_3d.parametric(
         lambda t, scale: (t, scale * t * t, t * t * t),
         (-1.0, 1.0),

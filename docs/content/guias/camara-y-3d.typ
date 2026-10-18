@@ -431,7 +431,9 @@ puntos se reproducen a la frecuencia de la pantalla.
 - Las primitivas con `Material3D` reciben luz, calculada en cada píxel, y
   ocultan sus caras traseras. Las mallas sin material (superficies, gráficos
   3D) no reciben luz y se ven por las dos caras; las líneas 3D tampoco
-  reciben luz y tienen extremos redondeados.
+  reciben luz y tienen extremos redondeados. `surface` y
+  `parametric_surface` aceptan `material=` y entonces se iluminan por las
+  dos caras, con sus colores, y proyectan y reciben sombras.
 - Una línea 3D mide en pantalla el ancho de su trazo, `.stroke(color, ancho)`
   en unidades de la escena, a cualquier profundidad; sin trazo, 2 px de una
   salida de 1080 px de alto, la misma parte del encuadre a cualquier tamaño.
@@ -448,6 +450,9 @@ puntos se reproducen a la frecuencia de la pantalla.
   las mallas opacas y los objetos 2D con `.in_3d()`, donde son al menos
   medio opacos; no las mallas translúcidas, las líneas ni lo que brilla
   (`Material3D.emissive`), que puede contener la luz que lo hace brillar.
+  Un sólido no se da sombra en la cara que aparta de la luz, y tampoco una
+  lámina (una superficie con material, o una malla abierta): ahí solo la
+  ilumina la luz que rodea el borde, y la sombra empieza más allá.
 - Todo el contenido 3D se dibuja debajo del 2D: etiquetas, textos y HUD
   quedan siempre encima. La excepción son las etiquetas con `.billboard()`:
   se desvanecen, con todo lo que contienen, mientras una malla opaca queda
