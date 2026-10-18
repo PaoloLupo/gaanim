@@ -1262,7 +1262,17 @@ class Box(Drawable):
         ...
     @property
     def background(self) -> Optional[Drawable]:
-        """The drawable behind the box (fill, border, radius), if any."""
+        """The drawable behind the box (fill, border, radius, edge), if any.
+
+        The ``edge`` property tears its outline like cut paper, through
+        ``modifiers.wiggle_path``: ``edge=True``, or a dict of ``size`` (a
+        length, ``"6px"`` by default), ``detail``, ``frequency``, ``hold`` and
+        ``seed``. The edge follows the box as it resizes, so a torn strip fits
+        its text by itself.
+
+        Example:
+            strip = scene.layout.box("Breaking", background="#f5e6c8", edge=True)
+        """
         ...
     def add(self, child: Drawable | str, *, at: Optional[int] = None, duration: Optional[float] = None, advance: bool = True) -> Any:
         """Insert a child (at ``at`` or at the end) and return it.

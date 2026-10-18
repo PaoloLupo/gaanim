@@ -530,6 +530,7 @@ const DECORATION_KEYS: &[&str] = &[
     "border_width",
     "radius",
     "shadow",
+    "edge",
     "clip",
 ];
 /// Typography passed to the text a box creates from `str` children.
@@ -972,6 +973,8 @@ pub(crate) struct LayoutState {
     version: u64,
     parents: Vec<Weak<Mutex<LayoutState>>>,
     background: Option<DrawableHandle>,
+    /// The background's rough edge: its `wiggle_path` modifier.
+    edge: Option<Py<PyAny>>,
     text: Py<PyDict>,
     /// Lowest z-index used by backgrounds in this box's subtree.
     floor_z: i32,
@@ -1266,6 +1269,7 @@ impl PyBox {
             version: 0,
             parents: Vec::new(),
             background: None,
+            edge: None,
             text: text.unbind(),
             floor_z: 0,
         }));
@@ -1393,7 +1397,8 @@ impl PyBox {
         ))
     }
 
-    /// Add or update the background: fill, border, radius, shadow and clip.
+    /// Add or update the background: fill, border, radius, shadow, edge and
+    /// clip.
     fn decorate(
         py: Python<'_>,
         inner: &Arc<Mutex<LayoutState>>,
@@ -1401,10 +1406,11 @@ impl PyBox {
         props: &Bound<'_, PyDict>,
     ) -> PyResult<()> {
         let shadow = prop(props, "shadow")?;
+        let edge = prop(props, "edge")?;
         let clip = prop(props, "clip")?
             .map(|value| value.extract::<bool>())
             .transpose()?;
-        if decoration.is_empty() && shadow.is_none() && clip.is_none() {
+        if decoration.is_empty() && shadow.is_none() && edge.is_none() && clip.is_none() {
             return Ok(());
         }
         let (canvas, root, existing) = {
@@ -1498,11 +1504,84 @@ impl PyBox {
                 ));
             }
         }
+        if let Some(edge) = edge {
+            Self::apply_edge(py, inner, background_object.bind(py), &edge, &canvas)?;
+        }
         if clip == Some(true) {
             let root_object = Py::new(py, PyDrawable(root))?.into_any();
             root_object
                 .bind(py)
                 .call_method1("clip", (background_object,))?;
+        }
+        Ok(())
+    }
+
+    /// Give the background a rough, torn edge: `True`, or a dict of the
+    /// `wiggle_path` settings `size`, `detail`, `frequency`, `hold` and
+    /// `seed`; `False` straightens it again. A later `edge` changes the size
+    /// and frequency of the same edge.
+    fn apply_edge(
+        py: Python<'_>,
+        inner: &Arc<Mutex<LayoutState>>,
+        background: &Bound<'_, PyAny>,
+        edge: &Bound<'_, PyAny>,
+        canvas: &Arc<Mutex<ApiCanvas>>,
+    ) -> PyResult<()> {
+        const MESSAGE: &str =
+            "edge must be True, False or a dict with size, detail, frequency, hold and seed";
+        let existing = inner
+            .lock()
+            .expect("layout poisoned")
+            .edge
+            .as_ref()
+            .map(|edge| edge.clone_ref(py));
+        let units = Units::new(canvas.clone());
+        let mut size = units.length(&PyString::new(py, DEFAULT_EDGE_SIZE).into_any(), "size")?;
+        let mut frequency = 0.0;
+        let fixed = PyDict::new(py);
+        if let Ok(enabled) = edge.extract::<bool>() {
+            if !enabled {
+                if existing.is_none() {
+                    return Ok(());
+                }
+                size = 0.0;
+            }
+        } else if let Ok(settings) = edge.cast::<PyDict>() {
+            for (key, value) in settings.iter() {
+                match key.extract::<String>()?.as_str() {
+                    "size" => size = units.length(&value, "size")?,
+                    "frequency" => frequency = value.extract::<f64>()?,
+                    key @ ("detail" | "hold" | "seed") => fixed.set_item(key, value)?,
+                    _ => return Err(pyo3::exceptions::PyValueError::new_err(MESSAGE)),
+                }
+            }
+        } else {
+            return Err(pyo3::exceptions::PyTypeError::new_err(MESSAGE));
+        }
+        let values = PyDict::new(py);
+        values.set_item("size", size)?;
+        values.set_item("frequency", frequency)?;
+        match existing {
+            Some(modifier) => {
+                if !fixed.is_empty() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "an edge's detail, hold and seed are fixed when it is created",
+                    ));
+                }
+                modifier.bind(py).call_method("set", (), Some(&values))?;
+            }
+            None => {
+                if !fixed.contains("detail")? {
+                    fixed.set_item("detail", DEFAULT_EDGE_DETAIL)?;
+                }
+                fixed.set_item("frequency", frequency)?;
+                let modifier = background.getattr("modifiers")?.call_method(
+                    "wiggle_path",
+                    (size,),
+                    Some(&fixed),
+                )?;
+                inner.lock().expect("layout poisoned").edge = Some(modifier.unbind());
+            }
         }
         Ok(())
     }
@@ -1906,6 +1985,12 @@ const DEFAULT_BORDER_WIDTH: f64 = 0.025;
 /// `radius="full"`: the background clamps it to half the shorter side.
 const FULL_RADIUS: f64 = 1.0e9;
 const DEFAULT_SHADOW_COLOR: &str = "#00000055";
+
+/// How far a box's rough `edge` strays from its outline by default.
+const DEFAULT_EDGE_SIZE: &str = "6px";
+
+/// Points per side of a box's rough `edge` by default.
+const DEFAULT_EDGE_DETAIL: u32 = 10;
 
 fn duration_value(duration: Option<f64>) -> PyResult<Option<f64>> {
     match duration {

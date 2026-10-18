@@ -112,7 +112,7 @@ Boxes, rows, grids, zones and animated reflow.
 
 | Example | Description |
 | --- | --- |
-| [Boxes](layout/boxes.py) | The box model: padding in every CSS shorthand, backgrounds, borders, radii, shadows, clipping and size rules. |
+| [Boxes](layout/boxes.py) | The box model: padding in every CSS shorthand, backgrounds, borders, radii, shadows, clipping, size rules and torn edges that fit their text. |
 | [Box styles](layout/box_styles.py) | Reusable styles with BoxStyle, .but() and classes, typography inherited by box text, text_box and components. |
 | [Flex](layout/flex.py) | Rows and columns with every justify and align value, gaps, wrapping, grow, shrink, basis, margins and absolute children. |
 | [Grids](layout/grids.py) | Grid tracks in px, %, fr, auto and scene units, gaps, spans, explicit cells, column flow and alignment in cells. |
