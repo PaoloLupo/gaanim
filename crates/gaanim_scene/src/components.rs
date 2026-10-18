@@ -851,7 +851,12 @@ pub struct PlaneGlyph {
     pub outline: Arc<BezPath>,
     /// From the outline's units to the drawable's plane.
     pub placement: Affine,
+    /// The color it is filled with; with a `gradient`, that gradient's first
+    /// color, which readers that predate gradients draw.
     pub color: gaanim_core::peniko::Color,
+    /// A gradient it is filled with instead, its opacity included, and the
+    /// map from the outline's units to the gradient's.
+    pub gradient: Option<(Arc<gaanim_core::peniko::Gradient>, Affine)>,
 }
 
 #[cfg(test)]

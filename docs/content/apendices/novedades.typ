@@ -137,6 +137,13 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   ecuación o un dibujo 2D en una lámina iluminada de dos caras que se coloca
   con `move_to_3d` y `rotate_to_3d`: texto en el suelo, en una pared o en la
   cara de un sólido. El ejemplo `3d/shapes_3d` muestra las cuatro.
+- `drawable.in_3d()` coloca un objeto 2D (texto, ecuaciones, formas,
+  grupos) en el mundo 3D sin dejar de ser el mismo objeto: `move_to_3d` y
+  `rotate_to_3d` lo sitúan, la perspectiva lo inclina y las mallas de
+  delante lo tapan píxel a píxel. El pase 3D lo dibuja desde sus curvas, así
+  que sus bordes siguen nítidos a cualquier tamaño, y conserva sus
+  animaciones, colores, degradados y trazos. Con `in_3d(material)` se
+  ilumina y recibe sombras. Lo muestra `3d/drawables_in_3d`.
 
 == Editor
 

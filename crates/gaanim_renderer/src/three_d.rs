@@ -207,11 +207,13 @@ pub struct MeshSource {
     fill: Option<FillBuffers>,
 }
 
-/// The curves and bands of a source's filled outlines (see
-/// [`crate::plane_fill`]).
+/// The curves and bands of a source's filled outlines, and their gradients'
+/// records and ramps (see [`crate::plane_fill`]).
 struct FillBuffers {
     curves: Vec<u8>,
     bands: Vec<u8>,
+    paints: Vec<u8>,
+    ramps: Vec<u8>,
 }
 
 /// What a source holds, which keys a drawable's uploads apart.
@@ -232,6 +234,8 @@ impl MeshSource {
         if let Some(fill) = &self.fill {
             fill.curves.hash(&mut hasher);
             fill.bands.hash(&mut hasher);
+            fill.paints.hash(&mut hasher);
+            fill.ramps.hash(&mut hasher);
         }
         hasher.finish()
     }
@@ -500,6 +504,8 @@ impl MeshSource {
             fill: Some(FillBuffers {
                 curves: built.curves,
                 bands: built.bands,
+                paints: built.paints,
+                ramps: built.ramps,
             }),
         })
     }
@@ -760,6 +766,8 @@ impl GpuMeshFrame {
             if let Some(fill) = &draw.source.fill {
                 update(&fill.curves);
                 update(&fill.bands);
+                update(&fill.paints);
+                update(&fill.ramps);
             }
         }
     }
@@ -1738,7 +1746,7 @@ impl Pipelines {
         };
         let fill_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gaanim-3d-fill"),
-            entries: &[storage(0), storage(1)],
+            entries: &[storage(0), storage(1), storage(2), storage(3)],
         });
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("gaanim-3d-shadows"),
@@ -2286,21 +2294,24 @@ impl GpuThreeD {
                                 usage: wgpu::BufferUsages::STORAGE,
                             })
                         };
-                        let curves = buffer("gaanim-3d-fill-curves", &fill.curves);
-                        let bands = buffer("gaanim-3d-fill-bands", &fill.bands);
+                        let buffers = [
+                            buffer("gaanim-3d-fill-curves", &fill.curves),
+                            buffer("gaanim-3d-fill-bands", &fill.bands),
+                            buffer("gaanim-3d-fill-paints", &fill.paints),
+                            buffer("gaanim-3d-fill-ramps", &fill.ramps),
+                        ];
+                        let entries: Vec<wgpu::BindGroupEntry> = buffers
+                            .iter()
+                            .enumerate()
+                            .map(|(binding, buffer)| wgpu::BindGroupEntry {
+                                binding: binding as u32,
+                                resource: buffer.as_entire_binding(),
+                            })
+                            .collect();
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("gaanim-3d-fill"),
                             layout: &pipelines.fill_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: curves.as_entire_binding(),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: bands.as_entire_binding(),
-                                },
-                            ],
+                            entries: &entries,
                         })
                     }),
                     _source: Arc::clone(&draw.source),
@@ -4085,6 +4096,7 @@ mod tests {
                 )),
                 placement: kurbo::Affine::IDENTITY,
                 color: peniko::Color::from_rgb8(255, 0, 0),
+                gradient: None,
             }],
         };
         let at_origin = GlobalSpatialTransform::default();
@@ -4147,6 +4159,104 @@ mod tests {
         let edge = pixel(32 - 4, 15);
         assert!((100..=156).contains(&edge[3]), "{edge:?}");
         assert_eq!(pixel(32 - 4, 17), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn gradient_fills_match_their_2d_drawing() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let at_origin = GlobalSpatialTransform::default();
+        // A square 3 units on a side, 16 pixels per unit: pixels 8 to 56.
+        let square = kurbo::Shape::to_path(&kurbo::Rect::new(-1.5, -1.5, 1.5, 1.5), 0.0);
+        let red = peniko::Color::from_rgb8(255, 0, 0);
+        let blue = peniko::Color::from_rgb8(0, 0, 255);
+        let white = peniko::Color::from_rgb8(255, 255, 255);
+        let gradients = [
+            peniko::Gradient::new_linear((-1.5, -1.0), (1.5, 1.0)).with_stops([red, blue]),
+            peniko::Gradient::new_radial((0.2, 0.3), 1.2)
+                .with_extend(peniko::Extend::Reflect)
+                .with_stops([white, red, blue]),
+            peniko::Gradient::new_sweep((0.0, 0.0), 0.5, 5.0).with_stops([red, white, blue]),
+        ];
+        for gradient in gradients {
+            // The square laid at its corner, as in-world outlines are, with
+            // its gradient mapped back to the square's units.
+            let corner = kurbo::Vec2::new(-1.5, -1.5);
+            let fill = PlaneFillData {
+                glyphs: vec![gaanim_scene::PlaneGlyph {
+                    outline: Arc::new(kurbo::Affine::translate(-corner) * square.clone()),
+                    placement: kurbo::Affine::translate(corner),
+                    color: red,
+                    gradient: Some((Arc::new(gradient.clone()), kurbo::Affine::translate(corner))),
+                }],
+            };
+            let mut sources = MeshSources::default();
+            let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+            assert!(meshes.push_fill(
+                0,
+                (1, 1),
+                None,
+                &Content {
+                    transform: &at_origin,
+                    opacity: &opacity,
+                    mesh: None,
+                    lines: None,
+                    material: None,
+                    line_width: None,
+                    line_range: None,
+                    fill: Some(&fill),
+                },
+            ));
+            let frames: Vec<GpuMeshFrame> = meshes
+                .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+                .into_iter()
+                .map(|(_, frame)| frame)
+                .collect();
+            let mut scene = vello::Scene::new();
+            scene.append(&frames[0].scene(), Some(placement));
+            let mut three_d = GpuThreeD::default();
+            three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+            let target = gpu.target(64, 64);
+            gpu.render(&scene, &target);
+            let drawn = gpu.read(&target);
+            // Vello samples a gradient at a pixel's corner, the 3D pass at its
+            // middle: half a pixel (a 32nd of a unit) up and left, the 2D
+            // gradient is sampled where the 3D one is.
+            let mut flat = vello::Scene::new();
+            flat.fill(
+                peniko::Fill::NonZero,
+                placement,
+                &peniko::Brush::Gradient(gradient.clone()),
+                Some(kurbo::Affine::translate((-1.0 / 32.0, 1.0 / 32.0))),
+                &square,
+            );
+            let target = gpu.target(64, 64);
+            gpu.render(&flat, &target);
+            let expected = gpu.read(&target);
+            // Inside the square, clear of its edges.
+            for y in 12..52 {
+                for x in 12..52 {
+                    let at = (y * 64 + x) * 4;
+                    let worst = (0..4)
+                        .map(|channel| drawn[at + channel].abs_diff(expected[at + channel]))
+                        .max()
+                        .unwrap();
+                    assert!(
+                        worst <= 3,
+                        "{:?} at ({x}, {y}): {:?} against {:?}",
+                        gradient.kind,
+                        &drawn[at..at + 4],
+                        &expected[at..at + 4],
+                    );
+                }
+            }
+        }
     }
 
     fn wait(device: &wgpu::Device) {
@@ -4299,6 +4409,7 @@ mod tests {
                         outline,
                         placement: kurbo::Affine::translate((x, y)) * kurbo::Affine::scale(scale),
                         color: peniko::Color::from_rgb8(20, 20, 30),
+                        gradient: None,
                     });
                 }
                 x += advance * scale;
