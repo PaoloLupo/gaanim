@@ -233,6 +233,7 @@ fn sampled_reactive_surface_3d(
     function: &ReactiveFunction,
     resolution: [usize; 2],
     color_map: Option<&gaanim_core::ColorMap>,
+    material: Option<gaanim_scene::Material3D>,
     time: f64,
     values: &[(ObjectId, f64)],
 ) -> TriangleMeshData {
@@ -259,14 +260,38 @@ fn sampled_reactive_surface_3d(
         values: Vec::new(),
     });
     let colors = surface_vertex_colors(&mesh.values, color_map, None);
+    surface_sheet(mesh.vertices, mesh.indices, colors, material)
+}
+
+/// A sampled surface's mesh, drawn on both sides: lit meshes hide their
+/// back faces, so a lit sheet gets a second copy wound the other way, whose
+/// normals face the other side.
+fn surface_sheet(
+    mut vertices: Vec<[f32; 3]>,
+    mut indices: Vec<u32>,
+    mut colors: Vec<[f32; 4]>,
+    material: Option<gaanim_scene::Material3D>,
+) -> TriangleMeshData {
+    if material.is_some() {
+        let count = vertices.len() as u32;
+        vertices.extend_from_within(..);
+        colors.extend_from_within(..);
+        let back = indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|[a, b, c]| [a + count, c + count, b + count])
+            .collect::<Vec<_>>();
+        indices.extend(back);
+    }
     TriangleMeshData {
-        vertices: mesh.vertices,
-        indices: mesh.indices,
+        vertices,
+        indices,
         normals: None,
         uvs: None,
         color: None,
         colors: Some(colors),
-        material: None,
+        material,
     }
 }
 
@@ -426,32 +451,8 @@ fn sampled_reactive_parametric_surface_3d(
         },
     )
     .unwrap_or_default();
-    let mut colors = surface_vertex_colors(&mesh.values, color_map, color_range);
-    let mut vertices = mesh.vertices;
-    let mut indices = mesh.indices;
-    // Lit meshes hide their back faces, so a lit sheet gets a second copy
-    // wound the other way, whose normals face the other side.
-    if material.is_some() {
-        let count = vertices.len() as u32;
-        vertices.extend_from_within(..);
-        colors.extend_from_within(..);
-        let back = indices
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .flat_map(|[a, b, c]| [a + count, c + count, b + count])
-            .collect::<Vec<_>>();
-        indices.extend(back);
-    }
-    TriangleMeshData {
-        vertices,
-        indices,
-        normals: None,
-        uvs: None,
-        color: None,
-        colors: Some(colors),
-        material,
-    }
+    let colors = surface_vertex_colors(&mesh.values, color_map, color_range);
+    surface_sheet(mesh.vertices, mesh.indices, colors, material)
 }
 
 fn compile_tracking_scalar(
@@ -10738,6 +10739,7 @@ impl SceneModel {
                 function,
                 resolution,
                 color_map,
+                material,
             } => {
                 let parameter_entities =
                     compile_function_parameters(function, id_map, &builder.states);
@@ -10757,6 +10759,7 @@ impl SceneModel {
                     function,
                     *resolution,
                     color_map.as_ref(),
+                    material.as_deref().copied(),
                     builder.current_time,
                     &values,
                 );
@@ -10769,6 +10772,7 @@ impl SceneModel {
                     let function = function.clone();
                     let resolution = *resolution;
                     let color_map = color_map.clone();
+                    let material = material.as_deref().copied();
                     let follows_time = function.depends_on_time();
                     let last = LastInputs::default();
                     let regen = ReactiveMeshRegen::new(move |world| {
@@ -10781,6 +10785,7 @@ impl SceneModel {
                             &function,
                             resolution,
                             color_map.as_ref(),
+                            material,
                             time,
                             &values,
                         ))

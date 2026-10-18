@@ -3619,6 +3619,9 @@ impl SceneModel {
         Ok(handle)
     }
 
+    /// Sample `function(x, y)` -> `z` on a `resolution` grid of the space
+    /// into a surface mesh colored by height through `color_map`, redrawn
+    /// when its inputs change. A `material` lights both sides.
     #[doc(hidden)]
     pub fn reactive_surface_plot(
         &mut self,
@@ -3626,6 +3629,7 @@ impl SceneModel {
         function: ReactiveFunction,
         resolution: [usize; 2],
         color_map: Option<gaanim_core::ColorMap>,
+        material: Option<gaanim_scene::Material3D>,
     ) -> Result<DrawableHandle, VisualizationError> {
         self.validate_reactive_function_owner(&function)?;
         if resolution[0] < 2 || resolution[1] < 2 {
@@ -3643,6 +3647,7 @@ impl SceneModel {
             function,
             resolution,
             color_map,
+            material: material.map(Box::new),
         });
         self.attach_to_space_3d(space, &handle);
         Ok(handle)
@@ -6992,7 +6997,7 @@ mod tests {
                 })
             };
             canvas
-                .reactive_surface_plot(&space, function, resolution, None)
+                .reactive_surface_plot(&space, function, resolution, None, None)
                 .unwrap();
             let mut world = bevy::prelude::World::new();
             world.insert_resource(gaanim_timeline::timeline::Timeline::new());
@@ -7017,6 +7022,63 @@ mod tests {
         assert_eq!(meshes[0].indices, meshes[1].indices);
         // 4 x 2 cells of two triangles, less the corner one with the hole.
         assert_eq!(meshes[0].indices.len(), 7 * 2 * 3);
+    }
+
+    #[test]
+    fn lit_surfaces_draw_a_second_side_wound_the_other_way() {
+        let meshes = [None, Some(gaanim_scene::Material3D::default())].map(|material| {
+            let mut canvas = SceneModel::new(640, 360);
+            let space = canvas
+                .coordinate_axes_3d(
+                    Axis::linear(-2.0, 2.0).unwrap(),
+                    Axis::linear(-1.0, 1.0).unwrap(),
+                    Axis::linear(-2.0, 2.0).unwrap(),
+                    [4.0, 2.0, 4.0],
+                    false,
+                )
+                .unwrap();
+            let function =
+                ReactiveFunction::new(2, 1, Vec::new(), |xy| Ok(vec![xy[0] * xy[1] * 0.25]));
+            canvas
+                .reactive_surface_plot(&space, function, [5, 3], None, material)
+                .unwrap();
+            let mut world = bevy::prelude::World::new();
+            world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+            world.insert_resource(gaanim_text::font::FontRegistry::new());
+            world.insert_resource(gaanim_text::prelude::TextConfig::default());
+            canvas.compile(&mut world);
+            world.flush();
+            world
+                .query::<&gaanim_scene::TriangleMeshData>()
+                .single(&world)
+                .unwrap()
+                .clone()
+        });
+        let [unlit, lit] = meshes;
+        assert_eq!(unlit.material, None);
+        assert_eq!(lit.material, Some(gaanim_scene::Material3D::default()));
+        // The front side is the unlit sheet; the back copies its vertices
+        // and colors, and runs each triangle the other way.
+        let count = unlit.vertices.len();
+        assert_eq!(lit.vertices[..count], unlit.vertices[..]);
+        assert_eq!(lit.vertices[count..], unlit.vertices[..]);
+        let colors = unlit.colors.as_ref().unwrap();
+        assert_eq!(lit.colors.as_ref().unwrap()[count..], colors[..]);
+        let front = unlit.indices.len();
+        assert_eq!(lit.indices.len(), 2 * front);
+        assert_eq!(lit.indices[..front], unlit.indices[..]);
+        let offset = count as u32;
+        for (back, front) in lit.indices[front..]
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .zip(unlit.indices.as_chunks::<3>().0)
+        {
+            assert_eq!(
+                *back,
+                [front[0] + offset, front[2] + offset, front[1] + offset]
+            );
+        }
     }
 
     #[test]
@@ -8287,6 +8349,7 @@ mod tests {
                     Ok(vec![values[2] * values[0] * values[1]])
                 }),
                 [4, 4],
+                None,
                 None,
             )
             .unwrap();

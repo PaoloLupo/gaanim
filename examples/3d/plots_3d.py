@@ -5,13 +5,14 @@ camera with z pointing up, and is labelled with the call on the space that
 builds it; the functions it plots are defined above each segment, and
 curves are stroked with the accent.
 Segments cover surfaces z = f(x, y), plots that follow animated inputs,
-parametric curves, and the arrows and streamlines of a 3D vector field.
+parametric curves, the arrows and streamlines of a 3D vector field, and
+surfaces lit by a material.
 """
 
 import math
 import os
 
-from gaanim import Axis, Scene, Zones
+from gaanim import Axis, Material3D, Scene, Zones
 
 DRAW = 1.4
 HOLD = 0.8
@@ -133,8 +134,23 @@ pair([
 ])
 scene.wait(HOLD)
 
+
+# A material lights a surface on both sides, keeping its colors, so its
+# relief shows in light and shadow: matte = Material3D.matte() and
+# metal = Material3D.metal(), under a low light from the camera's left.
+matte = Material3D.matte()
+metal = Material3D.metal()
+
+scene.segment("lighting")
+scene.geometry.light_3d("directional").move_to_3d(-9, -3, 5)
+pair([
+    ("space.surface(wave, material=matte)", lambda space: space.surface(wave, material=matte)),
+    ("space.surface(bowl, material=metal)", lambda space: space.surface(bowl, material=metal)),
+])
+scene.wait(HOLD)
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     # Drawing and drawn plots; the inputs segment also as its inputs animate.
-    scene.snapshots(snapshots, [1.0, 2.0, 3.0, 4.6, 5.6, 6.6, 7.6, 8.7, 9.6, 10.9])
+    scene.snapshots(snapshots, [1.0, 2.0, 3.0, 4.6, 5.6, 6.6, 7.6, 8.7, 9.6, 10.9, 11.8, 13.1])
 else:
     scene.render()
