@@ -8146,6 +8146,7 @@ class CoordinateSpace3D:
         *,
         resolution: tuple[int, int] = (64, 48),
         inputs: Sequence[Parameter | Variable | Computed | TimeInput] = (),
+        vectorized: bool = False,
         color_map: Optional[ColorMapLike] = None,
     ) -> Drawable:
         """Sample ``z = f(x, y)`` on a grid of ``resolution`` points and draw it as a lit mesh.
@@ -8156,8 +8157,16 @@ class CoordinateSpace3D:
         map such as ``"viridis"`` or ``"plasma"``. Without one, a blue, green
         and red ramp.
 
+        ``vectorized=True`` calls ``function`` once for the whole grid, each
+        time its inputs change, instead of once per vertex: ``x`` and ``y``
+        are read-only numpy arrays with one entry per vertex, the inputs are
+        numbers, and it returns an array of heights (or one number for all).
+        A NaN height leaves a hole. It needs numpy, and is much faster for
+        large or animated grids.
+
         Example:
             hill = space.surface(lambda x, y: math.exp(-(x * x + y * y)), color_map="magma")
+            wave = space.surface(lambda x, y, t: np.sin(x + t) * np.cos(y), inputs=[phase], vectorized=True)
         """
         ...
     def parametric(self, function: Callable[..., tuple[float, float, float]], domain: tuple[float, float], *, samples: int = 320, inputs: Sequence[Parameter | Variable | Computed | TimeInput] = ()) -> Drawable: ...
@@ -8415,6 +8424,35 @@ class Geometry:
             word = scene.geometry.extrude(scene.text("HOLA"), depth=0.2)
         """
         ...
+    def flat_3d(
+        self,
+        source: Drawable,
+        *,
+        material: Optional[Material3D] = None,
+        tolerance: float = 0.01,
+        keep_source: bool = False,
+    ) -> Primitive3D:
+        """Turn the area a 2D drawable fills into a flat, lit sheet to place in 3D.
+
+        Like ``extrude`` with no depth: the outline of text, equations,
+        shapes, groups or imported SVGs is read when the scene compiles and
+        filled with the nonzero rule, so letters keep their holes. The sheet
+        lies where the source is, in the z = 0 plane facing the default
+        camera, with a face on each side (seen from behind it reads mirrored)
+        that light shades and that casts shadows. Use ``move_to_3d`` and
+        ``rotate_to_3d`` to put it on a wall, a floor or a face of a solid,
+        unlike ``billboard``, which keeps 2D drawables facing the camera.
+        Curves flatten to ``tolerance`` scene units. Without a ``material``
+        the sheet is matte in the source's fill color. The source stays a
+        drawable of its own, hidden from the cursor on unless
+        ``keep_source``. A source from another scene, a 3D, image, video or
+        Lottie source, or a non-positive ``tolerance`` raise ``ValueError``;
+        an outline that encloses no area warns and leaves an empty mesh.
+
+        Example:
+            label = scene.geometry.flat_3d(scene.text("x²")).move_to_3d(0, -1, 0).rotate_to_3d(-1.5708, 0, 0)
+        """
+        ...
     def text_plane(
         self,
         source: Drawable,
@@ -8424,14 +8462,17 @@ class Geometry:
     ) -> Primitive3D:
         """Lay the area a 2D drawable fills in the 3D world, drawn from its curves.
 
-        Experimental. The outlines are read when the scene compiles, as for
-        ``extrude``, and lie in the z = 0 plane of a 3D drawable centered on
-        the source's place, in the source's fill colors. The 3D pass fills
-        them from their curves per pixel, so edges stay sharp at any size,
-        tilt with perspective, and meshes in front hide them pixel by pixel.
+        The outlines of text, equations, shapes, groups or imported SVGs are
+        read when the scene compiles, as for ``extrude``, and lie in the
+        z = 0 plane of a 3D drawable centered on the source's place, in the
+        source's solid fill colors (nonzero rule). The 3D pass fills them
+        from their curves per pixel, so edges stay sharp at any size, tilt
+        with perspective, and meshes in front hide them pixel by pixel.
         Without a ``material`` they keep their colors unlit; with one they
-        are lit and shadowed as a surface. The source is hidden from the
-        cursor on unless ``keep_source``.
+        are lit and receive shadows as a surface. They cast no shadows, and
+        strokes and gradients are not drawn. The source is hidden from the
+        cursor on unless ``keep_source``. A source from another scene, or a
+        3D, image, video or Lottie source, raises ``ValueError``.
 
         Example:
             sign = scene.geometry.text_plane(scene.text("Gaanim")).rotate_to_3d(-1.2, 0, 0)
@@ -8451,6 +8492,78 @@ class Geometry:
         ...
     def plane(self, width: float = 2.0, height: float = 2.0, *, subdivisions: tuple[int, int] = (1, 1), material: Optional[Material3D] = None) -> Primitive3D:
         """Create an XZ plane with upward-facing normals."""
+        ...
+    def torus(self, major_radius: float = 1.0, minor_radius: float = 0.3, *, segments: int = 48, rings: int = 24, material: Optional[Material3D] = None) -> Primitive3D:
+        """Create a smooth Y-up torus centered at the origin.
+
+        A tube ``minor_radius`` thick runs around a circle of
+        ``major_radius`` in the XZ plane, so the torus lies flat like a
+        plane; turn it with ``rotate_to_3d`` to stand it up. ``segments``
+        divide the circle and ``rings`` the tube around. The mesh is closed,
+        so it casts shadows like other solids. Non-positive radii, a
+        ``minor_radius`` not less than ``major_radius``, fewer than 3
+        ``segments`` or fewer than 3 ``rings`` raise ``ValueError``.
+
+        Example:
+            ring = scene.geometry.torus(1.2, 0.35, material=Material3D.metal(GOLD))
+        """
+        ...
+    def arrow_3d(
+        self,
+        start: tuple[float, float, float],
+        end: tuple[float, float, float],
+        *,
+        shaft_radius: Optional[float] = None,
+        head_radius: Optional[float] = None,
+        head_length: Optional[float] = None,
+        segments: int = 24,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create a lit 3D arrow from ``start`` to ``end`` in world space.
+
+        The arrow is a closed solid: a cylinder shaft capped at ``start`` and
+        a cone head ending at ``end``, each with ``segments`` sides. Its sizes
+        follow its length unless given in scene units: the shaft radius is
+        2.5% of the length, the head's base three times the shaft's radius
+        and the head 22% of the length. The drawable sits at the arrow's
+        midpoint, so ``move_to_3d`` moves that point, rotations and scales
+        turn about it and ``create()`` grows the arrow from it. Equal or
+        non-finite points, non-positive sizes, a head not shorter than the
+        arrow or not wider than the shaft, or fewer than 3 ``segments`` raise
+        ``ValueError``.
+
+        Example:
+            velocity = scene.geometry.arrow_3d((0, 0, 0), (2, 1, 1), material=Material3D.matte(RED))
+        """
+        ...
+    def tube(
+        self,
+        points: Sequence[tuple[float, float, float]],
+        radius: float = 0.1,
+        *,
+        segments: int = 16,
+        closed: bool = False,
+        caps: bool = True,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create a lit tube of ``radius`` along the polyline through ``points``.
+
+        The cross-section, a circle of ``segments`` sides, follows the path
+        with rotation-minimizing frames, so the tube does not twist around
+        it; a ``closed`` tube runs back to the first point and its seam meets.
+        Corners keep the radius; turns sharper than 35° crease, gentler ones
+        (sampled curves) stay smooth. ``caps`` closes the ends of an open
+        tube; without them it is an open shell. Repeated points are skipped.
+        The drawable sits at the center of the points' box: it is a
+        ``Primitive3D`` like any other, so position, rotation, scale, opacity
+        and material animate, and ``create()`` grows it from that center.
+        Fewer than two distinct points (three when ``closed``), non-finite
+        points, a non-positive ``radius`` or fewer than 3 ``segments`` raise
+        ``ValueError``.
+
+        Example:
+            knot = scene.geometry.tube(points, 0.12, closed=True, material=Material3D.metal(GOLD))
+        """
         ...
     def lighting_3d(self, preset: Literal["studio", "none"] = "studio", intensity: float = 1.0, shadows: bool = True) -> None:
         """Configure the light of lit 3D primitives.

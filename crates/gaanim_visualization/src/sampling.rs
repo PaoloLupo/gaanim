@@ -388,6 +388,27 @@ pub struct SurfaceMesh {
     pub values: Vec<f64>,
 }
 
+/// The `(x, y)` of every vertex of a surface of `map` sampled on a grid of
+/// `resolution` points, in the order [`sample_surface`] samples them: `y`
+/// major, over the axes' domains.
+pub fn surface_grid(map: &CoordinateMap3D, resolution: [usize; 2]) -> Vec<[f64; 2]> {
+    let (x_min, x_max) = map.x.domain();
+    let (y_min, y_max) = map.y.domain();
+    let at = |low: f64, high: f64, index: usize, count: usize| {
+        low + (high - low) * index as f64 / (count.max(2) - 1) as f64
+    };
+    (0..resolution[1])
+        .flat_map(|iy| {
+            (0..resolution[0]).map(move |ix| {
+                [
+                    at(x_min, x_max, ix, resolution[0]),
+                    at(y_min, y_max, iy, resolution[1]),
+                ]
+            })
+        })
+        .collect()
+}
+
 pub fn sample_surface(
     map: &CoordinateMap3D,
     resolution: [usize; 2],
@@ -396,13 +417,9 @@ pub fn sample_surface(
     if resolution.iter().any(|value| *value < 2) {
         return Err(SamplingError::TooFewSamples);
     }
-    let (x_min, x_max) = map.x.domain();
-    let (y_min, y_max) = map.y.domain();
     let mut mesh = SurfaceMesh::default();
-    for iy in 0..resolution[1] {
-        for ix in 0..resolution[0] {
-            let x = x_min + (x_max - x_min) * ix as f64 / (resolution[0] - 1) as f64;
-            let y = y_min + (y_max - y_min) * iy as f64 / (resolution[1] - 1) as f64;
+    for [x, y] in surface_grid(map, resolution) {
+        {
             let z = evaluator(x, y)
                 .filter(|value| value.is_finite())
                 .unwrap_or(f64::NAN);
@@ -535,6 +552,29 @@ mod tests {
         })
         .unwrap();
         assert!(sampled.segments.len() >= 2);
+    }
+
+    #[test]
+    fn surface_grids_list_points_in_the_order_surfaces_sample_them() {
+        let map = CoordinateMap3D::new(
+            Axis::linear(-1.0, 1.0).unwrap(),
+            Axis::linear(0.0, 2.0).unwrap(),
+            Axis::linear(-1.0, 1.0).unwrap(),
+            [2.0, 2.0, 2.0],
+        )
+        .unwrap();
+        let grid = surface_grid(&map, [3, 2]);
+        assert_eq!(grid.len(), 6);
+        // x steps first, then y.
+        assert_eq!(grid[1], [0.0, 0.0]);
+        assert_eq!(grid[3], [-1.0, 2.0]);
+        let mut seen = Vec::new();
+        sample_surface(&map, [3, 2], |x, y| {
+            seen.push([x, y]);
+            Some(0.0)
+        })
+        .unwrap();
+        assert_eq!(seen, grid);
     }
 
     #[test]

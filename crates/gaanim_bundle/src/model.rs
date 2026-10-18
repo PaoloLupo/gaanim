@@ -166,11 +166,15 @@ pub struct Tables {
     pub(crate) transition_shaders: Vec<Arc<TransitionShader>>,
     /// Passes of the drawables' shader effects, deduplicated.
     pub(crate) effect_shaders: Vec<PostProcessShader>,
-    /// Native 3D meshes and line lists, encoded, deduplicated by content.
+    /// Native 3D meshes and line lists, encoded, deduplicated by content,
+    /// and by the address of a frame's `Arc` while it lives: frames capture
+    /// unchanged 3D content in the same `Arc`, which is then encoded once.
     pub(crate) meshes: Vec<Vec<u8>>,
     mesh_by_hash: HashMap<blake3::Hash, u32>,
+    mesh_by_address: ByAddress<gaanim_scene::TriangleMeshData>,
     pub(crate) lines: Vec<Vec<u8>>,
     lines_by_hash: HashMap<blake3::Hash, u32>,
+    lines_by_address: ByAddress<gaanim_scene::LineListData>,
     /// Keys of the drawables the post-process leaves out.
     pub(crate) post_exempt: BTreeSet<u32>,
     /// Whether a frame draws glass, which only a GPU pass composes.
@@ -209,8 +213,10 @@ impl Default for Tables {
             effect_shaders: Vec::new(),
             meshes: Vec::new(),
             mesh_by_hash: HashMap::new(),
+            mesh_by_address: ByAddress::default(),
             lines: Vec::new(),
             lines_by_hash: HashMap::new(),
+            lines_by_address: ByAddress::default(),
             post_exempt: BTreeSet::new(),
             glass: false,
             starts: vec![TableCounts::default()],
@@ -262,6 +268,44 @@ pub(crate) fn grid_exponent(path: &kurbo::BezPath, pixels_per_unit: Option<f64>)
 
 /// The segment that holds item `index`, given where each segment starts
 /// (`start` reads one table's start): the last one starting at or before it.
+/// Table indexes by the address of the `Arc` a frame stored. The weak
+/// reference keeps the allocation, so no other value takes that address
+/// while it is listed: a later frame with the same `Arc` finds its index
+/// without encoding and hashing it again.
+struct ByAddress<T> {
+    entries: HashMap<usize, (std::sync::Weak<T>, u32)>,
+    /// Entries left by the last sweep of those no frame holds any more.
+    swept: usize,
+}
+
+impl<T> Default for ByAddress<T> {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            swept: 0,
+        }
+    }
+}
+
+impl<T> ByAddress<T> {
+    fn get(&self, value: &Arc<T>) -> Option<u32> {
+        self.entries
+            .get(&(Arc::as_ptr(value) as usize))
+            .map(|(_, index)| *index)
+    }
+
+    fn insert(&mut self, value: &Arc<T>, index: u32) {
+        // Values that change every frame leave an entry each: sweep the
+        // dead ones whenever the entries double.
+        if self.entries.len() >= 64 && self.entries.len() >= 2 * self.swept {
+            self.entries.retain(|_, (weak, _)| weak.strong_count() > 0);
+            self.swept = self.entries.len();
+        }
+        self.entries
+            .insert(Arc::as_ptr(value) as usize, (Arc::downgrade(value), index));
+    }
+}
+
 fn segment_of(starts: &[TableCounts], start: fn(&TableCounts) -> u32, index: u32) -> u32 {
     (starts.partition_point(|counts| start(counts) <= index) - 1) as u32
 }
@@ -374,18 +418,25 @@ impl Tables {
     }
 
     /// Store a mesh once and return its index.
-    pub(crate) fn mesh(&mut self, mesh: &gaanim_scene::TriangleMeshData) -> u32 {
-        let mut w = Writer::new();
-        codec::write_mesh(&mut w, mesh);
-        let bytes = w.into_bytes();
-        let hash = blake3::hash(&bytes);
-        let index = match self.mesh_by_hash.get(&hash) {
-            Some(index) => *index,
+    pub(crate) fn mesh(&mut self, mesh: &Arc<gaanim_scene::TriangleMeshData>) -> u32 {
+        let index = match self.mesh_by_address.get(mesh) {
+            Some(index) => index,
             None => {
-                let index = self.meshes.len() as u32;
-                self.pending_bytes += bytes.len();
-                self.meshes.push(bytes);
-                self.mesh_by_hash.insert(hash, index);
+                let mut w = Writer::new();
+                codec::write_mesh(&mut w, mesh);
+                let bytes = w.into_bytes();
+                let hash = blake3::hash(&bytes);
+                let index = match self.mesh_by_hash.get(&hash) {
+                    Some(index) => *index,
+                    None => {
+                        let index = self.meshes.len() as u32;
+                        self.pending_bytes += bytes.len();
+                        self.meshes.push(bytes);
+                        self.mesh_by_hash.insert(hash, index);
+                        index
+                    }
+                };
+                self.mesh_by_address.insert(mesh, index);
                 index
             }
         };
@@ -394,18 +445,25 @@ impl Tables {
     }
 
     /// Store a line list once and return its index.
-    pub(crate) fn line_list(&mut self, lines: &gaanim_scene::LineListData) -> u32 {
-        let mut w = Writer::new();
-        codec::write_lines(&mut w, lines);
-        let bytes = w.into_bytes();
-        let hash = blake3::hash(&bytes);
-        let index = match self.lines_by_hash.get(&hash) {
-            Some(index) => *index,
+    pub(crate) fn line_list(&mut self, lines: &Arc<gaanim_scene::LineListData>) -> u32 {
+        let index = match self.lines_by_address.get(lines) {
+            Some(index) => index,
             None => {
-                let index = self.lines.len() as u32;
-                self.pending_bytes += bytes.len();
-                self.lines.push(bytes);
-                self.lines_by_hash.insert(hash, index);
+                let mut w = Writer::new();
+                codec::write_lines(&mut w, lines);
+                let bytes = w.into_bytes();
+                let hash = blake3::hash(&bytes);
+                let index = match self.lines_by_hash.get(&hash) {
+                    Some(index) => *index,
+                    None => {
+                        let index = self.lines.len() as u32;
+                        self.pending_bytes += bytes.len();
+                        self.lines.push(bytes);
+                        self.lines_by_hash.insert(hash, index);
+                        index
+                    }
+                };
+                self.lines_by_address.insert(lines, index);
                 index
             }
         };
@@ -902,10 +960,10 @@ fn write_three_d(
             w.f64(value);
         }
         w.f32(source.opacity);
-        w.option(source.mesh.as_deref(), |w, mesh| {
+        w.option(source.mesh.as_ref(), |w, mesh| {
             w.var(u64::from(tables.mesh(mesh)))
         });
-        w.option(source.lines.as_deref(), |w, lines| {
+        w.option(source.lines.as_ref(), |w, lines| {
             w.var(u64::from(tables.line_list(lines)))
         });
         w.option(source.material.as_ref(), codec::write_material);
@@ -2435,5 +2493,44 @@ impl DeltaDecoder {
         };
         self.previous = Some(frame.clone());
         Ok(frame)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn triangle(indices: Vec<u32>) -> gaanim_scene::TriangleMeshData {
+        gaanim_scene::TriangleMeshData {
+            vertices: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices,
+            normals: None,
+            uvs: None,
+            color: None,
+            colors: None,
+            material: None,
+        }
+    }
+
+    /// A frame that stores the same mesh `Arc` as the frame before finds its
+    /// index by address; a copy finds it by content, another mesh gets its
+    /// own, and entries of meshes no frame holds any more are swept.
+    #[test]
+    fn meshes_are_stored_once_by_address_and_by_content() {
+        let mut tables = Tables::default();
+        let mesh = Arc::new(triangle(vec![0, 1, 2]));
+        let first = tables.mesh(&mesh);
+        assert_eq!(tables.mesh_by_address.get(&mesh), Some(first));
+        assert_eq!(tables.mesh(&mesh), first);
+        let copy = Arc::new((*mesh).clone());
+        assert_eq!(tables.mesh_by_address.get(&copy), None);
+        assert_eq!(tables.mesh(&copy), first);
+        assert_ne!(tables.mesh(&Arc::new(triangle(vec![0, 2, 1]))), first);
+        assert_eq!(tables.meshes.len(), 2);
+        for _ in 0..300 {
+            tables.mesh(&Arc::new(triangle(vec![0, 1, 2])));
+        }
+        assert!(tables.mesh_by_address.entries.len() < 150);
+        assert_eq!(tables.mesh_by_address.get(&mesh), Some(first));
     }
 }

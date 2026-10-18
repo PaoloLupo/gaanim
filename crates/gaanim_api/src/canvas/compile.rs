@@ -236,15 +236,22 @@ fn sampled_reactive_surface_3d(
     time: f64,
     values: &[(ObjectId, f64)],
 ) -> TriangleMeshData {
-    let mesh = gaanim_visualization::sample_surface(map, resolution, |x, y| {
-        function
-            .evaluate(&[x, y], time, |logical| {
-                values
-                    .iter()
-                    .find_map(|(id, value)| (*id == logical).then_some(*value))
-            })
+    let lookup = |logical| {
+        values
+            .iter()
+            .find_map(|(id, value)| (*id == logical).then_some(*value))
+    };
+    // A function with no coordinates gives every height at once, in the
+    // grid's order; f64::MAX marks a missing one.
+    let mut heights = (function.coordinate_arity() == 0)
+        .then(|| function.evaluate(&[], time, lookup).unwrap_or_default())
+        .map(Vec::into_iter);
+    let mesh = gaanim_visualization::sample_surface(map, resolution, |x, y| match &mut heights {
+        Some(heights) => heights.next().filter(|z| *z != f64::MAX),
+        None => function
+            .evaluate(&[x, y], time, lookup)
             .ok()
-            .map(|output| output[0])
+            .map(|output| output[0]),
     })
     .unwrap_or(gaanim_visualization::SurfaceMesh {
         vertices: Vec::new(),
@@ -2947,9 +2954,9 @@ impl SceneModel {
         leaves
     }
 
-    /// The mesh extruded from the outline `source` fills in the scene, and
-    /// the center it belongs at; `None`, with a console warning, when the
-    /// outline encloses no area.
+    /// The mesh extruded from the outline `source` fills in the scene (a
+    /// flat sheet at depth 0), and the center it belongs at; `None`, with a
+    /// console warning, when the outline encloses no area.
     fn extruded_mesh(
         builder: &SceneBuilder<'_, '_, '_>,
         source: ObjectId,
@@ -2969,16 +2976,26 @@ impl SceneModel {
                 gaanim_scene::Material3D::matte,
             )
         });
-        match gaanim_objects::extrude::extrude(
-            &outline,
-            extrusion.depth,
-            extrusion.bevel,
-            extrusion.tolerance,
-            material,
-        ) {
+        let built = if extrusion.depth > 0.0 {
+            gaanim_objects::extrude::extrude(
+                &outline,
+                extrusion.depth,
+                extrusion.bevel,
+                extrusion.tolerance,
+                material,
+            )
+        } else {
+            gaanim_objects::extrude::flat(&outline, extrusion.tolerance, material)
+        };
+        match built {
             Ok(extruded) => Some((extruded.mesh, extruded.center)),
             Err(error) => {
-                gaanim_core::console::warn("3d", format!("extrude: {error}"));
+                let factory = if extrusion.depth > 0.0 {
+                    "extrude"
+                } else {
+                    "flat_3d"
+                };
+                gaanim_core::console::warn("3d", format!("{factory}: {error}"));
                 None
             }
         }

@@ -17,8 +17,8 @@ Sin publicar. Los gráficos declarativos dibujan tartas y donuts con la marca
 `arc`, que se abren porción a porción al entrar y reparten sus porciones por
 clave al cambiar de datos, y la paleta categórica se elige: el tema la fija
 para toda la escena y cada campo puede tener la suya. El 3D se rasteriza en
-la GPU: se ve mejor y deja de ralentizar las escenas densas. Lee «Al
-actualizar».
+la GPU: se ve mejor y deja de ralentizar las escenas densas, y suma toros,
+flechas, tubos y texto en un plano. Lee «Al actualizar».
 
 == Gráficos
 
@@ -75,6 +75,9 @@ actualizar».
   `gallery/catenoid_helicoid`.
 - Las superficies reactivas (`surface` y `parametric_surface`) se vuelven
   a muestrear solo cuando cambian sus entradas, no en cada fotograma.
+- `space.surface(..., vectorized=True)` calcula toda la rejilla con una
+  llamada con arrays de numpy, como `parametric_surface`, en lugar de una
+  llamada de Python por vértice.
 
 == 3D
 
@@ -113,10 +116,24 @@ actualizar».
 - Las mallas 3D iguales se suben una vez a la GPU, y las opacas con la
   misma geometría y el mismo material se dibujan juntas, en una llamada: una
   escena con 8.000 esferas sueltas pasa de 21 a 69 fps.
+- Los números y los títulos de los ejes de `scene.viz.cartesian_3d` se ven:
+  miden lo que los de los ejes 2D (los estilos `axes/numbers` y
+  `axes/labels` del tema) y miran a la cámara. Antes medían menos de un
+  píxel. En la esquina donde empiezan los tres ejes solo se escribe el
+  número del primero que los muestra, para que no se monten.
 - Las etiquetas con `.billboard()` se desvanecen detrás de las mallas 3D
   opacas y vuelven al salir, poco a poco cuando quedan a medias tras su
   borde. Con la cámara en perspectiva aparecen en su punto 3D; antes caían
   fuera de la imagen.
+- Nuevas primitivas iluminadas: `scene.geometry.torus(...)` crea toros;
+  `scene.geometry.arrow_3d(start, end)`, flechas sólidas entre dos puntos
+  para los vectores de una escena 3D, con el astil y la punta proporcionales
+  a su longitud, y `scene.geometry.tube(points, radius)`, tubos a lo largo de
+  una polilínea que no se retuercen, abiertos con tapas o cerrados en lazo.
+- `scene.geometry.flat_3d(source)` convierte el relleno de un texto, una
+  ecuación o un dibujo 2D en una lámina iluminada de dos caras que se coloca
+  con `move_to_3d` y `rotate_to_3d`: texto en el suelo, en una pared o en la
+  cara de un sólido. El ejemplo `3d/shapes_3d` muestra las cuatro.
 
 == Al actualizar
 

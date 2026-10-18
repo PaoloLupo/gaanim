@@ -301,8 +301,9 @@ scene.render()
 
 == Objetos, materiales y luz
 
-- `scene.geometry` crea primitivas 3D: `cube`, `sphere`, `cylinder`, `cone` y
-  `plane`.
+- `scene.geometry` crea primitivas 3D: `cube`, `sphere`, `cylinder`, `cone`,
+  `plane` y `torus`. `arrow_3d`, `tube` y `flat_3d` construyen flechas,
+  tubos y láminas a partir de puntos o de un dibujo 2D (ver más abajo).
 - `Material3D.matte(color)`, `Material3D.metal(color)` y
   `Material3D.emissive(color, strength)` son puntos de partida; el constructor
   `Material3D(color, roughness=, metallic=)` permite ajustarlos.
@@ -337,6 +338,45 @@ scene.render()
 
 Los ejes son los de la escena 2D: `x` hacia la derecha, `y` hacia arriba y `z`
 hacia el espectador.
+
+== Vectores, recorridos y texto en el espacio
+
+Algunas formas se definen mejor con puntos del mundo que con medidas:
+
+- `arrow_3d(start, end)` dibuja un vector como una flecha sólida, con el
+  astil y la punta proporcionales a su longitud (`shaft_radius`,
+  `head_radius` y `head_length` los fijan).
+- `tube(points, radius)` sigue una polilínea con un tubo iluminado, como una
+  trayectoria o un muelle. La sección avanza sin retorcerse; `closed=True`
+  cierra el lazo y `caps=False` deja los extremos abiertos.
+- `flat_3d(source)` convierte el relleno de un texto, una ecuación o una
+  forma en una lámina plana de dos caras. A diferencia de `billboard`, que
+  mantiene un objeto 2D de frente a la cámara, la lámina es parte de la
+  escena: se coloca con `move_to_3d` y `rotate_to_3d`, recibe luz y gira con
+  la cámara.
+
+Las flechas y los tubos quedan en el centro de sus puntos, así que
+`move_to_3d` y los giros parten de ahí. Todas son mallas cerradas que
+proyectan sombra.
+
+```python
+import math
+from gaanim import GOLD, RED, WHITE, Material3D, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+floor = scene.geometry.plane(12, 8).move_to_3d(0, -1, 0)
+path = [(2 * math.cos(t / 10), t / 40 - 0.9, 2 * math.sin(t / 10)) for t in range(64)]
+trail = scene.geometry.tube(path, 0.06, material=Material3D.metal(GOLD))
+force = scene.geometry.arrow_3d((0, -1, 0), (0, 1.5, 0), material=Material3D.matte(RED))
+label = scene.geometry.flat_3d(scene.text("F", size=0.8), material=Material3D.matte(WHITE))
+label.move_to_3d(0.6, 1.2, 0)
+
+scene.camera.perspective(fov_y=0.7)
+scene.camera.look_at(eye=(0, 3, 9), target=(0, 0, 0))
+scene.play([trail.animate.create(), force.animate.create(), label.animate.fade_in()])
+scene.play([scene.camera.animate.orbit(delta_yaw=1.2, delta_pitch=0.0).duration(2)])
+scene.render()
+```
 
 == La cámara en perspectiva
 

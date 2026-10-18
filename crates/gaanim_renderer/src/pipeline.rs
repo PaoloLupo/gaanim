@@ -2831,9 +2831,14 @@ fn world_background_values(
 /// camera cannot see.
 /// Resource: the fragments [`extract_world`] built for its last frame, by
 /// drawable. A drawable whose recipe and Lottie frame are unchanged reuses
-/// its fragment instead of encoding its paths, shadows and glows again.
+/// its fragment instead of encoding its paths, shadows and glows again. With
+/// them, the 3D content the last captured frame held (see
+/// [`CapturedThreeDHeld`]).
 #[derive(Resource, Default)]
-pub struct ExtractedFragments(HashMap<Entity, ExtractedFragment>);
+pub struct ExtractedFragments {
+    fragments: HashMap<Entity, ExtractedFragment>,
+    three_d: CapturedThreeDHeld,
+}
 
 struct ExtractedFragment {
     recipe: Arc<FragmentRecipe>,
@@ -2858,10 +2863,12 @@ fn extract_world(
     gpu_meshes: bool,
 ) -> WorldExtraction {
     // Fragments of drawables not extracted this frame are dropped with it.
-    let mut previous_fragments = world
+    let ExtractedFragments {
+        fragments: mut previous_fragments,
+        three_d: mut held_three_d,
+    } = world
         .remove_resource::<ExtractedFragments>()
-        .unwrap_or_default()
-        .0;
+        .unwrap_or_default();
     let mut fragments = HashMap::with_capacity(previous_fragments.len());
     let replaying_pins = pins.as_ref().is_some_and(|pins| pins.recorded);
     let background_time = world
@@ -3347,16 +3354,25 @@ fn extract_world(
             !camera_views.is_empty(),
             opacity_fallback,
             &mut extracted,
-            three_d.as_mut(),
+            three_d.as_mut().map(|capture| (capture, &mut held_three_d)),
             meshes,
         );
         if let Some(sources) = mesh_sources {
             world.insert_resource(sources);
         }
+        // The next frame keeps a captured mesh while its change tick stays:
+        // a change made straight after this capture, outside a schedule,
+        // must get a tick of its own.
+        if capture_three_d {
+            world.increment_change_tick();
+        }
     }
 
     extracted.sort_by(ExtractedElement::draw_order);
-    world.insert_resource(ExtractedFragments(fragments));
+    world.insert_resource(ExtractedFragments {
+        fragments,
+        three_d: held_three_d,
+    });
 
     let background_values =
         world_background_values(world, background_time, transition_frame.as_ref());
@@ -3497,7 +3513,7 @@ fn extract_three_d(
     with_lineage: bool,
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
-    capture: Option<&mut CapturedThreeD>,
+    capture: Option<(&mut CapturedThreeD, &mut CapturedThreeDHeld)>,
     gpu: Option<crate::three_d::GpuMeshes<'_>>,
 ) -> Vec<crate::three_d::GpuMeshFrame> {
     let mut lights = world.query_filtered::<LightData, With<Visible>>();
@@ -3520,6 +3536,47 @@ fn extract_three_d(
         capture,
         gpu,
     )
+}
+
+/// The meshes, lines and filled outlines a recording's frames captured, by
+/// drawable: while a drawable's mesh, lines or outlines keep their change
+/// tick, the next frame captures the same `Arc`, by whose address
+/// compositions keep their uploads and bundles their tables, so that
+/// unchanged 3D content is built and encoded once instead of once per frame.
+#[derive(Default)]
+struct CapturedThreeDHeld {
+    meshes: HashMap<Entity, (u32, Arc<gaanim_scene::TriangleMeshData>)>,
+    lines: HashMap<Entity, (u32, Arc<gaanim_scene::LineListData>)>,
+    fills: HashMap<Entity, (u32, Arc<gaanim_scene::PlaneFillData>)>,
+}
+
+impl CapturedThreeDHeld {
+    /// `data` of `entity` at change tick `tick`: the `Arc` the frame before
+    /// captured when the tick is the same, else a new one.
+    fn held<T: Clone>(
+        held: &mut HashMap<Entity, (u32, Arc<T>)>,
+        entity: Entity,
+        tick: u32,
+        data: &T,
+    ) -> Arc<T> {
+        match held.get(&entity) {
+            Some((kept, data)) if *kept == tick => Arc::clone(data),
+            _ => {
+                let data = Arc::new(data.clone());
+                held.insert(entity, (tick, Arc::clone(&data)));
+                data
+            }
+        }
+    }
+
+    /// Forget the drawables a frame did not capture.
+    fn keep_only(&mut self, captured: &[CapturedThreeDSource]) {
+        let entities: std::collections::HashSet<Entity> =
+            captured.iter().map(|source| source.entity).collect();
+        self.meshes.retain(|entity, _| entities.contains(entity));
+        self.lines.retain(|entity, _| entities.contains(entity));
+        self.fills.retain(|entity, _| entities.contains(entity));
+    }
 }
 
 /// The width of a drawable's 3D lines in scene units: its stroke's, when
@@ -3672,7 +3729,7 @@ fn three_d_elements<'a>(
     with_lineage: bool,
     opacity_fallback: kurbo::Rect,
     extracted: &mut Vec<ExtractedElement>,
-    capture: Option<&mut CapturedThreeD>,
+    capture: Option<(&mut CapturedThreeD, &mut CapturedThreeDHeld)>,
     gpu: Option<crate::three_d::GpuMeshes<'_>>,
 ) -> Vec<crate::three_d::GpuMeshFrame> {
     let mut revisions = Vec::new();
@@ -3696,25 +3753,35 @@ fn three_d_elements<'a>(
             (entity, content, composition)
         })
         .collect();
-    if let Some(capture) = capture {
+    if let Some((capture, held)) = capture {
         capture.lighting = lighting.lighting;
         capture.lights = lighting.lights.clone();
         capture.opacity_fallback = opacity_fallback;
         capture.sources = sources
             .iter()
-            .map(|(entity, content, composition)| CapturedThreeDSource {
-                entity: *entity,
-                transform: content.transform.mat4,
-                opacity: content.opacity.0,
-                mesh: content.mesh.cloned().map(Arc::new),
-                lines: content.lines.cloned().map(Arc::new),
-                material: content.material.copied(),
-                line_width: content.line_width.map(|width| width as f32),
-                line_range: content.line_range,
-                fill: content.fill.cloned().map(Arc::new),
-                composition: composition.clone(),
-            })
+            .zip(&revisions)
+            .map(
+                |((entity, content, composition), revision)| CapturedThreeDSource {
+                    entity: *entity,
+                    transform: content.transform.mat4,
+                    opacity: content.opacity.0,
+                    mesh: content.mesh.map(|mesh| {
+                        CapturedThreeDHeld::held(&mut held.meshes, *entity, revision[0], mesh)
+                    }),
+                    lines: content.lines.map(|lines| {
+                        CapturedThreeDHeld::held(&mut held.lines, *entity, revision[1], lines)
+                    }),
+                    material: content.material.copied(),
+                    line_width: content.line_width.map(|width| width as f32),
+                    line_range: content.line_range,
+                    fill: content.fill.map(|fill| {
+                        CapturedThreeDHeld::held(&mut held.fills, *entity, revision[2], fill)
+                    }),
+                    composition: composition.clone(),
+                },
+            )
             .collect();
+        held.keep_only(&capture.sources);
     }
     let Some(gpu) = gpu else {
         return Vec::new();
@@ -6270,6 +6337,47 @@ mod tests {
 
     fn rect_path(x0: f64, y0: f64, x1: f64, y1: f64) -> Arc<kurbo::BezPath> {
         Arc::new(kurbo::Rect::new(x0, y0, x1, y1).to_path(0.1))
+    }
+
+    /// Frames captured while a mesh is unchanged hold it in the same `Arc`,
+    /// by which recordings keep its upload and its table entry; a changed
+    /// mesh, even changed straight after a capture, is captured anew.
+    #[test]
+    fn captures_keep_unchanged_meshes_in_the_same_arc() {
+        let mut world = World::new();
+        let mesh = gaanim_scene::TriangleMeshData {
+            vertices: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: None,
+            colors: None,
+            material: None,
+        };
+        let entity = world
+            .spawn((
+                mesh,
+                gaanim_scene::Mesh3DMarker,
+                Visible,
+                GlobalSpatialTransform::default(),
+                GlobalOpacity(1.0),
+            ))
+            .id();
+        let camera = gaanim_math::Camera::ortho_2d(1280, 720);
+        let captured = |world: &mut World| {
+            let three_d = capture_frame(world, Some(&camera)).three_d.unwrap();
+            three_d.sources[0].mesh.clone().unwrap()
+        };
+        let first = captured(&mut world);
+        assert!(Arc::ptr_eq(&first, &captured(&mut world)));
+        world
+            .get_mut::<gaanim_scene::TriangleMeshData>(entity)
+            .unwrap()
+            .indices = vec![0, 2, 1];
+        let changed = captured(&mut world);
+        assert!(!Arc::ptr_eq(&first, &changed));
+        assert_eq!(changed.indices, [0, 2, 1]);
+        assert!(Arc::ptr_eq(&changed, &captured(&mut world)));
     }
 
     /// A light shades from where its entity is, dimmed by its opacity.

@@ -1,6 +1,7 @@
 //! `scene.geometry.extrude` (CA-06): a 3D mesh extruded from the outline of
 //! a 2D drawable, built when the scene compiles, once the source's geometry
-//! (shaped text, imported SVG) is known.
+//! (shaped text, imported SVG) is known; `scene.geometry.flat_3d`, the same
+//! outline as a flat sheet.
 
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ use super::{DrawableHandle, SceneModel, SpawnKind};
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtrusionSpec {
     pub source: ObjectId,
+    /// 0 builds a flat two-sided sheet instead of a solid.
     pub depth: f64,
     pub bevel: f64,
     pub tolerance: f64,
@@ -34,9 +36,6 @@ impl SceneModel {
         material: Option<Material3D>,
         keep_source: bool,
     ) -> Result<DrawableHandle, String> {
-        if !Arc::ptr_eq(&source.state, &self.state) {
-            return Err("the drawable to extrude must belong to this scene".to_string());
-        }
         if !depth.is_finite() || depth <= 0.0 {
             return Err(format!("depth must be finite and positive, got {depth}"));
         }
@@ -44,6 +43,41 @@ impl SceneModel {
             return Err(format!(
                 "bevel must be finite, non-negative and less than half the depth, got {bevel}"
             ));
+        }
+        self.outline_mesh(source, depth, bevel, tolerance, material, keep_source)
+    }
+
+    /// The area `source` fills as a flat, lit sheet with a face on each
+    /// side, centered on the source's place in the z = 0 plane and facing
+    /// the default camera; move and turn it into place in 3D. Curves flatten
+    /// to `tolerance`. Unless `keep_source`, the source is hidden from here
+    /// on.
+    pub fn flat_3d(
+        &mut self,
+        source: &DrawableHandle,
+        tolerance: f64,
+        material: Option<Material3D>,
+        keep_source: bool,
+    ) -> Result<DrawableHandle, String> {
+        self.outline_mesh(source, 0.0, 0.0, tolerance, material, keep_source)
+    }
+
+    fn outline_mesh(
+        &mut self,
+        source: &DrawableHandle,
+        depth: f64,
+        bevel: f64,
+        tolerance: f64,
+        material: Option<Material3D>,
+        keep_source: bool,
+    ) -> Result<DrawableHandle, String> {
+        let (verb, done) = if depth > 0.0 {
+            ("extrude", "extruded")
+        } else {
+            ("lay flat", "laid flat")
+        };
+        if !Arc::ptr_eq(&source.state, &self.state) {
+            return Err(format!("the drawable to {verb} must belong to this scene"));
         }
         if !tolerance.is_finite() || tolerance <= 0.0 {
             return Err(format!(
@@ -60,7 +94,7 @@ impl SceneModel {
                 | SpawnKind::Video { .. }
                 | SpawnKind::Lottie { .. }
         ) {
-            return Err("only 2D vector drawables can be extruded".to_string());
+            return Err(format!("only 2D vector drawables can be {done}"));
         }
         // A solid fill known now names the material, so animations start
         // from it; otherwise the compiled leaves' fill does.

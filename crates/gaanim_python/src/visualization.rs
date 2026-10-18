@@ -292,22 +292,28 @@ impl SurfaceGrid {
     }
 
     fn arrays(&self, py: Python<'_>) -> PyResult<GridArrays> {
-        let numpy = py.import("numpy").map_err(|_| {
-            PyTypeError::new_err("vectorized=True needs numpy: install it with `pip install numpy`")
-        })?;
-        let (u, v): (Vec<f64>, Vec<f64>) = self.points().unzip();
-        // Read-only, so a callback cannot change the grid of later frames.
-        let freeze = |values: Vec<f64>| -> PyResult<Py<PyAny>> {
-            let array = numpy.call_method1("array", (values,))?;
-            array.getattr("flags")?.setattr("writeable", false)?;
-            Ok(array.unbind())
-        };
-        Ok(GridArrays {
-            count: u.len(),
-            u: freeze(u)?,
-            v: freeze(v)?,
-        })
+        let (u, v) = self.points().unzip();
+        grid_arrays(py, u, v)
     }
+}
+
+/// The coordinates `u` and `v` of a grid's vertices as numpy arrays, for
+/// vectorized callbacks.
+fn grid_arrays(py: Python<'_>, u: Vec<f64>, v: Vec<f64>) -> PyResult<GridArrays> {
+    let numpy = py.import("numpy").map_err(|_| {
+        PyTypeError::new_err("vectorized=True needs numpy: install it with `pip install numpy`")
+    })?;
+    // Read-only, so a callback cannot change the grid of later frames.
+    let freeze = |values: Vec<f64>| -> PyResult<Py<PyAny>> {
+        let array = numpy.call_method1("array", (values,))?;
+        array.getattr("flags")?.setattr("writeable", false)?;
+        Ok(array.unbind())
+    };
+    Ok(GridArrays {
+        count: u.len(),
+        u: freeze(u)?,
+        v: freeze(v)?,
+    })
 }
 
 /// Call a vectorized `callback(u, v, *inputs)` over the whole grid and
@@ -356,8 +362,10 @@ fn batch_values(
         return Err(wrong());
     }
     Ok(bytes
-        .chunks_exact(8)
-        .map(|chunk| f64::from_ne_bytes(chunk.try_into().expect("8-byte chunk")))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| f64::from_ne_bytes(*chunk))
         .collect())
 }
 
@@ -2428,17 +2436,34 @@ impl PyCoordinateSpace3D {
             .map_err(value_error)
     }
 
-    #[pyo3(signature = (function, *, resolution=(64, 48), inputs=Vec::new(), color_map=None))]
+    #[pyo3(signature = (function, *, resolution=(64, 48), inputs=Vec::new(), vectorized=false, color_map=None))]
     fn surface(
         &self,
         py: Python<'_>,
         function: Py<PyAny>,
         resolution: (usize, usize),
         inputs: Vec<Py<PyAny>>,
+        vectorized: bool,
         color_map: Option<crate::color::PyColorMapArg>,
     ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        let function = checked_python_function(py, function, 2, 1, inputs, &self.canvas)?;
+        let function = if vectorized {
+            if resolution.0 < 2 || resolution.1 < 2 || resolution.0 * resolution.1 > 250_000 {
+                return Err(PyValueError::new_err(
+                    "resolution must have at least 2 points per side and at most 250000 in all",
+                ));
+            }
+            let (x, y) = self
+                .inner
+                .surface_grid([resolution.0, resolution.1])
+                .into_iter()
+                .map(|[x, y]| (x, y))
+                .unzip();
+            let arrays = grid_arrays(py, x, y)?;
+            checked_batch_function(py, function, &arrays, 1, inputs, &self.canvas)?
+        } else {
+            checked_python_function(py, function, 2, 1, inputs, &self.canvas)?
+        };
         self.canvas
             .lock()
             .expect("scene canvas poisoned")
