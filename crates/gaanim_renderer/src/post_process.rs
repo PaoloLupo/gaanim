@@ -1985,6 +1985,138 @@ mod tests {
         assert_eq!(pixel[3], 255);
     }
 
+    /// `pixels` (one row of RGBA8) after `pass` on the GPU, or `None`
+    /// without a GPU adapter.
+    fn row_after_pass(pixels: &[[u8; 4]], pass: PostProcessPass) -> Option<Vec<[u8; 4]>> {
+        let gpu = test_gpu()?;
+        let width = pixels.len() as u32;
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        gpu.queue.write_texture(
+            target.as_image_copy(),
+            pixels.as_flattened(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: None,
+            },
+            target.size(),
+        );
+        let request = CanvasPostProcess {
+            passes: vec![pass],
+            ..Default::default()
+        }
+        .request(0.0, kurbo::Rect::new(0.0, 0.0, f64::from(width), 1.0))
+        .unwrap();
+        let mut post = GpuPostProcess::default();
+        assert!(post.prepare(&gpu.device, &gpu.queue, &target, Some(&request), None, None));
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        post.encode(&mut encoder);
+        gpu.queue.submit(Some(encoder.finish()));
+        let out = gpu.read(&target);
+        Some(
+            out.chunks_exact(4)
+                .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
+                .collect(),
+        )
+    }
+
+    fn assert_near(pixel: [u8; 4], expected: [u8; 4]) {
+        assert!(
+            pixel
+                .iter()
+                .zip(expected)
+                .all(|(value, expected)| value.abs_diff(expected) <= 2),
+            "{pixel:?} is not {expected:?}"
+        );
+    }
+
+    #[test]
+    fn gpu_tint_and_duotone_map_brightness_onto_their_colors() {
+        use crate::post_presets::PostPreset;
+        // Black, the ink's own brightness, white, and a translucent gray.
+        let ink = [0.8_f64, 0.4, 0.2];
+        let ink_luma = 0.2126 * ink[0] + 0.7152 * ink[1] + 0.0722 * ink[2];
+        let level = (ink_luma * 255.0).round() as u8;
+        let pixels = [
+            [0, 0, 0, 255],
+            [level, level, level, 255],
+            [255, 255, 255, 255],
+            [128, 128, 128, 128],
+        ];
+        let byte = |value: f64| (value * 255.0).round() as u8;
+        let tint = |amount| {
+            PostProcessPass::constant(PostPreset::Tint.shader(), &[ink[0], ink[1], ink[2], amount])
+                .unwrap()
+        };
+        let Some(full) = row_after_pass(&pixels, tint(1.0)) else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        assert_near(full[0], [0, 0, 0, 255]);
+        assert_near(full[1], [byte(ink[0]), byte(ink[1]), byte(ink[2]), 255]);
+        assert_near(full[2], [255, 255, 255, 255]);
+        assert_eq!(full[3][3], 128, "alpha is kept");
+        // Half the amount is halfway back to the original.
+        let half = row_after_pass(&pixels, tint(0.5)).unwrap();
+        assert_near(
+            half[1],
+            [
+                byte((ink[0] + ink_luma) / 2.0),
+                byte((ink[1] + ink_luma) / 2.0),
+                byte((ink[2] + ink_luma) / 2.0),
+                255,
+            ],
+        );
+
+        let shadows = [0.1_f64, 0.2, 0.4];
+        let highlights = [1.0_f64, 0.9, 0.6];
+        let duotone = PostProcessPass::constant(
+            PostPreset::Duotone.shader(),
+            &[
+                shadows[0],
+                shadows[1],
+                shadows[2],
+                highlights[0],
+                highlights[1],
+                highlights[2],
+                1.0,
+            ],
+        )
+        .unwrap();
+        let toned = row_after_pass(&pixels, duotone).unwrap();
+        assert_near(
+            toned[0],
+            [byte(shadows[0]), byte(shadows[1]), byte(shadows[2]), 255],
+        );
+        assert_near(
+            toned[2],
+            [
+                byte(highlights[0]),
+                byte(highlights[1]),
+                byte(highlights[2]),
+                255,
+            ],
+        );
+        let t = f64::from(level) / 255.0;
+        let between = |axis: usize| byte(shadows[axis] + (highlights[axis] - shadows[axis]) * t);
+        assert_near(toned[1], [between(0), between(1), between(2), 255]);
+    }
+
     #[test]
     fn gpu_overlay_covers_the_frame_and_blends_with_it() {
         use crate::post_presets::{ImageOverlay, OverlayBlend};

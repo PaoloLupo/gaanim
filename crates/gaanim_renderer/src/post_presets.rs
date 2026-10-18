@@ -1,6 +1,6 @@
 //! Built-in finishing passes for the post-process chain: film grain,
-//! vignette, chromatic aberration, color grading, lookup tables, halftone,
-//! ordered dithering, CRT, pixelation, glitch and bloom.
+//! vignette, chromatic aberration, color grading, tint and duotone, lookup
+//! tables, halftone, ordered dithering, CRT, pixelation, glitch and bloom.
 //!
 //! Each preset is a [`PostProcessShader`] with named uniforms, so its
 //! amounts can be constants or animated parameters. Sizes are measured in
@@ -24,6 +24,11 @@ pub enum PostPreset {
     ChromaticAberration,
     /// `exposure` (stops), `contrast`, `saturation`, `temperature`.
     ColorGrade,
+    /// `red`, `green`, `blue` (the ink), `amount`.
+    Tint,
+    /// `shadow_red`, `shadow_green`, `shadow_blue`, `highlight_red`,
+    /// `highlight_green`, `highlight_blue`, `amount`.
+    Duotone,
     /// `dot` (cell size in pixels at 1080p).
     Halftone,
     /// `levels` (per channel, at least 2).
@@ -138,6 +143,47 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
 }
 "#;
 
+// Monochrome in one ink: black, the ink where the image is as bright as the
+// ink, then white, so the image keeps its brightness.
+const TINT: &str = r#"
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let color = gaanim_scene(uv);
+    let ink = clamp(
+        vec3<f32>(gaanim_uniforms.red, gaanim_uniforms.green, gaanim_uniforms.blue),
+        vec3<f32>(0.0),
+        vec3<f32>(1.0),
+    );
+    let luma = clamp(gaanim_preset_luma(color.rgb), 0.0, 1.0);
+    let middle = clamp(gaanim_preset_luma(ink), 1e-3, 1.0 - 1e-3);
+    let tinted = select(
+        mix(ink, vec3<f32>(1.0), (luma - middle) / (1.0 - middle)),
+        ink * (luma / middle),
+        luma <= middle,
+    );
+    return vec4<f32>(mix(color.rgb, tinted, clamp(gaanim_uniforms.amount, 0.0, 1.0)), color.a);
+}
+"#;
+
+// Brightness mapped from the shadow color to the highlight color.
+const DUOTONE: &str = r#"
+fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
+    let color = gaanim_scene(uv);
+    let shadows = vec3<f32>(
+        gaanim_uniforms.shadow_red,
+        gaanim_uniforms.shadow_green,
+        gaanim_uniforms.shadow_blue,
+    );
+    let highlights = vec3<f32>(
+        gaanim_uniforms.highlight_red,
+        gaanim_uniforms.highlight_green,
+        gaanim_uniforms.highlight_blue,
+    );
+    let luma = clamp(gaanim_preset_luma(color.rgb), 0.0, 1.0);
+    let toned = mix(shadows, highlights, luma);
+    return vec4<f32>(mix(color.rgb, toned, clamp(gaanim_uniforms.amount, 0.0, 1.0)), color.a);
+}
+"#;
+
 const HALFTONE: &str = r#"
 fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
     let size = max(gaanim_uniforms.dot, 1.0) * gaanim_preset_scale(resolution);
@@ -242,11 +288,13 @@ fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> {
 "#;
 
 impl PostPreset {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Grain,
         Self::Vignette,
         Self::ChromaticAberration,
         Self::ColorGrade,
+        Self::Tint,
+        Self::Duotone,
         Self::Halftone,
         Self::Dither,
         Self::Crt,
@@ -262,6 +310,16 @@ impl PostPreset {
             Self::Vignette => &["strength", "softness"],
             Self::ChromaticAberration => &["amount"],
             Self::ColorGrade => &["exposure", "contrast", "saturation", "temperature"],
+            Self::Tint => &["red", "green", "blue", "amount"],
+            Self::Duotone => &[
+                "shadow_red",
+                "shadow_green",
+                "shadow_blue",
+                "highlight_red",
+                "highlight_green",
+                "highlight_blue",
+                "amount",
+            ],
             Self::Halftone => &["dot"],
             Self::Dither => &["levels"],
             Self::Crt => &["strength"],
@@ -277,6 +335,8 @@ impl PostPreset {
             Self::Vignette => VIGNETTE,
             Self::ChromaticAberration => CHROMATIC_ABERRATION,
             Self::ColorGrade => COLOR_GRADE,
+            Self::Tint => TINT,
+            Self::Duotone => DUOTONE,
             Self::Halftone => HALFTONE,
             Self::Dither => DITHER,
             Self::Crt => CRT,

@@ -894,7 +894,7 @@ scene.play(line["resalta"].animate.flash_under(color=GOLD, width=0.05).duration(
     (name: "corner_radius", type: "float", default: "0.1", desc: [Radio de las esquinas del hueco.]),
   ),
   returns: (type: "Anim", desc: [Un velo con un hueco que se oscurece y vuelve.]),
-  desc: [Un velo negro con un hueco vivo alrededor del objetivo (sigue al objetivo si se mueve) llega a `dim` a mitad de la animación y vuelve a nada; `duration` fija el ciclo entero y una curva como `Easing.SMOOTH` lo deja oscurecido al final. Con varios objetivos hay un hueco alrededor de cada uno, y los que se solapan se unen; para iluminar la caja conjunta, agrúpalos. La animación devuelta se reproduce sobre el velo. Una secuencia vacía, un `dim` fuera de rango o un objetivo de otra escena lanzan `ValueError`.],
+  desc: [Un velo negro con un hueco vivo alrededor del objetivo (sigue al objetivo si se mueve) llega a `dim` a mitad de la animación y vuelve a nada. Una selección de texto tiene un hueco por cada línea que abarca, solo alrededor de sus glifos, que gira con un texto girado, como las bandas de `marker`; `duration` fija el ciclo entero y una curva como `Easing.SMOOTH` lo deja oscurecido al final. Con varios objetivos hay un hueco alrededor de cada uno, y los que se solapan se unen; para iluminar la caja conjunta, agrúpalos. La animación devuelta se reproduce sobre el velo. Una secuencia vacía, un `dim` fuera de rango o un objetivo de otra escena lanzan `ValueError`.],
 )[
 ```python
 # output: preview.webp

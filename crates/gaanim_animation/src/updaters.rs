@@ -1863,6 +1863,10 @@ pub enum SurroundingShape {
     Frame,
     /// A single line along the bottom edge, as an underline.
     Underline,
+    /// One frame per rendered line of the targets (text glyphs), padded and
+    /// rounded like `Frame`, in the frame of their text: it turns with the
+    /// text. It follows `to`; retargets do not interpolate it.
+    Lines,
 }
 
 impl SurroundingRect {
@@ -1900,6 +1904,20 @@ impl SurroundingRect {
         }
     }
 
+    /// One frame around each rendered line of the glyphs `targets`, grown by
+    /// `padding` and rounded by `corner_radius` (see
+    /// [`SurroundingShape::Lines`]).
+    pub fn lines(
+        targets: Vec<gaanim_core::ObjectId>,
+        padding: [f64; 4],
+        corner_radius: f64,
+    ) -> Self {
+        Self {
+            shape: SurroundingShape::Lines,
+            ..Self::new(targets, padding, corner_radius)
+        }
+    }
+
     /// A line under the targets, `gap` scene units below them and as wide as
     /// they are plus `overhang` on each side.
     pub fn underline(targets: Vec<gaanim_core::ObjectId>, gap: f64, overhang: f64) -> Self {
@@ -1919,6 +1937,77 @@ fn object_set_bounds(
         .filter_map(|id| entities.get(id))
         .filter_map(|entity| resolve_entity_bounds(*entity, world))
         .reduce(|left, right| left.union(&right))
+}
+
+/// A rectangle rounded by `corner_radius`, capped at half its smaller side.
+fn frame_path(rect: gaanim_core::kurbo::Rect, corner_radius: f64) -> BezPath {
+    let radius = corner_radius
+        .min(rect.width().abs() * 0.5)
+        .min(rect.height().abs() * 0.5)
+        .max(0.0);
+    if radius > 0.0 {
+        gaanim_core::kurbo::RoundedRect::from_rect(rect, radius).to_path(0.1)
+    } else {
+        rect.to_path(0.1)
+    }
+}
+
+/// One frame per rendered line of the glyphs `ids`, grown by `padding` and
+/// rounded by `corner_radius`, in world coordinates. The glyphs are grouped
+/// into lines with their text's world rotation undone, and the frames turn
+/// back with it.
+fn line_frames(
+    ids: &[gaanim_core::ObjectId],
+    entities: &std::collections::HashMap<gaanim_core::ObjectId, Entity>,
+    world: &World,
+    padding: [f64; 4],
+    corner_radius: f64,
+) -> BezPath {
+    let glyphs: Vec<(Entity, gaanim_math::Bounds3D, DMat4)> = ids
+        .iter()
+        .filter_map(|id| entities.get(id))
+        .filter_map(|&entity| {
+            let local = world.get::<LocalBounds>(entity)?.0;
+            Some((entity, local, entity_world_matrix(entity, world)?))
+        })
+        .collect();
+    let Some(&(first, _, first_matrix)) = glyphs.first() else {
+        return BezPath::new();
+    };
+    // The lines run along the text's x axis: the first glyph's parent's.
+    let basis = world
+        .get::<ChildOf>(first)
+        .and_then(|parent| entity_world_matrix(parent.parent(), world))
+        .unwrap_or(first_matrix);
+    let angle = basis.x_axis.y.atan2(basis.x_axis.x);
+    let unturn = DMat4::from_rotation_z(-angle);
+    let upright: Vec<gaanim_math::text_lines::LineGlyph> = glyphs
+        .iter()
+        .map(|(_, local, matrix)| {
+            let bounds = local.transform_mat4(&(unturn * *matrix));
+            gaanim_math::text_lines::LineGlyph {
+                min: bounds.min.truncate(),
+                max: bounds.max.truncate(),
+                selected: true,
+            }
+        })
+        .collect();
+    let turn = gaanim_core::kurbo::Affine::rotate(angle);
+    let [top, right, bottom, left] = padding;
+    let mut path = BezPath::new();
+    for line in gaanim_math::text_lines::group_lines(&upright) {
+        let Some((low, high)) = line.selected_x else {
+            continue;
+        };
+        let rect = gaanim_core::kurbo::Rect::new(
+            low - left,
+            line.min_y - bottom,
+            high + right,
+            line.max_y + top,
+        );
+        path.extend(turn * frame_path(rect, corner_radius));
+    }
+    path
 }
 
 fn padded_bounds(bounds: gaanim_math::Bounds3D, padding: [f64; 4]) -> gaanim_math::Bounds3D {
@@ -1962,6 +2051,29 @@ pub fn surrounding_rect_system(world: &mut World) {
     };
 
     for (entity, frame) in frames {
+        if frame.shape == SurroundingShape::Lines {
+            let path = line_frames(
+                &frame.to,
+                &entities,
+                world,
+                frame.padding,
+                frame.corner_radius,
+            );
+            let bounds = (!path.elements().is_empty()).then(|| {
+                let rect = path.bounding_box();
+                gaanim_math::Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1)
+            });
+            write_path(world, entity, path);
+            if let Some(bounds) = bounds {
+                if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
+                    local.0 = bounds;
+                }
+                if let Some(mut live) = world.get_mut::<SurroundingRect>(entity) {
+                    live.last_bounds = Some(bounds);
+                }
+            }
+            continue;
+        }
         let from = object_set_bounds(&frame.from, &entities, world)
             .map(|bounds| padded_bounds(bounds, frame.padding));
         let to = object_set_bounds(&frame.to, &entities, world)
@@ -3312,6 +3424,86 @@ mod tests {
             .x += 20.0;
         surrounding_rect_system(&mut world);
         assert_eq!(world.get::<LocalBounds>(frame).unwrap().0.max.x, 59.0);
+    }
+
+    #[test]
+    fn line_frames_cover_each_line_of_a_turned_text() {
+        let mut world = World::new();
+        let placed = gaanim_core::kurbo::Affine::translate((3.0, 1.0))
+            * gaanim_core::kurbo::Affine::rotate(0.5);
+        let text = world
+            .spawn(SpatialTransform::new_2d(3.0, 1.0).with_rotation_2d(0.5))
+            .id();
+        // Two glyphs on the first line and one on the second, in the text's
+        // own coordinates.
+        let glyphs = [
+            (0.0, 0.0, 0.2, 0.4),
+            (0.3, 0.0, 0.5, 0.4),
+            (0.0, -0.8, 0.2, -0.4),
+        ];
+        let ids: Vec<ObjectId> = glyphs
+            .iter()
+            .enumerate()
+            .map(|(index, &(x0, y0, x1, y1))| {
+                let id = ObjectId::from_parts(10 + index as u32, 1);
+                world.spawn((
+                    gaanim_scene::MobjectId(id),
+                    SpatialTransform::default(),
+                    LocalBounds(gaanim_math::Bounds3D::new_2d(x0, y0, x1, y1)),
+                    ChildOf(text),
+                ));
+                id
+            })
+            .collect();
+        let empty = Arc::new(BezPath::new());
+        let holes = world
+            .spawn((
+                gaanim_scene::MobjectId(ObjectId::from_parts(2, 1)),
+                SpatialTransform::default(),
+                Path2D(empty.clone()),
+                PathSource(empty),
+                LocalBounds(gaanim_math::Bounds3D::default()),
+                SurroundingRect::lines(ids, [0.1; 4], 0.0),
+            ))
+            .id();
+        surrounding_rect_system(&mut world);
+
+        // Back in the text's coordinates, each line has its own frame.
+        let path = placed.inverse() * world.get::<PathSource>(holes).unwrap().0.as_ref().clone();
+        let mut frames = Vec::new();
+        for element in path.elements() {
+            match element {
+                gaanim_core::kurbo::PathEl::MoveTo(point) => {
+                    frames.push(gaanim_core::kurbo::Rect::from_points(*point, *point));
+                }
+                gaanim_core::kurbo::PathEl::LineTo(point) => {
+                    let frame = frames.last_mut().unwrap();
+                    *frame = frame.union_pt(*point);
+                }
+                _ => {}
+            }
+        }
+        let expected = [
+            gaanim_core::kurbo::Rect::new(-0.1, -0.1, 0.6, 0.5),
+            gaanim_core::kurbo::Rect::new(-0.1, -0.9, 0.3, -0.3),
+        ];
+        assert_eq!(frames.len(), expected.len());
+        for (frame, expected) in frames.iter().zip(expected) {
+            for (value, expected) in [
+                (frame.x0, expected.x0),
+                (frame.y0, expected.y0),
+                (frame.x1, expected.x1),
+                (frame.y1, expected.y1),
+            ] {
+                assert!(
+                    (value - expected).abs() < 1e-9,
+                    "{frame:?} is not {expected:?}"
+                );
+            }
+        }
+        let drawn = world.get::<PathSource>(holes).unwrap().0.bounding_box();
+        let bounds = world.get::<LocalBounds>(holes).unwrap().0;
+        assert_eq!((bounds.min.x, bounds.max.y), (drawn.x0, drawn.y1));
     }
 
     #[test]

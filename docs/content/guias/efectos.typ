@@ -166,6 +166,9 @@ con tus propios shaders:
   `chromatic_aberration(amount)`: acabado de película.
 - `color_grade(exposure, contrast, saturation, temperature)` y
   `lut(ruta, strength)` con un archivo `.cube`: corrección de color.
+- `tint(color, amount)` y `duotone(shadows, highlights, amount)`: monocromo
+  en un color (un sepia) o a dos tintas, para fotos de archivo o en los
+  colores de una marca.
 - `bloom(threshold, intensity, radius)`: bloom de varios pasos; todo lo que
   supera `threshold` brilla, igual a cualquier resolución.
 - `halftone`, `dither`, `crt`, `pixelate` y `glitch`: estilos.

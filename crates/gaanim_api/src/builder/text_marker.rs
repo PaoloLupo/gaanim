@@ -15,6 +15,7 @@ use gaanim_core::ObjectId;
 use gaanim_core::glam::DVec2;
 use gaanim_core::kurbo;
 use gaanim_core::peniko::{Brush, Color};
+use gaanim_math::text_lines::{LineGlyph, group_lines};
 use std::collections::{HashMap, HashSet};
 
 /// Default translucent highlighter yellow.
@@ -96,14 +97,6 @@ impl TextMarkerStyle {
     }
 }
 
-/// Box of one rendered glyph in scene units, with the text's rotation undone.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct GlyphBox {
-    pub min: DVec2,
-    pub max: DVec2,
-    pub selected: bool,
-}
-
 /// One marker band: a centerline stroked with `thickness`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct MarkerBand {
@@ -112,71 +105,19 @@ pub(crate) struct MarkerBand {
     pub thickness: f64,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct LineSpan {
-    min_y: f64,
-    max_y: f64,
-    selected_x: Option<(f64, f64)>,
-}
-
-/// Groups glyphs into rendered lines by vertical overlap and returns one band
-/// per line that contains selected glyphs, ordered from the top line down.
+/// One band per rendered line of `glyphs` (see
+/// [`gaanim_math::text_lines::group_lines`]) that contains selected glyphs,
+/// ordered from the top line down.
 ///
 /// A line's band spans the selected glyphs horizontally and the full height of
 /// every glyph on that line, so all words of a line get the same thickness.
 pub(crate) fn marker_bands(
-    glyphs: &[GlyphBox],
+    glyphs: &[LineGlyph],
     padding: Option<f64>,
     skew: f64,
 ) -> Vec<MarkerBand> {
-    let mut order: Vec<&GlyphBox> = glyphs
-        .iter()
-        .filter(|glyph| {
-            glyph.min.is_finite()
-                && glyph.max.is_finite()
-                && glyph.max.x > glyph.min.x
-                && glyph.max.y > glyph.min.y
-        })
-        .collect();
-    order.sort_by(|a, b| (b.min.y + b.max.y).total_cmp(&(a.min.y + a.max.y)));
-
-    let mut lines: Vec<LineSpan> = Vec::new();
-    for glyph in order {
-        let height = glyph.max.y - glyph.min.y;
-        let best = lines
-            .iter()
-            .enumerate()
-            .map(|(index, line)| {
-                let overlap = glyph.max.y.min(line.max_y) - glyph.min.y.max(line.min_y);
-                (index, overlap)
-            })
-            .filter(|(_, overlap)| *overlap >= 0.35 * height)
-            .max_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(index, _)| index);
-        let line = match best {
-            Some(index) => &mut lines[index],
-            None => {
-                lines.push(LineSpan {
-                    min_y: glyph.min.y,
-                    max_y: glyph.max.y,
-                    selected_x: None,
-                });
-                lines.last_mut().expect("line was just pushed")
-            }
-        };
-        line.min_y = line.min_y.min(glyph.min.y);
-        line.max_y = line.max_y.max(glyph.max.y);
-        if glyph.selected {
-            line.selected_x = Some(match line.selected_x {
-                Some((low, high)) => (low.min(glyph.min.x), high.max(glyph.max.x)),
-                None => (glyph.min.x, glyph.max.x),
-            });
-        }
-    }
-    lines.sort_by(|a, b| (b.min_y + b.max_y).total_cmp(&(a.min_y + a.max_y)));
-
     let skew = if skew.is_finite() { skew } else { 0.0 };
-    lines
+    group_lines(glyphs)
         .into_iter()
         .filter_map(|line| {
             let (low, high) = line.selected_x?;
@@ -285,7 +226,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         // padding and the band thickness.
         let angle = self.get_world_transform(anim.target).z_angle();
         let (turn, unturn) = (kurbo::Affine::rotate(angle), kurbo::Affine::rotate(-angle));
-        let glyphs: Vec<GlyphBox> = glyph_ids
+        let glyphs: Vec<LineGlyph> = glyph_ids
             .iter()
             .filter_map(|id| {
                 let state = self.states.get(*id)?;
@@ -295,7 +236,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 let upright = state
                     .bounds
                     .transform_2d(&(unturn * self.get_world_transform(*id).to_affine_2d()));
-                Some(GlyphBox {
+                Some(LineGlyph {
                     min: upright.min.truncate(),
                     max: upright.max.truncate(),
                     selected: selected_set.contains(id),
@@ -376,8 +317,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 mod tests {
     use super::*;
 
-    fn glyph(x: f64, y: f64, width: f64, height: f64, selected: bool) -> GlyphBox {
-        GlyphBox {
+    fn glyph(x: f64, y: f64, width: f64, height: f64, selected: bool) -> LineGlyph {
+        LineGlyph {
             min: DVec2::new(x, y),
             max: DVec2::new(x + width, y + height),
             selected,
