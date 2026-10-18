@@ -2696,6 +2696,17 @@ impl SceneModel {
                 _ => None,
             })
             .unwrap_or(Color::from_rgb8(0x50, 0x50, 0x50));
+        // As thin as a 2D grid's lines, the theme's `axes/grid` width, so the
+        // grid stays behind the axes and what the box holds rather than
+        // matching the axes' default width.
+        let grid_width = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/grid"))
+            .and_then(|rule| rule.stroke.as_ref())
+            .map(|stroke| stroke.style.width)
+            .filter(|width| width.is_finite() && *width > 0.0)
+            .unwrap_or(0.01);
         let tick_half = size.into_iter().fold(f64::INFINITY, f64::min) * 0.015;
         let axis_ticks = [x.ticks_values(7)?, y.ticks_values(7)?, z.ticks_values(7)?];
         // Where each axis's ticks fall along it, from 0 at the box's lowest
@@ -2756,7 +2767,8 @@ impl SceneModel {
                     };
                     if follow {
                         let line = self
-                            .line_segments_3d_with_colors(segment.to_vec(), vec![grid_color; 2]);
+                            .line_segments_3d_with_colors(segment.to_vec(), vec![grid_color; 2])
+                            .stroke(grid_color, grid_width);
                         mark(
                             &line,
                             AxisBoxRole::PlaneEdge {
@@ -2776,7 +2788,9 @@ impl SceneModel {
                 // translucent intersecting lines have no fragment order on
                 // the GPU and alternated a few snapshot pixels.
                 let colors = vec![grid_color; inner.len()];
-                let plane = self.line_segments_3d_with_colors(inner, colors);
+                let plane = self
+                    .line_segments_3d_with_colors(inner, colors)
+                    .stroke(grid_color, grid_width);
                 mark(&plane, AxisBoxRole::Plane { normal });
                 grid_parts.push(plane);
             }

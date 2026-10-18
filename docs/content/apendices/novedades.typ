@@ -234,7 +234,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   pasados sus números, y donde se juntan dos ejes solo escribe su número el
   primero. Al girar la cámara, saltan al otro lado cuando
   cruza el plano que pasa por el centro de la caja. `sides="fixed"` los deja
-  donde estaban, en la esquina más baja.
+  donde estaban, en la esquina más baja. Las líneas de la rejilla 3D miden
+  lo que las de la rejilla 2D, el ancho de `axes/grid` del tema, en lugar del
+  ancho de los ejes, así que quedan por detrás de ellos y de lo que contiene
+  la caja.
 
 == Efectos
 
@@ -282,7 +285,8 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   la cámara: con la cámara en `-y`, como en muchas escenas, el plano `xz`
   pasa de `y` mínima a `y` máxima, el eje `y` a la arista del suelo de `x`
   máxima y los títulos al centro de sus ejes. Para conservar la colocación
-  anterior, pasa `sides="fixed"`.
+  anterior, pasa `sides="fixed"`. Su rejilla se dibuja más fina, con el
+  ancho de `axes/grid` del tema.
 - Las líneas 3D con `.stroke(color, ancho)` miden ese ancho; quita el ancho
   o ajústalo si las querías de 1,5 px. Las que no tienen trazo miden 2 px a
   1080p en lugar de 1,5 px a cualquier tamaño.
