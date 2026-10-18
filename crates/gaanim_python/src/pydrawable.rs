@@ -3484,6 +3484,25 @@ impl PyDrawable {
         let result = Ok(Self(handle.shader_effect(passes, margin)));
         same_drawable(slf, result)
     }
+    /// Sticker outline traced from the drawable's alpha; see
+    /// `gaanim_core.pyi`.
+    #[pyo3(signature = (color, width=0.06))]
+    fn outline<'py>(
+        slf: &Bound<'py, Self>,
+        color: Option<PyColor>,
+        width: f64,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        crate::custom::ensure_authoring_allowed()?;
+        if !width.is_finite() || width <= 0.0 {
+            return Err(PyValueError::new_err("width must be finite and positive"));
+        }
+        let outline = color.map(|color| gaanim_api::canvas::OutlineSpec {
+            color: color.0,
+            width,
+        });
+        let result = Ok(Self(slf.borrow().0.clone().outline(outline)));
+        same_drawable(slf, result)
+    }
     /// Frosted glass; see `gaanim_core.pyi`.
     #[pyo3(signature = (blur=0.25, *, saturation=1.4, refraction=0.08, edge=0.3, dispersion=0.0, bevel=0.12, transparency=1.0, twist=0.0))]
     #[allow(clippy::too_many_arguments)]

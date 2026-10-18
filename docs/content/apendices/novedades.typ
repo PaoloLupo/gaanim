@@ -206,6 +206,13 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   mientras se acerca o se aleja, en un solo movimiento: `orbit` y `dolly` no
   se pueden reproducir a la vez.
 
+== Efectos
+
+- `drawable.outline(color, width)` traza un borde de pegatina alrededor del
+  alfa de una imagen recortada, de los glifos de un texto o de los miembros
+  de un grupo. Se combina con `shader_effect`, cuyo resultado contornea, y
+  con `shadow`, que se proyecta desde el resultado contorneado.
+
 == Editor
 
 - Al reproducir un paquete `.gaanim`, la barra de overlays, la paleta de

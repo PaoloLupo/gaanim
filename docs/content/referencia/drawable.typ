@@ -630,6 +630,28 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.outline",
+  kind: "method",
+  params: (
+    (name: "color", type: "Color | None", default: none, desc: [Color del borde; `None` lo quita.]),
+    (name: "width", type: "float", default: "0.06", desc: [Ancho del borde en unidades de escena.]),
+  ),
+  desc: [Traza un borde alrededor de lo que cubre el objeto, como el de una pegatina: sigue el alfa del objeto y sus descendientes, no su caja (los píxeles opacos de un recorte, los glifos de un texto, los miembros de un grupo), con el borde suavizado y debajo de ellos. Se traza después de los pases de `shader_effect`, alrededor de lo que dejan, y la `shadow` se proyecta desde el resultado contorneado. Es estado de declaración: vale para toda la línea de tiempo. Un `width` no finito o no positivo lanza `ValueError`. Cuesta dos pases sobre la textura del objeto, de unas cuatro lecturas por píxel de ancho como mucho; un borde de más de 96 píxeles de la textura baja su densidad.],
+)[
+```python
+# show-code: true
+from gaanim import Scene, WHITE
+scene = Scene(frame=(16, 9), background="#e8dcc4")
+word = scene.text("Sticker", size=1.4, color="#c0392b").move_to(-3, 0)
+word.outline(WHITE, width=0.1).shadow("#00000088", 0.12, -0.12, 0.05)
+star = scene.geometry.star(5, 1.6, 0.45).fill("#2e86de").move_to(4, 0)
+star.outline(WHITE, width=0.12).shadow("#00000088", 0.12, -0.12, 0.05)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
   name: "Drawable.matte",
   kind: "method",
   params: (

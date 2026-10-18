@@ -922,6 +922,9 @@ pub struct ObjectSpec {
     /// Post-process passes this drawable and its descendants are drawn
     /// through, as one layer.
     pub shader_effect: Option<ShaderEffectSpec>,
+    /// A sticker outline traced around what the drawable covers, after its
+    /// shader effect's passes.
+    pub outline: Option<OutlineSpec>,
     /// Track matte: the drawable whose alpha or luminance shows this one.
     pub matte: Option<(ObjectId, gaanim_renderer::object_effects::MatteMode)>,
     /// Frosted glass showing what is drawn behind the drawable.
@@ -1028,6 +1031,14 @@ pub struct ObjectSpec {
 pub struct ShaderEffectSpec {
     pub passes: Vec<gaanim_renderer::post_process::PostProcessPass>,
     pub margin: f64,
+}
+
+/// A sticker outline: `color`, `width` scene units wide, traced from the
+/// alpha of a drawable and its descendants and drawn beneath them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OutlineSpec {
+    pub color: gaanim_core::peniko::Color,
+    pub width: f64,
 }
 
 /// Most copies one [`EchoSpec`] draws.
@@ -1142,6 +1153,7 @@ impl ObjectSpec {
             stroke_scales_with_object: None,
             chalk: None,
             shader_effect: None,
+            outline: None,
             matte: None,
             glass: None,
             svg_root: false,

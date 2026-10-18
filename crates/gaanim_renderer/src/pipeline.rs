@@ -4592,6 +4592,19 @@ fn divert_effects(
         } else {
             pixels_per_unit
         };
+        // So is an outline's width, which bounds how far its passes look.
+        let is_outline = crate::object_effects::is_outline_shader;
+        let outline_width = effect
+            .passes
+            .iter()
+            .filter(|(shader, _)| is_outline(shader))
+            .filter_map(|(_, values)| values.first().copied())
+            .fold(0.0_f64, |widest, width| widest.max(f64::from(width)));
+        let pixels_per_unit = if outline_width > 0.0 {
+            pixels_per_unit.min(crate::object_effects::MAX_OUTLINE_PIXELS / outline_width)
+        } else {
+            pixels_per_unit
+        };
         let Some((width, height, density)) = effect_texture_size(bounds, pixels_per_unit) else {
             continue;
         };
@@ -4601,10 +4614,10 @@ fn divert_effects(
             .iter()
             .map(|(shader, values)| {
                 let mut values = values.clone();
-                if is_depth_blur(shader)
-                    && let Some(sigma) = values.first_mut()
+                if (is_depth_blur(shader) || is_outline(shader))
+                    && let Some(length) = values.first_mut()
                 {
-                    *sigma *= density as f32;
+                    *length *= density as f32;
                 }
                 (shader.clone(), values)
             })

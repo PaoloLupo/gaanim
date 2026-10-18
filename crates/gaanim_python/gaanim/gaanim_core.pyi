@@ -3943,6 +3943,22 @@ class Drawable:
             title.shader_effect(PostProcess.shader(ripple_src, uniforms={"amount": level}), margin=0.4)
         """
         ...
+    def outline(self, color: Optional[ColorLike], width: float = 0.06) -> Self:
+        """Trace a ``color`` border ``width`` scene units wide around this drawable, like a sticker's.
+
+        The border follows the alpha of the drawable and its descendants,
+        not their box: around the opaque pixels of a cutout image, the
+        glyphs of a text or the members of a group, with an antialiased
+        edge, and drawn beneath them. It is traced after any
+        ``shader_effect`` passes, around what they leave, and a ``shadow``
+        is then cast from the outlined result. ``None`` removes it. It is
+        declaration state for the whole timeline. A ``width`` that is not
+        finite and positive raises ``ValueError``.
+
+        Example:
+            photo.outline(WHITE, width=0.08).shadow("#00000088", 0.1, -0.1, 0.05)
+        """
+        ...
     def chalk(self, seed: int = 0, roughness: float = 0.01) -> Self:
         """Draw the fill and stroke as chalk on a blackboard.
 
