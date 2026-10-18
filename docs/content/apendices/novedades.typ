@@ -86,6 +86,12 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   sus colores por altura, el relieve se ve por la luz y proyecta y recibe
   sombras. Lo muestra `3d/plots_3d`.
 
+== Tiempo y texto
+
+- `Theme(font_files={clave: archivo})` avisa con un `UserWarning` cuando la
+  clave no es la familia que declara el archivo, y nombra esa familia: el
+  texto solo encuentra la fuente por ella.
+
 == 3D
 
 - El 3D se rasteriza en la GPU, con búfer de profundidad y antialiasing MSAA,

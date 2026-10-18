@@ -982,6 +982,29 @@ impl PyTheme {
                             "could not read font file '{path}' for '{family}': {error}"
                         ))
                     })?;
+                // Typst finds a font only by the family its file declares,
+                // so a key that names another family never reaches it.
+                let declared = gaanim_text::prelude::declared_families(&bytes);
+                if let Some(real) = declared.first()
+                    && !declared
+                        .iter()
+                        .any(|name| name.to_lowercase() == family.to_lowercase())
+                {
+                    let message = format!(
+                        "Theme font_files: '{path}' declares the family {real:?}, not \
+                         {family:?}; texts find this font only by its own family, so use \
+                         {real:?} as the key and in fonts="
+                    );
+                    let category = py.get_type::<pyo3::exceptions::PyUserWarning>();
+                    PyErr::warn(
+                        py,
+                        category.as_any(),
+                        &std::ffi::CString::new(message).map_err(|error| {
+                            pyo3::exceptions::PyValueError::new_err(error.to_string())
+                        })?,
+                        1,
+                    )?;
+                }
                 theme.fonts.push(ThemeFont {
                     family,
                     bytes: bytes.into(),

@@ -837,9 +837,12 @@ class Theme:
         file directly inside the directory (not subdirectories). Each face is
         resolved by the family, weight and style its file declares, so
         ``fonts={"text": "Inter"}`` with ``weight=700`` finds the bold file
-        without naming it. ``font_files`` still registers single files. A
-        relative ``font_dir`` or font file is found in the working directory,
-        then in the calling script's ``assets`` folder, then beside the script.
+        without naming it. ``font_files`` still registers single files: each
+        key is the family its file declares, which ``fonts`` then names, not
+        an alias, and a key that is not that family warns with the file's own
+        family (a ``UserWarning``). A relative ``font_dir`` or font file is
+        found in the working directory, then in the calling script's
+        ``assets`` folder, then beside the script.
 
         ``text_markup=False`` makes ``*`` and ``_`` literal by default in
         ``scene.text``, ``badge`` and ``chip``; a call

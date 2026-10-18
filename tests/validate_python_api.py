@@ -317,6 +317,19 @@ def validate_theme_typography_contract(module: object) -> list[str]:
         pass
     else:
         failures.append("Theme(font_dir=...) accepted a missing directory")
+    import warnings
+
+    mono = str(ROOT / "crates/gaanim_text/assets/fonts/JetBrainsMono-Variable.ttf")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        module.Theme(font_files={"MyAlias": mono})
+        module.Theme(font_files={"jetbrains mono": mono})
+    messages = [str(warning.message) for warning in caught]
+    if len(messages) != 1 or "'JetBrains Mono'" not in messages[0].replace('"', "'"):
+        failures.append(
+            "Theme(font_files=...) did not name the file's own family once for a key "
+            f"that is not it: {messages}"
+        )
     return failures
 
 
