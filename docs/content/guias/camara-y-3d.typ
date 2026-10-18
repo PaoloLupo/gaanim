@@ -453,14 +453,18 @@ puntos se reproducen a la frecuencia de la pantalla.
   Un sólido no se da sombra en la cara que aparta de la luz, y tampoco una
   lámina (una superficie con material, o una malla abierta): ahí solo la
   ilumina la luz que rodea el borde, y la sombra empieza más allá.
-- Todo el contenido 3D se dibuja debajo del 2D: etiquetas, textos y HUD
-  quedan siempre encima. La excepción son las etiquetas con `.billboard()`:
-  se desvanecen, con todo lo que contienen, mientras una malla opaca queda
-  entre su punto 3D y la cámara, y pierden opacidad poco a poco cuando
-  quedan a medias tras el borde de la malla. Se ocultan enteras, no por
-  píxel, y las líneas 3D no las tapan. Un objeto 2D con `.in_3d()` sí vive
-  en el mundo 3D: lo dibuja el pase 3D, inclinado por la perspectiva y
-  tapado píxel a píxel por las mallas que tiene delante.
+- Todo el contenido 3D se dibuja debajo del 2D: textos y HUD quedan
+  siempre encima. Las excepciones viven en el mundo 3D y las dibuja el pase
+  3D, tapadas píxel a píxel por las mallas y las líneas que tienen delante:
+  un objeto 2D con `.in_3d()`, inclinado por la perspectiva, y las etiquetas
+  con `.billboard()` y los números y títulos de los ejes 3D, de frente a la
+  cámara y del tamaño de su texto. Una etiqueta se acerca a la cámara la
+  mitad de su lado mayor, así que una superficie en la que se apoya no la
+  corta, y un número o un título que se ve sobre la caja de sus ejes queda
+  delante de ella: su rejilla y su gráfico no lo tapan, pero lo que está
+  delante de la caja sí. Si contiene una imagen, una escena Lottie o un
+  efecto 2D, se dibuja encima del 3D y se desvanece entera mientras una
+  malla opaca queda entre su punto y la cámara.
 
 El 3D aparece en la vista previa, las exportaciones, las capturas, los
 paquetes `.gaanim` (también en el reproductor web) y las vistas previas de

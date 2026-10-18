@@ -3414,6 +3414,7 @@ type ThreeDData = (
     Option<Ref<'static, gaanim_scene::LineListSource>>,
     Option<Ref<'static, gaanim_scene::PlaneFillData>>,
     Option<&'static gaanim_scene::InWorld3D>,
+    Option<&'static gaanim_scene::BillboardPlane>,
 );
 /// 3D primitives, and 2D drawables placed in the 3D world.
 type ThreeDFilter = (
@@ -3475,6 +3476,7 @@ type ThreeDItem<'a> = (
     Option<Ref<'a, gaanim_scene::LineListSource>>,
     Option<Ref<'a, gaanim_scene::PlaneFillData>>,
     Option<&'a gaanim_scene::InWorld3D>,
+    Option<&'a gaanim_scene::BillboardPlane>,
 );
 
 fn three_d_source<'a>(
@@ -3492,6 +3494,7 @@ fn three_d_source<'a>(
         source,
         fill,
         in_world,
+        billboard,
     ): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
@@ -3511,7 +3514,8 @@ fn three_d_source<'a>(
     (
         entity,
         crate::three_d::Content {
-            transform,
+            // A billboard is drawn in its plane facing the camera.
+            transform: billboard.map_or(transform, |billboard| &billboard.0),
             opacity,
             mesh: mesh.map(Ref::into_inner),
             lines: lines.map(Ref::into_inner),

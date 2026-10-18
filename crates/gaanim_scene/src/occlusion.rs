@@ -8,6 +8,10 @@
 //! as an [`Occlusion`] factor, which the opacity cascade multiplies in: a
 //! label fades out as it passes behind a surface. It reads only the scene's
 //! state, so seeks, exports and recordings agree.
+//!
+//! Most billboards are drawn by the 3D pass instead ([`InWorld3D`]), hidden
+//! pixel by pixel; only those holding what it does not draw, such as an
+//! image or a 2D effect, fade here.
 
 use std::sync::Arc;
 
@@ -18,7 +22,7 @@ use gaanim_core::glam::DVec3;
 use gaanim_math::GlobalSpatialTransform;
 
 use crate::components::{
-    Billboard, GlobalOpacity, HudOverlay, Mesh3DMarker, TriangleMeshData, Visible,
+    Billboard, GlobalOpacity, HudOverlay, InWorld3D, Mesh3DMarker, TriangleMeshData, Visible,
 };
 
 /// The share of a billboard that 3D meshes leave visible, between zero and
@@ -205,7 +209,10 @@ pub struct MeshBvhs(HashMap<Entity, (u32, Arc<MeshBvh>)>);
 pub fn billboard_occlusion_system(
     mut commands: Commands,
     camera: Option<Res<gaanim_math::ResolvedCamera>>,
-    billboards: Query<(Entity, &GlobalSpatialTransform, Option<&Occlusion>), With<Billboard>>,
+    billboards: Query<
+        (Entity, &GlobalSpatialTransform, Option<&Occlusion>),
+        (With<Billboard>, Without<InWorld3D>),
+    >,
     meshes: Query<
         (
             Entity,

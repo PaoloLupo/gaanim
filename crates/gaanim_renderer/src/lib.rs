@@ -91,6 +91,13 @@ impl Plugin for GaanimDerivedGeometryPlugin {
             Update,
             in_world::sync_in_world_system.in_set(gaanim_scene::SceneSet::Bounds),
         );
+        // Billboards join them before they face the camera.
+        app.add_systems(
+            Update,
+            in_world::billboards_in_world_system
+                .before(gaanim_scene::systems::billboard_system)
+                .in_set(gaanim_scene::SceneSet::Propagation),
+        );
     }
 }
 

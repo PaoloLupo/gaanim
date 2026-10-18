@@ -21,7 +21,8 @@
 //! front of it, blends once over what is behind it. Outlines filled in a
 //! drawable's plane ([`PlaneFillData`], see [`crate::plane_fill`]) draw from
 //! their curves after the opaque draws, blending their edges without
-//! writing depth.
+//! writing depth; then they write it where they are at least half covered
+//! and opaque, so the translucent layers behind them do not draw over them.
 
 use std::any::Any;
 use std::collections::hash_map::Entry;
@@ -1683,6 +1684,9 @@ struct Pipelines {
     outline: [wgpu::RenderPipeline; 2],
     /// Filled outlines into a shadow map.
     shadow_fill: wgpu::RenderPipeline,
+    /// Filled outlines into the depth, where they hide what lies behind
+    /// them from the translucent layers.
+    fill_depth: wgpu::RenderPipeline,
     /// Opaque meshes into a shadow map, by `[closed]`: an open mesh casts
     /// with both faces, a closed one with the faces turned away from the
     /// light, so that it never shadows the side that faces it.
@@ -2089,6 +2093,49 @@ impl Pipelines {
             multiview_mask: None,
             cache: None,
         });
+        let fill_depth = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("gaanim-3d-fill-depth"),
+            layout: Some(&filling),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vertex_fill"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: crate::plane_fill::GLYPH_BYTES as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &fill_attributes,
+                }],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: SAMPLES,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fragment_fill_depth"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COLOR_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::empty(),
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let shadow_fill = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("gaanim-3d-shadow-fill"),
             layout: Some(&fill_casting),
@@ -2142,6 +2189,7 @@ impl Pipelines {
             outline: [outline(false), outline(true)],
             shadow: [shadow(false), shadow(true)],
             shadow_fill,
+            fill_depth,
             fill,
         }
     }
@@ -2645,6 +2693,9 @@ impl GpuThreeD {
                     pass.set_bind_group(1, &shadow_maps.group, &[]);
                     pass.set_bind_group(2, fill, &[]);
                     pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                    pass.draw(0..6, draw.instances.clone());
+                    // Then its depth, which the translucent layers read.
+                    pass.set_pipeline(&pipelines.fill_depth);
                     pass.draw(0..6, draw.instances.clone());
                     return;
                 }
@@ -3998,6 +4049,90 @@ mod tests {
         let (shadow, hole, light) = (pixel(21, 32), pixel(24, 32), pixel(21, 20));
         assert!(shadow + 40 < light, "shadow {shadow}, light {light}");
         assert!(hole + 10 > light, "hole {hole}, light {light}");
+    }
+
+    #[test]
+    fn translucent_layers_behind_filled_outlines_do_not_cover_them() {
+        let Some(mut gpu) = crate::background::test_gpu::test_gpu() else {
+            return;
+        };
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        // A half-opaque blue sheet, and a red square a unit in front of it.
+        let sheet = quad(peniko::Color::from_rgb8(0, 0, 255));
+        let behind = placed(1.0, DVec3::ZERO);
+        let half = GlobalOpacity(0.5);
+        let fill = PlaneFillData {
+            glyphs: vec![gaanim_scene::PlaneGlyph {
+                outline: Arc::new(kurbo::Shape::to_path(
+                    &kurbo::Rect::new(-0.5, -0.5, 0.5, 0.5),
+                    0.0,
+                )),
+                placement: kurbo::Affine::IDENTITY,
+                color: peniko::Color::from_rgb8(255, 0, 0),
+                gradient: None,
+                clip: None,
+            }],
+        };
+        let front = placed(1.0, DVec3::new(0.0, 0.0, 1.0));
+        let opaque = GlobalOpacity(1.0);
+        let mut sources = MeshSources::default();
+        let mut meshes = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        meshes.push(
+            0,
+            [(1, 1), (1, 1)],
+            [None, None],
+            &Content {
+                transform: &behind,
+                opacity: &half,
+                mesh: Some(&sheet),
+                lines: None,
+                material: None,
+                line_width: None,
+                line_range: None,
+                fill: None,
+            },
+        );
+        assert!(meshes.push_fill(
+            0,
+            (2, 1),
+            None,
+            &Content {
+                transform: &front,
+                opacity: &opaque,
+                mesh: None,
+                lines: None,
+                material: None,
+                line_width: None,
+                line_range: None,
+                fill: Some(&fill),
+            },
+        ));
+        let illumination = Illumination {
+            lighting: Lighting3D::default(),
+            lights: Vec::new(),
+        };
+        let frames: Vec<GpuMeshFrame> = meshes
+            .finish(&camera, ndc_to_canvas, line_width, &illumination)
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        assert!(three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames));
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        let pixels = gpu.read(&target);
+        let pixel = |x: usize, y: usize| &pixels[(y * 64 + x) * 4..(y * 64 + x) * 4 + 3];
+        // The square, drawn after the sheet's layer, is not blended with it.
+        let square = pixel(32, 32);
+        assert!(square[0] > 240 && square[2] < 10, "square {square:?}");
+        // Beside it, the sheet shows.
+        let sheet = pixel(32, 18);
+        assert!(sheet[2] > 60 && sheet[0] < 10, "sheet {sheet:?}");
     }
 
     /// The red channel at `pixels` of a 64 x 64 render of a lit floor 2
