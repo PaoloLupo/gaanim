@@ -48,6 +48,7 @@ pub struct FragmentRecipe {
 }
 
 /// Borrowed components a recipe is captured from.
+#[derive(Clone, Copy)]
 pub(crate) struct FragmentParts<'a> {
     pub path: Option<&'a gaanim_scene::Path2D>,
     pub source: Option<&'a gaanim_scene::PathSource>,
@@ -142,6 +143,34 @@ pub struct BuiltFragment {
     pub soft: Vec<crate::object_effects::EffectLayer>,
 }
 
+/// What a drawable with a drop shadow draws into the shader effect it is
+/// the root of: its fragment without the shadow, which the effect casts
+/// from what its passes draw instead (see `pipeline::divert_effects`).
+pub(crate) struct EffectShadow {
+    pub shadow: DropShadow,
+    pub scene: Arc<vello::Scene>,
+    pub soft: Arc<[crate::object_effects::EffectLayer]>,
+}
+
+/// The [`EffectShadow`] of a drawable built from `recipe` (after `lottie`)
+/// for a renderer that runs object effects; `None` without a shadow.
+pub(crate) fn build_effect_shadow(
+    recipe: &FragmentRecipe,
+    lottie: Option<&vello::Scene>,
+) -> Option<Arc<EffectShadow>> {
+    let shadow = recipe.shadow.clone()?;
+    let unshadowed = FragmentRecipe {
+        shadow: None,
+        ..recipe.clone()
+    };
+    let built = build_fragment_with(&unshadowed, lottie, true);
+    Some(Arc::new(EffectShadow {
+        shadow,
+        scene: Arc::new(built.scene),
+        soft: built.soft.into(),
+    }))
+}
+
 impl FragmentRecipe {
     /// The outline drawn: empty while a write reveal has not started.
     pub(crate) fn visible_path<'a>(&'a self, empty: &'a kurbo::BezPath) -> &'a kurbo::BezPath {
@@ -227,14 +256,16 @@ pub fn build_fragment_with(
     };
 
     // 1. Drop shadow and glow, under the geometry. The shadow follows what
-    // is painted: the filled region, or the stroke of an unfilled path.
+    // is painted: the opaque part of an image, the filled region, or the
+    // stroke of an unfilled path.
     if let Some(shadow) = &recipe.shadow {
-        let filled = (elem_fill.is_some() && !is_trimmed_closed)
-            || recipe
-                .raster
-                .as_ref()
-                .is_some_and(|raster| raster.image.is_some());
-        let caster = if filled {
+        let image = recipe
+            .raster
+            .as_ref()
+            .and_then(|raster| Some((raster.image.as_ref()?, raster.local_transform)));
+        let caster = if let Some((image, transform)) = image {
+            ShadowCaster::Image { image, transform }
+        } else if elem_fill.is_some() && !is_trimmed_closed {
             ShadowCaster::Fill
         } else if let (Some(_), Some(style)) = (elem_stroke, elem_stroke_style) {
             ShadowCaster::Stroke {
@@ -248,7 +279,7 @@ pub fn build_fragment_with(
             ShadowCaster::None
         };
         match gpu
-            .then(|| draw_shadow_on_gpu(&mut scene, elem_path, shadow, caster))
+            .then(|| draw_shadow_on_gpu(&mut scene, elem_path, shadow, caster, None))
             .flatten()
         {
             Some(layer) => soft.push(layer),
@@ -423,6 +454,8 @@ struct StoredFragment {
     scene: Arc<vello::Scene>,
     overlay: Option<Arc<vello::Scene>>,
     soft: Arc<[crate::object_effects::EffectLayer]>,
+    /// Built the first time a shader effect asks for it.
+    effect_shadow: Option<Arc<EffectShadow>>,
     last_used: u64,
 }
 
@@ -473,6 +506,7 @@ impl FragmentStore {
                 scene: Arc::new(built.scene),
                 overlay: built.overlay.map(Arc::new),
                 soft: built.soft.into(),
+                effect_shadow: None,
                 last_used: generation,
             }
         });
@@ -482,6 +516,25 @@ impl FragmentStore {
             entry.overlay.clone(),
             Arc::clone(&entry.soft),
         )
+    }
+
+    /// The [`EffectShadow`] of `recipe`, once [`Self::get_with`] has built
+    /// its fragment for a renderer that runs object effects.
+    pub(crate) fn effect_shadow(
+        &mut self,
+        recipe: &Arc<FragmentRecipe>,
+        lottie: Option<&Arc<vello::Scene>>,
+    ) -> Option<Arc<EffectShadow>> {
+        let key = (
+            Arc::as_ptr(recipe) as usize,
+            lottie.map_or(0, |scene| Arc::as_ptr(scene) as usize),
+            true,
+        );
+        let entry = self.built.get_mut(&key)?;
+        if entry.effect_shadow.is_none() {
+            entry.effect_shadow = build_effect_shadow(recipe, lottie.map(Arc::as_ref));
+        }
+        entry.effect_shadow.clone()
     }
 
     /// Forget fragments whose recipes (or Lottie scenes) nothing else holds.
@@ -577,8 +630,73 @@ pub fn draws_same(a: &vello::Scene, b: &vello::Scene) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// A 4x4 image over the unit square whose left half is opaque and right
+    /// half transparent.
+    pub(crate) fn half_opaque_image() -> RasterImage {
+        let pixels: Vec<u8> = (0..16)
+            .flat_map(|index| {
+                if index % 4 < 2 {
+                    [200, 40, 40, 255]
+                } else {
+                    [0, 0, 0, 0]
+                }
+            })
+            .collect();
+        RasterImage {
+            image: Some(peniko::ImageBrush::new(peniko::ImageData {
+                data: peniko::Blob::from(pixels),
+                format: peniko::ImageFormat::Rgba8,
+                alpha_type: peniko::ImageAlphaType::Alpha,
+                width: 4,
+                height: 4,
+            })),
+            local_transform: kurbo::Affine::scale(0.25),
+        }
+    }
+
+    /// How many times `scene` draws the image whose data is `id`.
+    pub(crate) fn image_draws(scene: &vello::Scene, id: u64) -> usize {
+        scene
+            .encoding()
+            .resources
+            .patches
+            .iter()
+            .filter(|patch| {
+                matches!(patch, vello_encoding::Patch::Image { image, .. } if image.data.id() == id)
+            })
+            .count()
+    }
+
+    #[test]
+    fn an_image_casts_the_shadow_of_its_alpha() {
+        use kurbo::Shape;
+        let raster = half_opaque_image();
+        let id = raster.image.as_ref().unwrap().image.data.id();
+        let recipe = |blur_radius| FragmentRecipe {
+            path: Some(Arc::new(kurbo::Rect::new(0.0, 0.0, 1.0, 1.0).to_path(0.1))),
+            raster: Some(raster.clone()),
+            shadow: Some(DropShadow {
+                blur_radius,
+                ..DropShadow::default()
+            }),
+            ..FragmentRecipe::default()
+        };
+        // The vector shadows mask their color with the image, a sharp one
+        // once and a blurred one at every tap, instead of filling its
+        // rectangle; the image itself is drawn once more.
+        let sharp = build_fragment_with(&recipe(0.0), None, false);
+        assert_eq!(image_draws(&sharp.scene, id), 2);
+        let blurred = build_fragment_with(&recipe(0.06), None, false);
+        assert!(image_draws(&blurred.scene, id) > 2);
+        // On the GPU the blurred silhouette is the image.
+        let gpu = build_fragment_with(&recipe(0.06), None, true);
+        assert_eq!(image_draws(&gpu.scene, id), 1);
+        assert_eq!(gpu.soft.len(), 1);
+        assert_eq!(image_draws(&gpu.soft[0].scene, id), 1);
+    }
 
     fn open_polyline(fill: Option<peniko::Brush>, blur_radius: f64) -> FragmentRecipe {
         FragmentRecipe {

@@ -3929,7 +3929,9 @@ class Drawable:
         (transparent around it), ``uv`` spans its box with the margin,
         ``resolution`` is the texture size in pixels and ``time`` the scene
         time. Uniforms take Parameters, Computeds and audio signals, and the
-        ``PostProcess`` presets work too. ``None`` removes the effect. It is
+        ``PostProcess`` presets work too. The ``shadow`` of an image or shape
+        stays out of the texture and is cast from the result, beneath it.
+        ``None`` removes the effect. It is
         declaration state for the whole timeline; a drawable with an effect
         inside another one is drawn by the outer effect. Previews, exports
         and ``.gaanim`` bundles draw it; a bundle stores the uniforms of
@@ -4015,12 +4017,14 @@ class Drawable:
         """Apply shadow to this drawable and return the result.
 
         The shadow is ``color`` blurred by ``blur`` scene units and offset by
-        ``(x, y)``; the color's alpha scales its opacity continuously. On a
-        text or group, a blurred shadow is drawn once from the silhouette of
-        its filled members, beneath all of them, like CSS ``drop-shadow`` on
-        a group: overlaps do not darken and the cost does not grow with each
-        glyph. Members that are clipped, blended or only stroked cast their
-        own.
+        ``(x, y)``; the color's alpha scales its opacity continuously. An
+        image casts the shadow of its opaque pixels, not of its rectangle.
+        On a text or group, a blurred shadow is drawn once from the
+        silhouette of its filled members, beneath all of them, like CSS
+        ``drop-shadow`` on a group: overlaps do not darken and the cost does
+        not grow with each glyph. Members that are clipped, blended or only
+        stroked cast their own. An image or shape with a ``shader_effect``
+        casts its shadow from what the effect draws, whichever is set first.
 
         Example:
             result = drawable.shadow(BLUE)
