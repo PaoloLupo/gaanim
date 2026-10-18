@@ -127,10 +127,16 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   guarda en pantalla la misma distancia a su eje que en 2D, con la cámara
   cerca, lejos o mirando a lo largo del eje, en el lado que la caja deja
   libre; cada título queda pasado el final de su eje y de sus números.
-- Las etiquetas con `.billboard()` se desvanecen detrás de las mallas 3D
-  opacas y vuelven al salir, poco a poco cuando quedan a medias tras su
-  borde. Con la cámara en perspectiva aparecen en su punto 3D; antes caían
-  fuera de la imagen.
+- Las etiquetas con `.billboard()` y los números y títulos de los ejes 3D
+  viven en el mundo 3D: las dibuja el pase 3D, de frente a la cámara y del
+  tamaño de su texto, y las mallas y las líneas que tienen delante las
+  tapan píxel a píxel. Se acercan a la cámara la mitad de su lado mayor,
+  así que una superficie en la que se apoyan no las corta, y los números
+  que se ven sobre la caja de sus ejes quedan delante de su rejilla y su
+  gráfico. Las que contienen una imagen, una escena Lottie o un efecto 2D
+  se dibujan encima del 3D y se desvanecen enteras tras las mallas opacas.
+  Con la cámara en perspectiva aparecen en su punto 3D; antes caían fuera
+  de la imagen.
 - Nuevas primitivas iluminadas: `scene.geometry.torus(...)` crea toros;
   `scene.geometry.arrow_3d(start, end)`, flechas sólidas entre dos puntos
   para los vectores de una escena 3D, con el astil y la punta proporcionales
@@ -146,8 +152,9 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   delante lo tapan píxel a píxel. El pase 3D lo dibuja desde sus curvas, así
   que sus bordes siguen nítidos a cualquier tamaño, y conserva sus
   animaciones, colores, degradados y trazos. Proyecta sombra como una
-  malla opaca, y con `in_3d(material)` se ilumina y recibe sombras. Lo
-  muestra `3d/drawables_in_3d`.
+  malla opaca, y con `in_3d(material)` se ilumina y recibe sombras. Tapa lo
+  translúcido que tiene detrás, como una superficie opaca, donde es al
+  menos medio opaco. Lo muestra `3d/drawables_in_3d`.
 
 == Editor
 
@@ -163,6 +170,9 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   capturas de referencia de tus escenas 3D.
 - Las escenas 3D iluminadas tienen sombras. Para el aspecto anterior, usa
   `lighting_3d(..., shadows=False)`.
+- Una etiqueta con `.billboard()` ya no queda encima de todo el 3D: lo que
+  tiene delante la tapa píxel a píxel. Si debe verse siempre, fíjala a la
+  imagen con `.hud()` o acércala a la cámara.
 - Las líneas 3D con `.stroke(color, ancho)` miden ese ancho; quita el ancho
   o ajústalo si las querías de 1,5 px. Las que no tienen trazo miden 2 px a
   1080p en lugar de 1,5 px a cualquier tamaño.

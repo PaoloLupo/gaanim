@@ -4597,9 +4597,13 @@ class Drawable:
         """Keep a 3D drawable facing the perspective camera.
 
         This is useful for labels and markers attached to a 3D scene. The
-        label fades out, with its children, while an opaque 3D mesh lies
-        between its anchor and the camera. The method is chainable and
-        returns the same ``Drawable``.
+        3D pass draws it, as large as its text on screen, so meshes and 3D
+        lines in front of it hide it pixel by pixel; it is drawn half its
+        larger side nearer the camera, so a surface it rests on does not cut
+        it. One holding an image, a Lottie scene or a 2D effect is drawn
+        over the 3D content instead, and fades out, with its children, while
+        an opaque 3D mesh lies between its anchor and the camera. The method
+        is chainable and returns the same ``Drawable``.
 
         Example:
             label = scene.text("origin").move_to_3d(0.0, 1.0, 0.0).billboard()

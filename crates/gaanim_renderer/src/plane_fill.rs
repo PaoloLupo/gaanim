@@ -1023,6 +1023,23 @@ fn vertex_fill_shadow(@builtin(vertex_index) index: u32, in: FillIn) -> FillShad
     return out;
 }
 
+// The pixels in which an outline hides what lies behind it from the
+// translucent layers drawn after it: those it covers at least half of, at
+// least half opaque, its drawable's opacity included. Its color writes no
+// depth, as its edges blend over what lies behind them.
+@fragment
+fn fragment_fill_depth(in: FillOut) {
+    var alpha = in.color.a;
+    if in.glyph.w != 0u {
+        alpha = fill_gradient(in.glyph.w, in.outline).a;
+    }
+    let pixels = fill_pixels(in.outline);
+    let coverage = fill_clipped(in.outline, in.band, in.glyph, in.clip_offset, in.clip_band, in.clip_glyph, pixels);
+    if coverage * alpha * draw.emissive.w < 0.5 {
+        discard;
+    }
+}
+
 // The texels an outline casts a shadow from: those it covers at least half
 // of, at least half opaque, its drawable's opacity included.
 @fragment

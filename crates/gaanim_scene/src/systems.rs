@@ -1001,6 +1001,13 @@ fn propagate_style_recursive(
 /// the axis every frame, then moved on screen to keep its gap from the axis
 /// (see [`axis_label_shift`]); its world position becomes the point at the
 /// anchor's depth that is drawn there, so occlusion tests where it shows.
+///
+/// A billboard the 3D pass draws has its [`BillboardPlane`] kept too: a
+/// plane facing the camera at that point, drawn where the 2D one would be
+/// and as large (see [`billboard_plane`]), so meshes and lines in front of
+/// it hide it pixel by pixel.
+///
+/// [`BillboardPlane`]: crate::components::BillboardPlane
 #[allow(clippy::type_complexity)]
 pub fn billboard_system(
     camera: Option<bevy::prelude::Res<gaanim_math::ResolvedCamera>>,
@@ -1016,6 +1023,8 @@ pub fn billboard_system(
                 Option<&ChildOf>,
                 Option<&LocalBounds>,
             )>,
+            Option<&mut crate::components::BillboardPlane>,
+            Option<&LocalBounds>,
         ),
         With<crate::components::Billboard>,
     >,
@@ -1050,7 +1059,7 @@ pub fn billboard_system(
             point.truncate()
         }
     };
-    for (entity, mut global, transform_opt, axis_label) in &mut query {
+    for (entity, mut global, transform_opt, axis_label, plane, bounds) in &mut query {
         // Preserve world position and scale, replace rotation with camera rotation.
         // The result is built aside and written only when it differs, so a
         // static billboard does not report a changed transform every frame.
@@ -1071,6 +1080,8 @@ pub fn billboard_system(
         };
         let (scale, _rot, mut trans) = world.to_scale_rotation_translation();
         let mut at = project(trans);
+        // How near an axis label comes for its own plot not to cross it.
+        let mut front = None;
         if let Some((gap, parent, _, bounds)) = axis_label {
             let turn = Affine::rotate(z_angle);
             let corners: Vec<DVec2> = bounds
@@ -1130,6 +1141,10 @@ pub fn billboard_system(
                 at = shifted;
                 trans = point;
             }
+            // Through its text's middle and corners.
+            let middle = corners.iter().copied().sum::<DVec2>() / corners.len().max(1) as f64;
+            let sights: Vec<DVec2> = corners.iter().copied().chain([middle]).collect();
+            front = box_entry_depth(&cam, parent, gap.bounds, trans, &sights);
         }
         let billboard_mat = DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
         billboard.mat4 = billboard_mat;
@@ -1138,6 +1153,25 @@ pub fn billboard_system(
             * Affine::scale_non_uniform(scale.x, scale.y);
         if *global != billboard {
             *global = billboard;
+        }
+        if let Some(mut plane) = plane {
+            // Half the label's larger side on the canvas.
+            let half = bounds
+                .map(|bounds| bounds.0.max - bounds.0.min)
+                .filter(|size| size.is_finite())
+                .map_or(0.0, |size| {
+                    0.5 * (size.x * scale.x.abs()).max(size.y * scale.y.abs())
+                });
+            // An axis label drawn over its box comes as near as where its
+            // lines of sight enter it, so that the lines and surfaces of its
+            // own plot do not cross it.
+            let mut drawn = billboard;
+            if let Some((point, units)) = billboard_plane(&cam, trans, half, front) {
+                drawn.mat4 = DMat4::from_scale_rotation_translation(scale * units, cam_rot, point);
+            }
+            if plane.0 != drawn {
+                plane.0 = drawn;
+            }
         }
         if let Some(mut t) = transform_opt {
             let (scale_d, _, trans_d) = billboard_mat.to_scale_rotation_translation();
@@ -1165,6 +1199,107 @@ pub fn billboard_system(
             &children_query,
             &mut child_transforms,
         );
+    }
+}
+
+/// The depth along the view at which the lines of sight through `sights`
+/// first enter the box `bounds` of `parent`'s space: `sights` are canvas
+/// offsets on the plane facing the camera at `point`, as a billboard drawn
+/// in the 3D pass lies (see [`billboard_plane`]). `None` when none does.
+fn box_entry_depth(
+    camera: &gaanim_math::Camera,
+    parent: gaanim_core::glam::DMat4,
+    [low, high]: [gaanim_core::glam::DVec3; 2],
+    point: gaanim_core::glam::DVec3,
+    sights: &[gaanim_core::glam::DVec2],
+) -> Option<f64> {
+    use gaanim_core::glam::DVec3;
+    let forward = camera.rotation * DVec3::NEG_Z;
+    let (right, up) = (camera.rotation * DVec3::X, camera.rotation * DVec3::Y);
+    let depth = (point - camera.position).dot(forward);
+    // World units a canvas unit spans on the plane, and whether the lines of
+    // sight meet at the eye.
+    let (units, perspective) = match camera.projection {
+        gaanim_math::Projection::Orthographic { .. } => (1.0, false),
+        gaanim_math::Projection::Perspective { fov_y, .. } => (
+            2.0 * (fov_y * 0.5).tan() / camera.frame_height.max(1e-9) * depth,
+            true,
+        ),
+    };
+    let to_local = parent.inverse();
+    sights
+        .iter()
+        .filter_map(|sight| {
+            let on_plane = point + (right * sight.x + up * sight.y) * units;
+            let (origin, direction) = if perspective {
+                (camera.position, on_plane - camera.position)
+            } else {
+                (on_plane - forward * depth, forward)
+            };
+            let (from, toward) = (
+                to_local.transform_point3(origin),
+                to_local.transform_vector3(direction),
+            );
+            // The part of the line of sight within each pair of the box's
+            // faces, from the camera on.
+            let (mut enter, mut exit) = (0.0_f64, f64::INFINITY);
+            for axis in 0..3 {
+                if toward[axis].abs() < 1e-12 {
+                    if from[axis] < low[axis] || from[axis] > high[axis] {
+                        return None;
+                    }
+                } else {
+                    let near = (low[axis] - from[axis]) / toward[axis];
+                    let far = (high[axis] - from[axis]) / toward[axis];
+                    enter = enter.max(near.min(far));
+                    exit = exit.min(near.max(far));
+                }
+            }
+            (enter <= exit).then(|| (origin + direction * enter - camera.position).dot(forward))
+        })
+        .filter(|depth| depth.is_finite())
+        .reduce(f64::min)
+}
+
+/// Where the plane of a billboard drawn in the 3D pass lies, and how many
+/// world units a canvas unit of it spans: it faces the camera at `anchor`,
+/// pulled toward the camera by `pull` canvas units, half its larger side, so
+/// that a surface it rests on does not cut it, and at least as near as the
+/// depth `front` along the view when given; and it covers on screen what it
+/// would on the canvas, drawn by the 2D renderer. Under perspective the
+/// canvas is the frame at every depth, so a canvas unit spans more of the
+/// world farther away; pulled along the line of sight, the label stays where
+/// it shows. `None` behind the camera.
+fn billboard_plane(
+    camera: &gaanim_math::Camera,
+    anchor: gaanim_core::glam::DVec3,
+    pull: f64,
+    front: Option<f64>,
+) -> Option<(gaanim_core::glam::DVec3, f64)> {
+    use gaanim_core::glam::DVec3;
+    let forward = camera.rotation * DVec3::NEG_Z;
+    let depth = (anchor - camera.position).dot(forward);
+    // How much nearer `front` lies than the anchor.
+    let to_front = front.map_or(0.0, |front| (depth - front).max(0.0));
+    match camera.projection {
+        gaanim_math::Projection::Orthographic { .. } => {
+            Some((anchor - forward * pull.max(to_front), 1.0))
+        }
+        gaanim_math::Projection::Perspective { fov_y, near, .. } => {
+            // World units a canvas unit spans at `depth` along the view.
+            let per_unit = 2.0 * (fov_y * 0.5).tan() / camera.frame_height.max(1e-9);
+            if !(depth > near) || !per_unit.is_finite() {
+                return None;
+            }
+            // At most halfway to the near plane, so the label stays in view.
+            let pull = (pull * per_unit * depth)
+                .max(to_front)
+                .min(0.5 * (depth - near));
+            let toward = (camera.position - anchor).normalize_or_zero();
+            let point = anchor + toward * pull / toward.dot(-forward).max(1e-9);
+            let depth = (point - camera.position).dot(forward);
+            Some((point, per_unit * depth))
+        }
     }
 }
 
@@ -1728,6 +1863,89 @@ mod tests {
         let along = (canvas_point(&camera, end + DVec3::X * 0.01) - at).normalize();
         let numbers = along.x.abs() * 0.25 + along.y.abs() * 0.1;
         assert!((clearance(&corners, at, along) - 0.12 - numbers).abs() < 1e-6);
+    }
+
+    #[test]
+    fn billboards_drawn_in_3d_face_the_camera_as_large_as_on_the_canvas() {
+        use gaanim_core::glam::{DVec3, DVec4};
+        let eye = DVec3::new(3.0, 2.0, 9.0);
+        let camera = axis_camera(eye);
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            camera,
+            gaanim_math::CameraViewport::default(),
+        ));
+        let anchor = DVec3::new(1.0, 0.5, -2.0);
+        let local = SpatialTransform::new_3d(anchor.x, anchor.y, anchor.z);
+        let label = world
+            .spawn((
+                local,
+                GlobalSpatialTransform::from_local(&local),
+                crate::components::Billboard,
+                crate::components::BillboardPlane::default(),
+                // A 0.8 by 0.4 label: pulled 0.4 canvas units toward the eye.
+                LocalBounds(gaanim_math::Bounds3D::new_2d(-0.4, -0.2, 0.4, 0.2)),
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(billboard_system);
+        schedule.run(&mut world);
+
+        let plane = world
+            .get::<crate::components::BillboardPlane>(label)
+            .unwrap()
+            .0
+            .mat4;
+        let at = |x: f64, y: f64| (plane * DVec4::new(x, y, 0.0, 1.0)).truncate();
+        // Drawn where the anchor is, a unit of it a canvas unit, upright.
+        let origin = canvas_point(&camera, at(0.0, 0.0));
+        assert!((origin - canvas_point(&camera, anchor)).length() < 1e-9);
+        let across = canvas_point(&camera, at(1.0, 0.0)) - origin;
+        let up = canvas_point(&camera, at(0.0, 1.0)) - origin;
+        assert!(
+            (across - gaanim_core::glam::DVec2::X).length() < 1e-9,
+            "{across}"
+        );
+        assert!((up - gaanim_core::glam::DVec2::Y).length() < 1e-9, "{up}");
+        // Nearer by half its larger side, at the anchor's scale.
+        let forward = camera.rotation * DVec3::NEG_Z;
+        let depth = |point: DVec3| (point - eye).dot(forward);
+        let per_unit = 2.0 * 0.4_f64.tan() / 9.0;
+        let pulled = depth(anchor) - depth(at(0.0, 0.0));
+        assert!(
+            (pulled - 0.4 * per_unit * depth(anchor)).abs() < 1e-9,
+            "{pulled}"
+        );
+        // Its own transform keeps the label's scale, which bounds measure.
+        let global = world.get::<GlobalSpatialTransform>(label).unwrap().mat4;
+        assert!((global.x_axis.truncate().length() - 1.0).abs() < 1e-12);
+        assert!((global.w_axis.truncate() - anchor).length() < 1e-12);
+    }
+
+    #[test]
+    fn axis_labels_come_as_near_as_their_sight_enters_their_box() {
+        use gaanim_core::glam::{DMat4, DVec2, DVec3};
+        let camera = axis_camera(DVec3::new(0.0, 0.0, 10.0));
+        let unit_box = [DVec3::splat(-1.0), DVec3::splat(1.0)];
+        let entry = |point: DVec3| {
+            box_entry_depth(&camera, DMat4::IDENTITY, unit_box, point, &[DVec2::ZERO])
+        };
+        // Seen through the box, a label behind it comes to its near face.
+        let through = entry(DVec3::new(0.0, 0.0, -3.0)).unwrap();
+        assert!((through - 9.0).abs() < 1e-9, "{through}");
+        // Seen beside it, the box does not move it.
+        assert_eq!(entry(DVec3::new(4.0, 0.0, -3.0)), None);
+        // A box in a scaled space, seen through its side.
+        let scaled = DMat4::from_scale(DVec3::splat(2.0));
+        let side = box_entry_depth(
+            &camera,
+            scaled,
+            unit_box,
+            DVec3::new(0.0, 0.0, -3.0),
+            &[DVec2::ZERO],
+        )
+        .unwrap();
+        assert!((side - 8.0).abs() < 1e-9, "{side}");
     }
 
     #[test]

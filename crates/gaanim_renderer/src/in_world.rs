@@ -7,6 +7,9 @@
 //! A part's fill and stroke keep their colors and gradients, its opacity and
 //! the progress of a write, and a stroke its alignment and profile; shadows,
 //! glows, blurs, chalk, rasters and Lottie scenes are left out.
+//!
+//! Billboards are drawn this way too, facing the camera (see
+//! [`billboards_in_world_system`]), unless they hold what is left out.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
@@ -17,12 +20,16 @@ use gaanim_core::kurbo::{self, Affine, BezPath, Shape};
 use gaanim_core::peniko;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::{
-    DrawnIn3D, FillBrush, GlobalOpacity, GroupMarker, InWorld3D, Path2D, PathSource, PlaneClip,
-    PlaneFillData, PlaneGlyph, RenderLayer, StrokeBrush, Visible,
+    Billboard, BillboardPlane, DrawnIn3D, FillBrush, GlobalOpacity, GroupMarker, HudOverlay,
+    InWorld3D, Path2D, PathSource, PlaneClip, PlaneFillData, PlaneGlyph, RasterImage, RenderLayer,
+    StrokeBrush, Visible,
 };
 
-use crate::effects::{StrokeAlign, StrokeProfile, StrokeScalesWithObject};
+use crate::effects::{
+    ChalkBrush, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile, StrokeScalesWithObject,
+};
 use crate::fragment::{FragmentParts, FragmentRecipe, fragment_recipe};
+use crate::lottie::LottiePlayer;
 
 /// What a part draws at full opacity.
 type Drawn = Arc<[Laid]>;
@@ -118,6 +125,71 @@ type PartData = (
     Option<&'static StrokeProfile>,
     Has<StrokeScalesWithObject>,
 );
+
+/// What a part may hold that the 3D pass leaves out: a Lottie scene or a 2D
+/// effect; or an image, a [`RasterImage`] that holds one, since every vector
+/// drawable has an empty one.
+type LeftOut = Or<(
+    With<LottiePlayer>,
+    With<DropShadow>,
+    With<Glow>,
+    With<GaussianBlur>,
+    With<ChalkBrush>,
+)>;
+
+/// A billboard that holds what the 3D pass leaves out, which stays 2D
+/// content drawn over the 3D image.
+#[derive(Component)]
+pub(crate) struct BillboardOver3D;
+
+/// Hand each billboard to the 3D pass, as an [`InWorld3D`] drawable that
+/// faces the camera (`billboard_system` keeps its [`BillboardPlane`]), so that the meshes and
+/// lines in front of it hide it pixel by pixel. One whose parts hold what
+/// the 3D pass leaves out ([`LeftOut`], or an image) stays 2D content over
+/// the 3D image, and fades as a whole behind meshes
+/// ([`gaanim_scene::occlusion`]). Each is decided once, when first seen,
+/// before it is placed.
+pub(crate) fn billboards_in_world_system(
+    mut commands: Commands,
+    billboards: Query<
+        Entity,
+        (
+            With<Billboard>,
+            Without<InWorld3D>,
+            Without<BillboardOver3D>,
+            Without<HudOverlay>,
+        ),
+    >,
+    children: Query<&Children>,
+    left_out: Query<(), LeftOut>,
+    rasters: Query<&RasterImage>,
+) {
+    for billboard in &billboards {
+        let mut stack = vec![billboard];
+        let mut drawable = true;
+        while let Some(entity) = stack.pop() {
+            if left_out.contains(entity)
+                || rasters
+                    .get(entity)
+                    .is_ok_and(|raster| raster.image.is_some())
+            {
+                drawable = false;
+                break;
+            }
+            if let Ok(kids) = children.get(entity) {
+                stack.extend(kids.iter());
+            }
+        }
+        if drawable {
+            commands
+                .entity(billboard)
+                .insert((InWorld3D::default(), BillboardPlane::default()))
+                .remove::<gaanim_scene::occlusion::Occlusion>();
+        } else {
+            commands.entity(billboard).insert(BillboardOver3D);
+        }
+    }
+}
 
 /// Keep the [`PlaneFillData`] of each [`InWorld3D`] drawable: the outlines
 /// its visible parts draw, placed in its plane relative to it, at their
@@ -456,6 +528,26 @@ mod tests {
         let mut schedule = Schedule::default();
         schedule.add_systems(sync_in_world_system);
         schedule.run(world);
+    }
+
+    #[test]
+    fn billboards_go_to_the_3d_pass_unless_they_hold_what_it_leaves_out() {
+        let mut world = World::new();
+        // Vector parts carry an empty raster.
+        let text = world.spawn((Billboard, RasterImage::none())).id();
+        world.spawn((Visible, RasterImage::none(), ChildOf(text)));
+        let glowing = world.spawn(Billboard).id();
+        world.spawn((Glow::default(), ChildOf(glowing)));
+        let hud = world.spawn((Billboard, HudOverlay)).id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(billboards_in_world_system);
+        schedule.run(&mut world);
+        assert!(world.get::<InWorld3D>(text).is_some());
+        assert!(world.get::<BillboardPlane>(text).is_some());
+        // A glowing part keeps it 2D content over the 3D image.
+        assert!(world.get::<InWorld3D>(glowing).is_none());
+        assert!(world.get::<BillboardOver3D>(glowing).is_some());
+        assert!(world.get::<InWorld3D>(hud).is_none());
     }
 
     #[test]

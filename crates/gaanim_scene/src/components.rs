@@ -416,6 +416,16 @@ pub struct TextSpan {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Billboard;
 
+/// Internal: where the 3D pass draws a [`Billboard`] it was handed (see
+/// [`InWorld3D`]): a plane facing the camera, as large on screen as the 2D
+/// renderer would draw the label, kept by
+/// [`crate::systems::billboard_system`]. The billboard's own
+/// [`gaanim_math::GlobalSpatialTransform`] keeps the label's scale, which
+/// its bounds measure.
+#[doc(hidden)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
+pub struct BillboardPlane(pub gaanim_math::GlobalSpatialTransform);
+
 /// Internal: keeps a 3D axis number or title a fixed gap from its axis on
 /// screen, as 2D axes do, whatever the camera's distance or angle. The
 /// billboard is anchored on the axis, at a tick or at the axis's end, and

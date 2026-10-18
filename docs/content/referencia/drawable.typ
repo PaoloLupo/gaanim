@@ -1428,7 +1428,7 @@ panel = scene.geometry.rect(2, 1).move_to_3d(0, 0, 0).rotate_to_3d(0.3, 0.6, 0)
 #api-entry(
   name: "Drawable.billboard",
   kind: "method",
-  desc: [Mantiene un objeto 3D orientado hacia la cámara, en su punto 3D y del tamaño de su texto. Útil para etiquetas y marcadores. Se desvanece mientras una malla 3D opaca queda entre su punto y la cámara, y vuelve al salir.],
+  desc: [Mantiene un objeto 3D orientado hacia la cámara, en su punto 3D y del tamaño de su texto. Útil para etiquetas y marcadores. Lo dibuja el pase 3D, como `in_3d`: las mallas y las líneas 3D que tiene delante lo tapan píxel a píxel. Se acerca a la cámara la mitad de su lado mayor, así que una superficie en la que se apoya no lo corta. Si contiene una imagen, una escena Lottie o un efecto 2D (sombra, brillo, desenfoque, tiza), se dibuja encima del 3D y se desvanece entero mientras una malla opaca queda entre su punto y la cámara.],
   none,
 )
 
