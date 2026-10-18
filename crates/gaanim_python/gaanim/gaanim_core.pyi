@@ -3929,8 +3929,10 @@ class Drawable:
         (transparent around it), ``uv`` spans its box with the margin,
         ``resolution`` is the texture size in pixels and ``time`` the scene
         time. Uniforms take Parameters, Computeds and audio signals, and the
-        ``PostProcess`` presets work too. The ``shadow`` of an image or shape
-        stays out of the texture and is cast from the result, beneath it.
+        ``PostProcess`` presets work too. A ``shadow`` the drawables inside
+        share (a drawable's own, a text's, a group's style) stays out of the
+        texture and is cast from the result, beneath it; members with
+        different shadows keep them inside.
         ``None`` removes the effect. It is
         declaration state for the whole timeline; a drawable with an effect
         inside another one is drawn by the outer effect. Previews, exports
@@ -4023,8 +4025,9 @@ class Drawable:
         silhouette of its filled members, beneath all of them, like CSS
         ``drop-shadow`` on a group: overlaps do not darken and the cost does
         not grow with each glyph. Members that are clipped, blended or only
-        stroked cast their own. An image or shape with a ``shader_effect``
-        casts its shadow from what the effect draws, whichever is set first.
+        stroked cast their own. With a ``shader_effect`` the shadow is cast
+        from what the effect draws, whichever is set first (on a text or
+        group, when its members share one shadow, as its style gives them).
 
         Example:
             result = drawable.shadow(BLUE)
