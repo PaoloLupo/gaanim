@@ -15,15 +15,15 @@ pub mod transition_frame;
 /// [`ecs_error::warn`], for an app to choose with `App::set_error_handler`.
 pub use bevy::ecs::error as ecs_error;
 pub use components::{
-    AuthoredCall, AuthoredIndex, AuthoredObject, AuthoredObjects, Billboard, CoordinateLabelOffset,
-    CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose, DepthOfField, DrawnIn3D, FillBrush,
-    FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, InWorld3D, LayoutBackdrop,
-    LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame, LayoutInspectionKind,
-    LayoutZoneRecord, LayoutZones, Light3D, LightKind3D, Lighting3D, LineListData, LineListSource,
-    LocalBounds, Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
-    ParallaxLayer, Path2D, PathRevealOrder, PathSource, PlaneClip, PlaneFillData, PlaneGlyph,
-    Presence, RasterImage, RenderLayer, RenderOrder, SegmentContent, ShapeDeform, StrokeBrush,
-    TextBaseline, TriangleMeshData, Visible, WorldBounds, ZLayer,
+    AuthoredCall, AuthoredIndex, AuthoredObject, AuthoredObjects, AxisLabelGap, Billboard,
+    CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose, DepthOfField,
+    DrawnIn3D, FillBrush, FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay,
+    InWorld3D, LayoutBackdrop, LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame,
+    LayoutInspectionKind, LayoutZoneRecord, LayoutZones, Light3D, LightKind3D, Lighting3D,
+    LineListData, LineListSource, LocalBounds, Material3D, Material3DError, Mesh3DMarker,
+    MobjectId, ObjectTag, Opacity, ParallaxLayer, Path2D, PathRevealOrder, PathSource, PlaneClip,
+    PlaneFillData, PlaneGlyph, Presence, RasterImage, RenderLayer, RenderOrder, SegmentContent,
+    ShapeDeform, StrokeBrush, TextBaseline, TriangleMeshData, Visible, WorldBounds, ZLayer,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use occlusion::Occlusion;

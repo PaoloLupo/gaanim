@@ -1117,7 +1117,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         SpawnKind::Text(_) | SpawnKind::Typst { .. } | SpawnKind::ReactiveReadout { .. } => "text",
         // Filled marks drawn like type.
         SpawnKind::Brace { .. } => "glyph",
-        SpawnKind::Axes { .. } | SpawnKind::Axes3D { .. } => "axes",
+        SpawnKind::Axes { .. } => "axes",
         SpawnKind::ReactivePlot { .. }
         | SpawnKind::ReactiveParametric2D { .. }
         | SpawnKind::ReactiveParametric3D { .. }
@@ -1203,7 +1203,6 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::DataMark { .. } => "data_mark",
         SpawnKind::ProgressArc { .. } => "progress_arc",
         SpawnKind::Axes { .. } => "axes",
-        SpawnKind::Axes3D { .. } => "axes_3d",
         SpawnKind::SurfaceMesh { .. } => "surface",
         SpawnKind::Primitive3D(_) => "primitive_3d",
         SpawnKind::Light3D(_) => "light_3d",

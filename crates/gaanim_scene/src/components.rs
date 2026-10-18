@@ -416,6 +416,30 @@ pub struct TextSpan {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Billboard;
 
+/// Internal: keeps a 3D axis number or title a fixed gap from its axis on
+/// screen, as 2D axes do, whatever the camera's distance or angle. The
+/// billboard is anchored on the axis, at a tick or at the axis's end, and
+/// [`crate::systems::billboard_system`] moves its text on screen: a number
+/// beside its tick, outside the box, and a title past the axis's end.
+/// Vectors and points are in the parent's coordinates.
+#[doc(hidden)]
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct AxisLabelGap {
+    /// The axis's direction, from its start toward its end.
+    pub axis: gaanim_core::glam::DVec3,
+    /// Half a tick, across the axis, toward the side a number takes when the
+    /// box does not decide it; zero for a title.
+    pub tick: gaanim_core::glam::DVec3,
+    /// The lowest and highest corners of the box the axes frame.
+    pub bounds: [gaanim_core::glam::DVec3; 2],
+    /// Space between the tick (or the axis's end) and the text, in scene
+    /// units on screen.
+    pub gap: f64,
+    /// For a title, half the size of the widest number beside the axis's
+    /// end, which it clears too; `None` for a number.
+    pub title: Option<gaanim_core::glam::DVec2>,
+}
+
 /// Box background marker: drawn before the box content it shares a render
 /// order with, so it stays beneath that content but above earlier siblings.
 /// A box inside another shares that order with it when they start with the
