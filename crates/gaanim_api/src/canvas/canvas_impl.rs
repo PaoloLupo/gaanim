@@ -2441,8 +2441,7 @@ impl SceneModel {
                     Op::Spawn(spec)
                         if matches!(
                             spec.lock().expect("object spec poisoned").kind,
-                            SpawnKind::Axes3D { .. }
-                                | SpawnKind::Primitive3D(..)
+                            SpawnKind::Primitive3D(..)
                                 | SpawnKind::SurfaceMesh { .. }
                                 | SpawnKind::Polyline3D { .. }
                                 | SpawnKind::LineSegments3D { .. }
@@ -4058,24 +4057,8 @@ impl SceneModel {
         })
     }
 
-    /// Creates 3D Cartesian axes with three grid planes and perspective support.
-    pub fn axes_3d(
-        &mut self,
-        x_range: (f64, f64, f64),
-        y_range: (f64, f64, f64),
-        z_range: (f64, f64, f64),
-        config: crate::canvas::types::Axes3DConfig,
-    ) -> DrawableHandle {
-        self.spawn(SpawnKind::Axes3D {
-            x_range,
-            y_range,
-            z_range,
-            config,
-        })
-    }
-
     /// Creates a triangulated 3D surface mesh in world space.
-    /// Vertices are expected in world coordinates (use `axes_3d` scale to compute).
+    /// Vertices are expected in world coordinates.
     pub fn surface_mesh(
         &mut self,
         vertices: Vec<[f32; 3]>,
@@ -13769,11 +13752,6 @@ mod scene_unit_default_tests {
                 dimension.gap_length
             ),
             (0.10, 0.03, 0.12, 0.08)
-        );
-        let axes = crate::canvas::Axes3DConfig::default();
-        assert_eq!(
-            (axes.axis_width, axes.grid_width, axes.tick_width),
-            (0.03, 0.01, 0.02)
         );
         assert_eq!(ArrowFieldOptions::default().width, 0.02);
         assert_eq!(ArrowFieldOptions::default().max_length, 0.28);

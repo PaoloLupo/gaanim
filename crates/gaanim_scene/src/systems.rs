@@ -1,6 +1,7 @@
 use crate::components::{
-    CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole, FillBrush, GlobalOpacity,
-    GroupMarker, LineListData, LocalBounds, Opacity, StrokeBrush, TriangleMeshData, WorldBounds,
+    AxisLabelGap, CoordinateLabelOffset, CoordinateTickLevel, CoordinateViewRole, FillBrush,
+    GlobalOpacity, GroupMarker, LineListData, LocalBounds, Opacity, StrokeBrush, TriangleMeshData,
+    WorldBounds,
 };
 use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::{
@@ -995,6 +996,12 @@ fn propagate_style_recursive(
 /// through the inverse of the fixed orthographic Vello transform. This makes
 /// the label appear at the correct screen location over the 3D geometry and
 /// stay upright regardless of camera orbit.
+///
+/// A billboard with an [`AxisLabelGap`] is placed afresh from its anchor on
+/// the axis every frame, then moved on screen to keep its gap from the axis
+/// (see [`axis_label_shift`]); its world position becomes the point at the
+/// anchor's depth that is drawn there, so occlusion tests where it shows.
+#[allow(clippy::type_complexity)]
 pub fn billboard_system(
     camera: Option<bevy::prelude::Res<gaanim_math::ResolvedCamera>>,
     children_query: Query<&Children>,
@@ -1003,6 +1010,12 @@ pub fn billboard_system(
             Entity,
             &mut GlobalSpatialTransform,
             Option<&mut bevy::prelude::Transform>,
+            Option<(
+                &AxisLabelGap,
+                &SpatialTransform,
+                Option<&ChildOf>,
+                Option<&LocalBounds>,
+            )>,
         ),
         With<crate::components::Billboard>,
     >,
@@ -1011,42 +1024,118 @@ pub fn billboard_system(
         Without<crate::components::Billboard>,
     >,
 ) {
+    use gaanim_core::glam::{DMat4, DVec2, DVec3};
+    use gaanim_core::kurbo::{Affine, Point};
+
     let Some(cam) = camera else { return };
     let cam_rot = cam.rotation;
     let is_perspective = matches!(cam.projection, gaanim_math::Projection::Perspective { .. });
-    for (entity, mut global, transform_opt) in &mut query {
+    // In perspective, the canvas is the fixed Vello world the 3D pass maps
+    // to (`canvas_projection` in the renderer), in scene units with y up;
+    // the canvas camera applies the host viewport to both.
+    let ppu = cam.pixels_per_unit().max(1e-9);
+    let hw = cam.viewport_width as f64 * 0.5;
+    let hh = cam.viewport_height as f64 * 0.5;
+    let vello = Affine::translate((hw, hh)) * Affine::scale_non_uniform(ppu, -ppu);
+    let inv = vello.inverse();
+    // Orthographic: turn with the camera, whose view turns the other way,
+    // so the label stays upright on screen.
+    let z_angle = if is_perspective { 0.0 } else { cam.z_angle() };
+    let project = |point: DVec3| {
+        if is_perspective {
+            let screen = cam.world_to_screen(point);
+            let at = inv * Point::new(screen.x, screen.y);
+            DVec2::new(at.x, at.y)
+        } else {
+            point.truncate()
+        }
+    };
+    for (entity, mut global, transform_opt, axis_label) in &mut query {
         // Preserve world position and scale, replace rotation with camera rotation.
         // The result is built aside and written only when it differs, so a
         // static billboard does not report a changed transform every frame.
         let mut billboard = *global;
-        let world = billboard.mat4;
-        let (scale, _rot, trans) = world.to_scale_rotation_translation();
-        let billboard_mat =
-            gaanim_core::glam::DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
-        billboard.mat4 = billboard_mat;
-        if is_perspective {
-            // Project 3D world position to screen, then map to fixed Vello
-            // world as the 3D pass does (`canvas_projection` in the
-            // renderer); the canvas camera applies the host viewport to both.
-            let world_pos = gaanim_core::glam::DVec3::new(trans.x, trans.y, trans.z);
-            let screen = cam.world_to_screen(world_pos);
-            let ppu = cam.pixels_per_unit().max(1e-9);
-            let hw = cam.viewport_width as f64 * 0.5;
-            let hh = cam.viewport_height as f64 * 0.5;
-            let vello = gaanim_core::kurbo::Affine::translate((hw, hh))
-                * gaanim_core::kurbo::Affine::scale_non_uniform(ppu, -ppu);
-            let inv = vello.inverse();
-            let vpos = inv * gaanim_core::kurbo::Point::new(screen.x, screen.y);
-            billboard.affine_2d = gaanim_core::kurbo::Affine::translate((vpos.x, vpos.y))
-                * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
-        } else {
-            // Orthographic: turn with the camera, whose view turns the other
-            // way, so the label stays upright on screen.
-            let z_angle = cam.z_angle();
-            billboard.affine_2d = gaanim_core::kurbo::Affine::translate((trans.x, trans.y))
-                * gaanim_core::kurbo::Affine::rotate(z_angle)
-                * gaanim_core::kurbo::Affine::scale_non_uniform(scale.x, scale.y);
+        let parent_of = |parent: Option<&ChildOf>| match parent {
+            None => Some(DMat4::IDENTITY),
+            Some(parent) => child_transforms
+                .get(parent.parent())
+                .ok()
+                .map(|(_, global)| global.mat4),
+        };
+        let axis_label = axis_label.and_then(|(gap, local, parent, bounds)| {
+            Some((gap, parent_of(parent)?, local, bounds))
+        });
+        let world = match axis_label {
+            Some((_, parent, local, _)) => parent * local.to_mat4(),
+            None => billboard.mat4,
+        };
+        let (scale, _rot, mut trans) = world.to_scale_rotation_translation();
+        let mut at = project(trans);
+        if let Some((gap, parent, _, bounds)) = axis_label {
+            let turn = Affine::rotate(z_angle);
+            let corners: Vec<DVec2> = bounds
+                .map(|bounds| {
+                    let (low, high) = (bounds.0.min, bounds.0.max);
+                    [
+                        (low.x, low.y),
+                        (high.x, low.y),
+                        (high.x, high.y),
+                        (low.x, high.y),
+                    ]
+                    .map(|(x, y)| {
+                        let corner = turn * Point::new(x * scale.x, y * scale.y);
+                        DVec2::new(corner.x, corner.y)
+                    })
+                    .to_vec()
+                })
+                .unwrap_or_default();
+            // The axis's direction, from a short step: a whole one could
+            // reach behind the camera.
+            const STEP: f64 = 1e-2;
+            let axis = parent.transform_vector3(gap.axis).normalize_or_zero() * STEP;
+            let [low, high] = gap.bounds;
+            let box_corners: Vec<DVec2> = (0..8)
+                .map(|corner| {
+                    let pick = |bit: usize, low: f64, high: f64| {
+                        if corner & bit == 0 { low } else { high }
+                    };
+                    let point = DVec3::new(
+                        pick(1, low.x, high.x),
+                        pick(2, low.y, high.y),
+                        pick(4, low.z, high.z),
+                    );
+                    project(parent.transform_point3(point)) - at
+                })
+                .filter(|corner| corner.is_finite())
+                .collect();
+            let shift = axis_label_shift(
+                gap,
+                (project(trans + axis) - at) / STEP,
+                project(trans + parent.transform_vector3(gap.tick)) - at,
+                &box_corners,
+                &corners,
+            );
+            let shifted = at + shift;
+            let point = if is_perspective {
+                // The point at the anchor's depth drawn at `shifted`.
+                let view_projection = cam.projection_matrix() * cam.view_matrix();
+                let depth = view_projection.project_point3(trans).z;
+                let screen = vello * Point::new(shifted.x, shifted.y);
+                let ndc = DVec3::new(screen.x / hw - 1.0, 1.0 - screen.y / hh, depth);
+                view_projection.inverse().project_point3(ndc)
+            } else {
+                DVec3::new(shifted.x, shifted.y, trans.z)
+            };
+            if shifted.is_finite() && point.is_finite() {
+                at = shifted;
+                trans = point;
+            }
         }
+        let billboard_mat = DMat4::from_scale_rotation_translation(scale, cam_rot, trans);
+        billboard.mat4 = billboard_mat;
+        billboard.affine_2d = Affine::translate((at.x, at.y))
+            * Affine::rotate(z_angle)
+            * Affine::scale_non_uniform(scale.x, scale.y);
         if *global != billboard {
             *global = billboard;
         }
@@ -1077,6 +1166,70 @@ pub fn billboard_system(
             &mut child_transforms,
         );
     }
+}
+
+/// How far an axis label's text moves on the canvas (scene units, y up)
+/// from its anchor: `gap.gap` clear of its tick, on the side of the axis
+/// outside the box, or past the axis's end for a title. `axis` is the
+/// projected direction of the axis; `tick` and `box_corners` are projected
+/// relative to the anchor, and `corners` are the text's box as drawn around
+/// its origin.
+///
+/// A number goes to the side of the axis the whole box leaves free on
+/// screen. Where the box lies on both sides, as around an axis between two
+/// grids, it goes to its tick's side, as authored; and where the tick points
+/// at the camera, away from the box's middle.
+fn axis_label_shift(
+    gap: &AxisLabelGap,
+    axis: gaanim_core::glam::DVec2,
+    tick: gaanim_core::glam::DVec2,
+    box_corners: &[gaanim_core::glam::DVec2],
+    corners: &[gaanim_core::glam::DVec2],
+) -> gaanim_core::glam::DVec2 {
+    use gaanim_core::glam::DVec2;
+    // Shorter than this, a projected direction counts as none: the camera
+    // looks along it.
+    const EDGE_ON: f64 = 1e-4;
+    let direction = |v: DVec2| (v.is_finite() && v.length() > EDGE_ON).then(|| v.normalize());
+    // How far the text reaches back toward the anchor along `n`.
+    let behind = |n: DVec2| {
+        corners
+            .iter()
+            .map(|corner| corner.dot(n))
+            .reduce(f64::min)
+            .unwrap_or(0.0)
+    };
+    let center = box_corners.iter().copied().sum::<DVec2>() / box_corners.len().max(1) as f64;
+    let away = direction(-center);
+    if let Some(numbers) = gap.title {
+        let n = direction(axis).or(away).unwrap_or(DVec2::Y);
+        let numbers = n.x.abs() * numbers.x + n.y.abs() * numbers.y;
+        return n * (gap.gap + numbers - behind(n));
+    }
+    let n = match direction(axis) {
+        Some(along) => {
+            let across = along.perp();
+            let (lowest, highest) = box_corners
+                .iter()
+                .map(|corner| corner.dot(across))
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), side| {
+                    (low.min(side), high.max(side))
+                });
+            if lowest > -EDGE_ON {
+                -across
+            } else if highest < EDGE_ON {
+                across
+            } else if across.dot(tick).abs() > EDGE_ON {
+                across * across.dot(tick).signum()
+            } else if across.dot(center) > 0.0 {
+                -across
+            } else {
+                across
+            }
+        }
+        None => away.or(direction(tick)).unwrap_or(DVec2::NEG_Y),
+    };
+    n * (tick.dot(n).abs() + gap.gap - behind(n))
 }
 
 fn propagate_billboard_children_recursive(
@@ -1366,6 +1519,215 @@ mod tests {
         assert!(a > 0.0 && d < 0.0);
         let at = global * gaanim_core::kurbo::Point::ORIGIN;
         assert!((at - gaanim_core::kurbo::Point::new(2.0, 1.0)).hypot() < 1e-9);
+    }
+
+    /// A perspective camera on a 16 by 9 frame looking from `eye` at the
+    /// origin, and the canvas point it draws `point` at.
+    fn axis_camera(eye: gaanim_core::glam::DVec3) -> gaanim_math::Camera {
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1600, 900);
+        camera.projection = gaanim_math::Projection::Perspective {
+            fov_y: 0.8,
+            near: 0.1,
+            far: 1000.0,
+        };
+        camera
+            .look_at(
+                eye,
+                gaanim_core::glam::DVec3::ZERO,
+                gaanim_core::glam::DVec3::Y,
+            )
+            .unwrap();
+        camera
+    }
+
+    fn canvas_point(
+        camera: &gaanim_math::Camera,
+        point: gaanim_core::glam::DVec3,
+    ) -> gaanim_core::glam::DVec2 {
+        let screen = camera.world_to_screen(point);
+        let ppu = camera.pixels_per_unit();
+        gaanim_core::glam::DVec2::new(
+            (screen.x - camera.viewport_width as f64 * 0.5) / ppu,
+            (camera.viewport_height as f64 * 0.5 - screen.y) / ppu,
+        )
+    }
+
+    /// Where `billboard_system` draws an axis label anchored at `anchor`
+    /// under `camera`: its text's origin and its 0.4 by 0.3 box's corners on
+    /// the canvas, and the canvas point its world position falls on.
+    fn place_axis_label(
+        camera: gaanim_math::Camera,
+        anchor: gaanim_core::glam::DVec3,
+        gap: AxisLabelGap,
+    ) -> (
+        gaanim_core::glam::DVec2,
+        Vec<gaanim_core::glam::DVec2>,
+        gaanim_core::glam::DVec2,
+    ) {
+        use gaanim_core::glam::{DVec2, DVec3};
+        let mut world = World::new();
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            camera,
+            gaanim_math::CameraViewport::default(),
+        ));
+        let axes = world
+            .spawn((
+                SpatialTransform::default(),
+                GlobalSpatialTransform::default(),
+            ))
+            .id();
+        let mut local = SpatialTransform::default();
+        local.translation = anchor;
+        let bounds = gaanim_math::Bounds3D {
+            min: DVec3::new(-0.2, -0.15, 0.0),
+            max: DVec3::new(0.2, 0.15, 0.0),
+        };
+        let label = world
+            .spawn((
+                local,
+                GlobalSpatialTransform::from_local(&local),
+                crate::components::Billboard,
+                gap,
+                LocalBounds(bounds),
+                ChildOf(axes),
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(billboard_system);
+        // A second run starts from the first's result, as later frames do.
+        schedule.run(&mut world);
+        schedule.run(&mut world);
+        let global = world.get::<GlobalSpatialTransform>(label).unwrap();
+        let at = |point: gaanim_core::kurbo::Point| DVec2::new(point.x, point.y);
+        let origin = at(global.affine_2d * gaanim_core::kurbo::Point::ORIGIN);
+        let corners = [(-0.2, -0.15), (0.2, -0.15), (0.2, 0.15), (-0.2, 0.15)]
+            .map(|(x, y)| at(global.affine_2d * gaanim_core::kurbo::Point::new(x, y)))
+            .to_vec();
+        let placed = canvas_point(&camera, global.mat4.transform_point3(DVec3::ZERO));
+        (origin, corners, placed)
+    }
+
+    /// How far the nearest corner lies past the line through `from` across `n`.
+    fn clearance(
+        corners: &[gaanim_core::glam::DVec2],
+        from: gaanim_core::glam::DVec2,
+        n: gaanim_core::glam::DVec2,
+    ) -> f64 {
+        corners
+            .iter()
+            .map(|corner| (*corner - from).dot(n))
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    #[test]
+    fn axis_numbers_take_the_side_the_box_leaves_free() {
+        use gaanim_core::glam::{DVec2, DVec3};
+        let gap = AxisLabelGap {
+            axis: DVec3::X,
+            tick: DVec3::NEG_Y,
+            bounds: [DVec3::ZERO, DVec3::ONE],
+            gap: 0.1,
+            title: None,
+        };
+        let square = |low: f64, high: f64| {
+            vec![
+                DVec2::new(-1.0, low),
+                DVec2::new(1.0, low),
+                DVec2::new(1.0, high),
+                DVec2::new(-1.0, high),
+            ]
+        };
+        let side = |tick: DVec2, box_corners: &[DVec2]| {
+            axis_label_shift(&gap, DVec2::X, tick, box_corners, &[]).y
+        };
+        // The box above the axis: below, whichever way the tick points.
+        assert!(side(DVec2::new(0.0, 0.05), &square(0.0, 2.0)) < 0.0);
+        // Below it: above.
+        assert!(side(DVec2::new(0.0, -0.05), &square(-2.0, 0.0)) > 0.0);
+        // On both sides, as around an axis between two grids: the tick's.
+        assert!(side(DVec2::new(0.0, 0.05), &square(-1.0, 2.0)) > 0.0);
+        assert!(side(DVec2::new(0.0, -0.05), &square(-1.0, 2.0)) < 0.0);
+        // A tick pointing at the camera: away from the box's middle.
+        assert!(side(DVec2::ZERO, &square(-1.0, 2.0)) < 0.0);
+    }
+
+    #[test]
+    fn axis_numbers_keep_their_gap_on_screen_at_any_distance() {
+        use gaanim_core::glam::DVec3;
+        let anchor = DVec3::new(1.0, -1.0, -1.0);
+        let gap = AxisLabelGap {
+            axis: DVec3::X,
+            tick: DVec3::new(0.0, -0.05, 0.0),
+            bounds: [DVec3::splat(-1.0), DVec3::splat(1.0)],
+            gap: 0.12,
+            title: None,
+        };
+        for eye in [DVec3::new(1.0, 2.0, 6.0), DVec3::new(10.0, 20.0, 60.0)] {
+            let camera = axis_camera(eye);
+            let (origin, corners, placed) = place_axis_label(camera, anchor, gap);
+            let tick = canvas_point(&camera, anchor);
+            let along = (canvas_point(&camera, anchor + DVec3::X * 0.01) - tick).normalize();
+            let across = -along.perp();
+            // Beside the axis, below it on screen, away from the box.
+            assert!(across.y < 0.0, "{across:?}");
+            let clear = clearance(&corners, tick, across);
+            let tick_reach = (canvas_point(&camera, anchor + gap.tick) - tick)
+                .dot(across)
+                .abs();
+            assert!(
+                (clear - tick_reach - 0.12).abs() < 1e-6,
+                "{eye:?}: {clear} past the axis"
+            );
+            // Its world position is drawn where its text is, for occlusion.
+            assert!((placed - origin).length() < 1e-6, "{placed:?} {origin:?}");
+        }
+    }
+
+    #[test]
+    fn an_axis_seen_end_on_puts_its_numbers_away_from_the_box() {
+        use gaanim_core::glam::DVec3;
+        // The camera looks down the z axis, which runs along x = y = -1.
+        let anchor = DVec3::new(-1.0, -1.0, 0.5);
+        let mut camera = axis_camera(DVec3::new(0.0, 0.0, 8.0));
+        camera
+            .look_at(
+                DVec3::new(-1.0, -1.0, 8.0),
+                DVec3::new(-1.0, -1.0, 0.0),
+                DVec3::Y,
+            )
+            .unwrap();
+        let gap = AxisLabelGap {
+            axis: DVec3::Z,
+            tick: DVec3::new(-0.05, 0.0, 0.0),
+            bounds: [DVec3::splat(-1.0), DVec3::splat(1.0)],
+            gap: 0.12,
+            title: None,
+        };
+        let (origin, corners, _) = place_axis_label(camera, anchor, gap);
+        let tick = canvas_point(&camera, anchor);
+        let box_center = canvas_point(&camera, DVec3::ZERO);
+        let away = (tick - box_center).normalize();
+        assert!((origin - tick).normalize().dot(away) > 0.99);
+        assert!(clearance(&corners, tick, away) > 0.12);
+    }
+
+    #[test]
+    fn axis_titles_sit_past_the_end_and_its_numbers() {
+        use gaanim_core::glam::{DVec2, DVec3};
+        let end = DVec3::new(2.0, -1.0, -1.0);
+        let camera = axis_camera(DVec3::new(10.0, 20.0, 60.0));
+        let gap = AxisLabelGap {
+            axis: DVec3::X,
+            tick: DVec3::ZERO,
+            bounds: [DVec3::splat(-1.0), DVec3::splat(1.0)],
+            gap: 0.12,
+            title: Some(DVec2::new(0.25, 0.1)),
+        };
+        let (_, corners, _) = place_axis_label(camera, end, gap);
+        let at = canvas_point(&camera, end);
+        let along = (canvas_point(&camera, end + DVec3::X * 0.01) - at).normalize();
+        let numbers = along.x.abs() * 0.25 + along.y.abs() * 0.1;
+        assert!((clearance(&corners, at, along) - 0.12 - numbers).abs() < 1e-6);
     }
 
     #[test]

@@ -214,99 +214,6 @@ impl Default for AxesConfig {
     }
 }
 
-/// How a 3D label should face the camera.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum LabelMode {
-    /// Always faces the camera (billboard). Scales with distance.
-    #[default]
-    Billboard,
-    /// Fixed screen-space HUD overlay (does not scale with distance).
-    Hud,
-}
-
-/// Display and styling options for 3D Cartesian axes.
-///
-/// Extends `AxesConfig` with a third dimension, three grid planes,
-/// and perspective-aware label modes.
-#[derive(Debug, Clone)]
-pub struct Axes3DConfig {
-    pub grid: bool,
-    pub ticks: bool,
-    pub numbers: bool,
-    pub labels: bool,
-    pub x_axis: bool,
-    pub y_axis: bool,
-    pub z_axis: bool,
-    pub xy_grid: bool,
-    pub xz_grid: bool,
-    pub yz_grid: bool,
-    pub x_ticks: bool,
-    pub y_ticks: bool,
-    pub z_ticks: bool,
-    pub x_numbers: bool,
-    pub y_numbers: bool,
-    pub z_numbers: bool,
-    pub x_label: Option<String>,
-    pub y_label: Option<String>,
-    pub z_label: Option<String>,
-    pub label_mode: LabelMode,
-    pub axis_color: Color,
-    pub grid_color: Color,
-    pub tick_color: Color,
-    pub number_color: Color,
-    pub label_color: Color,
-    pub axis_width: f64,
-    pub grid_width: f64,
-    pub tick_width: f64,
-    pub tick_length: f64,
-    pub auto_fit: bool,
-    pub x_length: Option<f64>,
-    pub y_length: Option<f64>,
-    pub z_length: Option<f64>,
-    pub tips: bool,
-}
-
-impl Default for Axes3DConfig {
-    fn default() -> Self {
-        Self {
-            grid: true,
-            ticks: true,
-            numbers: true,
-            labels: true,
-            x_axis: true,
-            y_axis: true,
-            z_axis: true,
-            xy_grid: true,
-            xz_grid: true,
-            yz_grid: true,
-            x_ticks: true,
-            y_ticks: true,
-            z_ticks: true,
-            x_numbers: true,
-            y_numbers: true,
-            z_numbers: true,
-            x_label: None,
-            y_label: None,
-            z_label: None,
-            label_mode: LabelMode::Billboard,
-            axis_color: Color::from_rgb8(0x20, 0x20, 0x20),
-            grid_color: Color::from_rgb8(0xC0, 0xC0, 0xC0),
-            tick_color: Color::from_rgb8(0x20, 0x20, 0x20),
-            number_color: Color::from_rgb8(0x20, 0x20, 0x20),
-            label_color: Color::from_rgb8(0x20, 0x20, 0x20),
-            axis_width: 0.03,
-            grid_width: 0.01,
-            tick_width: 0.02,
-            tick_length: 0.2,
-            auto_fit: true,
-            x_length: None,
-            y_length: None,
-            z_length: None,
-            tips: true,
-        }
-    }
-}
-
 /// Per-side canvas margin (in the same unit as the coordinate system).
 ///
 /// Layout operations like `to_edge` and `to_corner` respect these margins
@@ -785,12 +692,6 @@ pub enum SpawnKind {
         y_range: (f64, f64, f64),
         config: AxesConfig,
     },
-    Axes3D {
-        x_range: (f64, f64, f64),
-        y_range: (f64, f64, f64),
-        z_range: (f64, f64, f64),
-        config: Axes3DConfig,
-    },
     /// Triangulated 3D surface mesh with explicit vertices/indices in world space.
     SurfaceMesh {
         vertices: Vec<[f32; 3]>,
@@ -1085,6 +986,8 @@ pub struct ObjectSpec {
     pub(crate) coordinate_view_role: Option<gaanim_scene::CoordinateViewRole>,
     /// Unzoomed offset of a coordinate-view label from its data anchor.
     pub(crate) coordinate_label_offset: Option<gaanim_core::glam::DVec2>,
+    /// On-screen gap of a 3D axis number or title from its axis.
+    pub(crate) axis_label_gap: Option<gaanim_scene::AxisLabelGap>,
     /// Axis, generation and shared view anchors of a fading tick generation.
     pub(crate) coordinate_tick_level: Option<(u8, u32, super::view_ticks::TickAnchors)>,
     /// Fill overrides applied to matching glyph fragments after textual objects
@@ -1260,6 +1163,7 @@ impl ObjectSpec {
             billboard: false,
             coordinate_view_role: None,
             coordinate_label_offset: None,
+            axis_label_gap: None,
             coordinate_tick_level: None,
             hud: false,
             parallax_depth: None,
@@ -2599,7 +2503,7 @@ impl Anim {
                     .visible_char_units(gaanim_text::prelude::TextRevealUnit::Grapheme)
                     .len(),
                 SpawnKind::Typst { source, .. } => visible(source),
-                SpawnKind::Axes { .. } | SpawnKind::Axes3D { .. } => MANIM_WRITE_LONG_PIECES,
+                SpawnKind::Axes { .. } => MANIM_WRITE_LONG_PIECES,
                 SpawnKind::Group(ids) | SpawnKind::GroupNoCenter(ids) if depth < 32 => ids
                     .iter()
                     .filter_map(|id| state.object_specs.get(id))
