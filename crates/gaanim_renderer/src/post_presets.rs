@@ -656,6 +656,25 @@ mod tests {
     }
 
     #[test]
+    fn an_overlay_shader_equals_itself_when_its_texels_read_as_nan() {
+        // Opaque blue packs to 0xffff0000, a NaN as f32. Bundles find a
+        // frame's shader in their table by equality.
+        let blue = [0, 0, 255, 255];
+        let shader = || {
+            ImageOverlay::from_rgba8(1, 1, &blue)
+                .unwrap()
+                .shader()
+                .unwrap()
+        };
+        assert!(shader().data().unwrap()[0][0].is_nan());
+        let first = shader();
+        assert_eq!(first, first.clone());
+        assert_eq!(first, shader());
+        let red = ImageOverlay::from_rgba8(1, 1, &[255, 0, 0, 255]).unwrap();
+        assert_ne!(first, red.shader().unwrap());
+    }
+
+    #[test]
     fn every_preset_is_valid_wgsl_with_its_uniforms() {
         for preset in PostPreset::ALL {
             let shader = preset.shader();
