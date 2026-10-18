@@ -4069,6 +4069,12 @@ impl SceneModel {
                     if spec.hud {
                         Self::apply_hud(builder, actual.id);
                     }
+                    // Placed in the 3D world: its parts draw in the 3D pass.
+                    if let Some(in_3d) = spec.in_3d
+                        && let Some(state) = builder.states.get(actual.id)
+                    {
+                        builder.commands.entity(state.entity).insert(in_3d);
+                    }
                     if let Some(depth) = spec.parallax_depth
                         && let Some(state) = builder.states.get(actual.id)
                     {

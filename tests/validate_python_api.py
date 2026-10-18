@@ -1559,6 +1559,22 @@ def validate_primitives_3d_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_in_3d_contract(module: object) -> list[str]:
+    """Exercise 2D drawables placed in the 3D world."""
+    failures: list[str] = []
+    scene = module.Scene(frame=(16, 9))
+    text = scene.text("HOLA")
+    if text.in_3d() is not text:
+        failures.append("Drawable.in_3d did not return the same drawable")
+    lit = scene.text.equation("e^(i pi)").in_3d(module.Material3D.matte(module.BLUE))
+    if not isinstance(lit.rotate_to_3d(-1.0, 0.0, 0.0).move_to_3d(0.0, 1.0, -2.0), module.Drawable):
+        failures.append("a drawable placed in 3D does not move and turn in 3D")
+    group = scene.geometry.group([scene.geometry.square(1.0), scene.geometry.circle(0.5)]).in_3d()
+    if not isinstance(group, module.Drawable):
+        failures.append("a group cannot be placed in 3D")
+    return failures
+
+
 def validate_matrix_contract(module: object) -> list[str]:
     """Exercise matrix construction, selectors, ordering, and mutations."""
     failures: list[str] = []
@@ -3537,6 +3553,7 @@ def main() -> int:
     missing.extend(validate_rough_notation_contract(module))
     missing.extend(validate_extrude_contract(module))
     missing.extend(validate_primitives_3d_contract(module))
+    missing.extend(validate_in_3d_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())

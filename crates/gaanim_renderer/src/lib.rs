@@ -21,11 +21,13 @@ pub mod diagnostics;
 pub mod effects;
 pub mod fragment;
 mod gpu_scope;
+mod in_world;
 pub mod lottie;
 pub mod object_effects;
 #[cfg(not(target_os = "emscripten"))]
 pub mod offscreen;
 pub mod pipeline;
+mod plane_fill;
 mod post_bloom;
 pub mod post_presets;
 pub mod post_process;
@@ -82,6 +84,12 @@ impl Plugin for GaanimDerivedGeometryPlugin {
         app.add_systems(
             Update,
             object_effects::depth_of_field_system.in_set(gaanim_scene::SceneSet::Bounds),
+        );
+        // 2D drawables placed in the 3D world hand their outlines, as they
+        // stand after propagation and derived geometry, to the 3D pass.
+        app.add_systems(
+            Update,
+            in_world::sync_in_world_system.in_set(gaanim_scene::SceneSet::Bounds),
         );
     }
 }

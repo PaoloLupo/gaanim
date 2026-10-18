@@ -517,6 +517,11 @@ path = "3d/shapes_3d.py"
 description = "Tori, arrows between two points, tubes along open, creased and closed paths, and flat sheets of text, equations and shapes."
 
 [[example]]
+path = "3d/drawables_in_3d.py"
+title = "2D drawables in 3D"
+description = "Text, equations and shapes placed in the 3D world with in_3d(): turned, written, tilted by perspective, hidden by meshes and lit, beside billboard()."
+
+[[example]]
 path = "3d/lines_3d.py"
 description = "Polylines through 3D points with solid colors and color maps, and paths traced behind moving objects that fade, cap or thin."
 

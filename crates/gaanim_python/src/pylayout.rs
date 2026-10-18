@@ -1741,6 +1741,15 @@ impl PyBox {
         Ok(slf)
     }
 
+    #[pyo3(signature = (material=None))]
+    fn in_3d<'py>(
+        slf: PyRef<'py, Self>,
+        material: Option<crate::py3d::PyMaterial3D>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        crate::pydrawable::PyDrawable(slf.handle()).in_3d_impl(material)?;
+        Ok(slf)
+    }
+
     fn hud<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
         crate::pydrawable::PyDrawable(slf.handle()).hud_impl()?;
         Ok(slf)

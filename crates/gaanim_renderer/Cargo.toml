@@ -72,3 +72,7 @@ serde = [
     "kurbo/serde",
     "glam/serde"
 ]
+
+[dev-dependencies]
+# Glyph outlines of a real font, for the filled outlines benchmark.
+ttf-parser = "0.25"

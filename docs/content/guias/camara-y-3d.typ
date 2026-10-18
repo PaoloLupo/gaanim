@@ -452,7 +452,9 @@ puntos se reproducen a la frecuencia de la pantalla.
   se desvanecen, con todo lo que contienen, mientras una malla opaca queda
   entre su punto 3D y la cámara, y pierden opacidad poco a poco cuando
   quedan a medias tras el borde de la malla. Se ocultan enteras, no por
-  píxel, y las líneas 3D no las tapan.
+  píxel, y las líneas 3D no las tapan. Un objeto 2D con `.in_3d()` sí vive
+  en el mundo 3D: lo dibuja el pase 3D, inclinado por la perspectiva y
+  tapado píxel a píxel por las mallas que tiene delante.
 
 El 3D aparece en la vista previa, las exportaciones, las capturas, los
 paquetes `.gaanim` (también en el reproductor web) y las vistas previas de

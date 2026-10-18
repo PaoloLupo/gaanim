@@ -2107,6 +2107,14 @@ impl DrawableHandle {
         self.update_spec(|spec| spec.billboard = true)
     }
 
+    /// Places this drawable in the 3D world: `move_to_3d` and `rotate_to_3d`
+    /// tilt it under perspective, meshes in front hide it pixel by pixel, and
+    /// with a `material` it is lit as a surface. It keeps its animations.
+    /// Chainable: `scene.text("sign").in_3d(None).rotate_to_3d(-1.2, 0, 0)`
+    pub fn in_3d(self, material: Option<gaanim_scene::Material3D>) -> Self {
+        self.update_spec(|spec| spec.in_3d = Some(gaanim_scene::InWorld3D { material }))
+    }
+
     /// Makes this drawable a fixed HUD overlay (screen-space, not affected by 3D camera).
     /// Chainable: `scene.text("title").hud().move_to(0, 300)`
     pub fn hud(self) -> Self {

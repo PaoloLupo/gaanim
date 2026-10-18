@@ -1009,14 +1009,23 @@ fn write_three_d(
                 .map(|material| (index, material))
         })
         .collect();
-    if !widths.is_empty() || !ranges.is_empty() || !outlines.is_empty() {
+    // Then the outlines filled in the sources' planes: each outline once in
+    // the paths table, its placement and its color, from the colors the
+    // source uses.
+    let fills: Vec<(usize, &gaanim_scene::PlaneFillData)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.fill.as_deref().map(|fill| (index, fill)))
+        .collect();
+    if !widths.is_empty() || !ranges.is_empty() || !outlines.is_empty() || !fills.is_empty() {
         w.len(widths.len());
         for (index, width) in widths {
             w.len(index);
             w.f32(width);
         }
     }
-    if !ranges.is_empty() || !outlines.is_empty() {
+    if !ranges.is_empty() || !outlines.is_empty() || !fills.is_empty() {
         w.len(ranges.len());
         for (index, [from, to]) in ranges {
             w.len(index);
@@ -1024,12 +1033,41 @@ fn write_three_d(
             w.f32(to);
         }
     }
-    if !outlines.is_empty() {
+    if !outlines.is_empty() || !fills.is_empty() {
         w.len(outlines.len());
         for (index, material) in outlines {
             w.len(index);
             codec::write_color(w, material.outline);
             w.f32(material.outline_width);
+        }
+    }
+    if !fills.is_empty() {
+        w.len(fills.len());
+        for (index, fill) in fills {
+            w.len(index);
+            let mut colors: Vec<peniko::Color> = Vec::new();
+            let mut color_of = Vec::with_capacity(fill.glyphs.len());
+            for glyph in &fill.glyphs {
+                let known = colors
+                    .iter()
+                    .position(|color| color.components == glyph.color.components);
+                color_of.push(known.unwrap_or_else(|| {
+                    colors.push(glyph.color);
+                    colors.len() - 1
+                }));
+            }
+            w.len(colors.len());
+            for color in colors {
+                codec::write_color(w, color);
+            }
+            w.len(fill.glyphs.len());
+            for (glyph, color) in fill.glyphs.iter().zip(color_of) {
+                w.var(u64::from(Interner::path(tables, &glyph.outline)));
+                for value in glyph.placement.as_coeffs() {
+                    w.f32(value as f32);
+                }
+                w.len(color);
+            }
         }
     }
 }
@@ -1083,6 +1121,7 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
             material,
             line_width: None,
             line_range: None,
+            fill: None,
             composition: ThreeDComposition {
                 in_views,
                 post_exempt,
@@ -1126,6 +1165,35 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                 material.outline = outline;
                 material.outline_width = width;
             }
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let colors = (0..r.len()?)
+                .map(|_| codec::read_color(r))
+                .collect::<Result<Vec<_>>>()?;
+            let count = r.len()?;
+            let mut glyphs = Vec::with_capacity(count.min(1 << 16));
+            for _ in 0..count {
+                let outline = Resolver::path(tables, r.u32()?)?;
+                let mut placement = [0.0; 6];
+                for value in &mut placement {
+                    *value = f64::from(r.f32()?);
+                }
+                let color = *colors
+                    .get(r.len()?)
+                    .ok_or_else(|| corrupt("a filled outline of no color"))?;
+                glyphs.push(gaanim_scene::PlaneGlyph {
+                    outline,
+                    placement: kurbo::Affine::new(placement),
+                    color,
+                });
+            }
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("filled outlines of no 3D source"))?
+                .fill = Some(Arc::new(gaanim_scene::PlaneFillData { glyphs }));
         }
     }
     Ok(CapturedThreeD {
