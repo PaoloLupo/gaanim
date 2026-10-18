@@ -646,6 +646,7 @@ word = scene.text("Sticker", size=1.4, color="#c0392b").move_to(-3, 0)
 word.outline(WHITE, width=0.1).shadow("#00000088", 0.12, -0.12, 0.05)
 star = scene.geometry.star(5, 1.6, 0.45).fill("#2e86de").move_to(4, 0)
 star.outline(WHITE, width=0.12).shadow("#00000088", 0.12, -0.12, 0.05)
+scene.wait(0.1)
 # output: preview.webp
 scene.render()
 ```

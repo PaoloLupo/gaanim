@@ -194,7 +194,23 @@ impl fmt::Debug for PostProcessShader {
 
 impl PartialEq for PostProcessShader {
     fn eq(&self, other: &Self) -> bool {
-        self.complete == other.complete && self.data == other.data
+        self.complete == other.complete && same_data(&self.data, &other.data)
+    }
+}
+
+/// Storage data compares by bits: it is raw texels to the shader, and an
+/// overlay packs RGBA8 into each lane, which can read as NaN.
+fn same_data(a: &Option<Arc<[[f32; 4]]>>, b: &Option<Arc<[[f32; 4]]>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            Arc::ptr_eq(a, b)
+                || a.len() == b.len()
+                    && a.iter()
+                        .zip(b.iter())
+                        .all(|(a, b)| a.map(f32::to_bits) == b.map(f32::to_bits))
+        }
+        _ => false,
     }
 }
 
