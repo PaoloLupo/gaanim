@@ -854,7 +854,7 @@ if warnings:
     (name: "heatmap", type: "Sequence[ColorLike] | None", default: "None", desc: [Colores continuos de los mapas de calor. Un heatmap cuyo campo `color` lleva `Scale.colors` usa los de su escala.]),
     (name: "palette", type: "PaletteLike | None", default: "None", desc: [Paleta categórica de la escena: colorea las categorías de todos los gráficos, leyendas, tartas y carreras de barras. Una `Palette`, un nombre (`"okabe_ito"`) o una lista de colores; por defecto, `gaanim`. `Scale.category().colors(...)` la sustituye en un campo concreto.]),
     (name: "layout", type: "dict[str, float] | None", default: "None", desc: [Tokens de espaciado, nuevos o sustituidos.]),
-    (name: "font_files", type: "dict[str, str] | None", default: "None", desc: [Familia → archivo de fuente.]),
+    (name: "font_files", type: "dict[str, str] | None", default: "None", desc: [Familia → archivo de fuente. La clave es la familia que declara el propio archivo, la que se usa en `fonts`; no es un alias. Con otra clave, el tema avisa con un `UserWarning` que nombra la familia del archivo.]),
     (name: "font_dir", type: "str | os.PathLike | None", default: "None", desc: [Carpeta cuyos `.ttf`, `.otf`, `.ttc` y `.otc` se registran (sin subcarpetas).]),
     (name: "text_markup", type: "bool | None", default: "None", desc: [Con `False`, `*` y `_` son literales por defecto en `scene.text`, `badge` y `chip`; `None` hereda el valor de la base.]),
   ),

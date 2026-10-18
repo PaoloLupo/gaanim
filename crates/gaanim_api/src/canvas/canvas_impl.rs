@@ -5815,6 +5815,25 @@ impl SceneModel {
         Ok(())
     }
 
+    /// Wait until `time`, in seconds of the whole timeline. An instant
+    /// already behind the cursor is an error: what comes before it is too
+    /// long.
+    pub fn wait_until_time(&mut self, time: f64) -> Result<(), String> {
+        if !time.is_finite() {
+            return Err(format!("seconds must be finite, got {time}"));
+        }
+        let cursor = self.current_time();
+        if time < cursor - 1e-6 {
+            return Err(format!(
+                "{time:.3} s is behind the cursor, already at {cursor:.3} s: \
+                 what comes before it is {:.3} s too long",
+                cursor - time
+            ));
+        }
+        self.wait((time - cursor).max(0.0));
+        Ok(())
+    }
+
     /// Regroup auto-queued animations into a parallel batch at the current
     /// cursor. Each `Anim` passed here is deactivated from its original
     /// sequential position before the batch is inserted.
@@ -10400,6 +10419,20 @@ mod tests {
         assert!((canvas.current_time() - 4.5).abs() < 1e-9);
         let grid = canvas.tempo().unwrap();
         assert_eq!(grid.bar_times(4.5, 100), vec![0.5, 2.5, 4.5]);
+    }
+
+    #[test]
+    fn wait_until_time_reaches_an_absolute_instant_or_says_how_late_it_is() {
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.wait_until_time(1.5).unwrap();
+        assert!((canvas.current_time() - 1.5).abs() < 1e-9);
+        canvas.wait_until_time(1.5).unwrap();
+        assert!((canvas.current_time() - 1.5).abs() < 1e-9);
+        canvas.wait(1.0);
+        let error = canvas.wait_until_time(2.0).unwrap_err();
+        assert!(error.contains("0.500 s too long"), "{error}");
+        assert!(canvas.wait_until_time(f64::NAN).is_err());
+        assert!((canvas.current_time() - 2.5).abs() < 1e-9);
     }
 
     #[test]

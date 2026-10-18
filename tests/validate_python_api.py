@@ -317,6 +317,19 @@ def validate_theme_typography_contract(module: object) -> list[str]:
         pass
     else:
         failures.append("Theme(font_dir=...) accepted a missing directory")
+    import warnings
+
+    mono = str(ROOT / "crates/gaanim_text/assets/fonts/JetBrainsMono-Variable.ttf")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        module.Theme(font_files={"MyAlias": mono})
+        module.Theme(font_files={"jetbrains mono": mono})
+    messages = [str(warning.message) for warning in caught]
+    if len(messages) != 1 or "'JetBrains Mono'" not in messages[0].replace('"', "'"):
+        failures.append(
+            "Theme(font_files=...) did not name the file's own family once for a key "
+            f"that is not it: {messages}"
+        )
     return failures
 
 
@@ -2242,6 +2255,21 @@ def validate_scene_capability_surface(module) -> list[str]:
         pass
     else:
         failures.append("Scene.wait_until accepted a beat behind the cursor")
+    timed.wait_until(seconds=2.5)
+    if abs(timed.cursor - 2.5) > 1e-9:
+        failures.append("Scene.wait_until(seconds=2.5) did not reach 2.5 s")
+    try:
+        timed.wait_until(seconds=1.0)
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.wait_until accepted an instant behind the cursor")
+    try:
+        timed.wait_until(beat=8, seconds=4.0)
+    except ValueError:
+        pass
+    else:
+        failures.append("Scene.wait_until accepted both beat= and seconds=")
 
     scene = module.Scene(frame=(16, 9))
     first = scene.geometry.circle(20)

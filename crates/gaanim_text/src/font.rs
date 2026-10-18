@@ -450,6 +450,18 @@ pub fn scan_font_dir(dir: impl AsRef<Path>) -> std::io::Result<Vec<FontFile>> {
         .collect()
 }
 
+/// The family names the first face of a font file declares, typographic
+/// family first; empty when the bytes are not a readable font.
+pub fn declared_families(bytes: &[u8]) -> Vec<String> {
+    let mut database = fontdb::Database::new();
+    database.load_font_data(bytes.to_vec());
+    database
+        .faces()
+        .next()
+        .map(|face| face.families.iter().map(|(name, _)| name.clone()).collect())
+        .unwrap_or_default()
+}
+
 /// For each family, the index of the face closest to an upright 400 weight.
 pub fn regular_faces(fonts: &[FontFile]) -> Vec<bool> {
     let mut best: HashMap<&str, usize> = HashMap::new();
@@ -470,7 +482,10 @@ pub fn regular_faces(fonts: &[FontFile]) -> Vec<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FontRegistry, OutlineCollector, regular_faces, scan_font_dir};
+    use super::{
+        FontRegistry, JETBRAINS_MONO, OutlineCollector, declared_families, regular_faces,
+        scan_font_dir,
+    };
 
     #[test]
     fn overlapping_glyph_contours_merge_into_one_outline() {
@@ -546,6 +561,17 @@ mod tests {
         let error = scan_font_dir(&dir).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn declared_families_name_the_family_a_file_declares() {
+        assert_eq!(
+            declared_families(JETBRAINS_MONO)
+                .first()
+                .map(String::as_str),
+            Some("JetBrains Mono")
+        );
+        assert!(declared_families(b"not a font").is_empty());
     }
 
     #[test]

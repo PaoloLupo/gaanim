@@ -837,9 +837,12 @@ class Theme:
         file directly inside the directory (not subdirectories). Each face is
         resolved by the family, weight and style its file declares, so
         ``fonts={"text": "Inter"}`` with ``weight=700`` finds the bold file
-        without naming it. ``font_files`` still registers single files. A
-        relative ``font_dir`` or font file is found in the working directory,
-        then in the calling script's ``assets`` folder, then beside the script.
+        without naming it. ``font_files`` still registers single files: each
+        key is the family its file declares, which ``fonts`` then names, not
+        an alias, and a key that is not that family warns with the file's own
+        family (a ``UserWarning``). A relative ``font_dir`` or font file is
+        found in the working directory, then in the calling script's
+        ``assets`` folder, then beside the script.
 
         ``text_markup=False`` makes ``*`` and ``_`` literal by default in
         ``scene.text``, ``badge`` and ``chip``; a call
@@ -905,7 +908,12 @@ class Anchor:
     BOTTOM_RIGHT: ClassVar[Anchor]
 
 class TextAnchor:
-    """Horizontal reference point on a Text object's typographic baseline."""
+    """Horizontal reference point on a Text object's typographic baseline.
+
+    For a point of the text's box instead, such as its left edge at its
+    vertical center for a left-aligned caption of one or more lines, pass an
+    ``Anchor`` to ``move_to``: ``caption.move_to(x, y, Anchor.LEFT)``.
+    """
     BASELINE_LEFT: ClassVar[TextAnchor]
     BASELINE_CENTER: ClassVar[TextAnchor]
     BASELINE_RIGHT: ClassVar[TextAnchor]
@@ -5787,7 +5795,9 @@ class Text(Drawable):
         A single visual line defaults to ``TextAnchor.BASELINE_CENTER``. A
         multiline block defaults to its visual center. Explicit
         ``TextAnchor`` values align the first line's baseline; geometric
-        ``Anchor`` values retain bounds-based placement. When a text with
+        ``Anchor`` values retain bounds-based placement, so ``Anchor.LEFT``
+        puts the left edge at ``x`` and the vertical center at ``y`` without
+        measuring ``bounds()``. When a text with
         explicit line breaks was created without ``flow`` or ``text_align``,
         an explicit anchor also aligns its lines: ``*_LEFT`` anchors left, ``*_RIGHT`` anchors right,
         and the others center. Layout-owned text raises
@@ -11306,14 +11316,25 @@ class Scene:
         Raises ``ValueError`` without a tempo.
         """
         ...
-    def wait_until(self, *, beat: Optional[float] = None, bar: Optional[float] = None) -> None:
-        """Move the cursor to a beat, or to the start of a bar, of the tempo.
+    def wait_until(
+        self,
+        *,
+        beat: Optional[float] = None,
+        bar: Optional[float] = None,
+        seconds: Optional[float] = None,
+    ) -> None:
+        """Move the cursor to a beat or the start of a bar of the tempo, or to an instant.
 
-        Give exactly one of ``beat`` (0 is the tempo's ``offset``) or ``bar``
-        (``bar=2`` is beat ``2 * beats_per_bar``). A beat already behind the
-        cursor raises ``ValueError`` saying how much too long the shot before
-        it is, instead of silently drifting off the music. Also raises without
-        a tempo.
+        Give exactly one of ``beat`` (0 is the tempo's ``offset``), ``bar``
+        (``bar=2`` is beat ``2 * beats_per_bar``) or ``seconds``, an instant
+        of the whole timeline as ``scene.cursor`` counts it. A beat or an
+        instant already behind the cursor raises ``ValueError`` saying how
+        much too long the shot before it is, instead of silently drifting.
+        ``beat`` and ``bar`` also raise without a tempo.
+
+        Example:
+            scene.wait_until(seconds=jam_start)
+            scene.play(caption.animate.fade_in())
         """
         ...
     def stop(

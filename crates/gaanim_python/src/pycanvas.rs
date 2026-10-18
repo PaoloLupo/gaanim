@@ -982,6 +982,29 @@ impl PyTheme {
                             "could not read font file '{path}' for '{family}': {error}"
                         ))
                     })?;
+                // Typst finds a font only by the family its file declares,
+                // so a key that names another family never reaches it.
+                let declared = gaanim_text::prelude::declared_families(&bytes);
+                if let Some(real) = declared.first()
+                    && !declared
+                        .iter()
+                        .any(|name| name.to_lowercase() == family.to_lowercase())
+                {
+                    let message = format!(
+                        "Theme font_files: '{path}' declares the family {real:?}, not \
+                         {family:?}; texts find this font only by its own family, so use \
+                         {real:?} as the key and in fonts="
+                    );
+                    let category = py.get_type::<pyo3::exceptions::PyUserWarning>();
+                    PyErr::warn(
+                        py,
+                        category.as_any(),
+                        &std::ffi::CString::new(message).map_err(|error| {
+                            pyo3::exceptions::PyValueError::new_err(error.to_string())
+                        })?,
+                        1,
+                    )?;
+                }
                 theme.fonts.push(ThemeFont {
                     family,
                     bytes: bytes.into(),
@@ -7173,14 +7196,25 @@ impl PyScene {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
-    /// Advance the cursor to a beat or the start of a bar of the tempo.
-    #[pyo3(signature = (*, beat=None, bar=None))]
-    fn wait_until(&self, beat: Option<f64>, bar: Option<f64>) -> PyResult<()> {
+    /// Advance the cursor to a beat or the start of a bar of the tempo, or to
+    /// an instant of the timeline in seconds.
+    #[pyo3(signature = (*, beat=None, bar=None, seconds=None))]
+    fn wait_until(
+        &self,
+        beat: Option<f64>,
+        bar: Option<f64>,
+        seconds: Option<f64>,
+    ) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
-        let beat = match (beat, bar) {
-            (Some(beat), None) => beat,
-            (None, Some(bar)) => {
+        let beat = match (beat, bar, seconds) {
+            (None, None, Some(seconds)) => {
+                return scene
+                    .wait_until_time(seconds)
+                    .map_err(pyo3::exceptions::PyValueError::new_err);
+            }
+            (Some(beat), None, None) => beat,
+            (None, Some(bar), None) => {
                 let tempo = scene.tempo().ok_or_else(|| {
                     pyo3::exceptions::PyValueError::new_err(
                         "set a tempo with scene.tempo(bpm) first",
@@ -7190,7 +7224,7 @@ impl PyScene {
             }
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
-                    "wait_until() takes exactly one of beat= or bar=",
+                    "wait_until() takes exactly one of beat=, bar= or seconds=",
                 ));
             }
         };

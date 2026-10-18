@@ -317,6 +317,27 @@ scene.wait(1.0)
 ]
 
 #api-entry(
+  name: "Scene.wait_until",
+  kind: "method",
+  params: (
+    (name: "beat", type: "float | None", default: "None", desc: [Pulso de la rejilla de tempo; 0 es el `offset` del tempo.]),
+    (name: "bar", type: "float | None", default: "None", desc: [Compás de la rejilla de tempo; `bar=2` es el pulso `2 * beats_per_bar`.]),
+    (name: "seconds", type: "float | None", default: "None", desc: [Instante de toda la línea de tiempo, en segundos, como lo cuenta `scene.cursor`.]),
+  ),
+  returns: (type: "None", desc: [Avanza el cursor hasta ese instante.]),
+  desc: [Lleva el cursor a un pulso, al inicio de un compás o a un segundo absoluto; se da exactamente uno de los tres. Sirve para colocar lo que depende del cursor (subtítulos, entradas) en instantes calculados fuera de la escena, por ejemplo por una simulación conducida con `drive_from_samples`. Si el cursor ya pasó ese instante, lanza `ValueError` y dice cuánto se alargó lo anterior, en vez de desfasarse en silencio. `beat` y `bar` necesitan un tempo (`Scene.tempo`); sin él, o con más o menos de un argumento, también lanza `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>caption = scene.text("Nace el atasco").hidden()
+scene.wait_until(seconds=2.5)
+scene.play(caption.animate.fade_in())
+scene.wait_until(seconds=4.0)
+```
+]
+
+#api-entry(
   name: "Scene.fade_out_all",
   kind: "method",
   params: ((name: "seconds", type: "float", default: none, desc: [Duración del fundido.]),),
