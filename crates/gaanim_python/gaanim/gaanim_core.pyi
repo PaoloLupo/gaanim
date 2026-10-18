@@ -11312,14 +11312,25 @@ class Scene:
         Raises ``ValueError`` without a tempo.
         """
         ...
-    def wait_until(self, *, beat: Optional[float] = None, bar: Optional[float] = None) -> None:
-        """Move the cursor to a beat, or to the start of a bar, of the tempo.
+    def wait_until(
+        self,
+        *,
+        beat: Optional[float] = None,
+        bar: Optional[float] = None,
+        seconds: Optional[float] = None,
+    ) -> None:
+        """Move the cursor to a beat or the start of a bar of the tempo, or to an instant.
 
-        Give exactly one of ``beat`` (0 is the tempo's ``offset``) or ``bar``
-        (``bar=2`` is beat ``2 * beats_per_bar``). A beat already behind the
-        cursor raises ``ValueError`` saying how much too long the shot before
-        it is, instead of silently drifting off the music. Also raises without
-        a tempo.
+        Give exactly one of ``beat`` (0 is the tempo's ``offset``), ``bar``
+        (``bar=2`` is beat ``2 * beats_per_bar``) or ``seconds``, an instant
+        of the whole timeline as ``scene.cursor`` counts it. A beat or an
+        instant already behind the cursor raises ``ValueError`` saying how
+        much too long the shot before it is, instead of silently drifting.
+        ``beat`` and ``bar`` also raise without a tempo.
+
+        Example:
+            scene.wait_until(seconds=jam_start)
+            scene.play(caption.animate.fade_in())
         """
         ...
     def stop(

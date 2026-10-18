@@ -7196,14 +7196,25 @@ impl PyScene {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
-    /// Advance the cursor to a beat or the start of a bar of the tempo.
-    #[pyo3(signature = (*, beat=None, bar=None))]
-    fn wait_until(&self, beat: Option<f64>, bar: Option<f64>) -> PyResult<()> {
+    /// Advance the cursor to a beat or the start of a bar of the tempo, or to
+    /// an instant of the timeline in seconds.
+    #[pyo3(signature = (*, beat=None, bar=None, seconds=None))]
+    fn wait_until(
+        &self,
+        beat: Option<f64>,
+        bar: Option<f64>,
+        seconds: Option<f64>,
+    ) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
         let mut scene = self.inner.lock().expect("scene canvas poisoned");
-        let beat = match (beat, bar) {
-            (Some(beat), None) => beat,
-            (None, Some(bar)) => {
+        let beat = match (beat, bar, seconds) {
+            (None, None, Some(seconds)) => {
+                return scene
+                    .wait_until_time(seconds)
+                    .map_err(pyo3::exceptions::PyValueError::new_err);
+            }
+            (Some(beat), None, None) => beat,
+            (None, Some(bar), None) => {
                 let tempo = scene.tempo().ok_or_else(|| {
                     pyo3::exceptions::PyValueError::new_err(
                         "set a tempo with scene.tempo(bpm) first",
@@ -7213,7 +7224,7 @@ impl PyScene {
             }
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
-                    "wait_until() takes exactly one of beat= or bar=",
+                    "wait_until() takes exactly one of beat=, bar= or seconds=",
                 ));
             }
         };

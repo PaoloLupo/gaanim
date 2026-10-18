@@ -88,6 +88,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 
 == Tiempo y texto
 
+- `scene.wait_until(seconds=t)` lleva el cursor a un segundo absoluto de la
+  línea de tiempo, como `beat=` y `bar=` lo llevan a la rejilla de tempo. Si
+  el cursor ya pasó `t`, lanza `ValueError` y dice cuánto se alargó lo
+  anterior. Sirve para colocar subtítulos en instantes que calcula una
+  simulación.
 - `Theme(font_files={clave: archivo})` avisa con un `UserWarning` cuando la
   clave no es la familia que declara el archivo, y nombra esa familia: el
   texto solo encuentra la fuente por ella.
