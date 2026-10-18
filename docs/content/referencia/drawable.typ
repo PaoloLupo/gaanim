@@ -609,7 +609,7 @@ blob = scene.geometry.circle(2).fill("#1E3A8A").blur(0.15)
     (name: "effect", type: "PostProcess | Sequence[PostProcess] | None", default: none, desc: [Un pase o una cadena de pases WGSL; `None` quita el efecto.]),
     (name: "margin", type: "float", default: "0.25", desc: [Unidades de escena que se agregan alrededor del objeto, para efectos que se salen de su contorno (un brillo, una onda).]),
   ),
-  desc: [Dibuja el objeto y sus descendientes en una textura propia, le aplica los pases y devuelve el resultado a la escena en su lugar del orden de dibujo. Es un `PostProcess.shader` sobre un solo objeto: en el shader, `gaanim_scene(uv)` lee solo ese objeto (transparente alrededor), `uv` va de 0 a 1 sobre su caja con el margen, `resolution` es el tamaño de la textura en píxeles y `time` es el tiempo de la escena. Los uniforms aceptan `Parameter`, `Computed` y señales de audio. Los presets de `PostProcess` (`grain`, `chromatic_aberration`…) también sirven. Es estado de declaración: vale para toda la línea de tiempo. Si un objeto con efecto contiene otro, se aplica el efecto exterior. Se ve en la vista previa, en la exportación y en los paquetes `.gaanim`, que guardan los uniforms de cada fotograma.],
+  desc: [Dibuja el objeto y sus descendientes en una textura propia, le aplica los pases y devuelve el resultado a la escena en su lugar del orden de dibujo. Es un `PostProcess.shader` sobre un solo objeto: en el shader, `gaanim_scene(uv)` lee solo ese objeto (transparente alrededor), `uv` va de 0 a 1 sobre su caja con el margen, `resolution` es el tamaño de la textura en píxeles y `time` es el tiempo de la escena. Los uniforms aceptan `Parameter`, `Computed` y señales de audio. Los presets de `PostProcess` (`grain`, `chromatic_aberration`…) también sirven. La `shadow` de una imagen o una forma queda fuera de la textura y se proyecta desde el resultado, debajo de él. Es estado de declaración: vale para toda la línea de tiempo. Si un objeto con efecto contiene otro, se aplica el efecto exterior. Se ve en la vista previa, en la exportación y en los paquetes `.gaanim`, que guardan los uniforms de cada fotograma.],
 )[
 ```python
 # show-code: true
@@ -689,7 +689,7 @@ scene.render()
   name: "Drawable.shadow",
   kind: "method",
   params: ((name: "color", type: "Color", default: none, desc: [Color de la sombra; su alfa escala la opacidad.]), (name: "x / y", type: "float", default: "0.08 / -0.08", desc: [Desplazamiento en unidades de escena.]), (name: "blur", type: "float", default: "0.06", desc: [Desenfoque en unidades de escena.])),
-  desc: [Sombra proyectada desplazada y desenfocada. En un texto o un grupo, una sombra desenfocada se dibuja una sola vez a partir de la silueta de sus miembros rellenos y debajo de todos, como `drop-shadow` de CSS sobre un grupo: los solapes no se oscurecen y el coste no crece con cada glifo. Los miembros recortados, con mezcla o solo con trazo proyectan la suya.],
+  desc: [Sombra proyectada desplazada y desenfocada. Una imagen proyecta la sombra de sus píxeles opacos, no la de su rectángulo. En un texto o un grupo, una sombra desenfocada se dibuja una sola vez a partir de la silueta de sus miembros rellenos y debajo de todos, como `drop-shadow` de CSS sobre un grupo: los solapes no se oscurecen y el coste no crece con cada glifo. Los miembros recortados, con mezcla o solo con trazo proyectan la suya. Una imagen o una forma con `shader_effect` proyecta su sombra desde lo que dibuja el efecto, sin importar cuál de los dos se aplique primero.],
 )[
 ```python
 >>>from gaanim import *

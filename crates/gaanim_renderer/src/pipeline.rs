@@ -372,6 +372,9 @@ pub struct GaanimRenderCache {
     /// Layers of the soft effects of fragments built for a canvas that runs
     /// object effects (see [`crate::soft_effects`]).
     soft_layers: HashMap<ObjectId, Arc<[crate::object_effects::EffectLayer]>>,
+    /// Fragments without their drop shadow, for drawables that are the root
+    /// of their shader effect (see [`ExtractedElement::effect_shadow`]).
+    effect_shadows: HashMap<ObjectId, Arc<crate::fragment::EffectShadow>>,
 }
 
 /// Values of the timeline-driven components a retained fragment was built from.
@@ -456,6 +459,11 @@ pub struct ExtractedElement {
     /// The member's drop shadow, left out of `scene` and drawn once for the
     /// run of members that share it.
     group_shadow: Option<Arc<crate::fragment::GroupShadow>>,
+    /// The element's own drop shadow and its fragment without it, when the
+    /// element is the root of its shader effect: the effect draws that
+    /// fragment and casts the shadow from what its passes draw. `scene`
+    /// keeps the shadow for frames the effect is not drawn.
+    effect_shadow: Option<Arc<crate::fragment::EffectShadow>>,
     /// The outermost ancestor (or the element itself) with a
     /// [`crate::object_effects::ShaderEffect`], whose effect draws it.
     effect_root: Option<Entity>,
@@ -613,6 +621,7 @@ impl ExtractedElement {
             opacity_group: self.opacity_group,
             group_opacity: self.group_opacity,
             group_shadow: self.group_shadow.clone(),
+            effect_shadow: self.effect_shadow.clone(),
             effect_root: self.effect_root,
             effect_extent: self.effect_extent,
             matte_root: self.matte_root,
@@ -2175,8 +2184,14 @@ pub(crate) fn draw_soft_fill(
 /// The painted silhouette a drop shadow copies.
 #[derive(Clone, Copy)]
 pub(crate) enum ShadowCaster<'a> {
-    /// The region the fill (or clipped raster) covers.
+    /// The region the fill covers.
     Fill,
+    /// An image drawn by `transform` and clipped to the path, which casts
+    /// the shadow of its alpha.
+    Image {
+        image: &'a peniko::ImageBrush,
+        transform: kurbo::Affine,
+    },
     /// The stroke of a path drawn without fill, so an open curve casts the
     /// shadow of its line rather than of the region its chord closes.
     Stroke {
@@ -2209,7 +2224,7 @@ pub(crate) fn draw_shadow(
     let shifted = |path: &kurbo::BezPath| offset * path;
     let sharp = shadow.blur_radius.is_nan() || shadow.blur_radius <= 0.0;
     let stroke_reach = match &caster {
-        ShadowCaster::Fill => 0.0,
+        ShadowCaster::Fill | ShadowCaster::Image { .. } => 0.0,
         ShadowCaster::Stroke { style, view, .. } => shadow_stroke_reach(style, *view),
         ShadowCaster::None => return,
     };
@@ -2217,6 +2232,27 @@ pub(crate) fn draw_shadow(
         let brush = peniko::Brush::Solid(shadow.color);
         match caster {
             ShadowCaster::Fill => scene.fill(peniko::Fill::NonZero, offset, &brush, None, path),
+            ShadowCaster::Image { image, transform } => {
+                // The color where the image is opaque, within the path.
+                scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::BlendMode::default(),
+                    1.0,
+                    offset,
+                    path,
+                );
+                scene.fill(peniko::Fill::NonZero, offset, &brush, None, path);
+                scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn),
+                    1.0,
+                    offset,
+                    path,
+                );
+                scene.draw_image(image.as_ref(), offset * transform);
+                scene.pop_layer();
+                scene.pop_layer();
+            }
             ShadowCaster::Stroke {
                 style,
                 view,
@@ -2264,6 +2300,22 @@ pub(crate) fn draw_shadow(
         ShadowCaster::Fill => {
             draw_soft_fill(scene, path, &coverage, shadow.blur_radius, 1.0, offset);
         }
+        ShadowCaster::Image { image, transform } => {
+            // The image's alpha at every tap, as `draw_soft_fill` stacks
+            // copies of a fill.
+            for ((x, y), weight) in blur_taps(shadow.blur_radius, 1.0) {
+                let tap = offset * kurbo::Affine::translate((x, y));
+                scene.push_layer(
+                    peniko::Fill::NonZero,
+                    peniko::BlendMode::default(),
+                    weight,
+                    tap,
+                    path,
+                );
+                scene.draw_image(image.as_ref(), tap * transform);
+                scene.pop_layer();
+            }
+        }
         ShadowCaster::Stroke { style, view, .. } => {
             draw_soft_stroke(
                 scene,
@@ -2293,12 +2345,15 @@ fn shadow_stroke_reach(style: &kurbo::Stroke, view: Option<kurbo::Affine>) -> f6
 
 /// [`draw_shadow`] as an image blurred on the GPU (see
 /// [`crate::soft_effects`]), returning the layer that fills it; `None`,
-/// having drawn nothing, for a sharp shadow or one nothing casts.
+/// having drawn nothing, for a sharp shadow or one nothing casts. With a
+/// `key`, the image is the one kept for it and drawn every frame (see
+/// [`crate::soft_effects::draw_keyed_shadow_image`]).
 pub(crate) fn draw_shadow_on_gpu(
     scene: &mut vello::Scene,
     path: &kurbo::BezPath,
     shadow: &DropShadow,
     caster: ShadowCaster<'_>,
+    key: Option<u64>,
 ) -> Option<crate::object_effects::EffectLayer> {
     if !(shadow.blur_radius.is_finite() && shadow.blur_radius > 0.0) {
         return None;
@@ -2310,6 +2365,13 @@ pub(crate) fn draw_shadow_on_gpu(
     let reach = match caster {
         ShadowCaster::Fill => {
             silhouette.fill(peniko::Fill::NonZero, offset, &black, None, path);
+            0.0
+        }
+        // The blur reads the alpha of what the silhouette draws.
+        ShadowCaster::Image { image, transform } => {
+            silhouette.push_clip_layer(peniko::Fill::NonZero, offset, path);
+            silhouette.draw_image(image.as_ref(), offset * transform);
+            silhouette.pop_layer();
             0.0
         }
         // The vector shadow stacks copies of the plain stroke too.
@@ -2327,7 +2389,7 @@ pub(crate) fn draw_shadow_on_gpu(
         ShadowCaster::None => return None,
     };
     let bounds = shifted.bounding_box().inflate(reach, reach);
-    crate::soft_effects::draw_shadow_image(scene, silhouette, bounds, shadow)
+    crate::soft_effects::draw_keyed_shadow_image(scene, silhouette, bounds, shadow, key)
 }
 
 /// A [`GaussianBlur`] of the fill (unless `None`) and stroke of `path` as
@@ -2568,6 +2630,7 @@ pub fn gaanim_render_cache_sweep_system(
     let active: std::collections::HashSet<ObjectId> = query_mobj_ids.iter().map(|m| m.0).collect();
     cache.fragment_cache.retain(|id, _| active.contains(id));
     cache.soft_layers.retain(|id, _| active.contains(id));
+    cache.effect_shadows.retain(|id, _| active.contains(id));
     cache.stroke_views.retain(|id, _| active.contains(id));
     cache.fragment_inputs.retain(|id, _| active.contains(id));
     cache.screen_overlays.retain(|id, _| active.contains(id));
@@ -2849,6 +2912,8 @@ struct ExtractedFragment {
     /// effects (see [`crate::fragment::build_fragment_with`]).
     gpu: bool,
     soft: Arc<[crate::object_effects::EffectLayer]>,
+    /// Built the first time the drawable is its shader effect's root.
+    effect_shadow: Option<Arc<crate::fragment::EffectShadow>>,
 }
 
 /// With `gpu`, fragments draw their soft effects as images that the
@@ -3139,12 +3204,16 @@ fn extract_world(
             screen: camera_view.is_some(),
             chalk: chalk_opt,
         };
+        // The root of a shader effect casts its own shadow from what the
+        // effect draws, not into the effect's texture.
+        let effect_casts_shadow = gpu && effect_root == Some(entity) && shadow_opt.is_some();
         let group_shadow = crate::fragment::group_shadow(
             &parts,
             opacity_group != entity
                 && clip_opt.is_none()
                 && blend.is_none()
-                && camera_view.is_none(),
+                && camera_view.is_none()
+                && !effect_casts_shadow,
         )
         .map(Arc::new);
         if group_shadow.is_some() {
@@ -3152,7 +3221,7 @@ fn extract_world(
         }
         let recipe = fragment_recipe(parts);
         let lottie_scene = lottie_opt.map(|lottie| lottie.scene());
-        let fragment = previous_fragments
+        let mut fragment = previous_fragments
             .remove(&entity)
             .filter(|cached| {
                 cached.lottie.as_ref().map(Arc::as_ptr) == lottie_scene.map(Arc::as_ptr)
@@ -3172,8 +3241,19 @@ fn extract_world(
                     overlay: built.overlay.map(Arc::new),
                     gpu,
                     soft: built.soft.into(),
+                    effect_shadow: None,
                 }
             });
+        if effect_casts_shadow && fragment.effect_shadow.is_none() {
+            fragment.effect_shadow = crate::fragment::build_effect_shadow(
+                &fragment.recipe,
+                lottie_scene.map(Arc::as_ref),
+            );
+        }
+        let effect_shadow = fragment
+            .effect_shadow
+            .clone()
+            .filter(|_| effect_casts_shadow);
         let recipe = Arc::clone(&fragment.recipe);
         let scene = Arc::clone(&fragment.scene);
         let soft = Arc::clone(&fragment.soft);
@@ -3218,7 +3298,7 @@ fn extract_world(
                         })
                         .as_deref(),
                     stroke_view,
-                    shadow_opt,
+                    shadow_opt.filter(|_| !effect_casts_shadow),
                     glow_opt,
                     blur_opt,
                 )
@@ -3244,6 +3324,7 @@ fn extract_world(
             opacity_group,
             group_opacity,
             group_shadow,
+            effect_shadow,
             effect_root,
             effect_extent,
             matte_root,
@@ -3921,6 +4002,7 @@ fn gpu_three_d_element(
         opacity_group: Entity::PLACEHOLDER,
         group_opacity: 1.0,
         group_shadow: None,
+        effect_shadow: None,
         effect_root: None,
         effect_extent: None,
         matte_root: None,
@@ -4424,9 +4506,30 @@ fn world_effects(
     )
 }
 
+/// Key of the image a shader effect's shadow is blurred into, mixed with
+/// the effect root's: unlike a fragment's shadow, its pixels change with
+/// the effect.
+const EFFECT_SHADOW_KEY: u64 = 0x5bd1_e995_c2b2_ae35;
+
+/// `shadow` of a drawable placed by `transform`, which draws it in its own
+/// coordinates, in world coordinates: the offset turns and scales with the
+/// drawable and the blur scales with it.
+fn shadow_in_world(shadow: &DropShadow, transform: kurbo::Affine) -> DropShadow {
+    let [a, b, c, d, _, _] = transform.as_coeffs();
+    let (x, y) = (shadow.offset.x, shadow.offset.y);
+    let scale = (a * d - b * c).abs().sqrt();
+    DropShadow {
+        offset: gaanim_core::glam::DVec2::new(a * x + c * y, b * x + d * y),
+        blur_radius: shadow.blur_radius * scale,
+        color: shadow.color,
+    }
+}
+
 /// Take the elements of each drawable in `effects` out of `elements` and
 /// draw an image in their place, at the first one's position in draw
-/// order. Returns the layers that draw those images: their elements
+/// order. A drawable's own drop shadow (see
+/// [`ExtractedElement::effect_shadow`]) is cast beneath the image from its
+/// alpha. Returns the layers that draw those images: their elements
 /// composed in world coordinates, a texture at `pixels_per_unit` around
 /// their bounds and the effect's passes at `time_seconds`. A drawable whose
 /// elements have no bounds is drawn plainly.
@@ -4502,11 +4605,20 @@ fn divert_effects(
             transition: None,
         };
         let mut scene = vello::Scene::new();
+        // The root's own shadow stays out of the texture; the effect casts
+        // it from what its passes draw.
+        let mut cast = None;
         let drawn: Vec<ExtractedElement> = members
             .iter()
             .map(|&index| {
                 let mut member = elements[index].clone();
                 member.effect_root = None;
+                if let Some(effect_shadow) = member.effect_shadow.take() {
+                    member.scene = Arc::clone(&effect_shadow.scene);
+                    // Its glow and blur images draw before the texture.
+                    layers.extend(effect_shadow.soft.iter().cloned());
+                    cast = Some(shadow_in_world(&effect_shadow.shadow, member.transform));
+                }
                 member
             })
             .collect();
@@ -4520,10 +4632,34 @@ fn divert_effects(
             );
         let mut placeholder = elements[members[0]].clone();
         let mut fill = vello::Scene::new();
+        let brush = peniko::ImageBrush::new(image.clone());
+        let mut drawn_bounds = bounds;
+        let mut shadow_layer = None;
+        if let Some(shadow) = &cast {
+            let outline = bounds.to_path(0.1);
+            let caster = ShadowCaster::Image {
+                image: &brush,
+                transform: image_to_world,
+            };
+            shadow_layer = draw_shadow_on_gpu(
+                &mut fill,
+                &outline,
+                shadow,
+                caster,
+                Some(root.to_bits() ^ EFFECT_SHADOW_KEY),
+            );
+            if shadow_layer.is_none() {
+                draw_shadow(&mut fill, &outline, shadow, caster);
+            }
+            let reach = BLUR_TAP_RADIUS * shadow.blur_radius.max(0.0) + 1.0e-3;
+            drawn_bounds = drawn_bounds.union(
+                (bounds + kurbo::Vec2::new(shadow.offset.x, shadow.offset.y)).inflate(reach, reach),
+            );
+        }
         fill.fill(
             peniko::Fill::NonZero,
             kurbo::Affine::IDENTITY,
-            &peniko::Brush::Image(peniko::ImageBrush::new(image.clone())),
+            &peniko::Brush::Image(brush),
             Some(image_to_world),
             &bounds,
         );
@@ -4532,15 +4668,16 @@ fn divert_effects(
         placeholder.lottie = None;
         placeholder.transform = kurbo::Affine::IDENTITY;
         placeholder.opacity = 1.0;
-        placeholder.opacity_bounds = bounds;
+        placeholder.opacity_bounds = drawn_bounds;
         placeholder.opacity_extent = None;
         placeholder.group_opacity = 1.0;
         placeholder.group_shadow = None;
+        placeholder.effect_shadow = None;
         placeholder.effect_root = None;
         placeholder.clip_mask = None;
         placeholder.blend = None;
         placeholder.screen = None;
-        placeholder.view_bounds = Some(bounds);
+        placeholder.view_bounds = Some(drawn_bounds);
         placeholder.tip = false;
         placeholder.backdrop = None;
         layers.push(EffectLayer {
@@ -4550,6 +4687,8 @@ fn divert_effects(
             request,
             fixed: false,
         });
+        // The shadow's blur reads the texture, so it draws after it.
+        layers.extend(shadow_layer);
         let first = members[0];
         let mut index = 0;
         elements.retain(|_| {
@@ -5167,6 +5306,12 @@ fn compose_captured_layers(
             element.lottie.as_ref(),
             effect_density.is_some(),
         );
+        // As in `extract_world`, the root of a shader effect casts its own
+        // shadow from what the effect draws.
+        let effect_shadow = (effect_density.is_some()
+            && element.effect_root == Some(element.entity))
+        .then(|| store.effect_shadow(&element.recipe, element.lottie.as_ref()))
+        .flatten();
         ExtractedElement {
             soft,
             persistent: false,
@@ -5190,6 +5335,7 @@ fn compose_captured_layers(
             opacity_group: element.opacity_group,
             group_opacity: element.group_opacity,
             group_shadow: element.group_shadow.clone(),
+            effect_shadow,
             effect_root: element.effect_root,
             effect_extent: element.effect_extent,
             matte_root: element.matte_root,
@@ -5947,12 +6093,17 @@ pub fn gaanim_render_system(
             screen: camera_view.is_some(),
             chalk: chalk_ref.as_deref(),
         };
+        let gpu = effect_layers.is_some();
+        // The root of a shader effect casts its own shadow from what the
+        // effect draws, not into the effect's texture.
+        let effect_casts_shadow = gpu && effect_root == Some(entity) && shadow_ref.is_some();
         let group_shadow = crate::fragment::group_shadow(
             &parts,
             opacity_group != entity
                 && clip_ref.is_none()
                 && blend.is_none()
-                && camera_view.is_none(),
+                && camera_view.is_none()
+                && !effect_casts_shadow,
         )
         .map(Arc::new);
         // A fragment keeps its shadow only while its group does not draw it.
@@ -5982,7 +6133,6 @@ pub fn gaanim_render_system(
         }
         let mut rebuilt_overlay = None;
         let mut rebuilt_soft = None;
-        let gpu = effect_layers.is_some();
         let fragment = cache.fragment_cache.entry(mobj_id.0).or_insert_with(|| {
             let recipe = fragment_recipe(FragmentParts {
                 shadow: if shared { None } else { parts.shadow },
@@ -5998,6 +6148,25 @@ pub fn gaanim_render_system(
             Arc::new(built.scene)
         });
         let fragment = Arc::clone(fragment);
+        if rebuilt_soft.is_some() || !effect_casts_shadow {
+            cache.effect_shadows.remove(&mobj_id.0);
+        }
+        let effect_shadow = if effect_casts_shadow {
+            match cache.effect_shadows.get(&mobj_id.0) {
+                Some(effect_shadow) => Some(Arc::clone(effect_shadow)),
+                None => crate::fragment::build_effect_shadow(
+                    &fragment_recipe(parts),
+                    lottie_ref.as_deref().map(|lottie| lottie.scene().as_ref()),
+                )
+                .inspect(|effect_shadow| {
+                    cache
+                        .effect_shadows
+                        .insert(mobj_id.0, Arc::clone(effect_shadow));
+                }),
+            }
+        } else {
+            None
+        };
         match rebuilt_soft {
             Some(soft) if soft.is_empty() => {
                 cache.soft_layers.remove(&mobj_id.0);
@@ -6069,7 +6238,7 @@ pub fn gaanim_render_system(
                     transform.affine_2d,
                     stroke_style.as_deref(),
                     stroke_view,
-                    shadow_ref.as_deref(),
+                    shadow_ref.as_deref().filter(|_| !effect_casts_shadow),
                     glow_ref.as_deref(),
                     blur_ref.as_deref(),
                 )
@@ -6087,6 +6256,7 @@ pub fn gaanim_render_system(
             opacity_group,
             group_opacity,
             group_shadow,
+            effect_shadow,
             effect_root,
             effect_extent,
             matte_root,
@@ -7529,6 +7699,7 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_shadow: None,
             effect_root: None,
             effect_extent: None,
             matte_root: None,
@@ -7585,6 +7756,7 @@ mod tests {
             opacity_group: root,
             group_opacity,
             group_shadow: None,
+            effect_shadow: None,
             effect_root: None,
             effect_extent: None,
             matte_root: None,
@@ -7629,6 +7801,121 @@ mod tests {
         assert!(composed.clone().take_unprocessed(true).is_some());
         assert!(composed.take_unprocessed(false).is_none());
         assert_eq!(paths(&composed.scene), paths(&alone.scene) + paths(&layer));
+    }
+
+    /// Spawn the half-opaque image with the default shadow and a shader
+    /// effect of `passes`.
+    fn spawn_shadowed_effect(world: &mut World, passes: Vec<crate::post_process::PostProcessPass>) {
+        world.spawn((
+            MobjectId(ObjectId::from_raw(31)),
+            gaanim_math::SpatialTransform::default(),
+            GlobalSpatialTransform::default(),
+            GlobalOpacity(1.0),
+            RenderOrder::default(),
+            RenderLayer::Vello2D,
+            Path2D(rect_path(0.0, 0.0, 1.0, 1.0)),
+            crate::fragment::tests::half_opaque_image(),
+            DropShadow::default(),
+            crate::object_effects::ShaderEffect {
+                post: crate::post_process::CanvasPostProcess {
+                    passes,
+                    ..Default::default()
+                },
+                margin: 0.2,
+            },
+            Visible,
+        ));
+    }
+
+    fn identity_pass() -> crate::post_process::PostProcessPass {
+        crate::post_process::PostProcessShader::new(
+            "fn gaanim_post(uv: vec2<f32>, resolution: vec2<f32>, time: f32) -> vec4<f32> { return gaanim_scene(uv); }",
+        )
+        .unwrap()
+        .into()
+    }
+
+    /// The effect's texture holds the drawable without the shadow its
+    /// fragment draws; the shadow is blurred from the texture, after it, and
+    /// `scene` draws it beneath the texture.
+    fn assert_shadow_cast_from_effect(
+        effects: &[crate::object_effects::EffectLayer],
+        scene: &vello::Scene,
+    ) {
+        use crate::fragment::tests::image_draws;
+        let texture = effects
+            .iter()
+            .position(|layer| layer.request.passes.len() == 1)
+            .expect("the effect's texture");
+        let texture_id = effects[texture].image.data.id();
+        assert!(
+            effects
+                .iter()
+                .filter(|layer| layer.fixed)
+                .all(|layer| image_draws(&effects[texture].scene, layer.image.data.id()) == 0)
+        );
+        let cast = effects
+            .iter()
+            .position(|layer| !layer.fixed && image_draws(&layer.scene, texture_id) == 1)
+            .expect("the shadow cast from the effect");
+        assert!(cast > texture);
+        assert_eq!(image_draws(scene, effects[cast].image.data.id()), 1);
+        assert_eq!(image_draws(scene, texture_id), 1);
+    }
+
+    #[test]
+    fn a_shader_effect_casts_its_drawables_shadow_from_what_it_draws() {
+        let mut world = World::new();
+        spawn_shadowed_effect(&mut world, vec![identity_pass()]);
+        let frame = compile_frame_from_world(&mut world, None);
+        assert_shadow_cast_from_effect(&frame.effects, &frame.scene);
+
+        // Without an active pass the drawable is drawn plainly, shadow and all.
+        let mut world = World::new();
+        spawn_shadowed_effect(&mut world, Vec::new());
+        let plain = compile_frame_from_world(&mut world, None);
+        let shadow = plain
+            .effects
+            .iter()
+            .find(|layer| layer.fixed)
+            .expect("the fragment's shadow");
+        assert_eq!(
+            crate::fragment::tests::image_draws(&plain.scene, shadow.image.data.id()),
+            1
+        );
+    }
+
+    #[test]
+    fn the_live_canvas_casts_a_shader_effects_shadow_from_what_it_draws() {
+        let mut app = App::new();
+        app.init_resource::<GaanimRenderCache>()
+            .init_resource::<EffectLayers>()
+            .add_systems(Update, gaanim_render_system);
+        spawn_shadowed_effect(app.world_mut(), vec![identity_pass()]);
+        app.update();
+        let effects = app.world().resource::<EffectLayers>().0.clone();
+        let live = app
+            .world_mut()
+            .query::<&VelloScene2d>()
+            .single(app.world())
+            .unwrap();
+        assert_shadow_cast_from_effect(&effects, live);
+    }
+
+    #[test]
+    fn a_shadow_in_world_turns_and_scales_with_its_drawable() {
+        let shadow = DropShadow {
+            offset: gaanim_core::glam::DVec2::new(0.1, 0.0),
+            blur_radius: 0.05,
+            ..DropShadow::default()
+        };
+        let placed = kurbo::Affine::translate((4.0, 2.0))
+            * kurbo::Affine::rotate(std::f64::consts::FRAC_PI_2)
+            * kurbo::Affine::scale(2.0);
+        let world = shadow_in_world(&shadow, placed);
+        assert!((world.offset - gaanim_core::glam::DVec2::new(0.0, 0.2)).length() < 1e-12);
+        assert!((world.blur_radius - 0.1).abs() < 1e-12);
+        assert_eq!(world.color, shadow.color);
     }
 
     #[test]
@@ -7785,6 +8072,7 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_shadow: None,
             effect_root: None,
             effect_extent: None,
             matte_root: None,
@@ -7828,6 +8116,7 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_shadow: None,
             effect_root: None,
             effect_extent: None,
             matte_root: None,
@@ -7900,6 +8189,7 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_shadow: None,
             effect_root: None,
             effect_extent: None,
             matte_root: None,
@@ -7950,6 +8240,7 @@ mod tests {
             opacity_group: Entity::PLACEHOLDER,
             group_opacity: 1.0,
             group_shadow: None,
+            effect_shadow: None,
             effect_root: None,
             effect_extent: None,
             matte_root: None,
