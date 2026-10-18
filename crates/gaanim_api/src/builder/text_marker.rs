@@ -96,7 +96,7 @@ impl TextMarkerStyle {
     }
 }
 
-/// World-space box of one rendered glyph.
+/// Box of one rendered glyph in scene units, with the text's rotation undone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GlyphBox {
     pub min: DVec2,
@@ -278,6 +278,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if glyph_ids.is_empty() {
             glyph_ids = selected.to_vec();
         }
+        // Lines run along the text's own x axis. Measure the glyphs with the
+        // text's world rotation undone, so a turned text (or one inside a
+        // turned group) still splits into its lines, then turn the bands
+        // back with it. Undoing only the rotation keeps scene units for the
+        // padding and the band thickness.
+        let angle = self.get_world_transform(anim.target).z_angle();
+        let (turn, unturn) = (kurbo::Affine::rotate(angle), kurbo::Affine::rotate(-angle));
         let glyphs: Vec<GlyphBox> = glyph_ids
             .iter()
             .filter_map(|id| {
@@ -285,17 +292,30 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 if state.path.elements().is_empty() {
                     return None;
                 }
-                let world = state
+                let upright = state
                     .bounds
-                    .transform_2d(&self.get_world_transform(*id).to_affine_2d());
+                    .transform_2d(&(unturn * self.get_world_transform(*id).to_affine_2d()));
                 Some(GlyphBox {
-                    min: world.min.truncate(),
-                    max: world.max.truncate(),
+                    min: upright.min.truncate(),
+                    max: upright.max.truncate(),
                     selected: selected_set.contains(id),
                 })
             })
             .collect();
-        let bands = marker_bands(&glyphs, style.padding, style.skew);
+        let bands: Vec<MarkerBand> = marker_bands(&glyphs, style.padding, style.skew)
+            .into_iter()
+            .map(|band| {
+                let world = |point: DVec2| {
+                    let point = turn * kurbo::Point::new(point.x, point.y);
+                    DVec2::new(point.x, point.y)
+                };
+                MarkerBand {
+                    start: world(band.start),
+                    end: world(band.end),
+                    ..band
+                }
+            })
+            .collect();
         if bands.is_empty() {
             tracing::warn!("text marker found no visible glyphs to highlight");
             return;
@@ -552,6 +572,97 @@ mod tests {
             text.select("dos").with_marker(TextMarkerStyle::default());
         });
         assert_eq!(marker_trims(&timeline), vec![(0.5, 0.0)]);
+    }
+
+    /// Start, end and thickness of each marker band over the middle of a
+    /// three-line paragraph turned by `angle`, by itself or inside a group.
+    fn turned_paragraph_bands(angle: f64, in_group: bool) -> Vec<(DVec2, DVec2, f64)> {
+        use gaanim_text::prelude::{TextFlow, TextSpec, TextStyle, TextWrap};
+        let (mut world, _) = compile_marker_scene(|canvas| {
+            let spec = TextSpec::new(
+                vec![
+                    "One two three four five six seven eight nine ten eleven twelve thirteen fourteen"
+                        .into(),
+                ],
+                None,
+                TextStyle {
+                    size: Some(0.3),
+                    ..TextStyle::default()
+                },
+                TextFlow {
+                    wrap: TextWrap::Width(4.5),
+                    ..TextFlow::default()
+                },
+            )
+            .expect("valid text");
+            let text = canvas.text_spec(spec);
+            let text = if in_group {
+                let card = canvas.rect(5.0, 2.2);
+                canvas.group(&[&card, &text]).rotate_to(angle);
+                text
+            } else {
+                text.rotate_to(angle)
+            };
+            text.select("five six seven eight nine ten")
+                .with_marker(TextMarkerStyle::default());
+        });
+        let mut query = world.query::<(
+            &gaanim_scene::components::PathSource,
+            &gaanim_scene::StrokeBrush,
+            Option<&gaanim_scene::components::TextSpan>,
+        )>();
+        let mut bands: Vec<_> = query
+            .iter(&world)
+            .filter(|(_, stroke, span)| {
+                span.is_none() && stroke.style.start_cap == kurbo::Cap::Butt
+            })
+            .map(|(path, stroke, _)| {
+                let points: Vec<_> = path
+                    .0
+                    .elements()
+                    .iter()
+                    .filter_map(|el| el.end_point())
+                    .collect();
+                let point = |p: kurbo::Point| DVec2::new(p.x, p.y);
+                (point(points[0]), point(points[1]), stroke.style.width)
+            })
+            .collect();
+        // Reading order along the text's lines: top line first.
+        let down = DVec2::new(angle.sin(), -angle.cos());
+        bands.sort_by(|a, b| (a.0 + a.1).dot(down).total_cmp(&(b.0 + b.1).dot(down)));
+        bands
+    }
+
+    #[test]
+    fn marker_bands_turn_with_their_text() {
+        let upright = turned_paragraph_bands(0.0, false);
+        // "five six seven" ends the first line and "eight nine ten" opens
+        // the second; the third line is not selected.
+        assert_eq!(upright.len(), 2);
+        for in_group in [false, true] {
+            for degrees in [-8.0f64, 1.5] {
+                let angle = degrees.to_radians();
+                let turned = turned_paragraph_bands(angle, in_group);
+                assert_eq!(
+                    turned.len(),
+                    upright.len(),
+                    "{degrees}° in group: {in_group}"
+                );
+                let rotate = |v: DVec2| DVec2::from_angle(angle).rotate(v);
+                let close = |a: DVec2, b: DVec2| (a - b).length() < 1e-6;
+                for ((start, end, width), (up_start, up_end, up_width)) in
+                    turned.iter().zip(&upright)
+                {
+                    assert!((width - up_width).abs() < 1e-9);
+                    // Same band, turned with the text: equal length and
+                    // direction rotated by the text's angle.
+                    assert!(close(*end - *start, rotate(*up_end - *up_start)));
+                }
+                // The second line's band sits where the turned text puts it.
+                let offset = |bands: &[(DVec2, DVec2, f64)]| bands[1].0 - bands[0].0;
+                assert!(close(offset(&turned), rotate(offset(&upright))));
+            }
+        }
     }
 
     #[test]
