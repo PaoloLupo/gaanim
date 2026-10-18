@@ -905,7 +905,12 @@ class Anchor:
     BOTTOM_RIGHT: ClassVar[Anchor]
 
 class TextAnchor:
-    """Horizontal reference point on a Text object's typographic baseline."""
+    """Horizontal reference point on a Text object's typographic baseline.
+
+    For a point of the text's box instead, such as its left edge at its
+    vertical center for a left-aligned caption of one or more lines, pass an
+    ``Anchor`` to ``move_to``: ``caption.move_to(x, y, Anchor.LEFT)``.
+    """
     BASELINE_LEFT: ClassVar[TextAnchor]
     BASELINE_CENTER: ClassVar[TextAnchor]
     BASELINE_RIGHT: ClassVar[TextAnchor]
@@ -5784,7 +5789,9 @@ class Text(Drawable):
         A single visual line defaults to ``TextAnchor.BASELINE_CENTER``. A
         multiline block defaults to its visual center. Explicit
         ``TextAnchor`` values align the first line's baseline; geometric
-        ``Anchor`` values retain bounds-based placement. When a text with
+        ``Anchor`` values retain bounds-based placement, so ``Anchor.LEFT``
+        puts the left edge at ``x`` and the vertical center at ``y`` without
+        measuring ``bounds()``. When a text with
         explicit line breaks was created without ``flow`` or ``text_align``,
         an explicit anchor also aligns its lines: ``*_LEFT`` anchors left, ``*_RIGHT`` anchors right,
         and the others center. Layout-owned text raises

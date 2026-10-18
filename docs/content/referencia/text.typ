@@ -367,7 +367,7 @@ Colocación por línea base para que palabras y ecuaciones se alineen.
     (name: "x / y", type: "float | fuente reactiva", default: none, desc: [Punto de destino en unidades de escena.]),
     (name: "anchor", type: "Anchor | str | TextAnchor | None", default: "None", desc: [Anclaje geométrico (un `Anchor` o su nombre, como `"top_left"`), o `TextAnchor.BASELINE_LEFT`, `BASELINE_CENTER` o `BASELINE_RIGHT` sobre la línea base.]),
   ),
-  desc: [Una sola línea se coloca por defecto con `TextAnchor.BASELINE_CENTER`: el centro horizontal visual en `x` y la línea base en `y`. Así, textos y ecuaciones con distintas ascendentes, fracciones o tamaños comparten línea base. Un bloque de varias líneas sin anclaje usa su centro visual, y un `TextAnchor` explícito usa la primera línea. Los anclajes geométricos (`Anchor.TOP_LEFT`…) se basan en los límites y no garantizan una línea base común. Un `Drawable` o un `AnchorPoint` centran el texto sobre la referencia sin seguirla. Un texto gestionado por Layout lanza `LayoutOwnershipError`; `text.animate.move_to(...)` sí lo mueve.],
+  desc: [Una sola línea se coloca por defecto con `TextAnchor.BASELINE_CENTER`: el centro horizontal visual en `x` y la línea base en `y`. Así, textos y ecuaciones con distintas ascendentes, fracciones o tamaños comparten línea base. Un bloque de varias líneas sin anclaje usa su centro visual, y un `TextAnchor` explícito usa la primera línea. Los anclajes geométricos (`Anchor.TOP_LEFT`…) se basan en los límites y no garantizan una línea base común. Para un texto de una o varias líneas alineado a la izquierda y centrado en vertical, como un subtítulo en una tarjeta de altura fija, usa `Anchor.LEFT`: el borde izquierdo de su caja queda en `x` y su centro vertical en `y`, sin medirlo con `bounds()`. Un `Drawable` o un `AnchorPoint` centran el texto sobre la referencia sin seguirla. Un texto gestionado por Layout lanza `LayoutOwnershipError`; `text.animate.move_to(...)` sí lo mueve.],
 )[
 ```python
 >>>from gaanim import *
@@ -376,6 +376,7 @@ word = scene.text("Tipografía").move_to(0, 1)
 equation = scene.text.equation("frac(x_1^2, y_2) = 1").move_to(0, -0.5, TextAnchor.BASELINE_CENTER)
 left = scene.text("alineado a la izquierda").move_to(-4, -2, TextAnchor.BASELINE_LEFT)
 corner = scene.text("esquina").move_to(-7, 4, Anchor.TOP_LEFT)
+caption = scene.text("Nace el atasco\nen el kilómetro 3", text_align="left").move_to(-6, -3, Anchor.LEFT)
 ```
 ]
 
