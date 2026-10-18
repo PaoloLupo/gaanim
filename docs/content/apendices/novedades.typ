@@ -191,6 +191,9 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   longitud: una línea de muestras tomadas a intervalos iguales de tiempo,
   recortada de `end=0` a `end=1` con `Easing.LINEAR`, crece con su extremo
   sobre el objeto que la traza. Lo muestra `gallery/heavy_top`.
+- `scene.camera.animate.orbit(..., dolly=0.8)` gira alrededor del objetivo
+  mientras se acerca o se aleja, en un solo movimiento: `orbit` y `dolly` no
+  se pueden reproducir a la vez.
 
 == Editor
 

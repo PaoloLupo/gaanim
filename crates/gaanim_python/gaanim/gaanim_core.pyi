@@ -6618,10 +6618,17 @@ class CameraAnimation:
         self,
         delta_yaw: float,
         delta_pitch: float,
+        *,
+        dolly: float = 1.0,
     ) -> Anim:
         """Orbit around the current look-at target.
 
-        ``delta_yaw`` and ``delta_pitch`` are radians.
+        ``delta_yaw`` and ``delta_pitch`` are radians. ``dolly`` multiplies
+        the distance to the target along the way, below ``1`` closer, at a
+        constant rate of change: rising over a scene while closing in is one
+        move, since ``orbit`` and ``dolly`` both drive the camera pose and
+        cannot play together. A ``dolly`` that is not finite and positive
+        raises ``ValueError``.
 
         Example:
             scene.camera.animate.orbit(delta_yaw=0.6, delta_pitch=0.12).duration(1.0)

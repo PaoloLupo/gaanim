@@ -5484,10 +5484,25 @@ impl SceneModel {
 
     /// Orbit around current target by yaw/pitch radians.
     pub fn camera_orbit(&mut self, delta_yaw: f64, delta_pitch: f64, duration: f64) -> Anim {
+        self.camera_orbit_dolly(delta_yaw, delta_pitch, 1.0, duration)
+    }
+
+    /// Orbit around the current target by yaw/pitch radians while the eye's
+    /// distance from it changes by `dolly` (below 1 closer), at a constant
+    /// rate of change: one move on the camera pose instead of two that would
+    /// both drive it.
+    pub fn camera_orbit_dolly(
+        &mut self,
+        delta_yaw: f64,
+        delta_pitch: f64,
+        dolly: f64,
+        duration: f64,
+    ) -> Anim {
         self.camera_anim(
             AnimationType::CameraOrbit {
                 delta_yaw,
                 delta_pitch,
+                dolly,
             },
             duration,
         )

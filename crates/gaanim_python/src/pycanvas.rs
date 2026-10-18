@@ -2743,19 +2743,26 @@ impl PyCameraAnimation {
         Ok(PyCanvasAnim { inner })
     }
 
-    /// Orbit around current target by yaw/pitch (radians).
-    fn orbit(&self, delta_yaw: f64, delta_pitch: f64) -> PyResult<PyCanvasAnim> {
+    /// Orbit around current target by yaw/pitch (radians), scaling the
+    /// distance to it by `dolly` on the way.
+    #[pyo3(signature = (delta_yaw, delta_pitch, *, dolly=1.0))]
+    fn orbit(&self, delta_yaw: f64, delta_pitch: f64, dolly: f64) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         if ![delta_yaw, delta_pitch].iter().all(|v| v.is_finite()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "delta_yaw/delta_pitch must be finite",
             ));
         }
+        if !dolly.is_finite() || dolly <= 0.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "dolly must be finite and positive",
+            ));
+        }
         let inner = self
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_orbit(delta_yaw, delta_pitch, 1.0);
+            .camera_orbit_dolly(delta_yaw, delta_pitch, dolly, 1.0);
         Ok(PyCanvasAnim { inner })
     }
 

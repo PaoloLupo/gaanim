@@ -5061,6 +5061,7 @@ fn apply_lens_spec(
             up,
             delta_yaw,
             delta_pitch,
+            dolly,
         } => {
             let mut orbit = gaanim_math::Camera::ortho_2d(1, 1);
             orbit
@@ -5069,8 +5070,10 @@ fn apply_lens_spec(
             orbit
                 .orbit_around_target(delta_yaw * t, delta_pitch * t)
                 .expect("validated orbit interpolation");
+            // The radius changes geometrically, so the dolly looks steady.
+            let position = *target + (orbit.position - *target) * dolly.powf(t);
             if let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>() {
-                camera.position = orbit.position;
+                camera.position = position;
                 camera.target = orbit.target;
                 camera.up = orbit.up;
                 camera.rotation = orbit.rotation;

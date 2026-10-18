@@ -1948,15 +1948,17 @@ rig.disable()
   params: (
     (name: "delta_yaw", type: "float", default: none, desc: [Giro horizontal alrededor del objetivo, en radianes.]),
     (name: "delta_pitch", type: "float", default: none, desc: [Giro vertical, en radianes.]),
+    (name: "dolly", type: "float", default: "1.0", desc: [Factor de la distancia al objetivo al terminar: menor que `1` acerca y mayor que `1` aleja.]),
   ),
   returns: (type: "Anim", desc: [Órbita alrededor del objetivo actual de `look_at`.]),
-  desc: [Usa incrementos pequeños para un giro suave.],
+  desc: [Usa incrementos pequeños para un giro suave. Con `dolly` la cámara se acerca o se aleja mientras gira, a un ritmo de cambio constante: `orbit` y `dolly` mueven la misma pose de la cámara y no se pueden reproducir a la vez, así que subir sobre una escena acercándose es una sola órbita. Un `dolly` no finito o no positivo lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 >>>scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
 scene.play([scene.camera.animate.orbit(delta_yaw=0.5, delta_pitch=0.1).duration(1.0)])
+scene.play([scene.camera.animate.orbit(delta_yaw=0.0, delta_pitch=0.5, dolly=0.8).duration(1.5)])
 ```
 ]
 

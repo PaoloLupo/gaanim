@@ -384,6 +384,9 @@ scene.render()
   campo de visión vertical en radianes.
 - `look_at(eye=, target=, up=)` coloca la cámara en `eye` mirando a `target`.
 - `animate.orbit(delta_yaw=, delta_pitch=)` gira alrededor del objetivo.
+  Con `dolly=` además se acerca (menor que `1`) o se aleja mientras gira:
+  `orbit` y `dolly` no se pueden reproducir a la vez, porque mueven la misma
+  pose de la cámara.
 - `animate.dolly(factor)` se acerca (menor que `1`) o se aleja (mayor que
   `1`).
 - `orthographic()` vuelve a la proyección ortográfica y `reset()` al encuadre

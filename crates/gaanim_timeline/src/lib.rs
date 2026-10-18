@@ -708,6 +708,7 @@ mod tests {
                     up: start.up,
                     delta_yaw: std::f64::consts::FRAC_PI_2,
                     delta_pitch: -std::f64::consts::FRAC_PI_6,
+                    dolly: 1.0,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
                 delay: 0.0,
