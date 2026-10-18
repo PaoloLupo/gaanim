@@ -4605,6 +4605,25 @@ class Drawable:
             label = scene.text("origin").move_to_3d(0.0, 1.0, 0.0).billboard()
         """
         ...
+    def in_3d(self, material: Optional[Material3D] = None) -> Self:
+        """Place the drawable in the 3D world, where perspective tilts it and meshes hide it.
+
+        ``move_to_3d`` and ``rotate_to_3d`` then place and turn it in the
+        world under the perspective camera. The 3D pass draws it from its
+        outlines, so its edges stay sharp at any size and meshes in front of
+        it hide it pixel by pixel, instead of drawing it above all 3D content.
+        It keeps its animations, colors and strokes: a write, a fade or a
+        color change plays as in 2D. Without a ``material`` it keeps its
+        colors unlit; with one it is lit, and receives shadows, as a surface.
+        Gradients draw in their first color; shadows, glows, blurs, chalk,
+        images and Lottie scenes are left out. ``billboard`` instead keeps a
+        drawable facing the camera, and ``hud`` pins it to the frame. The
+        method is chainable and returns the same ``Drawable``.
+
+        Example:
+            sign = scene.text("Hola").in_3d().move_to_3d(0.0, 1.0, -2.0).rotate_to_3d(-1.2, 0.0, 0.0)
+        """
+        ...
     def hud(self) -> Self:
         """Pin the drawable to the output frame as a HUD overlay.
 
@@ -8451,31 +8470,6 @@ class Geometry:
 
         Example:
             label = scene.geometry.flat_3d(scene.text("x²")).move_to_3d(0, -1, 0).rotate_to_3d(-1.5708, 0, 0)
-        """
-        ...
-    def text_plane(
-        self,
-        source: Drawable,
-        *,
-        material: Optional[Material3D] = None,
-        keep_source: bool = False,
-    ) -> Primitive3D:
-        """Lay the area a 2D drawable fills in the 3D world, drawn from its curves.
-
-        The outlines of text, equations, shapes, groups or imported SVGs are
-        read when the scene compiles, as for ``extrude``, and lie in the
-        z = 0 plane of a 3D drawable centered on the source's place, in the
-        source's solid fill colors (nonzero rule). The 3D pass fills them
-        from their curves per pixel, so edges stay sharp at any size, tilt
-        with perspective, and meshes in front hide them pixel by pixel.
-        Without a ``material`` they keep their colors unlit; with one they
-        are lit and receive shadows as a surface. They cast no shadows, and
-        strokes and gradients are not drawn. The source is hidden from the
-        cursor on unless ``keep_source``. A source from another scene, or a
-        3D, image, video or Lottie source, raises ``ValueError``.
-
-        Example:
-            sign = scene.geometry.text_plane(scene.text("Gaanim")).rotate_to_3d(-1.2, 0, 0)
         """
         ...
     def cube(self, size: float = 2.0, *, material: Optional[Material3D] = None) -> Primitive3D:

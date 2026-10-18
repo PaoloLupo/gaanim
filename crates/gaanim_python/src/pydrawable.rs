@@ -2686,6 +2686,11 @@ impl PyDrawable {
         Ok(Self(self.0.clone().billboard()))
     }
 
+    pub(crate) fn in_3d_impl(&self, material: Option<PyMaterial3D>) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(Self(self.0.clone().in_3d(material.map(|value| value.0))))
+    }
+
     pub(crate) fn hud_impl(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         Ok(Self(self.0.clone().hud()))
@@ -3937,6 +3942,14 @@ impl PyDrawable {
         let result = slf.borrow().billboard_impl();
         same_drawable(slf, result)
     }
+    #[pyo3(signature = (material=None))]
+    fn in_3d<'py>(
+        slf: &Bound<'py, Self>,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().in_3d_impl(material);
+        same_drawable(slf, result)
+    }
     fn hud<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().hud_impl();
         same_drawable(slf, result)
@@ -4441,6 +4454,15 @@ macro_rules! media_drawable_methods {
 
     fn billboard<'py>(slf: PyRef<'py, Self>) -> PyResult<PyRef<'py, Self>> {
         PyDrawable(slf.handle()).billboard_impl()?;
+        Ok(slf)
+    }
+
+    #[pyo3(signature = (material=None))]
+    fn in_3d<'py>(
+        slf: PyRef<'py, Self>,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<PyRef<'py, Self>> {
+        PyDrawable(slf.handle()).in_3d_impl(material)?;
         Ok(slf)
     }
 

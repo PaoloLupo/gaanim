@@ -1559,28 +1559,19 @@ def validate_primitives_3d_contract(module: object) -> list[str]:
     return failures
 
 
-def validate_text_plane_contract(module: object) -> list[str]:
-    """Exercise text laid in the 3D world, filled from its curves."""
+def validate_in_3d_contract(module: object) -> list[str]:
+    """Exercise 2D drawables placed in the 3D world."""
     failures: list[str] = []
     scene = module.Scene(frame=(16, 9))
-    for source in (scene.text("HOLA"), scene.text.equation("e^(i pi)"), scene.geometry.star(5, 1.0, 0.4)):
-        plane = scene.geometry.text_plane(source)
-        if not isinstance(plane, module.Primitive3D):
-            failures.append("Geometry.text_plane did not return a Primitive3D")
-    lit = scene.geometry.text_plane(scene.text("lit"), material=module.Material3D.matte(module.BLUE), keep_source=True)
-    if lit.material(module.Material3D.matte(module.RED)) is not lit:
-        failures.append("a text plane does not take a material")
-    other = module.Scene(frame=(16, 9))
-    for call in (
-        lambda: scene.geometry.text_plane(scene.geometry.cube()),
-        lambda: scene.geometry.text_plane(other.text("elsewhere")),
-    ):
-        try:
-            call()
-        except ValueError:
-            pass
-        else:
-            failures.append("Geometry.text_plane accepted an invalid source")
+    text = scene.text("HOLA")
+    if text.in_3d() is not text:
+        failures.append("Drawable.in_3d did not return the same drawable")
+    lit = scene.text.equation("e^(i pi)").in_3d(module.Material3D.matte(module.BLUE))
+    if not isinstance(lit.rotate_to_3d(-1.0, 0.0, 0.0).move_to_3d(0.0, 1.0, -2.0), module.Drawable):
+        failures.append("a drawable placed in 3D does not move and turn in 3D")
+    group = scene.geometry.group([scene.geometry.square(1.0), scene.geometry.circle(0.5)]).in_3d()
+    if not isinstance(group, module.Drawable):
+        failures.append("a group cannot be placed in 3D")
     return failures
 
 
@@ -3562,7 +3553,7 @@ def main() -> int:
     missing.extend(validate_rough_notation_contract(module))
     missing.extend(validate_extrude_contract(module))
     missing.extend(validate_primitives_3d_contract(module))
-    missing.extend(validate_text_plane_contract(module))
+    missing.extend(validate_in_3d_contract(module))
     missing.extend(validate_matrix_contract(module))
     missing.extend(validate_matrix_logical_units(module))
     missing.extend(validate_matrix_stub_typing())

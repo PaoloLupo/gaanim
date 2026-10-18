@@ -995,7 +995,15 @@ impl<'a> GpuMeshes<'a> {
             .into_iter()
             .map(|pending| {
                 let (center, radius) = world_sphere(&pending);
-                let depth = -view.transform_point3(center).z + radius;
+                // Filled outlines lie in a plane: its middle orders them, where
+                // a wide text's far edge would put it behind a small shape that
+                // lies behind it.
+                let reach = if pending.source.fill.is_some() {
+                    0.0
+                } else {
+                    radius
+                };
+                let depth = -view.transform_point3(center).z + reach;
                 (depth, pending)
             })
             .collect();

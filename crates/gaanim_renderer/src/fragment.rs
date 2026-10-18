@@ -144,7 +144,7 @@ pub struct BuiltFragment {
 
 impl FragmentRecipe {
     /// The outline drawn: empty while a write reveal has not started.
-    fn visible_path<'a>(&'a self, empty: &'a kurbo::BezPath) -> &'a kurbo::BezPath {
+    pub(crate) fn visible_path<'a>(&'a self, empty: &'a kurbo::BezPath) -> &'a kurbo::BezPath {
         if self
             .completion
             .is_some_and(|completion| completion <= f64::EPSILON)

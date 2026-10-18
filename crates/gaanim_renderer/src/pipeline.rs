@@ -2959,7 +2959,7 @@ fn extract_world(
         Option<&RasterImage>,
         Option<&LottiePlayer>,
         Option<&gaanim_scene::ObjectTag>,
-    ), With<Visible>>();
+    ), (With<Visible>, Without<gaanim_scene::DrawnIn3D>)>();
 
     let mut query_effects = world.query::<(
         Option<&DropShadow>,
@@ -3413,8 +3413,16 @@ type ThreeDData = (
     Option<&'static gaanim_scene::StrokeBrush>,
     Option<Ref<'static, gaanim_scene::LineListSource>>,
     Option<Ref<'static, gaanim_scene::PlaneFillData>>,
+    Option<&'static gaanim_scene::InWorld3D>,
 );
-type ThreeDFilter = (With<Visible>, With<gaanim_scene::Mesh3DMarker>);
+/// 3D primitives, and 2D drawables placed in the 3D world.
+type ThreeDFilter = (
+    With<Visible>,
+    Or<(
+        With<gaanim_scene::Mesh3DMarker>,
+        With<gaanim_scene::PlaneFillData>,
+    )>,
+);
 /// Query of the drawables with 3D content.
 type ThreeDQuery<'w, 's> = Query<'w, 's, ThreeDData, ThreeDFilter>;
 /// The lights shown, where they are and how opaque.
@@ -3466,10 +3474,25 @@ type ThreeDItem<'a> = (
     Option<&'a gaanim_scene::StrokeBrush>,
     Option<Ref<'a, gaanim_scene::LineListSource>>,
     Option<Ref<'a, gaanim_scene::PlaneFillData>>,
+    Option<&'a gaanim_scene::InWorld3D>,
 );
 
 fn three_d_source<'a>(
-    (entity, transform, opacity, mesh, lines, material, hud, exempt, layer, stroke, source, fill): ThreeDItem<'a>,
+    (
+        entity,
+        transform,
+        opacity,
+        mesh,
+        lines,
+        material,
+        hud,
+        exempt,
+        layer,
+        stroke,
+        source,
+        fill,
+        in_world,
+    ): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
     // the source stays uploaded while the reveal moves.
@@ -3492,7 +3515,8 @@ fn three_d_source<'a>(
             opacity,
             mesh: mesh.map(Ref::into_inner),
             lines: lines.map(Ref::into_inner),
-            material,
+            // A 2D drawable placed in 3D is lit with the material it was given.
+            material: material.or(in_world.and_then(|in_world| in_world.material.as_ref())),
             line_width: line_width(stroke),
             line_range,
             fill: fill.map(Ref::into_inner),
@@ -5602,7 +5626,7 @@ pub fn gaanim_render_system(
             Option<Ref<LottiePlayer>>,
             Option<&gaanim_scene::ObjectTag>,
         ),
-        With<Visible>,
+        (With<Visible>, Without<gaanim_scene::DrawnIn3D>),
     >,
     query_effects: Query<(
         Option<Ref<DropShadow>>,

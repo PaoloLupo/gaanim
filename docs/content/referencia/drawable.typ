@@ -1416,6 +1416,22 @@ panel = scene.geometry.rect(2, 1).move_to_3d(0, 0, 0).rotate_to_3d(0.3, 0.6, 0)
 )
 
 #api-entry(
+  name: "Drawable.in_3d",
+  kind: "method",
+  params: (
+    (name: "material", type: "Material3D | None", default: "None", desc: [Con él, el objeto se ilumina y recibe sombras como una superficie; sin él, conserva sus colores sin iluminar.]),
+  ),
+  desc: [Coloca el objeto en el mundo 3D: `move_to_3d` y `rotate_to_3d` lo sitúan y lo inclinan bajo la cámara en perspectiva, y las mallas que tiene delante lo tapan píxel a píxel, en vez de dibujarse encima de todo el 3D. El pase 3D lo dibuja a partir de sus contornos, así que los bordes siguen nítidos a cualquier tamaño. Conserva sus animaciones, colores y trazos: `write`, un fundido o un cambio de color se ven como en 2D. Los degradados se dibujan con su primer color; las sombras, el brillo, el desenfoque, la tiza, las imágenes y las escenas Lottie se omiten. A diferencia de `billboard`, que mantiene el objeto de frente a la cámara, gira con la escena; `hud` lo fija a la imagen.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+sign = scene.text("Hola").in_3d().move_to_3d(0, 1, -2).rotate_to_3d(-1.2, 0, 0)
+floor = scene.text("bajo la luz").in_3d(material=Material3D.matte(WHITE)).rotate_to_3d(-1.5708, 0, 0)
+```
+]
+
+#api-entry(
   name: "Drawable.hud",
   kind: "method",
   desc: [Fija el objeto a la imagen como superposición: se queda en su sitio aunque la cámara 2D se desplace, acerque o gire, y aunque se mueva la cámara 3D. Sus coordenadas son las de la cámara sin mover, así que `.move_to(0, 3.5)` lo pone arriba en un fotograma de 16 × 9. Se dibuja encima de la escena y nunca aparece dentro de una vista de cámara. Pertenece a su segmento como cualquier objeto: `wipe`, `iris`, `blinds` y las demás transiciones vectoriales lo recortan con su segmento, y `push` y `slide` lo desplazan con él. En `cross_fade`, `fade_through` y `zoom_through`, que solo funden la opacidad, se ven a la vez el HUD del segmento que sale y el del que entra; si deben ocupar el mismo sitio, usa un solo HUD con `scene.persist(...)` y cambia su contenido, o dale al que entra una entrada que empiece al terminar la transición.],

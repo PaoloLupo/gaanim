@@ -818,10 +818,25 @@ mod line_tests {
 #[derive(Component, Debug, Clone)]
 pub struct LineListSource(pub LineListData);
 
-/// Filled outlines lying in the drawable's z = 0 plane, as text, equations
-/// and shapes laid in the 3D world: the 3D pass draws them from their curves,
-/// per pixel, beneath or in front of meshes as the depth buffer decides. An
-/// entity with a [`Material3D`] is lit as a surface facing along +z.
+/// A 2D drawable placed in the 3D world: its 3D position and rotation tilt
+/// it under perspective, and the 3D pass draws it from its outlines, hidden
+/// pixel by pixel by meshes in front of it, instead of the 2D renderer
+/// drawing it above all 3D content. With a material it is lit, and receives
+/// shadows, as a surface.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
+pub struct InWorld3D {
+    pub material: Option<Material3D>,
+}
+
+/// A part of an [`InWorld3D`] drawable: the 2D renderer leaves it to the 3D
+/// pass.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DrawnIn3D;
+
+/// Filled outlines lying in the drawable's z = 0 plane: what an
+/// [`InWorld3D`] drawable's parts draw, kept on it each frame. The 3D pass
+/// draws them from their curves, per pixel, beneath or in front of meshes
+/// as the depth buffer decides.
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct PlaneFillData {
     pub glyphs: Vec<PlaneGlyph>,

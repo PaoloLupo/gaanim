@@ -13,8 +13,8 @@ pub mod transition_frame;
 
 pub use components::{
     AuthoredCall, AuthoredIndex, AuthoredObject, AuthoredObjects, Billboard, CoordinateLabelOffset,
-    CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose, DepthOfField, FillBrush,
-    FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, LayoutBackdrop,
+    CoordinateTickLevel, CoordinateViewRole, CoversOnPurpose, DepthOfField, DrawnIn3D, FillBrush,
+    FillDirection, FillLevel, GlobalOpacity, GroupMarker, HudOverlay, InWorld3D, LayoutBackdrop,
     LayoutInspection, LayoutInspectionCell, LayoutInspectionFrame, LayoutInspectionKind,
     LayoutZoneRecord, LayoutZones, Light3D, LightKind3D, Lighting3D, LineListData, LineListSource,
     LocalBounds, Material3D, Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity,
