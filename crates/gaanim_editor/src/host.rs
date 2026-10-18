@@ -69,10 +69,21 @@ pub fn window_title(detail: Option<&str>) -> String {
     }
 }
 
+/// Make an ECS error nothing handles, such as a command on an entity
+/// despawned earlier in the frame, log a warning instead of ending `app`.
+/// Bevy 0.19 runs `close_when_requested` and bevy_winit's `update_cursors` in
+/// `Last` without an order: closing a window in a frame where egui changes
+/// its cursor queues an insert into the despawned window.
+fn warn_on_unhandled_errors(app: &mut App) {
+    app.set_error_handler(gaanim_scene::ecs_error::warn);
+}
+
 /// The editor application, without a scene: callers load a script session,
 /// a playback bundle, or show the project hub.
 pub fn host_app(options: &HostOptions) -> App {
     let mut app = App::new();
+    // Before the plugins, so the render sub-app takes the handler too.
+    warn_on_unhandled_errors(&mut app);
     // A presentation fills its monitor; the editor opens where it was left.
     let remembered = (!options.present && !crate::WEB)
         .then(crate::window_memory::WindowPreferences::load)
@@ -253,6 +264,21 @@ fn spawn_clear_camera(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A command on an entity despawned earlier in the frame, as when a
+    /// window closes while its cursor changes, warns instead of panicking.
+    #[test]
+    fn commands_on_despawned_entities_warn_instead_of_panicking() {
+        let mut app = App::new();
+        warn_on_unhandled_errors(&mut app);
+        let entity = app.world_mut().spawn_empty().id();
+        app.add_systems(Update, move |mut commands: Commands| {
+            commands.entity(entity).despawn();
+            commands.entity(entity).insert(Name::new("late"));
+        });
+        app.update();
+        assert!(app.world().get_entity(entity).is_err());
+    }
 
     #[test]
     fn window_titles_name_the_running_version() {

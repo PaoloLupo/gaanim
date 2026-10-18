@@ -23,6 +23,9 @@ pub use components::{
     TriangleMeshData, Visible, WorldBounds, ZLayer,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
+/// Bevy's handlers of ECS errors no system or command handled, such as
+/// [`ecs_error::warn`], for an app to choose with `App::set_error_handler`.
+pub use bevy::ecs::error as ecs_error;
 pub use occlusion::Occlusion;
 
 /// Bevy's render visibility, which scene entities carry for Bevy's own
