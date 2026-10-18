@@ -189,9 +189,10 @@ const OTHER_KEYS: &[(&str, &str, &str)] = &[
     ),
     (
         "Overlays",
-        "B C G M K",
-        "With overlays on: bounds, coordinates, grid, guides, layout",
+        "B C G M",
+        "With overlays on: bounds, coordinates, grid, guides",
     ),
+    LAYOUT_KEYS,
     (
         "Overlays",
         "Ctrl+C",
@@ -215,6 +216,26 @@ const OTHER_KEYS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// The layout overlay's key, left off the sheet while a bundle plays: a
+/// bundle records frames, not the layout that placed them.
+const LAYOUT_KEYS: (&str, &str, &str) =
+    ("Overlays", "K", "With overlays on: layout boxes and zones");
+
+/// Whether the palette and the sheet offer `spec`: a bundle records frames,
+/// not the animations the timeline panel lists.
+fn offered(spec: &Spec, bundle: bool) -> bool {
+    !bundle || (spec.command)() != Command::Animations
+}
+
+/// `spec`'s title; while a bundle plays, the overlays have no layout.
+fn spec_title(spec: &Spec, bundle: bool) -> &'static str {
+    if bundle && (spec.command)() == Command::Overlays {
+        "Overlays: bounds, grid, guides"
+    } else {
+        spec.title
+    }
+}
+
 /// An entry of the palette's list.
 #[derive(Debug, Clone)]
 struct Item {
@@ -235,13 +256,14 @@ struct Item {
     cue: Option<crate::presenter::ThumbnailKey>,
 }
 
-/// The palette's entries: every command, each Settings section, and the
-/// recent projects to switch to.
-fn items(recents: &[RecentEntry]) -> Vec<Item> {
+/// The palette's entries: every command (those a `bundle` can use while
+/// one plays), each Settings section, and the recent projects to switch to.
+fn items(recents: &[RecentEntry], bundle: bool) -> Vec<Item> {
     let mut items: Vec<Item> = COMMANDS
         .iter()
+        .filter(|spec| offered(spec, bundle))
         .map(|spec| Item {
-            title: spec.title.to_owned(),
+            title: spec_title(spec, bundle).to_owned(),
             group: spec.group.to_owned(),
             shortcut: spec.shortcut,
             command: (spec.command)(),
@@ -403,6 +425,8 @@ pub(crate) struct CommandPalette {
     /// Focus the search field on the next frame.
     focus: bool,
     forwarded: Option<PlaybackAction>,
+    /// Whether a bundle plays rather than a scene.
+    bundle: bool,
 }
 
 impl CommandPalette {
@@ -418,7 +442,10 @@ impl CommandPalette {
         self.query.clear();
         self.highlight = 0;
         self.focus = true;
-        self.items = items(&gaanim_project::RecentProjects::load().entries());
+        self.items = items(
+            &gaanim_project::RecentProjects::load().entries(),
+            self.bundle,
+        );
     }
 
     fn show_jumps(&mut self, timeline: &Timeline) {
@@ -463,7 +490,11 @@ fn command_palette_system(
     mut animations: ResMut<AnimationTimeline>,
     mut thumbnails: ResMut<crate::presenter::PresenterThumbnailCache>,
     stash: Res<crate::export::StashedReplay>,
+    bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
 ) {
+    if palette_state.bundle != bundle.is_some() {
+        palette_state.bundle = bundle.is_some();
+    }
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let Some(mut hub) = hub else {
         return;
@@ -961,10 +992,20 @@ fn sheet_ui(ctx: &egui::Context, state: &mut CommandPalette) {
     let screen = ctx.viewport_rect();
     let width = 640.0_f32.min(screen.width() - 32.0);
     let mut groups: Vec<(&str, Vec<(&str, &str)>)> = Vec::new();
+    let bundle = state.bundle;
     let rows = COMMANDS
         .iter()
-        .filter_map(|spec| spec.shortcut.map(|keys| (spec.group, keys, spec.title)))
-        .chain(OTHER_KEYS.iter().copied());
+        .filter(|spec| offered(spec, bundle))
+        .filter_map(|spec| {
+            spec.shortcut
+                .map(|keys| (spec.group, keys, spec_title(spec, bundle)))
+        })
+        .chain(
+            OTHER_KEYS
+                .iter()
+                .copied()
+                .filter(|row| !bundle || *row != LAYOUT_KEYS),
+        );
     for (group, keys, what) in rows {
         match groups.iter_mut().find(|(name, _)| *name == group) {
             Some((_, entries)) => entries.push((keys, what)),
@@ -1039,7 +1080,7 @@ mod tests {
 
     #[test]
     fn typing_finds_commands_by_their_initials_and_words() {
-        let items = items(&[]);
+        let items = items(&[], false);
         assert_eq!(titles(&items, "").len(), items.len());
         assert_eq!(titles(&items, "export")[0], "Export…");
         assert_eq!(titles(&items, "fs")[0], "Full screen");
@@ -1049,10 +1090,36 @@ mod tests {
 
     #[test]
     fn a_group_name_finds_its_commands() {
-        let items = items(&[]);
+        let items = items(&[], false);
         let found = titles(&items, "playback");
         assert!(found.contains(&"Play / pause"));
         assert!(found.contains(&"Go to end"));
+    }
+
+    #[test]
+    fn a_bundle_is_offered_no_animations_or_layout() {
+        let scene = items(&[], false);
+        let recorded = items(&[], true);
+        let overlays = |items: &[Item]| {
+            items
+                .iter()
+                .find(|item| item.command == Command::Overlays)
+                .map(|item| item.title.clone())
+        };
+        assert!(scene.iter().any(|item| item.command == Command::Animations));
+        assert!(
+            recorded
+                .iter()
+                .all(|item| item.command != Command::Animations)
+        );
+        assert_eq!(
+            overlays(&scene).as_deref(),
+            Some("Overlays: bounds, grid, guides, layout")
+        );
+        assert_eq!(
+            overlays(&recorded).as_deref(),
+            Some("Overlays: bounds, grid, guides")
+        );
     }
 
     #[test]

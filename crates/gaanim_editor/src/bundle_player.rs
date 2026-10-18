@@ -408,6 +408,25 @@ impl Plugin for BundlePlayerPlugin {
     }
 }
 
+/// A two-frame bundle for tests, its camera zoomed in its second frame.
+#[cfg(test)]
+pub(crate) fn test_bundle() -> Arc<[u8]> {
+    use gaanim_bundle::{BundleWriter, SceneData};
+    let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+    for (index, zoom) in [1.0, 3.0].into_iter().enumerate() {
+        writer
+            .push_frame(&tests::frame(index as f64 * 0.5, zoom), [0; 32])
+            .unwrap();
+    }
+    let scene = SceneData {
+        fps: 2,
+        duration: 1.0,
+        output_size: (16, 9),
+        ..Default::default()
+    };
+    writer.finish(&scene).unwrap().into_inner().into()
+}
+
 /// Whether `path` names a playback bundle.
 pub fn is_bundle_path(path: &Path) -> bool {
     path.extension()
@@ -419,9 +438,9 @@ pub fn is_bundle_path(path: &Path) -> bool {
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use gaanim_bundle::{BundleWriter, Frame, SceneData};
+    use gaanim_bundle::Frame;
 
-    fn frame(time: f64, zoom: f64) -> Frame {
+    pub(super) fn frame(time: f64, zoom: f64) -> Frame {
         let mut camera = gaanim_math::Camera::ortho_2d(1280, 720);
         camera.projection = gaanim_math::Projection::Orthographic { zoom };
         Frame {
@@ -435,21 +454,8 @@ mod tests {
 
     #[test]
     fn the_recorded_camera_survives_seeks_between_frame_changes() {
-        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
-        for (index, zoom) in [1.0, 3.0].into_iter().enumerate() {
-            writer
-                .push_frame(&frame(index as f64 * 0.5, zoom), [0; 32])
-                .unwrap();
-        }
-        let scene = SceneData {
-            fps: 2,
-            duration: 1.0,
-            output_size: (16, 9),
-            ..Default::default()
-        };
-        let bytes = writer.finish(&scene).unwrap().into_inner();
         let mut world = World::new();
-        open_bundle_bytes(&mut world, Path::new("test.gaanim"), bytes.into()).unwrap();
+        open_bundle_bytes(&mut world, Path::new("test.gaanim"), test_bundle()).unwrap();
         let zoomed = frame(0.5, 3.0).camera;
 
         world.resource_mut::<Timeline>().current_time = 0.6;

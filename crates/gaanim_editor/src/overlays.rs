@@ -355,10 +355,14 @@ pub fn overlays_settings_ui_system(
     mut console: ResMut<crate::console_panel::ConsolePanel>,
     mut capture: ResMut<crate::frame_capture::FrameCapture>,
     mut animations: ResMut<crate::animation_timeline::AnimationTimeline>,
+    bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
 ) {
     if presentation.active || !overlays.enabled {
         return;
     }
+    // A bundle holds recorded frames and cameras, not the scene's objects,
+    // layout or animations: the tools that read those are left out.
+    let recorded = bundle.is_some();
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
@@ -390,10 +394,13 @@ pub fn overlays_settings_ui_system(
                             palette::ACCENT,
                             HEIGHT,
                         )
-                        .on_hover_text(
+                        .on_hover_text(if recorded {
+                            "Move the view without touching the recorded camera · I\n\
+                             Dragging pans and the wheel zooms toward the cursor."
+                        } else {
                             "Move the view without touching the scene's camera · I\n\
-                             Dragging pans, the wheel zooms toward the cursor and a click selects.",
-                        )
+                             Dragging pans, the wheel zooms toward the cursor and a click selects."
+                        })
                         .clicked()
                         {
                             interactive.toggle(authored_camera.as_deref().copied());
@@ -454,19 +461,20 @@ pub fn overlays_settings_ui_system(
                         {
                             overlays.show_guides = !overlays.show_guides;
                         }
-                        if pill_toggle(
-                            ui,
-                            Icon::Layout,
-                            Some("Layout"),
-                            overlays.show_layout,
-                            colors::LAYOUT,
-                            HEIGHT,
-                        )
-                        .on_hover_text(
-                            "Layout boxes and zones · K\n\
-                             Hovering a box shows its content, padding, margin and gap.",
-                        )
-                        .clicked()
+                        if !recorded
+                            && pill_toggle(
+                                ui,
+                                Icon::Layout,
+                                Some("Layout"),
+                                overlays.show_layout,
+                                colors::LAYOUT,
+                                HEIGHT,
+                            )
+                            .on_hover_text(
+                                "Layout boxes and zones · K\n\
+                                 Hovering a box shows its content, padding, margin and gap.",
+                            )
+                            .clicked()
                         {
                             overlays.show_layout = !overlays.show_layout;
                         }
@@ -512,10 +520,13 @@ pub fn overlays_settings_ui_system(
                             palette::ACCENT,
                             HEIGHT,
                         )
-                        .on_hover_text(
+                        .on_hover_text(if recorded {
+                            "The recorded camera at the playhead\n\
+                             A bundle has no objects to select."
+                        } else {
                             "Properties of the selected object and its line in the script
-                             A click in the view selects an object.",
-                        )
+                             A click in the view selects an object."
+                        })
                         .clicked()
                         {
                             inspector.enabled = !inspector.enabled;
@@ -533,19 +544,20 @@ pub fn overlays_settings_ui_system(
                         {
                             console.open = !console.open;
                         }
-                        if pill_toggle(
-                            ui,
-                            Icon::Timeline,
-                            Some("Animations"),
-                            animations.open,
-                            palette::ACCENT,
-                            HEIGHT,
-                        )
-                        .on_hover_text(
-                            "What animates each object and when · T\n\
-                             Click a block: go to its start · double-click: open its play.",
-                        )
-                        .clicked()
+                        if !recorded
+                            && pill_toggle(
+                                ui,
+                                Icon::Timeline,
+                                Some("Animations"),
+                                animations.open,
+                                palette::ACCENT,
+                                HEIGHT,
+                            )
+                            .on_hover_text(
+                                "What animates each object and when · T\n\
+                                 Click a block: go to its start · double-click: open its play.",
+                            )
+                            .clicked()
                         {
                             animations.open = !animations.open;
                         }
@@ -1581,6 +1593,7 @@ pub fn overlays_toggle_keys_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut overlays: ResMut<EditorOverlays>,
     presentation: Res<PresentationMode>,
+    bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
 ) {
     if presentation.active {
         return;
@@ -1620,7 +1633,8 @@ pub fn overlays_toggle_keys_system(
     if keys.just_pressed(KeyCode::KeyM) {
         overlays.show_guides = !overlays.show_guides;
     }
-    if keys.just_pressed(KeyCode::KeyK) {
+    // A bundle has no layout to show.
+    if keys.just_pressed(KeyCode::KeyK) && bundle.is_none() {
         overlays.show_layout = !overlays.show_layout;
     }
 }
@@ -1628,6 +1642,46 @@ pub fn overlays_toggle_keys_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bundle_ignores_the_keys_of_the_layout_and_the_animations() {
+        use crate::animation_timeline::{AnimationTimeline, animation_timeline_keys_system};
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        crate::bundle_player::open_bundle_bytes(
+            &mut world,
+            std::path::Path::new("test.gaanim"),
+            crate::bundle_player::test_bundle(),
+        )
+        .unwrap();
+        let mut keys = ButtonInput::<KeyCode>::default();
+        keys.press(KeyCode::KeyK);
+        keys.press(KeyCode::KeyT);
+        world.insert_resource(keys);
+        world.insert_resource(bevy_egui::input::EguiWantsInput::default());
+        world.insert_resource(PresentationMode::default());
+        world.insert_resource(AnimationTimeline::default());
+        world.insert_resource(EditorOverlays {
+            enabled: true,
+            ..EditorOverlays::default()
+        });
+        let press = |world: &mut World| {
+            world.run_system_once(overlays_toggle_keys_system).unwrap();
+            world
+                .run_system_once(animation_timeline_keys_system)
+                .unwrap();
+            (
+                world.resource::<EditorOverlays>().show_layout,
+                world.resource::<AnimationTimeline>().open,
+            )
+        };
+
+        assert_eq!(press(&mut world), (false, false));
+        // A scene has them.
+        world.remove_resource::<crate::bundle_player::BundlePlayback>();
+        assert_eq!(press(&mut world), (true, true));
+    }
 
     #[test]
     fn grid_step_uses_readable_logical_units_at_common_editor_scales() {
