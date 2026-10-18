@@ -65,6 +65,9 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   inicial.
 - `scene.geometry.group(a, b)` acepta los miembros sueltos además de una
   lista.
+- `deg(90)` convierte grados a los radianes que piden los ángulos, como en
+  `rotate_to_3d(deg(-30), deg(45), 0)`. Con un `Parameter`, un `Computed` o
+  `scene.time` devuelve un `Computed` que lo sigue.
 - `space.parametric_surface(f, u_domain, v_domain)` dibuja superficies
   paramétricas `(u, v) → (x, y, z)` en un espacio 3D. Con `inputs` reactivas
   la malla se vuelve a muestrear y una superficie se dobla en otra;

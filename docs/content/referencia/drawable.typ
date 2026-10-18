@@ -240,6 +240,23 @@ Setters absolutos (`move_to`, `scale_to`, `rotate_to`, `skew_to`) y relativos (`
 animadas están en #link("/referencia/animations/")[Animaciones].
 
 #api-entry(
+  name: "deg",
+  kind: "function",
+  signature: "deg(value) -> float | Computed",
+  params: ((name: "value", type: "float | Parameter | Variable | Computed | scene.time", default: none, desc: [Ángulo en grados.]),),
+  desc: [Convierte grados a los radianes que piden todos los ángulos de la API: rotaciones, órbitas de cámara, arcos o campos de visión. Un número devuelve un número (`deg(180) == math.pi`); una fuente reactiva devuelve un `Computed` que la sigue, para ángulos reactivos como `rotate_to(deg(angle))`. Un número no finito lanza `ValueError` y otro tipo, `TypeError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+angle = scene.viz.parameter(0.0)
+needle = scene.geometry.rect(3, 0.1).rotate_to(deg(angle))
+card = scene.geometry.square(2).rotate_to_3d(deg(-30), deg(45), 0)
+scene.play([angle.animate.set(90)], duration=1.0)
+```
+]
+
+#api-entry(
   name: "Drawable.move_to",
   kind: "method",
   signature: "move_to(x, y, anchor=None) | move_to(reference) | move_to(point) -> Self",
@@ -295,9 +312,8 @@ logo = scene.media.svg("assets/logo.svg").scale_to(2.5)
 )[
 ```python
 >>>from gaanim import *
->>>import math
 >>>scene = Scene(frame=(16, 9))
-tilted = scene.geometry.square(1).rotate_to(math.pi / 4)
+tilted = scene.geometry.square(1).rotate_to(deg(45))
 ```
 ]
 
@@ -1347,7 +1363,8 @@ scene.wait(1)
 #experimental()
 
 Los mismos setters en tres ejes, para objetos colocados en el espacio de la
-cámara en perspectiva. Las rotaciones de Euler usan orden XYZ y radianes.
+cámara en perspectiva. Las rotaciones de Euler usan orden XYZ y radianes;
+`deg(30)` convierte grados.
 
 #api-entry(
   name: "Drawable.move_to_3d",

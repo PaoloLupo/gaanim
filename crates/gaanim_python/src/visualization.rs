@@ -533,6 +533,18 @@ pub fn computed(
     Ok(PyComputed { source, owners })
 }
 
+/// `value` degrees in radians, for any parameter that takes an angle: a
+/// number for a number, and a `Computed` that follows a reactive value.
+#[pyfunction]
+pub fn deg(py: Python<'_>, value: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    let DeferredScalar { source, owners } = extract_deferred_scalar(value)?;
+    if let Some(degrees) = source.constant_value() {
+        return Ok(degrees.to_radians().into_pyobject(py)?.into_any().unbind());
+    }
+    let source = source.scaled(std::f64::consts::PI / 180.0);
+    Ok(Py::new(py, PyComputed { source, owners })?.into_any())
+}
+
 fn field_evaluator_2d(
     py: Python<'_>,
     function: Py<PyAny>,
