@@ -4399,6 +4399,24 @@ macro_rules! media_drawable_methods {
         slf.handle().quality(crate::pycanvas::image_quality(value)?).map_err(PyValueError::new_err)?;
         Ok(slf)
     }
+    /// A point at a source pixel that follows the frame, crop and transforms.
+    #[pyo3(signature = (x, y, *, normalized=false))]
+    fn point_ref(&self, x: f64, y: f64, normalized: bool) -> PyResult<crate::pycanvas::PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.handle()
+            .media_point(x, y, normalized)
+            .map(crate::pycanvas::PyPointRef)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+    /// An invisible drawable over source pixels that follows the frame, crop and transforms.
+    #[pyo3(signature = (x, y, width, height, *, normalized=false))]
+    fn region(&self, x: f64, y: f64, width: f64, height: f64, normalized: bool) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.handle()
+            .media_region(x, y, width, height, normalized)
+            .map(PyDrawable)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
     #[getter]
     fn source_width(&self) -> PyResult<u32> { crate::custom::ensure_authoring_allowed()?; self.handle().source_width().map_err(PyValueError::new_err) }
     #[getter]

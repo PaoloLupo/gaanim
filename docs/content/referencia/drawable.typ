@@ -396,7 +396,7 @@ scene.render()
   kind: "method",
   params: ((name: "px, py", type: "float", default: none, desc: [Píxel del archivo original, contado desde la esquina superior izquierda con y hacia abajo, como en un editor de imágenes.]),),
   returns: (type: "AnchorPoint", desc: [El punto de la imagen o el vídeo en ese píxel.]),
-  desc: [Convierte un píxel de una imagen o un vídeo en un punto de anclaje que sirve en `move_to`, `scene.camera.inset`, `pan_to` o conectores, y que sigue a la imagen si se mueve, escala o gira. Tiene en cuenta el recorte, `width=` y el modo de ajuste; mide sobre el archivo original, no sobre una captura reducida. Lanza `ValueError` en otros objetos o con coordenadas no finitas.],
+  desc: [Convierte un píxel de una imagen o un vídeo en un punto de anclaje que sirve en `move_to`, `scene.camera.inset`, `pan_to` o conectores, y que sigue a la imagen si se mueve, escala o gira. Tiene en cuenta el recorte, `width=` y el modo de ajuste; mide sobre el archivo original, no sobre una captura reducida. Se mide con el marco y el recorte que el objeto tiene al llamarlo; para un punto que siga un recorte posterior o animado, usa #link("/referencia/medios/#api-image-point_ref")[`Image.point_ref`]. Lanza `ValueError` en otros objetos o con coordenadas no finitas.],
 )[
 ```python
 >>>from gaanim import *

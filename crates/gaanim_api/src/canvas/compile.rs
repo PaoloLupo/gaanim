@@ -98,6 +98,15 @@ fn reactive_polyline_path(
     path
 }
 
+/// Where source pixel `(x, y)` of the image or video `media` shows in the
+/// scene as authored so far: through its media frame and world transform.
+fn authored_media_point(builder: &SceneBuilder, media: ObjectId, x: f64, y: f64) -> Option<DVec3> {
+    let frame = builder.media_frames.get(&media)?;
+    let local = frame.geometry().1 * gaanim_core::kurbo::Point::new(x, y);
+    let matrix = builder.get_world_transform(media).to_mat4();
+    Some(matrix.transform_point3(DVec3::new(local.x, local.y, 0.0)))
+}
+
 /// The stretches of stepped time: each segment with a step rate, cut at its
 /// stops so that the steps start again at each one.
 fn step_windows(
@@ -762,6 +771,15 @@ fn compile_tracking_endpoint(
             x: compile_tracking_scalar(x, id_map, states),
             y: compile_tracking_scalar(y, id_map, states),
         },
+        CanvasEndpoint::MediaPixel { object, x, y } => id_map
+            .get(object)
+            .and_then(|runtime| states.get(*runtime))
+            .map(|state| TrackingEndpoint::MediaPixel {
+                entity: state.entity,
+                x: *x,
+                y: *y,
+            })
+            .unwrap_or(TrackingEndpoint::Static(DVec3::ZERO)),
         CanvasEndpoint::LocalExpression { space, x, y, z } => id_map
             .get(space)
             .and_then(|runtime| states.get(*runtime))
@@ -7007,6 +7025,42 @@ impl SceneModel {
                         );
                     }
                 }
+                Op::AttachMediaRegion {
+                    target,
+                    media,
+                    rect,
+                } => {
+                    let media = id_map.get(media).copied();
+                    let target = id_map.get(target).copied();
+                    if let (Some(media), Some(target)) = (media, target)
+                        && let Some(media_entity) = builder.states.get(media).map(|s| s.entity)
+                    {
+                        let [x0, y0, x1, y1] = *rect;
+                        // Placed now as the system will place it, for the
+                        // measurements made while the scene is authored.
+                        let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+                            .map(|(x, y)| authored_media_point(builder, media, x, y));
+                        if let Some(state) = builder.states.get_mut(target) {
+                            let entity = state.entity;
+                            let mut commands = builder.commands.entity(entity);
+                            commands.insert(gaanim_animation::MediaRegion {
+                                media: media_entity,
+                                rect: gaanim_core::kurbo::Rect::new(x0, y0, x1, y1),
+                            });
+                            if let [Some(a), Some(b), Some(c), Some(d)] = corners {
+                                let (path, bounds) =
+                                    gaanim_animation::media_region_shape([a, b, c, d]);
+                                let path = std::sync::Arc::new(path);
+                                state.path = path.clone();
+                                state.bounds = bounds;
+                                commands.insert((
+                                    gaanim_scene::Path2D(path),
+                                    gaanim_scene::LocalBounds(bounds),
+                                ));
+                            }
+                        }
+                    }
+                }
                 Op::AttachLineFrames {
                     target,
                     sources,
@@ -8770,6 +8824,11 @@ impl SceneModel {
                     bounds.center() + bounds.size() * 0.5 * anchor.normalized + anchor.offset;
                 let matrix = builder.get_world_transform(runtime).to_mat4();
                 Some((matrix.transform_point3(local), matrix))
+            }
+            CanvasEndpoint::MediaPixel { object, x, y } => {
+                let runtime = *id_map.get(object)?;
+                let matrix = builder.get_world_transform(runtime).to_mat4();
+                Some((authored_media_point(builder, runtime, *x, *y)?, matrix))
             }
             _ => None,
         }
@@ -19374,6 +19433,82 @@ mod tests {
         // Pixel (150, 25): x = -2 + 3 = 1, y = 1 - 0.5 = 0.5, then moved by (1, 1).
         assert!(at.distance(DVec3::new(2.0, 1.5, 0.0)) < 1e-9, "{at:?}");
         assert_eq!(corner.offset, DVec3::new(-2.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn media_points_and_regions_stay_on_their_pixels_through_an_animated_crop() {
+        use gaanim_animation::{EndpointFollow, MediaRegion, resolve_tracking_endpoint};
+        let mut canvas = SceneModel::new(640, 360);
+        let image = gaanim_core::peniko::ImageData {
+            data: gaanim_core::peniko::Blob::new(std::sync::Arc::new(vec![255u8; 4 * 200 * 100])),
+            format: gaanim_core::peniko::ImageFormat::Rgba8,
+            alpha_type: gaanim_core::peniko::ImageAlphaType::Alpha,
+            width: 200,
+            height: 100,
+        };
+        // 200x100 px contained in a 4x2 frame: 50 px per unit.
+        let options = crate::canvas::types::ImageOptions {
+            width: Some(4.0),
+            height: Some(2.0),
+            ..Default::default()
+        };
+        let view = options.resolve(200, 100).unwrap();
+        let picture = canvas
+            .spawn(SpawnKind::Image { image, view })
+            .move_to(1.0, 1.0)
+            .rotate_to(std::f64::consts::FRAC_PI_2);
+        picture.spec.lock().unwrap().media_frame = Some(options.media_frame(view));
+        let point = picture.media_point(0.75, 0.25, true).unwrap();
+        // The top-right quarter of the source.
+        let region = picture
+            .media_region(100.0, 0.0, 100.0, 50.0, false)
+            .unwrap();
+        assert!(picture.media_region(0.0, 0.0, 0.0, 10.0, false).is_err());
+        assert!(picture.media_point(f64::NAN, 0.0, false).is_err());
+        assert!(canvas.rect(1.0, 1.0).media_point(0.0, 0.0, false).is_err());
+        let marker = canvas.dot(0.05).follow_endpoint(
+            point.0.clone(),
+            DVec3::ZERO,
+            gaanim_animation::FollowOffsetSpace::World,
+        );
+        // Then show the source's right half, contained: the same scale,
+        // with the frame centered on pixel x 150.
+        let zoom = picture
+            .animate()
+            .crop(100.0, 0.0, 100.0, 100.0, false)
+            .unwrap()
+            .duration(1.0);
+        canvas.play(vec![zoom]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let marker_entity = entity_of(&mut world, &marker);
+        let follow = world.get::<EndpointFollow>(marker_entity).unwrap().clone();
+        let region_bounds = |world: &mut World| {
+            world
+                .query::<(&MediaRegion, &gaanim_scene::LocalBounds)>()
+                .single(world)
+                .unwrap()
+                .1
+                .0
+        };
+        let close = |a: DVec3, b: DVec3| a.distance(b) < 1e-9;
+        // Turned a quarter: local (x, y) shows at (1 - y, 1 + x).
+        timeline.seek(&mut world, 0.0);
+        let at = resolve_tracking_endpoint(&follow.endpoint, &world).unwrap();
+        // Pixel (150, 25) is local (1, 0.5).
+        assert!(close(at, DVec3::new(0.5, 2.0, 0.0)), "{at:?}");
+        // The compiled region already lies on its pixels: local x 0..2, y 0..1.
+        let bounds = region_bounds(&mut world);
+        assert!(close(bounds.min, DVec3::new(0.0, 1.0, 0.0)), "{bounds:?}");
+        assert!(close(bounds.max, DVec3::new(1.0, 3.0, 0.0)), "{bounds:?}");
+        timeline.seek(&mut world, 1.0);
+        gaanim_animation::media_region_system(&mut world);
+        let at = resolve_tracking_endpoint(&follow.endpoint, &world).unwrap();
+        // Pixel (150, 25) is now local (0, 0.5).
+        assert!(close(at, DVec3::new(0.5, 1.0, 0.0)), "{at:?}");
+        let bounds = region_bounds(&mut world);
+        assert!(close(bounds.min, DVec3::new(0.0, 0.0, 0.0)), "{bounds:?}");
+        assert!(close(bounds.max, DVec3::new(1.0, 2.0, 0.0)), "{bounds:?}");
+        let _ = region;
     }
 
     #[test]

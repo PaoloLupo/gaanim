@@ -1014,6 +1014,96 @@ pub enum TrackingEndpoint {
         radius: TrackingScalar,
         angle: TrackingScalar,
     },
+    /// A pixel of an image's or a video's source, from its top-left corner
+    /// with y down, through the media's frame, crop and transforms.
+    MediaPixel { entity: Entity, x: f64, y: f64 },
+}
+
+/// The scene point that shows source pixel `(x, y)` of the image or video
+/// `entity`: through its [`gaanim_scene::MediaFrame`], read as the timeline
+/// left it, so an animated crop moves the point in the same frame.
+pub fn media_pixel_point(entity: Entity, x: f64, y: f64, world: &World) -> Option<DVec3> {
+    let local = world.get::<gaanim_scene::MediaFrame>(entity)?.geometry().1
+        * gaanim_core::kurbo::Point::new(x, y);
+    entity_world_matrix(entity, world)
+        .map(|matrix| matrix.transform_point3(DVec3::new(local.x, local.y, 0.0)))
+}
+
+/// Component: an invisible quad over a rectangle of source pixels of an
+/// image or video, kept on them as the media's frame, crop and transforms
+/// change. Its path and bounds are in scene coordinates, as a surrounding
+/// rectangle's are, so frames, notations and spotlights can target it.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct MediaRegion {
+    pub media: Entity,
+    /// Source pixels, from the top-left corner with y down.
+    pub rect: gaanim_core::kurbo::Rect,
+}
+
+impl MediaRegion {
+    /// The region's corners in scene coordinates, clockwise from the
+    /// top-left pixel.
+    pub fn corners(&self, world: &World) -> Option<[DVec3; 4]> {
+        let rect = self.rect;
+        let corner = |x, y| media_pixel_point(self.media, x, y, world);
+        Some([
+            corner(rect.x0, rect.y0)?,
+            corner(rect.x1, rect.y0)?,
+            corner(rect.x1, rect.y1)?,
+            corner(rect.x0, rect.y1)?,
+        ])
+    }
+}
+
+/// The closed quad through `corners` and its bounds.
+pub fn media_region_shape(corners: [DVec3; 4]) -> (BezPath, gaanim_math::Bounds3D) {
+    let mut path = BezPath::new();
+    path.move_to((corners[0].x, corners[0].y));
+    for corner in &corners[1..] {
+        path.line_to((corner.x, corner.y));
+    }
+    path.close_path();
+    let min = corners
+        .iter()
+        .copied()
+        .reduce(DVec3::min)
+        .unwrap_or_default();
+    let max = corners
+        .iter()
+        .copied()
+        .reduce(DVec3::max)
+        .unwrap_or_default();
+    (
+        path,
+        gaanim_math::Bounds3D::new_2d(min.x, min.y, max.x, max.y),
+    )
+}
+
+/// Puts every [`MediaRegion`] back on its pixels, before the surrounding
+/// rectangles that frame it measure it.
+pub fn media_region_system(world: &mut World) {
+    let regions = world
+        .query::<(Entity, &MediaRegion)>()
+        .iter(world)
+        .map(|(entity, region)| (entity, *region))
+        .collect::<Vec<_>>();
+    for (entity, region) in regions {
+        let Some(corners) = region.corners(world) else {
+            continue;
+        };
+        let (path, bounds) = media_region_shape(corners);
+        // A still region keeps its path, so its fragment is not rebuilt.
+        if world
+            .get::<Path2D>(entity)
+            .is_some_and(|current| *current.0 == path)
+        {
+            continue;
+        }
+        write_path(world, entity, path);
+        if let Some(mut local) = world.get_mut::<LocalBounds>(entity) {
+            local.0 = bounds;
+        }
+    }
 }
 
 /// Scalar expression with its construction-time parameter ids resolved to ECS entities.
@@ -2358,6 +2448,7 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
             let angle = angle.evaluate(world)?;
             Some(origin + DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0))
         }
+        TrackingEndpoint::MediaPixel { entity, x, y } => media_pixel_point(*entity, *x, *y, world),
     }
 }
 
@@ -2394,7 +2485,9 @@ pub fn resolve_entity_bounds(entity: Entity, world: &World) -> Option<gaanim_mat
 
 fn endpoint_basis(ep: &TrackingEndpoint, world: &World) -> DMat4 {
     match ep {
-        TrackingEndpoint::Entity(entity) | TrackingEndpoint::EntityAnchor { entity, .. } => {
+        TrackingEndpoint::Entity(entity)
+        | TrackingEndpoint::EntityAnchor { entity, .. }
+        | TrackingEndpoint::MediaPixel { entity, .. } => {
             entity_world_matrix(*entity, world).unwrap_or(DMat4::IDENTITY)
         }
         TrackingEndpoint::LocalExpression { space, .. }

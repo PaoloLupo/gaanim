@@ -1,9 +1,10 @@
-"""Images: fitting a raster image to a frame, cropping it, panning and zooming inside it, and sampling quality.
+"""Images: fitting a raster image to a frame, cropping it, panning and zooming inside it, sampling quality, and points on its pixels.
 
 Every image sits in an outline of the frame it is given, so the fit modes
 show what they keep and what they cut. Each crop is shown twice: the whole
 image with the crop window on it, and the cropped image in its frame.
-Animating the crop pans and zooms inside the same frame.
+Animating the crop pans and zooms inside the same frame, and points and
+regions on source pixels stay on their detail while it does.
 """
 
 import os
@@ -139,8 +140,32 @@ for cell, quality in zip(cells, ["low", "medium", "high"]):
     scene.media.image(BADGE, width=S, height=S, crop=(244, 120, 24, 24), quality=quality).move_to(*stage.center)
 scene.wait(1.0)
 
+# point_ref and region sit on source pixels, read through the frame and the
+# current crop every frame: while the crop zooms in, the circles around the
+# regions and the connector to the point stay on their detail, not on the
+# frame, as they would follow a moving drawable. A notation is hand-drawn
+# by default; roughness=0 and a single pass draw clean geometry.
+pixels_start = scene.cursor
+scene.segment("pixels")
+page = scene.layout.zones(Zones.rows(["1fr", "2fr", "1fr", "1fr", "6fr"], gap="12px", padding="page_padding"))
+code("image.region(205, 128, 64, 64).annotate.circle()", page[0])
+code("image.region(280, 200, 48, 48).annotate.circle(\n    roughness=0, passes=1)", page[1])
+code("image.animate.crop(154, 77, 205, 205)", page[2])
+label = code("image.point_ref(237, 160)", page[3])
+stage = page[4]
+size = min(stage.width, stage.height)
+image = scene.media.image(BADGE, width=size, height=size).move_to(*stage.center)
+outline(stage.center, size, size)
+rough = image.region(205, 128, 64, 64).annotate.circle()
+clean = image.region(280, 200, 48, 48).annotate.circle(roughness=0, passes=1)
+scene.geometry.connector(label.anchor_point("bottom", offset=(0.0, -0.1)), image.point_ref(237, 160))
+scene.play([rough.animate.create().duration(0.6), clean.animate.create().duration(0.6)])
+scene.play([image.animate.crop(154, 77, 205, 205)], duration=2.0)
+scene.wait(0.5)
+
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
-    # The fits, the crops, the pan and zoom before, during and after, the qualities.
-    scene.snapshots(snapshots, [0.5, 1.5, 2.2, 3.0, 4.2, 4.8])
+    # The fits, the crops, the pan and zoom before, during and after, the
+    # qualities, and the region and point through the zoom.
+    scene.snapshots(snapshots, [0.5, 1.5, 2.2, 3.0, 4.2, 4.8] + [pixels_start + t for t in (0.8, 1.6, 2.9)])
 else:
     scene.render()

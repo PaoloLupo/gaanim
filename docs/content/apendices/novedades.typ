@@ -95,6 +95,12 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   por las dos caras con `lighting_3d`, como `parametric_surface`: conserva
   sus colores por altura, el relieve se ve por la luz y proyecta y recibe
   sombras. Lo muestra `3d/plots_3d`.
+- `image.point_ref(x, y)` es un punto sobre un píxel de una imagen o un
+  vídeo que se queda en ese detalle mientras `animate.crop` hace un paneo o
+  un zoom, y sigue a la imagen si se mueve o gira. `image.region(x, y, w, h)`
+  es un objeto invisible sobre un rectángulo de píxeles al que apuntan
+  `annotate`, `scene.fx.spotlight`, `surrounding_rect` y los conectores, así
+  que una marca sigue a un detalle durante un Ken Burns.
 
 == Tiempo y texto
 
