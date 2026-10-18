@@ -123,7 +123,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   miden lo que los de los ejes 2D (los estilos `axes/numbers` y
   `axes/labels` del tema) y miran a la cámara. Antes medían menos de un
   píxel. En la esquina donde empiezan los tres ejes solo se escribe el
-  número del primero que los muestra, para que no se monten.
+  número del primero que los muestra, para que no se monten. Cada número
+  guarda en pantalla la misma distancia a su eje que en 2D, con la cámara
+  cerca, lejos o mirando a lo largo del eje, en el lado que la caja deja
+  libre; cada título queda pasado el final de su eje y de sus números.
 - Las etiquetas con `.billboard()` se desvanecen detrás de las mallas 3D
   opacas y vuelven al salir, poco a poco cuando quedan a medias tras su
   borde. Con la cámara en perspectiva aparecen en su punto 3D; antes caían

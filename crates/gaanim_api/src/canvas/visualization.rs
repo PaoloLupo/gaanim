@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use gaanim_animation::{ReactiveFunction, ScalarSource};
-use gaanim_core::glam::DVec3;
+use gaanim_core::glam::{DVec2, DVec3};
 use gaanim_core::kurbo::{BezPath, Circle, Point, Rect, Shape};
 use gaanim_core::peniko::Color;
 use gaanim_core::{ColorMap, ObjectId};
@@ -2668,26 +2668,12 @@ impl SceneModel {
             .unwrap_or(Color::from_rgb8(0x50, 0x50, 0x50));
         let tick_half = size.into_iter().fold(f64::INFINITY, f64::min) * 0.015;
         let axis_ticks = [x.ticks_values(7)?, y.ticks_values(7)?, z.ticks_values(7)?];
-        // Numbers and titles take the sizes of 2D axes. They face the camera
-        // centered on their anchor, so each keeps the 2D gap past its tick
-        // plus half its larger extent, clear of the axis whichever way the
-        // camera turns the offset.
+        // Numbers and titles take the sizes of 2D axes and face the camera.
+        // Each is anchored on its axis, at its tick or at the axis's end, and
+        // keeps the 2D gap from it on screen whatever the camera's distance
+        // or angle (`AxisLabelGap`): a number beside its tick, away from the
+        // box, and a title past the axis's end and its numbers.
         let (number_scale, label_scale) = self.axis_text_scales();
-        let clearance = |text: &str, scale: f64| {
-            let (width, height) = self.axis_text_size(text, scale);
-            tick_half + super::view_ticks::NUMBER_GAP + width.max(height) * 0.5
-        };
-        let number_offsets = axis_ticks.each_ref().map(|ticks| {
-            ticks
-                .iter()
-                .filter(|tick| tick.major && !tick.label.is_empty())
-                .map(|tick| clearance(&tick.label, number_scale))
-                .fold(0.0, f64::max)
-        });
-        let label_offsets = [&x, &y, &z].map(|axis| {
-            axis.label_text()
-                .map_or(0.0, |label| clearance(label, label_scale))
-        });
         let mut numbers = Vec::new();
         let ticks_visible = [visibility.x_ticks, visibility.y_ticks, visibility.z_ticks];
         let numbers_visible = [
@@ -2695,6 +2681,34 @@ impl SceneModel {
             visibility.y_numbers,
             visibility.z_numbers,
         ];
+        let directions = [DVec3::X, DVec3::Y, DVec3::Z];
+        // x's ticks cross their axis along y, and y's and z's along x.
+        let tick_across = [DVec3::NEG_Y, DVec3::NEG_X, DVec3::NEG_X].map(|side| side * tick_half);
+        // Half the widest number of each axis, which its title clears.
+        let widest_numbers = std::array::from_fn::<_, 3, _>(|dimension| {
+            if !numbers_visible[dimension] {
+                return DVec2::ZERO;
+            }
+            axis_ticks[dimension]
+                .iter()
+                .filter(|tick| tick.major && !tick.label.is_empty())
+                .map(|tick| {
+                    let (width, height) = self.axis_text_size(&tick.label, number_scale);
+                    DVec2::new(width, height) * 0.5
+                })
+                .fold(DVec2::ZERO, DVec2::max)
+        });
+        let label_gap = |dimension: usize, title: Option<DVec2>| gaanim_scene::AxisLabelGap {
+            axis: directions[dimension],
+            tick: if title.is_some() {
+                DVec3::ZERO
+            } else {
+                tick_across[dimension]
+            },
+            bounds: [DVec3::from(min), DVec3::from(max)],
+            gap: super::view_ticks::NUMBER_GAP,
+            title,
+        };
         // The three axes start at the box's lowest corner, where their first
         // numbers would pile up: only the first axis numbered keeps its
         // number there.
@@ -2765,22 +2779,21 @@ impl SceneModel {
                         grid_colors.extend_from_slice(&[grid_color, grid_color]);
                     }
                 }
-                let offset = number_offsets[dimension];
                 let (from, to, number_position) = match dimension {
                     0 => (
                         [coordinate, min[1] - tick_half, min[2]],
                         [coordinate, min[1] + tick_half, min[2]],
-                        [coordinate, min[1] - offset, min[2]],
+                        [coordinate, min[1], min[2]],
                     ),
                     1 => (
                         [min[0] - tick_half, coordinate, min[2]],
                         [min[0] + tick_half, coordinate, min[2]],
-                        [min[0] - offset, coordinate, min[2]],
+                        [min[0], coordinate, min[2]],
                     ),
                     _ => (
                         [min[0] - tick_half, min[1], coordinate],
                         [min[0] + tick_half, min[1], coordinate],
-                        [min[0] - offset, min[1], coordinate],
+                        [min[0], min[1], coordinate],
                     ),
                 };
                 if ticks_visible[dimension] {
@@ -2794,13 +2807,18 @@ impl SceneModel {
                     && !(at_corner && corner_numbered)
                 {
                     corner_numbered |= at_corner;
-                    numbers.push(
-                        self.text(&tick.label)
-                            .fill(axis.style_value().number_color)
-                            .move_to_3d(number_position[0], number_position[1], number_position[2])
-                            .billboard()
-                            .scale_to(number_scale),
-                    );
+                    let number = self
+                        .text(&tick.label)
+                        .fill(axis.style_value().number_color)
+                        .move_to_3d(number_position[0], number_position[1], number_position[2])
+                        .billboard()
+                        .scale_to(number_scale);
+                    number
+                        .spec
+                        .lock()
+                        .expect("number spec poisoned")
+                        .axis_label_gap = Some(label_gap(dimension, None));
+                    numbers.push(number);
                 }
             }
         }
@@ -2809,31 +2827,27 @@ impl SceneModel {
         let number_refs: Vec<_> = numbers.iter().collect();
         let numbers = self.group_no_center(&number_refs);
         let mut labels = Vec::new();
-        for (axis, position, visible) in [
-            (
-                &x,
-                [max[0] + label_offsets[0], min[1], min[2]],
-                visibility.x_labels,
-            ),
-            (
-                &y,
-                [min[0], max[1] + label_offsets[1], min[2]],
-                visibility.y_labels,
-            ),
-            (
-                &z,
-                [min[0], min[1], max[2] + label_offsets[2]],
-                visibility.z_labels,
-            ),
-        ] {
+        for (dimension, (axis, end, visible)) in [
+            (&x, [max[0], min[1], min[2]], visibility.x_labels),
+            (&y, [min[0], max[1], min[2]], visibility.y_labels),
+            (&z, [min[0], min[1], max[2]], visibility.z_labels),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             if visible && let Some(label) = axis.label_text() {
-                labels.push(
-                    self.text(label)
-                        .fill(axis.style_value().label_color)
-                        .move_to_3d(position[0], position[1], position[2])
-                        .billboard()
-                        .scale_to(label_scale),
-                );
+                let title = self
+                    .text(label)
+                    .fill(axis.style_value().label_color)
+                    .move_to_3d(end[0], end[1], end[2])
+                    .billboard()
+                    .scale_to(label_scale);
+                title
+                    .spec
+                    .lock()
+                    .expect("title spec poisoned")
+                    .axis_label_gap = Some(label_gap(dimension, Some(widest_numbers[dimension])));
+                labels.push(title);
             }
         }
         let label_refs: Vec<_> = labels.iter().collect();
@@ -3082,15 +3096,9 @@ impl SceneModel {
                 .scale_to(number_scale)
                 .move_to(label.position.x, label.position.y);
             let (axis, offset) = if index < x_number_count {
-                (
-                    0,
-                    gaanim_core::glam::DVec2::new(0.0, label.position.y - axis_origin.y),
-                )
+                (0, DVec2::new(0.0, label.position.y - axis_origin.y))
             } else {
-                (
-                    1,
-                    gaanim_core::glam::DVec2::new(label.position.x - axis_origin.x, 0.0),
-                )
+                (1, DVec2::new(label.position.x - axis_origin.x, 0.0))
             };
             {
                 let mut spec = handle.spec.lock().expect("label spec poisoned");
