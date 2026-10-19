@@ -279,6 +279,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   carpetas comparten (`[workspace.shared]`, con `python` y `assets`). Cada
   miembro ve el código compartido en `sys.path`, encuentra los recursos
   compartidos, se recarga al guardarlos y usa el `.venv` del workspace.
+- `gaanim init workspace` crea un workspace listo para un repositorio de
+  Git: el manifiesto comentado, `src/` y `assets/` compartidos, un primer
+  miembro, el entorno de Python, `.gitignore`, `README.md` y `AGENTS.md`. En
+  el Inicio, *New workspace* hace lo mismo.
 - `gaanim check <workspace>` comprueba todos los miembros y resume, y
   `--members` elige algunos por ruta o patrón. `gaanim init` dentro de un
   workspace crea solo los archivos del miembro.
@@ -287,11 +291,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   video* y *New presentation* para crear uno, y *Check all*, que comprueba
   cada miembro y anota el resultado en su tarjeta.
 - Los recientes muestran el workspace como una entrada propia y cada miembro
-  con su workspace delante (`canal › ep1`), como el título de la ventana. La
+  con su workspace delante (`channel › ep1`), como el título de la ventana. La
   portada del workspace es la imagen de `cover` o un `cover.png` en su raíz,
   y sin ellas, un mosaico con las de sus miembros. La
-  paleta de comandos lista los demás miembros del abierto y *Back to canal*
-  vuelve a la página del workspace.
+  paleta de comandos lista los demás miembros del abierto y *Back to
+  channel* vuelve a la página del workspace.
 - En Windows, la raíz del proyecto y su `src/` entran en `sys.path` sin el
   prefijo `\\?\`, y el `__file__` de los módulos que se importan de ahí
   también.

@@ -130,28 +130,32 @@ separado. Es el `gaanim.toml` de la carpeta que los contiene, con una tabla
 nombres son tuyos, y el workspace los describe.
 
 ```toml
-# canal/gaanim.toml
-name = "canal"
+# channel/gaanim.toml
+name = "channel"
 
 [workspace]
 members = [
-  { path = "temporada-1/*", group = "Temporada 1" },
-  { path = "temporada-2/*", group = "Temporada 2" },
-  "eventos/*/charla",
+  { path = "season-1/*", group = "Season 1" },
+  { path = "season-2/*", group = "Season 2" },
+  "events/*/talk",
   "trailer",
 ]
-exclude = ["temporada-2/borrador"]
+exclude = ["season-2/draft"]
 
 [workspace.shared]
-python = ["comun"]
-assets = ["recursos", "marca"]
+python = ["common"]
+assets = ["media", "brand"]
 ```
+
+`gaanim init workspace` crea uno con `members = ["videos/*", "talks/*"]`,
+`src/` y `assets/`, y un primer miembro en `videos/intro` (ver
+#link("/guias/proyectos/#workspaces")[Varios proyectos en un repositorio]).
 
 #table(
   columns: (auto, auto, auto, 1fr),
   inset: 7pt,
   [*Campo*], [*Tipo*], [*Predeterminado*], [*Significado*],
-  [`members`], [lista], [obligatorio], [Dónde están los proyectos: rutas relativas al workspace, a cualquier profundidad. `*` vale por cualquier parte de un nombre de carpeta en ese tramo (`temporada-1/*`, `eventos/*/charla`, `ep-*`). Una entrada puede ser una tabla `{ path, group }`.],
+  [`members`], [lista], [obligatorio], [Dónde están los proyectos: rutas relativas al workspace, a cualquier profundidad. `*` vale por cualquier parte de un nombre de carpeta en ese tramo (`season-1/*`, `events/*/talk`, `ep-*`). Una entrada puede ser una tabla `{ path, group }`.],
   [`exclude`], [lista], [ninguna], [Rutas o patrones que `members` no debe incluir.],
   [`shared.python`], [lista], [`["src"]` si existe], [Carpetas que entran en `sys.path` de cada miembro, después de las suyas.],
   [`shared.assets`], [lista], [`["assets"]` si existe], [Carpetas donde cada miembro busca una ruta relativa que no está en las suyas.],

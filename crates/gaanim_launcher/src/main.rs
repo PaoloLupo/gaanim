@@ -19,7 +19,9 @@ mod startup;
 
 use gaanim_core::console;
 use gaanim_project::help::{self, Topic};
-use gaanim_project::{CreateProjectOptions, ProjectKind, create_project};
+use gaanim_project::{
+    CreateProjectOptions, CreateWorkspaceOptions, ProjectKind, create_project, create_workspace,
+};
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -66,11 +68,18 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         Some("init") => {}
         _ => return false,
     }
-    let parsed = parse_init_args(&args[2..]).unwrap_or_else(|error| {
-        console::error("init", error);
-        console::hint("Run `gaanim init --help` for usage.");
-        std::process::exit(2);
-    });
+    let parsed = match parse_init_args(&args[2..]) {
+        Ok(InitTarget::Project(parsed)) => parsed,
+        Ok(InitTarget::Workspace(options)) => {
+            init_workspace(&options);
+            return true;
+        }
+        Err(error) => {
+            console::error("init", error);
+            console::hint("Run `gaanim init --help` for usage.");
+            std::process::exit(2);
+        }
+    };
     let project = create_project(&parsed).unwrap_or_else(|error| {
         console::error("init", error);
         std::process::exit(2);
@@ -513,11 +522,17 @@ fn run_association(register: bool) -> ! {
     }
 }
 
-fn parse_init_args(args: &[String]) -> Result<CreateProjectOptions, String> {
-    let kind = args
-        .first()
-        .ok_or_else(|| "missing project kind; available kinds: video, slides".to_string())
-        .and_then(|value| ProjectKind::parse(value))?;
+/// What `gaanim init` creates.
+#[derive(Debug, PartialEq, Eq)]
+enum InitTarget {
+    Project(CreateProjectOptions),
+    Workspace(CreateWorkspaceOptions),
+}
+
+fn parse_init_args(args: &[String]) -> Result<InitTarget, String> {
+    let kind = args.first().ok_or_else(|| {
+        "missing project kind; available kinds: video, slides, workspace".to_string()
+    })?;
     let mut directory = None;
     let mut force = false;
     for arg in &args[1..] {
@@ -528,11 +543,73 @@ fn parse_init_args(args: &[String]) -> Result<CreateProjectOptions, String> {
             value => return Err(format!("unexpected argument `{value}`")),
         }
     }
-    Ok(CreateProjectOptions {
+    if kind == "workspace" {
+        return Ok(InitTarget::Workspace(CreateWorkspaceOptions {
+            directory: directory
+                .unwrap_or_else(|| PathBuf::from(gaanim_project::DEFAULT_WORKSPACE_DIRECTORY)),
+            force,
+        }));
+    }
+    let kind = ProjectKind::parse(kind).map_err(|error| {
+        if error.starts_with("unknown") {
+            format!("{error}, workspace")
+        } else {
+            error
+        }
+    })?;
+    Ok(InitTarget::Project(CreateProjectOptions {
         kind,
         directory: directory.unwrap_or_else(|| PathBuf::from(kind.default_directory())),
         force,
-    })
+    }))
+}
+
+/// `gaanim init workspace`: the workspace, its Git repository and its
+/// Python environment, then what to do next.
+fn init_workspace(options: &CreateWorkspaceOptions) {
+    let workspace = create_workspace(options).unwrap_or_else(|error| {
+        console::error("init", error);
+        std::process::exit(2);
+    });
+    let git = gaanim_project::init_git_repository(&workspace.root);
+    let venv = gaanim_project::provision_authoring_package(&workspace.root);
+    let root = console::display_path(&workspace.root);
+    console::success(
+        "init",
+        format!("Created workspace {}: {root}", workspace.name),
+    );
+    console::detail(
+        "Members",
+        "videos/* and talks/* (edit `members` in gaanim.toml)",
+    );
+    console::detail(
+        "Shared",
+        "src/ for Python, assets/ for images, fonts and sounds",
+    );
+    let videos = workspace.root.join("videos");
+    console::detail(
+        "First",
+        format!("gaanim {}", console::display_path(&videos.join("intro"))),
+    );
+    console::detail(
+        "New",
+        format!(
+            "gaanim init video {}",
+            console::display_path(&videos.join("<name>"))
+        ),
+    );
+    console::detail("Home", format!("gaanim {root}"));
+    console::detail("Check", format!("gaanim check {root}"));
+    if git {
+        console::detail("Git", "initialized a repository");
+    }
+    match venv {
+        Ok(venv) => console::detail("Python", console::display_path(&venv)),
+        Err(error) => console::warn(
+            "python",
+            format!("authoring environment not ready: {error}"),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -540,17 +617,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_only_video_and_slides_init_kinds() {
+    fn accepts_video_slides_and_workspace_init_kinds() {
+        let kind = |name: &str| match parse_init_args(&[name.into()]).unwrap() {
+            InitTarget::Project(options) => Some(options.kind),
+            InitTarget::Workspace(_) => None,
+        };
+        assert_eq!(kind("video"), Some(ProjectKind::Video));
+        assert_eq!(kind("slides"), Some(ProjectKind::Slides));
         assert_eq!(
-            parse_init_args(&["video".into()]).unwrap().kind,
-            ProjectKind::Video
-        );
-        assert_eq!(
-            parse_init_args(&["slides".into()]).unwrap().kind,
-            ProjectKind::Slides
+            parse_init_args(&["workspace".into(), "canal".into(), "--force".into()]).unwrap(),
+            InitTarget::Workspace(CreateWorkspaceOptions {
+                directory: PathBuf::from("canal"),
+                force: true,
+            })
         );
         assert!(parse_init_args(&["presentation".into()]).is_err());
         assert!(parse_init_args(&["thesis".into()]).is_err());
+        assert!(
+            parse_init_args(&["film".into()])
+                .unwrap_err()
+                .contains("workspace")
+        );
     }
 
     #[test]

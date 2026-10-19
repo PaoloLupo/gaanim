@@ -21,6 +21,20 @@ pub use workspace::{
 const VIDEO_PROJECT_TEMPLATE: &str = include_str!("../../../templates/video_project.py");
 const SLIDES_PROJECT_TEMPLATE: &str = include_str!("../../../templates/slides_project.py");
 const PROJECT_AGENTS: &str = include_str!("../../../templates/project_agents.md");
+const WORKSPACE_AGENTS: &str = include_str!("../../../templates/workspace_agents.md");
+/// What a workspace's repository leaves out: the environment and what any
+/// of its projects renders, wherever its `output_dir` puts it. Media
+/// extensions are not ignored, so images and videos in `assets/` stay.
+const WORKSPACE_GITIGNORE: &str = r#"# The Python environment
+.venv/
+__pycache__/
+
+# What Gaanim renders: each project's exports and captures, and the
+# snapshots of visual checks
+**/exports/*
+!**/exports/.gitkeep
+**/snapshots/
+"#;
 const PROJECT_GITIGNORE: &str = r#"exports/*
 !exports/.gitkeep
 snapshots/
@@ -81,6 +95,15 @@ impl ProjectKind {
         matches!(self, Self::Slides)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateWorkspaceOptions {
+    pub directory: PathBuf,
+    pub force: bool,
+}
+
+/// The folder a new workspace goes in when none is given.
+pub const DEFAULT_WORKSPACE_DIRECTORY: &str = "gaanim-workspace";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateProjectOptions {
@@ -329,6 +352,181 @@ pub fn create_project(options: &CreateProjectOptions) -> Result<ResolvedProject,
             .map_err(|error| format!("could not write {}: {error}", path.display()))?;
     }
     resolve_project(&options.directory)
+}
+
+/// Create a workspace ready for a repository: a `gaanim.toml` whose
+/// members are `videos/*` and `talks/*`, a shared Python package in `src/`,
+/// shared `assets/`, the Python environment's `pyproject.toml`, a
+/// `.gitignore`, a README and agent notes, and a first member,
+/// `videos/intro`. The names are only a start: the manifest says where the
+/// members are.
+pub fn create_workspace(options: &CreateWorkspaceOptions) -> Result<Workspace, String> {
+    if options.directory.is_file() {
+        return Err(format!(
+            "{} is a file; choose a workspace directory",
+            options.directory.display()
+        ));
+    }
+    let name = options
+        .directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(DEFAULT_WORKSPACE_DIRECTORY);
+    let package = python_package_name(name);
+    let manifest = workspace_manifest(name);
+    let readme = workspace_readme(name, &package);
+    let pyproject = uv_bare_pyproject(name);
+    let shared = format!(
+        "\"\"\"Code every project of the {name} workspace shares.\n\n\
+         Import it from any of them (`import {package}`): Gaanim puts the\n\
+         workspace's `src/` folder on `sys.path` and reloads this package when\n\
+         it changes.\n\"\"\"\n"
+    );
+    let directory = &options.directory;
+    let files = [
+        (directory.join("gaanim.toml"), manifest.as_str()),
+        (
+            directory.join("src").join(&package).join("__init__.py"),
+            shared.as_str(),
+        ),
+        (directory.join("assets").join(".gitkeep"), ""),
+        (directory.join("pyproject.toml"), pyproject.as_str()),
+        (directory.join(".python-version"), PYTHON_VERSION),
+        (directory.join(".gitignore"), WORKSPACE_GITIGNORE),
+        (directory.join("README.md"), readme.as_str()),
+        (directory.join("AGENTS.md"), WORKSPACE_AGENTS),
+    ];
+    if !options.force
+        && let Some((path, _)) = files.iter().find(|(path, _)| path.exists())
+    {
+        return Err(format!(
+            "{} already exists (use --force to update scaffold files)",
+            path.display()
+        ));
+    }
+    for (path, source) in &files {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+        }
+        std::fs::write(path, source)
+            .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+    }
+    let first = directory.join("videos").join("intro");
+    if !first.join("gaanim.toml").exists() {
+        create_project(&CreateProjectOptions {
+            kind: ProjectKind::Video,
+            directory: first,
+            force: false,
+        })?;
+    }
+    resolve_workspace(directory)
+}
+
+/// A workspace's `gaanim.toml`, explained for whoever edits it next.
+fn workspace_manifest(name: &str) -> String {
+    format!(
+        r#"name = "{}"
+
+# A Gaanim workspace: projects that share code, assets and Python.
+# https://paololupo.github.io/gaanim/referencia/gaanim-toml/#workspace
+[workspace]
+# Where the projects are, relative to this folder. `*` stands for any part
+# of a folder name, at any depth ("season-1/*", "events/*/talk"), and an
+# entry can name its group: {{ path = "season-1/*", group = "Season 1" }}.
+# A folder is a member only if it has its own gaanim.toml.
+members = ["videos/*", "talks/*"]
+
+[workspace.shared]
+# Python on every member's sys.path, after the member's own folders.
+python = ["src"]
+# Where a member looks for an asset it does not have itself.
+assets = ["assets"]
+"#,
+        escape_manifest_value(name)
+    )
+}
+
+/// `name` as a Python package: lowercase letters, digits and underscores,
+/// not starting with a digit.
+fn python_package_name(name: &str) -> String {
+    let mut package = String::new();
+    for character in name.chars() {
+        if character.is_ascii_alphanumeric() {
+            package.push(character.to_ascii_lowercase());
+        } else if !package.ends_with('_') {
+            package.push('_');
+        }
+    }
+    let package = package.trim_matches('_');
+    match package.chars().next() {
+        None => "shared".to_owned(),
+        Some(first) if first.is_ascii_digit() => format!("shared_{package}"),
+        Some(_) => package.to_owned(),
+    }
+}
+
+fn workspace_readme(name: &str, package: &str) -> String {
+    format!(
+        "# {name}\n\n\
+         Workspace de Gaanim: varios proyectos (vídeos, charlas) que comparten código, \
+         recursos y entorno de Python.\n\n\
+         ## Estructura\n\n\
+         ```text\n\
+         gaanim.toml        # el workspace: dónde están los proyectos y qué comparten\n\
+         src/{package}/     # código de Python compartido: `import {package}`\n\
+         assets/            # recursos compartidos: imágenes, SVG, fuentes, sonidos\n\
+         videos/intro/      # un proyecto: gaanim.toml, main.py y sus assets/\n\
+         talks/             # charlas y presentaciones\n\
+         ```\n\n\
+         La estructura es tuya: cambia `members` en `gaanim.toml` (por ejemplo \
+         `\"season-1/*\"`) y mueve las carpetas. Un proyecto busca primero en sus \
+         propias carpetas y después en las compartidas.\n\n\
+         ## Trabajar\n\n\
+         ```bash\n\
+         gaanim .                          # el Inicio, con los proyectos del workspace\n\
+         gaanim videos/intro               # vista previa con recarga al guardar\n\
+         gaanim init video videos/nuevo    # un vídeo nuevo\n\
+         gaanim init slides talks/charla   # una presentación nueva\n\
+         ```\n\n\
+         ## Validar\n\n\
+         ```bash\n\
+         gaanim check .                    # todos los proyectos; útil en CI\n\
+         gaanim check . --members \"videos/*\"\n\
+         ```\n\n\
+         ## Exportar\n\n\
+         ```bash\n\
+         gaanim export videos/intro --output videos/intro/exports/intro.mp4\n\
+         ```\n\n\
+         Las exportaciones van a la carpeta `exports/` de cada proyecto, que Git \
+         ignora. El entorno de Python está en `.venv`, en la raíz; si falta, \
+         `uv sync` lo crea.\n"
+    )
+}
+
+/// Make `directory` a Git repository unless it is inside one already or
+/// Git is not installed. Whether it made one.
+pub fn init_git_repository(directory: &Path) -> bool {
+    let inside = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(directory)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match inside {
+        // Inside a repository already.
+        Ok(status) if status.success() => false,
+        Ok(_) => Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(directory)
+            .stdin(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success()),
+        // No Git.
+        Err(_) => false,
+    }
 }
 
 pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
@@ -1754,6 +1952,64 @@ language = \"es\"
         ] {
             assert!(!directory.join(absent).exists(), "{absent}");
         }
+    }
+
+    #[test]
+    fn a_new_workspace_is_ready_for_its_repository() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("My Channel");
+        let workspace = create_workspace(&CreateWorkspaceOptions {
+            directory: directory.clone(),
+            force: false,
+        })
+        .unwrap();
+        assert_eq!(workspace.name, "My Channel");
+        assert_eq!(workspace.python_roots, [workspace.root.join("src")]);
+        assert_eq!(workspace.asset_roots, [workspace.root.join("assets")]);
+        assert!(directory.join("src/my_channel/__init__.py").is_file());
+        for file in [
+            ".gitignore",
+            "pyproject.toml",
+            ".python-version",
+            "README.md",
+            "AGENTS.md",
+        ] {
+            assert!(directory.join(file).is_file(), "{file}");
+        }
+        let ignore = std::fs::read_to_string(directory.join(".gitignore")).unwrap();
+        assert!(ignore.contains(".venv/") && ignore.contains("**/exports/*"));
+        assert!(!ignore.contains("*.webp"), "assets may be WebP images");
+        let readme = std::fs::read_to_string(directory.join("README.md")).unwrap();
+        assert!(readme.contains("import my_channel"));
+        // The first member is one, with only its own files.
+        let members = workspace.members();
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].path, "videos/intro");
+        assert!(!directory.join("videos/intro/pyproject.toml").exists());
+        // The manifest documents itself and stays valid TOML.
+        let manifest = std::fs::read_to_string(directory.join("gaanim.toml")).unwrap();
+        assert!(manifest.contains("members = [\"videos/*\", \"talks/*\"]"));
+        assert!(
+            create_workspace(&CreateWorkspaceOptions {
+                directory: directory.clone(),
+                force: false,
+            })
+            .unwrap_err()
+            .contains("--force")
+        );
+        create_workspace(&CreateWorkspaceOptions {
+            directory,
+            force: true,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn workspace_packages_are_python_names() {
+        assert_eq!(python_package_name("My Channel"), "my_channel");
+        assert_eq!(python_package_name("gaanim-workspace"), "gaanim_workspace");
+        assert_eq!(python_package_name("2026 talks"), "shared_2026_talks");
+        assert_eq!(python_package_name("--"), "shared");
     }
 
     #[test]

@@ -251,69 +251,97 @@ es un proyecto normal, con su `gaanim.toml`, y todos comparten el código
 común (helpers, componentes, una mascota), los recursos (logos, fuentes,
 música) y el entorno de Python.
 
-La estructura es tuya. Puede ir por temporadas:
+== Crear un workspace
+
+```bash
+gaanim init workspace channel
+```
+
+crea un workspace listo para un repositorio de Git:
 
 ```text
-canal/
-  gaanim.toml          # el workspace
-  comun/canal/         # paquete de Python compartido
-  recursos/            # recursos compartidos
-  temporada-1/ep1/     # un proyecto: gaanim.toml, main.py, assets/
-  temporada-1/ep2/
-  eventos/2026/charla/
+channel/
+  gaanim.toml          # el workspace: dónde están los proyectos y qué comparten
+  src/channel/         # paquete de Python compartido: import channel
+  assets/              # recursos compartidos
+  videos/intro/        # un primer proyecto: gaanim.toml, main.py, assets/
+  pyproject.toml       # el entorno de Python de todo el workspace
+  .gitignore           # el entorno y lo que se renderiza, no los recursos
+  README.md            # la estructura y los comandos de cada día
+  AGENTS.md            # la guía para asistentes de código
+```
+
+Su `gaanim.toml` explica cada clave en comentarios. `init` también hace de la
+carpeta un repositorio de Git, si no está ya dentro de uno, y prepara el
+`.venv` de su raíz. Desde el Inicio, *New workspace* hace lo mismo.
+
+== La estructura es tuya
+
+Los nombres que crea `init` son solo un comienzo: `members` dice dónde están
+los proyectos y `[workspace.shared]` qué carpetas se comparten, así que
+puedes mover y renombrar todo. Por ejemplo, por temporadas:
+
+```text
+channel/
+  gaanim.toml
+  common/channel/      # paquete de Python compartido
+  media/               # recursos compartidos
+  season-1/ep1/        # un proyecto: gaanim.toml, main.py, assets/
+  season-1/ep2/
+  events/2026/talk/
 ```
 
 ```toml
-# canal/gaanim.toml
-name = "canal"
+# channel/gaanim.toml
+name = "channel"
 
 [workspace]
-members = [{ path = "temporada-1/*", group = "Temporada 1" }, "eventos/*/charla"]
+members = [{ path = "season-1/*", group = "Season 1" }, "events/*/talk"]
 
 [workspace.shared]
-python = ["comun"]
-assets = ["recursos"]
+python = ["common"]
+assets = ["media"]
 ```
 
-O ser plana, con los nombres por defecto, `src` para el código y `assets`
-para los recursos:
+O plana, con los nombres por defecto, `src` para el código y `assets` para
+los recursos:
 
 ```text
-curso/
-  gaanim.toml          # [workspace] members = ["clase-*"]
-  src/curso/
+course/
+  gaanim.toml          # [workspace] members = ["lesson-*"]
+  src/course/
   assets/
-  clase-01/
-  clase-02/
+  lesson-01/
+  lesson-02/
 ```
 
-Desde cualquier miembro, `import canal` encuentra el paquete compartido y
-`scene.media.svg("mascota.svg")` encuentra `recursos/mascota.svg` si el
-miembro no tiene uno propio con ese nombre. Al guardar un archivo de `comun/`
-o de `recursos/`, la vista previa del miembro abierto se recarga; al guardar
-uno de otro episodio, no.
+Desde cualquier miembro, `import channel` encuentra el paquete compartido y
+`scene.media.svg("mascot.svg")` encuentra `media/mascot.svg` si el miembro no
+tiene uno propio con ese nombre. Al guardar un archivo de `common/` o de
+`media/`, la vista previa del miembro abierto se recarga; al guardar uno de
+otro episodio, no.
 
 ```bash
-gaanim canal                                 # el Inicio, con los miembros
-gaanim canal/temporada-1/ep1                 # abre un miembro
-gaanim check canal                           # comprueba todos los miembros
-gaanim check canal --members "temporada-1/*" # solo algunos
-gaanim init video canal/temporada-1/ep3      # un miembro nuevo
+gaanim channel                               # el Inicio, con los miembros
+gaanim channel/season-1/ep1                  # abre un miembro
+gaanim check channel                         # comprueba todos los miembros
+gaanim check channel --members "season-1/*"  # solo algunos
+gaanim init video channel/season-1/ep3       # un miembro nuevo
 ```
 
-- `gaanim check canal` ejecuta el `entry` de cada miembro, uno tras otro, y
+- `gaanim check channel` ejecuta el `entry` de cada miembro, uno tras otro, y
   termina con un resumen; devuelve `1` si falla alguno, así que sirve para la
   integración continua de un canal.
-- `gaanim init` dentro de un workspace crea solo `main.py`, `gaanim.toml` y
-  `assets/`. Si `members` no incluye la carpeta nueva, avisa y dice qué línea
-  añadir; hasta entonces es un proyecto independiente.
+- `gaanim init video` o `slides` dentro de un workspace crea solo `main.py`,
+  `gaanim.toml` y `assets/`. Si `members` no incluye la carpeta nueva, avisa y
+  dice qué línea añadir; hasta entonces es un proyecto independiente.
 - El entorno de Python es el `.venv` de la raíz del workspace, que Gaanim
-  crea la primera vez que abres un miembro. Un miembro con su propio `.venv`
-  usa el suyo.
+  crea la primera vez que abres un miembro si `init` no lo preparó. Un
+  miembro con su propio `.venv` usa el suyo.
 
 == En el Inicio y el editor
 
-Al abrir la carpeta del workspace, desde el Inicio o con `gaanim canal`, el
+Al abrir la carpeta del workspace, desde el Inicio o con `gaanim channel`, el
 Inicio muestra su página: los miembros agrupados como dice el manifiesto (por
 el `group` de su entrada o, sin él, por la carpeta que los contiene), con las
 mismas tarjetas y la misma búsqueda que los recientes.
@@ -327,13 +355,15 @@ mismas tarjetas y la misma búsqueda que los recientes.
   lugar de desaparecer.
 
 Los recientes muestran cada miembro con su workspace delante
-(`canal › ep1`), y el workspace también, como una entrada propia que abre su
-página. Su portada es la imagen que nombra `cover` en `[workspace]`, o un
+(`channel › ep1`), y el workspace también, como una entrada propia que abre
+su página. Su portada es la imagen que nombra `cover` en `[workspace]`, o un
 `cover.png` (o `.jpg`, `.webp`) en su raíz; sin ninguna, un mosaico con las
-portadas de los cuatro miembros editados más recientemente. Con un miembro abierto, la paleta de comandos (`Ctrl+Shift+P`) lista
-los demás miembros para cambiar de uno a otro sin volver al Inicio, y *Back to
-canal* vuelve a la página del workspace. El título de la ventana también lleva
-el workspace delante.
+portadas de los cuatro miembros editados más recientemente.
+
+Con un miembro abierto, la paleta de comandos (`Ctrl+Shift+P`) lista los
+demás miembros para cambiar de uno a otro sin volver al Inicio, y *Back to
+channel* vuelve a la página del workspace. El título de la ventana también
+lleva el workspace delante.
 
 La #link("/referencia/gaanim-toml/#workspace")[referencia de `[workspace]`]
 describe cada clave y qué hereda cada miembro.

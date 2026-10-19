@@ -199,7 +199,7 @@ only says whether there is one",
 };
 
 const INIT: Page = Page {
-    summary: "Create a runnable project: gaanim.toml, a minimal main.py, and a Python 3.14\nenvironment with the authoring package, so editors autocomplete the API.",
+    summary: "Create a runnable project: gaanim.toml, a minimal main.py, and a Python 3.14\nenvironment with the authoring package, so editors autocomplete the API. Or a\nworkspace: several projects in one repository that share code and assets.",
     blocks: &[
         Block::Lines("Usage", &["gaanim init <KIND> [DIRECTORY] [--force]"]),
         Block::Rows(
@@ -209,6 +209,10 @@ const INIT: Page = Page {
                 (
                     "slides",
                     "A presentation: each segment is a slide and stop() waits\nfor you to advance",
+                ),
+                (
+                    "workspace",
+                    "Several projects in one repository that share code,\nassets and Python: gaanim.toml, src/, assets/, a first\nmember in videos/intro, .gitignore, README, and a Git\nrepository unless it is inside one",
                 ),
                 (
                     "DIRECTORY",
@@ -231,6 +235,11 @@ const INIT: Page = Page {
             &[
                 ("gaanim init video", "Create ./gaanim-video"),
                 ("gaanim init slides talk", "Create a presentation in ./talk"),
+                (
+                    "gaanim init workspace channel",
+                    "Create a workspace in ./channel",
+                ),
+                ("gaanim init video channel/videos/ep1", "Add a member to it"),
             ],
         ),
     ],

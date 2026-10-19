@@ -18,10 +18,10 @@ use bevy_egui::{EguiPrimaryContextPass, egui};
 use crossbeam_channel::{Receiver, TryRecvError};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use gaanim_project::{
-    CreateProjectOptions, EnvironmentProbe, ProjectFolder, ProjectKind, PythonSource, RecentBundle,
-    RecentEntry, RecentGroup, RecentProjects, ResolvedProject, Workspace, WorkspaceMember,
-    create_project, default_project_parent, is_bundle_path, locate_script, resolve_folder,
-    resolve_project,
+    CreateProjectOptions, CreateWorkspaceOptions, EnvironmentProbe, ProjectFolder, ProjectKind,
+    PythonSource, RecentBundle, RecentEntry, RecentGroup, RecentProjects, ResolvedProject,
+    Workspace, WorkspaceMember, create_project, create_workspace, default_project_parent,
+    is_bundle_path, locate_script, resolve_folder, resolve_project,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -1081,6 +1081,38 @@ impl ProjectHubState {
         }
     }
 
+    /// Ask for a folder with the native picker and create a workspace there,
+    /// in a Git repository of its own unless it is inside one, then show it.
+    fn create_workspace_with_picker(&mut self) {
+        let Some(picked) = crate::platform::pick_folder(
+            "Choose or create a folder for the new workspace",
+            Some(&default_project_parent()),
+        ) else {
+            return;
+        };
+        let directory = match new_folder_target(&picked, "new-workspace") {
+            NewProjectTarget::Existing(root) => {
+                self.open_path(&root);
+                return;
+            }
+            NewProjectTarget::Create(directory) => directory,
+        };
+        match create_workspace(&CreateWorkspaceOptions {
+            directory,
+            force: false,
+        }) {
+            Ok(workspace) => {
+                gaanim_project::init_git_repository(&workspace.root);
+                self.open_workspace(workspace);
+            }
+            Err(error) => {
+                self.notice = Some(Notice::Error(format!(
+                    "Could not create the workspace: {error}"
+                )))
+            }
+        }
+    }
+
     fn open_with_picker(&mut self) {
         if let Some(path) =
             crate::platform::pick_folder("Open a Gaanim project", Some(&default_project_parent()))
@@ -1145,6 +1177,18 @@ enum NewProjectTarget {
 /// An empty folder becomes the project; any other folder gets a new subfolder
 /// with the first free default name, so picking "Documents" just works.
 fn new_project_target(picked: &Path, kind: ProjectKind) -> NewProjectTarget {
+    new_folder_target(
+        picked,
+        match kind {
+            ProjectKind::Video => "new-video",
+            ProjectKind::Slides => "new-presentation",
+        },
+    )
+}
+
+/// [`new_project_target`] for any new folder: one named `base`, or
+/// `base-2` and so on, when the picked folder is not empty.
+fn new_folder_target(picked: &Path, base: &str) -> NewProjectTarget {
     if picked.join("gaanim.toml").is_file() {
         return NewProjectTarget::Existing(picked.to_path_buf());
     }
@@ -1152,10 +1196,6 @@ fn new_project_target(picked: &Path, kind: ProjectKind) -> NewProjectTarget {
     if empty {
         return NewProjectTarget::Create(picked.to_path_buf());
     }
-    let base = match kind {
-        ProjectKind::Video => "new-video",
-        ProjectKind::Slides => "new-presentation",
-    };
     let candidate = (1..)
         .map(|n| {
             if n == 1 {
@@ -2059,6 +2099,14 @@ fn projects_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         Some(Start::Open) => state.open_with_picker(),
         Some(Start::Bundle) => state.open_bundle_with_picker(),
         None => {}
+    }
+
+    // Several projects in one repository are a workspace.
+    if secondary_button(ui, "New workspace", !busy)
+        .on_hover_text("Videos and talks in one repository that share code, assets and Python")
+        .clicked()
+    {
+        state.create_workspace_with_picker();
     }
 
     ui.add_space(22.0);

@@ -207,6 +207,7 @@ gaanim --present mi-charla --listen 127.0.0.1:7801
 
 ```bash
 gaanim init <video|slides> [DIRECTORIO] [--force]
+gaanim init workspace [DIRECTORIO] [--force]
 ```
 
 Crea un proyecto ejecutable con un `main.py` mínimo: `video` genera una
@@ -232,7 +233,17 @@ paquete de autoría de Gaanim; si no lo consigue, avisa y el proyecto sigue
 siendo válido. Si algún archivo del scaffold ya existe, falla. `--force`
 reescribe solo esos archivos y no borra nada de `assets/` ni de otras carpetas.
 
-Dentro de un #link("/guias/proyectos/#workspaces")[workspace], `init` crea
+`gaanim init workspace` crea un
+#link("/guias/proyectos/#workspaces")[workspace] listo para un repositorio:
+un `gaanim.toml` con `[workspace]` comentado (`members = ["videos/*",
+"talks/*"]`), un paquete de Python compartido en `src/`, `assets/`, un primer
+miembro en `videos/intro`, `pyproject.toml`, `.python-version`, un
+`.gitignore` que deja fuera el entorno y lo que se renderiza en cualquier
+proyecto (no los recursos), `README.md` y `AGENTS.md`. Hace de la carpeta un
+repositorio de Git si no está ya dentro de uno y prepara el `.venv` de su
+raíz. Sin `DIRECTORIO` usa `gaanim-workspace`.
+
+Dentro de un workspace, `init video` o `init slides` crea
 solo `main.py`, `gaanim.toml` y `assets/`: el entorno de Python, el
 `.gitignore` y las notas son los del workspace, y lo que prepara es el `.venv`
 de su raíz. Si los `members` del workspace no incluyen la carpeta nueva, avisa,
@@ -290,11 +301,11 @@ Con la carpeta de un #link("/guias/proyectos/#workspaces")[workspace],
 `members`, y termina con un resumen:
 
 ```text
-  ✗ fail      workspace canal · 3 of 4 members passed · failed: temporada-1/ep2
+  ✗ fail      workspace channel · 3 of 4 members passed · failed: season-1/ep2
 ```
 
 `--members` elige los miembros con rutas o patrones escritos como los de
-`members`, separados por comas (`--members "temporada-1/*,trailer"`). Un
+`members`, separados por comas (`--members "season-1/*,trailer"`). Un
 patrón que no nombra ningún miembro es un error que lista los que hay. Con la
 carpeta de un workspace que también es un proyecto, `check` comprueba ese
 proyecto, y `--members`, sus miembros. Un miembro que no se puede cargar
