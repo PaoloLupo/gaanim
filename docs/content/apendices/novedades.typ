@@ -13,8 +13,8 @@ instalar una versión nueva, sigue
 
 = 0.15.0
 
-Sin publicar. Los gráficos declarativos dibujan tartas y donuts con la marca
-`arc`, que se abren porción a porción al entrar y reparten sus porciones por
+Publicada el 19 de octubre de 2026. Los gráficos declarativos dibujan
+tartas y donuts con la marca `arc`, que se abren porción a porción al entrar y reparten sus porciones por
 clave al cambiar de datos, y la paleta categórica se elige: el tema la fija
 para toda la escena y cada campo puede tener la suya. El 3D se rasteriza en
 la GPU: se ve mejor y deja de ralentizar las escenas densas, y suma toros,
