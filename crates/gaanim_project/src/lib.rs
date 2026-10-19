@@ -106,6 +106,10 @@ pub struct CreateWorkspaceOptions {
 /// The folder a new workspace goes in when none is given.
 pub const DEFAULT_WORKSPACE_DIRECTORY: &str = "gaanim-workspace";
 
+/// The shared Python package a new workspace gets in `src/`: the same name
+/// in every workspace, so it does not follow a rename of the folder.
+const SHARED_PACKAGE: &str = "common";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateProjectOptions {
     pub kind: ProjectKind,
@@ -376,13 +380,12 @@ pub fn create_workspace(options: &CreateWorkspaceOptions) -> Result<Workspace, S
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or(DEFAULT_WORKSPACE_DIRECTORY);
-    let package = python_package_name(name);
     let manifest = workspace_manifest(name);
-    let readme = workspace_readme(name, &package);
+    let readme = workspace_readme(name);
     let pyproject = uv_bare_pyproject(name);
     let shared = format!(
         "\"\"\"Code every project of the {name} workspace shares.\n\n\
-         Import it from any of them (`import {package}`): Gaanim puts the\n\
+         Import it from any of them (`import {SHARED_PACKAGE}`): Gaanim puts the\n\
          workspace's `src/` folder on `sys.path` and reloads this package when\n\
          it changes.\n\"\"\"\n"
     );
@@ -390,7 +393,10 @@ pub fn create_workspace(options: &CreateWorkspaceOptions) -> Result<Workspace, S
     let files = [
         (directory.join("gaanim.toml"), manifest.as_str()),
         (
-            directory.join("src").join(&package).join("__init__.py"),
+            directory
+                .join("src")
+                .join(SHARED_PACKAGE)
+                .join("__init__.py"),
             shared.as_str(),
         ),
         (directory.join("assets").join(".gitkeep"), ""),
@@ -451,26 +457,7 @@ assets = ["assets"]
     )
 }
 
-/// `name` as a Python package: lowercase letters, digits and underscores,
-/// not starting with a digit.
-fn python_package_name(name: &str) -> String {
-    let mut package = String::new();
-    for character in name.chars() {
-        if character.is_ascii_alphanumeric() {
-            package.push(character.to_ascii_lowercase());
-        } else if !package.ends_with('_') {
-            package.push('_');
-        }
-    }
-    let package = package.trim_matches('_');
-    match package.chars().next() {
-        None => "shared".to_owned(),
-        Some(first) if first.is_ascii_digit() => format!("shared_{package}"),
-        Some(_) => package.to_owned(),
-    }
-}
-
-fn workspace_readme(name: &str, package: &str) -> String {
+fn workspace_readme(name: &str) -> String {
     format!(
         "# {name}\n\n\
          Workspace de Gaanim: varios proyectos (vídeos, charlas) que comparten código, \
@@ -478,14 +465,16 @@ fn workspace_readme(name: &str, package: &str) -> String {
          ## Estructura\n\n\
          ```text\n\
          gaanim.toml        # el workspace: dónde están los proyectos y qué comparten\n\
-         src/{package}/     # código de Python compartido: `import {package}`\n\
+         src/{SHARED_PACKAGE}/        # código de Python compartido: `import {SHARED_PACKAGE}`\n\
          assets/            # recursos compartidos: imágenes, SVG, fuentes, sonidos\n\
          videos/intro/      # un proyecto: gaanim.toml, main.py y sus assets/\n\
          talks/             # charlas y presentaciones\n\
          ```\n\n\
          La estructura es tuya: cambia `members` en `gaanim.toml` (por ejemplo \
          `\"season-1/*\"`) y mueve las carpetas. Un proyecto busca primero en sus \
-         propias carpetas y después en las compartidas.\n\n\
+         propias carpetas y después en las compartidas. Otro paquete junto a \
+         `src/{SHARED_PACKAGE}/`, como `src/charts/`, se importa igual desde \
+         todos.\n\n\
          ## Trabajar\n\n\
          ```bash\n\
          gaanim .                          # el Inicio, con los proyectos del workspace\n\
@@ -1966,7 +1955,7 @@ language = \"es\"
         assert_eq!(workspace.name, "My Channel");
         assert_eq!(workspace.python_roots, [workspace.root.join("src")]);
         assert_eq!(workspace.asset_roots, [workspace.root.join("assets")]);
-        assert!(directory.join("src/my_channel/__init__.py").is_file());
+        assert!(directory.join("src/common/__init__.py").is_file());
         for file in [
             ".gitignore",
             "pyproject.toml",
@@ -1980,7 +1969,7 @@ language = \"es\"
         assert!(ignore.contains(".venv/") && ignore.contains("**/exports/*"));
         assert!(!ignore.contains("*.webp"), "assets may be WebP images");
         let readme = std::fs::read_to_string(directory.join("README.md")).unwrap();
-        assert!(readme.contains("import my_channel"));
+        assert!(readme.contains("`import common`"));
         // The first member is one, with only its own files.
         let members = workspace.members();
         assert_eq!(members.len(), 1);
@@ -2002,14 +1991,6 @@ language = \"es\"
             force: true,
         })
         .unwrap();
-    }
-
-    #[test]
-    fn workspace_packages_are_python_names() {
-        assert_eq!(python_package_name("My Channel"), "my_channel");
-        assert_eq!(python_package_name("gaanim-workspace"), "gaanim_workspace");
-        assert_eq!(python_package_name("2026 talks"), "shared_2026_talks");
-        assert_eq!(python_package_name("--"), "shared");
     }
 
     #[test]

@@ -149,7 +149,7 @@ assets = ["media", "brand"]
 ```
 
 `gaanim init workspace` crea uno con `members = ["videos/*", "talks/*"]`,
-`src/` y `assets/`, y un primer miembro en `videos/intro` (ver
+`src/common/` y `assets/`, y un primer miembro en `videos/intro` (ver
 #link("/guias/proyectos/#workspaces")[Varios proyectos en un repositorio]).
 
 #table(

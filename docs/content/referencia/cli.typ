@@ -236,8 +236,8 @@ reescribe solo esos archivos y no borra nada de `assets/` ni de otras carpetas.
 `gaanim init workspace` crea un
 #link("/guias/proyectos/#workspaces")[workspace] listo para un repositorio:
 un `gaanim.toml` con `[workspace]` comentado (`members = ["videos/*",
-"talks/*"]`), un paquete de Python compartido en `src/`, `assets/`, un primer
-miembro en `videos/intro`, `pyproject.toml`, `.python-version`, un
+"talks/*"]`), un paquete de Python compartido en `src/common/`, `assets/`, un
+primer miembro en `videos/intro`, `pyproject.toml`, `.python-version`, un
 `.gitignore` que deja fuera el entorno y lo que se renderiza en cualquier
 proyecto (no los recursos), `README.md` y `AGENTS.md`. Hace de la carpeta un
 repositorio de Git si no está ya dentro de uno y prepara el `.venv` de su

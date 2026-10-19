@@ -267,7 +267,7 @@ crea un workspace listo para un repositorio de Git:
 ```text
 channel/
   gaanim.toml          # el workspace: dónde están los proyectos y qué comparten
-  src/channel/         # paquete de Python compartido: import channel
+  src/common/          # paquete de Python compartido: import common
   assets/              # recursos compartidos
   videos/intro/        # un primer proyecto: gaanim.toml, main.py, assets/
   pyproject.toml       # el entorno de Python de todo el workspace
@@ -289,7 +289,8 @@ puedes mover y renombrar todo. Por ejemplo, por temporadas:
 ```text
 channel/
   gaanim.toml
-  common/channel/      # paquete de Python compartido
+  code/common/         # paquete de Python compartido
+  code/charts/         # otro paquete compartido
   media/               # recursos compartidos
   season-1/ep1/        # un proyecto: gaanim.toml, main.py, assets/
   season-1/ep2/
@@ -304,7 +305,7 @@ name = "channel"
 members = [{ path = "season-1/*", group = "Season 1" }, "events/*/talk"]
 
 [workspace.shared]
-python = ["common"]
+python = ["code"]
 assets = ["media"]
 ```
 
@@ -314,17 +315,21 @@ los recursos:
 ```text
 course/
   gaanim.toml          # [workspace] members = ["lesson-*"]
-  src/course/
+  src/common/
   assets/
   lesson-01/
   lesson-02/
 ```
 
-Desde cualquier miembro, `import channel` encuentra el paquete compartido y
-`scene.media.svg("mascot.svg")` encuentra `media/mascot.svg` si el miembro no
-tiene uno propio con ese nombre. Al guardar un archivo de `common/` o de
-`media/`, la vista previa del miembro abierto se recarga; al guardar uno de
-otro episodio, no.
+Desde cualquier miembro, `import common` y `import charts` encuentran los
+paquetes compartidos y `scene.media.svg("mascot.svg")` encuentra
+`media/mascot.svg` si el miembro no tiene uno propio con ese nombre. Al
+guardar un archivo de `code/` o de `media/`, la vista previa del miembro
+abierto se recarga; al guardar uno de otro episodio, no.
+
+`init` llama `common` al paquete compartido en todos los workspaces, así que
+no cambia si renombras la carpeta. Un módulo del miembro con el mismo nombre
+(un `common.py` junto a su `main.py`) va antes en `sys.path` y lo tapa.
 
 ```bash
 gaanim channel                               # el Inicio, con los miembros
