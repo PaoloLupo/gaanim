@@ -505,22 +505,36 @@ fn flush_python_output(py: Python<'_>) {
 }
 
 fn prepare_script_execution(py: Python<'_>, path: &Path) -> PyResult<()> {
-    let root = gaanim_project::find_project_for_script(path)
-        .map(|project| project.root)
-        .or_else(|| path.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| path.to_path_buf());
-    evict_project_modules(py, &root)?;
+    // An invalid manifest was reported when the script was opened.
+    let location = gaanim_project::locate_script(path).unwrap_or_default();
+    let script_folder = path.parent().unwrap_or(path).to_path_buf();
+    let root = location
+        .project
+        .as_ref()
+        .map(|project| project.root.clone())
+        .unwrap_or_else(|| script_folder.clone());
+    // A workspace's shared modules reload with the project's.
+    let workspace = location.workspace.as_ref();
+    evict_project_modules(py, workspace.map_or(&root, |workspace| &workspace.root))?;
 
+    // The project's own folders come first, so its names win.
     let mut import_paths = Vec::new();
     let source_root = root.join("src");
     if source_root.is_dir() {
         import_paths.push(source_root);
     }
-    if let Some(parent) = path.parent() {
-        import_paths.push(parent.to_path_buf());
-    }
+    import_paths.push(script_folder);
     import_paths.push(root);
-    import_paths.dedup();
+    if let Some(workspace) = workspace {
+        import_paths.extend(workspace.python_roots.iter().cloned());
+        import_paths.push(workspace.root.clone());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let import_paths: Vec<PathBuf> = import_paths
+        .iter()
+        .map(|import_path| python_path(import_path))
+        .filter(|import_path| seen.insert(import_path.clone()))
+        .collect();
 
     let sys_path = py.import("sys")?.getattr("path")?;
     for import_path in import_paths.iter().rev() {
@@ -747,6 +761,67 @@ mod tests {
 
         Python::attach(|py| run_script_file(py, &entry)).unwrap();
         assert_eq!(std::fs::read_to_string(output).unwrap(), "from-src");
+    }
+
+    #[test]
+    fn a_workspace_member_imports_and_reloads_the_shared_python_folders() {
+        let _python = python_lock();
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        std::fs::write(
+            root.join("gaanim.toml"),
+            "[workspace]\nmembers = [\"shows/*\"]\n\n[workspace.shared]\npython = [\"common\"]\n",
+        )
+        .unwrap();
+        let common = root.join("common/workspace_case");
+        std::fs::create_dir_all(&common).unwrap();
+        std::fs::write(common.join("__init__.py"), "VALUE = 'first'\n").unwrap();
+        let member = root.join("shows/pilot");
+        std::fs::create_dir_all(member.join("src")).unwrap();
+        write_project_manifest(&member);
+        let output = member.join("result.txt");
+        let entry = member.join("main.py");
+        std::fs::write(
+            &entry,
+            format!(
+                "import sys\nfrom pathlib import Path\nimport workspace_case\n\
+                 Path({output:?}).write_text('\\n'.join([workspace_case.VALUE, \
+                 workspace_case.__file__, *sys.path[:5]]))\n"
+            ),
+        )
+        .unwrap();
+        let run = || {
+            Python::attach(|py| run_script_file(py, &entry)).unwrap();
+            std::fs::read_to_string(&output).unwrap()
+        };
+
+        let first = run();
+        let lines: Vec<&str> = first.lines().collect();
+        assert_eq!(lines[0], "first");
+        // Every path Python sees is a plain one, without `\\?\`.
+        assert!(
+            lines.iter().all(|line| !line.starts_with(r"\\?\")),
+            "{first}"
+        );
+        let plain = |path: &Path| python_path(path).to_string_lossy().into_owned();
+        assert_eq!(
+            lines[2..7],
+            [
+                plain(&member.join("src")),
+                plain(&member),
+                plain(&root.join("common")),
+                plain(&root),
+                lines[6].to_owned(),
+            ]
+        );
+        assert!(
+            lines[1].starts_with(&plain(&root.join("common"))),
+            "{first}"
+        );
+
+        std::fs::write(common.join("__init__.py"), "VALUE = 'second-value'\n").unwrap();
+        assert_eq!(run().lines().next(), Some("second-value"));
     }
 
     #[test]

@@ -548,7 +548,7 @@ fn load_python(
     project: Option<&gaanim_project::ResolvedProject>,
 ) -> Result<&'static gaanim_editor::python_plugin::PythonPlugin, String> {
     if let Some(project) = project
-        && let Err(error) = gaanim_project::provision_authoring_package(&project.root)
+        && let Err(error) = gaanim_project::provision_authoring_package(project.environment_root())
     {
         console::warn(
             "python",
@@ -668,7 +668,7 @@ fn attach_script_session(
             .iter_mut(world)
             .next()
         {
-            window.title = gaanim_editor::host::window_title(Some(&project.manifest.name));
+            window.title = gaanim_editor::host::window_title(Some(&project.display_name()));
         }
     }
     world
@@ -702,6 +702,13 @@ fn open_project_request_system(world: &mut World) {
 /// exception and the script line its traceback names; text keeps the whole
 /// traceback.
 pub(crate) fn exit_could_not_load(label: &str, error: &str) -> ! {
+    report_could_not_load(label, error);
+    std::process::exit(2);
+}
+
+/// Report a script that failed to load, as [`exit_could_not_load`] does,
+/// without exiting.
+fn report_could_not_load(label: &str, error: &str) {
     if console::message_format_json() {
         let (headline, location) = console::traceback_summary(error);
         console::print_status_at(
@@ -713,13 +720,14 @@ pub(crate) fn exit_could_not_load(label: &str, error: &str) -> ! {
     } else {
         console::error(label, format!("could not load project: {error}"));
     }
-    std::process::exit(2);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CheckArgs {
     script: PathBuf,
     strict: bool,
+    /// `--members`: the workspace members to check, as patterns.
+    members: Option<String>,
 }
 
 fn dispatch_check_mode() -> bool {
@@ -743,10 +751,29 @@ fn dispatch_check_mode() -> bool {
         check_bundle(&parsed.script).unwrap_or_else(|error| error.exit("check"));
         return true;
     }
+    if let Some(workspace) = checked_workspace(&parsed) {
+        std::process::exit(check_workspace(&workspace, &parsed));
+    }
+    if parsed.members.is_some() {
+        console::error(
+            "check",
+            format!(
+                "--members needs a workspace, and {} is not one",
+                console::display_path(&parsed.script)
+            ),
+        );
+        std::process::exit(2);
+    }
     let script = gaanim_project::resolve_entry(&parsed.script).unwrap_or_else(|error| {
         console::error("check", error);
         std::process::exit(2);
     });
+    // An invalid manifest above the script stops the check, as it stops
+    // opening the script.
+    if let Err(error) = gaanim_project::locate_script(&script) {
+        console::error("check", error);
+        std::process::exit(2);
+    }
 
     let python = crate::python::runtime(&script).unwrap_or_else(|error| {
         console::error("check", error);
@@ -756,9 +783,113 @@ fn dispatch_check_mode() -> bool {
     let json = console::message_format_json();
     // A diagnostic about a segment points at the line that made it.
     gaanim_api::canvas::track_script_lines(json);
-    let canvas = (python.load_script_canvas)(&script)
-        .unwrap_or_else(|error| exit_could_not_load("check", &error));
-    let source = std::fs::read_to_string(&script).unwrap_or_default();
+    match check_script(python, &script, parsed.strict, json) {
+        Err(error) => exit_could_not_load("check", &error),
+        Ok(true) => std::process::exit(1),
+        Ok(false) => true,
+    }
+}
+
+/// The workspace `gaanim check` checks the members of: the folder's own
+/// workspace, or the one a project at the workspace root declares when
+/// `--members` asks for members.
+fn checked_workspace(parsed: &CheckArgs) -> Option<gaanim_project::Workspace> {
+    if !parsed.script.is_dir() {
+        return None;
+    }
+    match gaanim_project::resolve_folder(&parsed.script).ok()? {
+        gaanim_project::ProjectFolder::Workspace(workspace) => Some(workspace),
+        gaanim_project::ProjectFolder::Project(project) if parsed.members.is_some() => project
+            .workspace
+            .filter(|workspace| workspace.root == project.root),
+        gaanim_project::ProjectFolder::Project(_) => None,
+    }
+}
+
+/// Check the entry of every member of `workspace` (or of those `--members`
+/// names), one after another in one interpreter, and summarize. The exit
+/// code: 0 when all pass, 1 when one fails, 2 when none can be checked.
+fn check_workspace(workspace: &gaanim_project::Workspace, parsed: &CheckArgs) -> i32 {
+    let members = workspace
+        .select_members(parsed.members.as_deref())
+        .unwrap_or_else(|error| {
+            console::error("check", error);
+            std::process::exit(2);
+        });
+    if members.is_empty() {
+        console::error(
+            "check",
+            format!("workspace {} has no members", workspace.name),
+        );
+        console::hint("Add the folders of its projects to `members` in its gaanim.toml.");
+        return 2;
+    }
+    let hint = members
+        .iter()
+        .find_map(|member| member.project.as_ref().ok())
+        .map_or(workspace.root.as_path(), |project| project.root.as_path());
+    let python = crate::python::runtime(hint).unwrap_or_else(|error| {
+        console::error("check", error);
+        console::hint(crate::python::install_hint());
+        std::process::exit(2);
+    });
+    let json = console::message_format_json();
+    gaanim_api::canvas::track_script_lines(json);
+    let mut failed = Vec::new();
+    for member in &members {
+        let outcome = match &member.project {
+            Ok(project) => check_script(python, &project.entry, parsed.strict, json),
+            Err(error) => Err(error.clone()),
+        };
+        match outcome {
+            Ok(false) => {}
+            Ok(true) => failed.push(member.path.as_str()),
+            Err(error) => {
+                report_could_not_load("check", &error);
+                failed.push(member.path.as_str());
+            }
+        }
+    }
+    let passed = members.len() - failed.len();
+    if json {
+        console::emit_json(&[
+            ("type", "workspace".into()),
+            ("name", workspace.name.as_str().into()),
+            ("members", members.len().into()),
+            ("passed", passed.into()),
+            ("failed", failed.len().into()),
+        ]);
+    } else {
+        let color = console::color_enabled(console::Stream::Stdout);
+        let (level, label) = if failed.is_empty() {
+            (console::Level::Success, "pass")
+        } else {
+            (console::Level::Error, "fail")
+        };
+        let mut message = format!(
+            "workspace {} · {passed} of {} members passed",
+            workspace.name,
+            members.len()
+        );
+        if !failed.is_empty() {
+            message.push_str(&format!(" · failed: {}", failed.join(", ")));
+        }
+        println!("{}", console::format_line(level, label, &message, color));
+    }
+    i32::from(!failed.is_empty())
+}
+
+/// Run `script` without a window and print its `check` report. Whether it
+/// failed (errors, or warnings when `strict`), or the error that kept it
+/// from loading.
+fn check_script(
+    python: &gaanim_editor::python_plugin::PythonPlugin,
+    script: &Path,
+    strict: bool,
+    json: bool,
+) -> Result<bool, String> {
+    let canvas = (python.load_script_canvas)(script)?;
+    let source = std::fs::read_to_string(script).unwrap_or_default();
     let is_presentation = canvas.has_presentation_features();
     let mut report = if is_presentation {
         presentation_preflight(&canvas, &source)
@@ -766,7 +897,7 @@ fn dispatch_check_mode() -> bool {
         scene_preflight(&canvas, &source)
     };
     // A manifest travels with the project, repositories included.
-    if let Some(project) = gaanim_project::find_project_for_script(&script) {
+    if let Some(project) = gaanim_project::find_project_for_script(script) {
         report
             .warnings
             .extend(project.manifest.secret_keys.iter().map(|key| {
@@ -777,12 +908,10 @@ fn dispatch_check_mode() -> bool {
             }));
     }
 
+    let failed = !report.errors.is_empty() || (strict && !report.warnings.is_empty());
     if json {
-        print_check_json(&script, &canvas, &report, is_presentation);
-        if !report.errors.is_empty() || (parsed.strict && !report.warnings.is_empty()) {
-            std::process::exit(1);
-        }
-        return true;
+        print_check_json(script, &canvas, &report, is_presentation);
+        return Ok(failed);
     }
     // The report goes to stdout so it can be captured. Its first line, the
     // `check` status line, marks where it starts (the docs builder relies on it).
@@ -795,7 +924,7 @@ fn dispatch_check_mode() -> bool {
         "check",
         &format!(
             "{} · {}",
-            console::display_path(&script),
+            console::display_path(script),
             if is_presentation {
                 "presentation"
             } else {
@@ -847,11 +976,7 @@ fn dispatch_check_mode() -> bool {
             &plural(report.errors.len(), "error"),
         );
     }
-
-    if !report.errors.is_empty() || (parsed.strict && !report.warnings.is_empty()) {
-        std::process::exit(1);
-    }
-    true
+    Ok(failed)
 }
 
 /// The `check` report as JSON lines: a `diagnostic` per error and warning,
@@ -943,9 +1068,18 @@ fn script_line_in(message: &str) -> Option<console::ScriptLocation> {
 fn parse_check_args(args: &[String]) -> Result<CheckArgs, String> {
     let mut script = None;
     let mut strict = false;
-    for arg in args {
+    let mut members = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
         match arg.as_str() {
             "--strict" => strict = true,
+            "--members" => {
+                members = Some(
+                    args.next()
+                        .ok_or_else(|| "--members requires member paths or patterns".to_string())?
+                        .clone(),
+                );
+            }
             value if value.starts_with('-') => return Err(format!("unknown option `{value}`")),
             value if script.is_none() => script = Some(PathBuf::from(value)),
             value => return Err(format!("unexpected argument `{value}`")),
@@ -954,6 +1088,7 @@ fn parse_check_args(args: &[String]) -> Result<CheckArgs, String> {
     Ok(CheckArgs {
         script: script.ok_or_else(|| "missing <script.py>".to_string())?,
         strict,
+        members,
     })
 }
 
@@ -1289,17 +1424,29 @@ fn parse_args() -> LaunchArgs {
         return parsed;
     }
     let (path, project) = if raw_path.is_dir() {
-        let project = gaanim_project::resolve_project(raw_path).unwrap_or_else(|error| {
-            console::error("project", error);
-            std::process::exit(2);
-        });
+        let project = match gaanim_project::resolve_folder(raw_path) {
+            Ok(gaanim_project::ProjectFolder::Project(project)) => project,
+            Ok(gaanim_project::ProjectFolder::Workspace(workspace)) => {
+                exit_with_workspace_members(&workspace)
+            }
+            Err(error) => {
+                console::error("project", error);
+                std::process::exit(2);
+            }
+        };
         (project.entry.clone(), Some(project))
     } else {
         let path = gaanim_project::resolve_entry(raw_path).unwrap_or_else(|error| {
             console::error("project", error);
             std::process::exit(2);
         });
-        let project = gaanim_project::find_project_for_script(&path);
+        // An invalid manifest above the script is reported, not passed over.
+        let project = gaanim_project::locate_script(&path)
+            .unwrap_or_else(|error| {
+                console::error("project", error);
+                std::process::exit(2);
+            })
+            .project;
         (path, project)
     };
     LaunchArgs {
@@ -1307,6 +1454,23 @@ fn parse_args() -> LaunchArgs {
         project,
         ..parsed
     }
+}
+
+/// A workspace without a script of its own was opened: say which members
+/// open, and exit.
+fn exit_with_workspace_members(workspace: &gaanim_project::Workspace) -> ! {
+    console::error(
+        "project",
+        format!(
+            "{} is the workspace {}; open one of its members",
+            console::display_path(&workspace.root),
+            workspace.name
+        ),
+    );
+    for member in workspace.members() {
+        console::hint(format!("gaanim {}", console::display_path(&member.root)));
+    }
+    std::process::exit(2);
 }
 
 fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
@@ -1630,8 +1794,15 @@ mod tests {
             CheckArgs {
                 script: PathBuf::from("slides.py"),
                 strict: true,
+                members: None,
             }
         );
+        let args = ["canal", "--members", "season-1/*,trailer"].map(str::to_string);
+        assert_eq!(
+            parse_check_args(&args).unwrap().members.as_deref(),
+            Some("season-1/*,trailer")
+        );
+        assert!(parse_check_args(&["canal", "--members"].map(str::to_string)).is_err());
     }
 
     #[test]

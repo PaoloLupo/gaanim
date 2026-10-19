@@ -2385,6 +2385,9 @@ pub struct SceneModel {
     /// and the path is not in the working directory: the script's `assets`
     /// folder and the script's own folder.
     pub asset_search: Vec<PathBuf>,
+    /// The workspace's shared asset folders: where a relative path missing
+    /// from the scene's own folders is looked up last.
+    pub shared_asset_roots: Vec<PathBuf>,
     /// Audio sources synchronized in preview and mixed by FFmpeg during export.
     pub audio_tracks: Vec<AudioTrack>,
     /// Index in `audio_tracks` of each segment's transition sound, so that a
@@ -2446,6 +2449,7 @@ impl SceneModel {
             design_resolution: 1080.0,
             asset_root: None,
             asset_search: Vec::new(),
+            shared_asset_roots: Vec::new(),
             audio_tracks: Vec::new(),
             transition_sounds: Vec::new(),
             tempo: None,
@@ -3038,21 +3042,33 @@ impl SceneModel {
         Ok(())
     }
 
+    /// Where a relative asset path is: in the asset root, or without one in
+    /// the working directory and then [`Self::asset_search`]; then in the
+    /// workspace's [`Self::shared_asset_roots`]. Missing everywhere, the
+    /// first place, so the error names it.
     fn resolve_asset_path(&self, path: impl AsRef<Path>) -> PathBuf {
         let path = path.as_ref();
         if path.is_absolute() {
-            path.to_path_buf()
-        } else if let Some(root) = &self.asset_root {
-            root.join(path)
-        } else if path.exists() {
-            path.to_path_buf()
-        } else {
-            self.asset_search
-                .iter()
-                .map(|folder| folder.join(path))
-                .find(|candidate| candidate.exists())
-                .unwrap_or_else(|| path.to_path_buf())
+            return path.to_path_buf();
         }
+        let first = match &self.asset_root {
+            Some(root) => root.join(path),
+            None => path.to_path_buf(),
+        };
+        if first.exists() {
+            return first;
+        }
+        let search = if self.asset_root.is_some() {
+            &[][..]
+        } else {
+            &self.asset_search[..]
+        };
+        search
+            .iter()
+            .chain(&self.shared_asset_roots)
+            .map(|folder| folder.join(path))
+            .find(|candidate| candidate.exists())
+            .unwrap_or(first)
     }
 
     /// Declare an audio source without scheduling it.
@@ -8931,6 +8947,54 @@ mod tests {
             panic!("typst asset should create a Typst drawable");
         };
         assert_eq!(source, "= Asset-backed Typst");
+    }
+
+    #[test]
+    fn shared_asset_roots_come_after_the_scene_folders() {
+        let temp = tempfile::tempdir().unwrap();
+        let (own, shared, brand) = (
+            temp.path().join("own"),
+            temp.path().join("shared"),
+            temp.path().join("brand"),
+        );
+        for folder in [&own, &shared, &brand] {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        std::fs::write(own.join("logo.svg"), "").unwrap();
+        std::fs::write(shared.join("logo.svg"), "").unwrap();
+        std::fs::write(shared.join("mascot.svg"), "").unwrap();
+        std::fs::write(brand.join("mascot.svg"), "").unwrap();
+        std::fs::write(brand.join("font.ttf"), "").unwrap();
+
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.shared_asset_roots = vec![shared.clone(), brand.clone()];
+        canvas.asset_search = vec![own.clone()];
+        assert_eq!(canvas.resolve_asset_path("logo.svg"), own.join("logo.svg"));
+        assert_eq!(
+            canvas.resolve_asset_path("mascot.svg"),
+            shared.join("mascot.svg")
+        );
+        assert_eq!(
+            canvas.resolve_asset_path("font.ttf"),
+            brand.join("font.ttf")
+        );
+        // Missing everywhere, the path stays as written.
+        assert_eq!(
+            canvas.resolve_asset_path("missing.png"),
+            PathBuf::from("missing.png")
+        );
+
+        canvas.set_asset_root(&own).unwrap();
+        let own = canvas.asset_root.clone().unwrap();
+        assert_eq!(canvas.resolve_asset_path("logo.svg"), own.join("logo.svg"));
+        assert_eq!(
+            canvas.resolve_asset_path("font.ttf"),
+            brand.join("font.ttf")
+        );
+        assert_eq!(
+            canvas.resolve_asset_path("missing.png"),
+            own.join("missing.png")
+        );
     }
 
     #[test]

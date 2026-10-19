@@ -271,6 +271,23 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   animaciones, que el paquete no guarda, y el inspector muestra la cámara
   grabada.
 
+== Proyectos
+
+- Un #link("/guias/proyectos/#workspaces")[workspace] reúne varios proyectos
+  en un repositorio: un `gaanim.toml` con `[workspace]` dice dónde están sus
+  miembros (`members`, a cualquier profundidad, con `*` y grupos) y qué
+  carpetas comparten (`[workspace.shared]`, con `python` y `assets`). Cada
+  miembro ve el código compartido en `sys.path`, encuentra los recursos
+  compartidos, se recarga al guardarlos y usa el `.venv` del workspace.
+- `gaanim check <workspace>` comprueba todos los miembros y resume, y
+  `--members` elige algunos por ruta o patrón. `gaanim init` dentro de un
+  workspace crea solo los archivos del miembro.
+- El título de la ventana de un miembro lleva delante su workspace
+  (`canal › ep1`).
+- En Windows, la raíz del proyecto y su `src/` entran en `sys.path` sin el
+  prefijo `\\?\`, y el `__file__` de los módulos que se importan de ahí
+  también.
+
 == Al actualizar
 
 - El 3D cambia de aspecto: bordes con MSAA en lugar del antialiasing de
@@ -310,6 +327,14 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   su primera muestra desde el segundo 0: hasta su cursor, el canal muestra la
   pose declarada o lo que lo anime antes. Si contabas con ese valor previo,
   declara la serie antes o ajusta la pose.
+- Al abrir un script, un `gaanim.toml` inválido en su carpeta o en una
+  superior ya no se salta en silencio: detiene `gaanim`, `check` y `export`
+  con un error que lo nombra. Un manifiesto sin `kind`, `entry` ni
+  `[workspace]`, que solo fija `assets_dir` para `load_project`, se sigue
+  saltando.
+- En un workspace, `scene.assets.load_project()` sin argumento, llamado desde
+  un módulo compartido, carga el proyecto del script que se ejecuta en lugar
+  del `gaanim.toml` del workspace.
 
 = 0.14.0
 

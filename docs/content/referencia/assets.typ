@@ -30,7 +30,10 @@ Una ruta relativa se resuelve desde la carpeta de recursos de la escena. Sin
 ella, se busca en el directorio de trabajo del proceso, después en la carpeta
 `assets/` junto al script que creó la escena y por último en la carpeta del
 script, así que `scene.media.svg("logo.svg")` encuentra `assets/logo.svg` sin
-configurar nada. Una ruta absoluta se usa tal
+configurar nada. En un
+#link("/referencia/gaanim-toml/#workspace")[workspace], una ruta que no está
+en esas carpetas se busca después en sus carpetas de recursos compartidas
+(`shared.assets`), en su orden. Una ruta absoluta se usa tal
 cual. Todas las fábricas usan archivos locales: no descargan URLs ni aceptan
 bytes o arrays.
 
@@ -41,7 +44,7 @@ bytes o arrays.
   kind: "method",
   params: ((name: "path", type: "str | None", default: "None", desc: [Ruta del manifiesto; sin ella, el `gaanim.toml` más cercano, buscando desde la carpeta del script que llama hacia arriba.]),),
   returns: (type: "None", desc: [Fija la carpeta de recursos.]),
-  desc: [Lee la clave `assets_dir` del manifiesto (`"assets"` si falta, como en la CLI) y la resuelve respecto de la carpeta del manifiesto, así que funciona igual se lance Gaanim desde donde se lance. Una ruta explícita relativa, en cambio, se resuelve desde el directorio de trabajo del proceso; sin argumento se busca el `gaanim.toml` en la carpeta del script que llama y después en sus carpetas superiores, así que un módulo como `capitulo4/estilo.py` usa el manifiesto del proyecto. Si no hay ninguno, lanza `RuntimeError` con la carpeta de partida. Es la forma recomendada en un proyecto. Un manifiesto ilegible lanza `RuntimeError`; un `assets_dir` que no es una cadena entre comillas o que apunta a una carpeta inexistente, `ValueError`. Consulta #link("/referencia/gaanim-toml/")[`gaanim.toml`].],
+  desc: [Lee la clave `assets_dir` del manifiesto (`"assets"` si falta, como en la CLI) y la resuelve respecto de la carpeta del manifiesto, así que funciona igual se lance Gaanim desde donde se lance. Una ruta explícita relativa, en cambio, se resuelve desde el directorio de trabajo del proceso; sin argumento se busca el `gaanim.toml` en la carpeta del script que llama y después en sus carpetas superiores, así que un módulo como `capitulo4/estilo.py` usa el manifiesto del proyecto. Si no hay ninguno, lanza `RuntimeError` con la carpeta de partida. En un workspace, sin argumento, carga el proyecto del script que se ejecuta y las carpetas de recursos compartidas del workspace, siempre que el manifiesto más cercano a quien llama sea el de ese proyecto o el del workspace: un módulo compartido que la llama no fija la carpeta de recursos en la raíz del workspace. Un miembro sin carpeta de recursos propia usa solo las compartidas, sin error. Es la forma recomendada en un proyecto. Un manifiesto ilegible lanza `RuntimeError`; un `assets_dir` que no es una cadena entre comillas o que apunta a una carpeta inexistente, `ValueError`. Consulta #link("/referencia/gaanim-toml/")[`gaanim.toml`].],
 )[
 ```python
 >>>from gaanim import *

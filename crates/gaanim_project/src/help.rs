@@ -210,7 +210,10 @@ const INIT: Page = Page {
                     "slides",
                     "A presentation: each segment is a slide and stop() waits\nfor you to advance",
                 ),
-                ("DIRECTORY", "Where to create it (default: gaanim-<KIND>)"),
+                (
+                    "DIRECTORY",
+                    "Where to create it (default: gaanim-<KIND>). Inside a\nworkspace, only main.py, gaanim.toml and assets/: the\nPython environment is the workspace's",
+                ),
             ],
         ),
         Block::Rows(
@@ -380,6 +383,7 @@ const CHECK: Page = Page {
             "Usage",
             &[
                 "gaanim check <SCRIPT_OR_PROJECT> [--strict] [--message-format json]",
+                "gaanim check <WORKSPACE> [--members <PATHS>] [--strict]",
                 "gaanim check <BUNDLE.gaanim>",
             ],
         ),
@@ -402,6 +406,10 @@ const CHECK: Page = Page {
                     "Also fail when there are warnings (useful in CI)",
                 ),
                 (
+                    "--members <PATHS>",
+                    "In a workspace, check only these members: paths or\npatterns as in `members`, comma-separated\n(\"season-1/*,trailer\")",
+                ),
+                (
                     "--message-format <FORMAT>",
                     "human (default) or json: one JSON object per line on\nstdout, each diagnostic with its file and line",
                 ),
@@ -412,7 +420,10 @@ const CHECK: Page = Page {
             "Exit status",
             &[
                 ("0", "No errors (and, with --strict, no warnings)"),
-                ("1", "The report found problems"),
+                (
+                    "1",
+                    "The report found problems (in a workspace, in a member)",
+                ),
                 ("2", "The script or project could not be loaded"),
             ],
         ),

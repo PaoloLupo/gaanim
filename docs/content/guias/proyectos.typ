@@ -161,7 +161,8 @@ proyecto siguen en caché hasta reiniciar Gaanim.
 
 La raíz del proyecto, su carpeta `src/` y la carpeta del script están en
 `sys.path`, y `__file__`, `sys.argv[0]` y `sys.path` usan rutas normales, sin
-el prefijo `\\?\` de Windows.
+el prefijo `\\?\` de Windows. En un #link(<workspaces>)[workspace], también
+sus carpetas de código compartido y su raíz, cuyos módulos se recargan igual.
 
 = Exportar
 
@@ -241,6 +242,76 @@ Para guardar solo el fotograma que estás viendo, pulsa `Ctrl+Mayús+S`
 renderiza aparte, sin overlays ni paneles, a 1920 píxeles en el lado largo, y
 se guarda en `<output_dir>/captures/` con el nombre del script y el instante
 (`main_2.35s.png`); nunca reemplaza una captura anterior.
+
+= Varios proyectos en un repositorio <workspaces>
+
+Un canal con varios vídeos y charlas, o un curso con una presentación por
+clase, cabe en un solo repositorio como un *workspace*: cada vídeo o charla
+es un proyecto normal, con su `gaanim.toml`, y todos comparten el código
+común (helpers, componentes, una mascota), los recursos (logos, fuentes,
+música) y el entorno de Python.
+
+La estructura es tuya. Puede ir por temporadas:
+
+```text
+canal/
+  gaanim.toml          # el workspace
+  comun/canal/         # paquete de Python compartido
+  recursos/            # recursos compartidos
+  temporada-1/ep1/     # un proyecto: gaanim.toml, main.py, assets/
+  temporada-1/ep2/
+  eventos/2026/charla/
+```
+
+```toml
+# canal/gaanim.toml
+name = "canal"
+
+[workspace]
+members = [{ path = "temporada-1/*", group = "Temporada 1" }, "eventos/*/charla"]
+
+[workspace.shared]
+python = ["comun"]
+assets = ["recursos"]
+```
+
+O ser plana, con los nombres por defecto, `src` para el código y `assets`
+para los recursos:
+
+```text
+curso/
+  gaanim.toml          # [workspace] members = ["clase-*"]
+  src/curso/
+  assets/
+  clase-01/
+  clase-02/
+```
+
+Desde cualquier miembro, `import canal` encuentra el paquete compartido y
+`scene.media.svg("mascota.svg")` encuentra `recursos/mascota.svg` si el
+miembro no tiene uno propio con ese nombre. Al guardar un archivo de `comun/`
+o de `recursos/`, la vista previa del miembro abierto se recarga; al guardar
+uno de otro episodio, no.
+
+```bash
+gaanim canal/temporada-1/ep1                 # abre un miembro
+gaanim check canal                           # comprueba todos los miembros
+gaanim check canal --members "temporada-1/*" # solo algunos
+gaanim init video canal/temporada-1/ep3      # un miembro nuevo
+```
+
+- `gaanim check canal` ejecuta el `entry` de cada miembro, uno tras otro, y
+  termina con un resumen; devuelve `1` si falla alguno, así que sirve para la
+  integración continua de un canal.
+- `gaanim init` dentro de un workspace crea solo `main.py`, `gaanim.toml` y
+  `assets/`. Si `members` no incluye la carpeta nueva, avisa y dice qué línea
+  añadir; hasta entonces es un proyecto independiente.
+- El entorno de Python es el `.venv` de la raíz del workspace, que Gaanim
+  crea la primera vez que abres un miembro. Un miembro con su propio `.venv`
+  usa el suyo.
+
+La #link("/referencia/gaanim-toml/#workspace")[referencia de `[workspace]`]
+describe cada clave y qué hereda cada miembro.
 
 = Convertir un script suelto en proyecto
 

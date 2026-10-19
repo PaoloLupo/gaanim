@@ -11,6 +11,12 @@ pub mod association;
 pub mod help;
 pub mod relay;
 pub mod settings;
+pub mod workspace;
+
+pub use workspace::{
+    MemberPattern, Workspace, WorkspaceMember, is_within, natural_cmp, resolve_workspace,
+    workspace_around,
+};
 
 const VIDEO_PROJECT_TEMPLATE: &str = include_str!("../../../templates/video_project.py");
 const SLIDES_PROJECT_TEMPLATE: &str = include_str!("../../../templates/slides_project.py");
@@ -104,13 +110,39 @@ pub struct ProjectManifest {
 #[derive(Debug, Deserialize)]
 struct RawProjectManifest {
     name: Option<String>,
-    kind: String,
-    entry: PathBuf,
+    kind: Option<String>,
+    entry: Option<PathBuf>,
     assets_dir: Option<PathBuf>,
     output_dir: Option<PathBuf>,
     language: Option<String>,
     #[serde(default)]
     polls: RawPolls,
+    workspace: Option<workspace::RawWorkspace>,
+}
+
+impl RawProjectManifest {
+    /// Whether the manifest describes a project: a workspace's may not,
+    /// and one that only sets `assets_dir` for `load_project` does not.
+    fn declares_project(&self) -> bool {
+        self.kind.is_some() || self.entry.is_some()
+    }
+}
+
+/// The manifest at `manifest_path`, read and parsed but not validated.
+fn read_manifest(manifest_path: &Path) -> Result<(String, RawProjectManifest), String> {
+    let source = std::fs::read_to_string(manifest_path).map_err(|error| {
+        format!(
+            "could not read project manifest {}: {error}",
+            manifest_path.display()
+        )
+    })?;
+    let raw = toml::from_str(&source).map_err(|error| {
+        format!(
+            "invalid project manifest {}: {error}",
+            manifest_path.display()
+        )
+    })?;
+    Ok((source, raw))
 }
 
 /// Words that make a key's name look like a credential.
@@ -185,6 +217,62 @@ pub struct ResolvedProject {
     pub manifest_path: PathBuf,
     pub manifest: ProjectManifest,
     pub entry: PathBuf,
+    /// The workspace the project is a member of, or the one its own
+    /// manifest declares.
+    pub workspace: Option<Workspace>,
+}
+
+impl ResolvedProject {
+    /// The project's name with its workspace's in front (`canal › ep1`)
+    /// when it is a member of one, for titles and lists.
+    pub fn display_name(&self) -> String {
+        match &self.workspace {
+            Some(workspace) if workspace.root != self.root => {
+                format!("{} › {}", workspace.name, self.manifest.name)
+            }
+            _ => self.manifest.name.clone(),
+        }
+    }
+
+    /// Where the project's Python environment lives: its own folder when it
+    /// has a virtual environment, else its workspace's root, else its own
+    /// folder, where one is created.
+    pub fn environment_root(&self) -> &Path {
+        let own = VENV_NAMES
+            .iter()
+            .any(|name| venv_python(&self.root.join(name)).is_some());
+        match &self.workspace {
+            Some(workspace) if !own => &workspace.root,
+            _ => &self.root,
+        }
+    }
+}
+
+/// What a script or folder belongs to: its project and the workspace that
+/// project is a member of, or only a workspace, for a file in a workspace's
+/// own folders (a shared module, a scratch script).
+#[derive(Debug, Clone, Default)]
+pub struct Location {
+    pub project: Option<ResolvedProject>,
+    pub workspace: Option<Workspace>,
+}
+
+/// A folder `gaanim` can open: a project, or a workspace without one.
+#[derive(Debug, Clone)]
+pub enum ProjectFolder {
+    Project(ResolvedProject),
+    Workspace(Workspace),
+}
+
+/// The project or workspace whose `gaanim.toml` is in the folder `path`.
+pub fn resolve_folder(path: &Path) -> Result<ProjectFolder, String> {
+    if path.is_dir() {
+        let (_, raw) = read_manifest(&path.join("gaanim.toml"))?;
+        if !raw.declares_project() && raw.workspace.is_some() {
+            return resolve_workspace(path).map(ProjectFolder::Workspace);
+        }
+    }
+    resolve_project(path).map(ProjectFolder::Project)
 }
 
 pub fn create_project(options: &CreateProjectOptions) -> Result<ResolvedProject, String> {
@@ -207,17 +295,23 @@ pub fn create_project(options: &CreateProjectOptions) -> Result<ResolvedProject,
     );
     let readme = project_readme(project_name, options.kind);
     let pyproject = uv_bare_pyproject(project_name);
-    let files = [
+    let mut files = vec![
         (options.directory.join("main.py"), options.kind.source()),
         (options.directory.join("gaanim.toml"), manifest.as_str()),
-        (options.directory.join("pyproject.toml"), pyproject.as_str()),
-        (options.directory.join(".python-version"), PYTHON_VERSION),
-        (options.directory.join(".gitignore"), PROJECT_GITIGNORE),
-        (options.directory.join("README.md"), readme.as_str()),
-        (options.directory.join("AGENTS.md"), PROJECT_AGENTS),
         (options.directory.join("assets").join(".gitkeep"), ""),
-        (options.directory.join("exports").join(".gitkeep"), ""),
     ];
+    // Inside a workspace, the Python environment, the ignore rules and the
+    // agent notes are the workspace's.
+    if workspace_around(&options.directory).is_none() {
+        files.extend([
+            (options.directory.join("pyproject.toml"), pyproject.as_str()),
+            (options.directory.join(".python-version"), PYTHON_VERSION),
+            (options.directory.join(".gitignore"), PROJECT_GITIGNORE),
+            (options.directory.join("README.md"), readme.as_str()),
+            (options.directory.join("AGENTS.md"), PROJECT_AGENTS),
+            (options.directory.join("exports").join(".gitkeep"), ""),
+        ]);
+    }
     if !options.force
         && let Some((path, _)) = files.iter().find(|(path, _)| path.exists())
     {
@@ -246,30 +340,49 @@ pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
     }
     let root = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let manifest_path = root.join("gaanim.toml");
-    let source = std::fs::read_to_string(&manifest_path).map_err(|error| {
+    let (source, raw) = read_manifest(&manifest_path)?;
+    if !raw.declares_project() && raw.workspace.is_some() {
+        return Err(format!(
+            "{} is a workspace, not a project: open one of its members",
+            root.display()
+        ));
+    }
+    let missing = |field: &str| {
         format!(
-            "could not read project manifest {}: {error}",
+            "invalid project manifest {}: missing field `{field}`",
             manifest_path.display()
         )
-    })?;
-    let raw: RawProjectManifest = toml::from_str(&source).map_err(|error| {
+    };
+    let raw_kind = raw.kind.as_deref().ok_or_else(|| missing("kind"))?;
+    let raw_entry = raw.entry.clone().ok_or_else(|| missing("entry"))?;
+    let secret_keys = toml::from_str::<toml::Table>(&source)
+        .map(|table| secret_keys(&table, ""))
+        .unwrap_or_default();
+    // A manifest found above a script is named, so it can be fixed.
+    let invalid = |error: String| {
         format!(
             "invalid project manifest {}: {error}",
             manifest_path.display()
         )
-    })?;
-    let secret_keys = toml::from_str::<toml::Table>(&source)
-        .map(|table| secret_keys(&table, ""))
-        .unwrap_or_default();
-    let kind = ProjectKind::parse(&raw.kind)?;
-    validate_relative_path(&raw.entry, "entry")?;
-    let entry = root.join(&raw.entry);
+    };
+    let kind = ProjectKind::parse(raw_kind).map_err(invalid)?;
+    validate_relative_path(&raw_entry, "entry").map_err(invalid)?;
+    let entry = root.join(&raw_entry);
     if !entry.is_file() {
         return Err(format!(
             "project entry does not exist or is not a file: {}",
             entry.display()
         ));
     }
+    let workspace = match raw.workspace {
+        Some(workspace) => Some(Workspace::from_raw(
+            &root,
+            &manifest_path,
+            raw.name.as_deref(),
+            workspace,
+        )?),
+        None => workspace::find_workspace_for(&root)?,
+    };
     let name = raw
         .name
         .filter(|name| !name.trim().is_empty())
@@ -278,10 +391,11 @@ pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
     Ok(ResolvedProject {
         root,
         manifest_path,
+        workspace,
         manifest: ProjectManifest {
             name,
             kind,
-            entry: raw.entry,
+            entry: raw_entry,
             assets_dir: raw.assets_dir.unwrap_or_else(|| PathBuf::from("assets")),
             output_dir: raw.output_dir.unwrap_or_else(|| PathBuf::from("exports")),
             poll_relay: raw
@@ -306,17 +420,51 @@ pub fn resolve_entry(path: &Path) -> Result<PathBuf, String> {
     resolve_project(path).map(|project| project.entry)
 }
 
+/// The project `script` belongs to, if any; see [`locate_script`], which
+/// also reports an invalid manifest instead of passing it over.
 pub fn find_project_for_script(script: &Path) -> Option<ResolvedProject> {
-    let mut current = script.parent()?.to_path_buf();
-    for _ in 0..=5 {
-        if current.join("gaanim.toml").is_file()
-            && let Ok(project) = resolve_project(&current)
-        {
-            return Some(project);
-        }
-        current = current.parent()?.to_path_buf();
+    locate_script(script).ok()?.project
+}
+
+/// What `script` belongs to, from the nearest `gaanim.toml` in its folder or
+/// up to five folders above.
+pub fn locate_script(script: &Path) -> Result<Location, String> {
+    match script.parent() {
+        Some(folder) => locate_folder(folder),
+        None => Ok(Location::default()),
     }
-    None
+}
+
+/// What `folder` belongs to, from the nearest `gaanim.toml` in it or up to
+/// five folders above. A manifest that declares a project or a workspace
+/// and is invalid is an error naming it; one that declares neither, such as
+/// a manifest that only sets `assets_dir` for `load_project`, is passed over.
+pub fn locate_folder(folder: &Path) -> Result<Location, String> {
+    let mut current = folder.to_path_buf();
+    for _ in 0..=5 {
+        let manifest = current.join("gaanim.toml");
+        if manifest.is_file() {
+            let (_, raw) = read_manifest(&manifest)?;
+            if raw.declares_project() {
+                let project = resolve_project(&current)?;
+                return Ok(Location {
+                    workspace: project.workspace.clone(),
+                    project: Some(project),
+                });
+            }
+            if raw.workspace.is_some() {
+                return Ok(Location {
+                    project: None,
+                    workspace: Some(resolve_workspace(&current)?),
+                });
+            }
+        }
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        current = parent.to_path_buf();
+    }
+    Ok(Location::default())
 }
 
 fn validate_relative_path(path: &Path, field: &str) -> Result<(), String> {
@@ -902,24 +1050,30 @@ fn find_project_venv(project_hint: Option<&Path>) -> Option<PathBuf> {
     if let Ok(cwd) = std::env::current_dir() {
         bases.push(cwd);
     }
-    const VENV_NAMES: &[&str] = &[".venv", "venv", "env", ".venv312"];
     for base in bases {
-        let mut current = base;
-        for _ in 0..4 {
+        // A folder's own environment, then its workspace's however far up,
+        // then those of the three folders above.
+        let workspace = locate_folder(&base)
+            .ok()
+            .and_then(|location| location.workspace)
+            .map(|workspace| workspace.root);
+        let folders = std::iter::once(base.clone())
+            .chain(workspace)
+            .chain(base.ancestors().skip(1).take(3).map(Path::to_path_buf));
+        for folder in folders {
             for name in VENV_NAMES {
-                let candidate = current.join(name);
+                let candidate = folder.join(name);
                 if venv_python(&candidate).is_some() {
                     return Some(candidate);
                 }
             }
-            let Some(parent) = current.parent() else {
-                break;
-            };
-            current = parent.to_path_buf();
         }
     }
     None
 }
+
+/// Folder names a project's virtual environment goes by.
+const VENV_NAMES: &[&str] = &[".venv", "venv", "env", ".venv312"];
 
 fn venv_python(root: &Path) -> Option<PathBuf> {
     let candidates = if cfg!(windows) {
@@ -1455,6 +1609,139 @@ language = \"es\"
         )
         .unwrap();
         assert!(resolve_project(temp.path()).is_err());
+    }
+
+    #[test]
+    fn a_script_belongs_to_the_nearest_project_or_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let write = |relative: &str, text: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "gaanim.toml",
+            "name = \"canal\"\n[workspace]\nmembers = [\"shows/*\"]\n[workspace.shared]\npython = [\"common\"]\n",
+        );
+        write("common/helpers.py", "");
+        write("shows/one/main.py", "");
+        write(
+            "shows/one/gaanim.toml",
+            "kind = \"video\"\nentry = \"main.py\"\n",
+        );
+        write("shows/one/scenes/intro.py", "");
+
+        let location = locate_script(&root.join("shows/one/scenes/intro.py")).unwrap();
+        let project = location.project.expect("the member");
+        assert_eq!(project.manifest.name, "one");
+        let workspace = location.workspace.expect("its workspace");
+        assert_eq!(workspace.name, "canal");
+        assert_eq!(project.workspace.as_ref(), Some(&workspace));
+
+        // A shared module belongs to the workspace alone.
+        let location = locate_script(&root.join("common/helpers.py")).unwrap();
+        assert!(location.project.is_none());
+        assert_eq!(
+            location.workspace.map(|ws| ws.name).as_deref(),
+            Some("canal")
+        );
+        assert!(matches!(
+            resolve_folder(root).unwrap(),
+            ProjectFolder::Workspace(ws) if ws.name == "canal"
+        ));
+        assert!(
+            resolve_project(root)
+                .unwrap_err()
+                .contains("is a workspace")
+        );
+
+        // A manifest that only sets `assets_dir` is passed over; one that
+        // declares a project and is invalid is an error naming it.
+        write("shows/one/scenes/gaanim.toml", "assets_dir = \"media\"\n");
+        let location = locate_script(&root.join("shows/one/scenes/intro.py")).unwrap();
+        assert_eq!(location.project.unwrap().manifest.name, "one");
+        write(
+            "shows/one/scenes/gaanim.toml",
+            "kind = \"film\"\nentry = \"intro.py\"\n",
+        );
+        let error = locate_script(&root.join("shows/one/scenes/intro.py")).unwrap_err();
+        assert!(error.contains("unknown project kind"), "{error}");
+        assert!(error.contains("scenes"), "{error}");
+        assert!(find_project_for_script(&root.join("shows/one/scenes/intro.py")).is_none());
+        write("shows/one/scenes/gaanim.toml", "kind = \"video\"\n");
+        let error = locate_script(&root.join("shows/one/scenes/intro.py")).unwrap_err();
+        assert!(error.contains("missing field `entry`"), "{error}");
+        assert!(error.contains("gaanim.toml"), "{error}");
+    }
+
+    #[test]
+    fn a_member_uses_its_own_environment_or_its_workspace_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        std::fs::write(
+            root.join("gaanim.toml"),
+            "[workspace]\nmembers = [\"a/b/c/*\"]\n",
+        )
+        .unwrap();
+        let member = root.join("a/b/c/talk");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(member.join("main.py"), "").unwrap();
+        std::fs::write(
+            member.join("gaanim.toml"),
+            "kind = \"slides\"\nentry = \"main.py\"\n",
+        )
+        .unwrap();
+        let project = resolve_project(&member).unwrap();
+        assert_eq!(project.environment_root(), root.as_path());
+
+        let make_venv = |folder: &Path| {
+            let scripts = folder
+                .join(".venv")
+                .join(if cfg!(windows) { "Scripts" } else { "bin" });
+            std::fs::create_dir_all(&scripts).unwrap();
+            for name in ["python.exe", "python3"] {
+                std::fs::write(scripts.join(name), "").unwrap();
+            }
+        };
+        // The workspace's environment is found past four folders up.
+        make_venv(&root);
+        assert_eq!(find_project_venv(Some(&member)), Some(root.join(".venv")));
+        make_venv(&member);
+        let project = resolve_project(&member).unwrap();
+        assert_eq!(project.environment_root(), member.as_path());
+        assert_eq!(find_project_venv(Some(&member)), Some(member.join(".venv")));
+    }
+
+    #[test]
+    fn a_new_project_inside_a_workspace_gets_only_its_own_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("gaanim.toml"),
+            "[workspace]\nmembers = [\"shows/*\"]\n",
+        )
+        .unwrap();
+        let directory = root.join("shows/pilot");
+        let project = create_project(&CreateProjectOptions {
+            kind: ProjectKind::Video,
+            directory: directory.clone(),
+            force: false,
+        })
+        .unwrap();
+        assert!(project.workspace.is_some());
+        assert!(directory.join("main.py").is_file());
+        assert!(directory.join("assets/.gitkeep").is_file());
+        for absent in [
+            "pyproject.toml",
+            ".python-version",
+            ".gitignore",
+            "README.md",
+            "AGENTS.md",
+            "exports",
+        ] {
+            assert!(!directory.join(absent).exists(), "{absent}");
+        }
     }
 
     #[test]

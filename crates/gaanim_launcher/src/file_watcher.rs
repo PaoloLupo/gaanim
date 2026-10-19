@@ -54,20 +54,49 @@ impl FileWatcher {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct WatchScope {
     script_path: PathBuf,
     root: PathBuf,
+    /// The shared folders of the project's workspace outside `root`.
+    shared: Vec<PathBuf>,
+    /// The workspace's other members inside `root`, whose files are theirs.
+    others: Vec<PathBuf>,
+    /// The workspace's manifest, when it is outside `root`.
+    workspace_manifest: Option<PathBuf>,
 }
 
 impl WatchScope {
     fn for_script(script_path: PathBuf) -> Self {
         let script_path = script_path.canonicalize().unwrap_or(script_path);
-        let root = gaanim_project::find_project_for_script(&script_path)
-            .map(|project| project.root)
+        let location = gaanim_project::locate_script(&script_path).unwrap_or_default();
+        let root = location
+            .project
+            .as_ref()
+            .map(|project| project.root.clone())
             .or_else(|| script_path.parent().map(Path::to_path_buf))
             .unwrap_or_else(|| script_path.clone());
-        Self { script_path, root }
+        let mut scope = Self {
+            script_path,
+            root,
+            ..Self::default()
+        };
+        if let Some(workspace) = &location.workspace {
+            for folder in workspace.python_roots.iter().chain(&workspace.asset_roots) {
+                if !folder.starts_with(&scope.root) && !scope.shared.contains(folder) {
+                    scope.shared.push(folder.clone());
+                }
+            }
+            scope.others = workspace
+                .members()
+                .into_iter()
+                .map(|member| member.root)
+                .filter(|member| member != &scope.root && member.starts_with(&scope.root))
+                .collect();
+            scope.workspace_manifest = (!workspace.manifest_path.starts_with(&scope.root))
+                .then(|| workspace.manifest_path.clone());
+        }
+        scope
     }
 
     /// How a change to `path` affects the scene, if at all.
@@ -75,7 +104,16 @@ impl WatchScope {
         if path == self.script_path {
             return Some(FileKind::Source);
         }
-        let relative = path.strip_prefix(&self.root).ok()?;
+        if self.workspace_manifest.as_deref() == Some(path) {
+            return Some(FileKind::Asset);
+        }
+        if self.others.iter().any(|member| path.starts_with(member)) {
+            return None;
+        }
+        let base = std::iter::once(&self.root)
+            .chain(&self.shared)
+            .find(|base| path.starts_with(base))?;
+        let relative = path.strip_prefix(base).ok()?;
         let ignored = relative
             .components()
             .any(|component| component.as_os_str().to_str().is_some_and(is_ignored_name));
@@ -120,10 +158,29 @@ impl WatchScope {
     /// Whether `path` is a top-level folder of the project that is watched.
     fn is_watched_folder(&self, path: &Path) -> bool {
         path.parent() == Some(self.root.as_path())
+            && !self.others.iter().any(|member| member == path)
             && path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| !is_ignored_name(name))
+    }
+
+    /// What the watch covers, for the console: the project and the
+    /// workspace's shared folders.
+    fn description(&self) -> String {
+        let root = match console::display_path(&self.root).as_str() {
+            "." => "the current folder".to_string(),
+            path => path.to_string(),
+        };
+        if self.shared.is_empty() {
+            return root;
+        }
+        let shared: Vec<String> = self
+            .shared
+            .iter()
+            .map(|folder| console::display_path(folder))
+            .collect();
+        format!("{root} and {}", shared.join(", "))
     }
 }
 
@@ -218,8 +275,17 @@ fn is_ignored_name(name: &str) -> bool {
 /// inotify watches and leave hot reload off.
 fn watch_project(watcher: &mut impl Watcher, scope: &WatchScope) -> notify::Result<()> {
     watcher.watch(&scope.root, RecursiveMode::NonRecursive)?;
-    for folder in scope.watched_folders() {
-        watch_folder(watcher, &folder);
+    for folder in scope.watched_folders().iter().chain(&scope.shared) {
+        watch_folder(watcher, folder);
+    }
+    // The workspace's root holds its manifest; its folders are not watched.
+    if let Some(folder) = scope.workspace_manifest.as_deref().and_then(Path::parent)
+        && let Err(error) = watcher.watch(folder, RecursiveMode::NonRecursive)
+    {
+        console::warn(
+            "watch",
+            format!("could not watch {}: {error}", folder.display()),
+        );
     }
     Ok(())
 }
@@ -255,13 +321,7 @@ fn watch_loop(scope: WatchScope, stop: Arc<AtomicBool>, changed_tx: mpsc::Sender
     }
     console::info(
         "watch",
-        format!(
-            "Watching {} · save a file to reload",
-            match console::display_path(&scope.root).as_str() {
-                "." => "the current folder".to_string(),
-                path => path.to_string(),
-            }
-        ),
+        format!("Watching {} · save a file to reload", scope.description()),
     );
 
     let debounce = Duration::from_millis(200);
@@ -349,6 +409,7 @@ mod tests {
         let scope = WatchScope {
             script_path: entry,
             root: temp.path().to_path_buf(),
+            ..WatchScope::default()
         };
         assert_eq!(
             event_change(&[section], &scope),
@@ -386,6 +447,7 @@ mod tests {
         let scope = WatchScope {
             script_path: temp.path().join("main.py"),
             root: temp.path().to_path_buf(),
+            ..WatchScope::default()
         };
         assert_eq!(
             scope.watched_folders(),
@@ -396,11 +458,86 @@ mod tests {
     }
 
     #[test]
+    fn a_member_watches_the_shared_folders_and_not_the_other_members() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let write = |relative: &str, text: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "gaanim.toml",
+            "[workspace]\nmembers = [\"shows/*\"]\n\n[workspace.shared]\n\
+             python = [\"common\"]\nassets = [\"media\"]\n",
+        );
+        write("common/helpers.py", "");
+        write("media/logo.svg", "");
+        write("notes/todo.md", "");
+        for show in ["pilot", "finale"] {
+            write(&format!("shows/{show}/main.py"), "");
+            write(
+                &format!("shows/{show}/gaanim.toml"),
+                "kind = \"video\"\nentry = \"main.py\"\n",
+            );
+        }
+        let assets = |path: PathBuf| Some(ProjectChange::Assets(vec![path]));
+
+        let scope = WatchScope::for_script(root.join("shows/pilot/main.py"));
+        assert_eq!(scope.root, root.join("shows/pilot"));
+        assert_eq!(scope.shared, [root.join("common"), root.join("media")]);
+        assert_eq!(
+            event_change(&[root.join("common/helpers.py")], &scope),
+            Some(ProjectChange::Source)
+        );
+        assert_eq!(
+            event_change(&[root.join("media/logo.svg")], &scope),
+            assets(root.join("media/logo.svg"))
+        );
+        assert_eq!(
+            event_change(&[root.join("gaanim.toml")], &scope),
+            assets(root.join("gaanim.toml"))
+        );
+        for ignored in [
+            "shows/finale/main.py",
+            "notes/todo.md",
+            "common/__pycache__/helpers.cpython-314.pyc",
+        ] {
+            assert_eq!(
+                event_change(&[root.join(ignored)], &scope),
+                None,
+                "{ignored}"
+            );
+        }
+
+        // A workspace that is a project leaves its members' files to them.
+        write(
+            "gaanim.toml",
+            "kind = \"video\"\nentry = \"intro.py\"\n\n[workspace]\nmembers = [\"shows/*\"]\n",
+        );
+        write("intro.py", "");
+        let scope = WatchScope::for_script(root.join("intro.py"));
+        assert_eq!(
+            scope.others,
+            [root.join("shows/finale"), root.join("shows/pilot")]
+        );
+        assert_eq!(
+            event_change(&[root.join("shows/pilot/main.py")], &scope),
+            None
+        );
+        assert_eq!(
+            event_change(&[root.join("notes/todo.md")], &scope),
+            assets(root.join("notes/todo.md"))
+        );
+    }
+
+    #[test]
     fn project_assets_trigger_an_asset_reload() {
         let temp = tempfile::tempdir().unwrap();
         let scope = WatchScope {
             script_path: temp.path().join("main.py"),
             root: temp.path().to_path_buf(),
+            ..WatchScope::default()
         };
         for asset in [
             "assets/cover.png",
@@ -483,6 +620,7 @@ mod tests {
         let scope = WatchScope {
             script_path: root.join("main.py"),
             root: root.to_path_buf(),
+            ..WatchScope::default()
         };
         let create = || EventKind::Create(CreateKind::Any);
         let modify = || EventKind::Modify(ModifyKind::Any);
@@ -548,6 +686,7 @@ mod tests {
         let scope = WatchScope {
             script_path: root.join("main.py"),
             root: root.to_path_buf(),
+            ..WatchScope::default()
         };
         let cover = assets.join("cover.png");
         std::fs::write(&cover, "").unwrap();

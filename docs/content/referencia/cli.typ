@@ -12,7 +12,9 @@
 El ejecutable `gaanim` abre el editor, crea proyectos y exporta escenas. Todos
 los comandos que reciben `<SCRIPT_O_PROYECTO>` aceptan la ruta de un script
 Python o la carpeta de un proyecto: en una carpeta se ejecuta el `entry` de su
-#link("/referencia/gaanim-toml/")[`gaanim.toml`].
+#link("/referencia/gaanim-toml/")[`gaanim.toml`]. La carpeta de un
+#link("/guias/proyectos/#workspaces")[workspace] sin `entry` no tiene script
+que ejecutar: `gaanim` lista sus miembros y `check` los comprueba todos.
 
 ```bash
 gaanim                                   # abre el Inicio
@@ -229,10 +231,18 @@ paquete de autoría de Gaanim; si no lo consigue, avisa y el proyecto sigue
 siendo válido. Si algún archivo del scaffold ya existe, falla. `--force`
 reescribe solo esos archivos y no borra nada de `assets/` ni de otras carpetas.
 
+Dentro de un #link("/guias/proyectos/#workspaces")[workspace], `init` crea
+solo `main.py`, `gaanim.toml` y `assets/`: el entorno de Python, el
+`.gitignore` y las notas son los del workspace, y lo que prepara es el `.venv`
+de su raíz. Si los `members` del workspace no incluyen la carpeta nueva, avisa,
+dice qué línea añadir y no prepara ningún entorno; hasta entonces el proyecto
+es independiente.
+
 = `gaanim check`
 
 ```bash
 gaanim check <SCRIPT_O_PROYECTO> [--strict] [--message-format json]
+gaanim check <WORKSPACE> [--members <RUTAS>] [--strict] [--message-format json]
 ```
 
 Ejecuta el script sin abrir ventana y revisa la escena resultante. Imprime la
@@ -273,6 +283,23 @@ solo hay advertencias. Si el script lanza una excepción o no termina con
 ```bash
 gaanim check mi-charla --strict
 ```
+
+Con la carpeta de un #link("/guias/proyectos/#workspaces")[workspace],
+`check` comprueba el `entry` de cada miembro, uno tras otro y en el orden de
+`members`, y termina con un resumen:
+
+```text
+  ✗ fail      workspace canal · 3 of 4 members passed · failed: temporada-1/ep2
+```
+
+`--members` elige los miembros con rutas o patrones escritos como los de
+`members`, separados por comas (`--members "temporada-1/*,trailer"`). Un
+patrón que no nombra ningún miembro es un error que lista los que hay. Con la
+carpeta de un workspace que también es un proyecto, `check` comprueba ese
+proyecto, y `--members`, sus miembros. Un miembro que no se puede cargar
+cuenta como fallido y la comprobación sigue con el siguiente; el código de
+salida es `1` si falla alguno. Todos los miembros se ejecutan en el mismo
+intérprete, el del entorno del primero.
 
 Con `--message-format json`, el informe sale en JSON por líneas, cada
 diagnóstico con su archivo y línea cuando los tiene (ver
@@ -676,6 +703,8 @@ Cada objeto tiene un `type`:
 - `check`: el veredicto de `check`, con `result` (`pass` o `fail`), `errors`,
   `warnings`, `segments`, `stops`, `duration`, `width` y `height`. El código de
   salida es el de siempre.
+- `workspace`: tras los `check` de los miembros de un workspace, su resumen,
+  con `name`, `members`, `passed` y `failed`.
 - `progress`: el avance de una exportación, con `current`, `total` y `percent`,
   una vez por cada punto porcentual. La barra de progreso no se dibuja.
 - `reload`: en la vista previa, `phase` `start` cuando un cambio vuelve a

@@ -104,11 +104,55 @@ pub(crate) fn script_asset_path(py: Python<'_>, path: PathBuf) -> PathBuf {
     let Ok(directory) = caller_directory(py) else {
         return path;
     };
+    let shared = workspace_asset_roots(&directory);
     [directory.join(DEFAULT_ASSETS_DIR), directory]
         .into_iter()
+        .chain(shared)
         .map(|folder| folder.join(&path))
         .find(|candidate| candidate.exists())
         .unwrap_or(path)
+}
+
+/// The shared asset folders of the workspace `directory` belongs to, where
+/// a relative path is looked up after the scene's own folders.
+fn workspace_asset_roots(directory: &std::path::Path) -> Vec<PathBuf> {
+    gaanim_project::locate_folder(directory)
+        .ok()
+        .and_then(|location| location.workspace)
+        .map(|workspace| workspace.asset_roots)
+        .unwrap_or_default()
+}
+
+/// The project of the script being run (`sys.argv[0]`), for a
+/// `load_project()` called from `directory` whose nearest manifest is that
+/// project's or its workspace's, or that has none: a shared module of a
+/// workspace then loads the member that runs, not the workspace.
+fn running_project(
+    py: Python<'_>,
+    directory: &std::path::Path,
+) -> Option<gaanim_project::ResolvedProject> {
+    let script = py
+        .import("sys")
+        .ok()?
+        .getattr("argv")
+        .ok()?
+        .get_item(0)
+        .ok()?
+        .extract::<String>()
+        .ok()?;
+    let project = gaanim_project::find_project_for_script(std::path::Path::new(&script))?;
+    let applies = match find_manifest_upward(directory) {
+        None => true,
+        Some(nearest) => {
+            let nearest = nearest.canonicalize().unwrap_or(nearest);
+            nearest == project.manifest_path
+                || project
+                    .workspace
+                    .as_ref()
+                    .is_some_and(|workspace| workspace.manifest_path == nearest)
+        }
+    };
+    applies.then_some(project)
 }
 
 /// Read the top-level `assets_dir` string from a project manifest, falling
@@ -3288,6 +3332,7 @@ impl PyScene {
         // Without an asset folder, a relative path missing from the working
         // directory is found next to the script or in its `assets` folder.
         if let Ok(directory) = caller_directory(py) {
+            canvas.shared_asset_roots = workspace_asset_roots(&directory);
             canvas.asset_search = vec![directory.join(DEFAULT_ASSETS_DIR), directory];
         }
         let inner = canvas.into_shared();
@@ -3825,9 +3870,29 @@ impl PyAssetManager {
     /// up through its parents. It
     /// reads one setting, `assets_dir`, resolved relative to the manifest
     /// file; like the CLI and editor, a manifest without it uses `"assets"`.
+    /// In a workspace, without a path, it loads the project of the script
+    /// being run, and its workspace's shared asset folders.
     #[pyo3(signature = (path=None))]
     fn load_project(&self, py: Python<'_>, path: Option<&str>) -> PyResult<()> {
         crate::custom::ensure_authoring_allowed()?;
+        if path.is_none()
+            && let Some(project) = running_project(py, &caller_directory(py)?)
+        {
+            let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+            let assets =
+                gaanim_core::console::plain_path(&project.root).join(&project.manifest.assets_dir);
+            // A member may keep no assets of its own and use the shared ones.
+            if project.workspace.is_none() || assets.is_dir() {
+                canvas
+                    .set_asset_root(assets)
+                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            }
+            canvas.shared_asset_roots = project
+                .workspace
+                .map(|workspace| workspace.asset_roots)
+                .unwrap_or_default();
+            return Ok(());
+        }
         let manifest = match path {
             Some(path) => PathBuf::from(path),
             None => default_project_manifest(py)?,

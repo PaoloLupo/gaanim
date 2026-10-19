@@ -75,7 +75,33 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         console::error("init", error);
         std::process::exit(2);
     });
-    let venv = gaanim_project::provision_authoring_package(&project.root);
+    // A new project inside a workspace that does not list it gets the
+    // workspace's files, not its own environment, until it is listed.
+    let outside = project
+        .workspace
+        .is_none()
+        .then(|| gaanim_project::workspace_around(&project.root))
+        .flatten();
+    if let Some(workspace) = &outside {
+        console::warn(
+            "init",
+            format!(
+                "{} is inside workspace {}, whose members do not include it",
+                console::display_path(&project.root),
+                workspace.name
+            ),
+        );
+        if let Some(line) = workspace.member_line(&project.root) {
+            console::hint(format!(
+                "Add it in {}: {line}",
+                console::display_path(&workspace.manifest_path)
+            ));
+        }
+    }
+    let venv = match outside {
+        Some(_) => Err("the project is not a member of its workspace yet".to_string()),
+        None => gaanim_project::provision_authoring_package(project.environment_root()),
+    };
     console::success(
         "init",
         format!(

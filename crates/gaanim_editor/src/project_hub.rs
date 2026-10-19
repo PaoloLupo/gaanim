@@ -696,7 +696,7 @@ impl ProjectHubState {
 
     fn start_preparation(&mut self, project: ResolvedProject, created: bool) {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let root = project.root.clone();
+        let root = project.environment_root().to_path_buf();
         let spawned = std::thread::Builder::new()
             .name("gaanim-hub-prepare".into())
             .spawn(move || {

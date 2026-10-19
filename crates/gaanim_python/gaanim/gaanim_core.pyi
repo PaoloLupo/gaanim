@@ -11353,7 +11353,11 @@ class AssetManager:
         With no path, uses the nearest ``gaanim.toml``: in the folder of the
         calling Python file or, failing that, in its parent folders (as git
         finds ``.git``), so a module inside a project package loads the
-        project's manifest.
+        project's manifest. In a workspace, with no path, it loads the project
+        of the script being run and the workspace's shared asset folders,
+        when the nearest manifest is that project's or the workspace's, so a
+        shared module that calls it does not point the scene at the
+        workspace root.
         An explicit relative path is resolved against the process working
         directory. ``assets_dir`` is resolved relative to the selected
         manifest and defaults to ``"assets"`` when the manifest omits it, as in
