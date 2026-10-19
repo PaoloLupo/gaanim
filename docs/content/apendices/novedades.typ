@@ -300,7 +300,9 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - `gaanim project <ruta> --json` describe, sin ejecutar Python, a qué
   proyecto y workspace pertenece un archivo: su `entry`, los miembros, las
   carpetas de `sys.path` y el intérprete del entorno, para que los plugins de
-  editores configuren la vista previa y el autocompletado.
+  editores configuren la vista previa y el autocompletado. Sus errores también
+  salen en JSON. `gaanim init --message-format json` escribe sus mensajes y lo
+  que creó como líneas JSON.
 - `gaanim check <workspace>` comprueba todos los miembros y resume, y
   `--members` elige algunos por ruta o patrón. `gaanim init` dentro de un
   workspace crea solo los archivos del miembro.
@@ -334,7 +336,12 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   importan dentro de Gaanim.
 - En Windows, la raíz del proyecto y su `src/` entran en `sys.path` sin el
   prefijo `\\?\`, y el `__file__` de los módulos que se importan de ahí
-  también.
+  también. Tampoco lo llevan las rutas que muestra `gaanim init` ni las de los
+  errores de un manifiesto o del entorno de Python.
+- El aviso de medir con `bounds()` ya no sale por una medición aislada lenta,
+  que es justo lo que recomienda, y dice lo que pasó: cuántas veces se compiló
+  la escena o se reanudó su compilación. Antes podía decir que la había
+  compilado 0 veces.
 
 == Al actualizar
 

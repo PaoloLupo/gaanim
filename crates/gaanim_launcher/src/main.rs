@@ -71,7 +71,19 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         Some("init") => {}
         _ => return false,
     }
-    let parsed = match parse_init_args(&args[2..]) {
+    // With `--message-format json` the messages are JSON lines, and one
+    // more says what was created, for editor plugins.
+    let init_args = match app::take_message_format(args[2..].to_vec()) {
+        Ok((init_args, json)) => {
+            console::set_message_format_json(json);
+            init_args
+        }
+        Err(error) => {
+            console::error("init", error);
+            std::process::exit(2);
+        }
+    };
+    let parsed = match parse_init_args(&init_args) {
         Ok(InitTarget::Project(parsed)) => parsed,
         Ok(InitTarget::Workspace(options)) => {
             init_workspace(&options);
@@ -119,34 +131,67 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         format!(
             "Created {} project: {}",
             parsed.kind.name(),
-            project.root.display()
+            console::display_path(&project.root)
         ),
     );
-    console::detail("Edit", project.entry.display());
-    console::detail("Preview", format!("gaanim {}", project.root.display()));
-    console::detail("Check", format!("gaanim check {}", project.root.display()));
+    console::detail("Edit", console::display_path(&project.entry));
+    console::detail(
+        "Preview",
+        format!("gaanim {}", console::display_path(&project.root)),
+    );
+    console::detail(
+        "Check",
+        format!("gaanim check {}", console::display_path(&project.root)),
+    );
     if parsed.kind.is_slides() {
         console::detail(
             "Present",
-            format!("gaanim --present --monitor 1 {}", project.root.display()),
+            format!(
+                "gaanim --present --monitor 1 {}",
+                console::display_path(&project.root)
+            ),
         );
     } else {
         console::detail(
             "Export",
             format!(
                 "gaanim export {} --output exports/video.mp4 --quality production",
-                project.root.display()
+                console::display_path(&project.root)
             ),
         );
     }
-    match venv {
-        Ok(venv) => console::detail("Python", venv.display()),
+    match &venv {
+        Ok(venv) => console::detail("Python", console::display_path(venv)),
         Err(error) => console::warn(
             "python",
             format!("authoring environment not ready: {error}"),
         ),
     }
+    if console::message_format_json() {
+        let workspace = project.workspace.as_ref().or(outside.as_ref());
+        console::emit_json(&[
+            ("type", "init".into()),
+            ("kind", parsed.kind.name().into()),
+            ("root", path_json(Some(&project.root))),
+            ("entry", path_json(Some(&project.entry))),
+            ("workspace", path_json(workspace.map(|w| w.root.as_path()))),
+            // Whether `members` lists it, when it is inside a workspace.
+            (
+                "member",
+                workspace.map_or(console::Json::Null, |_| outside.is_none().into()),
+            ),
+            ("venv", path_json(venv.as_deref().ok())),
+        ]);
+    }
     true
+}
+
+/// A path in a JSON line: absolute, without Windows' `\\?\` prefix, or
+/// `null`.
+fn path_json(path: Option<&Path>) -> console::Json {
+    path.map_or(console::Json::Null, |path| {
+        console::plain_path(path).display().to_string().into()
+    })
 }
 
 /// `gaanim update [--check]`: install the newest Gaanim release for this
@@ -571,27 +616,25 @@ fn parse_init_args(args: &[String]) -> Result<InitTarget, String> {
 /// belongs to, its `sys.path` and its Python environment, for editors and
 /// their plugins. Runs no Python.
 fn run_project(args: &[String]) -> ! {
+    let json = args.iter().any(|arg| arg == "--json");
     let mut path = None;
-    let mut json = false;
     for arg in args {
         match arg.as_str() {
-            "--json" => json = true,
+            "--json" => {}
             value if value.starts_with('-') => {
-                console::error("project", format!("unknown option `{value}`"));
-                std::process::exit(2);
+                project_failed(json, path.as_deref(), format!("unknown option `{value}`"))
             }
             value if path.is_none() => path = Some(PathBuf::from(value)),
-            value => {
-                console::error("project", format!("unexpected argument `{value}`"));
-                std::process::exit(2);
-            }
+            value => project_failed(
+                json,
+                path.as_deref(),
+                format!("unexpected argument `{value}`"),
+            ),
         }
     }
     let path = path.unwrap_or_else(|| PathBuf::from("."));
-    let described = gaanim_project::describe::describe(&path).unwrap_or_else(|error| {
-        console::error("project", error);
-        std::process::exit(2);
-    });
+    let described = gaanim_project::describe::describe(&path)
+        .unwrap_or_else(|error| project_failed(json, Some(&path), error));
     if json {
         println!(
             "{}",
@@ -646,6 +689,26 @@ fn run_project(args: &[String]) -> ! {
     std::process::exit(0);
 }
 
+/// Stop `gaanim project` with `error`. With `--json` the error is a JSON
+/// object too, `{"path", "error"}`, so a plugin reads every outcome.
+fn project_failed(json: bool, path: Option<&Path>, error: String) -> ! {
+    if json {
+        let path = path.unwrap_or(Path::new("."));
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let failed = serde_json::json!({
+            "path": console::plain_path(&path),
+            "error": error,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&failed).unwrap_or_default()
+        );
+    } else {
+        console::error("project", error);
+    }
+    std::process::exit(2);
+}
+
 /// `gaanim init workspace`: the workspace, its Git repository and its
 /// Python environment, then what to do next.
 fn init_workspace(options: &CreateWorkspaceOptions) {
@@ -685,12 +748,22 @@ fn init_workspace(options: &CreateWorkspaceOptions) {
     if git {
         console::detail("Git", "initialized a repository");
     }
-    match venv {
-        Ok(venv) => console::detail("Python", console::display_path(&venv)),
+    match &venv {
+        Ok(venv) => console::detail("Python", console::display_path(venv)),
         Err(error) => console::warn(
             "python",
             format!("authoring environment not ready: {error}"),
         ),
+    }
+    if console::message_format_json() {
+        console::emit_json(&[
+            ("type", "init".into()),
+            ("kind", "workspace".into()),
+            ("root", path_json(Some(&workspace.root))),
+            ("manifest", path_json(Some(&workspace.manifest_path))),
+            ("git", git.into()),
+            ("venv", path_json(venv.as_deref().ok())),
+        ]);
     }
 }
 

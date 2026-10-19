@@ -6,7 +6,7 @@
 //! with `*` for any part of a folder name, and `[workspace.shared]` names
 //! the shared folders by their role.
 
-use crate::{ResolvedProject, read_manifest, resolve_project};
+use crate::{ResolvedProject, read_manifest, resolve_project, shown};
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -98,12 +98,8 @@ impl Workspace {
         name: Option<&str>,
         raw: RawWorkspace,
     ) -> Result<Self, String> {
-        let invalid = |message: String| {
-            format!(
-                "invalid workspace in {}: {message}",
-                manifest_path.display()
-            )
-        };
+        let invalid =
+            |message: String| format!("invalid workspace in {}: {message}", shown(manifest_path));
         let members = raw
             .members
             .into_iter()
@@ -608,17 +604,14 @@ pub fn workspace_around(folder: &Path) -> Option<Workspace> {
 /// The workspace whose `gaanim.toml` is in the folder `path`.
 pub fn resolve_workspace(path: &Path) -> Result<Workspace, String> {
     if !path.is_dir() {
-        return Err(format!(
-            "expected a workspace directory: {}",
-            path.display()
-        ));
+        return Err(format!("expected a workspace directory: {}", shown(path)));
     }
     let root = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let manifest_path = root.join("gaanim.toml");
     let (_, raw) = read_manifest(&manifest_path)?;
     let workspace = raw
         .workspace
-        .ok_or_else(|| format!("{} has no [workspace] table", manifest_path.display()))?;
+        .ok_or_else(|| format!("{} has no [workspace] table", shown(&manifest_path)))?;
     Workspace::from_raw(&root, &manifest_path, raw.name.as_deref(), workspace)
 }
 
