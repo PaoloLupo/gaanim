@@ -3,6 +3,8 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 python_dir := if os_family() == "windows" { "./.venv/Scripts" } else { "./.venv/bin" }
 python := python_dir + if os_family() == "windows" { "/python.exe" } else { "/python3" }
 system_python := if os_family() == "windows" { "py.exe" } else { "python" }
+# The Python the .venv is made with: the one Gaanim requires.
+venv_python := if os_family() == "windows" { "py.exe -3.15" } else { "python3.15" }
 debug_runtime := if os_family() == "windows" { "./target/debug/gaanim.exe" } else { "./target/debug/gaanim" }
 release_runtime := if os_family() == "windows" { "./target/release/gaanim.exe" } else { "./target/release/gaanim" }
 
@@ -20,12 +22,12 @@ default:
 # Create .venv (needed by PyO3 to locate Python at build time).
 [windows]
 bootstrap:
-    if (-not (Test-Path .venv)) { {{ system_python }} -m venv .venv }
+    if (-not (Test-Path .venv)) { {{ venv_python }} -m venv .venv }
     {{ python }} -m pip install --upgrade pip build hatchling
 
 [unix]
 bootstrap:
-    if test ! -e .venv; then {{ system_python }} -m venv .venv; fi
+    if test ! -e .venv; then {{ venv_python }} -m venv .venv; fi
     {{ python }} -m pip install --upgrade pip build hatchling
 
 # Wipe the local .venv (forces a fresh `just bootstrap`).

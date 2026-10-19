@@ -13,7 +13,7 @@ error de Python con su línea.
 
 = Instalación y Python
 
-Los errores al arrancar (`Python 3.14 was not found`, una versión de Python
+Los errores al arrancar (`Python 3.15 was not found`, una versión de Python
 incorrecta, `python3.dll` no encontrado, `authoring environment not ready`)
 están explicados en la sección de problemas de
 #link("/empezar/instalacion/")[Instalación].
