@@ -45,9 +45,9 @@ pub(crate) struct ExtractedUnprocessed(pub(crate) Option<Arc<vello::Scene>>);
 pub(crate) struct CanvasOverlayTarget(Option<(wgpu::Texture, wgpu::TextureView)>);
 
 impl CanvasOverlayTarget {
-    /// The view of the target, if a post-process prepared it this frame.
-    pub(crate) fn view(&self) -> Option<&wgpu::TextureView> {
-        self.0.as_ref().map(|(_, view)| view)
+    /// The target and its view, if a post-process prepared it this frame.
+    pub(crate) fn target(&self) -> Option<&(wgpu::Texture, wgpu::TextureView)> {
+        self.0.as_ref()
     }
 
     /// The target matching `size`, created or resized as needed.
@@ -64,7 +64,11 @@ impl CanvasOverlayTarget {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                // Vello draws a large canvas in bands copied into place.
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
             let view = texture.create_view(&Default::default());
@@ -81,11 +85,9 @@ impl CanvasOverlayTarget {
 pub(crate) struct CanvasTransitionTargets(Option<[(wgpu::Texture, wgpu::TextureView); 2]>);
 
 impl CanvasTransitionTargets {
-    /// Views of the incoming and above targets, if a transition prepared them.
-    pub(crate) fn views(&self) -> Option<(&wgpu::TextureView, &wgpu::TextureView)> {
-        self.0
-            .as_ref()
-            .map(|[incoming, above]| (&incoming.1, &above.1))
+    /// The incoming and above targets, if a transition prepared them.
+    pub(crate) fn targets(&self) -> Option<&[(wgpu::Texture, wgpu::TextureView); 2]> {
+        self.0.as_ref()
     }
 
     /// Targets matching `size`, created or resized as needed.
@@ -113,7 +115,9 @@ impl CanvasTransitionTargets {
                         dimension: wgpu::TextureDimension::D2,
                         format: wgpu::TextureFormat::Rgba8Unorm,
                         usage: wgpu::TextureUsages::STORAGE_BINDING
-                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                            | wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_SRC
+                            | wgpu::TextureUsages::COPY_DST,
                         view_formats: &[],
                     });
                     let view = texture.create_view(&Default::default());

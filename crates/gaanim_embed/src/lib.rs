@@ -411,7 +411,7 @@ mod web {
         /// Draws the 3D content into the images the scene shows.
         three_d: GpuThreeD,
         /// Vello's output and its size.
-        target: Option<(wgpu::TextureView, u32, u32)>,
+        target: Option<(wgpu::Texture, wgpu::TextureView)>,
     }
 
     impl Gpu {
@@ -503,11 +503,11 @@ mod web {
         }
 
         /// Vello's output texture at `width` by `height`.
-        fn target(&mut self, width: u32, height: u32) -> wgpu::TextureView {
-            if let Some((view, w, h)) = &self.target
-                && (*w, *h) == (width, height)
+        fn target(&mut self, width: u32, height: u32) -> (wgpu::Texture, wgpu::TextureView) {
+            if let Some((texture, view)) = &self.target
+                && (texture.width(), texture.height()) == (width, height)
             {
-                return view.clone();
+                return (texture.clone(), view.clone());
             }
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("gaanim-embed-frame"),
@@ -520,12 +520,16 @@ mod web {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                // A large canvas draws in bands copied into place.
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            self.target = Some((view.clone(), width, height));
-            view
+            self.target = Some((texture.clone(), view.clone()));
+            (texture, view)
         }
 
         /// Draw `scene`, with the 3D content of `three_d`, over `base` and
@@ -538,23 +542,24 @@ mod web {
             width: u32,
             height: u32,
         ) -> Result<bool, JsValue> {
-            let target = self.target(width, height);
+            let (texture, target) = self.target(width, height);
             self.three_d
                 .prepare(&self.device, &self.queue, &mut self.renderer, three_d);
-            self.renderer
-                .render_to_texture(
-                    &self.device,
-                    &self.queue,
-                    scene,
-                    &target,
-                    &vello::RenderParams {
-                        base_color: base,
-                        width,
-                        height,
-                        antialiasing_method: vello::AaConfig::Area,
-                    },
-                )
-                .map_err(|error| failure("error", &error.to_string()))?;
+            gaanim_renderer::vello_target::render_to_texture(
+                &mut self.renderer,
+                &self.device,
+                &self.queue,
+                scene,
+                &texture,
+                &target,
+                &vello::RenderParams {
+                    base_color: base,
+                    width,
+                    height,
+                    antialiasing_method: vello::AaConfig::Area,
+                },
+            )
+            .map_err(|error| failure("error", &error.to_string()))?;
             let output = match self.surface.get_current_texture() {
                 wgpu::CurrentSurfaceTexture::Success(output)
                 | wgpu::CurrentSurfaceTexture::Suboptimal(output) => output,

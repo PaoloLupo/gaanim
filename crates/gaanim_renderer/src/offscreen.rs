@@ -46,8 +46,11 @@ pub fn vello_target_image(width: u32, height: u32) -> Image {
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
-    image.texture_descriptor.usage =
-        TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC;
+    // Vello draws a large image in bands copied into place.
+    image.texture_descriptor.usage = TextureUsages::STORAGE_BINDING
+        | TextureUsages::TEXTURE_BINDING
+        | TextureUsages::COPY_SRC
+        | TextureUsages::COPY_DST;
     image
 }
 
@@ -85,10 +88,12 @@ fn render_images(
             .0
             .prepare(device.wgpu_device(), &queue, &mut renderer, &render.three_d);
         let size = target.texture_descriptor.size;
-        if let Err(error) = renderer.render_to_texture(
+        if let Err(error) = crate::vello_target::render_to_texture(
+            &mut renderer,
             device.wgpu_device(),
             &queue,
             &render.scene,
+            &target.texture,
             &target.texture_view,
             &RenderParams {
                 base_color: render.base_color,
