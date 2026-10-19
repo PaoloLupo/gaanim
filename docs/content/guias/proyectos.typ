@@ -164,6 +164,11 @@ La raíz del proyecto, su carpeta `src/` y la carpeta del script están en
 el prefijo `\\?\` de Windows. En un #link(<workspaces>)[workspace], también
 sus carpetas de código compartido y su raíz, cuyos módulos se recargan igual.
 
+El entorno de Python del proyecto va delante de los paquetes del propio
+Python, y sus archivos `.pth` se procesan como al arrancar Python: los paquetes
+instalados en modo editable (`uv pip install -e`, `pip install -e`) y los
+miembros de un workspace de uv se importan igual que con `python`.
+
 = Exportar
 
 Para exportar no cambias el script: se lo pides al ejecutable.

@@ -421,8 +421,7 @@ pub fn capture_script_snapshots(
 /// snapshot environment switches are removed so validation can never start a
 /// render job as a side effect.
 pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::SceneModel, String> {
-    let (sender, receiver) = crossbeam_channel::bounded::<ReloadPayload>(1);
-    host::set_host_sender(Some(sender));
+    let receiver = submissions();
 
     let result = Python::attach(|py| -> PyResult<()> {
         bootstrap_gaanim_package(py)?;
@@ -436,10 +435,44 @@ pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Scen
     result.map_err(|error| {
         Python::attach(|py| without_runner_frames(&format_py_traceback(py, &error)))
     })?;
+    last_submitted_scene(&receiver)
+}
+
+/// A host channel that keeps every scene a script submits until the script
+/// ends: they are read only then, so a second `scene.render()` must not wait
+/// for the first to be taken.
+fn submissions() -> Receiver<ReloadPayload> {
+    let (sender, receiver) = crossbeam_channel::unbounded::<ReloadPayload>();
+    host::set_host_sender(Some(sender));
     receiver
+}
+
+/// The scene a script that ended submitted: the last, as the preview shows,
+/// when `scene.render()` ran more than once, with a warning that the others
+/// are not used.
+fn last_submitted_scene(
+    receiver: &Receiver<ReloadPayload>,
+) -> Result<gaanim_api::canvas::SceneModel, String> {
+    let mut last = receiver
         .recv_timeout(std::time::Duration::from_secs(2))
-        .map(|payload| payload.canvas)
-        .map_err(|_| "script did not submit a scene; finish it with `scene.render()`".to_string())
+        .map_err(|_| {
+            "script did not submit a scene; finish it with `scene.render()`".to_string()
+        })?;
+    let mut count = 1;
+    for payload in receiver.try_iter() {
+        last = payload;
+        count += 1;
+    }
+    if count > 1 {
+        gaanim_core::console::warn(
+            "render",
+            format!(
+                "scene.render() ran {count} times; only the last scene is used, as the \
+                 preview shows it"
+            ),
+        );
+    }
+    Ok(last.canvas)
 }
 
 /// Run a Python API-contract validator against the builtin PyO3 module.
@@ -811,6 +844,73 @@ mod tests {
 
         std::fs::write(common.join("__init__.py"), "VALUE = 'second-value'\n").unwrap();
         assert_eq!(run().lines().next(), Some("second-value"));
+    }
+
+    #[test]
+    fn a_script_that_renders_twice_hands_over_its_last_scene() {
+        let _python = python_lock();
+        let scene = |design_resolution: f64| {
+            let mut scene = gaanim_api::canvas::SceneModel::new(320, 180);
+            scene.design_resolution = design_resolution;
+            scene
+        };
+        let receiver = submissions();
+        assert!(host::send_to_host(scene(720.0)));
+        // A second submission used to wait forever for the first to be read.
+        assert!(host::send_to_host(scene(1080.0)));
+        host::set_host_sender(None);
+        assert_eq!(
+            last_submitted_scene(&receiver).unwrap().design_resolution,
+            1080.0
+        );
+
+        let receiver = submissions();
+        host::set_host_sender(None);
+        assert!(
+            last_submitted_scene(&receiver)
+                .unwrap_err()
+                .contains("scene.render()")
+        );
+    }
+
+    #[test]
+    fn a_venv_path_file_makes_its_packages_importable() {
+        let _python = python_lock();
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        let site = temp.path().join("venv").join("Lib").join("site-packages");
+        let source = temp.path().join("editable").join("src");
+        std::fs::create_dir_all(&site).unwrap();
+        std::fs::create_dir_all(source.join("pth_editable_case")).unwrap();
+        std::fs::write(
+            source.join("pth_editable_case").join("__init__.py"),
+            "VALUE = 'editable'\n",
+        )
+        .unwrap();
+        // An editable install, or a uv workspace member, is a `.pth` line.
+        std::fs::write(
+            site.join("_pth_editable_case.pth"),
+            format!("{}\n", source.display()),
+        )
+        .unwrap();
+
+        crate::python_home::inject_venv_site_packages(&temp.path().join("venv"));
+        Python::attach(|py| {
+            let value: String = py
+                .import("pth_editable_case")
+                .and_then(|module| module.getattr("VALUE"))
+                .and_then(|value| value.extract())
+                .unwrap();
+            assert_eq!(value, "editable");
+            // The environment still comes before the runtime's own packages.
+            let first: String = py
+                .import("sys")
+                .and_then(|sys| sys.getattr("path"))
+                .and_then(|path| path.get_item(0))
+                .and_then(|entry| entry.extract())
+                .unwrap();
+            assert_eq!(first, site.to_string_lossy());
+        });
     }
 
     #[test]
