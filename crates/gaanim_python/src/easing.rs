@@ -8,8 +8,7 @@ use pyo3::prelude::*;
     rename_all = "SCREAMING_SNAKE_CASE",
     frozen,
     eq,
-    eq_int,
-    skip_from_py_object
+    eq_int
 )]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PyEasingCurve {

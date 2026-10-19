@@ -203,7 +203,7 @@ pub(crate) fn camera_inset(
 }
 
 /// A second camera shown inside a screen drawable.
-#[pyclass(name = "CameraView", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "CameraView", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCameraView {
     inner: CameraViewHandle,
@@ -313,11 +313,7 @@ impl PyCameraView {
 }
 
 /// Animations of a camera view, each returned as an `Anim`.
-#[pyclass(
-    name = "CameraViewAnimation",
-    module = "gaanim_core",
-    skip_from_py_object
-)]
+#[pyclass(name = "CameraViewAnimation", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCameraViewAnimation {
     inner: CameraViewHandle,

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::color::PyColor;
 
 /// Full scene-bounds paint, including timeline-driven custom WGSL shaders.
-#[pyclass(name = "Background", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "Background", module = "gaanim_core")]
 #[derive(Clone, Debug)]
 pub struct PyBackground(pub gaanim_api::canvas::BackgroundPaint);
 
@@ -189,7 +189,7 @@ fn living_background(
 }
 
 /// Custom WGSL post-processing of the rendered 2D scene inside the camera frame.
-#[pyclass(name = "PostProcess", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "PostProcess", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyPostProcess {
     pub(crate) shader: gaanim_api::canvas::PostProcessShader,
@@ -700,7 +700,7 @@ pub fn segment_post_process(
 }
 
 /// A reusable solid or gradient paint accepted by drawables and scene backgrounds.
-#[pyclass(name = "Brush", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "Brush", module = "gaanim_core")]
 #[derive(Clone, Debug)]
 pub struct PyBrush(pub Brush);
 

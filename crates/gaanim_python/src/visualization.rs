@@ -1560,18 +1560,14 @@ impl PyCoordinateRef {
 }
 
 /// A typed 2D space that owns independently animatable visual layers.
-#[pyclass(name = "CoordinateSpace", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "CoordinateSpace", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCoordinateSpace {
     pub(crate) inner: CoordinateSpaceHandle,
     canvas: Arc<Mutex<ApiCanvas>>,
 }
 
-#[pyclass(
-    name = "CoordinateSpaceAnimation",
-    module = "gaanim_core",
-    skip_from_py_object
-)]
+#[pyclass(name = "CoordinateSpaceAnimation", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCoordinateSpaceAnimation {
     inner: CoordinateSpaceHandle,
@@ -1641,11 +1637,7 @@ impl PyCoordinateSpaceAnimation {
 }
 
 /// A typed 3D coordinate space with native surface and curve sampling.
-#[pyclass(
-    name = "CoordinateSpace3D",
-    module = "gaanim_core",
-    skip_from_py_object
-)]
+#[pyclass(name = "CoordinateSpace3D", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCoordinateSpace3D {
     inner: CoordinateSpace3DHandle,
@@ -1660,7 +1652,7 @@ enum PyVectorFieldInner {
 
 /// Reusable field evaluator. Geometry is materialized explicitly with
 /// `arrows()` or `streamlines()`.
-#[pyclass(name = "VectorField", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "VectorField", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyVectorField {
     inner: PyVectorFieldInner,
@@ -1669,21 +1661,21 @@ pub struct PyVectorField {
 }
 
 /// Materialized arrow glyphs for a vector field.
-#[pyclass(name = "ArrowVectorField", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "ArrowVectorField", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyArrowVectorField {
     inner: ArrowVectorFieldHandle,
 }
 
 /// Materialized deterministic integral curves for a vector field.
-#[pyclass(name = "StreamLines", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "StreamLines", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyStreamLines {
     inner: StreamLinesHandle,
 }
 
 /// Deterministically seeded particles with finite advection clips.
-#[pyclass(name = "FlowParticles", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "FlowParticles", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyFlowParticles {
     inner: FlowParticlesHandle,
@@ -2042,7 +2034,7 @@ impl PyFlowParticles {
 }
 
 /// Materialized declarative chart with stable semantic layers.
-#[pyclass(name = "Chart", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "Chart", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyChart {
     inner: ChartHandle,
@@ -2051,7 +2043,7 @@ pub struct PyChart {
     inspection_format: Option<String>,
 }
 
-#[pyclass(name = "ChartAnimation", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "ChartAnimation", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyChartAnimation {
     inner: ChartHandle,
@@ -2200,7 +2192,7 @@ impl PyChart {
     }
 }
 
-#[pyclass(name = "NumberLine", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "NumberLine", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyNumberLine {
     inner: NumberLineHandle,
@@ -2303,7 +2295,7 @@ impl PyNumberLine {
     }
 }
 
-#[pyclass(name = "PolarSpace", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "PolarSpace", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyPolarSpace {
     inner: PolarSpaceHandle,

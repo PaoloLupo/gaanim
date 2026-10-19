@@ -863,7 +863,7 @@ impl PyThemeInput {
 }
 
 /// Reusable colors, typography, and embedded font files for a scene.
-#[pyclass(name = "Theme", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "Theme", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyTheme {
     pub(crate) inner: CanvasTheme,
@@ -2198,7 +2198,7 @@ impl PySceneStop {
 
 macro_rules! scene_capability {
     ($rust:ident, $python:literal) => {
-        #[pyclass(name = $python, module = "gaanim_core", skip_from_py_object)]
+        #[pyclass(name = $python, module = "gaanim_core")]
         pub struct $rust {
             pub(crate) inner: Arc<Mutex<ApiCanvas>>,
         }
@@ -2207,7 +2207,7 @@ macro_rules! scene_capability {
 
 macro_rules! contextual_scene_capability {
     ($rust:ident, $python:literal) => {
-        #[pyclass(name = $python, module = "gaanim_core", skip_from_py_object)]
+        #[pyclass(name = $python, module = "gaanim_core")]
         pub struct $rust {
             pub(crate) inner: Arc<Mutex<ApiCanvas>>,
             pub(crate) scene: Py<PyScene>,
@@ -2226,27 +2226,27 @@ contextual_scene_capability!(PyLayoutBuilder, "LayoutBuilder");
 contextual_scene_capability!(PyVisualization, "Visualization");
 
 /// Semantic camera controller exposed as ``scene.camera``.
-#[pyclass(name = "Camera", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "Camera", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCamera {
     inner: Arc<Mutex<ApiCanvas>>,
 }
 
-#[pyclass(name = "CameraAnimation", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "CameraAnimation", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCameraAnimation {
     inner: Arc<Mutex<ApiCanvas>>,
 }
 
 /// Reusable complete authored camera state.
-#[pyclass(name = "CameraState", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "CameraState", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCameraState {
     inner: gaanim_api::canvas::CameraStateHandle,
 }
 
 /// Stable handle for a persistent native camera constraint.
-#[pyclass(name = "CameraConstraint", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "CameraConstraint", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyCameraConstraint {
     inner: CameraConstraintHandle,

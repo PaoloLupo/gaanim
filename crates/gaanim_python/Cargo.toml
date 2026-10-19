@@ -9,7 +9,7 @@ name = "gaanim_python"
 crate-type = ["rlib"]
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["abi3-py314", "multiple-pymethods", "py-clone"] }
+pyo3 = { version = "0.30.1", features = ["abi3-py314", "multiple-pymethods", "py-clone"] }
 gaanim_core = { path = "../gaanim_core" }
 # Poll relay and session of the scene's project.
 gaanim_project = { path = "../gaanim_project" }

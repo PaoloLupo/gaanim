@@ -28,7 +28,7 @@ enum ZonesKind {
 /// template: `Zones.rows(...)`, `Zones.columns(...)` or `Zones.grid(...)`.
 /// It holds no drawables and belongs to no scene, so one template serves
 /// the whole frame, a zone of another template or the box of an object.
-#[pyclass(name = "Zones", module = "gaanim_core", frozen, skip_from_py_object)]
+#[pyclass(name = "Zones", module = "gaanim_core", frozen)]
 pub struct PyZones {
     kind: ZonesKind,
     rows: Option<Py<PyAny>>,
@@ -228,7 +228,7 @@ impl PyZones {
 }
 
 /// The zones of a template applied to a region.
-#[pyclass(name = "ZoneSet", module = "gaanim_core", frozen, skip_from_py_object)]
+#[pyclass(name = "ZoneSet", module = "gaanim_core", frozen)]
 pub struct PyZoneSet {
     canvas: Arc<Mutex<ApiCanvas>>,
     zones: Vec<Bounds3D>,
@@ -372,7 +372,7 @@ impl PyZoneSet {
 }
 
 /// A rectangle of the frame that places drawables without owning them.
-#[pyclass(name = "Zone", module = "gaanim_core", frozen, skip_from_py_object)]
+#[pyclass(name = "Zone", module = "gaanim_core", frozen)]
 #[derive(Clone)]
 pub struct PyZone {
     canvas: Arc<Mutex<ApiCanvas>>,

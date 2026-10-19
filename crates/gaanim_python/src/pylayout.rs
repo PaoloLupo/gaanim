@@ -205,12 +205,7 @@ impl PyLayoutConstraint {
 }
 
 /// Handle returned by `Scene.constrain`.
-#[pyclass(
-    name = "ConstraintSet",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "ConstraintSet", module = "gaanim_core", frozen)]
 #[derive(Clone)]
 pub struct PyConstraintSet {
     #[pyo3(get)]
@@ -1032,7 +1027,7 @@ pub(crate) fn reflow_owner_of(child: &DrawableHandle, duration: Option<f64>) {
 }
 
 /// A reusable set of box properties, like a CSS class.
-#[pyclass(name = "BoxStyle", module = "gaanim_core", frozen, skip_from_py_object)]
+#[pyclass(name = "BoxStyle", module = "gaanim_core", frozen)]
 pub struct PyBoxStyle {
     props: Py<PyDict>,
 }
@@ -1070,7 +1065,7 @@ impl PyBoxStyle {
 /// A box: a container that places its children like CSS flexbox or grid,
 /// with padding, gap, background, border, radius and shadow. It is a
 /// Drawable, so it moves, fades and animates as one object.
-#[pyclass(name = "Box", module = "gaanim_core", extends = PyDrawable, skip_from_py_object)]
+#[pyclass(name = "Box", module = "gaanim_core", extends = PyDrawable)]
 #[derive(Clone)]
 pub struct PyBox {
     inner: Arc<Mutex<LayoutState>>,
@@ -2724,7 +2719,7 @@ fn layout_error(error: gaanim_api::canvas::LayoutOwnershipError) -> PyErr {
     crate::LayoutOwnershipError::new_err(error.to_string())
 }
 
-#[pyclass(name = "Anchor", module = "gaanim_core", frozen, skip_from_py_object)]
+#[pyclass(name = "Anchor", module = "gaanim_core", frozen)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyAnchor(pub Anchor);
 
@@ -2802,12 +2797,7 @@ impl PyAnchor {
     }
 }
 
-#[pyclass(
-    name = "Direction",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "Direction", module = "gaanim_core", frozen)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyDirection(pub Direction);
 copy_from_py_object!(PyDirection);

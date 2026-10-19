@@ -315,6 +315,12 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   paleta de comandos lista los demás miembros del abierto y *Back to
   channel* vuelve a la página del workspace.
 
+== Python
+
+- Gaanim está probado con Python 3.15.0 en Windows, donde sirve cualquier
+  Python desde 3.14: la vista previa, `check` y `export` dan las mismas
+  escenas que con 3.14. En Ubuntu sigue haciendo falta exactamente 3.14.
+
 == Correcciones
 
 - Un script que llama a `scene.render()` más de una vez ya no deja colgados

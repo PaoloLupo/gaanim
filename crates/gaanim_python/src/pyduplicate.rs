@@ -7,12 +7,7 @@ use pyo3::prelude::*;
 use crate::pydrawable::PyDrawable;
 
 /// Where `Geometry.duplicate` places the copies of a drawable.
-#[pyclass(
-    name = "Distribution",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "Distribution", module = "gaanim_core", frozen)]
 #[derive(Clone, Debug)]
 pub struct PyDistribution(pub gaanim_api::canvas::Distribution);
 

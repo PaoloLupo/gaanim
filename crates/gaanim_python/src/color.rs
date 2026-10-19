@@ -12,11 +12,11 @@ use std::str::FromStr;
 /// - A hex string: `"#FF0000"`, `"#F00"`, `"#FF000080"`
 /// - A CSS color: `"red"`, `"rgb(255, 0, 0)"`, `"hsl(0, 100%, 50%)"`, …
 /// - An `(r, g, b)` or `(r, g, b, a)` tuple of u8 values
-#[pyclass(name = "Color", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "Color", module = "gaanim_core")]
 #[derive(Clone, Copy, Debug)]
 pub struct PyColor(pub peniko::Color);
 
-#[pyclass(name = "ColorMap", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "ColorMap", module = "gaanim_core")]
 #[derive(Clone, Debug)]
 pub struct PyColorMap(pub gaanim_core::ColorMap);
 
@@ -24,7 +24,7 @@ pub struct PyColorMap(pub gaanim_core::ColorMap);
 pub struct PyColorMapArg(pub gaanim_core::ColorMap);
 
 /// Categorical colors handed to categories in turn; see `gaanim_core::Palette`.
-#[pyclass(name = "Palette", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "Palette", module = "gaanim_core")]
 #[derive(Clone, Debug)]
 pub struct PyPalette(pub gaanim_core::Palette);
 

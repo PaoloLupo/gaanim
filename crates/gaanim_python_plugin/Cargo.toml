@@ -19,7 +19,7 @@ gaanim_api = { path = "../gaanim_api" }
 gaanim_diff = { path = "../gaanim_diff" }
 gaanim_editor = { path = "../gaanim_editor" }
 gaanim_project = { path = "../gaanim_project" }
-pyo3 = { version = "0.28", features = ["abi3-py314"] }
+pyo3 = { version = "0.30.1", features = ["abi3-py314"] }
 crossbeam-channel = { workspace = true }
 
 [dev-dependencies]
