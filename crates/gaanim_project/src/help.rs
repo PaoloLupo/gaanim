@@ -55,8 +55,8 @@ const GENERAL: Page = Page {
             "Commands",
             &[
                 (
-                    "init <video|slides> [DIR]",
-                    "Create a project with a minimal main.py and its\nPython environment",
+                    "init <video|slides|workspace> [DIR]",
+                    "Create a project with a minimal main.py and its\nPython environment, or a workspace",
                 ),
                 (
                     "check <SCRIPT_OR_PROJECT>",
@@ -206,7 +206,10 @@ only says whether there is one",
 const INIT: Page = Page {
     summary: "Create a runnable project: gaanim.toml, a minimal main.py, and a Python 3.15\nenvironment with the authoring package, so editors autocomplete the API. Or a\nworkspace: several projects in one repository that share code and assets.",
     blocks: &[
-        Block::Lines("Usage", &["gaanim init <KIND> [DIRECTORY] [--force]"]),
+        Block::Lines(
+            "Usage",
+            &["gaanim init <KIND> [DIRECTORY] [--force] [--message-format <FORMAT>]"],
+        ),
         Block::Rows(
             "Arguments",
             &[
@@ -231,6 +234,10 @@ const INIT: Page = Page {
                 (
                     "--force",
                     "Refresh the scaffold files of an existing project; your\nscripts' assets are kept",
+                ),
+                (
+                    "--message-format <FORMAT>",
+                    "human (default) or json: what was created and the\nwarnings as JSON lines on stdout",
                 ),
                 ("-h, --help", "Print this help"),
             ],
@@ -473,7 +480,10 @@ const PROJECT: Page = Page {
         Block::Rows(
             "Options",
             &[
-                ("--json", "One JSON object on stdout"),
+                (
+                    "--json",
+                    "One JSON object on stdout; an error is one too, with\nits `error` and `path`, and the exit code 2",
+                ),
                 ("-h, --help", "Print this help"),
             ],
         ),

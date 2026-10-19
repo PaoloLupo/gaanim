@@ -206,8 +206,8 @@ gaanim --present mi-charla --listen 127.0.0.1:7801
 = `gaanim init`
 
 ```bash
-gaanim init <video|slides> [DIRECTORIO] [--force]
-gaanim init workspace [DIRECTORIO] [--force]
+gaanim init <video|slides> [DIRECTORIO] [--force] [--message-format json]
+gaanim init workspace [DIRECTORIO] [--force] [--message-format json]
 ```
 
 Crea un proyecto ejecutable con un `main.py` mínimo: `video` genera una
@@ -249,6 +249,21 @@ solo `main.py`, `gaanim.toml` y `assets/`: el entorno de Python, el
 de su raíz. Si los `members` del workspace no incluyen la carpeta nueva, avisa,
 dice qué línea añadir y no prepara ningún entorno; hasta entonces el proyecto
 es independiente.
+
+Con `--message-format json`, los mensajes salen como líneas JSON en la salida
+estándar, como en `check`, y una línea más dice qué se creó, para los plugins
+de editores:
+
+```json
+{"type": "init", "kind": "video", "root": "C:/channel/videos/ep2",
+ "entry": "C:/channel/videos/ep2/main.py", "workspace": "C:/channel",
+ "member": true, "venv": "C:/channel/.venv"}
+```
+
+`workspace` es la raíz del workspace que contiene el proyecto, o `null`;
+`member` dice si sus `members` lo incluyen (`null` fuera de un workspace), y
+`venv`, el entorno que quedó listo o `null`. Para `init workspace`, la línea
+trae `root`, `manifest`, `git` (si hizo un repositorio) y `venv`.
 
 = `gaanim check`
 
@@ -415,7 +430,10 @@ Con `--json`, escribe un objeto JSON:
   o el `.venv` del workspace, que comparten todos sus miembros. Es `null`
   mientras no hay entorno; abrir el proyecto lo prepara.
 - Un miembro con un manifiesto inválido trae su `error` y `kind` y `entry`
-  nulos. Un manifiesto inválido en la ruta pedida devuelve el código `2`.
+  nulos.
+- Si la ruta pedida no se puede describir, como con un manifiesto inválido,
+  `project` sale con el código `2` y, con `--json`, escribe también un
+  objeto: `{"path": "…", "error": "…"}`.
 
 Las rutas no llevan el prefijo `\\?\` de Windows. Sin `--json`, `project`
 escribe un resumen para personas.

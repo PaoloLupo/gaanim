@@ -163,7 +163,7 @@ fn command_args() -> Vec<String> {
 
 /// `args` without its `--message-format <FORMAT>` (or
 /// `--message-format=<FORMAT>`), and whether the format is JSON.
-fn take_message_format(mut args: Vec<String>) -> Result<(Vec<String>, bool), String> {
+pub(crate) fn take_message_format(mut args: Vec<String>) -> Result<(Vec<String>, bool), String> {
     let mut json = false;
     while let Some(index) = args
         .iter()
