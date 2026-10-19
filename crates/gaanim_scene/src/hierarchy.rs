@@ -98,6 +98,16 @@ impl Plugin for GaanimScenePlugin {
             )
                 .in_set(SceneSet::Propagation),
         );
+        // The grid planes and axes of 3D spaces take the sides of their box
+        // the camera shows best once every pin has placed their parents, and
+        // hide the grid lines under them before opacity propagates.
+        app.add_systems(
+            Update,
+            crate::axis_box::axis_box_system
+                .after(crate::systems::pin_hud_overlays_system)
+                .before(crate::systems::opacity_propagation_system)
+                .in_set(SceneSet::Propagation),
+        );
         // Billboards face the camera after hierarchy propagation, and fade
         // behind 3D meshes before opacity propagates.
         app.add_systems(

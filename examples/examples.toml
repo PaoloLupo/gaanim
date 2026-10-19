@@ -535,7 +535,7 @@ description = "Polylines through 3D points with solid colors and color maps, and
 
 [[example]]
 path = "3d/axes_3d.py"
-description = "3D axes with their grid planes, box sizes, linear, log, symlog and power scales, and layers that animate apart."
+description = "3D axes with their grid planes, box sizes, linear, log, symlog and power scales, layers that animate apart, and planes and axes that take the sides the camera shows."
 
 [[example]]
 path = "3d/plots_3d.py"

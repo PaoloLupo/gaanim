@@ -10403,6 +10403,7 @@ class Visualization:
         x_labels: Optional[bool] = None,
         y_labels: Optional[bool] = None,
         z_labels: Optional[bool] = None,
+        sides: Literal["view", "fixed"] = "view",
     ) -> Cartesian3D:
         """Create typed 3D axes with independently selectable planes and annotations.
 
@@ -10412,6 +10413,19 @@ class Visualization:
         distance. ``xy_grid``, ``xz_grid`` and ``yz_grid`` override ``grid`` when set;
         axis-specific ticks, numbers, and titles follow the same precedence.
         Hidden layers remain available as empty ``Drawable`` objects.
+
+        ``sides`` chooses where the planes and axes sit on the box. With
+        ``"view"`` (the default) each grid plane takes the face of the box
+        behind its content and each axis, with its ticks, numbers and title,
+        an edge of the box's outline: the two axes across the camera's ``up``
+        run along the floor's edges nearer the camera, and the vertical axis
+        up the outline's left edge. Each title stands beside the middle of its
+        axis, past its numbers, and where two axes meet only the first one
+        writes its number. They follow the camera every frame and
+        jump to the other side when it crosses the plane through the box's
+        middle. ``"fixed"`` keeps the planes on the box's lowest faces and the
+        axes on the edges from its lowest corner whatever the camera. Any
+        other value raises ``ValueError``.
         """
         ...
     def polar(

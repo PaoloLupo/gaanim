@@ -485,6 +485,7 @@ fn self_contained(spec: &ObjectSpec) -> bool {
         && spec.coordinate_view_role.is_none()
         && spec.coordinate_label_offset.is_none()
         && spec.axis_label_gap.is_none()
+        && spec.axis_box_part.is_none()
         && spec.coordinate_tick_level.is_none()
         && spec.coordinate_view_cursor.is_none()
         && spec.reactive_readout_layout.is_none()

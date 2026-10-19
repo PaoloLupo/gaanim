@@ -230,7 +230,7 @@ Primitives, arrows and tubes, extrusion, axonometric drawings and 3D axes.
 | [Shapes 3d](3d/shapes_3d.py) | Tori, arrows between two points, tubes along open, creased and closed paths, and flat sheets of text, equations and shapes. |
 | [2D drawables in 3D](3d/drawables_in_3d.py) | Text, equations and shapes placed in the 3D world with in_3d(): turned, written, tilted by perspective, hidden by meshes and lit, beside billboard(). |
 | [Lines 3d](3d/lines_3d.py) | Polylines through 3D points with solid colors and color maps, and paths traced behind moving objects that fade, cap or thin. |
-| [Axes 3d](3d/axes_3d.py) | 3D axes with their grid planes, box sizes, linear, log, symlog and power scales, and layers that animate apart. |
+| [Axes 3d](3d/axes_3d.py) | 3D axes with their grid planes, box sizes, linear, log, symlog and power scales, layers that animate apart, and planes and axes that take the sides the camera shows. |
 | [Plots 3d](3d/plots_3d.py) | Surfaces, parametric curves and vector fields in a 3D space, static and driven by parameters. |
 | [Axonometric](3d/axonometric.py) | A 3D model drawn as flat shapes from isometric, dimetric, plan, front and side views, turned and morphed between views. |
 | [Camera 3d](3d/camera_3d.py) | The 3D camera: look_at, orbit, dolly and dolly zoom, perspective and orthographic lenses, saved poses, state_3d and bind_3d. |

@@ -7,6 +7,7 @@ use gaanim_core::kurbo::{BezPath, Circle, Point, Rect, Shape};
 use gaanim_core::peniko::Color;
 use gaanim_core::{ColorMap, ObjectId};
 use gaanim_objects::prelude::SvgPath;
+use gaanim_scene::{AxisBoxLayout, AxisBoxPart, AxisBoxRole, AxisBoxSides, PlaneEdge};
 use gaanim_visualization::{
     Axis, AxisLabelPosition, Cartesian3DVisibility, CartesianSpace, CartesianVisibility, Channel,
     ChartSpec, ConstantValue, CoordinateMap2D, CoordinateMap3D, DataMarkKind, Encoding, MarkKind,
@@ -2614,7 +2615,8 @@ impl SceneModel {
         )
     }
 
-    /// Build a typed 3D Cartesian coordinate space with resolved component visibility.
+    /// Build a typed 3D Cartesian coordinate space with resolved component
+    /// visibility, whose grid planes and axes follow the camera.
     pub fn coordinate_axes_3d_with_visibility(
         &mut self,
         x: Axis,
@@ -2623,34 +2625,62 @@ impl SceneModel {
         size: [f64; 3],
         visibility: Cartesian3DVisibility,
     ) -> Result<CoordinateSpace3DHandle, VisualizationError> {
+        self.coordinate_axes_3d_with_sides(x, y, z, size, visibility, AxisBoxSides::View)
+    }
+
+    /// Build a typed 3D Cartesian coordinate space with resolved component
+    /// visibility, whose grid planes and axes take the box's `sides`.
+    pub fn coordinate_axes_3d_with_sides(
+        &mut self,
+        x: Axis,
+        y: Axis,
+        z: Axis,
+        size: [f64; 3],
+        visibility: Cartesian3DVisibility,
+        sides: AxisBoxSides,
+    ) -> Result<CoordinateSpace3DHandle, VisualizationError> {
         let x = self.themed_axis(x);
         let y = self.themed_axis(y);
         let z = self.themed_axis(z);
         let map = CoordinateMap3D::new(x.clone(), y.clone(), z.clone(), size)?;
         let min = [-size[0] * 0.5, -size[1] * 0.5, -size[2] * 0.5];
         let max = [size[0] * 0.5, size[1] * 0.5, size[2] * 0.5];
+        let bounds = [DVec3::from(min), DVec3::from(max)];
         let as_point = |point: [f64; 3]| [point[0] as f32, point[1] as f32, point[2] as f32];
-        let mut axis_points = Vec::new();
-        let mut axis_colors = Vec::new();
-        let mut push_axis = |from: [f64; 3], to: [f64; 3], color: Color| {
-            axis_points.extend_from_slice(&[as_point(from), as_point(to)]);
-            axis_colors.extend_from_slice(&[color, color]);
+        let axes_of = [&x, &y, &z];
+        // Every part is built on the box's lowest faces and on the edges
+        // from its lowest corner. Following the camera, each part moves on
+        // its own to the face or edge the camera shows best (see
+        // `AxisBoxLayout::for_view`); fixed, it stays.
+        let follow = sides == AxisBoxSides::View;
+        let mark = |handle: &DrawableHandle, role: AxisBoxRole| {
+            if follow {
+                handle
+                    .spec
+                    .lock()
+                    .expect("box part spec poisoned")
+                    .axis_box_part = Some(AxisBoxPart { bounds, role });
+            }
         };
-        if visibility.x_axis {
-            push_axis(min, [max[0], min[1], min[2]], x.style_value().color);
+        let axes_visible = [visibility.x_axis, visibility.y_axis, visibility.z_axis];
+        let mut axis_lines = Vec::new();
+        for (dimension, axis) in axes_of.into_iter().enumerate() {
+            if !axes_visible[dimension] {
+                continue;
+            }
+            let mut end = min;
+            end[dimension] = max[dimension];
+            let color = axis.style_value().color;
+            let line = self.line_segments_3d_with_colors(
+                vec![as_point(min), as_point(end)],
+                vec![color, color],
+            );
+            mark(&line, AxisBoxRole::Axis { axis: dimension });
+            axis_lines.push(line);
         }
-        if visibility.y_axis {
-            push_axis(min, [min[0], max[1], min[2]], y.style_value().color);
-        }
-        if visibility.z_axis {
-            push_axis(min, [min[0], min[1], max[2]], z.style_value().color);
-        }
-        let axes = self.line_segments_3d_with_colors(axis_points, axis_colors);
+        let axis_refs: Vec<_> = axis_lines.iter().collect();
+        let axes = self.group_no_center(&axis_refs);
 
-        let mut grid_points = Vec::new();
-        let mut grid_colors = Vec::new();
-        let mut tick_points = Vec::new();
-        let mut tick_colors = Vec::new();
         let grid_color = self
             .theme_style
             .as_ref()
@@ -2666,24 +2696,155 @@ impl SceneModel {
                 _ => None,
             })
             .unwrap_or(Color::from_rgb8(0x50, 0x50, 0x50));
+        // As thin as a 2D grid's lines, the theme's `axes/grid` width, so the
+        // grid stays behind the axes and what the box holds rather than
+        // matching the axes' default width.
+        let grid_width = self
+            .theme_style
+            .as_ref()
+            .and_then(|theme| theme.styles.get("axes/grid"))
+            .and_then(|rule| rule.stroke.as_ref())
+            .map(|stroke| stroke.style.width)
+            .filter(|width| width.is_finite() && *width > 0.0)
+            .unwrap_or(0.01);
         let tick_half = size.into_iter().fold(f64::INFINITY, f64::min) * 0.015;
         let axis_ticks = [x.ticks_values(7)?, y.ticks_values(7)?, z.ticks_values(7)?];
+        // Where each axis's ticks fall along it, from 0 at the box's lowest
+        // corner to 1, and which of them have grid lines.
+        let mut normalized = [Vec::new(), Vec::new(), Vec::new()];
+        for (dimension, axis) in axes_of.into_iter().enumerate() {
+            for tick in &axis_ticks[dimension] {
+                normalized[dimension].push((axis.normalize(tick.value)?, tick.major));
+            }
+        }
+        // A grid line this near an end of its axis lies on the box's edge.
+        const END: f64 = 1e-12;
+        let has_end = normalized.each_ref().map(|ticks| {
+            [
+                ticks.iter().any(|&(at, major)| major && at <= END),
+                ticks.iter().any(|&(at, major)| major && at >= 1.0 - END),
+            ]
+        });
+        // The plane across each dimension: x's is the yz plane.
+        let planes_visible = [visibility.yz_grid, visibility.xz_grid, visibility.xy_grid];
+        // Each plane draws its inner lines as one part. The lines on its
+        // edges are parts of their own: under an axis, or on the edge it
+        // shares with another plane that draws it, they hide, so that no two
+        // lines lie on top of each other, which would leave the GPU's depth
+        // test to decide between them and change pixels from run to run.
+        let mut grid_parts = Vec::new();
+        for normal in 0..3 {
+            if !planes_visible[normal] {
+                continue;
+            }
+            let (first, second) = ((normal + 1) % 3, (normal + 2) % 3);
+            let in_plane = [first.min(second), first.max(second)];
+            let mut inner = Vec::new();
+            let mut edges = Vec::new();
+            for (across, along) in [(in_plane[0], in_plane[1]), (in_plane[1], in_plane[0])] {
+                for &(at, major) in &normalized[across] {
+                    if !major {
+                        continue;
+                    }
+                    let mut from = min;
+                    from[across] = min[across] + at * size[across];
+                    let mut to = from;
+                    to[along] = max[along];
+                    let segment = [as_point(from), as_point(to)];
+                    let high = if at <= END {
+                        false
+                    } else if at >= 1.0 - END {
+                        true
+                    } else {
+                        inner.extend(segment);
+                        continue;
+                    };
+                    let edge = PlaneEdge {
+                        normal,
+                        across,
+                        high,
+                        twin: has_end[normal].map(|end| planes_visible[across] && end),
+                    };
+                    if follow {
+                        let line = self
+                            .line_segments_3d_with_colors(segment.to_vec(), vec![grid_color; 2])
+                            .stroke(grid_color, grid_width);
+                        mark(
+                            &line,
+                            AxisBoxRole::PlaneEdge {
+                                edge,
+                                axes: axes_visible,
+                            },
+                        );
+                        edges.push(line);
+                    } else if AxisBoxLayout::FIXED.shows_plane_edge(edge, axes_visible) {
+                        inner.extend(segment);
+                    }
+                }
+            }
+            if !inner.is_empty() {
+                // The opaque sRGB equivalent of the earlier 50%-gray,
+                // 38%-alpha tint over the default black background:
+                // translucent intersecting lines have no fragment order on
+                // the GPU and alternated a few snapshot pixels.
+                let colors = vec![grid_color; inner.len()];
+                let plane = self
+                    .line_segments_3d_with_colors(inner, colors)
+                    .stroke(grid_color, grid_width);
+                mark(&plane, AxisBoxRole::Plane { normal });
+                grid_parts.push(plane);
+            }
+            grid_parts.extend(edges);
+        }
+        let grid_refs: Vec<_> = grid_parts.iter().collect();
+        let grid_handle = self.group_no_center(&grid_refs);
+
+        let ticks_visible = [visibility.x_ticks, visibility.y_ticks, visibility.z_ticks];
+        // x's ticks cross their axis along y, and y's and z's along x.
+        let tick_across = [DVec3::NEG_Y, DVec3::NEG_X, DVec3::NEG_X].map(|side| side * tick_half);
+        let mut tick_lines = Vec::new();
+        for (dimension, axis) in axes_of.into_iter().enumerate() {
+            if !ticks_visible[dimension] || normalized[dimension].is_empty() {
+                continue;
+            }
+            let mut points = Vec::new();
+            for &(at, _) in &normalized[dimension] {
+                let mut middle = min;
+                middle[dimension] = min[dimension] + at * size[dimension];
+                let across = tick_across[dimension].to_array();
+                let mut from = middle;
+                let mut to = middle;
+                for side in 0..3 {
+                    from[side] += across[side];
+                    to[side] -= across[side];
+                }
+                points.extend([as_point(from), as_point(to)]);
+            }
+            let tick_color = axis.style_value().tick_color;
+            let colors = vec![tick_color; points.len()];
+            let ticks = self.line_segments_3d_with_colors(points, colors);
+            mark(&ticks, AxisBoxRole::Ticks { axis: dimension });
+            tick_lines.push(ticks);
+        }
+        let tick_refs: Vec<_> = tick_lines.iter().collect();
+        let ticks = self.group_no_center(&tick_refs);
+
         // Numbers and titles take the sizes of 2D axes and face the camera.
-        // Each is anchored on its axis, at its tick or at the axis's end, and
-        // keeps the 2D gap from it on screen whatever the camera's distance
-        // or angle (`AxisLabelGap`): a number beside its tick, away from the
-        // box, and a title past the axis's end and its numbers.
+        // Each is anchored on its axis and keeps the 2D gap from it on screen
+        // whatever the camera's distance or angle (`AxisLabelGap`): a number
+        // beside its tick, away from the box. Fixed, a title sits past the
+        // axis's end and its numbers. Following the camera, the axes run
+        // around the box's outline, each ending where another starts, so a
+        // title stands beside its axis's middle, past its numbers, and the
+        // labels move with their axis.
         let (number_scale, label_scale) = self.axis_text_scales();
         let mut numbers = Vec::new();
-        let ticks_visible = [visibility.x_ticks, visibility.y_ticks, visibility.z_ticks];
         let numbers_visible = [
             visibility.x_numbers,
             visibility.y_numbers,
             visibility.z_numbers,
         ];
         let directions = [DVec3::X, DVec3::Y, DVec3::Z];
-        // x's ticks cross their axis along y, and y's and z's along x.
-        let tick_across = [DVec3::NEG_Y, DVec3::NEG_X, DVec3::NEG_X].map(|side| side * tick_half);
         // Half the widest number of each axis, which its title clears.
         let widest_numbers = std::array::from_fn::<_, 3, _>(|dimension| {
             if !numbers_visible[dimension] {
@@ -2700,117 +2861,49 @@ impl SceneModel {
         });
         let label_gap = |dimension: usize, title: Option<DVec2>| gaanim_scene::AxisLabelGap {
             axis: directions[dimension],
-            tick: if title.is_some() {
+            tick: if title.is_some() && !follow {
                 DVec3::ZERO
             } else {
                 tick_across[dimension]
             },
-            bounds: [DVec3::from(min), DVec3::from(max)],
+            bounds,
             gap: super::view_ticks::NUMBER_GAP,
             title,
+            beside: follow,
+            follows: follow.then_some(dimension),
         };
-        // The three axes start at the box's lowest corner, where their first
-        // numbers would pile up: only the first axis numbered keeps its
-        // number there.
+        // Which axes write a number at their lowest and highest ends.
+        let numbered = std::array::from_fn::<_, 3, _>(|dimension| {
+            let labeled = |end: &dyn Fn(f64) -> bool| {
+                numbers_visible[dimension]
+                    && axis_ticks[dimension]
+                        .iter()
+                        .zip(&normalized[dimension])
+                        .any(|(tick, &(at, _))| tick.major && !tick.label.is_empty() && end(at))
+            };
+            [labeled(&|at| at <= END), labeled(&|at| at >= 1.0 - END)]
+        });
+        // Where two axes meet, their numbers at that corner would pile up:
+        // only the first axis numbered keeps its number there. Fixed, the
+        // three meet at the box's lowest corner; following the camera, the
+        // corners they share change with it (see
+        // `AxisBoxLayout::shows_corner_number`).
         let mut corner_numbered = false;
-        for (dimension, axis) in [x.clone(), y.clone(), z.clone()].into_iter().enumerate() {
-            for tick in &axis_ticks[dimension] {
-                let normalized = axis.normalize(tick.value)?;
-                let coordinate = min[dimension] + normalized * size[dimension];
-                let tick_color = axis.style_value().tick_color;
-                // The three axes already own the edges that start at the
-                // minimum corner. Emitting the minimum tick's grid segments
-                // duplicates those lines at exactly the same depth, causing
-                // nondeterministic z-fighting when another 3D drawable enters
-                // the transparent render phase.
-                if tick.major && normalized > 1e-12 {
-                    let mut lines = Vec::with_capacity(2);
-                    match dimension {
-                        0 => {
-                            if visibility.xy_grid {
-                                lines.push((
-                                    [coordinate, min[1], min[2]],
-                                    [coordinate, max[1], min[2]],
-                                ));
-                            }
-                            if visibility.xz_grid {
-                                lines.push((
-                                    [coordinate, min[1], min[2]],
-                                    [coordinate, min[1], max[2]],
-                                ));
-                            }
-                        }
-                        1 => {
-                            if visibility.xy_grid {
-                                lines.push((
-                                    [min[0], coordinate, min[2]],
-                                    [max[0], coordinate, min[2]],
-                                ));
-                            }
-                            if visibility.yz_grid {
-                                lines.push((
-                                    [min[0], coordinate, min[2]],
-                                    [min[0], coordinate, max[2]],
-                                ));
-                            }
-                        }
-                        _ => {
-                            if visibility.xz_grid {
-                                lines.push((
-                                    [min[0], min[1], coordinate],
-                                    [max[0], min[1], coordinate],
-                                ));
-                            }
-                            if visibility.yz_grid {
-                                lines.push((
-                                    [min[0], min[1], coordinate],
-                                    [min[0], max[1], coordinate],
-                                ));
-                            }
-                        }
-                    }
-                    for (from, to) in lines {
-                        grid_points.extend_from_slice(&[as_point(from), as_point(to)]);
-                        // Use the opaque sRGB equivalent of the previous
-                        // 50%-gray/38%-alpha tint over the default black
-                        // background. Transparent line-list intersections
-                        // have undefined fragment ordering on the GPU and
-                        // produced a handful of alternating snapshot pixels.
-                        grid_colors.extend_from_slice(&[grid_color, grid_color]);
-                    }
-                }
-                let (from, to, number_position) = match dimension {
-                    0 => (
-                        [coordinate, min[1] - tick_half, min[2]],
-                        [coordinate, min[1] + tick_half, min[2]],
-                        [coordinate, min[1], min[2]],
-                    ),
-                    1 => (
-                        [min[0] - tick_half, coordinate, min[2]],
-                        [min[0] + tick_half, coordinate, min[2]],
-                        [min[0], coordinate, min[2]],
-                    ),
-                    _ => (
-                        [min[0] - tick_half, min[1], coordinate],
-                        [min[0] + tick_half, min[1], coordinate],
-                        [min[0], min[1], coordinate],
-                    ),
-                };
-                if ticks_visible[dimension] {
-                    tick_points.extend_from_slice(&[as_point(from), as_point(to)]);
-                    tick_colors.extend_from_slice(&[tick_color, tick_color]);
-                }
-                let at_corner = normalized <= 1e-12;
+        for (dimension, axis) in axes_of.into_iter().enumerate() {
+            for (tick, &(at, _)) in axis_ticks[dimension].iter().zip(&normalized[dimension]) {
+                let at_corner = !follow && at <= END;
                 if numbers_visible[dimension]
                     && tick.major
                     && !tick.label.is_empty()
                     && !(at_corner && corner_numbered)
                 {
                     corner_numbered |= at_corner;
+                    let mut position = min;
+                    position[dimension] = min[dimension] + at * size[dimension];
                     let number = self
                         .text(&tick.label)
                         .fill(axis.style_value().number_color)
-                        .move_to_3d(number_position[0], number_position[1], number_position[2])
+                        .move_to_3d(position[0], position[1], position[2])
                         .billboard()
                         .scale_to(number_scale);
                     number
@@ -2818,24 +2911,45 @@ impl SceneModel {
                         .lock()
                         .expect("number spec poisoned")
                         .axis_label_gap = Some(label_gap(dimension, None));
+                    let end = if at <= END {
+                        Some(false)
+                    } else {
+                        (at >= 1.0 - END).then_some(true)
+                    };
+                    if let Some(high) = end {
+                        mark(
+                            &number,
+                            AxisBoxRole::CornerNumber {
+                                axis: dimension,
+                                high,
+                                numbered,
+                            },
+                        );
+                    }
                     numbers.push(number);
                 }
             }
         }
-        let grid_handle = self.line_segments_3d_with_colors(grid_points, grid_colors);
-        let ticks = self.line_segments_3d_with_colors(tick_points, tick_colors);
         let number_refs: Vec<_> = numbers.iter().collect();
         let numbers = self.group_no_center(&number_refs);
         let mut labels = Vec::new();
-        for (dimension, (axis, end, visible)) in [
-            (&x, [max[0], min[1], min[2]], visibility.x_labels),
-            (&y, [min[0], max[1], min[2]], visibility.y_labels),
-            (&z, [min[0], min[1], max[2]], visibility.z_labels),
+        for (dimension, (axis, visible)) in [
+            (&x, visibility.x_labels),
+            (&y, visibility.y_labels),
+            (&z, visibility.z_labels),
         ]
         .into_iter()
         .enumerate()
         {
             if visible && let Some(label) = axis.label_text() {
+                // Past the axis's end, or beside its middle when it follows
+                // the camera.
+                let mut end = min;
+                end[dimension] = if follow {
+                    (min[dimension] + max[dimension]) * 0.5
+                } else {
+                    max[dimension]
+                };
                 let title = self
                     .text(label)
                     .fill(axis.style_value().label_color)
@@ -5535,18 +5649,6 @@ mod tests {
             )
             .unwrap();
 
-        let grid = space.layer(SpaceLayer::MajorGrid).unwrap();
-        let spec = grid.spec.lock().expect("grid spec poisoned");
-        let SpawnKind::LineSegments3D { points, .. } = &spec.kind else {
-            panic!("expected a 3D grid layer")
-        };
-        assert!(!points.is_empty());
-        assert!(
-            points
-                .iter()
-                .all(|point| (point[2] + 2.0).abs() < f32::EPSILON)
-        );
-        drop(spec);
         for layer in [
             SpaceLayer::Axes,
             SpaceLayer::Ticks,
@@ -5555,6 +5657,28 @@ mod tests {
         ] {
             assert!(layer_is_empty(&canvas, space.layer(layer).unwrap()));
         }
+        assert!(!layer_is_empty(
+            &canvas,
+            space.layer(SpaceLayer::MajorGrid).unwrap()
+        ));
+        // Only the xy plane draws, built on the box's lowest face.
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let points: Vec<[f32; 3]> = world
+            .query::<&gaanim_scene::LineListData>()
+            .iter(&world)
+            .flat_map(|line| line.points.clone())
+            .collect();
+        assert!(!points.is_empty());
+        assert!(
+            points
+                .iter()
+                .all(|point| (point[2] + 2.0).abs() < f32::EPSILON)
+        );
     }
 
     #[test]
@@ -6836,15 +6960,97 @@ mod tests {
     }
 
     #[test]
-    fn three_dimensional_grid_does_not_duplicate_axis_edges() {
+    fn three_dimensional_grids_and_axes_take_the_sides_the_camera_shows() {
+        use bevy::prelude::App;
+        use gaanim_core::glam::DVec3;
+        let axis = || Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap();
         let mut canvas = SceneModel::new(640, 360);
-        let _space = canvas
-            .coordinate_axes_3d(
-                Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap(),
-                Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap(),
-                Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap(),
+        canvas
+            .coordinate_axes_3d(axis(), axis(), axis(), [4.0, 4.0, 4.0], true)
+            .unwrap();
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin);
+        canvas.compile(app.world_mut());
+        app.finish();
+        app.cleanup();
+
+        // From each camera, the faces behind the box along x, y and z.
+        for (eye, behind) in [
+            (DVec3::new(9.0, -7.0, 5.0), [-2.0, 2.0, -2.0]),
+            (DVec3::new(-9.0, 7.0, 5.0), [2.0, -2.0, -2.0]),
+            (DVec3::new(9.0, 7.0, -5.0), [-2.0, -2.0, 2.0]),
+        ] {
+            let mut camera = gaanim_math::Camera::perspective_3d(640, 360, 0.8);
+            camera.look_at(eye, DVec3::ZERO, DVec3::Z).unwrap();
+            app.world_mut()
+                .insert_resource(gaanim_math::CameraViewOverride(Some(camera)));
+            app.update();
+
+            let world = app.world_mut();
+            let mut lines = world.query::<(
+                &gaanim_scene::LineListData,
+                &gaanim_math::GlobalSpatialTransform,
+                &gaanim_scene::GlobalOpacity,
+                Option<&gaanim_scene::AxisBoxPart>,
+            )>();
+            // Every drawn segment in world coordinates, to a micrometre.
+            let mut segments = Vec::new();
+            for (line, global, opacity, part) in lines.iter(world) {
+                if opacity.0 <= f32::EPSILON {
+                    continue;
+                }
+                for segment in line.points.as_chunks::<2>().0 {
+                    let [from, to] = segment.map(|point| {
+                        let point = global
+                            .mat4
+                            .transform_point3(DVec3::from(point.map(f64::from)));
+                        (point * 1e6).round().as_i64vec3().to_array()
+                    });
+                    segments.push(if from <= to { [from, to] } else { [to, from] });
+                }
+                if let Some(gaanim_scene::AxisBoxPart {
+                    role: gaanim_scene::AxisBoxRole::Plane { normal },
+                    ..
+                }) = part
+                {
+                    for point in &line.points {
+                        let at = global
+                            .mat4
+                            .transform_point3(DVec3::from(point.map(f64::from)));
+                        assert!(
+                            (at[*normal] - behind[*normal]).abs() < 1e-6,
+                            "{eye:?}: the plane across {normal} at {at:?}"
+                        );
+                    }
+                }
+            }
+            let count = segments.len();
+            segments.sort_unstable();
+            segments.dedup();
+            assert_eq!(
+                segments.len(),
+                count,
+                "{eye:?}: two lines lie on top of each other"
+            );
+        }
+    }
+
+    #[test]
+    fn fixed_three_dimensional_axes_keep_the_lowest_corner() {
+        let axis = || Axis::linear(-2.0, 2.0).unwrap().ticks(1.0).unwrap();
+        let mut canvas = SceneModel::new(640, 360);
+        canvas
+            .coordinate_axes_3d_with_sides(
+                axis(),
+                axis(),
+                axis(),
                 [4.0, 4.0, 4.0],
-                true,
+                Cartesian3DVisibility::default(),
+                AxisBoxSides::Fixed,
             )
             .unwrap();
         let mut world = bevy::prelude::World::new();
@@ -6854,33 +7060,42 @@ mod tests {
         canvas.compile(&mut world);
         world.flush();
 
-        let mut lines = world.query::<&gaanim_scene::LineListData>();
-        let compiled: Vec<_> = lines.iter(&world).cloned().collect();
-        let axes = compiled
-            .iter()
-            .find(|line| {
-                line.points.len() == 6
-                    && line
-                        .colors
-                        .as_ref()
-                        .is_some_and(|colors| colors.iter().all(|color| color[3] >= 0.999))
-            })
-            .unwrap();
-        let grid = compiled
-            .iter()
-            .max_by_key(|line| line.points.len())
-            .unwrap();
-        assert!(
-            grid.colors
-                .as_ref()
-                .is_some_and(|colors| colors.iter().all(|color| color[3] >= 0.999))
+        // Nothing follows the camera, and no grid line lies on an axis or
+        // on another plane's line. (The y and z ticks at the lowest corner
+        // still cross x there on top of each other, as they always have.)
+        assert_eq!(
+            world
+                .query::<&gaanim_scene::AxisBoxPart>()
+                .iter(&world)
+                .count(),
+            0
         );
-
-        for axis in axes.points.as_chunks::<2>().0 {
-            assert!(grid.points.as_chunks::<2>().0.iter().all(|segment| {
-                segment != axis && !(segment[0] == axis[1] && segment[1] == axis[0])
-            }));
-        }
+        let mut segments: Vec<[[i64; 3]; 2]> = world
+            .query::<&gaanim_scene::LineListData>()
+            .iter(&world)
+            .flat_map(|line| line.points.as_chunks::<2>().0.to_vec())
+            .map(|segment| {
+                let [from, to] =
+                    segment.map(|point| point.map(|value| (f64::from(value) * 1e6).round() as i64));
+                if from <= to { [from, to] } else { [to, from] }
+            })
+            .filter(|[from, to]| {
+                let length: i64 = from.iter().zip(to).map(|(a, b)| (a - b).abs()).sum();
+                length > 1_000_000
+            })
+            .collect();
+        let count = segments.len();
+        segments.sort_unstable();
+        segments.dedup();
+        assert_eq!(segments.len(), count);
+        // The three walls at the lowest faces: no grid line reaches past
+        // them toward the camera.
+        assert!(
+            segments
+                .iter()
+                .flatten()
+                .all(|point| point.iter().any(|&value| value == -2_000_000))
+        );
     }
 
     #[test]
@@ -7227,9 +7442,9 @@ mod tests {
             .iter(&world)
             .map(|(transform, bounds)| (bounds.0.max.y - bounds.0.min.y) * transform.scale.y)
             .collect();
-        // Five numbers along x, four along y and z, whose -2 would sit on
-        // x's at the lowest corner, and three titles.
-        assert_eq!(heights.len(), 16);
+        // Five numbers along each axis, which follow the camera to edges
+        // that share no corner by three, and three titles.
+        assert_eq!(heights.len(), 18);
         assert!(
             heights.iter().all(|height| (0.15..=0.6).contains(height)),
             "{heights:?}"

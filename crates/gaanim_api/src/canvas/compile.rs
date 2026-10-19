@@ -11867,6 +11867,19 @@ impl SceneModel {
             if let Some(gap) = spec.axis_label_gap {
                 builder.commands.entity(entity).insert(gap);
             }
+            if let Some(part) = spec.axis_box_part {
+                builder.commands.entity(entity).insert(part);
+                if matches!(
+                    part.role,
+                    gaanim_scene::AxisBoxRole::PlaneEdge { .. }
+                        | gaanim_scene::AxisBoxRole::CornerNumber { .. }
+                ) {
+                    builder
+                        .commands
+                        .entity(entity)
+                        .insert(gaanim_scene::AxisBoxShown(true));
+                }
+            }
             if let Some((axis, generation, anchors)) = &spec.coordinate_tick_level {
                 let anchors = anchors.lock().expect("tick anchors poisoned").clone();
                 builder

@@ -133,14 +133,14 @@ type StaleTransformFilter = Or<(
 )>;
 
 /// Read-only inputs of [`propagate_transforms_recursive`].
-struct Propagation<'a, 'w1, 's1, 'w2, 's2, 'w3, 's3, 'w4, 's4> {
-    children_query: &'a Query<'w1, 's1, &'static Children>,
-    view_roles: &'a Query<'w2, 's2, &'static CoordinateViewRole>,
-    label_offsets: &'a Query<'w3, 's3, &'static CoordinateLabelOffset>,
-    parents: &'a Query<'w4, 's4, &'static ChildOf>,
+pub(crate) struct Propagation<'a, 'w1, 's1, 'w2, 's2, 'w3, 's3, 'w4, 's4> {
+    pub(crate) children_query: &'a Query<'w1, 's1, &'static Children>,
+    pub(crate) view_roles: &'a Query<'w2, 's2, &'static CoordinateViewRole>,
+    pub(crate) label_offsets: &'a Query<'w3, 's3, &'static CoordinateLabelOffset>,
+    pub(crate) parents: &'a Query<'w4, 's4, &'static ChildOf>,
     /// Entities to recompute even when their parent did not change; `None`
     /// recomputes the whole subtree.
-    stale: Option<&'a EntityHashSet>,
+    pub(crate) stale: Option<&'a EntityHashSet>,
 }
 
 /// `local` with `deform` applied about its position, in the parent's space.
@@ -162,7 +162,7 @@ fn deformed_local(
     }
 }
 
-fn propagate_transforms_recursive(
+pub(crate) fn propagate_transforms_recursive(
     entity: Entity,
     parent_global: Option<GlobalSpatialTransform>,
     parent_changed: bool,
@@ -547,16 +547,25 @@ pub fn pin_hud_overlays_system(
 #[allow(clippy::type_complexity)]
 pub fn has_opacity_changes(
     query: Query<&Opacity, Or<(Changed<Opacity>, Added<Opacity>)>>,
-    presences: Query<(), Or<(Changed<crate::Presence>, Changed<crate::Occlusion>)>>,
+    presences: Query<
+        (),
+        Or<(
+            Changed<crate::Presence>,
+            Changed<crate::Occlusion>,
+            Changed<crate::AxisBoxShown>,
+        )>,
+    >,
     mut removed: (
         RemovedComponents<crate::Presence>,
         RemovedComponents<crate::Occlusion>,
+        RemovedComponents<crate::AxisBoxShown>,
     ),
 ) -> bool {
     !query.is_empty()
         || !presences.is_empty()
         || removed.0.read().next().is_some()
         || removed.1.read().next().is_some()
+        || removed.2.read().next().is_some()
 }
 
 /// System: Propagate opacity cascade down the hierarchy using Bevy 0.19's `ChildOf` relation.
@@ -569,20 +578,19 @@ pub fn opacity_propagation_system(
         RemovedComponents<crate::Presence>,
         RemovedComponents<Opacity>,
         RemovedComponents<crate::Occlusion>,
+        RemovedComponents<crate::AxisBoxShown>,
     ),
     children_query: Query<&'static Children>,
     local_opacities: Query<&'static Opacity>,
     parents: Query<&'static ChildOf>,
-    presences: Query<(
-        Option<&'static crate::Presence>,
-        Option<&'static crate::Occlusion>,
-    )>,
+    presences: Query<OpacityFactors>,
 ) {
     let mut stale: EntityHashSet = queries.p0().iter().collect();
     stale.extend(removed.0.read());
     stale.extend(removed.1.read());
     stale.extend(removed.2.read());
     stale.extend(removed.3.read());
+    stale.extend(removed.4.read());
     let mut opacities = queries.p1();
     let propagation = OpacityPropagation {
         children_query: &children_query,
@@ -617,19 +625,31 @@ type StaleOpacityFilter = Or<(
     Changed<GlobalOpacity>,
     Changed<crate::Presence>,
     Changed<crate::Occlusion>,
+    Changed<crate::AxisBoxShown>,
     Changed<ChildOf>,
 )>;
 
-/// An entity's extra opacity factors: a repeater copy's presence and a
-/// billboard's occlusion by 3D meshes.
+/// An entity's extra opacity factors: a repeater copy's presence, a
+/// billboard's occlusion by 3D meshes, and whether a grid line on a 3D box's
+/// edge shows.
 type OpacityFactors = (
     Option<&'static crate::Presence>,
     Option<&'static crate::Occlusion>,
+    Option<&'static crate::AxisBoxShown>,
 );
 
 /// The product of an entity's extra opacity factors.
-fn opacity_factor(factors: (Option<&crate::Presence>, Option<&crate::Occlusion>)) -> f32 {
-    factors.0.map_or(1.0, |presence| presence.0) * factors.1.map_or(1.0, |occlusion| occlusion.0)
+fn opacity_factor(
+    factors: (
+        Option<&crate::Presence>,
+        Option<&crate::Occlusion>,
+        Option<&crate::AxisBoxShown>,
+    ),
+) -> f32 {
+    let shown = factors.2.is_none_or(|shown| shown.0);
+    factors.0.map_or(1.0, |presence| presence.0)
+        * factors.1.map_or(1.0, |occlusion| occlusion.0)
+        * if shown { 1.0 } else { 0.0 }
 }
 
 struct OpacityPropagation<'a, 'w1, 's1, 'w2, 's2> {
@@ -1074,8 +1094,24 @@ pub fn billboard_system(
         let axis_label = axis_label.and_then(|(gap, local, parent, bounds)| {
             Some((gap, parent_of(parent)?, local, bounds))
         });
+        // A label that follows its axis to the edge the camera shows best
+        // moves with it, and its tick turns to that edge's outside.
+        let follow = axis_label.and_then(|(gap, parent, _, _)| {
+            let axis = gap.follows?;
+            let layout = crate::AxisBoxLayout::for_view(&cam, parent, gap.bounds);
+            Some((axis, layout))
+        });
         let world = match axis_label {
-            Some((_, parent, local, _)) => parent * local.to_mat4(),
+            Some((gap, parent, local, _)) => {
+                let offset = follow.map_or(DVec3::ZERO, |(axis, layout)| {
+                    layout.edge_offset(axis, gap.bounds)
+                });
+                if offset == DVec3::ZERO {
+                    parent * local.to_mat4()
+                } else {
+                    parent * DMat4::from_translation(offset) * local.to_mat4()
+                }
+            }
             None => billboard.mat4,
         };
         let (scale, _rot, mut trans) = world.to_scale_rotation_translation();
@@ -1120,10 +1156,19 @@ pub fn billboard_system(
                 })
                 .filter(|corner| corner.is_finite())
                 .collect();
+            let tick = follow.map_or(gap.tick, |(axis, layout)| {
+                DVec3::from_array(std::array::from_fn(|dimension| {
+                    if layout.edges[axis][dimension] {
+                        -gap.tick[dimension]
+                    } else {
+                        gap.tick[dimension]
+                    }
+                }))
+            });
             let shift = axis_label_shift(
                 gap,
                 (project(trans + axis) - at) / STEP,
-                project(trans + parent.transform_vector3(gap.tick)) - at,
+                project(trans + parent.transform_vector3(tick)) - at,
                 &box_corners,
                 &corners,
             );
@@ -1347,7 +1392,9 @@ fn axis_label_shift(
     };
     let center = box_corners.iter().copied().sum::<DVec2>() / box_corners.len().max(1) as f64;
     let away = direction(-center);
-    if let Some(numbers) = gap.title {
+    if let Some(numbers) = gap.title
+        && !gap.beside
+    {
         let n = direction(axis).or(away).unwrap_or(DVec2::Y);
         let numbers = n.x.abs() * numbers.x + n.y.abs() * numbers.y;
         return n * (gap.gap + numbers - behind(n));
@@ -1375,7 +1422,12 @@ fn axis_label_shift(
         }
         None => away.or(direction(tick)).unwrap_or(DVec2::NEG_Y),
     };
-    n * (tick.dot(n).abs() + gap.gap - behind(n))
+    // A title beside its axis clears its numbers' whole width along `n`
+    // and a second gap.
+    let numbers = gap.title.map_or(0.0, |numbers| {
+        2.0 * (n.x.abs() * numbers.x + n.y.abs() * numbers.y) + gap.gap
+    });
+    n * (tick.dot(n).abs() + gap.gap + numbers - behind(n))
 }
 
 fn propagate_billboard_children_recursive(
@@ -1774,6 +1826,8 @@ mod tests {
             bounds: [DVec3::ZERO, DVec3::ONE],
             gap: 0.1,
             title: None,
+            beside: false,
+            follows: None,
         };
         let square = |low: f64, high: f64| {
             vec![
@@ -1807,6 +1861,8 @@ mod tests {
             bounds: [DVec3::splat(-1.0), DVec3::splat(1.0)],
             gap: 0.12,
             title: None,
+            beside: false,
+            follows: None,
         };
         for eye in [DVec3::new(1.0, 2.0, 6.0), DVec3::new(10.0, 20.0, 60.0)] {
             let camera = axis_camera(eye);
@@ -1848,6 +1904,8 @@ mod tests {
             bounds: [DVec3::splat(-1.0), DVec3::splat(1.0)],
             gap: 0.12,
             title: None,
+            beside: false,
+            follows: None,
         };
         let (origin, corners, _) = place_axis_label(camera, anchor, gap);
         let tick = canvas_point(&camera, anchor);
@@ -1868,12 +1926,45 @@ mod tests {
             bounds: [DVec3::splat(-1.0), DVec3::splat(1.0)],
             gap: 0.12,
             title: Some(DVec2::new(0.25, 0.1)),
+            beside: false,
+            follows: None,
         };
         let (_, corners, _) = place_axis_label(camera, end, gap);
         let at = canvas_point(&camera, end);
         let along = (canvas_point(&camera, end + DVec3::X * 0.01) - at).normalize();
         let numbers = along.x.abs() * 0.25 + along.y.abs() * 0.1;
         assert!((clearance(&corners, at, along) - 0.12 - numbers).abs() < 1e-6);
+    }
+
+    #[test]
+    fn axis_titles_beside_their_axis_clear_its_numbers() {
+        use gaanim_core::glam::{DVec2, DVec3};
+        let middle = DVec3::new(0.0, -1.0, -1.0);
+        let camera = axis_camera(DVec3::new(10.0, 20.0, 60.0));
+        let gap = AxisLabelGap {
+            axis: DVec3::X,
+            tick: DVec3::new(0.0, -0.05, 0.0),
+            bounds: [DVec3::splat(-1.0), DVec3::splat(1.0)],
+            gap: 0.12,
+            title: Some(DVec2::new(0.25, 0.1)),
+            beside: true,
+            follows: None,
+        };
+        let (_, corners, _) = place_axis_label(camera, middle, gap);
+        let at = canvas_point(&camera, middle);
+        let along = (canvas_point(&camera, middle + DVec3::X * 0.01) - at).normalize();
+        let across = -along.perp();
+        // On the numbers' side of the axis, below it, past their width.
+        assert!(across.y < 0.0, "{across:?}");
+        let tick_reach = (canvas_point(&camera, middle + gap.tick) - at)
+            .dot(across)
+            .abs();
+        let numbers = 2.0 * (across.x.abs() * 0.25 + across.y.abs() * 0.1);
+        let clear = clearance(&corners, at, across);
+        assert!(
+            (clear - tick_reach - 0.24 - numbers).abs() < 1e-6,
+            "{clear} past the axis"
+        );
     }
 
     #[test]

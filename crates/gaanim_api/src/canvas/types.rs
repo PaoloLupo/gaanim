@@ -995,6 +995,9 @@ pub struct ObjectSpec {
     pub(crate) coordinate_label_offset: Option<gaanim_core::glam::DVec2>,
     /// On-screen gap of a 3D axis number or title from its axis.
     pub(crate) axis_label_gap: Option<gaanim_scene::AxisLabelGap>,
+    /// The part of a 3D space's box this line list is, which follows the
+    /// camera to the box's side it shows best.
+    pub(crate) axis_box_part: Option<gaanim_scene::AxisBoxPart>,
     /// Axis, generation and shared view anchors of a fading tick generation.
     pub(crate) coordinate_tick_level: Option<(u8, u32, super::view_ticks::TickAnchors)>,
     /// Fill overrides applied to matching glyph fragments after textual objects
@@ -1184,6 +1187,7 @@ impl ObjectSpec {
             coordinate_view_role: None,
             coordinate_label_offset: None,
             axis_label_gap: None,
+            axis_box_part: None,
             coordinate_tick_level: None,
             hud: false,
             parallax_depth: None,
