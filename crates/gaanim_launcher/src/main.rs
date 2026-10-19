@@ -119,28 +119,37 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         format!(
             "Created {} project: {}",
             parsed.kind.name(),
-            project.root.display()
+            console::display_path(&project.root)
         ),
     );
-    console::detail("Edit", project.entry.display());
-    console::detail("Preview", format!("gaanim {}", project.root.display()));
-    console::detail("Check", format!("gaanim check {}", project.root.display()));
+    console::detail("Edit", console::display_path(&project.entry));
+    console::detail(
+        "Preview",
+        format!("gaanim {}", console::display_path(&project.root)),
+    );
+    console::detail(
+        "Check",
+        format!("gaanim check {}", console::display_path(&project.root)),
+    );
     if parsed.kind.is_slides() {
         console::detail(
             "Present",
-            format!("gaanim --present --monitor 1 {}", project.root.display()),
+            format!(
+                "gaanim --present --monitor 1 {}",
+                console::display_path(&project.root)
+            ),
         );
     } else {
         console::detail(
             "Export",
             format!(
                 "gaanim export {} --output exports/video.mp4 --quality production",
-                project.root.display()
+                console::display_path(&project.root)
             ),
         );
     }
     match venv {
-        Ok(venv) => console::detail("Python", venv.display()),
+        Ok(venv) => console::detail("Python", console::display_path(&venv)),
         Err(error) => console::warn(
             "python",
             format!("authoring environment not ready: {error}"),

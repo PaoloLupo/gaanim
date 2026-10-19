@@ -158,13 +158,13 @@ fn read_manifest(manifest_path: &Path) -> Result<(String, RawProjectManifest), S
     let source = std::fs::read_to_string(manifest_path).map_err(|error| {
         format!(
             "could not read project manifest {}: {error}",
-            manifest_path.display()
+            shown(manifest_path)
         )
     })?;
     let raw = toml::from_str(&source).map_err(|error| {
         format!(
             "invalid project manifest {}: {error}",
-            manifest_path.display()
+            shown(manifest_path)
         )
     })?;
     Ok((source, raw))
@@ -202,13 +202,13 @@ pub fn set_project_language(manifest_path: &Path, language: Option<&str>) -> Res
     let source = std::fs::read_to_string(manifest_path).map_err(|error| {
         format!(
             "could not read project manifest {}: {error}",
-            manifest_path.display()
+            shown(manifest_path)
         )
     })?;
     let mut document: toml_edit::DocumentMut = source.parse().map_err(|error| {
         format!(
             "invalid project manifest {}: {error}",
-            manifest_path.display()
+            shown(manifest_path)
         )
     })?;
     match language
@@ -227,7 +227,7 @@ pub fn set_project_language(manifest_path: &Path, language: Option<&str>) -> Res
         .and_then(|()| std::fs::rename(&temporary, manifest_path))
         .map_err(|error| {
             let _ = std::fs::remove_file(&temporary);
-            format!("could not write {}: {error}", manifest_path.display())
+            format!("could not write {}: {error}", shown(manifest_path))
         })
 }
 
@@ -306,7 +306,7 @@ pub fn create_project(options: &CreateProjectOptions) -> Result<ResolvedProject,
     if options.directory.is_file() {
         return Err(format!(
             "{} is a file; choose a project directory",
-            options.directory.display()
+            shown(&options.directory)
         ));
     }
     let project_name = options
@@ -344,16 +344,16 @@ pub fn create_project(options: &CreateProjectOptions) -> Result<ResolvedProject,
     {
         return Err(format!(
             "{} already exists (use --force to update scaffold files)",
-            path.display()
+            shown(path)
         ));
     }
     for (path, source) in files {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+                .map_err(|error| format!("could not create {}: {error}", shown(parent)))?;
         }
         std::fs::write(&path, source)
-            .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+            .map_err(|error| format!("could not write {}: {error}", shown(&path)))?;
     }
     resolve_project(&options.directory)
 }
@@ -368,7 +368,7 @@ pub fn create_workspace(options: &CreateWorkspaceOptions) -> Result<Workspace, S
     if options.directory.is_file() {
         return Err(format!(
             "{} is a file; choose a workspace directory",
-            options.directory.display()
+            shown(&options.directory)
         ));
     }
     let name = options
@@ -406,16 +406,16 @@ pub fn create_workspace(options: &CreateWorkspaceOptions) -> Result<Workspace, S
     {
         return Err(format!(
             "{} already exists (use --force to update scaffold files)",
-            path.display()
+            shown(path)
         ));
     }
     for (path, source) in &files {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+                .map_err(|error| format!("could not create {}: {error}", shown(parent)))?;
         }
         std::fs::write(path, source)
-            .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+            .map_err(|error| format!("could not write {}: {error}", shown(path)))?;
     }
     let first = directory.join("videos").join("intro");
     if !first.join("gaanim.toml").exists() {
@@ -537,10 +537,10 @@ pub fn init_git_repository(directory: &Path) -> bool {
 
 pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
     if !path.exists() {
-        return Err(format!("project not found: {}", path.display()));
+        return Err(format!("project not found: {}", shown(path)));
     }
     if !path.is_dir() {
-        return Err(format!("expected a project directory: {}", path.display()));
+        return Err(format!("expected a project directory: {}", shown(path)));
     }
     let root = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let manifest_path = root.join("gaanim.toml");
@@ -548,13 +548,13 @@ pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
     if !raw.declares_project() && raw.workspace.is_some() {
         return Err(format!(
             "{} is a workspace, not a project: open one of its members",
-            root.display()
+            shown(&root)
         ));
     }
     let missing = |field: &str| {
         format!(
             "invalid project manifest {}: missing field `{field}`",
-            manifest_path.display()
+            shown(&manifest_path)
         )
     };
     let raw_kind = raw.kind.as_deref().ok_or_else(|| missing("kind"))?;
@@ -566,7 +566,7 @@ pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
     let invalid = |error: String| {
         format!(
             "invalid project manifest {}: {error}",
-            manifest_path.display()
+            shown(&manifest_path)
         )
     };
     let kind = ProjectKind::parse(raw_kind).map_err(invalid)?;
@@ -575,7 +575,7 @@ pub fn resolve_project(path: &Path) -> Result<ResolvedProject, String> {
     if !entry.is_file() {
         return Err(format!(
             "project entry does not exist or is not a file: {}",
-            entry.display()
+            shown(&entry)
         ));
     }
     let workspace = match raw.workspace {
@@ -687,6 +687,14 @@ fn validate_relative_path(path: &Path, field: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// `path` as messages show it: without the `\\?\` prefix of Windows'
+/// canonical paths, which people never type (see [`describe`]).
+pub(crate) fn shown(path: impl AsRef<Path>) -> String {
+    gaanim_core::console::plain_path(path.as_ref())
+        .display()
+        .to_string()
 }
 
 fn escape_manifest_value(value: &str) -> String {
@@ -855,7 +863,7 @@ impl RecentProjects {
             return Ok(Self::default());
         }
         let source = std::fs::read_to_string(path)
-            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+            .map_err(|error| format!("could not read {}: {error}", shown(path)))?;
         let stored: Self = serde_json::from_str(&source).unwrap_or_default();
         let mut seen = HashSet::new();
         let pinned: Vec<PathBuf> = stored
@@ -964,12 +972,12 @@ impl RecentProjects {
     pub fn save_to(&self, path: &Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+                .map_err(|error| format!("could not create {}: {error}", shown(parent)))?;
         }
         let source = serde_json::to_string_pretty(self)
             .map_err(|error| format!("could not serialize recent projects: {error}"))?;
         std::fs::write(path, source)
-            .map_err(|error| format!("could not write {}: {error}", path.display()))
+            .map_err(|error| format!("could not write {}: {error}", shown(path)))
     }
 }
 
@@ -1462,14 +1470,14 @@ pub fn activate_environment(probe: &EnvironmentProbe) -> Result<Option<PathBuf>,
                 version.major,
                 version.minor,
                 version.patch,
-                python.executable.display()
+                shown(&python.executable)
             );
             // A project made for an older Gaanim keeps its environment.
             if let Some(root) = &python.venv_root {
                 error.push_str(&format!(
                     "; set `.python-version` to {PYTHON_VERSION} and run \
                      `uv venv --python {PYTHON_VERSION} --clear` in {}",
-                    root.parent().unwrap_or(root).display()
+                    shown(root.parent().unwrap_or(root))
                 ));
             }
             return Err(error);
@@ -1545,15 +1553,11 @@ pub fn provision_authoring_package(project_root: &Path) -> Result<PathBuf, Strin
             .status()
             .map_err(|error| format!("could not start uv: {error}"))?;
         if !status.success() {
-            return Err(format!("uv could not create {}", venv.display()));
+            return Err(format!("uv could not create {}", shown(&venv)));
         }
     }
-    let python = venv_python(&venv).ok_or_else(|| {
-        format!(
-            "uv did not create a usable environment at {}",
-            venv.display()
-        )
-    })?;
+    let python = venv_python(&venv)
+        .ok_or_else(|| format!("uv did not create a usable environment at {}", shown(&venv)))?;
     let installed = if authoring_package_installed(&venv) {
         Some(env!("CARGO_PKG_VERSION").to_string())
     } else {
@@ -1583,7 +1587,7 @@ pub fn provision_authoring_package(project_root: &Path) -> Result<PathBuf, Strin
         if !status.success() {
             return Err(format!(
                 "uv could not install the Gaanim authoring package into {}",
-                venv.display()
+                shown(&venv)
             ));
         }
     }
@@ -1817,6 +1821,17 @@ language = \"es\"
             assert!(readme.contains("\n## Compartir\n"));
             assert!(readme.contains("\ngaanim --present exports/escena.gaanim\n"));
         }
+    }
+
+    #[test]
+    fn errors_name_paths_without_the_verbatim_prefix() {
+        let temp = tempfile::tempdir().unwrap();
+        // Canonical, so `\\?\C:\…` on Windows.
+        let root = temp.path().canonicalize().unwrap();
+        std::fs::write(root.join("gaanim.toml"), "kind = 3\n").unwrap();
+        let error = resolve_project(&root).unwrap_err();
+        assert!(error.starts_with("invalid project manifest"), "{error}");
+        assert!(!error.contains(r"\\?\"), "{error}");
     }
 
     #[test]

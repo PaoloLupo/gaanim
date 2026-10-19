@@ -334,7 +334,8 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   importan dentro de Gaanim.
 - En Windows, la raíz del proyecto y su `src/` entran en `sys.path` sin el
   prefijo `\\?\`, y el `__file__` de los módulos que se importan de ahí
-  también.
+  también. Tampoco lo llevan las rutas que muestra `gaanim init` ni las de los
+  errores de un manifiesto o del entorno de Python.
 - El aviso de medir con `bounds()` ya no sale por una medición aislada lenta,
   que es justo lo que recomienda, y dice lo que pasó: cuántas veces se compiló
   la escena o se reanudó su compilación. Antes podía decir que la había
