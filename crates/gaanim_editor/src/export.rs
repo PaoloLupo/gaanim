@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-mod output_file;
+pub(crate) mod output_file;
 use output_file::{OutputKind, OutputParts};
 
 use crate::ui_kit::{

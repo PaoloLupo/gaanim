@@ -184,16 +184,38 @@ fn dispatch_export_mode() -> bool {
     if args.first().map(String::as_str) != Some("export") {
         return false;
     }
-    let command = ExportCommand::parse(&args[1..]).unwrap_or_else(|error| {
+    let mut command = ExportCommand::parse(&args[1..]).unwrap_or_else(|error| {
         console::error("export", error);
         std::process::exit(2);
     });
+    if let Err(error) = command.validate_placeholders() {
+        console::error("export", error);
+        std::process::exit(2);
+    }
+    let output_has = |placeholder: &str| {
+        command
+            .output
+            .as_deref()
+            .is_some_and(|output| output.contains(placeholder))
+    };
     // A playback bundle exports to video without running Python.
     if command
         .input
         .as_deref()
         .is_some_and(gaanim_editor::bundle_player::is_bundle_path)
     {
+        if output_has("{member}")
+            || output_has("{segment}")
+            || command.members.is_some()
+            || command.sections.is_some()
+        {
+            console::error(
+                "export",
+                "a playback bundle exports as a whole; {member}, {segment}, --members and \
+                 --sections do not apply",
+            );
+            std::process::exit(2);
+        }
         console::banner("Export");
         let pdf = command
             .output_format()
@@ -208,6 +230,17 @@ fn dispatch_export_mode() -> bool {
         }
         return true;
     }
+    // A workspace exports each of its members, in a process of its own.
+    if let Some(workspace) = exported_workspace(&command) {
+        std::process::exit(export_members(&workspace, &command, &args[1..]));
+    }
+    if output_has("{member}") || command.members.is_some() {
+        console::error(
+            "export",
+            "{member} and --members export the members of a workspace; pass its folder",
+        );
+        std::process::exit(2);
+    }
     let script = command
         .input
         .as_deref()
@@ -217,10 +250,34 @@ fn dispatch_export_mode() -> bool {
             console::hint("Run `gaanim export --help` for the options.");
             std::process::exit(2);
         });
+    let project = gaanim_project::locate_script(&script)
+        .unwrap_or_else(|error| {
+            console::error("export", error);
+            std::process::exit(2);
+        })
+        .project;
+    // Without --output, a project exports to its output_dir.
+    if command.output.is_none()
+        && let Some(project) = &project
+    {
+        command.output = Some(gaanim_editor::cli::default_output(
+            project, &script, &command,
+        ));
+    }
     let (output, format) = command.output_format().unwrap_or_else(|error| {
         console::error("export", error);
         std::process::exit(2);
     });
+    let segments = output.contains("{segment}");
+    if segments
+        && (format == gaanim_bundle::EXTENSION || format == gaanim_editor::cli::PDF_EXTENSION)
+    {
+        console::error(
+            "export",
+            format!("a .{format} holds the whole scene; {{segment}} exports videos or PNGs"),
+        );
+        std::process::exit(2);
+    }
     if format == gaanim_bundle::EXTENSION {
         if command.from.is_some()
             || command.to.is_some()
@@ -294,6 +351,22 @@ fn dispatch_export_mode() -> bool {
         }
         return true;
     }
+    if segments {
+        match export_segments(&script, &command, &output, &format) {
+            Ok(count) => console::success(
+                "export",
+                format!(
+                    "exported {count} segment{}",
+                    if count == 1 { "" } else { "s" }
+                ),
+            ),
+            Err(error) => {
+                console::error("export", error);
+                std::process::exit(1);
+            }
+        }
+        return true;
+    }
     if let Err(error) = run_export_worker(ExportWorkerArgs {
         script,
         output,
@@ -313,6 +386,157 @@ fn dispatch_export_mode() -> bool {
         std::process::exit(1);
     }
     true
+}
+
+/// The workspace whose members `gaanim export` exports: the input's own,
+/// or the one a project at the workspace root declares when `--members` or
+/// `{member}` ask for members.
+fn exported_workspace(command: &ExportCommand) -> Option<gaanim_project::Workspace> {
+    let input = command.input.as_deref().filter(|input| input.is_dir())?;
+    let members = command.members.is_some()
+        || command
+            .output
+            .as_deref()
+            .is_some_and(|output| output.contains("{member}"));
+    match gaanim_project::resolve_folder(input).ok()? {
+        gaanim_project::ProjectFolder::Workspace(workspace) => Some(workspace),
+        gaanim_project::ProjectFolder::Project(project) if members => project
+            .workspace
+            .filter(|workspace| workspace.root == project.root),
+        gaanim_project::ProjectFolder::Project(_) => None,
+    }
+}
+
+/// Export every member of `workspace` (or those `--members` names), each
+/// in a `gaanim export` of its own with the same options: `{member}` in
+/// `--output` becomes the member's path, and without `--output` each
+/// member writes to its own output_dir. The exit code: 1 when one fails.
+fn export_members(
+    workspace: &gaanim_project::Workspace,
+    command: &ExportCommand,
+    args: &[String],
+) -> i32 {
+    let members = workspace
+        .select_members(command.members.as_deref())
+        .unwrap_or_else(|error| {
+            console::error("export", error);
+            std::process::exit(2);
+        });
+    if members.is_empty() {
+        console::error(
+            "export",
+            format!("workspace {} has no members", workspace.name),
+        );
+        return 2;
+    }
+    if let Some(output) = &command.output
+        && !output.contains("{member}")
+        && members.len() > 1
+    {
+        console::error(
+            "export",
+            format!(
+                "--output names one file for {} members; put {{member}} in it \
+                 (exports/{{member}}.mp4), or leave it out to export each member to its \
+                 output_dir",
+                members.len()
+            ),
+        );
+        return 2;
+    }
+    let executable = match std::env::current_exe() {
+        Ok(executable) => executable,
+        Err(error) => {
+            console::error("export", format!("could not find gaanim: {error}"));
+            return 2;
+        }
+    };
+    let json = console::message_format_json();
+    let mut failed = Vec::new();
+    for member in &members {
+        if let Err(error) = &member.project {
+            console::error("export", format!("{}: {error}", member.path));
+            failed.push(member.path.as_str());
+            continue;
+        }
+        let output = command
+            .output
+            .as_deref()
+            .map(|output| gaanim_editor::cli::fill_placeholder(output, "{member}", &member.path));
+        console::info(
+            "export",
+            format!(
+                "{} · {}",
+                member.path,
+                output.as_deref().unwrap_or("to its output_dir")
+            ),
+        );
+        let mut child = std::process::Command::new(&executable);
+        child.arg("export").args(gaanim_editor::cli::member_args(
+            args,
+            &member.root,
+            output.as_deref(),
+        ));
+        if json {
+            child.args(["--message-format", "json"]);
+        }
+        if !child.status().is_ok_and(|status| status.success()) {
+            failed.push(member.path.as_str());
+        }
+    }
+    let exported = members.len() - failed.len();
+    if json {
+        console::emit_json(&[
+            ("type", "workspace".into()),
+            ("name", workspace.name.as_str().into()),
+            ("members", members.len().into()),
+            ("passed", exported.into()),
+            ("failed", failed.len().into()),
+        ]);
+    } else if failed.is_empty() {
+        console::success(
+            "export",
+            format!(
+                "workspace {} · exported {exported} of {} members",
+                workspace.name,
+                members.len()
+            ),
+        );
+    } else {
+        console::error(
+            "export",
+            format!(
+                "workspace {} · exported {exported} of {} members · failed: {}",
+                workspace.name,
+                members.len(),
+                failed.join(", ")
+            ),
+        );
+    }
+    i32::from(!failed.is_empty())
+}
+
+/// Export each segment `{segment}` asks for (all, or those of
+/// `--sections`) to `output` with its name, running the script once.
+fn export_segments(
+    script: &Path,
+    command: &ExportCommand,
+    output: &str,
+    format: &str,
+) -> Result<usize, String> {
+    let python = crate::python::runtime(script)?;
+    let canvas = (python.load_script_canvas)(script)?;
+    let segments = gaanim_editor::cli::segment_exports(&canvas, command.sections.as_deref())?;
+    let format = gaanim_editor::cli::export_format(format).expect("validated export format");
+    for (name, start, end) in &segments {
+        let path = gaanim_editor::cli::fill_placeholder(output, "{segment}", name);
+        console::info("export", format!("segment {name} · {path}"));
+        let config =
+            gaanim_editor::cli::video_config(command, &path, format, (Some(*start), Some(*end)));
+        gaanim_api::export::export_canvas(canvas.clone(), config)
+            .map_err(|error| format!("segment {name}: {error}"))?;
+    }
+    Ok(segments.len())
 }
 
 /// Report the PDF deck `command` wrote, with its number of pages.

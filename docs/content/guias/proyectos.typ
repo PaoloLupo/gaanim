@@ -225,8 +225,8 @@ barra de progreso que `gaanim export` y el resultado. Al terminar aparece un
 aviso en la esquina con el archivo y un botón para abrirlo.
 
 En *File* escribes solo el nombre: la extensión la pone el formato. Al
-principio es el del proyecto (su carpeta, si el script es `main.py`, o el
-nombre del script), en la carpeta `output_dir` de `gaanim.toml`. *Change…*
+principio es el del script, o el de su carpeta si es un `main.py`, en la
+carpeta `output_dir` de `gaanim.toml`. *Change…*
 elige otra carpeta con el selector del sistema; pasa el cursor por ella para
 ver la ruta completa. Si ya existe un archivo con ese nombre, el diálogo avisa
 de que lo reemplazará y ofrece el siguiente nombre libre (`intro-2`,
@@ -332,6 +332,10 @@ gaanim init video channel/season-1/ep3       # un miembro nuevo
 - `gaanim check channel` ejecuta el `entry` de cada miembro, uno tras otro, y
   termina con un resumen; devuelve `1` si falla alguno, así que sirve para la
   integración continua de un canal.
+- `gaanim export channel` exporta cada miembro a su `output_dir`, y
+  `--output renders/{member}.mp4` los reúne en una carpeta con la misma
+  estructura (ver #link("/referencia/cli/#exportar-varias")[Varias salidas]).
+  `{segment}` exporta un archivo por segmento.
 - `gaanim init video` o `slides` dentro de un workspace crea solo `main.py`,
   `gaanim.toml` y `assets/`. Si `members` no incluye la carpeta nueva, avisa y
   dice qué línea añadir; hasta entonces es un proyecto independiente.

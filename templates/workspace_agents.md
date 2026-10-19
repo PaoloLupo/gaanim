@@ -40,7 +40,7 @@ changing scenes; do not rely on memory.
   does not list is not part of the workspace.
 - Preview a member: `gaanim videos/<name>`; `gaanim .` opens the workspace
   in Home.
-- Export a member:
-  `gaanim export videos/<name> --output videos/<name>/exports/video.mp4`.
+- Export a member to its `exports/`: `gaanim export videos/<name>`; every
+  member: `gaanim export .`, or `gaanim export . -o renders/{member}.mp4`.
 - Put code more than one member uses in `src/`, and assets more than one
   member uses in `assets/`.

@@ -252,7 +252,8 @@ const EXPORT: Page = Page {
         Block::Lines(
             "Usage",
             &[
-                "gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]",
+                "gaanim export <SCRIPT_OR_PROJECT> [--output <FILE>] [OPTIONS]",
+                "gaanim export <WORKSPACE> [--members <PATHS>] [--output <PATTERN>] [OPTIONS]",
                 "gaanim export <BUNDLE.gaanim> --output <VIDEO_OR_PDF> [OPTIONS]",
             ],
         ),
@@ -290,7 +291,18 @@ const EXPORT: Page = Page {
         Block::Rows(
             "Options",
             &[
-                ("-o, --output <FILE>", "Output file (required)"),
+                (
+                    "-o, --output <FILE>",
+                    "Output file. In a project it defaults to\n<output_dir>/<name>.mp4 (.png with --frame), named after\nthe script, or its folder for a main.py. Placeholders\nexport several files: {member} each member of a\nworkspace (its path), {segment} each segment, and {name}\nand {time} each --frame instant",
+                ),
+                (
+                    "--members <PATHS>",
+                    "With a workspace, export only these members: paths or\npatterns as in `members`, comma-separated. Without\n--output, each member exports to its output_dir",
+                ),
+                (
+                    "--sections <LIST>",
+                    "With {segment}, the segments to export: segment names\nor Section keys, comma-separated",
+                ),
                 (
                     "--quality <PRESET>",
                     "draft (30 fps, fast), standard (60 fps, default), or\nproduction (60 fps, best encode). GIF and WebP stay at\n30 fps",

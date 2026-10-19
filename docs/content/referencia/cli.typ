@@ -374,7 +374,8 @@ así que `inspect` solo acepta scripts y proyectos.
 = `gaanim export`
 
 ```bash
-gaanim export <SCRIPT_O_PROYECTO> --output <ARCHIVO> [OPCIONES]
+gaanim export <SCRIPT_O_PROYECTO> [--output <ARCHIVO>] [OPCIONES]
+gaanim export <WORKSPACE> [--members <RUTAS>] [--output <PATRÓN>] [OPCIONES]
 gaanim export <PAQUETE.gaanim> --output <VÍDEO_O_PDF> [OPCIONES]
 ```
 
@@ -412,7 +413,7 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   columns: (auto, auto, 1fr),
   inset: 7pt,
   [*Opción*], [*Predeterminado*], [*Efecto*],
-  [`-o`, `--output <ARCHIVO>`], [obligatorio], [Archivo de salida; su extensión elige el formato.],
+  [`-o`, `--output <ARCHIVO>`], [en un proyecto, `<output_dir>/<nombre>.mp4`], [Archivo de salida; su extensión elige el formato. Puede llevar marcadores que exportan varios archivos (ver #link(<exportar-varias>)[Varias salidas]). Fuera de un proyecto es obligatorio. El nombre por defecto es el del script, o el de su carpeta si es un `main.py`, como en el editor; con `--frame` es un `.png`.],
   [`--quality <PRESET>`], [`standard`], [`draft`: 30 fps y codificación rápida. `standard`: 60 fps y equilibrio. `production`: 60 fps y la mejor compresión, más lenta. GIF y WebP se quedan en 30 fps.],
   [`--fps <TASA>`], [la de `--quality`], [Fotogramas por segundo, de 1 a 240: un entero (`24`), una fracción (`24000/1001`) o un decimal (`23.976`). Sustituye a la tasa de la calidad.],
   [`--width <PX>`], [`1920`], [Ancho de salida en píxeles.],
@@ -424,6 +425,8 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--to <SEGUNDOS|NOMBRE>`], [fin de la escena], [Fin del tramo exportado; un segmento lo termina en su final.],
   [`--frame <SEGUNDOS|NOMBRE>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo; un segmento da su primera pausa. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
   [`--notes`], [desactivado], [Solo PDF: añade tras la última página de cada diapositiva una página con sus notas (`scene.segment(notes=...)`).],
+  [`--sections <LISTA>`], [todos], [Con `{segment}`, los segmentos que se exportan: nombres de segmentos o claves de `Section`, separados por comas, como en la vista previa.],
+  [`--members <RUTAS>`], [todos], [Con un workspace, los miembros que se exportan: rutas o patrones como los de `members`, separados por comas.],
   [`--message-format <FORMATO>`], [`human`], [`json`: mensajes y progreso con su porcentaje en JSON por líneas, sin barra (ver #link(<message-format>)[Mensajes para herramientas]).],
 )
 
@@ -504,6 +507,31 @@ gaanim export mi-charla --output exports/resultados.mp4 --from resultados --to r
 gaanim export mi-video --output frames/f_%04d.png --quality draft
 ```
 
+== Varias salidas a la vez <exportar-varias>
+
+Un marcador en `--output` exporta varios archivos en una sola orden:
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Marcador*], [*Exporta*],
+  [`{member}`], [Con la carpeta de un #link("/guias/proyectos/#workspaces")[workspace], el `entry` de cada miembro (o de los que elige `--members`), con su ruta relativa al workspace: `exports/{member}.mp4` escribe `exports/season-1/ep1.mp4`. Cada miembro se exporta en un proceso propio, con las mismas opciones.],
+  [`{segment}`], [Un archivo por segmento, con su tramo y su nombre: `exports/{segment}.mp4`. `--sections` elige cuáles; sin ella, todos los que duran algo. El script se ejecuta una sola vez. No se combina con `--from`, `--to` ni `--frame`, ni con un `.pdf` o un `.gaanim`, que guardan la escena entera.],
+  [`{name}`, `{time}`], [Con `--frame`, el nombre de cada PNG: el instante tal como se escribió (`climax`, `11.4`) y sus segundos (`11.40s`).],
+)
+
+Con un workspace y sin `--output`, cada miembro exporta a su propio
+`output_dir`; con `--output` y más de un miembro, `--output` tiene que llevar
+`{member}`. Un miembro que falla no detiene a los demás: al final, un resumen
+dice cuántos se exportaron y el código de salida es `1` si falló alguno.
+
+```bash
+gaanim export channel --quality production             # cada miembro, a su output_dir
+gaanim export channel --members "season-1/*" -o renders/{member}.mp4
+gaanim export mi-charla -o clips/{segment}.mp4 --sections intro,resultados
+gaanim export mi-video -o fotos/{name}.png --frame 3,climax
+```
+
 == Fotogramas sueltos
 
 Para revisar la composición en un instante, `--frame` escribe exactamente un
@@ -515,8 +543,9 @@ su primera página en el #link(<diapositivas-pdf>)[PDF], o su final si no tiene
 pausas; una pausa, el instante en que descansa, el mismo que captura
 `--diff --capture-stops`. Con un solo instante escribe el archivo de
 `--output`; con varios añade su posición al nombre (`fotos/f.png` escribe
-`f_1.png`, `f_2.png`…). Respeta `--width`, `--height`, `--fit` y
-`--transparent`.
+`f_1.png`, `f_2.png`…), salvo que el nombre lleve `{name}` o `{time}`
+(`fotos/{name}.png` escribe `fotos/climax.png`). Respeta `--width`,
+`--height`, `--fit` y `--transparent`.
 
 ```bash
 gaanim export mi-video --output revision.png --frame 11.4

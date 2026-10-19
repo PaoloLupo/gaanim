@@ -83,7 +83,7 @@ pub(super) fn join(parts: &OutputParts, kind: OutputKind) -> String {
 
 /// `name` without the characters a file name cannot hold on some system;
 /// folder separators become dashes so the name stays one file.
-pub(super) fn sanitize_name(name: &str) -> String {
+pub(crate) fn sanitize_name(name: &str) -> String {
     name.chars()
         .map(|ch| match ch {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
@@ -93,9 +93,10 @@ pub(super) fn sanitize_name(name: &str) -> String {
         .collect()
 }
 
-/// The name an export starts with: the script's, or the project's when the
-/// script is its `main.py`; a bundle's own name; `output` otherwise.
-pub(super) fn default_name(project: Option<(&Path, &Path)>, bundle: Option<&Path>) -> String {
+/// The name an export starts with: the script's, or its folder's when the
+/// script is a `main.py`, so the episodes of a repository do not all take
+/// its name; a bundle's own name; `output` otherwise.
+pub(crate) fn default_name(project: Option<(&Path, &Path)>, bundle: Option<&Path>) -> String {
     let stem = |path: &Path| {
         path.file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -103,8 +104,10 @@ pub(super) fn default_name(project: Option<(&Path, &Path)>, bundle: Option<&Path
     let name = match (project, bundle) {
         (_, Some(bundle)) => stem(bundle),
         (Some((project_dir, script)), None) => match stem(script) {
-            Some(stem) if stem == "main" || stem == "__main__" => project_dir
-                .file_name()
+            Some(stem) if stem == "main" || stem == "__main__" => script
+                .parent()
+                .or(Some(project_dir))
+                .and_then(Path::file_name)
                 .map(|name| name.to_string_lossy().into_owned()),
             stem => stem,
         },
@@ -232,6 +235,11 @@ mod tests {
         assert_eq!(
             default_name(Some((project, &project.join("escenas/intro.py"))), None),
             "intro"
+        );
+        // Episodes of a repository with one manifest take their folder's name.
+        assert_eq!(
+            default_name(Some((project, &project.join("videos/ep1/main.py"))), None),
+            "ep1"
         );
         assert_eq!(
             default_name(None, Some(Path::new("/descargas/demo.gaanim"))),

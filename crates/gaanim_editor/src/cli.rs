@@ -318,6 +318,158 @@ pub const PDF_EXTENSION: &str = "pdf";
 /// Video formats that keep the alpha channel with `--transparent`.
 pub const TRANSPARENT_EXTENSIONS: [&str; 4] = ["webm", "mov", "webp", "png"];
 
+/// Placeholders `--output` can hold: `{member}` exports every member of a
+/// workspace, `{segment}` every segment, and `{name}` and `{time}` name the
+/// PNGs of `--frame`.
+pub const OUTPUT_PLACEHOLDERS: [&str; 4] = ["{member}", "{segment}", "{name}", "{time}"];
+
+/// `output` with `placeholder` replaced by `value`. A member keeps its
+/// folders (`season-1/ep1`), so the outputs repeat the workspace's layout;
+/// anything else becomes one file name.
+pub fn fill_placeholder(output: &str, placeholder: &str, value: &str) -> String {
+    let value = if placeholder == "{member}" {
+        value.replace('/', std::path::MAIN_SEPARATOR_STR)
+    } else {
+        crate::export::output_file::sanitize_name(value)
+    };
+    output.replace(placeholder, &value)
+}
+
+/// Options of `gaanim export` that take a value, which [`member_args`]
+/// must keep with their flag.
+const VALUE_OPTIONS: [&str; 13] = [
+    "--fps",
+    "--frame",
+    "--from",
+    "--to",
+    "--output",
+    "-o",
+    "--quality",
+    "--encoder",
+    "--width",
+    "--height",
+    "--fit",
+    "--members",
+    "--sections",
+];
+
+/// The arguments of the `gaanim export` that exports one member: `args`
+/// (those after `export`) with the member's folder as the input, `output`
+/// for `--output` when there is one, and no `--members`.
+pub fn member_args(args: &[String], member: &Path, output: Option<&str>) -> Vec<String> {
+    let mut kept = vec![console::plain_path(member).to_string_lossy().into_owned()];
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if VALUE_OPTIONS.contains(&arg.as_str()) {
+            let value = args.next();
+            match arg.as_str() {
+                "--members" | "--output" | "-o" => {}
+                _ => {
+                    kept.push(arg.clone());
+                    kept.extend(value.cloned());
+                }
+            }
+        } else if arg.starts_with('-') {
+            kept.push(arg.clone());
+        }
+        // The positional argument is the workspace, replaced by the member.
+    }
+    if let Some(output) = output {
+        kept.extend(["--output".to_owned(), output.to_owned()]);
+    }
+    kept
+}
+
+/// Where a project's export goes without `--output`: its `output_dir`,
+/// named as the editor names it (the folder of a `main.py`), as an MP4, or
+/// a PNG with `--frame`; one file per segment with `--sections`.
+pub fn default_output(
+    project: &gaanim_project::ResolvedProject,
+    script: &Path,
+    command: &ExportCommand,
+) -> String {
+    let folder = if project.manifest.output_dir.is_absolute() {
+        project.manifest.output_dir.clone()
+    } else {
+        console::plain_path(&project.root).join(&project.manifest.output_dir)
+    };
+    let name = crate::export::output_file::default_name(Some((&project.root, script)), None);
+    let file = if !command.frames.is_empty() {
+        format!("{name}.png")
+    } else if command.sections.is_some() {
+        format!("{name}-{{segment}}.mp4")
+    } else {
+        format!("{name}.mp4")
+    };
+    folder.join(file).to_string_lossy().into_owned()
+}
+
+/// The segments a `{segment}` export writes, in timeline order, with the
+/// name each file takes and the range it covers: all of them, or those
+/// `sections` (a `--sections` list) names. Two segments of the same name
+/// are told apart by a number.
+pub fn segment_exports(
+    canvas: &gaanim_api::canvas::SceneModel,
+    sections: Option<&str>,
+) -> Result<Vec<(String, f64, f64)>, String> {
+    let segments = canvas.segment_manifest().segments;
+    if segments.is_empty() {
+        return Err(
+            "{segment} exports one file per segment, and the scene has none; define them \
+             with scene.segment"
+                .to_owned(),
+        );
+    }
+    let names: Vec<&str> = segments
+        .iter()
+        .map(|segment| segment.name.as_str())
+        .collect();
+    let chosen: Vec<usize> = match sections {
+        // A segment that lasts nothing, such as the one before the first
+        // scene.segment, has no range to export.
+        None => (0..segments.len())
+            .filter(|&index| segments[index].end_time > segments[index].start_time)
+            .collect(),
+        Some(list) => {
+            let mut chosen = Vec::new();
+            for name in gaanim_timeline::selection::SegmentSelection::parse_list(list)? {
+                let found =
+                    gaanim_timeline::selection::segments_named(&name, names.iter().copied());
+                if found.is_empty() {
+                    return Err(format!(
+                        "--sections: no segment or section named `{name}`; available: {}",
+                        gaanim_timeline::selection::segment_choices(names.iter().copied())
+                            .iter()
+                            .map(|choice| format!("`{choice}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                chosen.extend(found);
+            }
+            chosen.sort_unstable();
+            chosen.dedup();
+            chosen
+        }
+    };
+    let mut used: Vec<String> = Vec::new();
+    Ok(chosen
+        .into_iter()
+        .map(|index| {
+            let segment = &segments[index];
+            let base = crate::scene_display_name(&segment.name).to_owned();
+            let mut name = base.clone();
+            let mut copy = 2;
+            while used.contains(&name) {
+                name = format!("{base}-{copy}");
+                copy += 1;
+            }
+            used.push(name.clone());
+            (name, segment.start_time, segment.end_time)
+        })
+        .collect())
+}
+
 /// `gaanim export <INPUT> --output <FILE> [options]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportCommand {
@@ -339,6 +491,10 @@ pub struct ExportCommand {
     pub frames: Vec<ExportBound>,
     /// `--notes`: a PDF deck prints each slide's speaker notes.
     pub notes: bool,
+    /// `--members`: the workspace members to export, as patterns.
+    pub members: Option<String>,
+    /// `--sections`: the segments a `{segment}` export writes.
+    pub sections: Option<String>,
 }
 
 impl Default for ExportCommand {
@@ -357,6 +513,8 @@ impl Default for ExportCommand {
             fps: None,
             frames: Vec::new(),
             notes: false,
+            members: None,
+            sections: None,
         }
     }
 }
@@ -406,6 +564,25 @@ impl ExportCommand {
                 "--output" | "-o" => {
                     index += 1;
                     command.output = args.get(index).cloned();
+                }
+                flag @ ("--members" | "--sections") => {
+                    index += 1;
+                    let value = args
+                        .get(index)
+                        .filter(|value| !value.trim().is_empty())
+                        .cloned()
+                        .ok_or_else(|| {
+                            if flag == "--members" {
+                                "--members requires member paths or patterns".to_string()
+                            } else {
+                                "--sections requires segment or section names".to_string()
+                            }
+                        })?;
+                    if flag == "--members" {
+                        command.members = Some(value);
+                    } else {
+                        command.sections = Some(value);
+                    }
                 }
                 "--quality" => {
                     index += 1;
@@ -461,12 +638,54 @@ impl ExportCommand {
         Ok(command)
     }
 
+    /// Check the placeholders of `--output` against the other options:
+    /// `{name}` and `{time}` name `--frame` PNGs, `{segment}` exports a
+    /// range per segment, and `--sections` picks those segments.
+    pub fn validate_placeholders(&self) -> Result<(), String> {
+        let output = self.output.as_deref().unwrap_or_default();
+        let mut rest = output;
+        while let Some(start) = rest.find('{') {
+            let end = rest[start..]
+                .find('}')
+                .map(|end| start + end + 1)
+                .unwrap_or(rest.len());
+            let placeholder = &rest[start..end];
+            if !OUTPUT_PLACEHOLDERS.contains(&placeholder) {
+                return Err(format!(
+                    "--output: unknown placeholder `{placeholder}`; available: {}",
+                    OUTPUT_PLACEHOLDERS.join(", ")
+                ));
+            }
+            rest = &rest[end..];
+        }
+        let has = |placeholder: &str| output.contains(placeholder);
+        if (has("{name}") || has("{time}")) && self.frames.is_empty() {
+            return Err("{name} and {time} name the PNGs of --frame".to_string());
+        }
+        if has("{segment}") {
+            if !self.frames.is_empty() {
+                return Err("{segment} exports ranges; drop --frame".to_string());
+            }
+            if self.from.is_some() || self.to.is_some() {
+                return Err(
+                    "{segment} exports each segment's range; drop --from and --to".to_string(),
+                );
+            }
+        } else if self.sections.is_some() && self.output.is_some() {
+            return Err(
+                "--sections exports one file per segment; put {segment} in --output \
+                 (exports/{segment}.mp4)"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     /// The output path and its lowercase format extension.
     pub fn output_format(&self) -> Result<(String, String), String> {
-        let output = self
-            .output
-            .clone()
-            .ok_or_else(|| "--output is required".to_string())?;
+        let output = self.output.clone().ok_or_else(|| {
+            "--output is required outside a project, which has an output_dir".to_string()
+        })?;
         let format = Path::new(&output)
             .extension()
             .and_then(|extension| extension.to_str())
@@ -538,10 +757,23 @@ impl ExportCommand {
         }
     }
 
-    /// The PNG each `--frame` instant is written to: `output` itself for one
-    /// instant, otherwise `output` with the instant's 1-based position
-    /// appended (`still.png` -> `still_1.png`, `still_2.png`).
-    pub fn frame_outputs(&self, output: &str) -> Vec<PathBuf> {
+    /// The PNG each `--frame` instant, at `times`, is written to: `output`
+    /// with `{name}` (the instant as written) and `{time}` (its seconds,
+    /// `2.35s`) filled in; without them, `output` itself for one instant,
+    /// otherwise `output` with the instant's 1-based position appended
+    /// (`still.png` -> `still_1.png`, `still_2.png`).
+    pub fn frame_outputs(&self, output: &str, times: &[f64]) -> Vec<PathBuf> {
+        if output.contains("{name}") || output.contains("{time}") {
+            return self
+                .frames
+                .iter()
+                .zip(times)
+                .map(|(frame, time)| {
+                    let named = fill_placeholder(output, "{name}", &frame.to_string());
+                    PathBuf::from(fill_placeholder(&named, "{time}", &format!("{time:.2}s")))
+                })
+                .collect();
+        }
         let path = Path::new(output);
         if self.frames.len() <= 1 {
             return vec![path.to_path_buf()];
@@ -630,7 +862,7 @@ pub fn export_frames(
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.transparent = command.transparent;
     config.headless = true;
-    let paths = command.frame_outputs(output);
+    let paths = command.frame_outputs(output, &times);
     for path in &paths {
         if let Some(parent) = path
             .parent()
@@ -999,7 +1231,7 @@ mod tests {
         assert_eq!(one.frames, vec![ExportBound::Seconds(11.4)]);
         assert!(one.validate_video("png").is_ok());
         assert_eq!(
-            one.frame_outputs("out/still.png"),
+            one.frame_outputs("out/still.png", &[11.4]),
             vec![PathBuf::from("out/still.png")]
         );
 
@@ -1019,10 +1251,22 @@ mod tests {
             ]
         );
         assert_eq!(
-            many.frame_outputs("out/still.png"),
+            many.frame_outputs("out/still.png", &[3.0, 20.0]),
             vec![
                 PathBuf::from("out/still_1.png"),
                 PathBuf::from("out/still_2.png")
+            ]
+        );
+        // `{name}` is the instant as written and `{time}` its seconds.
+        assert_eq!(
+            many.frame_outputs("out/{name}.png", &[3.0, 20.0]),
+            vec![PathBuf::from("out/3.png"), PathBuf::from("out/climax.png")]
+        );
+        assert_eq!(
+            many.frame_outputs("out/f_{time}.png", &[3.0, 20.0]),
+            vec![
+                PathBuf::from("out/f_3.00s.png"),
+                PathBuf::from("out/f_20.00s.png")
             ]
         );
 
@@ -1320,5 +1564,117 @@ mod tests {
         let encoder =
             ExportCommand::parse(&args(&["a.py", "-o", "a.mov", "--encoder", "nvenc"])).unwrap();
         assert!(encoder.validate_video("mov").is_err());
+    }
+
+    #[test]
+    fn placeholders_name_members_segments_and_frames() {
+        let parse = |list: &[&str]| ExportCommand::parse(&args(list)).unwrap();
+        assert!(
+            parse(&["canal", "-o", "out/{member}.mp4"])
+                .validate_placeholders()
+                .is_ok()
+        );
+        assert!(
+            parse(&["v", "-o", "out/{segment}.mp4", "--sections", "intro,end"])
+                .validate_placeholders()
+                .is_ok()
+        );
+        assert!(
+            parse(&["v", "-o", "s/{name}.png", "--frame", "1,climax"])
+                .validate_placeholders()
+                .is_ok()
+        );
+        let error = |list: &[&str]| parse(list).validate_placeholders().unwrap_err();
+        assert!(error(&["v", "-o", "out/{title}.mp4"]).contains("unknown placeholder"));
+        assert!(error(&["v", "-o", "out/{name}.mp4"]).contains("--frame"));
+        assert!(error(&["v", "-o", "out/{segment}.mp4", "--from", "1"]).contains("--from"));
+        assert!(error(&["v", "-o", "out/v.mp4", "--sections", "intro"]).contains("{segment}"));
+        // Without --output, --sections writes one file per segment anyway.
+        assert!(
+            parse(&["v", "--sections", "intro"])
+                .validate_placeholders()
+                .is_ok()
+        );
+
+        assert_eq!(
+            fill_placeholder("out/{member}.mp4", "{member}", "season-1/ep1"),
+            format!("out/season-1{}ep1.mp4", std::path::MAIN_SEPARATOR)
+        );
+        assert_eq!(
+            fill_placeholder("out/{segment}.mp4", "{segment}", "a/b: c"),
+            "out/a-b- c.mp4"
+        );
+    }
+
+    #[test]
+    fn a_member_export_keeps_every_option_but_the_workspace_ones() {
+        let given = args(&[
+            "canal",
+            "--quality",
+            "draft",
+            "--members",
+            "season-1/*",
+            "--output",
+            "out/{member}.mp4",
+            "--transparent",
+            "--frame",
+            "1,2",
+        ]);
+        assert_eq!(
+            member_args(
+                &given,
+                Path::new("/w/season-1/ep1"),
+                Some("out/season-1/ep1.mp4")
+            ),
+            args(&[
+                "/w/season-1/ep1",
+                "--quality",
+                "draft",
+                "--transparent",
+                "--frame",
+                "1,2",
+                "--output",
+                "out/season-1/ep1.mp4",
+            ])
+        );
+        assert_eq!(
+            member_args(&args(&["canal"]), Path::new("/w/talk"), None),
+            args(&["/w/talk"])
+        );
+    }
+
+    #[test]
+    fn a_project_exports_to_its_output_dir_without_output() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("pilot");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("main.py"), "").unwrap();
+        std::fs::write(
+            root.join("gaanim.toml"),
+            "kind = \"video\"\nentry = \"main.py\"\noutput_dir = \"renders\"\n",
+        )
+        .unwrap();
+        let project = gaanim_project::resolve_project(&root).unwrap();
+        let plain = console::plain_path(&project.root);
+        let output = |list: &[&str]| {
+            default_output(
+                &project,
+                &project.entry,
+                &ExportCommand::parse(&args(list)).unwrap(),
+            )
+        };
+        let expected = |file: &str| {
+            plain
+                .join("renders")
+                .join(file)
+                .to_string_lossy()
+                .into_owned()
+        };
+        assert_eq!(output(&["pilot"]), expected("pilot.mp4"));
+        assert_eq!(output(&["pilot", "--frame", "2"]), expected("pilot.png"));
+        assert_eq!(
+            output(&["pilot", "--sections", "intro"]),
+            expected("pilot-{segment}.mp4")
+        );
     }
 }

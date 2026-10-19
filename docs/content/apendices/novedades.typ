@@ -283,6 +283,13 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   Git: el manifiesto comentado, `src/` y `assets/` compartidos, un primer
   miembro, el entorno de Python, `.gitignore`, `README.md` y `AGENTS.md`. En
   el Inicio, *New workspace* hace lo mismo.
+- `gaanim export` exporta varios archivos con marcadores en `--output`:
+  `{member}` cada miembro de un workspace (`--members` elige cuáles),
+  `{segment}` cada segmento (`--sections` elige cuáles), y `{name}` y
+  `{time}` nombran los PNG de `--frame`. En un proyecto, `--output` es
+  opcional: se escribe en su `output_dir`.
+- El nombre por defecto de una exportación de un `main.py` es el de su
+  carpeta, así que los episodios de un repositorio no proponen todos el mismo.
 - `gaanim check <workspace>` comprueba todos los miembros y resume, y
   `--members` elige algunos por ruta o patrón. `gaanim init` dentro de un
   workspace crea solo los archivos del miembro.

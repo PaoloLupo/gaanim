@@ -497,7 +497,9 @@ fn workspace_readme(name: &str, package: &str) -> String {
          ```\n\n\
          ## Exportar\n\n\
          ```bash\n\
-         gaanim export videos/intro --output videos/intro/exports/intro.mp4\n\
+         gaanim export videos/intro        # a videos/intro/exports/intro.mp4\n\
+         gaanim export . --quality production   # todos los proyectos\n\
+         gaanim export . -o renders/{{member}}.mp4\n\
          ```\n\n\
          Las exportaciones van a la carpeta `exports/` de cada proyecto, que Git \
          ignora. El entorno de Python está en `.venv`, en la raíz; si falta, \
