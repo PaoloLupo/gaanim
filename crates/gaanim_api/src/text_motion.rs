@@ -423,6 +423,7 @@ impl SceneBuilder<'_, '_, '_> {
                 next_id_fn,
                 &mut children,
                 1.0,
+                &Default::default(),
             );
         // Glyph paths are in page space; the new page shares the old origin.
         let page_center_y = children

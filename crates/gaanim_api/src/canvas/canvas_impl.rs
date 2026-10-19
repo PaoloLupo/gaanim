@@ -2192,10 +2192,11 @@ pub fn clear_asset_caches() {
 
 /// Forget what the process-local caches hold from the files `changed` (raster
 /// images, Lottie JSON and the images it references, dotLottie packages), so
-/// the next compile reads them from disk again. Typst layouts read no
-/// project file and stay. Anything else the scene holds from a file was
-/// read while authoring, and reaches the replay's fingerprints: a new image
-/// is a new allocation, the rest is content.
+/// the next compile reads them from disk again. Typst layouts stay: a
+/// document's files are read while authoring, and are part of its layout's
+/// key. Anything else the scene holds from a file was read while authoring,
+/// and reaches the replay's fingerprints: a new image is a new allocation,
+/// the rest is content.
 pub fn forget_assets(changed: &[PathBuf]) {
     let changed = gaanim_renderer::lottie::ChangedFiles::new(changed);
     if let Some(cache) = IMAGE_CACHE.get() {
@@ -4414,12 +4415,12 @@ impl SceneModel {
     }
     /// Compile full Typst markup, including tables and other document layout.
     pub fn typst(&mut self, source: &str) -> DrawableHandle {
-        self.typst_inner(source, None)
+        self.typst_inner(source, None, None)
     }
 
     /// Compile full Typst markup with a custom page width (e.g. `"16cm"`, `"800pt"`, `"12in"`).
     pub fn typst_with_width(&mut self, source: &str, page_width: &str) -> DrawableHandle {
-        self.typst_inner(source, Some(page_width))
+        self.typst_inner(source, Some(page_width), None)
     }
 
     /// Compile full Typst markup loaded from an asset path.
@@ -4447,9 +4448,30 @@ impl SceneModel {
         page_width: Option<&str>,
     ) -> Result<DrawableHandle, TypstAssetError> {
         let path = self.resolve_asset_path(path);
-        let source = std::fs::read_to_string(&path)
-            .map_err(|source| TypstAssetError::Read { path, source })?;
-        Ok(self.typst_inner(&source, page_width))
+        let source = std::fs::read_to_string(&path).map_err(|source| TypstAssetError::Read {
+            path: path.clone(),
+            source,
+        })?;
+        // Its own folder comes first, so it imports the files beside it.
+        let folder = path
+            .parent()
+            .map(|folder| std::path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf()));
+        Ok(self.typst_inner(&source, page_width, folder))
+    }
+
+    /// Where a Typst document's project files are read from (`#import
+    /// "lib.typ"`, `image("logo.svg")`), first to last: the scene's asset
+    /// root, or without one its search folders, then the workspace's shared
+    /// asset folders.
+    fn typst_roots(&self) -> Vec<PathBuf> {
+        let own = match &self.asset_root {
+            Some(root) => vec![root.clone()],
+            None => self.asset_search.clone(),
+        };
+        own.into_iter()
+            .chain(self.shared_asset_roots.iter().cloned())
+            .filter(|folder| folder.is_dir())
+            .collect()
     }
 
     /// Read a tmTheme file for a code block, resolved like other assets.
@@ -4466,11 +4488,19 @@ impl SceneModel {
             .map_err(|message| CodeThemeError::Invalid { path, message })
     }
 
-    fn typst_inner(&mut self, source: &str, page_width: Option<&str>) -> DrawableHandle {
+    fn typst_inner(
+        &mut self,
+        source: &str,
+        page_width: Option<&str>,
+        folder: Option<PathBuf>,
+    ) -> DrawableHandle {
+        let roots: Vec<PathBuf> = folder.into_iter().chain(self.typst_roots()).collect();
+        let files = gaanim_text::prelude::read_typst_files(source, &roots);
         self.spawn(SpawnKind::Typst {
             source: source.to_string(),
             page_width: page_width.map(|w| w.to_string()),
             scene_units: false,
+            files,
         })
     }
 
@@ -4482,6 +4512,7 @@ impl SceneModel {
             source: source.to_string(),
             page_width: None,
             scene_units: true,
+            files: Default::default(),
         })
     }
 
@@ -8947,6 +8978,47 @@ mod tests {
             panic!("typst asset should create a Typst drawable");
         };
         assert_eq!(source, "= Asset-backed Typst");
+    }
+
+    #[test]
+    fn a_typst_document_carries_the_project_files_it_reads() {
+        let temp = tempfile::tempdir().unwrap();
+        let (assets, shared) = (temp.path().join("assets"), temp.path().join("brand"));
+        std::fs::create_dir_all(assets.join("slides")).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(
+            assets.join("slides/title.typ"),
+            "#import \"parts.typ\": heading\n#import \"/palette.typ\": accent\n#heading",
+        )
+        .unwrap();
+        std::fs::write(assets.join("slides/parts.typ"), "#let heading = [Hello]\n").unwrap();
+        std::fs::write(shared.join("palette.typ"), "#let accent = blue\n").unwrap();
+
+        let mut canvas = SceneModel::new(640, 360);
+        canvas.set_asset_root(&assets).unwrap();
+        canvas.shared_asset_roots = vec![shared.clone()];
+        let files = |handle: &DrawableHandle| {
+            let spec = handle.spec.lock().unwrap();
+            let SpawnKind::Typst { files, .. } = &spec.kind else {
+                panic!("a Typst drawable");
+            };
+            files.clone()
+        };
+        // The asset's own folder first, then the scene's and the workspace's.
+        let title = canvas.typst_asset("slides/title.typ").unwrap();
+        assert_eq!(
+            files(&title).paths().collect::<Vec<_>>(),
+            ["/palette.typ", "/parts.typ"]
+        );
+        let inline = canvas.typst("#import \"/palette.typ\": accent\n#text(fill: accent)[x]");
+        assert_eq!(files(&inline).paths().collect::<Vec<_>>(), ["/palette.typ"]);
+        assert!(files(&canvas.typst("= Plain")).is_empty());
+
+        // An edited import changes what the replay fingerprints.
+        let before = format!("{:?}", files(&title));
+        std::fs::write(shared.join("palette.typ"), "#let accent = red\n").unwrap();
+        let again = canvas.typst_asset("slides/title.typ").unwrap();
+        assert_ne!(format!("{:?}", files(&again)), before);
     }
 
     #[test]

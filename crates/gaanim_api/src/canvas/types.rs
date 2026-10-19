@@ -727,6 +727,8 @@ pub enum SpawnKind {
         /// Typst points are scene units instead of a document scaled so its
         /// default 11pt text matches the body role.
         scene_units: bool,
+        /// The project files it reads, read when it was created.
+        files: gaanim_text::prelude::TypstFiles,
     },
     /// Decoded RGBA texture plus its source and destination mapping.
     Image {

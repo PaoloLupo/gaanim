@@ -9826,6 +9826,15 @@ class Typography:
         ``plot(style: (labels: (fill: theme.foreground, bg: none)))``.
         Strokes that continue one another, such as a curve a plotting
         package draws one sample at a time, are one piece for ``write``.
+        A document can read project files: ``#import`` and ``#include``
+        other ``.typ`` files, and data with ``read``, ``json``, ``csv``,
+        ``yaml``, ``toml``, ``xml`` or ``cbor``. A path (``"parts.typ"``,
+        ``"/palette.typ"``) is looked up in the ``.typ`` asset's folder, then
+        the scene's asset folder (without one, ``assets/`` beside the script
+        and the script's folder), then the workspace's shared asset
+        folders, and cannot leave them. They are read when the document is
+        created, so saving one reloads the preview. Images (``image(...)``)
+        are not drawn yet.
         Empty inline source raises ``ValueError`` and an unreadable asset
         raises ``RuntimeError``.
 

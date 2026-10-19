@@ -189,7 +189,8 @@ Lo que hereda cada miembro:
   de otro miembro no recarga el abierto.
 - Una ruta relativa de un recurso que no está en las carpetas del miembro se
   busca en `shared.assets`, en su orden. También las fuentes, los fondos de
-  shader, las transiciones y los postprocesos.
+  shader, las transiciones y los postprocesos, y los archivos que importa o
+  lee un documento Typst (`#import "/paleta.typ"`).
 - El entorno de Python: el `.venv` del miembro si tiene uno; si no, el del
   workspace, que Gaanim crea en su raíz.
 

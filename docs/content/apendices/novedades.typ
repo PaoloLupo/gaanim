@@ -290,6 +290,11 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   opcional: se escribe en su `output_dir`.
 - El nombre por defecto de una exportación de un `main.py` es el de su
   carpeta, así que los episodios de un repositorio no proponen todos el mismo.
+- Un documento de `scene.text.typst` puede importar e incluir otros `.typ`
+  y leer datos (`read`, `json`, `csv`…) del proyecto: de la carpeta del
+  documento, de la de recursos de la escena y de las compartidas del
+  workspace, sin salir de ellas. Guardar uno de esos archivos recarga la
+  vista previa. Las imágenes de `image(...)` todavía no se dibujan.
 - `gaanim project <ruta> --json` describe, sin ejecutar Python, a qué
   proyecto y workspace pertenece un archivo: su `entry`, los miembros, las
   carpetas de `sys.path` y el intérprete del entorno, para que los plugins de

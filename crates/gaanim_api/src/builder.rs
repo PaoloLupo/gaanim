@@ -9630,6 +9630,32 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         math_size: Option<f64>,
         scale: f64,
     ) -> MobjectRef {
+        self.scaled_typst_with_files(
+            source,
+            is_math,
+            text_font,
+            math_font,
+            text_size,
+            math_size,
+            scale,
+            &Default::default(),
+        )
+    }
+
+    /// [`Self::scaled_typst`] for a document that reads the project
+    /// `files`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn scaled_typst_with_files(
+        &mut self,
+        source: &str,
+        is_math: bool,
+        text_font: Option<&str>,
+        math_font: Option<&str>,
+        text_size: Option<f64>,
+        math_size: Option<f64>,
+        scale: f64,
+        files: &gaanim_text::prelude::TypstFiles,
+    ) -> MobjectRef {
         let text_font = text_font.or_else(|| (!is_math).then_some("New Computer Modern"));
         let parent_id = self.next_id();
         let style_color = self
@@ -9665,6 +9691,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             next_id_fn,
             &mut child_spans,
             scale,
+            files,
         );
         self.register_textual_hierarchy(
             parent_id,
