@@ -10,8 +10,9 @@ they share; each project is a folder with its own `gaanim.toml` and
 
 - `gaanim.toml`: `members` lists where the projects are (`*` stands for any
   part of a folder name); `[workspace.shared]` names the shared folders.
-- `src/`: Python shared by every project; a member imports it as any
-  package, and Gaanim reloads it when it changes.
+- `src/`: Python shared by every project. `src/common/` is the shared
+  package (`import common`); more packages can sit beside it. A member
+  imports them as any package, and Gaanim reloads them when they change.
 - `assets/`: images, SVG, fonts and sounds every project can load by name.
 - Each member keeps its own `assets/` and writes its renders to its own
   `exports/`; its own files win over the shared ones.
