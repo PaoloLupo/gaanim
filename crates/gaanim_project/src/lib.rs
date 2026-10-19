@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
 pub mod association;
+pub mod describe;
 pub mod help;
 pub mod relay;
 pub mod settings;
@@ -1262,26 +1263,21 @@ fn find_project_venv(project_hint: Option<&Path>) -> Option<PathBuf> {
     if let Ok(cwd) = std::env::current_dir() {
         bases.push(cwd);
     }
-    for base in bases {
-        // A folder's own environment, then its workspace's however far up,
-        // then those of the three folders above.
-        let workspace = locate_folder(&base)
-            .ok()
-            .and_then(|location| location.workspace)
-            .map(|workspace| workspace.root);
-        let folders = std::iter::once(base.clone())
-            .chain(workspace)
-            .chain(base.ancestors().skip(1).take(3).map(Path::to_path_buf));
-        for folder in folders {
-            for name in VENV_NAMES {
-                let candidate = folder.join(name);
-                if venv_python(&candidate).is_some() {
-                    return Some(candidate);
-                }
-            }
-        }
-    }
-    None
+    bases.iter().find_map(|base| venv_for_folder(base))
+}
+
+/// The environment scripts in `base` run in: the folder's own, then its
+/// workspace's however far up, then those of the three folders above.
+fn venv_for_folder(base: &Path) -> Option<PathBuf> {
+    let workspace = locate_folder(base)
+        .ok()
+        .and_then(|location| location.workspace)
+        .map(|workspace| workspace.root);
+    std::iter::once(base.to_path_buf())
+        .chain(workspace)
+        .chain(base.ancestors().skip(1).take(3).map(Path::to_path_buf))
+        .flat_map(|folder| VENV_NAMES.iter().map(move |name| folder.join(name)))
+        .find(|candidate| venv_python(candidate).is_some())
 }
 
 /// Folder names a project's virtual environment goes by.

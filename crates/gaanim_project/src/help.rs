@@ -27,6 +27,7 @@ pub enum Topic {
     Export,
     Check,
     Inspect,
+    Project,
     Diff,
 }
 
@@ -68,6 +69,10 @@ const GENERAL: Page = Page {
                 (
                     "export <SCRIPT_OR_PROJECT>",
                     "Render to MP4, WebM, WebP, GIF, a PNG sequence, or a\nplayback bundle (.gaanim)",
+                ),
+                (
+                    "project [PATH] [--json]",
+                    "Describe the project and workspace a file or folder\nbelongs to: entry, members, sys.path and Python\nenvironment, for editor plugins (no Python needed)",
                 ),
                 (
                     "--diff --example <SCRIPT>",
@@ -452,6 +457,30 @@ const CHECK: Page = Page {
     footer: &[DOCS],
 };
 
+const PROJECT: Page = Page {
+    summary: "Describe the project and workspace a file or folder belongs to, without\nrunning Python: what an editor plugin needs to run, complete and check it.",
+    blocks: &[
+        Block::Lines("Usage", &["gaanim project [PATH] [--json]"]),
+        Block::Lines(
+            "Reports",
+            &[
+                "the project: name, kind, entry, assets_dir and output_dir",
+                "its workspace: shared folders and every member, with its group",
+                "the folders its scripts find on sys.path, in order",
+                "the Python environment and interpreter to complete them with",
+            ],
+        ),
+        Block::Rows(
+            "Options",
+            &[
+                ("--json", "One JSON object on stdout"),
+                ("-h, --help", "Print this help"),
+            ],
+        ),
+    ],
+    footer: &[DOCS],
+};
+
 const INSPECT: Page = Page {
     summary: "List the timeline of a scene with the script line of every part.",
     blocks: &[
@@ -562,6 +591,7 @@ fn page(topic: Topic) -> &'static Page {
         Topic::Export => &EXPORT,
         Topic::Check => &CHECK,
         Topic::Inspect => &INSPECT,
+        Topic::Project => &PROJECT,
         Topic::Diff => &DIFF,
     }
 }
@@ -659,6 +689,7 @@ pub fn title(topic: Topic) -> &'static str {
         Topic::Export => "gaanim export — render a scene to a file",
         Topic::Check => "gaanim check — validate a scene or presentation",
         Topic::Inspect => "gaanim inspect — list the timeline and its script lines",
+        Topic::Project => "gaanim project — describe a project and its workspace",
         Topic::Diff => "gaanim --diff — visual regression snapshots",
     }
 }
@@ -671,6 +702,7 @@ pub fn print(topic: Topic) {
         Topic::Export => "export · render to a file",
         Topic::Check => "check · validate a scene",
         Topic::Inspect => "inspect · list the timeline",
+        Topic::Project => "project · describe a project",
         Topic::Diff => "--diff · visual regression",
     };
     if !console::banner(subtitle) {
@@ -686,12 +718,13 @@ pub fn print(topic: Topic) {
 mod tests {
     use super::*;
 
-    const TOPICS: [Topic; 6] = [
+    const TOPICS: [Topic; 7] = [
         Topic::General,
         Topic::Init,
         Topic::Export,
         Topic::Check,
         Topic::Inspect,
+        Topic::Project,
         Topic::Diff,
     ];
 

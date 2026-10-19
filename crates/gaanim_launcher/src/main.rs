@@ -49,6 +49,8 @@ fn handle_no_python_commands(args: &[String]) -> bool {
             help::print(Topic::Check);
         } else if args.get(1).map(String::as_str) == Some("inspect") {
             help::print(Topic::Inspect);
+        } else if args.get(1).map(String::as_str) == Some("project") {
+            help::print(Topic::Project);
         } else if args.get(1).map(String::as_str) == Some("export") {
             help::print(Topic::Export);
         } else if args.iter().any(|arg| arg == "--diff") {
@@ -65,6 +67,7 @@ fn handle_no_python_commands(args: &[String]) -> bool {
         Some("unregister") => run_association(false),
         Some("relay") => run_relay(&args[2..]),
         Some("update") => run_update(&args[2..]),
+        Some("project") => run_project(&args[2..]),
         Some("init") => {}
         _ => return false,
     }
@@ -562,6 +565,85 @@ fn parse_init_args(args: &[String]) -> Result<InitTarget, String> {
         directory: directory.unwrap_or_else(|| PathBuf::from(kind.default_directory())),
         force,
     }))
+}
+
+/// `gaanim project [PATH] [--json]`: the project and workspace `PATH`
+/// belongs to, its `sys.path` and its Python environment, for editors and
+/// their plugins. Runs no Python.
+fn run_project(args: &[String]) -> ! {
+    let mut path = None;
+    let mut json = false;
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            value if value.starts_with('-') => {
+                console::error("project", format!("unknown option `{value}`"));
+                std::process::exit(2);
+            }
+            value if path.is_none() => path = Some(PathBuf::from(value)),
+            value => {
+                console::error("project", format!("unexpected argument `{value}`"));
+                std::process::exit(2);
+            }
+        }
+    }
+    let path = path.unwrap_or_else(|| PathBuf::from("."));
+    let described = gaanim_project::describe::describe(&path).unwrap_or_else(|error| {
+        console::error("project", error);
+        std::process::exit(2);
+    });
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&described).unwrap_or_default()
+        );
+        std::process::exit(0);
+    }
+    let field = |value: &serde_json::Value| value.as_str().unwrap_or_default().to_owned();
+    let project = &described["project"];
+    let workspace = &described["workspace"];
+    if project.is_null() {
+        console::info(
+            "project",
+            format!("{} · no project", field(&described["path"])),
+        );
+    } else {
+        console::info(
+            "project",
+            format!(
+                "{} · {}",
+                field(&project["display_name"]),
+                field(&project["kind"])
+            ),
+        );
+        console::detail("Root", field(&project["root"]));
+        console::detail("Entry", field(&project["entry"]));
+    }
+    if !workspace.is_null() {
+        let members = workspace["members"].as_array().map_or(0, Vec::len);
+        console::detail(
+            "Workspace",
+            format!(
+                "{} · {members} member{} · {}",
+                field(&workspace["name"]),
+                if members == 1 { "" } else { "s" },
+                field(&workspace["root"])
+            ),
+        );
+    }
+    let python = &described["python"];
+    console::detail(
+        "Python",
+        python["interpreter"]
+            .as_str()
+            .unwrap_or("no environment yet; opening the project prepares it"),
+    );
+    if let Some(paths) = python["paths"].as_array() {
+        for (index, path) in paths.iter().enumerate() {
+            console::detail(if index == 0 { "sys.path" } else { "" }, field(path));
+        }
+    }
+    std::process::exit(0);
 }
 
 /// `gaanim init workspace`: the workspace, its Git repository and its

@@ -371,6 +371,52 @@ cada clave una vez, del inicio de su primer segmento al final del último.
 de una línea al instante que muestra. Un paquete `.gaanim` no guarda líneas,
 así que `inspect` solo acepta scripts y proyectos.
 
+= `gaanim project` <gaanim-project>
+
+```bash
+gaanim project [RUTA] [--json]
+```
+
+Describe a qué proyecto y a qué
+#link("/guias/proyectos/#workspaces")[workspace] pertenece un archivo o una
+carpeta (sin `RUTA`, la carpeta actual), sin ejecutar Python: es lo que
+necesita un plugin de editor para abrir la vista previa del proyecto
+correcto, completar el código con el entorno correcto y listar los miembros.
+Con `--json`, escribe un objeto JSON:
+
+```json
+{
+  "path": "C:/channel/videos/intro/scenes/title.py",
+  "project": {"name": "intro", "display_name": "channel › intro", "kind": "video",
+              "root": "C:/channel/videos/intro", "manifest": "C:/channel/videos/intro/gaanim.toml",
+              "entry": "C:/channel/videos/intro/main.py", "assets_dir": "C:/channel/videos/intro/assets",
+              "output_dir": "C:/channel/videos/intro/exports", "language": null},
+  "workspace": {"name": "channel", "root": "C:/channel", "manifest": "C:/channel/gaanim.toml",
+                "cover": null, "python": ["C:/channel/src"], "assets": ["C:/channel/assets"],
+                "members": [{"path": "videos/intro", "name": "intro", "group": "videos",
+                             "root": "C:/channel/videos/intro", "kind": "video",
+                             "entry": "C:/channel/videos/intro/main.py", "error": null}]},
+  "python": {"paths": ["C:/channel/videos/intro/scenes", "C:/channel/videos/intro",
+                       "C:/channel/src", "C:/channel"],
+             "venv": "C:/channel/.venv", "interpreter": "C:/channel/.venv/Scripts/python.exe"}
+}
+```
+
+- `project` es `null` fuera de un proyecto (en la raíz de un workspace, en una
+  carpeta compartida) y `workspace`, fuera de un workspace.
+- `python.paths` son las carpetas que el script encuentra en `sys.path`, en
+  orden: las mismas que usa Gaanim al ejecutarlo. Un editor las añade a las
+  rutas de búsqueda de su analizador, como `python.analysis.extraPaths` de
+  Pyright.
+- `python.interpreter` es el Python del entorno que usa el proyecto: el suyo,
+  o el `.venv` del workspace, que comparten todos sus miembros. Es `null`
+  mientras no hay entorno; abrir el proyecto lo prepara.
+- Un miembro con un manifiesto inválido trae su `error` y `kind` y `entry`
+  nulos. Un manifiesto inválido en la ruta pedida devuelve el código `2`.
+
+Las rutas no llevan el prefijo `\\?\` de Windows. Sin `--json`, `project`
+escribe un resumen para personas.
+
 = `gaanim export`
 
 ```bash
@@ -745,7 +791,10 @@ Cada objeto tiene un `type`:
   `warnings`, `segments`, `stops`, `duration`, `width` y `height`. El código de
   salida es el de siempre.
 - `workspace`: tras los `check` de los miembros de un workspace, su resumen,
-  con `name`, `members`, `passed` y `failed`.
+  con `name`, `members`, `passed` y `failed`. En un workspace, cada `check`
+  lleva también el `member` al que se refiere, y un miembro que no se pudo
+  cargar da un `check` con `member` y `result` `error`. `export` de un
+  workspace termina con el mismo resumen.
 - `progress`: el avance de una exportación, con `current`, `total` y `percent`,
   una vez por cada punto porcentual. La barra de progreso no se dibuja.
 - `reload`: en la vista previa, `phase` `start` cuando un cambio vuelve a

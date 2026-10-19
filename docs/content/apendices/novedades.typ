@@ -290,6 +290,10 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   opcional: se escribe en su `output_dir`.
 - El nombre por defecto de una exportación de un `main.py` es el de su
   carpeta, así que los episodios de un repositorio no proponen todos el mismo.
+- `gaanim project <ruta> --json` describe, sin ejecutar Python, a qué
+  proyecto y workspace pertenece un archivo: su `entry`, los miembros, las
+  carpetas de `sys.path` y el intérprete del entorno, para que los plugins de
+  editores configuren la vista previa y el autocompletado.
 - `gaanim check <workspace>` comprueba todos los miembros y resume, y
   `--members` elige algunos por ruta o patrón. `gaanim init` dentro de un
   workspace crea solo los archivos del miembro.

@@ -1011,7 +1011,7 @@ fn dispatch_check_mode() -> bool {
     let json = console::message_format_json();
     // A diagnostic about a segment points at the line that made it.
     gaanim_api::canvas::track_script_lines(json);
-    match check_script(python, &script, parsed.strict, json) {
+    match check_script(python, &script, None, parsed.strict, json) {
         Err(error) => exit_could_not_load("check", &error),
         Ok(true) => std::process::exit(1),
         Ok(false) => true,
@@ -1066,7 +1066,13 @@ fn check_workspace(workspace: &gaanim_project::Workspace, parsed: &CheckArgs) ->
     let mut failed = Vec::new();
     for member in &members {
         let outcome = match &member.project {
-            Ok(project) => check_script(python, &project.entry, parsed.strict, json),
+            Ok(project) => check_script(
+                python,
+                &project.entry,
+                Some(&member.path),
+                parsed.strict,
+                json,
+            ),
             Err(error) => Err(error.clone()),
         };
         match outcome {
@@ -1074,6 +1080,14 @@ fn check_workspace(workspace: &gaanim_project::Workspace, parsed: &CheckArgs) ->
             Ok(true) => failed.push(member.path.as_str()),
             Err(error) => {
                 report_could_not_load("check", &error);
+                // Editors match each verdict to its member.
+                if json {
+                    console::emit_json(&[
+                        ("type", "check".into()),
+                        ("member", member.path.as_str().into()),
+                        ("result", "error".into()),
+                    ]);
+                }
                 failed.push(member.path.as_str());
             }
         }
@@ -1113,6 +1127,7 @@ fn check_workspace(workspace: &gaanim_project::Workspace, parsed: &CheckArgs) ->
 fn check_script(
     python: &gaanim_editor::python_plugin::PythonPlugin,
     script: &Path,
+    member: Option<&str>,
     strict: bool,
     json: bool,
 ) -> Result<bool, String> {
@@ -1138,7 +1153,7 @@ fn check_script(
 
     let failed = !report.errors.is_empty() || (strict && !report.warnings.is_empty());
     if json {
-        print_check_json(script, &canvas, &report, is_presentation);
+        print_check_json(script, member, &canvas, &report, is_presentation);
         return Ok(failed);
     }
     // The report goes to stdout so it can be captured. Its first line, the
@@ -1209,9 +1224,10 @@ fn check_script(
 
 /// The `check` report as JSON lines: a `diagnostic` per error and warning,
 /// with the line of the segment it names when there is one, then the
-/// `check` verdict.
+/// `check` verdict, which names the workspace `member` it is about.
 fn print_check_json(
     script: &Path,
+    member: Option<&str>,
     canvas: &gaanim_api::canvas::SceneModel,
     report: &PreflightReport,
     is_presentation: bool,
@@ -1250,8 +1266,8 @@ fn print_check_json(
     } else {
         "fail"
     };
-    console::emit_json(&[
-        ("type", "check".into()),
+    let mut verdict = vec![
+        ("type", console::Json::from("check")),
         (
             "script",
             console::plain_path(script)
@@ -1259,6 +1275,11 @@ fn print_check_json(
                 .into_owned()
                 .into(),
         ),
+    ];
+    if let Some(member) = member {
+        verdict.push(("member", member.into()));
+    }
+    verdict.extend([
         ("kind", kind.into()),
         ("result", result.into()),
         ("errors", report.errors.len().into()),
@@ -1269,6 +1290,7 @@ fn print_check_json(
         ("width", canvas.frame.width.into()),
         ("height", canvas.frame.height.into()),
     ]);
+    console::emit_json(&verdict);
 }
 
 /// The segment a diagnostic is about, written as segment `name`.

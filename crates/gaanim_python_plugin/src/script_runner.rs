@@ -517,23 +517,12 @@ fn prepare_script_execution(py: Python<'_>, path: &Path) -> PyResult<()> {
     let workspace = location.workspace.as_ref();
     evict_project_modules(py, workspace.map_or(&root, |workspace| &workspace.root))?;
 
-    // The project's own folders come first, so its names win.
-    let mut import_paths = Vec::new();
-    let source_root = root.join("src");
-    if source_root.is_dir() {
-        import_paths.push(source_root);
-    }
-    import_paths.push(script_folder);
-    import_paths.push(root);
-    if let Some(workspace) = workspace {
-        import_paths.extend(workspace.python_roots.iter().cloned());
-        import_paths.push(workspace.root.clone());
-    }
-    let mut seen = std::collections::HashSet::new();
-    let import_paths: Vec<PathBuf> = import_paths
+    // The project's own folders come first, so its names win; editors read
+    // the same list from `gaanim project --json`.
+    let import_paths: Vec<PathBuf> = location
+        .python_paths(&script_folder)
         .iter()
         .map(|import_path| python_path(import_path))
-        .filter(|import_path| seen.insert(import_path.clone()))
         .collect();
 
     let sys_path = py.import("sys")?.getattr("path")?;
