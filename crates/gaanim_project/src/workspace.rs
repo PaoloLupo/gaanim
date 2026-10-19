@@ -18,7 +18,11 @@ pub(crate) struct RawWorkspace {
     #[serde(default)]
     exclude: Vec<String>,
     shared: Option<RawShared>,
+    cover: Option<PathBuf>,
 }
+
+/// Images at a workspace's root Home takes as its cover without `cover`.
+const COVER_FILES: [&str; 4] = ["cover.png", "cover.jpg", "cover.jpeg", "cover.webp"];
 
 /// An entry of `members`: a path, or a table that also names its group.
 #[derive(Debug, Deserialize)]
@@ -57,6 +61,10 @@ pub struct Workspace {
     /// Folders a member's relative asset paths are looked up in when the
     /// member's own folders lack them.
     pub asset_roots: Vec<PathBuf>,
+    /// The image Home shows for the workspace: `cover`, else a `cover.png`
+    /// (or `.jpg`, `.webp`) at its root. Without one, Home composes its
+    /// members' covers.
+    pub cover: Option<PathBuf>,
 }
 
 /// A project of a workspace, as [`Workspace::members`] finds it.
@@ -124,6 +132,13 @@ impl Workspace {
             shared_folders(root, shared.python, "src", "shared.python").map_err(invalid)?;
         let asset_roots =
             shared_folders(root, shared.assets, "assets", "shared.assets").map_err(invalid)?;
+        let cover = match raw.cover {
+            Some(cover) => Some(cover_file(root, &cover).map_err(invalid)?),
+            None => COVER_FILES
+                .iter()
+                .map(|name| root.join(name))
+                .find(|path| path.is_file()),
+        };
         let name = name
             .map(str::trim)
             .filter(|name| !name.is_empty())
@@ -142,6 +157,7 @@ impl Workspace {
             exclude,
             python_roots,
             asset_roots,
+            cover,
         })
     }
 
@@ -308,6 +324,28 @@ fn shared_folders(
             Ok(path)
         })
         .collect()
+}
+
+/// The image `cover` names, which must be a file inside the workspace.
+fn cover_file(root: &Path, cover: &Path) -> Result<PathBuf, String> {
+    let inside = !cover.as_os_str().is_empty()
+        && cover
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
+    if !inside {
+        return Err(format!(
+            "cover: {:?} must be an image inside the workspace",
+            cover.to_string_lossy()
+        ));
+    }
+    let path = root.join(cover);
+    if !path.is_file() {
+        return Err(format!(
+            "cover: file {:?} does not exist",
+            cover.to_string_lossy()
+        ));
+    }
+    Ok(path)
 }
 
 /// `pattern` in `/` form without a leading `./` or trailing `/`, or why it
@@ -768,6 +806,36 @@ assets = ["media", "brand/logos"]
             assert!(error.contains(message), "{error}");
             assert!(error.contains("gaanim.toml"), "{error}");
         }
+    }
+
+    #[test]
+    fn the_cover_is_the_chosen_image_or_one_at_the_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        write(
+            &root.join("gaanim.toml"),
+            "[workspace]\nmembers = [\"*\"]\n",
+        );
+        assert_eq!(resolve_workspace(root).unwrap().cover, None);
+        write(&root.join("cover.jpg"), "");
+        let workspace = resolve_workspace(root).unwrap();
+        assert_eq!(workspace.cover, Some(workspace.root.join("cover.jpg")));
+        write(&root.join("brand/channel.png"), "");
+        write(
+            &root.join("gaanim.toml"),
+            "[workspace]\nmembers = [\"*\"]\ncover = \"brand/channel.png\"\n",
+        );
+        let workspace = resolve_workspace(root).unwrap();
+        assert_eq!(
+            workspace.cover,
+            Some(workspace.root.join("brand/channel.png"))
+        );
+        write(
+            &root.join("gaanim.toml"),
+            "[workspace]\nmembers = [\"*\"]\ncover = \"missing.png\"\n",
+        );
+        let error = resolve_workspace(root).unwrap_err();
+        assert!(error.contains("cover"), "{error}");
     }
 
     #[test]

@@ -47,6 +47,8 @@ chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
 rfd = "0.17"
 serde = { workspace = true }
 serde_json = { workspace = true }
+# A workspace's cover image; the same build gaanim_api uses.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 # The web player hands a game's spreadsheets over in one archive; the same
 # build gaanim_bundle uses.
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }

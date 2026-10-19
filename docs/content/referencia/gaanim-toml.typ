@@ -155,6 +155,7 @@ assets = ["recursos", "marca"]
   [`exclude`], [lista], [ninguna], [Rutas o patrones que `members` no debe incluir.],
   [`shared.python`], [lista], [`["src"]` si existe], [Carpetas que entran en `sys.path` de cada miembro, después de las suyas.],
   [`shared.assets`], [lista], [`["assets"]` si existe], [Carpetas donde cada miembro busca una ruta relativa que no está en las suyas.],
+  [`cover`], [ruta], [`cover.png` (o `.jpg`, `.webp`) si existe], [Imagen PNG, JPEG o WebP con la que el Inicio muestra el workspace. Sin ella, el Inicio compone las portadas de hasta cuatro miembros.],
 )
 
 - *Miembros:* una carpeta que encaja en `members` es miembro si tiene su

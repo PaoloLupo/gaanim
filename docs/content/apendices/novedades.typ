@@ -288,6 +288,8 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   cada miembro y anota el resultado en su tarjeta.
 - Los recientes muestran el workspace como una entrada propia y cada miembro
   con su workspace delante (`canal › ep1`), como el título de la ventana. La
+  portada del workspace es la imagen de `cover` o un `cover.png` en su raíz,
+  y sin ellas, un mosaico con las de sus miembros. La
   paleta de comandos lista los demás miembros del abierto y *Back to canal*
   vuelve a la página del workspace.
 - En Windows, la raíz del proyecto y su `src/` entran en `sys.path` sin el

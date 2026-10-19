@@ -328,7 +328,9 @@ mismas tarjetas y la misma búsqueda que los recientes.
 
 Los recientes muestran cada miembro con su workspace delante
 (`canal › ep1`), y el workspace también, como una entrada propia que abre su
-página. Con un miembro abierto, la paleta de comandos (`Ctrl+Shift+P`) lista
+página. Su portada es la imagen que nombra `cover` en `[workspace]`, o un
+`cover.png` (o `.jpg`, `.webp`) en su raíz; sin ninguna, un mosaico con las
+portadas de los cuatro miembros editados más recientemente. Con un miembro abierto, la paleta de comandos (`Ctrl+Shift+P`) lista
 los demás miembros para cambiar de uno a otro sin volver al Inicio, y *Back to
 canal* vuelve a la página del workspace. El título de la ventana también lleva
 el workspace delante.

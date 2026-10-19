@@ -645,7 +645,7 @@ impl Thumbnails {
                 group.bundle.as_ref().map(|bundle| bundle.path.clone()),
             )),
             RecentEntry::Bundle(bundle) => Some(Cover::Bundle(bundle.path.clone())),
-            RecentEntry::Workspace(_) => None,
+            RecentEntry::Workspace(workspace) => Some(Cover::Workspace(workspace.clone())),
         };
         let (sender, receiver) = crossbeam_channel::bounded(1);
         let spawned = std::thread::Builder::new()
@@ -671,6 +671,8 @@ enum Cover {
     /// A project's: the editor's cache, else its newest bundle's cover.
     Project(Option<PathBuf>, Option<PathBuf>),
     Bundle(PathBuf),
+    /// A workspace's: its image, else its members' covers in a mosaic.
+    Workspace(Workspace),
 }
 
 impl Cover {
@@ -681,14 +683,94 @@ impl Cover {
                 .and_then(|file| std::fs::read(file).ok())
                 .or_else(|| bundle.as_deref().and_then(bundle_cover))?,
             Self::Bundle(path) => bundle_cover(&path)?,
+            Self::Workspace(workspace) => return workspace_cover(&workspace).map(color_image),
         };
-        let image = gaanim_thumbnail::scaled(&png, COVER_EDGE).ok()?;
-        let (width, height) = image.dimensions();
-        Some(egui::ColorImage::from_rgba_unmultiplied(
-            [width as usize, height as usize],
-            image.as_raw(),
-        ))
+        gaanim_thumbnail::scaled(&png, COVER_EDGE)
+            .ok()
+            .map(color_image)
     }
+}
+
+fn color_image(image: image::RgbaImage) -> egui::ColorImage {
+    let (width, height) = image.dimensions();
+    egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], image.as_raw())
+}
+
+/// A workspace's cover: its image (`cover`, or a `cover.png` at its root),
+/// else the covers of up to four members, the most recently edited first,
+/// in a mosaic.
+fn workspace_cover(workspace: &Workspace) -> Option<image::RgbaImage> {
+    if let Some(file) = &workspace.cover {
+        let image = image::load_from_memory(&std::fs::read(file).ok()?)
+            .ok()?
+            .into_rgba8();
+        let (width, height) = image.dimensions();
+        if width.max(height) <= COVER_EDGE {
+            return Some(image);
+        }
+        let (width, height) = gaanim_thumbnail::fit(width, height, COVER_EDGE);
+        return Some(image::imageops::resize(
+            &image,
+            width,
+            height,
+            image::imageops::FilterType::Triangle,
+        ));
+    }
+    let mut members: Vec<(SystemTime, PathBuf)> = workspace
+        .members()
+        .into_iter()
+        .filter_map(|member| {
+            let project = member.project.ok()?;
+            let edited = std::fs::metadata(&project.entry).ok()?.modified().ok()?;
+            Some((edited, project.root))
+        })
+        .collect();
+    members.sort_by(|a, b| b.0.cmp(&a.0));
+    let tiles: Vec<image::RgbaImage> = members
+        .iter()
+        .filter_map(|(_, root)| {
+            let png = std::fs::read(gaanim_project::project_thumbnail_path(root)?).ok()?;
+            gaanim_thumbnail::scaled(&png, COVER_EDGE).ok()
+        })
+        .take(4)
+        .collect();
+    mosaic(&tiles)
+}
+
+/// `tiles` in a 16:9 image [`COVER_EDGE`] wide: one fills it, more share a
+/// two-by-two grid in reading order, each contained in its cell.
+fn mosaic(tiles: &[image::RgbaImage]) -> Option<image::RgbaImage> {
+    const GAP: u32 = 4;
+    let (width, height) = (COVER_EDGE, COVER_EDGE * 9 / 16);
+    let columns = match tiles.len() {
+        0 => return None,
+        1 => 1,
+        _ => 2,
+    };
+    let cell = (
+        (width - GAP * (columns - 1)) / columns,
+        (height - GAP * (columns - 1)) / columns,
+    );
+    let mut canvas = image::RgbaImage::new(width, height);
+    for (index, tile) in tiles.iter().enumerate() {
+        let (column, row) = (index as u32 % columns, index as u32 / columns);
+        let (tile_width, tile_height) = tile.dimensions();
+        let scale = (f64::from(cell.0) / f64::from(tile_width.max(1)))
+            .min(f64::from(cell.1) / f64::from(tile_height.max(1)));
+        let size = |edge: u32| ((f64::from(edge) * scale).round() as u32).max(1);
+        let (fitted_width, fitted_height) =
+            (size(tile_width).min(cell.0), size(tile_height).min(cell.1));
+        let fitted = image::imageops::resize(
+            tile,
+            fitted_width,
+            fitted_height,
+            image::imageops::FilterType::Triangle,
+        );
+        let x = column * (cell.0 + GAP) + (cell.0 - fitted_width) / 2;
+        let y = row * (cell.1 + GAP) + (cell.1 - fitted_height) / 2;
+        image::imageops::overlay(&mut canvas, &fitted, i64::from(x), i64::from(y));
+    }
+    Some(canvas)
 }
 
 impl Default for ProjectHubState {
@@ -4159,5 +4241,38 @@ mod tests {
             .0,
             "Failed · 1 error"
         );
+    }
+
+    #[test]
+    fn a_workspace_cover_is_its_image_or_a_mosaic_of_its_members() {
+        let tile = |shade: u8| {
+            image::RgbaImage::from_pixel(160, 90, image::Rgba([shade, shade, shade, 255]))
+        };
+        assert!(mosaic(&[]).is_none());
+        let one = mosaic(&[tile(200)]).unwrap();
+        assert_eq!(one.dimensions(), (COVER_EDGE, COVER_EDGE * 9 / 16));
+        assert_eq!(one.get_pixel(COVER_EDGE / 2, 100)[0], 200);
+        let three = mosaic(&[tile(10), tile(20), tile(30)]).unwrap();
+        let (width, height) = three.dimensions();
+        assert_eq!(three.get_pixel(width / 4, height / 4)[0], 10);
+        assert_eq!(three.get_pixel(3 * width / 4, height / 4)[0], 20);
+        assert_eq!(three.get_pixel(width / 4, 3 * height / 4)[0], 30);
+        // The fourth cell stays empty, as does the gap between cells.
+        assert_eq!(three.get_pixel(3 * width / 4, 3 * height / 4)[3], 0);
+        assert_eq!(three.get_pixel(width / 2, height / 4)[3], 0);
+
+        // An image at the workspace's root wins, scaled down to a cover.
+        let (temp, _) = workspace();
+        let png = gaanim_thumbnail::encode_png(&image::RgbaImage::from_pixel(
+            1920,
+            1080,
+            image::Rgba([1, 2, 3, 255]),
+        ))
+        .unwrap();
+        std::fs::write(temp.path().join("cover.png"), png).unwrap();
+        let workspace = gaanim_project::resolve_workspace(temp.path()).unwrap();
+        let cover = workspace_cover(&workspace).unwrap();
+        assert_eq!(cover.dimensions(), (COVER_EDGE, COVER_EDGE * 9 / 16));
+        assert_eq!(cover.get_pixel(0, 0).0, [1, 2, 3, 255]);
     }
 }
