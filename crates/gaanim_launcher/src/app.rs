@@ -133,9 +133,13 @@ pub fn run() {
             std::process::exit(2);
         }
     } else {
-        app.world_mut()
-            .resource_mut::<gaanim_editor::project_hub::ProjectHubState>()
-            .show();
+        let mut hub = app
+            .world_mut()
+            .resource_mut::<gaanim_editor::project_hub::ProjectHubState>();
+        match launch.workspace {
+            Some(workspace) => hub.show_workspace(workspace),
+            None => hub.show(),
+        }
     }
 
     app.run();
@@ -1351,6 +1355,8 @@ fn capture_stop_snapshots(
 struct LaunchArgs {
     script_path: Option<PathBuf>,
     project: Option<gaanim_project::ResolvedProject>,
+    /// A workspace folder without a script of its own: Home shows its page.
+    workspace: Option<gaanim_project::Workspace>,
     present: bool,
     /// Zero-based monitor index used only with `--present`.
     monitor: Option<usize>,
@@ -1401,6 +1407,7 @@ fn parse_args() -> LaunchArgs {
         return LaunchArgs {
             script_path: None,
             project: None,
+            workspace: None,
             present: false,
             monitor: None,
             selection: Default::default(),
@@ -1426,8 +1433,24 @@ fn parse_args() -> LaunchArgs {
     let (path, project) = if raw_path.is_dir() {
         let project = match gaanim_project::resolve_folder(raw_path) {
             Ok(gaanim_project::ProjectFolder::Project(project)) => project,
+            // A workspace without a script of its own opens in Home.
             Ok(gaanim_project::ProjectFolder::Workspace(workspace)) => {
-                exit_with_workspace_members(&workspace)
+                if parsed.present || parsed.listen.is_some() || !parsed.selection.is_empty() {
+                    console::error(
+                        "usage",
+                        format!(
+                            "{} is the workspace {}; open one of its members",
+                            console::display_path(&workspace.root),
+                            workspace.name
+                        ),
+                    );
+                    std::process::exit(2);
+                }
+                return LaunchArgs {
+                    script_path: None,
+                    workspace: Some(workspace),
+                    ..parsed
+                };
             }
             Err(error) => {
                 console::error("project", error);
@@ -1454,23 +1477,6 @@ fn parse_args() -> LaunchArgs {
         project,
         ..parsed
     }
-}
-
-/// A workspace without a script of its own was opened: say which members
-/// open, and exit.
-fn exit_with_workspace_members(workspace: &gaanim_project::Workspace) -> ! {
-    console::error(
-        "project",
-        format!(
-            "{} is the workspace {}; open one of its members",
-            console::display_path(&workspace.root),
-            workspace.name
-        ),
-    );
-    for member in workspace.members() {
-        console::hint(format!("gaanim {}", console::display_path(&member.root)));
-    }
-    std::process::exit(2);
 }
 
 fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
@@ -1548,6 +1554,7 @@ fn parse_launch_args(args: &[String]) -> Result<LaunchArgs, String> {
     Ok(LaunchArgs {
         script_path,
         project: None,
+        workspace: None,
         present,
         monitor,
         selection,
@@ -1684,6 +1691,7 @@ mod tests {
             LaunchArgs {
                 script_path: Some(PathBuf::from("demo.py")),
                 project: None,
+                workspace: None,
                 present: true,
                 monitor: Some(1),
                 selection: Default::default(),
@@ -1777,6 +1785,7 @@ mod tests {
             LaunchArgs {
                 script_path: None,
                 project: None,
+                workspace: None,
                 present: false,
                 monitor: None,
                 selection: Default::default(),

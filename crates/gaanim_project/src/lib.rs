@@ -591,14 +591,19 @@ pub struct RecentBundle {
 pub enum RecentEntry {
     Project(ResolvedProject),
     Bundle(RecentBundle),
+    /// A workspace opened in Home. Versions without workspaces cannot
+    /// resolve it as a project and skip it.
+    Workspace(Workspace),
 }
 
 impl RecentEntry {
-    /// The path that identifies the entry: a project root or a bundle file.
+    /// The path that identifies the entry: a project or workspace root, or
+    /// a bundle file.
     pub fn path(&self) -> &Path {
         match self {
             Self::Project(project) => &project.root,
             Self::Bundle(bundle) => &bundle.path,
+            Self::Workspace(workspace) => &workspace.root,
         }
     }
 }
@@ -626,9 +631,11 @@ fn resolve_bundle(path: &Path) -> Option<RecentBundle> {
 
 fn resolve_entry_path(path: &Path) -> Option<RecentEntry> {
     if is_bundle_path(path) {
-        resolve_bundle(path).map(RecentEntry::Bundle)
-    } else {
-        resolve_project(path).ok().map(RecentEntry::Project)
+        return resolve_bundle(path).map(RecentEntry::Bundle);
+    }
+    match resolve_folder(path).ok()? {
+        ProjectFolder::Project(project) => Some(RecentEntry::Project(project)),
+        ProjectFolder::Workspace(workspace) => Some(RecentEntry::Workspace(workspace)),
     }
 }
 
@@ -706,13 +713,18 @@ impl RecentProjects {
             .into_iter()
             .filter_map(|entry| match entry {
                 RecentEntry::Project(project) => Some(project),
-                RecentEntry::Bundle(_) => None,
+                RecentEntry::Bundle(_) | RecentEntry::Workspace(_) => None,
             })
             .collect()
     }
 
     pub fn record(&mut self, project: &ResolvedProject) {
         self.record_path(project.root.clone());
+    }
+
+    /// Record the workspace opened in Home as the newest entry.
+    pub fn record_workspace(&mut self, workspace: &Workspace) {
+        self.record_path(workspace.root.clone());
     }
 
     /// Record the playback bundle at `path` as the newest entry.
@@ -766,7 +778,7 @@ fn group_entries(entries: Vec<RecentEntry>, pinned: &[PathBuf]) -> Vec<RecentGro
         .iter()
         .filter_map(|entry| match entry {
             RecentEntry::Project(project) => Some(project.root.clone()),
-            RecentEntry::Bundle(_) => None,
+            RecentEntry::Bundle(_) | RecentEntry::Workspace(_) => None,
         })
         .collect();
     let mut newest: HashMap<PathBuf, RecentBundle> = HashMap::new();
@@ -785,7 +797,7 @@ fn group_entries(entries: Vec<RecentEntry>, pinned: &[PathBuf]) -> Vec<RecentGro
         .map(|entry| {
             let bundle = match &entry {
                 RecentEntry::Project(project) => newest.remove(&project.root),
-                RecentEntry::Bundle(_) => None,
+                RecentEntry::Bundle(_) | RecentEntry::Workspace(_) => None,
             };
             let pinned = pinned.iter().any(|path| path == entry.path());
             RecentGroup {
@@ -1892,6 +1904,36 @@ language = \"es\"
         assert_eq!(loaded.entries().len(), 1);
         loaded.set_pinned(&pinned, false);
         assert!(loaded.entries().is_empty());
+    }
+
+    #[test]
+    fn recents_keep_workspaces_and_name_members_after_them() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("canal");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("gaanim.toml"),
+            "name = \"canal\"\n[workspace]\nmembers = [\"shows/*\"]\n",
+        )
+        .unwrap();
+        let member = create_project(&CreateProjectOptions {
+            kind: ProjectKind::Video,
+            directory: root.join("shows/pilot"),
+            force: false,
+        })
+        .unwrap();
+        assert_eq!(member.display_name(), "canal › pilot");
+        let workspace = resolve_workspace(&root).unwrap();
+
+        let mut recents = RecentProjects::default();
+        recents.record(&member);
+        recents.record_workspace(&workspace);
+        let storage = temp.path().join("recent.json");
+        recents.save_to(&storage).unwrap();
+        let entries = RecentProjects::load_from(&storage).unwrap().entries();
+        assert!(matches!(&entries[0], RecentEntry::Workspace(found) if found.name == "canal"));
+        assert!(matches!(&entries[1], RecentEntry::Project(found) if found.root == member.root));
+        assert_eq!(recents.projects().len(), 1);
     }
 
     #[test]

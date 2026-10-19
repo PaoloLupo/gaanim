@@ -190,7 +190,8 @@ Lo que hereda cada miembro:
 == Cómo se encuentra el proyecto
 
 - `gaanim <carpeta>` exige un `gaanim.toml` en esa carpeta. Si es un
-  workspace sin `entry`, `gaanim` lista sus miembros.
+  workspace sin `entry`, abre el Inicio en la página del workspace, con sus
+  miembros.
 - `gaanim <script.py>` ejecuta ese script y busca un `gaanim.toml` en su
   carpeta y en hasta cinco carpetas superiores para mostrar el nombre del
   proyecto y proponer la carpeta de exportación. Un manifiesto que solo fija

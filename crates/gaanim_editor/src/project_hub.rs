@@ -18,9 +18,10 @@ use bevy_egui::{EguiPrimaryContextPass, egui};
 use crossbeam_channel::{Receiver, TryRecvError};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use gaanim_project::{
-    CreateProjectOptions, EnvironmentProbe, ProjectKind, PythonSource, RecentBundle, RecentEntry,
-    RecentGroup, RecentProjects, ResolvedProject, create_project, default_project_parent,
-    find_project_for_script, is_bundle_path, resolve_project,
+    CreateProjectOptions, EnvironmentProbe, ProjectFolder, ProjectKind, PythonSource, RecentBundle,
+    RecentEntry, RecentGroup, RecentProjects, ResolvedProject, Workspace, WorkspaceMember,
+    create_project, default_project_parent, is_bundle_path, locate_script, resolve_folder,
+    resolve_project,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -403,6 +404,169 @@ pub struct ProjectHubState {
     covered: bool,
     /// What the recent list is filtered by: part of a name or a path.
     recent_query: String,
+    /// The workspace whose members the Projects page shows instead.
+    workspace_page: Option<WorkspacePage>,
+}
+
+/// A workspace opened in Home: its members, grouped as its manifest says.
+struct WorkspacePage {
+    workspace: Workspace,
+    members: Vec<WorkspaceMember>,
+    /// What the member list is filtered by: part of a name, path or group.
+    query: String,
+    /// The last *Check all*, while it runs and after.
+    #[cfg(not(target_arch = "wasm32"))]
+    check: Option<WorkspaceCheck>,
+}
+
+impl WorkspacePage {
+    fn new(workspace: Workspace) -> Self {
+        Self {
+            members: workspace.members(),
+            workspace,
+            query: String::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            check: None,
+        }
+    }
+
+    /// List the members again: one may have been added or removed.
+    fn refresh(&mut self) {
+        self.members = self.workspace.members();
+    }
+}
+
+/// *Check all*: `gaanim check` run on each member in turn, in its own
+/// process, so Home loads no Python.
+#[cfg(not(target_arch = "wasm32"))]
+struct WorkspaceCheck {
+    results: HashMap<PathBuf, CheckOutcome>,
+    receiver: Receiver<(PathBuf, CheckOutcome)>,
+    running: bool,
+}
+
+/// How a member's `gaanim check` ended.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CheckOutcome {
+    Passed { warnings: usize },
+    Failed { errors: usize, warnings: usize },
+    NotLoaded(String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl CheckOutcome {
+    /// What a member's card says about it, in what color.
+    fn label(&self) -> (String, Color32) {
+        let plural = |count: usize, word: &str| {
+            format!("{count} {word}{}", if count == 1 { "" } else { "s" })
+        };
+        match self {
+            Self::Passed { warnings: 0 } => ("Passed".into(), palette::LOOP),
+            Self::Passed { warnings } => (
+                format!("Passed · {}", plural(*warnings, "warning")),
+                palette::STOP,
+            ),
+            Self::Failed { errors, .. } => (
+                format!("Failed · {}", plural(*errors, "error")),
+                palette::DANGER,
+            ),
+            Self::NotLoaded(_) => ("Could not load".into(), palette::DANGER),
+        }
+    }
+
+    /// The outcome of a `gaanim check --message-format json` run that
+    /// exited with `code` and wrote `stdout`.
+    fn read(code: Option<i32>, stdout: &str) -> Self {
+        let lines: Vec<serde_json::Value> = stdout
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        let count = |line: &serde_json::Value, key: &str| {
+            line.get(key)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize
+        };
+        let verdict = lines
+            .iter()
+            .find(|line| line.get("type").and_then(|kind| kind.as_str()) == Some("check"));
+        match (code, verdict) {
+            (Some(0), Some(line)) => Self::Passed {
+                warnings: count(line, "warnings"),
+            },
+            (Some(1), Some(line)) => Self::Failed {
+                errors: count(line, "errors"),
+                warnings: count(line, "warnings"),
+            },
+            _ => Self::NotLoaded(
+                lines
+                    .iter()
+                    .filter(|line| {
+                        line.get("level").and_then(|level| level.as_str()) == Some("error")
+                    })
+                    .find_map(|line| line.get("message").and_then(|message| message.as_str()))
+                    .unwrap_or("gaanim check did not finish")
+                    .to_owned(),
+            ),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorkspaceCheck {
+    /// Start checking `members` on a worker thread.
+    fn start(members: &[WorkspaceMember]) -> Option<Self> {
+        let executable = std::env::current_exe().ok()?;
+        let roots: Vec<PathBuf> = members
+            .iter()
+            .filter(|member| member.project.is_ok())
+            .map(|member| member.root.clone())
+            .collect();
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        std::thread::Builder::new()
+            .name("gaanim-hub-check".into())
+            .spawn(move || {
+                for root in roots {
+                    let output = std::process::Command::new(&executable)
+                        .arg("check")
+                        .arg(gaanim_core::console::plain_path(&root))
+                        .args(["--message-format", "json"])
+                        .stdin(std::process::Stdio::null())
+                        .output();
+                    let outcome = match output {
+                        Ok(output) => CheckOutcome::read(
+                            output.status.code(),
+                            &String::from_utf8_lossy(&output.stdout),
+                        ),
+                        Err(error) => CheckOutcome::NotLoaded(error.to_string()),
+                    };
+                    if sender.send((root, outcome)).is_err() {
+                        return;
+                    }
+                }
+            })
+            .ok()?;
+        Some(Self {
+            results: HashMap::new(),
+            receiver,
+            running: true,
+        })
+    }
+
+    fn poll(&mut self) {
+        loop {
+            match self.receiver.try_recv() {
+                Ok((root, outcome)) => {
+                    self.results.insert(root, outcome);
+                }
+                Err(TryRecvError::Empty) => return,
+                Err(TryRecvError::Disconnected) => {
+                    self.running = false;
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// How Home shows its recent entries; saved in the `home` section of the
@@ -481,6 +645,7 @@ impl Thumbnails {
                 group.bundle.as_ref().map(|bundle| bundle.path.clone()),
             )),
             RecentEntry::Bundle(bundle) => Some(Cover::Bundle(bundle.path.clone())),
+            RecentEntry::Workspace(_) => None,
         };
         let (sender, receiver) = crossbeam_channel::bounded(1);
         let spawned = std::thread::Builder::new()
@@ -556,6 +721,7 @@ impl Default for ProjectHubState {
             thumbnails: Thumbnails::default(),
             covered: false,
             recent_query: String::new(),
+            workspace_page: None,
         }
     }
 }
@@ -581,6 +747,20 @@ impl ProjectHubState {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn request_switch(&mut self, path: PathBuf) {
         self.switch_requested = Some(path);
+    }
+
+    /// Show `workspace`'s page, as opening its folder from Home does.
+    pub fn show_workspace(&mut self, workspace: Workspace) {
+        self.show();
+        self.open_workspace(workspace);
+    }
+
+    fn open_workspace(&mut self, workspace: Workspace) {
+        self.notice = None;
+        self.recents.record_workspace(&workspace);
+        let _ = self.recents.save();
+        self.section = Section::Projects;
+        self.workspace_page = Some(WorkspacePage::new(workspace));
     }
 
     pub fn report_open_error(&mut self, error: String) {
@@ -615,6 +795,14 @@ impl ProjectHubState {
     fn poll_workers(&mut self, pending: &mut PendingProjectOpen) {
         #[cfg(not(target_arch = "wasm32"))]
         self.update.poll();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(check) = self
+            .workspace_page
+            .as_mut()
+            .and_then(|page| page.check.as_mut())
+        {
+            check.poll();
+        }
         if let Some(rx) = &self.checking {
             match rx.try_recv() {
                 Ok(tools) => {
@@ -730,11 +918,17 @@ impl ProjectHubState {
     /// project about to open or a dropped file not yet taken.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn working(&self) -> bool {
+        let checking_members = self
+            .workspace_page
+            .as_ref()
+            .and_then(|page| page.check.as_ref())
+            .is_some_and(|check| check.running);
         self.bundle_request.is_some()
             || (self.active
                 && (self.checking.is_some()
                     || self.busy()
                     || self.dropped.is_some()
+                    || checking_members
                     || self.update.working()))
     }
 
@@ -746,7 +940,7 @@ impl ProjectHubState {
             .into_iter()
             .find_map(|entry| match entry {
                 RecentEntry::Bundle(bundle) => bundle.path.parent().map(Path::to_path_buf),
-                RecentEntry::Project(_) => None,
+                RecentEntry::Project(_) | RecentEntry::Workspace(_) => None,
             })
             .unwrap_or_else(default_project_parent);
         if let Some(path) = crate::platform::pick_file(
@@ -773,12 +967,16 @@ impl ProjectHubState {
 
     /// Ask for a folder with the native picker and create the project there.
     fn create_with_picker(&mut self, kind: ProjectKind) {
+        self.create_with_picker_in(kind, &default_project_parent());
+    }
+
+    /// [`Self::create_with_picker`], with the picker starting in `start`.
+    fn create_with_picker_in(&mut self, kind: ProjectKind, start: &Path) {
         let title = match kind {
             ProjectKind::Video => "Choose or create a folder for the new video",
             ProjectKind::Slides => "Choose or create a folder for the new presentation",
         };
-        let Some(picked) = crate::platform::pick_folder(title, Some(&default_project_parent()))
-        else {
+        let Some(picked) = crate::platform::pick_folder(title, Some(start)) else {
             return;
         };
         match new_project_target(&picked, kind) {
@@ -809,21 +1007,39 @@ impl ProjectHubState {
         }
     }
 
-    /// Open a dropped or picked path: a playback bundle, a project folder or
-    /// any file inside one.
+    /// Open a dropped or picked path: a playback bundle, a project or
+    /// workspace folder, or any file inside one.
     fn open_path(&mut self, path: &Path) {
         if is_bundle_path(path) {
             self.open_bundle(path);
             return;
         }
-        let project = if path.is_dir() {
-            resolve_project(path).ok()
+        let opened = if path.is_dir() {
+            if path.join("gaanim.toml").is_file() {
+                resolve_folder(path).map(Some)
+            } else {
+                Ok(None)
+            }
         } else {
-            find_project_for_script(path)
+            locate_script(path).map(|location| match location {
+                gaanim_project::Location {
+                    project: Some(project),
+                    ..
+                } => Some(ProjectFolder::Project(project)),
+                gaanim_project::Location {
+                    workspace: Some(workspace),
+                    ..
+                } => Some(ProjectFolder::Workspace(workspace)),
+                _ => None,
+            })
         };
-        match project {
-            Some(project) => self.open_project(project, false),
-            None => {
+        match opened {
+            Ok(Some(ProjectFolder::Project(project))) => self.open_project(project, false),
+            Ok(Some(ProjectFolder::Workspace(workspace))) => self.open_workspace(workspace),
+            Err(error) => {
+                self.notice = Some(Notice::Error(format!("Could not open it: {error}")));
+            }
+            Ok(None) => {
                 self.notice = Some(Notice::Error(format!(
                     "“{}” is neither a Gaanim project (it has no gaanim.toml) nor a \
                      .gaanim file. Use “New video” or “New presentation” to create one.",
@@ -1173,6 +1389,10 @@ fn project_hub_ui_system(
     let focused = ctx.input(|input| input.focused);
     if focused && !state.was_focused {
         state.check_tools();
+        // A member may have been added outside Gaanim.
+        if let Some(page) = state.workspace_page.as_mut() {
+            page.refresh();
+        }
     }
     state.was_focused = focused;
 
@@ -1694,6 +1914,10 @@ enum Start {
 }
 
 fn projects_ui(ui: &mut Ui, state: &mut ProjectHubState) {
+    if state.workspace_page.is_some() {
+        workspace_ui(ui, state);
+        return;
+    }
     page_header(
         ui,
         "PROJECTS",
@@ -2071,6 +2295,235 @@ fn paint_bundle_scene(painter: &egui::Painter, stage: Rect, playing: bool, time:
     );
 }
 
+/// What the workspace page asked for this frame.
+enum PageAction {
+    Back,
+    Create(ProjectKind),
+    #[cfg(not(target_arch = "wasm32"))]
+    Check,
+    Member(RowAction, WorkspaceMember),
+}
+
+/// A workspace's page: its members grouped as its manifest says, with
+/// ways to add members and to check them all.
+fn workspace_ui(ui: &mut Ui, state: &mut ProjectHubState) {
+    let busy = state.busy() || state.covered;
+    let view = state.recent_view;
+    let ctx = ui.ctx().clone();
+    let ProjectHubState {
+        workspace_page,
+        thumbnails,
+        ..
+    } = state;
+    let Some(page) = workspace_page.as_mut() else {
+        return;
+    };
+    let mut chosen = None;
+
+    if ui
+        .add(
+            egui::Label::new(
+                egui::RichText::new("‹ Projects")
+                    .size(12.5)
+                    .color(palette::TEXT_MUTED),
+            )
+            .sense(Sense::click()),
+        )
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        chosen = Some(PageAction::Back);
+    }
+    ui.add_space(16.0);
+    let workspace = &page.workspace;
+    let count = page.members.len();
+    let mut subtitle = format!(
+        "{} · {count} member{}",
+        display_path(&workspace.root),
+        if count == 1 { "" } else { "s" }
+    );
+    let shared: Vec<String> = workspace
+        .python_roots
+        .iter()
+        .chain(&workspace.asset_roots)
+        .filter_map(|folder| workspace.relative_path(folder))
+        .collect();
+    if !shared.is_empty() {
+        subtitle.push_str(&format!(" · shares {}", shared.join(", ")));
+    }
+    page_header(ui, "WORKSPACE", &workspace.name, &subtitle);
+
+    ui.horizontal(|ui| {
+        if primary_button(ui, "New video", Some(Icon::Plus), !busy).clicked() {
+            chosen = Some(PageAction::Create(ProjectKind::Video));
+        }
+        ui.add_space(8.0);
+        if secondary_button(ui, "New presentation", !busy).clicked() {
+            chosen = Some(PageAction::Create(ProjectKind::Slides));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            ui.add_space(8.0);
+            let checkable = page
+                .members
+                .iter()
+                .filter(|member| member.project.is_ok())
+                .count();
+            let running = page.check.as_ref().filter(|check| check.running);
+            let label = match running {
+                Some(check) => format!("Checking… {}/{checkable}", check.results.len()),
+                None => "Check all".to_owned(),
+            };
+            if secondary_button(ui, &label, !busy && running.is_none() && checkable > 0)
+                .on_hover_text("Run gaanim check on every member")
+                .clicked()
+            {
+                chosen = Some(PageAction::Check);
+            }
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui_kit::field_frame()
+                .inner_margin(egui::Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut page.query)
+                            .hint_text("Search")
+                            .desired_width(150.0)
+                            .frame(egui::Frame::NONE),
+                    );
+                });
+        });
+    });
+    ui.add_space(22.0);
+
+    let query = page.query.trim().to_lowercase();
+    let mut groups: Vec<(&str, Vec<&WorkspaceMember>)> = Vec::new();
+    for member in &page.members {
+        let matches = query.is_empty()
+            || member.name().to_lowercase().contains(&query)
+            || member.path.to_lowercase().contains(&query)
+            || member.group.to_lowercase().contains(&query);
+        if !matches {
+            continue;
+        }
+        match groups.iter_mut().find(|(group, _)| *group == member.group) {
+            Some((_, members)) => members.push(member),
+            None => groups.push((&member.group, vec![member])),
+        }
+    }
+    if page.members.is_empty() {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(
+                    "This workspace has no members yet. Create one here, or add the folders \
+                     of its projects to `members` in its gaanim.toml.",
+                )
+                .size(13.5)
+                .color(palette::TEXT_FAINT),
+            )
+            .wrap(),
+        );
+    } else if groups.is_empty() {
+        ui.label(
+            egui::RichText::new(format!("No member matches \"{}\".", page.query.trim()))
+                .size(13.5)
+                .color(palette::TEXT_FAINT),
+        );
+    }
+    for (group, members) in &groups {
+        if !group.is_empty() {
+            ui.label(caption(&group.to_uppercase()));
+            ui.add_space(10.0);
+        }
+        let rows: Vec<RecentRow> = members
+            .iter()
+            .map(|member| {
+                #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+                let mut row = RecentRow::member(member);
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(outcome) = page
+                    .check
+                    .as_ref()
+                    .and_then(|check| check.results.get(&member.root))
+                {
+                    row.status = Some(outcome.label());
+                }
+                row
+            })
+            .collect();
+        match view {
+            RecentView::List => {
+                for (member, row) in members.iter().zip(&rows) {
+                    if let Some(action) = recent_row(ui, row, !busy) {
+                        chosen = Some(PageAction::Member(action, (*member).clone()));
+                    }
+                    ui.add_space(8.0);
+                }
+            }
+            RecentView::Grid => {
+                const GAP: f32 = 14.0;
+                const MIN_CARD: f32 = 220.0;
+                let width = ui.available_width();
+                let columns = (((width + GAP) / (MIN_CARD + GAP)).floor() as usize).max(1);
+                let card = (width - GAP * (columns - 1) as f32) / columns as f32;
+                let pairs: Vec<(&&WorkspaceMember, &RecentRow)> =
+                    members.iter().zip(&rows).collect();
+                for chunk in pairs.chunks(columns) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = GAP;
+                        for (member, row) in chunk {
+                            let cover = member.project.as_ref().ok().and_then(|project| {
+                                thumbnails.get(
+                                    &ctx,
+                                    &RecentGroup {
+                                        entry: RecentEntry::Project(project.clone()),
+                                        bundle: None,
+                                        pinned: false,
+                                    },
+                                )
+                            });
+                            if let Some(action) = recent_card(ui, row, cover.as_ref(), card, !busy)
+                            {
+                                chosen = Some(PageAction::Member(action, (**member).clone()));
+                            }
+                        }
+                    });
+                    ui.add_space(GAP);
+                }
+            }
+        }
+        ui.add_space(14.0);
+    }
+
+    // New members start where the first one is, or at the workspace root.
+    let start = page
+        .members
+        .first()
+        .and_then(|member| member.root.parent())
+        .unwrap_or(&page.workspace.root)
+        .to_path_buf();
+    match chosen {
+        Some(PageAction::Back) => *workspace_page = None,
+        Some(PageAction::Create(kind)) => {
+            state.create_with_picker_in(kind, &start);
+            if let Some(page) = state.workspace_page.as_mut() {
+                page.refresh();
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(PageAction::Check) => page.check = WorkspaceCheck::start(&page.members),
+        Some(PageAction::Member(RowAction::Open, member)) => match member.project {
+            Ok(project) => state.open_project(project, false),
+            Err(error) => state.notice = Some(Notice::Error(error)),
+        },
+        Some(PageAction::Member(RowAction::ShowFolder, member)) => {
+            let _ = crate::platform::open_detached(&member.root);
+        }
+        Some(PageAction::Member(RowAction::PlayBundle(path), _)) => state.open_bundle(&path),
+        Some(PageAction::Member(_, _)) | None => {}
+    }
+}
+
 fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
     let all = state.recents.groups();
     let query = state.recent_query.trim().to_lowercase();
@@ -2199,10 +2652,14 @@ fn recents_ui(ui: &mut Ui, state: &mut ProjectHubState) {
             state.open_project(project, false)
         }
         Some((RowAction::Open, RecentEntry::Bundle(bundle))) => state.open_bundle(&bundle.path),
+        Some((RowAction::Open, RecentEntry::Workspace(workspace))) => {
+            state.open_workspace(workspace)
+        }
         Some((RowAction::ShowFolder, entry)) => {
             let folder = match &entry {
                 RecentEntry::Project(project) => Some(project.root.as_path()),
                 RecentEntry::Bundle(bundle) => bundle.path.parent(),
+                RecentEntry::Workspace(workspace) => Some(workspace.root.as_path()),
             };
             if let Some(folder) = folder {
                 let _ = crate::platform::open_detached(folder);
@@ -2254,6 +2711,12 @@ struct RecentRow {
     pinned: bool,
     /// The project's newest bundle, and how long ago it was recorded.
     bundle: Option<(PathBuf, Option<String>)>,
+    /// A workspace member, which is listed but not pinned or removed.
+    member: bool,
+    /// Why the member's manifest is invalid, shown instead of its path.
+    error: Option<String>,
+    /// What the last *Check all* said, shown instead of the kind.
+    status: Option<(String, Color32)>,
 }
 
 impl RecentRow {
@@ -2265,7 +2728,7 @@ impl RecentRow {
             .map(|bundle| (bundle.path.clone(), bundle_age(bundle)));
         match &group.entry {
             RecentEntry::Project(project) => Self {
-                name: project.manifest.name.clone(),
+                name: project.display_name(),
                 path: project.root.clone(),
                 icon: match project.manifest.kind {
                     ProjectKind::Video => Icon::Play,
@@ -2276,6 +2739,9 @@ impl RecentRow {
                 age: edited_ago(project),
                 pinned,
                 bundle,
+                member: false,
+                error: None,
+                status: None,
             },
             RecentEntry::Bundle(bundle) => Self {
                 name: bundle.name.clone(),
@@ -2286,8 +2752,66 @@ impl RecentRow {
                 age: recorded_ago(bundle),
                 pinned,
                 bundle: None,
+                member: false,
+                error: None,
+                status: None,
+            },
+            RecentEntry::Workspace(workspace) => Self {
+                name: workspace.name.clone(),
+                path: workspace.root.clone(),
+                icon: Icon::Layout,
+                color: palette::TEXT_MUTED,
+                label: "Workspace",
+                age: None,
+                pinned,
+                bundle: None,
+                member: false,
+                error: None,
+                status: None,
             },
         }
+    }
+
+    /// A member on its workspace's page, under its own name.
+    fn member(member: &WorkspaceMember) -> Self {
+        match &member.project {
+            Ok(project) => Self {
+                name: project.manifest.name.clone(),
+                member: true,
+                ..Self::of(&RecentGroup {
+                    entry: RecentEntry::Project(project.clone()),
+                    bundle: None,
+                    pinned: false,
+                })
+            },
+            Err(error) => Self {
+                name: member.name().to_owned(),
+                path: member.root.clone(),
+                icon: Icon::Warning,
+                color: palette::DANGER,
+                label: "Invalid",
+                age: None,
+                pinned: false,
+                bundle: None,
+                member: true,
+                error: Some(error.clone()),
+                status: None,
+            },
+        }
+    }
+
+    /// The kind, or what the last check said, and its color.
+    fn meta(&self) -> (&str, Color32) {
+        match &self.status {
+            Some((status, color)) => (status, *color),
+            None => (self.label, self.color),
+        }
+    }
+
+    /// How many hover buttons [`recent_actions`] draws.
+    fn action_count(&self) -> usize {
+        let base = if self.member { 1 } else { 3 };
+        base + usize::from(self.bundle.is_some())
     }
 
     /// The age line: when it was edited, and its bundle's age.
@@ -2307,9 +2831,10 @@ impl RecentRow {
 /// The hover buttons every recent entry has, right to left: remove, show
 /// the folder, pin, and play the project's bundle.
 fn recent_actions(ui: &mut Ui, row: &RecentRow, action: &mut Option<RowAction>) {
-    if icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
-        .on_hover_text("Remove from recent (does not delete files)")
-        .clicked()
+    if !row.member
+        && icon_button(ui, Icon::Close, ButtonTone::Ghost, true)
+            .on_hover_text("Remove from recent (does not delete files)")
+            .clicked()
     {
         *action = Some(RowAction::Remove);
     }
@@ -2318,6 +2843,16 @@ fn recent_actions(ui: &mut Ui, row: &RecentRow, action: &mut Option<RowAction>) 
         .clicked()
     {
         *action = Some(RowAction::ShowFolder);
+    }
+    if row.member {
+        if let Some((bundle, _)) = &row.bundle
+            && icon_button(ui, Icon::Package, ButtonTone::Ghost, true)
+                .on_hover_text("Play its newest bundle")
+                .clicked()
+        {
+            *action = Some(RowAction::PlayBundle(bundle.clone()));
+        }
+        return;
     }
     let pin_tone = if row.pinned {
         ButtonTone::On(ui_kit::ToggleColor::Stop)
@@ -2404,10 +2939,14 @@ fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> 
             pos2(text_left + name_width + 12.0, rect.center().y - 10.0),
         );
     }
+    let (path_text, path_color) = match &row.error {
+        Some(error) => (error.clone(), palette::DANGER),
+        None => (display_path(&row.path), palette::TEXT_FAINT),
+    };
     let path = painter.layout(
-        display_path(&row.path),
+        path_text,
         FontId::proportional(11.5),
-        palette::TEXT_FAINT,
+        path_color,
         f32::INFINITY,
     );
     let path_clip = Rect::from_min_size(pos2(text_left, rect.center().y + 2.0), vec2(text_w, 16.0));
@@ -2436,12 +2975,13 @@ fn recent_row(ui: &mut Ui, row: &RecentRow, enabled: bool) -> Option<RowAction> 
         );
     } else {
         let meta_x = rect.max.x - 18.0;
+        let (meta, meta_color) = row.meta();
         painter.text(
             pos2(meta_x, rect.center().y - 9.0),
             Align2::RIGHT_CENTER,
-            row.label,
+            meta,
             FontId::proportional(12.0),
-            color,
+            meta_color,
         );
         if let Some(ages) = row.ages() {
             painter.text(
@@ -2536,12 +3076,13 @@ fn recent_card(
         .with_clip_rect(name_clip)
         .galley(name_clip.min, name, palette::TEXT);
     let meta_y = stage.max.y + 38.0;
+    let (meta, meta_color) = row.meta();
     let label = painter.text(
         pos2(text_left, meta_y),
         Align2::LEFT_CENTER,
-        row.label,
+        meta,
         FontId::proportional(11.5),
-        color,
+        meta_color,
     );
     if let Some(ages) = row.ages() {
         painter
@@ -2565,7 +3106,7 @@ fn recent_card(
 
     let mut action = None;
     if hovered {
-        let buttons = if row.bundle.is_some() { 4.0 } else { 3.0 };
+        let buttons = row.action_count() as f32;
         let actions = Rect::from_min_max(
             pos2(stage.max.x - 10.0 - buttons * 34.0, stage.min.y + 6.0),
             pos2(stage.max.x - 6.0, stage.min.y + 40.0),
@@ -2585,7 +3126,7 @@ fn recent_card(
         && action.is_none()
         && response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text(display_path(&row.path))
+            .on_hover_text(row.error.clone().unwrap_or_else(|| display_path(&row.path)))
             .clicked()
     {
         action = Some(RowAction::Open);
@@ -3516,5 +4057,107 @@ mod tests {
         }
         assert!(uv_help().command.contains("uv"));
         assert!(ffmpeg_help().command.to_lowercase().contains("ffmpeg"));
+    }
+
+    /// A workspace in a temporary folder: `shows/pilot` (valid),
+    /// `shows/broken` (an invalid manifest) and `extras/trailer`.
+    fn workspace() -> (tempfile::TempDir, Workspace) {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let write = |relative: &str, text: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "gaanim.toml",
+            "name = \"canal\"\n[workspace]\nmembers = [{ path = \"shows/*\", group = \"Shows\" }, \"extras/*\"]\n",
+        );
+        for member in ["shows/pilot", "extras/trailer"] {
+            write(&format!("{member}/main.py"), "");
+            write(
+                &format!("{member}/gaanim.toml"),
+                "kind = \"video\"\nentry = \"main.py\"\n",
+            );
+        }
+        write(
+            "shows/broken/gaanim.toml",
+            "kind = \"film\"\nentry = \"main.py\"\n",
+        );
+        let workspace = gaanim_project::resolve_workspace(root).unwrap();
+        (temp, workspace)
+    }
+
+    #[test]
+    fn members_are_listed_by_their_own_name_and_an_invalid_one_says_why() {
+        let (_temp, workspace) = workspace();
+        let page = WorkspacePage::new(workspace);
+        let rows: Vec<RecentRow> = page.members.iter().map(RecentRow::member).collect();
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["broken", "pilot", "trailer"]);
+        assert!(rows.iter().all(|row| row.member));
+        assert!(
+            rows[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("film"))
+        );
+        assert_eq!(rows[0].label, "Invalid");
+        assert!(rows[1].error.is_none());
+        // Members keep the folder button; pinning and removing are for recents.
+        assert_eq!(rows[1].action_count(), 1);
+        let groups: Vec<&str> = page
+            .members
+            .iter()
+            .map(|member| member.group.as_str())
+            .collect();
+        assert_eq!(groups, ["Shows", "Shows", "extras"]);
+        // In recents, a member carries its workspace's name.
+        let recent = RecentRow::of(&RecentGroup {
+            entry: RecentEntry::Project(page.members[1].project.clone().unwrap()),
+            bundle: None,
+            pinned: false,
+        });
+        assert_eq!(recent.name, "canal › pilot");
+        assert_eq!(recent.action_count(), 3);
+    }
+
+    #[test]
+    fn a_member_check_is_read_from_its_json_report() {
+        let verdict = |result: &str, errors: usize, warnings: usize| {
+            format!(
+                "{{\"type\":\"check\",\"result\":\"{result}\",\"errors\":{errors},\"warnings\":{warnings}}}"
+            )
+        };
+        assert_eq!(
+            CheckOutcome::read(Some(0), &format!("noise\n{}", verdict("pass", 0, 2))),
+            CheckOutcome::Passed { warnings: 2 }
+        );
+        assert_eq!(
+            CheckOutcome::read(Some(1), &verdict("fail", 3, 1)),
+            CheckOutcome::Failed {
+                errors: 3,
+                warnings: 1
+            }
+        );
+        let error = "{\"type\":\"message\",\"level\":\"error\",\"label\":\"check\",\"message\":\"could not load project: boom\"}";
+        assert_eq!(
+            CheckOutcome::read(Some(2), error),
+            CheckOutcome::NotLoaded("could not load project: boom".into())
+        );
+        assert_eq!(
+            CheckOutcome::read(None, ""),
+            CheckOutcome::NotLoaded("gaanim check did not finish".into())
+        );
+        assert_eq!(CheckOutcome::Passed { warnings: 0 }.label().0, "Passed");
+        assert_eq!(
+            CheckOutcome::Failed {
+                errors: 1,
+                warnings: 0
+            }
+            .label()
+            .0,
+            "Failed · 1 error"
+        );
     }
 }

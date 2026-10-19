@@ -282,8 +282,14 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - `gaanim check <workspace>` comprueba todos los miembros y resume, y
   `--members` elige algunos por ruta o patrón. `gaanim init` dentro de un
   workspace crea solo los archivos del miembro.
-- El título de la ventana de un miembro lleva delante su workspace
-  (`canal › ep1`).
+- Abrir la carpeta de un workspace (o `gaanim <workspace>`) muestra en el
+  Inicio su página: sus miembros agrupados como dice el manifiesto, *New
+  video* y *New presentation* para crear uno, y *Check all*, que comprueba
+  cada miembro y anota el resultado en su tarjeta.
+- Los recientes muestran el workspace como una entrada propia y cada miembro
+  con su workspace delante (`canal › ep1`), como el título de la ventana. La
+  paleta de comandos lista los demás miembros del abierto y *Back to canal*
+  vuelve a la página del workspace.
 - En Windows, la raíz del proyecto y su `src/` entran en `sys.path` sin el
   prefijo `\\?\`, y el `__file__` de los módulos que se importan de ahí
   también.

@@ -294,6 +294,7 @@ o de `recursos/`, la vista previa del miembro abierto se recarga; al guardar
 uno de otro episodio, no.
 
 ```bash
+gaanim canal                                 # el Inicio, con los miembros
 gaanim canal/temporada-1/ep1                 # abre un miembro
 gaanim check canal                           # comprueba todos los miembros
 gaanim check canal --members "temporada-1/*" # solo algunos
@@ -309,6 +310,28 @@ gaanim init video canal/temporada-1/ep3      # un miembro nuevo
 - El entorno de Python es el `.venv` de la raíz del workspace, que Gaanim
   crea la primera vez que abres un miembro. Un miembro con su propio `.venv`
   usa el suyo.
+
+== En el Inicio y el editor
+
+Al abrir la carpeta del workspace, desde el Inicio o con `gaanim canal`, el
+Inicio muestra su página: los miembros agrupados como dice el manifiesto (por
+el `group` de su entrada o, sin él, por la carpeta que los contiene), con las
+mismas tarjetas y la misma búsqueda que los recientes.
+
+- *New video* y *New presentation* crean un miembro con el selector de
+  carpetas, que empieza junto al primer miembro.
+- *Check all* ejecuta `gaanim check` en cada miembro, cada uno en su propio
+  proceso, y cada tarjeta dice cómo le fue: *Passed*, los avisos o los
+  errores.
+- Un miembro con un `gaanim.toml` inválido aparece en rojo con su error, en
+  lugar de desaparecer.
+
+Los recientes muestran cada miembro con su workspace delante
+(`canal › ep1`), y el workspace también, como una entrada propia que abre su
+página. Con un miembro abierto, la paleta de comandos (`Ctrl+Shift+P`) lista
+los demás miembros para cambiar de uno a otro sin volver al Inicio, y *Back to
+canal* vuelve a la página del workspace. El título de la ventana también lleva
+el workspace delante.
 
 La #link("/referencia/gaanim-toml/#workspace")[referencia de `[workspace]`]
 describe cada clave y qué hereda cada miembro.

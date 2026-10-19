@@ -14,7 +14,8 @@ los comandos que reciben `<SCRIPT_O_PROYECTO>` aceptan la ruta de un script
 Python o la carpeta de un proyecto: en una carpeta se ejecuta el `entry` de su
 #link("/referencia/gaanim-toml/")[`gaanim.toml`]. La carpeta de un
 #link("/guias/proyectos/#workspaces")[workspace] sin `entry` no tiene script
-que ejecutar: `gaanim` lista sus miembros y `check` los comprueba todos.
+que ejecutar: `gaanim` abre el Inicio en la página del workspace y `check`
+comprueba todos sus miembros.
 
 ```bash
 gaanim                                   # abre el Inicio
