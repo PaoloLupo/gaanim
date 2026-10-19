@@ -38,6 +38,7 @@ mod soft_effects;
 mod stroke;
 pub mod three_d;
 pub mod transition_presets;
+pub mod vello_target;
 
 // MainVelloScene is re-exported via prelude; used implicitly by the plugin system registration.
 #[allow(unused_imports)]
