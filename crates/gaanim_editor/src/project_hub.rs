@@ -18,10 +18,10 @@ use bevy_egui::{EguiPrimaryContextPass, egui};
 use crossbeam_channel::{Receiver, TryRecvError};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use gaanim_project::{
-    CreateProjectOptions, CreateWorkspaceOptions, EnvironmentProbe, ProjectFolder, ProjectKind,
-    PythonSource, RecentBundle, RecentEntry, RecentGroup, RecentProjects, ResolvedProject,
-    Workspace, WorkspaceMember, create_project, create_workspace, default_project_parent,
-    is_bundle_path, locate_script, resolve_folder, resolve_project,
+    CreateProjectOptions, CreateWorkspaceOptions, EnvironmentProbe, PYTHON_VERSION, ProjectFolder,
+    ProjectKind, PythonSource, RecentBundle, RecentEntry, RecentGroup, RecentProjects,
+    ResolvedProject, Workspace, WorkspaceMember, create_project, create_workspace,
+    default_project_parent, is_bundle_path, locate_script, resolve_folder, resolve_project,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -3414,7 +3414,7 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         Some(python) if tools.probe.uv.is_some() => (
             ToolState::Handled,
             format!(
-                "You have Python {}.{}; uv will download Python 3.14 for your projects",
+                "You have Python {}.{}; uv will download Python {PYTHON_VERSION} for your projects",
                 python.version.major, python.version.minor
             ),
         ),
@@ -3425,18 +3425,18 @@ fn environment_ui(ui: &mut Ui, state: &mut ProjectHubState) {
         Some(python) => (
             ToolState::Missing,
             format!(
-                "Python {}.{} is not supported · install uv and it will bring Python 3.14",
+                "Python {}.{} is not supported · install uv and it will bring Python {PYTHON_VERSION}",
                 python.version.major, python.version.minor
             ),
         ),
         None => (
             ToolState::Missing,
-            "Not found · install uv and it will bring Python 3.14".into(),
+            format!("Not found · install uv and it will bring Python {PYTHON_VERSION}"),
         ),
     };
     tool_card(
         ui,
-        "Python 3.14",
+        &format!("Python {PYTHON_VERSION}"),
         "The language you write scenes in. You do not have to install it by hand.",
         python_state,
         &python_detail,
@@ -3913,11 +3913,13 @@ fn preparation_modal(ctx: &egui::Context, state: &mut ProjectHubState) {
             ui.add_space(20.0);
             ui.label(
                 egui::RichText::new(if opening {
-                    "Loading the scene…"
+                    "Loading the scene…".to_owned()
                 } else {
-                    "uv is creating the project's Python environment and installing \
-                     autocomplete. The first time can take a minute while it downloads \
-                     Python 3.14."
+                    format!(
+                        "uv is creating the project's Python environment and installing \
+                         autocomplete. The first time can take a minute while it downloads \
+                         Python {PYTHON_VERSION}."
+                    )
                 })
                 .size(12.5)
                 .color(palette::TEXT_MUTED),

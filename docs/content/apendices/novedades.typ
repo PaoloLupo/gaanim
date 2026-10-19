@@ -317,9 +317,12 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 
 == Python
 
-- Gaanim está probado con Python 3.15.0 en Windows, donde sirve cualquier
-  Python desde 3.14: la vista previa, `check` y `export` dan las mismas
-  escenas que con 3.14. En Ubuntu sigue haciendo falta exactamente 3.14.
+- Gaanim exige Python 3.15: en Windows cualquier Python desde 3.15 y en
+  Ubuntu exactamente 3.15, porque el motor enlaza `libpython3.15.so`.
+  `gaanim init` crea los proyectos y los workspaces con 3.15. Las escenas
+  dan lo mismo que con 3.14, y Python 3.15 trae el modo UTF-8 por defecto:
+  `open()` sin `encoding` lee y escribe UTF-8 también en Windows. El
+  playground sigue en Python 3.14, el de Pyodide.
 
 == Correcciones
 
@@ -380,6 +383,13 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
 - En un workspace, `scene.assets.load_project()` sin argumento, llamado desde
   un módulo compartido, carga el proyecto del script que se ejecuta en lugar
   del `gaanim.toml` del workspace.
+- Gaanim exige Python 3.15 (ver «Python»). Un proyecto o un workspace
+  creado con 3.14 no abre hasta que recrees su entorno: instala Python 3.15
+  (`uv python install 3.15`), pon `3.15` en su `.python-version` y
+  `requires-python = ">=3.15"` en su `pyproject.toml`, y en su carpeta
+  ejecuta `uv venv --python 3.15 --clear`. Gaanim instala el paquete de
+  autoría al abrirlo; si el proyecto usa otros paquetes, vuelve a
+  instalarlos con `uv pip install`.
 
 = 0.14.0
 

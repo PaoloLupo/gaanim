@@ -8,7 +8,7 @@
 
 = En resumen
 
-Si ya tienes Python 3.14 y #link("https://docs.astral.sh/uv/")[uv]:
+Si ya tienes Python 3.15 y #link("https://docs.astral.sh/uv/")[uv]:
 
 1. Descarga el paquete de tu sistema desde la
    #link("https://github.com/PaoloLupo/gaanim/releases/latest")[última release].
@@ -30,7 +30,7 @@ página explica cada paso con detalle.
   columns: 3,
   table.header[][*Windows*][*Ubuntu*],
   [Sistema], [Windows 10/11 x64], [Ubuntu 24.04 x64],
-  [Python], [3.14 o posterior], [3.14 exactamente],
+  [Python], [3.15 o posterior], [3.15 exactamente],
   [uv], [necesario], [necesario],
   [GPU], [controladores actuales (Vulkan o DirectX 12)], [Vulkan],
   [FFmpeg], [opcional], [opcional],
@@ -38,9 +38,10 @@ página explica cada paso con detalle.
 
 - *Python* ejecuta tus escenas. Instálalo desde
   #link("https://www.python.org/downloads/")[python.org], con
-  `winget install Python.Python.3.14` (Windows) o, en cualquier sistema, con
-  `uv python install 3.14`. En Ubuntu tiene que ser 3.14 porque el motor
-  enlaza `libpython3.14.so`.
+  `winget install Python.Python.3.15` (Windows) o, en cualquier sistema, con
+  `uv python install 3.15` (si instala una versión candidata, como
+  `3.15.0rc2`, actualiza uv con `uv self update`). En Ubuntu tiene que ser
+  3.15 porque el motor enlaza `libpython3.15.so`.
 - *#link("https://docs.astral.sh/uv/")[uv]* crea el entorno de cada proyecto.
 - *FFmpeg* solo hace falta para exportar video (MP4, WebM, MOV, WebP animado y GIF)
   y para `scene.media.video()`. Sin él tienes la vista previa completa y puedes
@@ -143,7 +144,7 @@ gaanim init video .             # en la carpeta actual
 ```
 
 `init` genera la estructura del proyecto y, con uv, un entorno `.venv` con
-Python 3.14 y el wheel de autoría:
+Python 3.15 y el wheel de autoría:
 
 ```text
 mi-video/
@@ -151,7 +152,7 @@ mi-video/
   main.py           # escena de ejemplo: edítala
   assets/           # imágenes, SVG, fuentes, audio
   exports/          # destino sugerido para las exportaciones
-  pyproject.toml    # proyecto uv con Python 3.14
+  pyproject.toml    # proyecto uv con Python 3.15
   .python-version
   README.md
   AGENTS.md         # instrucciones para asistentes de código
@@ -192,12 +193,12 @@ primer intérprete que encuentra:
 1. El entorno activo (`VIRTUAL_ENV`).
 2. Una carpeta `.venv`, `venv` o `env` junto al proyecto o al directorio
    actual, subiendo hasta cuatro niveles.
-3. El Python del sistema: `py -3.14`, `python` o `python3` en Windows;
-   `python3.14`, `python3` o `python` en Ubuntu.
-4. El Python 3.14 que haya instalado uv.
+3. El Python del sistema: `py -3.15`, `python` o `python3` en Windows;
+   `python3.15`, `python3` o `python` en Ubuntu.
+4. El Python 3.15 que haya instalado uv.
 
 Los pasos 1 y 2 no siguen buscando si encuentran otra versión: un entorno con
-Python 3.12 produce un error aunque tengas 3.14 instalado.
+Python 3.14 produce un error aunque tengas 3.15 instalado.
 
 = Actualiza
 
@@ -217,17 +218,20 @@ reemplaza los archivos; si algo falla, deja los anteriores. Ver
 
 A mano también se puede: descarga la release nueva y reemplaza todos los
 archivos de la carpeta, porque el ejecutable y sus bibliotecas deben venir de
-la misma versión. En ningún caso hace falta recrear los proyectos: al abrir
-uno, Gaanim reinstala su paquete de autoría si no coincide con la versión del
-ejecutable.
+la misma versión. No hace falta recrear los proyectos: al abrir uno, Gaanim
+reinstala su paquete de autoría si no coincide con la versión del ejecutable.
+Solo cuando Gaanim pasa a exigir otro Python, como la 0.15.0 con 3.15, cada
+proyecto necesita un entorno nuevo; lo explica «Al actualizar» en las
+#link("/apendices/novedades/")[novedades] de esa versión.
 
 = Solución de problemas <problemas>
 
-- *`Python >=3.14 was not found` o `Python 3.14 was not found`*: instala
-  Python 3.14 (`uv python install 3.14`) y vuelve a intentarlo.
+- *`Python >=3.15 was not found` o `Python 3.15 was not found`*: instala
+  Python 3.15 (`uv python install 3.15`) y vuelve a intentarlo.
 - *`Gaanim requires Python … but found Python 3.x`*: el entorno activo o el
-  `.venv` del proyecto usa otra versión. Desactívalo, o recrea el entorno con
-  `uv venv --python 3.14`.
+  `.venv` del proyecto usa otra versión. Desactívalo, o pon `3.15` en el
+  `.python-version` del proyecto y recrea el entorno con
+  `uv venv --python 3.15 --clear`, como indica el propio error.
 - *`gaanim_engine.dll` o `std-….dll` no encontrado, o salida `-1073741515`
   (Windows)*: faltan archivos del paquete junto a `gaanim.exe`. Extrae de nuevo
   el zip completo en la misma carpeta.

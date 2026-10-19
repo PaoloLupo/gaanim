@@ -16,7 +16,7 @@ Gaanim se distribuye en dos piezas complementarias:
   previsualización, hot reload, render y exportación.
 - El wheel de autoría, que solo instala helpers Python, stubs, `py.typed` y las
   fuentes Typst de la documentación (`gaanim/_docs`) para el entorno del proyecto. No contiene renderer, extensión nativa ni un modo
-  headless independiente. Requiere Python 3.14 o superior.
+  headless independiente. Requiere Python 3.15 o superior.
 
 La documentación (guía, recetas y referencia de la API) se publica en
 <https://paololupo.github.io/gaanim/>. El workflow `Docs` la reconstruye en
@@ -115,11 +115,11 @@ En Ubuntu, descargue `gaanim-v<versión>-linux-x64.tar.gz`, extráigalo completo
 en una carpeta, por ejemplo `~/.local/lib/gaanim`, y enlace el ejecutable
 `gaanim` desde una carpeta de `PATH` como `~/.local/bin`: el ejecutable busca
 sus bibliotecas (`libgaanim_engine.so`, `libgaanim_python_plugin.so` y el `std`
-de Rust) junto a él. Para ejecutar scripts requiere exactamente Python 3.14
-(el soporte de Python de Linux enlaza `libpython3.14.so`; por ejemplo
-`uv python install 3.14`) y las bibliotecas de
+de Rust) junto a él. Para ejecutar scripts requiere exactamente Python 3.15
+(el soporte de Python de Linux enlaza `libpython3.15.so`; por ejemplo
+`uv python install 3.15`) y las bibliotecas de
 sistema de Ubuntu 24.04; FFmpeg sigue siendo opcional salvo para video y audio.
-En Windows sirve cualquier Python 3.14 o superior.
+En Windows sirve cualquier Python 3.15 o superior.
 
 El binario de usuario también administra proyectos. `gaanim` sin argumentos
 abre el Inicio con creación, apertura, diagnóstico de Python/uv y hasta diez
@@ -131,10 +131,10 @@ gaanim init slides mi-charla
 gaanim .
 ```
 
-Cada `gaanim init` crea un proyecto uv mínimo con Python 3.14, declara `gaanim`
+Cada `gaanim init` crea un proyecto uv mínimo con Python 3.15, declara `gaanim`
 en las dependencias de `pyproject.toml`, deja `.python-version` y prepara
 `.venv` con esa misma versión. Los proyectos sin `.venv` pueden usar un Python
-3.14+ detectado en el sistema.
+3.15+ detectado en el sistema.
 
 Los proyectos pueden crecer con un layout `src/`: Gaanim añade automáticamente
 `src` y la carpeta del entrypoint a la ruta de imports. Durante la

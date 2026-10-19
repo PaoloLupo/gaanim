@@ -204,7 +204,7 @@ only says whether there is one",
 };
 
 const INIT: Page = Page {
-    summary: "Create a runnable project: gaanim.toml, a minimal main.py, and a Python 3.14\nenvironment with the authoring package, so editors autocomplete the API. Or a\nworkspace: several projects in one repository that share code and assets.",
+    summary: "Create a runnable project: gaanim.toml, a minimal main.py, and a Python 3.15\nenvironment with the authoring package, so editors autocomplete the API. Or a\nworkspace: several projects in one repository that share code and assets.",
     blocks: &[
         Block::Lines("Usage", &["gaanim init <KIND> [DIRECTORY] [--force]"]),
         Block::Rows(

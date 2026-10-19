@@ -77,7 +77,7 @@ class LocateTests(unittest.TestCase):
 
     def test_posix_venv_layout(self):
         project = self.base / "proj"
-        site = project / ".venv" / "lib" / "python3.14" / "site-packages"
+        site = project / ".venv" / "lib" / "python3.15" / "site-packages"
         package = write_site_packages(site, bundled=True)
 
         found = gaanim_docs.locate(project)

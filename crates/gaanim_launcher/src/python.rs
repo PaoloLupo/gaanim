@@ -39,8 +39,9 @@ pub fn runtime(hint: &Path) -> Result<&'static PythonPlugin, String> {
 /// What to tell the user when [`runtime`] fails for want of Python.
 pub fn install_hint() -> String {
     format!(
-        "Install {} (for example `uv python install 3.14`) and retry, or run `gaanim --help`.",
-        gaanim_project::python_requirement()
+        "Install {} (for example `uv python install {}`) and retry, or run `gaanim --help`.",
+        gaanim_project::python_requirement(),
+        gaanim_project::PYTHON_VERSION
     )
 }
 
