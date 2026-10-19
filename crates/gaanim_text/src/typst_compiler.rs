@@ -309,6 +309,9 @@ impl PartialEq for TypstFiles {
 
 impl TypstFiles {
     fn new(mut files: Vec<(FileId, Bytes)>) -> Self {
+        if files.is_empty() {
+            return Self::default();
+        }
         files.sort_by(|a, b| {
             a.0.vpath()
                 .get_with_slash()
