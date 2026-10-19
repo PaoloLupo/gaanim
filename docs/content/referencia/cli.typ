@@ -104,9 +104,9 @@ Los atajos de teclado del modo presentación y de Presenter View están en
 == Comandos y atajos del editor <comandos>
 
 La barra de reproducción se esconde mientras no la usas. Al abrir un proyecto
-y tras cada recarga se queda unos segundos a la vista; después, una línea corta
-en el borde inferior indica dónde está, y basta con bajar el puntero para que
-vuelva.
+se queda unos segundos a la vista, y una recarga no la vuelve a mostrar;
+después, una línea corta en el borde inferior indica dónde está, y basta con
+bajar el puntero para que vuelva.
 
 #table(
   columns: (auto, 1fr),

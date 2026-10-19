@@ -270,6 +270,8 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   comandos y la hoja de atajos dejan fuera el layout y el panel de
   animaciones, que el paquete no guarda, y el inspector muestra la cámara
   grabada.
+- La barra de reproducción ya no aparece tras cada recarga: se queda unos
+  segundos a la vista solo al abrir un proyecto.
 
 == Proyectos
 

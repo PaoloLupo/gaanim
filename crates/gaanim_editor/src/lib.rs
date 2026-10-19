@@ -638,10 +638,10 @@ pub struct EditorState {
     /// Where the playback bar was drawn last frame, in egui points.
     pub(crate) bar_rect: Option<egui::Rect>,
     /// The bar stays on screen until this egui time, so a project that
-    /// opens or reloads shows its controls before they hide.
+    /// opens shows its controls before they hide.
     bar_reveal_until: f64,
-    /// The replay the bar last revealed itself for.
-    bar_revealed_revision: Option<u64>,
+    /// Whether the bar revealed itself for the project's first scene.
+    bar_revealed: bool,
 }
 
 impl Default for EditorState {
@@ -661,7 +661,7 @@ impl Default for EditorState {
             touch_reveal: false,
             bar_rect: None,
             bar_reveal_until: 0.0,
-            bar_revealed_revision: None,
+            bar_revealed: false,
         }
     }
 }
@@ -899,10 +899,12 @@ fn editor_ui_system(
     let centre_shift = vp.center().x - ctx.viewport_rect().center().x;
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let pointer_near_bottom = pointer.map(|p| p.y > vp.height() - 60.0).unwrap_or(false);
-    // A project that opens or reloads shows its controls for a moment.
+    // A project shows its controls for a moment with its first scene
+    // (revision 0 is none yet). Opening another project starts Gaanim
+    // again, so every later replay is a reload, which leaves the bar hidden.
     let now = ctx.input(|i| i.time);
-    if state.bar_revealed_revision != Some(replay_stash.revision) {
-        state.bar_revealed_revision = Some(replay_stash.revision);
+    if !state.bar_revealed && replay_stash.revision != 0 {
+        state.bar_revealed = true;
         state.bar_reveal_until = now + BAR_REVEAL_SECONDS;
     }
     let revealing = now < state.bar_reveal_until;
@@ -1822,7 +1824,7 @@ fn format_time(seconds: f64) -> String {
     format!("{}:{:02}.{:02}", mins, secs, cs)
 }
 
-/// Seconds the playback bar stays up when a project opens or reloads.
+/// Seconds the playback bar stays up when a project opens.
 const BAR_REVEAL_SECONDS: f64 = 3.0;
 
 /// While the playback bar hides, a short line at the bottom edge says it is
