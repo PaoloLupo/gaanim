@@ -725,7 +725,7 @@ fn workspace_cover(workspace: &Workspace) -> Option<image::RgbaImage> {
             Some((edited, project.root))
         })
         .collect();
-    members.sort_by(|a, b| b.0.cmp(&a.0));
+    members.sort_by_key(|(edited, _)| std::cmp::Reverse(*edited));
     let tiles: Vec<image::RgbaImage> = members
         .iter()
         .filter_map(|(_, root)| {
@@ -2431,7 +2431,7 @@ enum PageAction {
     Create(ProjectKind),
     #[cfg(not(target_arch = "wasm32"))]
     Check,
-    Member(RowAction, WorkspaceMember),
+    Member(RowAction, Box<WorkspaceMember>),
 }
 
 /// A workspace's page: its members grouped as its manifest says, with
@@ -2585,7 +2585,7 @@ fn workspace_ui(ui: &mut Ui, state: &mut ProjectHubState) {
             RecentView::List => {
                 for (member, row) in members.iter().zip(&rows) {
                     if let Some(action) = recent_row(ui, row, !busy) {
-                        chosen = Some(PageAction::Member(action, (*member).clone()));
+                        chosen = Some(PageAction::Member(action, Box::new((*member).clone())));
                     }
                     ui.add_space(8.0);
                 }
@@ -2614,7 +2614,8 @@ fn workspace_ui(ui: &mut Ui, state: &mut ProjectHubState) {
                             });
                             if let Some(action) = recent_card(ui, row, cover.as_ref(), card, !busy)
                             {
-                                chosen = Some(PageAction::Member(action, (**member).clone()));
+                                chosen =
+                                    Some(PageAction::Member(action, Box::new((**member).clone())));
                             }
                         }
                     });

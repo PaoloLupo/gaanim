@@ -282,6 +282,8 @@ pub struct Location {
 }
 
 /// A folder `gaanim` can open: a project, or a workspace without one.
+// One at a time, briefly: boxing the project would only add indirection.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum ProjectFolder {
     Project(ResolvedProject),
