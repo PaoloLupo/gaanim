@@ -24,9 +24,12 @@ use vello::{AaConfig, RenderParams, Scene};
 use crate::post_process::{
     CanvasPostProcess, GpuPostProcess, PostProcessRequest, PostProcessShader,
 };
+use crate::vello_target::{MAX_BINS, bins};
 
 /// Largest side, in pixels, of an effect's texture.
 pub const MAX_EFFECT_TEXTURE: u32 = 4096;
+
+const _: () = assert!(bins(MAX_EFFECT_TEXTURE, MAX_EFFECT_TEXTURE) <= MAX_BINS);
 
 /// Component: draw this drawable and its descendants through `post`'s
 /// passes. `margin` (scene units) widens the texture around them for
@@ -902,11 +905,20 @@ impl ObjectEffects {
     }
 }
 
-/// Largest side of the atlas that batches of layers are drawn into.
-const MAX_ATLAS_SIDE: u32 = 8192;
+/// Largest side of the atlas that batches of layers are drawn into: Vello
+/// renders the whole atlas, so it must stay within the bins one render
+/// covers (see [`crate::vello_target`]).
+const MAX_ATLAS_SIDE: u32 = 4096;
 /// The atlas grows in steps of this many pixels, so that batches of
 /// slightly different sizes reuse it.
 const ATLAS_STEP: u32 = 512;
+
+const _: () = assert!(
+    bins(
+        MAX_ATLAS_SIDE.div_ceil(ATLAS_STEP) * ATLAS_STEP,
+        MAX_ATLAS_SIDE.div_ceil(ATLAS_STEP) * ATLAS_STEP
+    ) <= MAX_BINS
+);
 
 /// Consecutive layers drawn with one Vello render, and where each one sits
 /// in the atlas.
@@ -971,15 +983,20 @@ struct Atlas {
 }
 
 impl Atlas {
-    fn new(device: &wgpu::Device, (width, height): (u32, u32)) -> Self {
-        let step = |length: u32| length.max(1).div_ceil(ATLAS_STEP) * ATLAS_STEP;
-        let size = (step(width), step(height));
+    fn new(device: &wgpu::Device, extent: (u32, u32)) -> Self {
+        let size = Self::size_for(extent);
         let texture = effect_texture(device, size.0, size.1);
         Self {
             view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
             texture,
             size,
         }
+    }
+
+    /// The size of an atlas for a batch covering `extent`.
+    fn size_for((width, height): (u32, u32)) -> (u32, u32) {
+        let step = |length: u32| length.max(1).div_ceil(ATLAS_STEP) * ATLAS_STEP;
+        (step(width), step(height))
     }
 
     /// Whether `extent` fits without leaving most of the atlas unused.
@@ -1094,6 +1111,36 @@ mod tests {
         assert_eq!(next_batch(&layers, 0, 1200).end, 2, "side by side");
         let alone = next_batch(&layers, 1, 1000);
         assert_eq!((alone.end, alone.extent), (2, (600, 600)));
+    }
+
+    #[test]
+    fn batches_keep_their_atlas_within_vellos_bins() {
+        // The soft images of a title whose glyphs finish a blur and glow:
+        // 7680 by 3072 pixels in rows of 8192 lost the GPU device.
+        let sizes = [
+            (86, 102),
+            (86, 77),
+            (2048, 1788),
+            (86, 77),
+            (2048, 1788),
+            (91, 76),
+            (2048, 1618),
+            (49, 106),
+            (725, 2048),
+            (132, 76),
+            (1145, 587),
+        ];
+        let layers: Vec<_> = (0..)
+            .zip(sizes)
+            .map(|(key, (width, height))| layer(130 + key, width, height, &[]))
+            .collect();
+        let mut start = 0;
+        while start < layers.len() {
+            let batch = next_batch(&layers, start, MAX_ATLAS_SIDE);
+            let (width, height) = Atlas::size_for(batch.extent);
+            assert!(bins(width, height) <= MAX_BINS, "{width}x{height}");
+            start = batch.end;
+        }
     }
 
     #[test]

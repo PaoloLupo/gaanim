@@ -11,7 +11,8 @@ use vello::wgpu::{
 
 /// Written to the probe pixels before each render. Vello writes every pixel
 /// of its target unless a stage overflowed its fixed-size buffers, in which
-/// case it writes none; probes still holding this value mark such a frame.
+/// case it writes none (of one band, in a target drawn in bands); a probe
+/// still holding this value marks such a frame.
 const PROBE_SENTINEL: [u8; 4] = [0x5a, 0xc3, 0x17, 0x01];
 /// Byte stride of the probe readback buffer (texture copy row alignment).
 const PROBE_STRIDE: u64 = 256;
@@ -329,7 +330,7 @@ impl GpuContext {
     fn render_unprocessed(&mut self, layer: &vello::Scene) -> Result<(), GpuContextError> {
         let (width, height) = (self.width, self.height);
         let device = &self.device;
-        let (_, view) = self.overlay_target.get_or_insert_with(|| {
+        let (texture, view) = self.overlay_target.get_or_insert_with(|| {
             let texture = device.create_texture(&TextureDescriptor {
                 label: Some("gaanim-export-unprocessed"),
                 size: Extent3d {
@@ -341,26 +342,31 @@ impl GpuContext {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                // Vello draws a large frame in bands copied into place.
+                usage: TextureUsages::STORAGE_BINDING
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC
+                    | TextureUsages::COPY_DST,
                 view_formats: &[],
             });
             let view = texture.create_view(&Default::default());
             (texture, view)
         });
-        self.renderer
-            .render_to_texture(
-                &self.device,
-                &self.queue,
-                layer,
-                view,
-                &vello::RenderParams {
-                    base_color: vello::peniko::Color::TRANSPARENT,
-                    width,
-                    height,
-                    antialiasing_method: EXPORT_ANTIALIASING,
-                },
-            )
-            .map_err(|e| GpuContextError::Render(e.to_string()))?;
+        gaanim_renderer::vello_target::render_to_texture(
+            &mut self.renderer,
+            &self.device,
+            &self.queue,
+            layer,
+            texture,
+            view,
+            &vello::RenderParams {
+                base_color: vello::peniko::Color::TRANSPARENT,
+                width,
+                height,
+                antialiasing_method: EXPORT_ANTIALIASING,
+            },
+        )
+        .map_err(|e| GpuContextError::Render(e.to_string()))?;
         self.check_error()
     }
 
@@ -390,31 +396,35 @@ impl GpuContext {
                     sample_count: 1,
                     dimension: TextureDimension::D2,
                     format: TextureFormat::Rgba8Unorm,
-                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                    usage: TextureUsages::STORAGE_BINDING
+                        | TextureUsages::TEXTURE_BINDING
+                        | TextureUsages::COPY_SRC
+                        | TextureUsages::COPY_DST,
                     view_formats: &[],
                 });
                 let view = texture.create_view(&Default::default());
                 (texture, view)
             })
         });
-        for ((_, view), (scene, base)) in targets.iter().zip([
+        for ((texture, view), (scene, base)) in targets.iter().zip([
             (&layers.incoming, base_color),
             (&layers.above, vello::peniko::Color::TRANSPARENT),
         ]) {
-            self.renderer
-                .render_to_texture(
-                    &self.device,
-                    &self.queue,
-                    scene,
-                    view,
-                    &vello::RenderParams {
-                        base_color: base,
-                        width,
-                        height,
-                        antialiasing_method: EXPORT_ANTIALIASING,
-                    },
-                )
-                .map_err(|e| GpuContextError::Render(e.to_string()))?;
+            gaanim_renderer::vello_target::render_to_texture(
+                &mut self.renderer,
+                &self.device,
+                &self.queue,
+                scene,
+                texture,
+                view,
+                &vello::RenderParams {
+                    base_color: base,
+                    width,
+                    height,
+                    antialiasing_method: EXPORT_ANTIALIASING,
+                },
+            )
+            .map_err(|e| GpuContextError::Render(e.to_string()))?;
         }
         self.check_error()
     }
@@ -689,20 +699,21 @@ impl GpuContext {
                 )
                 .map_err(|e| GpuContextError::Render(e.to_string()))?;
         }
-        self.renderer
-            .render_to_texture(
-                &self.device,
-                &self.queue,
-                scene,
-                &self.texture_view,
-                &vello::RenderParams {
-                    base_color,
-                    width: self.width,
-                    height: self.height,
-                    antialiasing_method: EXPORT_ANTIALIASING,
-                },
-            )
-            .map_err(|e| GpuContextError::Render(e.to_string()))?;
+        gaanim_renderer::vello_target::render_to_texture(
+            &mut self.renderer,
+            &self.device,
+            &self.queue,
+            scene,
+            &self.texture,
+            &self.texture_view,
+            &vello::RenderParams {
+                base_color,
+                width: self.width,
+                height: self.height,
+                antialiasing_method: EXPORT_ANTIALIASING,
+            },
+        )
+        .map_err(|e| GpuContextError::Render(e.to_string()))?;
         self.check_error()?;
         if let Some(layers) = layers {
             self.render_transition_layers(layers, base_color)?;
@@ -823,7 +834,8 @@ impl GpuContext {
             let probes = self.probe.slice(..).get_mapped_range();
             probes
                 .chunks(PROBE_STRIDE as usize)
-                .all(|probe| probe[..4] == PROBE_SENTINEL)
+                // A frame drawn in bands may skip only some of them.
+                .any(|probe| probe[..4] == PROBE_SENTINEL)
         };
         self.probe.unmap();
         Ok(!skipped)

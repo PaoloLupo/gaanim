@@ -471,7 +471,8 @@ impl CanvasOverflow {
                     .slice(..)
                     .get_mapped_range()
                     .chunks(PROBE_STRIDE as usize)
-                    .all(|probe| probe[..4] == PROBE_SENTINEL);
+                    // A frame drawn in bands may skip only some of them.
+                    .any(|probe| probe[..4] == PROBE_SENTINEL);
                 buffer.unmap();
                 skipped
             }),
@@ -855,7 +856,7 @@ fn render_canvas(
     let unprocessed = unprocessed.and_then(|layer| layer.0.clone());
     let overlay_view = overlay_target
         .as_deref()
-        .and_then(|target| target.view())
+        .and_then(|target| target.target())
         .filter(|_| post.as_ref().is_some_and(|post| post.is_active()))
         .cloned();
     let volatile = post.is_some_and(|post| post.is_active())
@@ -922,10 +923,12 @@ fn render_canvas(
     {
         error!("Vello failed to render a shader effect: {error}");
     }
-    match renderer.render_to_texture(
+    match crate::vello_target::render_to_texture(
+        &mut renderer,
         device.wgpu_device(),
         &queue,
         &frame,
+        &target.texture,
         &target.texture_view,
         &RenderParams {
             base_color: vello::peniko::Color::TRANSPARENT,
@@ -949,16 +952,18 @@ fn render_canvas(
     let layers = extracted.transition.as_ref().zip(placement).zip(
         transition_targets
             .as_deref()
-            .and_then(|targets| targets.views()),
+            .and_then(|targets| targets.targets()),
     );
-    if let Some((((incoming, above), affine), (incoming_view, above_view))) = layers {
-        for (scene, view) in [(incoming, incoming_view), (above, above_view)] {
+    if let Some((((incoming, above), affine), [incoming_target, above_target])) = layers {
+        for (scene, (texture, view)) in [(incoming, incoming_target), (above, above_target)] {
             let mut placed = Scene::new();
             placed.append(scene, Some(affine));
-            if let Err(error) = renderer.render_to_texture(
+            if let Err(error) = crate::vello_target::render_to_texture(
+                &mut renderer,
                 device.wgpu_device(),
                 &queue,
                 &placed,
+                texture,
                 view,
                 &RenderParams {
                     base_color: vello::peniko::Color::TRANSPARENT,
@@ -971,14 +976,17 @@ fn render_canvas(
             }
         }
     }
-    if let (Some(view), Some(unprocessed), Some(affine)) = (&overlay_view, &unprocessed, placement)
+    if let (Some((texture, view)), Some(unprocessed), Some(affine)) =
+        (&overlay_view, &unprocessed, placement)
     {
         let mut placed = Scene::new();
         placed.append(unprocessed, Some(affine));
-        if let Err(error) = renderer.render_to_texture(
+        if let Err(error) = crate::vello_target::render_to_texture(
+            &mut renderer,
             device.wgpu_device(),
             &queue,
             &placed,
+            texture,
             view,
             &RenderParams {
                 base_color: vello::peniko::Color::TRANSPARENT,
