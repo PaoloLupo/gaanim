@@ -268,7 +268,10 @@ vuelve a componer cada fotograma para compararlo con el resumen grabado
 
 Los errores devuelven el código `1`. `--strict` también devuelve `1` cuando
 solo hay advertencias. Si el script lanza una excepción o no termina con
-`scene.render()`, `check` lo informa y devuelve `2`.
+`scene.render()`, `check` lo informa y devuelve `2`. Si llama a
+`scene.render()` más de una vez, por ejemplo con varias `Scene` en un bucle,
+`check` y `export` usan la última escena, la misma que muestra la vista
+previa, y lo avisan.
 
 ```bash
 gaanim check mi-charla --strict

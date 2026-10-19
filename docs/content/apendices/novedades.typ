@@ -271,6 +271,15 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   animaciones, que el paquete no guarda, y el inspector muestra la cámara
   grabada.
 
+== Correcciones
+
+- Un script que llama a `scene.render()` más de una vez ya no deja colgados
+  `gaanim check` ni `gaanim export`: usan la última escena, como la vista
+  previa, y avisan de que hubo varias.
+- Los `.pth` del entorno de Python se procesan, así que los paquetes
+  editables (`uv pip install -e`) y los miembros de un workspace de uv se
+  importan dentro de Gaanim.
+
 == Al actualizar
 
 - El 3D cambia de aspecto: bordes con MSAA en lugar del antialiasing de

@@ -163,6 +163,11 @@ La raíz del proyecto, su carpeta `src/` y la carpeta del script están en
 `sys.path`, y `__file__`, `sys.argv[0]` y `sys.path` usan rutas normales, sin
 el prefijo `\\?\` de Windows.
 
+El entorno de Python del proyecto va delante de los paquetes del propio
+Python, y sus archivos `.pth` se procesan como al arrancar Python: los paquetes
+instalados en modo editable (`uv pip install -e`, `pip install -e`) y los
+miembros de un workspace de uv se importan igual que con `python`.
+
 = Exportar
 
 Para exportar no cambias el script: se lo pides al ejecutable.
