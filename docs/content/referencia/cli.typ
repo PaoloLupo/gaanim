@@ -12,7 +12,10 @@
 El ejecutable `gaanim` abre el editor, crea proyectos y exporta escenas. Todos
 los comandos que reciben `<SCRIPT_O_PROYECTO>` aceptan la ruta de un script
 Python o la carpeta de un proyecto: en una carpeta se ejecuta el `entry` de su
-#link("/referencia/gaanim-toml/")[`gaanim.toml`].
+#link("/referencia/gaanim-toml/")[`gaanim.toml`]. La carpeta de un
+#link("/guias/proyectos/#workspaces")[workspace] sin `entry` no tiene script
+que ejecutar: `gaanim` abre el Inicio en la página del workspace y `check`
+comprueba todos sus miembros.
 
 ```bash
 gaanim                                   # abre el Inicio
@@ -204,6 +207,7 @@ gaanim --present mi-charla --listen 127.0.0.1:7801
 
 ```bash
 gaanim init <video|slides> [DIRECTORIO] [--force]
+gaanim init workspace [DIRECTORIO] [--force]
 ```
 
 Crea un proyecto ejecutable con un `main.py` mínimo: `video` genera una
@@ -229,10 +233,28 @@ paquete de autoría de Gaanim; si no lo consigue, avisa y el proyecto sigue
 siendo válido. Si algún archivo del scaffold ya existe, falla. `--force`
 reescribe solo esos archivos y no borra nada de `assets/` ni de otras carpetas.
 
+`gaanim init workspace` crea un
+#link("/guias/proyectos/#workspaces")[workspace] listo para un repositorio:
+un `gaanim.toml` con `[workspace]` comentado (`members = ["videos/*",
+"talks/*"]`), un paquete de Python compartido en `src/`, `assets/`, un primer
+miembro en `videos/intro`, `pyproject.toml`, `.python-version`, un
+`.gitignore` que deja fuera el entorno y lo que se renderiza en cualquier
+proyecto (no los recursos), `README.md` y `AGENTS.md`. Hace de la carpeta un
+repositorio de Git si no está ya dentro de uno y prepara el `.venv` de su
+raíz. Sin `DIRECTORIO` usa `gaanim-workspace`.
+
+Dentro de un workspace, `init video` o `init slides` crea
+solo `main.py`, `gaanim.toml` y `assets/`: el entorno de Python, el
+`.gitignore` y las notas son los del workspace, y lo que prepara es el `.venv`
+de su raíz. Si los `members` del workspace no incluyen la carpeta nueva, avisa,
+dice qué línea añadir y no prepara ningún entorno; hasta entonces el proyecto
+es independiente.
+
 = `gaanim check`
 
 ```bash
 gaanim check <SCRIPT_O_PROYECTO> [--strict] [--message-format json]
+gaanim check <WORKSPACE> [--members <RUTAS>] [--strict] [--message-format json]
 ```
 
 Ejecuta el script sin abrir ventana y revisa la escena resultante. Imprime la
@@ -268,11 +290,31 @@ vuelve a componer cada fotograma para compararlo con el resumen grabado
 
 Los errores devuelven el código `1`. `--strict` también devuelve `1` cuando
 solo hay advertencias. Si el script lanza una excepción o no termina con
-`scene.render()`, `check` lo informa y devuelve `2`.
+`scene.render()`, `check` lo informa y devuelve `2`. Si llama a
+`scene.render()` más de una vez, por ejemplo con varias `Scene` en un bucle,
+`check` y `export` usan la última escena, la misma que muestra la vista
+previa, y lo avisan.
 
 ```bash
 gaanim check mi-charla --strict
 ```
+
+Con la carpeta de un #link("/guias/proyectos/#workspaces")[workspace],
+`check` comprueba el `entry` de cada miembro, uno tras otro y en el orden de
+`members`, y termina con un resumen:
+
+```text
+  ✗ fail      workspace channel · 3 of 4 members passed · failed: season-1/ep2
+```
+
+`--members` elige los miembros con rutas o patrones escritos como los de
+`members`, separados por comas (`--members "season-1/*,trailer"`). Un
+patrón que no nombra ningún miembro es un error que lista los que hay. Con la
+carpeta de un workspace que también es un proyecto, `check` comprueba ese
+proyecto, y `--members`, sus miembros. Un miembro que no se puede cargar
+cuenta como fallido y la comprobación sigue con el siguiente; el código de
+salida es `1` si falla alguno. Todos los miembros se ejecutan en el mismo
+intérprete, el del entorno del primero.
 
 Con `--message-format json`, el informe sale en JSON por líneas, cada
 diagnóstico con su archivo y línea cuando los tiene (ver
@@ -332,10 +374,57 @@ cada clave una vez, del inicio de su primer segmento al final del último.
 de una línea al instante que muestra. Un paquete `.gaanim` no guarda líneas,
 así que `inspect` solo acepta scripts y proyectos.
 
+= `gaanim project` <gaanim-project>
+
+```bash
+gaanim project [RUTA] [--json]
+```
+
+Describe a qué proyecto y a qué
+#link("/guias/proyectos/#workspaces")[workspace] pertenece un archivo o una
+carpeta (sin `RUTA`, la carpeta actual), sin ejecutar Python: es lo que
+necesita un plugin de editor para abrir la vista previa del proyecto
+correcto, completar el código con el entorno correcto y listar los miembros.
+Con `--json`, escribe un objeto JSON:
+
+```json
+{
+  "path": "C:/channel/videos/intro/scenes/title.py",
+  "project": {"name": "intro", "display_name": "channel › intro", "kind": "video",
+              "root": "C:/channel/videos/intro", "manifest": "C:/channel/videos/intro/gaanim.toml",
+              "entry": "C:/channel/videos/intro/main.py", "assets_dir": "C:/channel/videos/intro/assets",
+              "output_dir": "C:/channel/videos/intro/exports", "language": null},
+  "workspace": {"name": "channel", "root": "C:/channel", "manifest": "C:/channel/gaanim.toml",
+                "cover": null, "python": ["C:/channel/src"], "assets": ["C:/channel/assets"],
+                "members": [{"path": "videos/intro", "name": "intro", "group": "videos",
+                             "root": "C:/channel/videos/intro", "kind": "video",
+                             "entry": "C:/channel/videos/intro/main.py", "error": null}]},
+  "python": {"paths": ["C:/channel/videos/intro/scenes", "C:/channel/videos/intro",
+                       "C:/channel/src", "C:/channel"],
+             "venv": "C:/channel/.venv", "interpreter": "C:/channel/.venv/Scripts/python.exe"}
+}
+```
+
+- `project` es `null` fuera de un proyecto (en la raíz de un workspace, en una
+  carpeta compartida) y `workspace`, fuera de un workspace.
+- `python.paths` son las carpetas que el script encuentra en `sys.path`, en
+  orden: las mismas que usa Gaanim al ejecutarlo. Un editor las añade a las
+  rutas de búsqueda de su analizador, como `python.analysis.extraPaths` de
+  Pyright.
+- `python.interpreter` es el Python del entorno que usa el proyecto: el suyo,
+  o el `.venv` del workspace, que comparten todos sus miembros. Es `null`
+  mientras no hay entorno; abrir el proyecto lo prepara.
+- Un miembro con un manifiesto inválido trae su `error` y `kind` y `entry`
+  nulos. Un manifiesto inválido en la ruta pedida devuelve el código `2`.
+
+Las rutas no llevan el prefijo `\\?\` de Windows. Sin `--json`, `project`
+escribe un resumen para personas.
+
 = `gaanim export`
 
 ```bash
-gaanim export <SCRIPT_O_PROYECTO> --output <ARCHIVO> [OPCIONES]
+gaanim export <SCRIPT_O_PROYECTO> [--output <ARCHIVO>] [OPCIONES]
+gaanim export <WORKSPACE> [--members <RUTAS>] [--output <PATRÓN>] [OPCIONES]
 gaanim export <PAQUETE.gaanim> --output <VÍDEO_O_PDF> [OPCIONES]
 ```
 
@@ -373,7 +462,7 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   columns: (auto, auto, 1fr),
   inset: 7pt,
   [*Opción*], [*Predeterminado*], [*Efecto*],
-  [`-o`, `--output <ARCHIVO>`], [obligatorio], [Archivo de salida; su extensión elige el formato.],
+  [`-o`, `--output <ARCHIVO>`], [en un proyecto, `<output_dir>/<nombre>.mp4`], [Archivo de salida; su extensión elige el formato. Puede llevar marcadores que exportan varios archivos (ver #link(<exportar-varias>)[Varias salidas]). Fuera de un proyecto es obligatorio. El nombre por defecto es el del script, o el de su carpeta si es un `main.py`, como en el editor; con `--frame` es un `.png`.],
   [`--quality <PRESET>`], [`standard`], [`draft`: 30 fps y codificación rápida. `standard`: 60 fps y equilibrio. `production`: 60 fps y la mejor compresión, más lenta. GIF y WebP se quedan en 30 fps.],
   [`--fps <TASA>`], [la de `--quality`], [Fotogramas por segundo, de 1 a 240: un entero (`24`), una fracción (`24000/1001`) o un decimal (`23.976`). Sustituye a la tasa de la calidad.],
   [`--width <PX>`], [`1920`], [Ancho de salida en píxeles.],
@@ -385,6 +474,8 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`--to <SEGUNDOS|NOMBRE>`], [fin de la escena], [Fin del tramo exportado; un segmento lo termina en su final.],
   [`--frame <SEGUNDOS|NOMBRE>[,…]`], [—], [Escribe exactamente un PNG en cada instante, en lugar de un tramo; un segmento da su primera pausa. Necesita una salida `.png` y no se combina con `--from` ni `--to`.],
   [`--notes`], [desactivado], [Solo PDF: añade tras la última página de cada diapositiva una página con sus notas (`scene.segment(notes=...)`).],
+  [`--sections <LISTA>`], [todos], [Con `{segment}`, los segmentos que se exportan: nombres de segmentos o claves de `Section`, separados por comas, como en la vista previa.],
+  [`--members <RUTAS>`], [todos], [Con un workspace, los miembros que se exportan: rutas o patrones como los de `members`, separados por comas.],
   [`--message-format <FORMATO>`], [`human`], [`json`: mensajes y progreso con su porcentaje en JSON por líneas, sin barra (ver #link(<message-format>)[Mensajes para herramientas]).],
 )
 
@@ -465,6 +556,31 @@ gaanim export mi-charla --output exports/resultados.mp4 --from resultados --to r
 gaanim export mi-video --output frames/f_%04d.png --quality draft
 ```
 
+== Varias salidas a la vez <exportar-varias>
+
+Un marcador en `--output` exporta varios archivos en una sola orden:
+
+#table(
+  columns: (auto, 1fr),
+  inset: 7pt,
+  [*Marcador*], [*Exporta*],
+  [`{member}`], [Con la carpeta de un #link("/guias/proyectos/#workspaces")[workspace], el `entry` de cada miembro (o de los que elige `--members`), con su ruta relativa al workspace: `exports/{member}.mp4` escribe `exports/season-1/ep1.mp4`. Cada miembro se exporta en un proceso propio, con las mismas opciones.],
+  [`{segment}`], [Un archivo por segmento, con su tramo y su nombre: `exports/{segment}.mp4`. `--sections` elige cuáles; sin ella, todos los que duran algo. El script se ejecuta una sola vez. No se combina con `--from`, `--to` ni `--frame`, ni con un `.pdf` o un `.gaanim`, que guardan la escena entera.],
+  [`{name}`, `{time}`], [Con `--frame`, el nombre de cada PNG: el instante tal como se escribió (`climax`, `11.4`) y sus segundos (`11.40s`).],
+)
+
+Con un workspace y sin `--output`, cada miembro exporta a su propio
+`output_dir`; con `--output` y más de un miembro, `--output` tiene que llevar
+`{member}`. Un miembro que falla no detiene a los demás: al final, un resumen
+dice cuántos se exportaron y el código de salida es `1` si falló alguno.
+
+```bash
+gaanim export channel --quality production             # cada miembro, a su output_dir
+gaanim export channel --members "season-1/*" -o renders/{member}.mp4
+gaanim export mi-charla -o clips/{segment}.mp4 --sections intro,resultados
+gaanim export mi-video -o fotos/{name}.png --frame 3,climax
+```
+
 == Fotogramas sueltos
 
 Para revisar la composición en un instante, `--frame` escribe exactamente un
@@ -476,8 +592,9 @@ su primera página en el #link(<diapositivas-pdf>)[PDF], o su final si no tiene
 pausas; una pausa, el instante en que descansa, el mismo que captura
 `--diff --capture-stops`. Con un solo instante escribe el archivo de
 `--output`; con varios añade su posición al nombre (`fotos/f.png` escribe
-`f_1.png`, `f_2.png`…). Respeta `--width`, `--height`, `--fit` y
-`--transparent`.
+`f_1.png`, `f_2.png`…), salvo que el nombre lleve `{name}` o `{time}`
+(`fotos/{name}.png` escribe `fotos/climax.png`). Respeta `--width`,
+`--height`, `--fit` y `--transparent`.
 
 ```bash
 gaanim export mi-video --output revision.png --frame 11.4
@@ -676,6 +793,11 @@ Cada objeto tiene un `type`:
 - `check`: el veredicto de `check`, con `result` (`pass` o `fail`), `errors`,
   `warnings`, `segments`, `stops`, `duration`, `width` y `height`. El código de
   salida es el de siempre.
+- `workspace`: tras los `check` de los miembros de un workspace, su resumen,
+  con `name`, `members`, `passed` y `failed`. En un workspace, cada `check`
+  lleva también el `member` al que se refiere, y un miembro que no se pudo
+  cargar da un `check` con `member` y `result` `error`. `export` de un
+  workspace termina con el mismo resumen.
 - `progress`: el avance de una exportación, con `current`, `total` y `percent`,
   una vez por cada punto porcentual. La barra de progreso no se dibuja.
 - `reload`: en la vista previa, `phase` `start` cuando un cambio vuelve a

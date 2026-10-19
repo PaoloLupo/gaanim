@@ -492,9 +492,15 @@ pub fn hint(message: impl Display) {
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
-/// Formats a `Key:  value` line aligned under the messages of status lines.
+/// Formats a `Key:  value` line aligned under the messages of status lines;
+/// an empty key continues the line above.
 pub fn format_detail(key: &str, value: &str, color: bool) -> String {
-    let key = paint(&format!("{:<12}", format!("{key}:")), DIM, color);
+    let label = if key.is_empty() {
+        String::new()
+    } else {
+        format!("{key}:")
+    };
+    let key = paint(&format!("{label:<12}"), DIM, color);
     format!("{:MESSAGE_COLUMN$}{key}{value}", "")
 }
 

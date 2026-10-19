@@ -11506,6 +11506,7 @@ impl SceneModel {
                 source,
                 page_width,
                 scene_units,
+                files,
             } => {
                 // A document's text takes the body role's color, as the
                 // theme's text does.
@@ -11534,7 +11535,7 @@ impl SceneModel {
                 } else {
                     body.size / TYPST_DEFAULT_TEXT_PT
                 };
-                let mr = builder.scaled_typst(
+                let mr = builder.scaled_typst_with_files(
                     &source,
                     false,
                     Some(&body.font_family),
@@ -11542,6 +11543,7 @@ impl SceneModel {
                     None,
                     None,
                     scale,
+                    files,
                 );
                 // Typst strokes tables, rules and shapes black unless told
                 // otherwise: those strokes take the body color, as the

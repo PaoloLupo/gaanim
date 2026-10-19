@@ -421,8 +421,7 @@ pub fn capture_script_snapshots(
 /// snapshot environment switches are removed so validation can never start a
 /// render job as a side effect.
 pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::SceneModel, String> {
-    let (sender, receiver) = crossbeam_channel::bounded::<ReloadPayload>(1);
-    host::set_host_sender(Some(sender));
+    let receiver = submissions();
 
     let result = Python::attach(|py| -> PyResult<()> {
         bootstrap_gaanim_package(py)?;
@@ -436,10 +435,44 @@ pub fn load_script_canvas(script_path: &Path) -> Result<gaanim_api::canvas::Scen
     result.map_err(|error| {
         Python::attach(|py| without_runner_frames(&format_py_traceback(py, &error)))
     })?;
+    last_submitted_scene(&receiver)
+}
+
+/// A host channel that keeps every scene a script submits until the script
+/// ends: they are read only then, so a second `scene.render()` must not wait
+/// for the first to be taken.
+fn submissions() -> Receiver<ReloadPayload> {
+    let (sender, receiver) = crossbeam_channel::unbounded::<ReloadPayload>();
+    host::set_host_sender(Some(sender));
     receiver
+}
+
+/// The scene a script that ended submitted: the last, as the preview shows,
+/// when `scene.render()` ran more than once, with a warning that the others
+/// are not used.
+fn last_submitted_scene(
+    receiver: &Receiver<ReloadPayload>,
+) -> Result<gaanim_api::canvas::SceneModel, String> {
+    let mut last = receiver
         .recv_timeout(std::time::Duration::from_secs(2))
-        .map(|payload| payload.canvas)
-        .map_err(|_| "script did not submit a scene; finish it with `scene.render()`".to_string())
+        .map_err(|_| {
+            "script did not submit a scene; finish it with `scene.render()`".to_string()
+        })?;
+    let mut count = 1;
+    for payload in receiver.try_iter() {
+        last = payload;
+        count += 1;
+    }
+    if count > 1 {
+        gaanim_core::console::warn(
+            "render",
+            format!(
+                "scene.render() ran {count} times; only the last scene is used, as the \
+                 preview shows it"
+            ),
+        );
+    }
+    Ok(last.canvas)
 }
 
 /// Run a Python API-contract validator against the builtin PyO3 module.
@@ -505,22 +538,25 @@ fn flush_python_output(py: Python<'_>) {
 }
 
 fn prepare_script_execution(py: Python<'_>, path: &Path) -> PyResult<()> {
-    let root = gaanim_project::find_project_for_script(path)
-        .map(|project| project.root)
-        .or_else(|| path.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| path.to_path_buf());
-    evict_project_modules(py, &root)?;
+    // An invalid manifest was reported when the script was opened.
+    let location = gaanim_project::locate_script(path).unwrap_or_default();
+    let script_folder = path.parent().unwrap_or(path).to_path_buf();
+    let root = location
+        .project
+        .as_ref()
+        .map(|project| project.root.clone())
+        .unwrap_or_else(|| script_folder.clone());
+    // A workspace's shared modules reload with the project's.
+    let workspace = location.workspace.as_ref();
+    evict_project_modules(py, workspace.map_or(&root, |workspace| &workspace.root))?;
 
-    let mut import_paths = Vec::new();
-    let source_root = root.join("src");
-    if source_root.is_dir() {
-        import_paths.push(source_root);
-    }
-    if let Some(parent) = path.parent() {
-        import_paths.push(parent.to_path_buf());
-    }
-    import_paths.push(root);
-    import_paths.dedup();
+    // The project's own folders come first, so its names win; editors read
+    // the same list from `gaanim project --json`.
+    let import_paths: Vec<PathBuf> = location
+        .python_paths(&script_folder)
+        .iter()
+        .map(|import_path| python_path(import_path))
+        .collect();
 
     let sys_path = py.import("sys")?.getattr("path")?;
     for import_path in import_paths.iter().rev() {
@@ -747,6 +783,134 @@ mod tests {
 
         Python::attach(|py| run_script_file(py, &entry)).unwrap();
         assert_eq!(std::fs::read_to_string(output).unwrap(), "from-src");
+    }
+
+    #[test]
+    fn a_workspace_member_imports_and_reloads_the_shared_python_folders() {
+        let _python = python_lock();
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        std::fs::write(
+            root.join("gaanim.toml"),
+            "[workspace]\nmembers = [\"shows/*\"]\n\n[workspace.shared]\npython = [\"common\"]\n",
+        )
+        .unwrap();
+        let common = root.join("common/workspace_case");
+        std::fs::create_dir_all(&common).unwrap();
+        std::fs::write(common.join("__init__.py"), "VALUE = 'first'\n").unwrap();
+        let member = root.join("shows/pilot");
+        std::fs::create_dir_all(member.join("src")).unwrap();
+        write_project_manifest(&member);
+        let output = member.join("result.txt");
+        let entry = member.join("main.py");
+        std::fs::write(
+            &entry,
+            format!(
+                "import sys\nfrom pathlib import Path\nimport workspace_case\n\
+                 Path({output:?}).write_text('\\n'.join([workspace_case.VALUE, \
+                 workspace_case.__file__, *sys.path[:5]]))\n"
+            ),
+        )
+        .unwrap();
+        let run = || {
+            Python::attach(|py| run_script_file(py, &entry)).unwrap();
+            std::fs::read_to_string(&output).unwrap()
+        };
+
+        let first = run();
+        let lines: Vec<&str> = first.lines().collect();
+        assert_eq!(lines[0], "first");
+        // Every path Python sees is a plain one, without `\\?\`.
+        assert!(
+            lines.iter().all(|line| !line.starts_with(r"\\?\")),
+            "{first}"
+        );
+        let plain = |path: &Path| python_path(path).to_string_lossy().into_owned();
+        assert_eq!(
+            lines[2..7],
+            [
+                plain(&member.join("src")),
+                plain(&member),
+                plain(&root.join("common")),
+                plain(&root),
+                lines[6].to_owned(),
+            ]
+        );
+        assert!(
+            lines[1].starts_with(&plain(&root.join("common"))),
+            "{first}"
+        );
+
+        std::fs::write(common.join("__init__.py"), "VALUE = 'second-value'\n").unwrap();
+        assert_eq!(run().lines().next(), Some("second-value"));
+    }
+
+    #[test]
+    fn a_script_that_renders_twice_hands_over_its_last_scene() {
+        let _python = python_lock();
+        let scene = |design_resolution: f64| {
+            let mut scene = gaanim_api::canvas::SceneModel::new(320, 180);
+            scene.design_resolution = design_resolution;
+            scene
+        };
+        let receiver = submissions();
+        assert!(host::send_to_host(scene(720.0)));
+        // A second submission used to wait forever for the first to be read.
+        assert!(host::send_to_host(scene(1080.0)));
+        host::set_host_sender(None);
+        assert_eq!(
+            last_submitted_scene(&receiver).unwrap().design_resolution,
+            1080.0
+        );
+
+        let receiver = submissions();
+        host::set_host_sender(None);
+        assert!(
+            last_submitted_scene(&receiver)
+                .unwrap_err()
+                .contains("scene.render()")
+        );
+    }
+
+    #[test]
+    fn a_venv_path_file_makes_its_packages_importable() {
+        let _python = python_lock();
+        Python::initialize();
+        let temp = tempfile::tempdir().unwrap();
+        let site = temp.path().join("venv").join("Lib").join("site-packages");
+        let source = temp.path().join("editable").join("src");
+        std::fs::create_dir_all(&site).unwrap();
+        std::fs::create_dir_all(source.join("pth_editable_case")).unwrap();
+        std::fs::write(
+            source.join("pth_editable_case").join("__init__.py"),
+            "VALUE = 'editable'\n",
+        )
+        .unwrap();
+        // An editable install, or a uv workspace member, is a `.pth` line.
+        std::fs::write(
+            site.join("_pth_editable_case.pth"),
+            format!("{}\n", source.display()),
+        )
+        .unwrap();
+
+        crate::python_home::inject_venv_site_packages(&temp.path().join("venv"));
+        Python::attach(|py| {
+            let value: String = py
+                .import("pth_editable_case")
+                .and_then(|module| module.getattr("VALUE"))
+                .and_then(|value| value.extract())
+                .unwrap();
+            assert_eq!(value, "editable");
+            // The environment still comes before the runtime's own packages.
+            let first: String = py
+                .import("sys")
+                .and_then(|sys| sys.getattr("path"))
+                .and_then(|path| path.get_item(0))
+                .and_then(|entry| entry.extract())
+                .unwrap();
+            assert_eq!(first, site.to_string_lossy());
+        });
     }
 
     #[test]

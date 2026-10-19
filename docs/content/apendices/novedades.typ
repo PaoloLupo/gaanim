@@ -271,6 +271,60 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   animaciones, que el paquete no guarda, y el inspector muestra la cámara
   grabada.
 
+== Proyectos
+
+- Un #link("/guias/proyectos/#workspaces")[workspace] reúne varios proyectos
+  en un repositorio: un `gaanim.toml` con `[workspace]` dice dónde están sus
+  miembros (`members`, a cualquier profundidad, con `*` y grupos) y qué
+  carpetas comparten (`[workspace.shared]`, con `python` y `assets`). Cada
+  miembro ve el código compartido en `sys.path`, encuentra los recursos
+  compartidos, se recarga al guardarlos y usa el `.venv` del workspace.
+- `gaanim init workspace` crea un workspace listo para un repositorio de
+  Git: el manifiesto comentado, `src/` y `assets/` compartidos, un primer
+  miembro, el entorno de Python, `.gitignore`, `README.md` y `AGENTS.md`. En
+  el Inicio, *New workspace* hace lo mismo.
+- `gaanim export` exporta varios archivos con marcadores en `--output`:
+  `{member}` cada miembro de un workspace (`--members` elige cuáles),
+  `{segment}` cada segmento (`--sections` elige cuáles), y `{name}` y
+  `{time}` nombran los PNG de `--frame`. En un proyecto, `--output` es
+  opcional: se escribe en su `output_dir`.
+- El nombre por defecto de una exportación de un `main.py` es el de su
+  carpeta, así que los episodios de un repositorio no proponen todos el mismo.
+- Un documento de `scene.text.typst` puede importar e incluir otros `.typ`
+  y leer datos (`read`, `json`, `csv`…) del proyecto: de la carpeta del
+  documento, de la de recursos de la escena y de las compartidas del
+  workspace, sin salir de ellas. Guardar uno de esos archivos recarga la
+  vista previa. Las imágenes de `image(...)` todavía no se dibujan.
+- `gaanim project <ruta> --json` describe, sin ejecutar Python, a qué
+  proyecto y workspace pertenece un archivo: su `entry`, los miembros, las
+  carpetas de `sys.path` y el intérprete del entorno, para que los plugins de
+  editores configuren la vista previa y el autocompletado.
+- `gaanim check <workspace>` comprueba todos los miembros y resume, y
+  `--members` elige algunos por ruta o patrón. `gaanim init` dentro de un
+  workspace crea solo los archivos del miembro.
+- Abrir la carpeta de un workspace (o `gaanim <workspace>`) muestra en el
+  Inicio su página: sus miembros agrupados como dice el manifiesto, *New
+  video* y *New presentation* para crear uno, y *Check all*, que comprueba
+  cada miembro y anota el resultado en su tarjeta.
+- Los recientes muestran el workspace como una entrada propia y cada miembro
+  con su workspace delante (`channel › ep1`), como el título de la ventana. La
+  portada del workspace es la imagen de `cover` o un `cover.png` en su raíz,
+  y sin ellas, un mosaico con las de sus miembros. La
+  paleta de comandos lista los demás miembros del abierto y *Back to
+  channel* vuelve a la página del workspace.
+
+== Correcciones
+
+- Un script que llama a `scene.render()` más de una vez ya no deja colgados
+  `gaanim check` ni `gaanim export`: usan la última escena, como la vista
+  previa, y avisan de que hubo varias.
+- Los `.pth` del entorno de Python se procesan, así que los paquetes
+  editables (`uv pip install -e`) y los miembros de un workspace de uv se
+  importan dentro de Gaanim.
+- En Windows, la raíz del proyecto y su `src/` entran en `sys.path` sin el
+  prefijo `\\?\`, y el `__file__` de los módulos que se importan de ahí
+  también.
+
 == Al actualizar
 
 - El 3D cambia de aspecto: bordes con MSAA en lugar del antialiasing de
@@ -310,6 +364,14 @@ flechas, tubos y texto en un plano. Lee «Al actualizar».
   su primera muestra desde el segundo 0: hasta su cursor, el canal muestra la
   pose declarada o lo que lo anime antes. Si contabas con ese valor previo,
   declara la serie antes o ajusta la pose.
+- Al abrir un script, un `gaanim.toml` inválido en su carpeta o en una
+  superior ya no se salta en silencio: detiene `gaanim`, `check` y `export`
+  con un error que lo nombra. Un manifiesto sin `kind`, `entry` ni
+  `[workspace]`, que solo fija `assets_dir` para `load_project`, se sigue
+  saltando.
+- En un workspace, `scene.assets.load_project()` sin argumento, llamado desde
+  un módulo compartido, carga el proyecto del script que se ejecuta en lugar
+  del `gaanim.toml` del workspace.
 
 = 0.14.0
 

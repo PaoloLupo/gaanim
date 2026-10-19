@@ -287,8 +287,9 @@ fn items(recents: &[RecentEntry], bundle: bool) -> Vec<Item> {
     }));
     items.extend(recents.iter().map(|entry| {
         let (name, kind) = match entry {
-            RecentEntry::Project(project) => (project.manifest.name.clone(), "Project"),
+            RecentEntry::Project(project) => (project.display_name(), "Project"),
             RecentEntry::Bundle(bundle) => (bundle.name.clone(), "Bundle"),
+            RecentEntry::Workspace(workspace) => (workspace.name.clone(), "Workspace"),
         };
         Item {
             title: format!("Open {name}"),
@@ -303,6 +304,50 @@ fn items(recents: &[RecentEntry], bundle: bool) -> Vec<Item> {
         }
     }));
     items
+}
+
+/// With a workspace member open: the other members to switch to, in the
+/// workspace's order, in place of their recent entries, and its page in
+/// place of Home.
+fn add_workspace_items(items: &mut Vec<Item>, project_dir: &std::path::Path) {
+    let Ok(gaanim_project::Location {
+        project: Some(project),
+        workspace: Some(workspace),
+    }) = gaanim_project::locate_folder(project_dir)
+    else {
+        return;
+    };
+    if workspace.root == project.root {
+        return;
+    }
+    if let Some(home) = items.iter_mut().find(|item| item.command == Command::Home) {
+        home.title = format!("Back to {}", workspace.name);
+        home.command = Command::OpenRecent(workspace.root.clone());
+    }
+    let members: Vec<gaanim_project::WorkspaceMember> = workspace
+        .members()
+        .into_iter()
+        .filter(|member| member.root != project.root && member.project.is_ok())
+        .collect();
+    items.retain(|item| match &item.command {
+        Command::OpenRecent(path) => !members.iter().any(|member| &member.root == path),
+        _ => true,
+    });
+    items.extend(members.iter().map(|member| Item {
+        title: format!("Open {}", member.name()),
+        group: if member.group.is_empty() {
+            workspace.name.clone()
+        } else {
+            format!("{} › {}", workspace.name, member.group)
+        },
+        shortcut: None,
+        command: Command::OpenRecent(member.root.clone()),
+        time: None,
+        preview: None,
+        nested: false,
+        heading: None,
+        cue: None,
+    }));
 }
 
 /// The jump list's entries: each segment, then its stops, in timeline
@@ -435,7 +480,8 @@ impl CommandPalette {
         self.forwarded.take()
     }
 
-    fn show(&mut self) {
+    /// Open the palette; `project_dir` is the open project's folder.
+    fn show(&mut self, project_dir: Option<&std::path::Path>) {
         self.open = true;
         self.jumping = false;
         self.sheet = false;
@@ -446,6 +492,9 @@ impl CommandPalette {
             &gaanim_project::RecentProjects::load().entries(),
             self.bundle,
         );
+        if let Some(project_dir) = project_dir {
+            add_workspace_items(&mut self.items, project_dir);
+        }
     }
 
     fn show_jumps(&mut self, timeline: &Timeline) {
@@ -491,6 +540,7 @@ fn command_palette_system(
     mut thumbnails: ResMut<crate::presenter::PresenterThumbnailCache>,
     stash: Res<crate::export::StashedReplay>,
     bundle: Option<Res<crate::bundle_player::BundlePlayback>>,
+    paths: Option<Res<crate::export::ProjectPaths>>,
 ) {
     if palette_state.bundle != bundle.is_some() {
         palette_state.bundle = bundle.is_some();
@@ -520,7 +570,7 @@ fn command_palette_system(
         if state.open && !state.jumping {
             state.open = false;
         } else {
-            state.show();
+            state.show(paths.as_deref().map(|paths| paths.project_dir.as_path()));
         }
     } else if ctx.input_mut(|input| input.consume_shortcut(&jump_keys)) {
         if state.open && state.jumping {
@@ -1188,5 +1238,62 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), total, "a shortcut is listed twice");
+    }
+
+    #[test]
+    fn a_member_offers_the_other_members_and_its_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let write = |relative: &str, text: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            "gaanim.toml",
+            "name = \"canal\"\n[workspace]\nmembers = [{ path = \"shows/*\", group = \"Shows\" }, \"trailer\"]\n",
+        );
+        for member in ["shows/pilot", "shows/finale", "trailer"] {
+            write(&format!("{member}/main.py"), "");
+            write(
+                &format!("{member}/gaanim.toml"),
+                "kind = \"video\"\nentry = \"main.py\"\n",
+            );
+        }
+        let workspace = gaanim_project::resolve_workspace(root).unwrap();
+        let pilot = workspace.root.join("shows/pilot");
+        // A recent entry for a member gives way to the workspace's own item.
+        let mut listed = items(&[], false);
+        listed.push(Item {
+            title: "Open finale".into(),
+            group: "Recent project".into(),
+            shortcut: None,
+            command: Command::OpenRecent(workspace.root.join("shows/finale")),
+            time: None,
+            preview: None,
+            nested: false,
+            heading: None,
+            cue: None,
+        });
+        add_workspace_items(&mut listed, &pilot);
+        let offered: Vec<(&str, &str)> = listed
+            .iter()
+            .filter(|item| matches!(item.command, Command::OpenRecent(_)))
+            .map(|item| (item.title.as_str(), item.group.as_str()))
+            .collect();
+        assert_eq!(
+            offered,
+            [
+                ("Back to canal", "Gaanim"),
+                ("Open finale", "canal › Shows"),
+                ("Open trailer", "canal"),
+            ]
+        );
+        assert!(!listed.iter().any(|item| item.command == Command::Home));
+
+        // The workspace root itself, or a lone project, changes nothing.
+        let mut plain = items(&[], false);
+        add_workspace_items(&mut plain, temp.path());
+        assert!(plain.iter().any(|item| item.command == Command::Home));
     }
 }

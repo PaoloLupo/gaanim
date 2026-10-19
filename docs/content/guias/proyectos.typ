@@ -161,7 +161,13 @@ proyecto siguen en caché hasta reiniciar Gaanim.
 
 La raíz del proyecto, su carpeta `src/` y la carpeta del script están en
 `sys.path`, y `__file__`, `sys.argv[0]` y `sys.path` usan rutas normales, sin
-el prefijo `\\?\` de Windows.
+el prefijo `\\?\` de Windows. En un #link(<workspaces>)[workspace], también
+sus carpetas de código compartido y su raíz, cuyos módulos se recargan igual.
+
+El entorno de Python del proyecto va delante de los paquetes del propio
+Python, y sus archivos `.pth` se procesan como al arrancar Python: los paquetes
+instalados en modo editable (`uv pip install -e`, `pip install -e`) y los
+miembros de un workspace de uv se importan igual que con `python`.
 
 = Exportar
 
@@ -224,8 +230,8 @@ barra de progreso que `gaanim export` y el resultado. Al terminar aparece un
 aviso en la esquina con el archivo y un botón para abrirlo.
 
 En *File* escribes solo el nombre: la extensión la pone el formato. Al
-principio es el del proyecto (su carpeta, si el script es `main.py`, o el
-nombre del script), en la carpeta `output_dir` de `gaanim.toml`. *Change…*
+principio es el del script, o el de su carpeta si es un `main.py`, en la
+carpeta `output_dir` de `gaanim.toml`. *Change…*
 elige otra carpeta con el selector del sistema; pasa el cursor por ella para
 ver la ruta completa. Si ya existe un archivo con ese nombre, el diálogo avisa
 de que lo reemplazará y ofrece el siguiente nombre libre (`intro-2`,
@@ -241,6 +247,135 @@ Para guardar solo el fotograma que estás viendo, pulsa `Ctrl+Mayús+S`
 renderiza aparte, sin overlays ni paneles, a 1920 píxeles en el lado largo, y
 se guarda en `<output_dir>/captures/` con el nombre del script y el instante
 (`main_2.35s.png`); nunca reemplaza una captura anterior.
+
+= Varios proyectos en un repositorio <workspaces>
+
+Un canal con varios vídeos y charlas, o un curso con una presentación por
+clase, cabe en un solo repositorio como un *workspace*: cada vídeo o charla
+es un proyecto normal, con su `gaanim.toml`, y todos comparten el código
+común (helpers, componentes, una mascota), los recursos (logos, fuentes,
+música) y el entorno de Python.
+
+== Crear un workspace
+
+```bash
+gaanim init workspace channel
+```
+
+crea un workspace listo para un repositorio de Git:
+
+```text
+channel/
+  gaanim.toml          # el workspace: dónde están los proyectos y qué comparten
+  src/channel/         # paquete de Python compartido: import channel
+  assets/              # recursos compartidos
+  videos/intro/        # un primer proyecto: gaanim.toml, main.py, assets/
+  pyproject.toml       # el entorno de Python de todo el workspace
+  .gitignore           # el entorno y lo que se renderiza, no los recursos
+  README.md            # la estructura y los comandos de cada día
+  AGENTS.md            # la guía para asistentes de código
+```
+
+Su `gaanim.toml` explica cada clave en comentarios. `init` también hace de la
+carpeta un repositorio de Git, si no está ya dentro de uno, y prepara el
+`.venv` de su raíz. Desde el Inicio, *New workspace* hace lo mismo.
+
+== La estructura es tuya
+
+Los nombres que crea `init` son solo un comienzo: `members` dice dónde están
+los proyectos y `[workspace.shared]` qué carpetas se comparten, así que
+puedes mover y renombrar todo. Por ejemplo, por temporadas:
+
+```text
+channel/
+  gaanim.toml
+  common/channel/      # paquete de Python compartido
+  media/               # recursos compartidos
+  season-1/ep1/        # un proyecto: gaanim.toml, main.py, assets/
+  season-1/ep2/
+  events/2026/talk/
+```
+
+```toml
+# channel/gaanim.toml
+name = "channel"
+
+[workspace]
+members = [{ path = "season-1/*", group = "Season 1" }, "events/*/talk"]
+
+[workspace.shared]
+python = ["common"]
+assets = ["media"]
+```
+
+O plana, con los nombres por defecto, `src` para el código y `assets` para
+los recursos:
+
+```text
+course/
+  gaanim.toml          # [workspace] members = ["lesson-*"]
+  src/course/
+  assets/
+  lesson-01/
+  lesson-02/
+```
+
+Desde cualquier miembro, `import channel` encuentra el paquete compartido y
+`scene.media.svg("mascot.svg")` encuentra `media/mascot.svg` si el miembro no
+tiene uno propio con ese nombre. Al guardar un archivo de `common/` o de
+`media/`, la vista previa del miembro abierto se recarga; al guardar uno de
+otro episodio, no.
+
+```bash
+gaanim channel                               # el Inicio, con los miembros
+gaanim channel/season-1/ep1                  # abre un miembro
+gaanim check channel                         # comprueba todos los miembros
+gaanim check channel --members "season-1/*"  # solo algunos
+gaanim init video channel/season-1/ep3       # un miembro nuevo
+```
+
+- `gaanim check channel` ejecuta el `entry` de cada miembro, uno tras otro, y
+  termina con un resumen; devuelve `1` si falla alguno, así que sirve para la
+  integración continua de un canal.
+- `gaanim export channel` exporta cada miembro a su `output_dir`, y
+  `--output renders/{member}.mp4` los reúne en una carpeta con la misma
+  estructura (ver #link("/referencia/cli/#exportar-varias")[Varias salidas]).
+  `{segment}` exporta un archivo por segmento.
+- `gaanim init video` o `slides` dentro de un workspace crea solo `main.py`,
+  `gaanim.toml` y `assets/`. Si `members` no incluye la carpeta nueva, avisa y
+  dice qué línea añadir; hasta entonces es un proyecto independiente.
+- El entorno de Python es el `.venv` de la raíz del workspace, que Gaanim
+  crea la primera vez que abres un miembro si `init` no lo preparó. Un
+  miembro con su propio `.venv` usa el suyo.
+
+== En el Inicio y el editor
+
+Al abrir la carpeta del workspace, desde el Inicio o con `gaanim channel`, el
+Inicio muestra su página: los miembros agrupados como dice el manifiesto (por
+el `group` de su entrada o, sin él, por la carpeta que los contiene), con las
+mismas tarjetas y la misma búsqueda que los recientes.
+
+- *New video* y *New presentation* crean un miembro con el selector de
+  carpetas, que empieza junto al primer miembro.
+- *Check all* ejecuta `gaanim check` en cada miembro, cada uno en su propio
+  proceso, y cada tarjeta dice cómo le fue: *Passed*, los avisos o los
+  errores.
+- Un miembro con un `gaanim.toml` inválido aparece en rojo con su error, en
+  lugar de desaparecer.
+
+Los recientes muestran cada miembro con su workspace delante
+(`channel › ep1`), y el workspace también, como una entrada propia que abre
+su página. Su portada es la imagen que nombra `cover` en `[workspace]`, o un
+`cover.png` (o `.jpg`, `.webp`) en su raíz; sin ninguna, un mosaico con las
+portadas de los cuatro miembros editados más recientemente.
+
+Con un miembro abierto, la paleta de comandos (`Ctrl+Shift+P`) lista los
+demás miembros para cambiar de uno a otro sin volver al Inicio, y *Back to
+channel* vuelve a la página del workspace. El título de la ventana también
+lleva el workspace delante.
+
+La #link("/referencia/gaanim-toml/#workspace")[referencia de `[workspace]`]
+describe cada clave y qué hereda cada miembro.
 
 = Convertir un script suelto en proyecto
 

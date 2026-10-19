@@ -5,6 +5,7 @@ use gaanim_objects::prelude::MobjectBundle;
 use gaanim_scene::{FillBrush, ObjectTag, StrokeBrush, TextBaseline};
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 use typst_kit::files::{FileLoader, FileStore};
@@ -131,6 +132,8 @@ struct TypstCacheKey {
     fill_debug: String,
     stroke_debug: String,
     font_universe: FontUniverseKey,
+    /// The content of the project files the document reads.
+    files: u128,
 }
 
 /// Registered fonts identified by family and a 128-bit content hash.
@@ -277,6 +280,226 @@ pub fn clear_typst_layout_cache() {
     }
 }
 
+/// Project files a Typst document reads (`#import`, `#include`, `image`,
+/// `read` and the data loaders), in memory by their root-relative path: the
+/// document compiles from them wherever it is replayed, and their content
+/// takes part in the scene's fingerprints through `Debug`.
+#[derive(Clone, Default)]
+pub struct TypstFiles {
+    files: Arc<Vec<(FileId, Bytes)>>,
+    /// Hash of every path and its bytes.
+    digest: u128,
+}
+
+impl std::fmt::Debug for TypstFiles {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TypstFiles")
+            .field("paths", &self.paths().collect::<Vec<_>>())
+            .field("digest", &format_args!("{:032x}", self.digest))
+            .finish()
+    }
+}
+
+impl PartialEq for TypstFiles {
+    fn eq(&self, other: &Self) -> bool {
+        self.digest == other.digest
+    }
+}
+
+impl TypstFiles {
+    fn new(mut files: Vec<(FileId, Bytes)>) -> Self {
+        if files.is_empty() {
+            return Self::default();
+        }
+        files.sort_by(|a, b| {
+            a.0.vpath()
+                .get_with_slash()
+                .cmp(b.0.vpath().get_with_slash())
+        });
+        files.dedup_by(|a, b| a.0 == b.0);
+        let digest = typst::utils::hash128(
+            &files
+                .iter()
+                .map(|(id, bytes)| (id.vpath().get_with_slash(), bytes.as_slice()))
+                .collect::<Vec<_>>(),
+        );
+        Self {
+            files: Arc::new(files),
+            digest,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
+    /// The root-relative paths of the files, as Typst names them (`/x.typ`).
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        self.files.iter().map(|(id, _)| id.vpath().get_with_slash())
+    }
+}
+
+/// Where a recording world reads project files from, and what it read.
+struct DiskFiles {
+    roots: Vec<PathBuf>,
+    read: Mutex<Vec<(FileId, PathBuf, Bytes)>>,
+    /// Paths a document asked for that no root holds.
+    missing: Mutex<Vec<FileId>>,
+}
+
+impl DiskFiles {
+    /// The file `id` names in the first root that holds it. A link may not
+    /// lead out of its root.
+    fn locate(&self, id: FileId) -> Option<Result<PathBuf, FileError>> {
+        for root in &self.roots {
+            let Ok(path) = id.vpath().realize(root) else {
+                continue;
+            };
+            if !path.is_file() {
+                continue;
+            }
+            let inside = path
+                .canonicalize()
+                .ok()
+                .zip(root.canonicalize().ok())
+                .is_some_and(|(path, root)| path.starts_with(root));
+            return Some(if inside {
+                Ok(path)
+            } else {
+                Err(FileError::AccessDenied)
+            });
+        }
+        None
+    }
+
+    fn read(&self, id: FileId) -> typst::diag::FileResult<Bytes> {
+        match self.locate(id) {
+            Some(Ok(path)) => {
+                let bytes = Bytes::new(
+                    std::fs::read(&path).map_err(|error| FileError::from_io(error, &path))?,
+                );
+                self.read.lock().expect("Typst file record poisoned").push((
+                    id,
+                    path,
+                    bytes.clone(),
+                ));
+                Ok(bytes)
+            }
+            Some(Err(error)) => Err(error),
+            None => {
+                self.missing
+                    .lock()
+                    .expect("Typst file record poisoned")
+                    .push(id);
+                Err(FileError::NotFound(id.vpath().get_with_slash().into()))
+            }
+        }
+    }
+}
+
+/// What reading a document's files found, kept to answer the next reload
+/// without compiling while none of them changed.
+struct RecordedFiles {
+    files: TypstFiles,
+    read: Vec<(PathBuf, Bytes)>,
+    disk: DiskFiles,
+}
+
+impl RecordedFiles {
+    /// Whether every file read still holds the same bytes and no file the
+    /// document missed has appeared.
+    fn current(&self) -> bool {
+        self.read
+            .iter()
+            .all(|(path, bytes)| std::fs::read(path).is_ok_and(|now| now == bytes.as_slice()))
+            && self
+                .disk
+                .missing
+                .lock()
+                .expect("Typst file record poisoned")
+                .iter()
+                .all(|id| self.disk.locate(*id).is_none())
+    }
+}
+
+type RecordedFilesCache = RecentlyUsed<(String, Vec<PathBuf>), Arc<RecordedFiles>>;
+
+/// Whether `source` may read a project file; a document that names none of
+/// Typst's file loaders compiles without looking.
+fn mentions_files(source: &str) -> bool {
+    [
+        "import",
+        "include",
+        "image(",
+        "read(",
+        "json(",
+        "csv(",
+        "yaml(",
+        "toml(",
+        "xml(",
+        "cbor(",
+        "bibliography(",
+        "plugin(",
+    ]
+    .iter()
+    .any(|loader| source.contains(loader))
+}
+
+/// The project files `source` reads, looked up in `roots` in order: the
+/// first root that holds a path gives its file. A path cannot leave its
+/// root, by `..` or a link. The document compiles once to find them; while
+/// none of them changes, later calls only read them again.
+pub fn read_typst_files(source: &str, roots: &[PathBuf]) -> TypstFiles {
+    if roots.is_empty() || !mentions_files(source) {
+        return TypstFiles::default();
+    }
+    static RECORDED: OnceLock<Mutex<RecordedFilesCache>> = OnceLock::new();
+    let recorded =
+        RECORDED.get_or_init(|| Mutex::new(RecentlyUsed::new(TYPST_HIERARCHY_CACHE_ENTRIES)));
+    let key = (source.to_owned(), roots.to_vec());
+    let known = recorded
+        .lock()
+        .expect("Typst file record poisoned")
+        .get(&key);
+    if let Some(known) = known
+        && known.current()
+    {
+        return known.files.clone();
+    }
+    let (_, resources) = typst_resources_for(&FontRegistry::without_system_fonts());
+    let mut world = GaanimTypstWorld::with_resources(source, resources);
+    world.disk = Some(DiskFiles {
+        roots: roots.to_vec(),
+        read: Mutex::new(Vec::new()),
+        missing: Mutex::new(Vec::new()),
+    });
+    // Errors are the materialization's to report; what was read counts.
+    let _ = typst::compile::<PagedDocument>(&world);
+    let disk = world
+        .disk
+        .take()
+        .expect("the recording world reads from disk");
+    let read = std::mem::take(&mut *disk.read.lock().expect("Typst file record poisoned"));
+    let files = TypstFiles::new(
+        read.iter()
+            .map(|(id, _, bytes)| (*id, bytes.clone()))
+            .collect(),
+    );
+    recorded.lock().expect("Typst file record poisoned").insert(
+        key,
+        Arc::new(RecordedFiles {
+            files: files.clone(),
+            read: read
+                .into_iter()
+                .map(|(_, path, bytes)| (path, bytes))
+                .collect(),
+            disk,
+        }),
+    );
+    files
+}
+
 /// The errors Typst reports compiling `source` as markup with Gaanim's
 /// embedded fonts, empty when it compiles. Results are remembered per
 /// source, so a scene that creates the same equation again, or runs again,
@@ -391,13 +614,18 @@ pub struct GaanimTypstWorld {
     source: Source,
     resources: Arc<TypstResources>,
     main_id: FileId,
-    /// Project files kept in memory, such as the pages of an exported deck.
+    /// Project files kept in memory: a document's [`TypstFiles`], or the
+    /// pages of an exported deck.
     files: HashMap<FileId, Bytes>,
+    /// While [`read_typst_files`] records a document's files: where they
+    /// are read from.
+    disk: Option<DiskFiles>,
 }
 
 /// Resolves package files through the same cache and registry as Typst's CLI.
-/// Project-local files deliberately remain unavailable: scene markup is supplied
-/// in memory and should not gain implicit access to the host file system.
+/// Project files never come from here: a world serves a document's
+/// [`TypstFiles`] from memory, read beforehand by [`read_typst_files`] from
+/// the scene's asset folders only.
 struct UniverseFileLoader {
     #[cfg(not(target_arch = "wasm32"))]
     packages: SystemPackages,
@@ -456,7 +684,20 @@ impl GaanimTypstWorld {
             resources,
             main_id,
             files: HashMap::new(),
+            disk: None,
         }
+    }
+
+    /// The project file `id`, from memory or, while recording, from disk;
+    /// `None` for a package's file.
+    fn project_file(&self, id: FileId) -> Option<typst::diag::FileResult<Bytes>> {
+        if let Some(bytes) = self.files.get(&id) {
+            return Some(Ok(bytes.clone()));
+        }
+        if !matches!(id.root(), VirtualRoot::Project) {
+            return None;
+        }
+        self.disk.as_ref().map(|disk| disk.read(id))
     }
 }
 
@@ -475,15 +716,22 @@ impl World for GaanimTypstWorld {
 
     fn source(&self, id: FileId) -> typst::diag::FileResult<Source> {
         if id == self.main_id {
-            Ok(self.source.clone())
-        } else {
-            self.resources.shared.files.source(id)
+            return Ok(self.source.clone());
+        }
+        match self.project_file(id) {
+            Some(bytes) => {
+                let bytes = bytes?;
+                let text =
+                    std::str::from_utf8(bytes.as_slice()).map_err(|_| FileError::InvalidUtf8)?;
+                Ok(Source::new(id, text.to_owned()))
+            }
+            None => self.resources.shared.files.source(id),
         }
     }
 
     fn file(&self, id: FileId) -> typst::diag::FileResult<Bytes> {
-        match self.files.get(&id) {
-            Some(bytes) => Ok(bytes.clone()),
+        match self.project_file(id) {
+            Some(bytes) => bytes,
             None => self.resources.shared.files.file(id),
         }
     }
@@ -903,6 +1151,7 @@ fn build_typst_cache_key(
     math_size: Option<f64>,
     fill: &Option<peniko::Brush>,
     stroke: &StrokeBrush,
+    files: &TypstFiles,
 ) -> TypstCacheKey {
     TypstCacheKey {
         source: source.to_string(),
@@ -914,6 +1163,7 @@ fn build_typst_cache_key(
         fill_debug: format!("{fill:?}"),
         stroke_debug: format!("{stroke:?}"),
         font_universe,
+        files: files.digest,
     }
 }
 
@@ -932,7 +1182,16 @@ fn compile_typst_source(
 ) -> Result<CachedTypstHierarchy, Vec<String>> {
     let (_, resources) = typst_resources_for(font_registry);
     compile_typst_source_with_resources(
-        resources, source, is_math, text_font, math_font, text_size, math_size, fill, stroke,
+        resources,
+        source,
+        is_math,
+        text_font,
+        math_font,
+        text_size,
+        math_size,
+        fill,
+        stroke,
+        &TypstFiles::default(),
     )
 }
 
@@ -947,6 +1206,7 @@ fn compile_typst_source_with_resources(
     math_size: Option<f64>,
     fill: &Option<peniko::Brush>,
     stroke: &StrokeBrush,
+    files: &TypstFiles,
 ) -> Result<CachedTypstHierarchy, Vec<String>> {
     // Build optional font directives.
     // Gaanim supplies New Computer Modern for plain text by default; math uses
@@ -982,7 +1242,8 @@ fn compile_typst_source_with_resources(
         format!("{}{}", directives, source)
     };
 
-    let world = GaanimTypstWorld::with_resources(&full_source, resources);
+    let mut world = GaanimTypstWorld::with_resources(&full_source, resources);
+    world.files.extend(files.files.iter().cloned());
     let result = typst::compile::<PagedDocument>(&world);
 
     for warning in &result.warnings {
@@ -1077,6 +1338,7 @@ fn cached_typst_hierarchy(
     math_size: Option<f64>,
     fill: &Option<peniko::Brush>,
     stroke: &StrokeBrush,
+    files: &TypstFiles,
 ) -> Result<Arc<CachedTypstHierarchy>, Vec<String>> {
     let (font_universe, resources) = typst_resources_for(font_registry);
     let cache_key = build_typst_cache_key(
@@ -1089,6 +1351,7 @@ fn cached_typst_hierarchy(
         math_size,
         fill,
         stroke,
+        files,
     );
     if let Some(cached) = typst_hierarchy_cache()
         .lock()
@@ -1098,7 +1361,7 @@ fn cached_typst_hierarchy(
         return Ok(cached);
     }
     let compiled = Arc::new(compile_typst_source_with_resources(
-        resources, source, is_math, text_font, math_font, text_size, math_size, fill, stroke,
+        resources, source, is_math, text_font, math_font, text_size, math_size, fill, stroke, files,
     )?);
     typst_hierarchy_cache()
         .lock()
@@ -1163,6 +1426,7 @@ pub fn measure_typst(
         math_size,
         &fill,
         &stroke,
+        &TypstFiles::default(),
     )
     .map(|cached| cached.parent_bounds)
 }
@@ -1191,6 +1455,7 @@ pub fn measure_typst_lines(
         math_size,
         &fill,
         &stroke,
+        &TypstFiles::default(),
     )
     .map(|cached| (cached.parent_bounds, cached.metrics))
 }
@@ -1306,6 +1571,7 @@ fn cached_plain_typst_text(
         None,
         &None,
         &StrokeBrush::transparent(),
+        &TypstFiles::default(),
     )
 }
 
@@ -1387,11 +1653,12 @@ pub fn compile_typst_to_hierarchy(
         next_id_fn,
         child_spans,
         1.0,
+        &TypstFiles::default(),
     )
 }
 
 /// Like [`compile_typst_to_hierarchy`], with the compiled geometry scaled by
-/// `scale` scene units per Typst point.
+/// `scale` scene units per Typst point and the project `files` it reads.
 #[allow(clippy::too_many_arguments)]
 pub fn compile_scaled_typst_to_hierarchy(
     commands: &mut Commands,
@@ -1408,6 +1675,7 @@ pub fn compile_scaled_typst_to_hierarchy(
     next_id_fn: impl FnMut() -> ObjectId,
     child_spans: &mut Vec<HierarchyChild>,
     scale: f64,
+    files: &TypstFiles,
 ) -> (Entity, Bounds3D, TextMetrics) {
     let cached = match cached_typst_hierarchy(
         font_registry,
@@ -1419,6 +1687,7 @@ pub fn compile_scaled_typst_to_hierarchy(
         math_size,
         &fill,
         &stroke,
+        files,
     ) {
         Ok(cached) => cached,
         Err(errors) => {
@@ -1612,6 +1881,7 @@ mod tests {
             None,
             &None,
             &StrokeBrush::transparent(),
+            &TypstFiles::default(),
         );
         let second_hierarchy_key = build_typst_cache_key(
             second_key,
@@ -1623,6 +1893,7 @@ mod tests {
             None,
             &None,
             &StrokeBrush::transparent(),
+            &TypstFiles::default(),
         );
         assert_ne!(first_hierarchy_key, second_hierarchy_key);
     }
@@ -1870,5 +2141,106 @@ mod tests {
         // Hanging punctuation must not shrink an isolated glyph's advance.
         let period = run(".");
         assert!((run("1.1").advance - (2.0 * one.advance + period.advance)).abs() < 1e-9);
+    }
+
+    /// A fresh folder under the system temporary directory.
+    fn scratch(name: &str) -> PathBuf {
+        let folder =
+            std::env::temp_dir().join(format!("gaanim-typst-files-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    #[test]
+    fn a_document_reads_project_files_from_its_roots_in_order() {
+        let own = scratch("own");
+        let shared = scratch("shared");
+        std::fs::write(own.join("lib.typ"), "#let greet = [own]\n").unwrap();
+        std::fs::write(shared.join("lib.typ"), "#let greet = [shared]\n").unwrap();
+        std::fs::write(shared.join("style.typ"), "#let size = 12pt\n").unwrap();
+        let source = "#import \"lib.typ\": greet\n#import \"/style.typ\": size\n#greet";
+        let roots = vec![own.clone(), shared.clone()];
+
+        let files = read_typst_files(source, &roots);
+        assert_eq!(
+            files.paths().collect::<Vec<_>>(),
+            ["/lib.typ", "/style.typ"]
+        );
+        // The first root holding a path gives its file.
+        let (_, bytes) = files
+            .files
+            .iter()
+            .find(|(id, _)| id.vpath().get_with_slash() == "/lib.typ")
+            .unwrap();
+        assert_eq!(bytes.as_slice(), b"#let greet = [own]\n");
+        // It compiles from memory, without the roots.
+        let compiled = cached_typst_hierarchy(
+            &FontRegistry::without_system_fonts(),
+            source,
+            false,
+            None,
+            None,
+            None,
+            None,
+            &None,
+            &StrokeBrush::transparent(),
+            &files,
+        );
+        assert!(compiled.is_ok(), "{:?}", compiled.err());
+        assert!(
+            cached_typst_hierarchy(
+                &FontRegistry::without_system_fonts(),
+                source,
+                false,
+                None,
+                None,
+                None,
+                None,
+                &None,
+                &StrokeBrush::transparent(),
+                &TypstFiles::default(),
+            )
+            .is_err(),
+            "without its files the import fails"
+        );
+
+        // Editing a file changes the files and their digest.
+        assert_eq!(read_typst_files(source, &roots), files);
+        std::fs::write(own.join("lib.typ"), "#let greet = [edited]\n").unwrap();
+        let edited = read_typst_files(source, &roots);
+        assert_ne!(edited, files);
+        assert!(format!("{edited:?}").contains("/lib.typ"));
+        // A file the document missed counts once it exists.
+        let wants = "#image(\"logo.svg\")";
+        assert!(read_typst_files(wants, &roots).is_empty());
+        std::fs::write(
+            shared.join("logo.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"4\"/>",
+        )
+        .unwrap();
+        assert_eq!(
+            read_typst_files(wants, &roots).paths().collect::<Vec<_>>(),
+            ["/logo.svg"]
+        );
+        // Nothing to read without roots or loaders.
+        assert!(read_typst_files(source, &[]).is_empty());
+        assert!(read_typst_files("= Title", &roots).is_empty());
+
+        let _ = std::fs::remove_dir_all(own);
+        let _ = std::fs::remove_dir_all(shared);
+    }
+
+    #[test]
+    fn a_document_cannot_read_outside_its_roots() {
+        let base = scratch("outside");
+        let root = base.join("assets");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(base.join("secret.typ"), "#let leaked = 1\n").unwrap();
+        let files = read_typst_files("#import \"../secret.typ\": leaked", &[root.clone()]);
+        assert!(files.is_empty());
+        let files = read_typst_files("#import \"/../secret.typ\": leaked", &[root]);
+        assert!(files.is_empty());
+        let _ = std::fs::remove_dir_all(base);
     }
 }

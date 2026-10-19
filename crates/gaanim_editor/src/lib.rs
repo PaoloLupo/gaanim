@@ -3039,7 +3039,7 @@ fn paint_hover_card(
 /// Truncate text to `max_chars` characters, appending "…" if truncated.
 /// Name shown for a scene: `gaanim.sections` prefixes its segments with
 /// `"{key} · {visit} · {step} · "`, which is dropped for display.
-fn scene_display_name(name: &str) -> &str {
+pub(crate) fn scene_display_name(name: &str) -> &str {
     let mut parts = name.splitn(4, " · ");
     match (parts.next(), parts.next(), parts.next(), parts.next()) {
         (Some(_), Some(visit), Some(step), Some(rest))

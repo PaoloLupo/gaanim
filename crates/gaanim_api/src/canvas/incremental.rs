@@ -116,6 +116,7 @@ impl SceneModel {
             design_resolution: _,
             asset_root,
             asset_search,
+            shared_asset_roots,
             audio_tracks,
             // Positions inside `audio_tracks`, which is fingerprinted.
             transition_sounds: _,
@@ -154,6 +155,7 @@ impl SceneModel {
         global.add(margin);
         global.add(asset_root);
         global.add(asset_search);
+        global.add(shared_asset_roots);
         global.add(audio_tracks);
         global.add(tempo);
         global.add(branding);

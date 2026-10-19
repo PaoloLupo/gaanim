@@ -13,7 +13,7 @@ pub use crate::structured::{
     TextWrap, flatten_content, parse_inline_math, rendered_text,
 };
 pub use crate::typst_compiler::{
-    GaanimTypstWorld, TextMetrics, TypstTextRun, compile_scaled_typst_to_hierarchy,
+    GaanimTypstWorld, TextMetrics, TypstFiles, TypstTextRun, compile_scaled_typst_to_hierarchy,
     compile_typst_text_to_path, compile_typst_to_hierarchy, measure_typst, measure_typst_lines,
-    shape_typst_text_run,
+    read_typst_files, shape_typst_text_run,
 };

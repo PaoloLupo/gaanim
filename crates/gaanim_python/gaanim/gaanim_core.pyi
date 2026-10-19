@@ -9826,6 +9826,15 @@ class Typography:
         ``plot(style: (labels: (fill: theme.foreground, bg: none)))``.
         Strokes that continue one another, such as a curve a plotting
         package draws one sample at a time, are one piece for ``write``.
+        A document can read project files: ``#import`` and ``#include``
+        other ``.typ`` files, and data with ``read``, ``json``, ``csv``,
+        ``yaml``, ``toml``, ``xml`` or ``cbor``. A path (``"parts.typ"``,
+        ``"/palette.typ"``) is looked up in the ``.typ`` asset's folder, then
+        the scene's asset folder (without one, ``assets/`` beside the script
+        and the script's folder), then the workspace's shared asset
+        folders, and cannot leave them. They are read when the document is
+        created, so saving one reloads the preview. Images (``image(...)``)
+        are not drawn yet.
         Empty inline source raises ``ValueError`` and an unreadable asset
         raises ``RuntimeError``.
 
@@ -11353,7 +11362,11 @@ class AssetManager:
         With no path, uses the nearest ``gaanim.toml``: in the folder of the
         calling Python file or, failing that, in its parent folders (as git
         finds ``.git``), so a module inside a project package loads the
-        project's manifest.
+        project's manifest. In a workspace, with no path, it loads the project
+        of the script being run and the workspace's shared asset folders,
+        when the nearest manifest is that project's or the workspace's, so a
+        shared module that calls it does not point the scene at the
+        workspace root.
         An explicit relative path is resolved against the process working
         directory. ``assets_dir`` is resolved relative to the selected
         manifest and defaults to ``"assets"`` when the manifest omits it, as in

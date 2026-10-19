@@ -27,6 +27,7 @@ pub enum Topic {
     Export,
     Check,
     Inspect,
+    Project,
     Diff,
 }
 
@@ -68,6 +69,10 @@ const GENERAL: Page = Page {
                 (
                     "export <SCRIPT_OR_PROJECT>",
                     "Render to MP4, WebM, WebP, GIF, a PNG sequence, or a\nplayback bundle (.gaanim)",
+                ),
+                (
+                    "project [PATH] [--json]",
+                    "Describe the project and workspace a file or folder\nbelongs to: entry, members, sys.path and Python\nenvironment, for editor plugins (no Python needed)",
                 ),
                 (
                     "--diff --example <SCRIPT>",
@@ -199,7 +204,7 @@ only says whether there is one",
 };
 
 const INIT: Page = Page {
-    summary: "Create a runnable project: gaanim.toml, a minimal main.py, and a Python 3.14\nenvironment with the authoring package, so editors autocomplete the API.",
+    summary: "Create a runnable project: gaanim.toml, a minimal main.py, and a Python 3.14\nenvironment with the authoring package, so editors autocomplete the API. Or a\nworkspace: several projects in one repository that share code and assets.",
     blocks: &[
         Block::Lines("Usage", &["gaanim init <KIND> [DIRECTORY] [--force]"]),
         Block::Rows(
@@ -210,7 +215,14 @@ const INIT: Page = Page {
                     "slides",
                     "A presentation: each segment is a slide and stop() waits\nfor you to advance",
                 ),
-                ("DIRECTORY", "Where to create it (default: gaanim-<KIND>)"),
+                (
+                    "workspace",
+                    "Several projects in one repository that share code,\nassets and Python: gaanim.toml, src/, assets/, a first\nmember in videos/intro, .gitignore, README, and a Git\nrepository unless it is inside one",
+                ),
+                (
+                    "DIRECTORY",
+                    "Where to create it (default: gaanim-<KIND>). Inside a\nworkspace, only main.py, gaanim.toml and assets/: the\nPython environment is the workspace's",
+                ),
             ],
         ),
         Block::Rows(
@@ -228,6 +240,11 @@ const INIT: Page = Page {
             &[
                 ("gaanim init video", "Create ./gaanim-video"),
                 ("gaanim init slides talk", "Create a presentation in ./talk"),
+                (
+                    "gaanim init workspace channel",
+                    "Create a workspace in ./channel",
+                ),
+                ("gaanim init video channel/videos/ep1", "Add a member to it"),
             ],
         ),
     ],
@@ -240,7 +257,8 @@ const EXPORT: Page = Page {
         Block::Lines(
             "Usage",
             &[
-                "gaanim export <SCRIPT_OR_PROJECT> --output <FILE> [OPTIONS]",
+                "gaanim export <SCRIPT_OR_PROJECT> [--output <FILE>] [OPTIONS]",
+                "gaanim export <WORKSPACE> [--members <PATHS>] [--output <PATTERN>] [OPTIONS]",
                 "gaanim export <BUNDLE.gaanim> --output <VIDEO_OR_PDF> [OPTIONS]",
             ],
         ),
@@ -278,7 +296,18 @@ const EXPORT: Page = Page {
         Block::Rows(
             "Options",
             &[
-                ("-o, --output <FILE>", "Output file (required)"),
+                (
+                    "-o, --output <FILE>",
+                    "Output file. In a project it defaults to\n<output_dir>/<name>.mp4 (.png with --frame), named after\nthe script, or its folder for a main.py. Placeholders\nexport several files: {member} each member of a\nworkspace (its path), {segment} each segment, and {name}\nand {time} each --frame instant",
+                ),
+                (
+                    "--members <PATHS>",
+                    "With a workspace, export only these members: paths or\npatterns as in `members`, comma-separated. Without\n--output, each member exports to its output_dir",
+                ),
+                (
+                    "--sections <LIST>",
+                    "With {segment}, the segments to export: segment names\nor Section keys, comma-separated",
+                ),
                 (
                     "--quality <PRESET>",
                     "draft (30 fps, fast), standard (60 fps, default), or\nproduction (60 fps, best encode). GIF and WebP stay at\n30 fps",
@@ -380,6 +409,7 @@ const CHECK: Page = Page {
             "Usage",
             &[
                 "gaanim check <SCRIPT_OR_PROJECT> [--strict] [--message-format json]",
+                "gaanim check <WORKSPACE> [--members <PATHS>] [--strict]",
                 "gaanim check <BUNDLE.gaanim>",
             ],
         ),
@@ -402,6 +432,10 @@ const CHECK: Page = Page {
                     "Also fail when there are warnings (useful in CI)",
                 ),
                 (
+                    "--members <PATHS>",
+                    "In a workspace, check only these members: paths or\npatterns as in `members`, comma-separated\n(\"season-1/*,trailer\")",
+                ),
+                (
                     "--message-format <FORMAT>",
                     "human (default) or json: one JSON object per line on\nstdout, each diagnostic with its file and line",
                 ),
@@ -412,8 +446,35 @@ const CHECK: Page = Page {
             "Exit status",
             &[
                 ("0", "No errors (and, with --strict, no warnings)"),
-                ("1", "The report found problems"),
+                (
+                    "1",
+                    "The report found problems (in a workspace, in a member)",
+                ),
                 ("2", "The script or project could not be loaded"),
+            ],
+        ),
+    ],
+    footer: &[DOCS],
+};
+
+const PROJECT: Page = Page {
+    summary: "Describe the project and workspace a file or folder belongs to, without\nrunning Python: what an editor plugin needs to run, complete and check it.",
+    blocks: &[
+        Block::Lines("Usage", &["gaanim project [PATH] [--json]"]),
+        Block::Lines(
+            "Reports",
+            &[
+                "the project: name, kind, entry, assets_dir and output_dir",
+                "its workspace: shared folders and every member, with its group",
+                "the folders its scripts find on sys.path, in order",
+                "the Python environment and interpreter to complete them with",
+            ],
+        ),
+        Block::Rows(
+            "Options",
+            &[
+                ("--json", "One JSON object on stdout"),
+                ("-h, --help", "Print this help"),
             ],
         ),
     ],
@@ -530,6 +591,7 @@ fn page(topic: Topic) -> &'static Page {
         Topic::Export => &EXPORT,
         Topic::Check => &CHECK,
         Topic::Inspect => &INSPECT,
+        Topic::Project => &PROJECT,
         Topic::Diff => &DIFF,
     }
 }
@@ -627,6 +689,7 @@ pub fn title(topic: Topic) -> &'static str {
         Topic::Export => "gaanim export — render a scene to a file",
         Topic::Check => "gaanim check — validate a scene or presentation",
         Topic::Inspect => "gaanim inspect — list the timeline and its script lines",
+        Topic::Project => "gaanim project — describe a project and its workspace",
         Topic::Diff => "gaanim --diff — visual regression snapshots",
     }
 }
@@ -639,6 +702,7 @@ pub fn print(topic: Topic) {
         Topic::Export => "export · render to a file",
         Topic::Check => "check · validate a scene",
         Topic::Inspect => "inspect · list the timeline",
+        Topic::Project => "project · describe a project",
         Topic::Diff => "--diff · visual regression",
     };
     if !console::banner(subtitle) {
@@ -654,12 +718,13 @@ pub fn print(topic: Topic) {
 mod tests {
     use super::*;
 
-    const TOPICS: [Topic; 6] = [
+    const TOPICS: [Topic; 7] = [
         Topic::General,
         Topic::Init,
         Topic::Export,
         Topic::Check,
         Topic::Inspect,
+        Topic::Project,
         Topic::Diff,
     ];
 
