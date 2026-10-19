@@ -19,12 +19,7 @@ pub struct PyComposition {
     pub(crate) inner: Composition,
 }
 
-#[pyclass(
-    name = "ScheduleEntry",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "ScheduleEntry", module = "gaanim_core", frozen)]
 #[derive(Clone, Debug)]
 pub struct PyScheduleEntry {
     path: Vec<usize>,
@@ -38,7 +33,7 @@ pub struct PyScheduleEntry {
     end: Option<f64>,
 }
 
-#[pyclass(name = "Schedule", module = "gaanim_core", frozen, skip_from_py_object)]
+#[pyclass(name = "Schedule", module = "gaanim_core", frozen)]
 #[derive(Clone, Debug)]
 pub struct PySchedule {
     #[pyo3(get)]

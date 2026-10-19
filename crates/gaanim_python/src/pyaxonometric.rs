@@ -42,12 +42,7 @@ pub(crate) fn axonometric_view(
 }
 
 /// An axonometric view of a model and the drawings made with it.
-#[pyclass(
-    name = "Axonometric",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "Axonometric", module = "gaanim_core", frozen)]
 pub struct PyAxonometric {
     pub(crate) inner: Axonometric,
 }

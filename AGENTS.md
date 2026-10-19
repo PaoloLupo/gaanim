@@ -44,7 +44,7 @@ This file guides repository work; model selection belongs to the calling client.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.
   - `gaanim_text` — cosmic-text/HarfBuzz shaping, Typst math compilation.
   - `gaanim_api` — fluent Rust builder API; depends on most core crates.
-  - `gaanim_python` — PyO3 0.28 module embedded by the Python plugin plus the pure-Python authoring wheel.
+  - `gaanim_python` — PyO3 0.30 module embedded by the Python plugin plus the pure-Python authoring wheel.
   - `gaanim_project` — shared project scaffolding, manifests, recent-project state,
     and side-effect-free Python/uv environment discovery.
   - `gaanim_bundle` — the `.gaanim` playback bundle format: lossless frame
@@ -152,7 +152,7 @@ all use the application host, which owns the native runtime.
 ## Build / toolchain quirks
 
 - **Bevy 0.19** is the current ECS target. Do not import `bevy::ecs::*` directly outside `gaanim_scene` — use re-exports from `gaanim_scene` or `gaanim_core`.
-- **Vello 0.9**, **bevy_egui 0.42.0**, **PyO3 0.28**.
+- **Vello 0.9**, **bevy_egui 0.42.0**, **PyO3 0.30**.
 - All workspace crates use Rust edition **2024**.
 - `Cargo.lock` exists locally but is **gitignored** (library/workspace convention).
 - Workspace profiles: `dev` uses `opt-level = 2` for workspace crates, `opt-level = 3` for dependencies.

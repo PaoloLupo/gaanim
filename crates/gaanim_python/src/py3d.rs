@@ -7,12 +7,7 @@ use crate::color::PyColor;
 use crate::pydrawable::PyDrawable;
 use crate::pylayout::PyAnchor;
 
-#[pyclass(
-    name = "Material3D",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "Material3D", module = "gaanim_core", frozen)]
 #[derive(Clone, Copy)]
 pub struct PyMaterial3D(pub gaanim_scene::Material3D);
 copy_from_py_object!(PyMaterial3D);
@@ -128,7 +123,7 @@ impl PyMaterial3D {
     }
 }
 
-#[pyclass(name = "Primitive3D", module = "gaanim_core", extends = PyDrawable, skip_from_py_object)]
+#[pyclass(name = "Primitive3D", module = "gaanim_core", extends = PyDrawable)]
 #[derive(Clone)]
 pub struct PyPrimitive3D {
     handle: gaanim_api::canvas::DrawableHandle,

@@ -16,12 +16,7 @@ use crate::pydrawable::{
 };
 use crate::pylayout::{PyAnchor, PyDirection};
 
-#[pyclass(
-    name = "TextAnchor",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "TextAnchor", module = "gaanim_core", frozen)]
 #[derive(Clone, Copy, Debug)]
 pub struct PyTextAnchor(pub TextAnchor);
 copy_from_py_object!(PyTextAnchor);
@@ -477,12 +472,7 @@ enum QueryKind {
     Part,
 }
 
-#[pyclass(
-    name = "TextQuery",
-    module = "gaanim_core",
-    frozen,
-    skip_from_py_object
-)]
+#[pyclass(name = "TextQuery", module = "gaanim_core", frozen)]
 #[derive(Clone)]
 pub struct PyTextQuery {
     handle: gaanim_api::canvas::DrawableHandle,
@@ -641,11 +631,7 @@ pub struct PyTextSelection {
     occurrence: Option<usize>,
 }
 
-#[pyclass(
-    name = "TextSelectionAnimation",
-    module = "gaanim_core",
-    skip_from_py_object
-)]
+#[pyclass(name = "TextSelectionAnimation", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyTextSelectionAnimation {
     source: gaanim_api::canvas::FragmentSelection,
@@ -894,7 +880,7 @@ impl PyTextSelection {
     }
 }
 
-#[pyclass(name = "Text", module = "gaanim_core", extends = PyDrawable, skip_from_py_object)]
+#[pyclass(name = "Text", module = "gaanim_core", extends = PyDrawable)]
 #[derive(Clone)]
 pub struct PyText {
     pub(crate) handle: gaanim_api::canvas::DrawableHandle,

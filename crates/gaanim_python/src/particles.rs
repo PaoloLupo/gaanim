@@ -13,7 +13,7 @@ use crate::pydrawable::PyDrawable;
 type SharedScene = std::sync::Arc<std::sync::Mutex<gaanim_api::canvas::SceneModel>>;
 
 /// Where `scene.fx.particles` releases its particles.
-#[pyclass(name = "Emitter", module = "gaanim_core", frozen, skip_from_py_object)]
+#[pyclass(name = "Emitter", module = "gaanim_core", frozen)]
 #[derive(Clone, Debug)]
 pub struct PyEmitter(pub Emitter);
 

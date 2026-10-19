@@ -117,7 +117,7 @@ pub(crate) fn text_reveal(
 }
 
 /// A reusable range selector over the units of one Text.
-#[pyclass(name = "TextAnimator", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "TextAnimator", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyTextAnimator {
     inner: TextAnimator,
@@ -187,11 +187,7 @@ impl PyTextAnimator {
 }
 
 /// Animation proxy of a [`PyTextAnimator`].
-#[pyclass(
-    name = "TextAnimatorAnimation",
-    module = "gaanim_core",
-    skip_from_py_object
-)]
+#[pyclass(name = "TextAnimatorAnimation", module = "gaanim_core")]
 #[derive(Clone)]
 pub struct PyTextAnimatorAnimation {
     inner: TextAnimator,

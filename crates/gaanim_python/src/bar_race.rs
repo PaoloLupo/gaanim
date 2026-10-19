@@ -20,7 +20,7 @@ pub struct PyBarRace {
 }
 
 /// Animation proxy of a bar race: ``race.animate.play()``.
-#[pyclass(name = "BarRaceAnimation", module = "gaanim_core", skip_from_py_object)]
+#[pyclass(name = "BarRaceAnimation", module = "gaanim_core")]
 pub struct PyBarRaceAnimation {
     race: BarRace,
 }
