@@ -88,7 +88,8 @@ pub(crate) struct AuthoringProfile {
     reused: usize,
     /// Where the scene was compiled to measure, in first-call order.
     sites: Vec<(String, Compiles)>,
-    /// The slowest measurement and where it was made.
+    /// The slowest measurement that compiled or resumed the scene, and where
+    /// it was made.
     slowest: Option<(Duration, Option<String>)>,
 }
 
@@ -132,7 +133,9 @@ pub(crate) enum Measured {
 
 /// Total time of scene compiles from which measuring is worth a warning.
 const COSTLY_MEASURING: Duration = Duration::from_millis(500);
-/// A single measurement this slow is worth a warning.
+/// A single measurement this slow that compiled or resumed the scene is
+/// worth a warning. One measured on its own is not: it compiles only that
+/// declaration, as the warning advises, and the render reuses its layout.
 const SLOW_MEASUREMENT: Duration = Duration::from_millis(100);
 
 impl SharedProfile {
@@ -152,7 +155,8 @@ impl SharedProfile {
     /// Record a measurement that took `time`. Scene compiles and slow
     /// measurements name the line that made them.
     pub(crate) fn measured(&self, how: Measured, time: Duration) {
-        let site = (how == Measured::Scene || time >= SLOW_MEASUREMENT)
+        let compiled = matches!(how, Measured::Scene | Measured::Resumed);
+        let site = (how == Measured::Scene || (compiled && time >= SLOW_MEASUREMENT))
             .then(call_site)
             .flatten()
             .map(|site| site.to_string());
@@ -174,10 +178,11 @@ impl SharedProfile {
                     }
                 }
             }
-            if profile
-                .slowest
-                .as_ref()
-                .is_none_or(|(slowest, _)| time > *slowest)
+            if compiled
+                && profile
+                    .slowest
+                    .as_ref()
+                    .is_none_or(|(slowest, _)| time > *slowest)
             {
                 profile.slowest = Some((time, site));
             }
@@ -203,13 +208,22 @@ impl SharedProfile {
                     format!("{site} ({}×, {})", compiles.count, seconds(compiles.time))
                 })
                 .collect::<Vec<_>>();
+            // Never both empty: the warning comes from scene compiles or from
+            // a slow measurement of either kind.
+            let mut done = Vec::new();
+            if profile.scene.count > 0 {
+                done.push(format!("compiled the scene {}", times(profile.scene)));
+            }
+            if profile.resumed.count > 0 {
+                done.push(format!(
+                    "resumed its compilation {}",
+                    times(profile.resumed)
+                ));
+            }
             let mut warning = format!(
-                "measuring drawables compiled the scene {} time{} ({}); measure before \
-                 the first play, measure the boxes you need together, or compute them \
-                 from your data",
-                profile.scene.count,
-                if profile.scene.count == 1 { "" } else { "s" },
-                seconds(profile.scene.time),
+                "measuring drawables {}; measure before the first play, measure the \
+                 boxes you need together, or compute them from your data",
+                done.join(" and "),
             );
             if !sites.is_empty() {
                 warning.push_str(&format!(": {}", sites.join(", ")));
@@ -281,6 +295,16 @@ fn seconds(time: Duration) -> String {
     format!("{:.2}s", time.as_secs_f64())
 }
 
+/// `3 times (0.60s)`.
+fn times(compiles: Compiles) -> String {
+    let plural = if compiles.count == 1 { "" } else { "s" };
+    format!(
+        "{} time{plural} ({})",
+        compiles.count,
+        seconds(compiles.time)
+    )
+}
+
 impl SceneModel {
     /// A warning when measuring drawables while authoring this scene
     /// compiled it at a cost; see [`SceneModel::bounds_of`].
@@ -312,7 +336,17 @@ mod tests {
         let profile = SharedProfile::default();
         profile.measured(Measured::Isolated, Duration::from_millis(3));
         profile.measured(Measured::Reused, Duration::from_millis(1));
+        // Measured on its own, as the warning advises: not worth one.
+        profile.measured(Measured::Isolated, Duration::from_millis(150));
         assert_eq!(profile.measurement_warning(), None);
+
+        let resumed = SharedProfile::default();
+        resumed.measured(Measured::Resumed, Duration::from_millis(150));
+        let warning = resumed.measurement_warning().unwrap();
+        assert!(
+            warning.starts_with("measuring drawables resumed its compilation 1 time (0.15s);"),
+            "{warning}"
+        );
 
         for _ in 0..3 {
             profile.measured(Measured::Scene, Duration::from_millis(200));
@@ -327,7 +361,7 @@ mod tests {
         profile.segment_started("intro");
         let report = profile.report(Instant::now());
         assert!(
-            report[0].contains("1 isolated") && report[0].contains("3 compiled the scene"),
+            report[0].contains("2 isolated") && report[0].contains("3 compiled the scene"),
             "{report:?}"
         );
         assert!(
