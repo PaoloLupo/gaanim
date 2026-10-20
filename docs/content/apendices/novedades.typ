@@ -77,6 +77,22 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
   efectos de sombreador, mates y vidrio se dibujan sin ellos.
 - El ejemplo `camera/camera_views` suma el segmento `snapshots`.
 
+== Seguir objetos en 3D
+
+- `scene.camera.animate.follow(objeto)` sigue también a un objeto que se
+  mueve en 3D con una cámara en perspectiva o en ángulo: la cámara se
+  traslada con él sin girar, a la misma distancia sobre su línea de visión,
+  y lo mantiene en el centro, con `lag` y al terminar. Antes solo movía el
+  ojo en x e y (y lo llevaba a la profundidad del objeto), así que el objeto
+  se salía del centro. `offset` admite `(x, y, z)`. Ver
+  #link("/guias/camara-y-3d/#seguir-un-objeto-en-3d")[Cámara y 3D].
+- Las vistas de cámara e insets que siguen a contenido 3D (`view.follow`,
+  `scene.camera.inset(..., follow=True)`) ponen su marco donde la cámara
+  principal lo dibuja, con sus conectores.
+- La cámara 2D se desplaza como antes, y las escenas sin cámara 3D no
+  hacen ningún cálculo nuevo.
+- El ejemplo `3d/camera_3d` suma los segmentos `follow` e `inset`.
+
 == Paquetes más ligeros
 
 - Una malla o línea 3D que cambia de un fotograma a otro guarda, sin perder

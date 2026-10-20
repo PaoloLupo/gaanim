@@ -5084,13 +5084,23 @@ fn apply_lens_spec(
         // While the clip plays the camera phase resolves these after
         // persistent bindings (and layout, for the frame); a finished clip
         // leaves the camera on the pose it handed off.
-        PropertyLensSpec::CameraFollowEndpoint { hold, .. } => {
+        PropertyLensSpec::CameraFollowEndpoint {
+            hold, hold_target, ..
+        } => {
             if completed
                 && let Some(hold) = hold
                 && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
             {
-                camera.position.x = hold.x;
-                camera.position.y = hold.y;
+                match hold_target {
+                    Some(target) => {
+                        camera.position = *hold;
+                        camera.target = *target;
+                    }
+                    None => {
+                        camera.position.x = hold.x;
+                        camera.position.y = hold.y;
+                    }
+                }
             }
         }
         PropertyLensSpec::CameraFrameDynamic { hold, .. } => {

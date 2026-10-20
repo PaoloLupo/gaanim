@@ -477,6 +477,36 @@ scene.render()
 - `orthographic()` vuelve a la proyección ortográfica y `reset()` al encuadre
   2D inicial.
 
+=== Seguir un objeto en 3D
+
+`animate.follow(objeto)` también funciona con una cámara en perspectiva o en
+ángulo: la cámara se mueve con el objeto sin girar, a la misma distancia
+sobre su línea de visión, y lo mantiene en el centro aunque suba, baje o se
+aleje. Su objetivo se mueve con ella, así que un `orbit` posterior gira
+alrededor del punto seguido. `offset` admite una profundidad, `(x, y, z)`.
+A diferencia de `bind_3d(target=)`, que gira la cámara desde un ojo fijo,
+aquí el ojo viaja.
+
+```python
+# output: preview.webp
+from gaanim import GOLD, Material3D, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.camera.look_at(eye=(7, 5, 10), target=(0, -1, 0))
+scene.camera.perspective(0.75)
+scene.geometry.plane(11, 7, material=Material3D.matte("#334155")).move_to_3d(0, -1, 0)
+bola = scene.geometry.sphere(0.8, material=Material3D.matte(GOLD)).move_to_3d(-3, 0, 2)
+scene.play([
+    bola.animate.move_to_3d(3, 1.5, -2).duration(3.0),
+    scene.camera.animate.follow(bola, lag=0.3).duration(3.0),
+])
+scene.render()
+```
+
+Las cámaras secundarias siguen al objeto donde la cámara principal lo
+dibuja: con `scene.camera.inset(bola, follow=True)` o `vista.follow(bola)`,
+el marco se queda sobre la esfera y la pantalla la muestra ampliada.
+
 == Ejes y superficies 3D
 
 `scene.viz.cartesian_3d` crea unos ejes 3D sobre los que puedes dibujar

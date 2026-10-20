@@ -579,6 +579,57 @@ impl Camera {
         self.look_at(self.target + new_dir, self.target, self.up)
     }
 
+    /// Whether the camera looks down the z axis through an orthographic
+    /// projection, as the 2D camera does: its x and y pan the view, and it
+    /// draws a point where the point's own x and y put it.
+    pub fn is_flat(&self) -> bool {
+        matches!(self.projection, Projection::Orthographic { .. })
+            && (self.rotation * DVec3::NEG_Z).z <= -1.0 + 1e-9
+    }
+
+    /// The camera moved without turning, so that the center of its view
+    /// travels the fraction `amount` of the way to `point`. It keeps its
+    /// distance along its view axis to the plane its target lies in, and
+    /// the target moves with it: at `amount` 1 the camera looks at `point`
+    /// as it looked at its target, and later orbits and dollies turn
+    /// around the point.
+    pub fn moved_toward(&self, point: DVec3, amount: f64) -> Self {
+        let forward = self.rotation * DVec3::NEG_Z;
+        let reach = self.target - self.position;
+        let along = reach.dot(forward);
+        let distance = if along > 1e-9 { along } else { reach.length() };
+        let shift = (point - (self.position + forward * distance)) * amount;
+        Self {
+            position: self.position + shift,
+            target: self.target + shift,
+            ..*self
+        }
+    }
+
+    /// The scene point the 2D canvas shows where the camera draws `point`:
+    /// the point's own x and y for a flat camera. A perspective camera
+    /// draws 2D content on a canvas that stays still, and a turned
+    /// orthographic one on a canvas that pans, zooms and rolls with it but
+    /// never tilts, so either draws a 3D point elsewhere than its x and y.
+    pub fn canvas_point(&self, point: DVec3) -> DVec2 {
+        if self.is_flat() {
+            return point.truncate();
+        }
+        let screen = self.world_to_screen(point);
+        let canvas = match self.projection {
+            Projection::Perspective { .. } => {
+                let scale = self.pixels_per_unit();
+                Affine::translate((
+                    self.viewport_width as f64 * 0.5,
+                    self.viewport_height as f64 * 0.5,
+                )) * Affine::scale_non_uniform(scale, -scale)
+            }
+            Projection::Orthographic { .. } => self.to_vello_transform(),
+        };
+        let at = canvas.inverse() * gaanim_core::kurbo::Point::new(screen.x, screen.y);
+        DVec2::new(at.x, at.y)
+    }
+
     /// Pan in screen space (pixels scaled to world).
     pub fn pan_screen_delta(&mut self, delta: DVec2) {
         self.pan_screen_delta_with_viewport(delta, CameraViewport::default());

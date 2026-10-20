@@ -1,4 +1,4 @@
-"""3D camera: aiming, orbiting, dollying, lenses, saved poses and bindings of the scene camera.
+"""3D camera: aiming, orbiting, dollying, lenses, saved poses, bindings and follows of the scene camera.
 
 Every segment starts from the same perspective pose over a few lit
 primitives on a floor and plays one camera move. The label, pinned to the
@@ -7,7 +7,7 @@ frame with ``hud()`` so the camera never moves it, is the code of the move.
 
 import os
 
-from gaanim import Material3D, Scene, Zones
+from gaanim import Anchor, Material3D, Scene, Zones
 
 HOLD = 0.5
 MOVE = 1.6
@@ -99,6 +99,26 @@ move(scene.camera.animate.orbit(delta_yaw=1.2, delta_pitch=0))
 shot("reset", "scene.camera.animate.reset()")
 move(scene.camera.animate.reset())
 
+# Follow the sphere as it rises and moves away: the camera moves with it,
+# without turning, and keeps it at the center as it framed the target; with
+# a lag it catches up. Unlike bind_3d, the eye moves too.
+ball = shot("follow", "scene.camera.animate.follow(ball, lag=0.3)")
+scene.play(
+    [
+        scene.camera.animate.follow(ball, lag=0.3).duration(2 * MOVE),
+        ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE),
+    ]
+)
+scene.wait(HOLD)
+
+# A second camera follows the sphere too: the inset's frame stays where the
+# main camera draws it, and the screen shows it enlarged.
+ball = shot("inset", "scene.camera.inset(ball, zoom=3, follow=True)")
+view = scene.camera.inset(ball, zoom=3, at=Anchor.TOP_RIGHT, follow=True)
+scene.play([view.animate.pop_out().duration(MOVE)])
+scene.play([ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE)])
+scene.wait(HOLD)
+
 # Before and after each move. Segments last one move, except the states
 # segment (two moves) and the bind_3d segment (two moves of the sphere).
 one = 2 * HOLD + MOVE
@@ -108,6 +128,12 @@ last = bind + 2 * (HOLD + MOVE)
 seeks = [start + t for start in (0, one, 2 * one, 3 * one, 4 * one, last, last + one) for t in (0.3, one - 0.2)]
 seeks += [states + 0.3, states + HOLD + MOVE + 0.2, bind - 0.2]
 seeks += [bind + HOLD + MOVE, last - 0.2, last + one + HOLD + MOVE / 2]
+# Halfway through the follow and once it holds; the inset as it opens,
+# halfway through the sphere's move and at its end.
+follow = last + 2 * one
+inset = follow + 2 * (HOLD + MOVE)
+seeks += [follow + HOLD + MOVE, follow + HOLD + 2 * MOVE + HOLD / 2]
+seeks += [inset + HOLD + MOVE / 2, inset + HOLD + 2 * MOVE, inset + HOLD + 3 * MOVE + HOLD / 2]
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, sorted(seeks))
 else:

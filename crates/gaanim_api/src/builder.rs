@@ -1054,7 +1054,8 @@ pub(crate) struct PendingCameraHold {
 
 pub(crate) enum PendingCameraHoldKind {
     /// `follow`: the endpoint plus `offset`, reached through `lag` over the
-    /// clip's `duration` from `from`.
+    /// clip's `duration` from `from`. A camera at an angle (`posed`) moves
+    /// its framing there instead, its target with it.
     Follow {
         target: Box<crate::canvas::CanvasEndpoint>,
         from: DVec3,
@@ -1062,6 +1063,7 @@ pub(crate) enum PendingCameraHoldKind {
         offset_space: gaanim_animation::FollowOffsetSpace,
         lag: f64,
         duration: f64,
+        posed: Option<Box<gaanim_math::Camera>>,
     },
     /// `pan_to(endpoint)`: where the endpoint is drawn as authored.
     Pan {
@@ -1804,6 +1806,21 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Computes the true world-space transform of a Mobject by walking up the parent chain.
     /// This is necessary during group creation to calculate accurate world bounds for nested children.
+    /// The authored world matrix of `id` in 3D, with its parents', where
+    /// [`Self::get_world_transform`] keeps the 2D part.
+    pub(crate) fn world_matrix_3d(&self, id: ObjectId) -> gaanim_core::glam::DMat4 {
+        let mut matrix = gaanim_core::glam::DMat4::IDENTITY;
+        let mut current = Some(id);
+        while let Some(object) = current {
+            let Some(state) = self.states.get(object) else {
+                break;
+            };
+            matrix = state.transform.to_mat4() * matrix;
+            current = state.parent;
+        }
+        matrix
+    }
+
     pub fn get_world_transform(&self, id: ObjectId) -> SpatialTransform {
         let mut current_id = Some(id);
         let mut world_affine = gaanim_core::kurbo::Affine::IDENTITY;
