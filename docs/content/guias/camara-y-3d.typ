@@ -368,12 +368,12 @@ a correr.
 from gaanim import Scene
 
 scene = Scene(frame=(16, 9), background="#0f172a")
-fox = scene.media.gltf("assets/Fox.glb").scale_to(0.04).move_to(0, -2)
-fox.rotate_to_3d(0.2, 0.9, 0)
+wolf = scene.media.gltf("assets/Wolf.glb").scale_to(1.7).move_to(0, -2)
+wolf.rotate_to_3d(0.2, 0.9, 0)
 
-scene.play(fox.animation("Survey"))
-scene.play(fox.animation("Walk", loop=True, transition=0.4), duration=3)
-scene.play(fox.animation("Run", loop=True, transition=0.3), duration=2)
+scene.play(wolf.animation("Idle_Eating"))
+scene.play(wolf.animation("Walk", loop=True, transition=0.4), duration=3)
+scene.play(wolf.animation("Run", loop=True, transition=0.3), duration=2)
 scene.render()
 ```
 

@@ -1,0 +1,7 @@
+Wolf.glb: "Wolf" from the Cube World Kit (August 2023) by Quaternius,
+https://quaternius.com/packs/cubeworldkit.html
+
+License: Creative Commons Zero (CC0 1.0), public domain dedication,
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Converted from the kit's Wolf.gltf to a binary .glb with its data unchanged.

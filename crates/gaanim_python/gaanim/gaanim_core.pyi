@@ -3761,7 +3761,7 @@ class Drawable:
         takes ``#<index>`` after it. ``parts()`` lists them.
 
         Example:
-            head = fox.part("b_Head_05")
+            head = wolf.part("Head")
             scene.play(head.animate.scale_by(1.3))
         """
         ...
@@ -3788,8 +3788,8 @@ class Drawable:
         names, which ``animation(name)`` plays.
 
         Example:
-            fox = scene.media.gltf("Fox.glb")
-            fox.animations()  # {"Survey": 3.42, "Walk": 0.71, "Run": 1.16}
+            wolf = scene.media.gltf("Wolf.glb")
+            wolf.animations()  # {"Death": 0.9, ..., "Run": 0.5, "Walk": 0.73}
         """
         ...
     @property
@@ -3858,9 +3858,9 @@ class Drawable:
         glTF models, ``TypeError``.
 
         Example:
-            fox = scene.media.gltf("Fox.glb").scale_to(0.03)
-            scene.play(fox.animation("Walk", loop=True), duration=3)
-            scene.play(fox.animation("Run", loop=True, transition=0.4), duration=2)
+            wolf = scene.media.gltf("Wolf.glb").scale_to(1.7)
+            scene.play(wolf.animation("Walk", loop=True), duration=3)
+            scene.play(wolf.animation("Run", loop=True, transition=0.4), duration=2)
         """
         ...
     def fill(self, paint: Paint) -> Self:
@@ -10257,8 +10257,8 @@ class MediaLibrary:
         ``ValueError``; a file that is not glTF, ``RuntimeError``.
 
         Example:
-            fox = scene.media.gltf("Fox.glb").scale_to(0.03)
-            print(fox.animations())
+            wolf = scene.media.gltf("Wolf.glb").scale_to(1.7)
+            print(wolf.animations())
         """
         ...
 

@@ -42,13 +42,24 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
 - Las escenas sin modelos no pagan nada: las pipelines de modelos se crean
   la primera vez que un fotograma dibuja uno, y las demás mallas se dibujan
   como antes.
-- Nuevo ejemplo, `3d/models_3d`, con el zorro de los modelos de ejemplo de
-  Khronos.
+- Nuevo ejemplo, `3d/models_3d`, con el lobo del Cube World Kit de
+  Quaternius, de dominio público (CC0).
+
+== Paquetes más ligeros
+
+- Una malla o línea 3D que cambia de un fotograma a otro guarda, sin perder
+  nada, el cambio de sus vértices respecto de los dos fotogramas anteriores
+  del mismo objeto, y comparte con ellos los índices, colores y materiales.
+  El paquete de `gallery/catenoid_helicoid` baja de 62 a 30 MB, y
+  `gaanim check` sigue confirmando cada fotograma.
+- `gaanim pack --web` guarda además esos vértices en una rejilla de
+  2#super[−17] del tamaño de la malla, que en un vídeo 4K no mueve ninguno
+  más de 1/64 de píxel: el mismo paquete queda en 12 MB.
 
 == Al actualizar
 
 - Los paquetes `.gaanim` pasan al formato 7, que guarda las texturas, los
-  modos alfa y los esqueletos. Gaanim sigue abriendo los de formato 5 y 6;
+  modos alfa y los esqueletos, y las mallas que cambian como su cambio. Gaanim sigue abriendo los de formato 5 y 6;
   un Gaanim anterior no abre los nuevos, así que actualiza los reproductores
   que los publican.
 - `Drawable.animations()` devuelve un diccionario de nombres y duraciones en

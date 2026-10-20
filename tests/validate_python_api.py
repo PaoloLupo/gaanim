@@ -1580,39 +1580,40 @@ def validate_primitives_3d_contract(module: object) -> list[str]:
 
 
 def validate_gltf_contract(module: object) -> list[str]:
-    """Import the sample fox: its nodes, animations, plays and errors."""
+    """Import the sample wolf: its nodes, animations, plays and errors."""
     failures: list[str] = []
     assets = ROOT / "docs/fixtures/assets"
     scene = module.Scene(frame=(16, 9))
-    fox = scene.media.gltf(str(assets / "Fox.glb"))
-    animations = fox.animations()
-    if list(animations) != ["Survey", "Walk", "Run"]:
-        failures.append(f"the fox's animations are {animations!r}")
+    wolf = scene.media.gltf(str(assets / "Wolf.glb"))
+    animations = wolf.animations()
+    expected = ["Death", "Headbutt", "Idle", "Idle_Eating", "Jump_Loop", "Jump_Start", "Run", "Walk"]
+    if list(animations) != expected:
+        failures.append(f"the wolf's animations are {animations!r}")
     elif not all(duration > 0 for duration in animations.values()):
         failures.append("a glTF animation has no duration")
-    if "fox" not in fox.parts():
-        failures.append("the fox's mesh node is not among its parts")
-    if not isinstance(fox.animation("Walk", loop=True, transition=0.4), module.Anim):
+    if not {"Wolf", "Head", "Tail"} <= set(wolf.parts()):
+        failures.append(f"the wolf's nodes are not among its parts: {wolf.parts()!r}")
+    if not isinstance(wolf.animation("Walk", loop=True, transition=0.4), module.Anim):
         failures.append("Drawable.animation does not return an Anim")
     if scene.geometry.cube(1.0).animations():
         failures.append("a drawable that is not a glTF model has animations")
-    copy = fox.copy()
-    if list(copy.animations()) != list(animations) or copy.parts() != fox.parts():
+    copy = wolf.copy()
+    if list(copy.animations()) != list(animations) or copy.parts() != wolf.parts():
         failures.append("Drawable.copy lost the glTF nodes or animations")
-    for expected, operation in (
-        (KeyError, lambda: fox.animation("Swim")),
+    for expected_error, operation in (
+        (KeyError, lambda: wolf.animation("Swim")),
         (TypeError, lambda: scene.geometry.cube(1.0).animation("Walk")),
-        (ValueError, lambda: fox.animation("Walk", speed=0)),
-        (ValueError, lambda: fox.animation("Walk", transition=-1)),
-        (ValueError, lambda: fox.animation("Walk", duration=float("nan"))),
+        (ValueError, lambda: wolf.animation("Walk", speed=0)),
+        (ValueError, lambda: wolf.animation("Walk", transition=-1)),
+        (ValueError, lambda: wolf.animation("Walk", duration=float("nan"))),
         (FileNotFoundError, lambda: scene.media.gltf(str(assets / "missing.glb"))),
-        (ValueError, lambda: scene.media.gltf(str(assets / "Fox.glb"), scene=3)),
-        (ValueError, lambda: scene.media.gltf(str(assets / "Fox.glb"), scene="Nowhere")),
+        (ValueError, lambda: scene.media.gltf(str(assets / "Wolf.glb"), scene=3)),
+        (ValueError, lambda: scene.media.gltf(str(assets / "Wolf.glb"), scene="Nowhere")),
         (RuntimeError, lambda: scene.media.gltf(str(assets / "robot.svg"))),
-        (TypeError, lambda: scene.media.gltf(str(assets / "Fox.glb"), scene=1.5)),
+        (TypeError, lambda: scene.media.gltf(str(assets / "Wolf.glb"), scene=1.5)),
     ):
-        if not raises_error(expected, operation):
-            failures.append(f"a glTF call did not raise {expected.__name__}")
+        if not raises_error(expected_error, operation):
+            failures.append(f"a glTF call did not raise {expected_error.__name__}")
     return failures
 
 

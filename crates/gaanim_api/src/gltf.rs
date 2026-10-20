@@ -256,9 +256,9 @@ mod tests {
         }
     }
 
-    /// The sample fox, compiled: Survey then Walk, a second each, as
+    /// The sample wolf, compiled: Idle then Walk, a second each, as
     /// `scene.play(..., duration=1)` plays them.
-    fn compiled_fox() -> (
+    fn compiled_wolf() -> (
         bevy::prelude::World,
         gaanim_timeline::timeline::Timeline,
         Entity,
@@ -266,16 +266,16 @@ mod tests {
     ) {
         use crate::canvas::{PlayItem, SceneModel};
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/fixtures/assets/Fox.glb");
+            .join("../../docs/fixtures/assets/Wolf.glb");
         let mut canvas = SceneModel::new(640, 360);
-        let fox = canvas.gltf(&path, &Default::default()).unwrap();
+        let wolf = canvas.gltf(&path, &Default::default()).unwrap();
         let animations = Arc::clone(
             &gaanim_objects::gltf::GltfModel::load(&path, &Default::default())
                 .unwrap()
                 .animations,
         );
-        for (name, transition) in [("Survey", 0.0), ("Walk", 0.3)] {
-            let play = fox
+        for (name, transition) in [("Idle", 0.0), ("Walk", 0.3)] {
+            let play = wolf
                 .animation(name, None, 1.0, true, false, transition, 0.0)
                 .unwrap();
             canvas
@@ -304,7 +304,7 @@ mod tests {
         (world, timeline, root, animations)
     }
 
-    /// The local transform of every node of the fox's rig.
+    /// The local transform of every node of the wolf's rig.
     fn poses(world: &World, root: Entity) -> Vec<SpatialTransform> {
         world
             .get::<GltfRig>(root)
@@ -317,14 +317,14 @@ mod tests {
 
     #[test]
     fn a_compiled_model_rigs_its_skin_and_its_plays_last_what_play_gives_them() {
-        let (mut world, timeline, root, animations) = compiled_fox();
-        assert_eq!(world.get::<GltfRig>(root).unwrap().nodes.len(), 26);
+        let (mut world, timeline, root, animations) = compiled_wolf();
+        assert_eq!(world.get::<GltfRig>(root).unwrap().nodes.len(), 11);
         let skins: Vec<usize> = world
             .query::<&gaanim_scene::MeshSkin>()
             .iter(&world)
             .map(|skin| skin.joints.len())
             .collect();
-        assert_eq!(skins, [24]);
+        assert_eq!(skins, [9]);
         // Each play lasts the second `play` gives it, not the animation's.
         let mut plays: Vec<(f64, f64)> = timeline
             .clips
@@ -344,12 +344,12 @@ mod tests {
             .collect();
         plays.sort_by(|a, b| a.0.total_cmp(&b.0));
         assert_eq!(plays, [(0.0, 1.0), (1.0, 1.0)]);
-        assert_eq!(animations.clips.len(), 3);
+        assert_eq!(animations.clips.len(), 8);
     }
 
     #[test]
     fn seeks_land_on_the_same_pose_in_any_order() {
-        let (mut world, mut timeline, root, animations) = compiled_fox();
+        let (mut world, mut timeline, root, animations) = compiled_wolf();
         // Before its plays, past them and in the fade between them.
         let times = [0.0, 0.6, 1.15, 1.8, 0.3, 1.8, 1.15, 0.6, 0.0];
         let mut seen: Vec<(f64, Vec<SpatialTransform>)> = Vec::new();

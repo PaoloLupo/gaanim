@@ -211,10 +211,10 @@ glTF.
 # show-code: true
 from gaanim import Scene
 scene = Scene(frame=(16, 9), background="#0f172a")
-# El zorro mide unas 80 unidades: scale_to(0.04) lo deja en 3,2
-fox = scene.media.gltf("assets/Fox.glb").scale_to(0.04).move_to(0, -2)
-fox.rotate_to_3d(0.2, 0.9, 0)
-scene.play(fox.animation("Walk", loop=True), duration=2)
+# El lobo mide 1,8 unidades de alto: scale_to(1.7) lo deja en unas 3
+wolf = scene.media.gltf("assets/Wolf.glb").scale_to(1.7).move_to(0, -2)
+wolf.rotate_to_3d(0.2, 0.9, 0)
+scene.play(wolf.animation("Walk", loop=True), duration=2)
 # output: preview.webp
 scene.render()
 ```
@@ -230,7 +230,7 @@ scene.render()
 # hide-code
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-print(scene.media.gltf("assets/Fox.glb").animations())
+print(scene.media.gltf("assets/Wolf.glb").animations())
 ```
 ]
 
@@ -243,10 +243,10 @@ print(scene.media.gltf("assets/Fox.glb").animations())
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-fox = scene.media.gltf("assets/Fox.glb").scale_to(0.04).move_to(0, -2)
-scene.play(fox.animation("Survey"))
-scene.play(fox.animation("Walk", loop=True, transition=0.4), duration=3)
-scene.play(fox.animation("Run", loop=True, transition=0.3, speed=1.2), duration=2)
+wolf = scene.media.gltf("assets/Wolf.glb").scale_to(1.7).move_to(0, -2)
+scene.play(wolf.animation("Idle_Eating"))
+scene.play(wolf.animation("Walk", loop=True, transition=0.4), duration=3)
+scene.play(wolf.animation("Run", loop=True, transition=0.3, speed=1.2), duration=2)
 ```
 ]
 
