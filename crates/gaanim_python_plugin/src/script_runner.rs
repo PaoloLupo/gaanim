@@ -594,8 +594,11 @@ fn evict_project_modules(py: Python<'_>, root: &Path) -> PyResult<()> {
         let is_source = file
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("py"));
+        // Python 3.15 no longer sets a module's `__cached__`; its spec has it.
         if is_source
-            && let Ok(cached) = module.getattr("__cached__")
+            && let Ok(cached) = module
+                .getattr("__spec__")
+                .and_then(|spec| spec.getattr("cached"))
             && let Ok(cached) = cached.extract::<String>()
         {
             bytecode_paths.push((file, PathBuf::from(cached)));

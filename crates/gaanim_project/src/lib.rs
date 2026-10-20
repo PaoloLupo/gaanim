@@ -165,12 +165,8 @@ fn read_manifest(manifest_path: &Path) -> Result<(String, RawProjectManifest), S
             shown(manifest_path)
         )
     })?;
-    let raw = toml::from_str(&source).map_err(|error| {
-        format!(
-            "invalid project manifest {}: {error}",
-            shown(manifest_path)
-        )
-    })?;
+    let raw = toml::from_str(&source)
+        .map_err(|error| format!("invalid project manifest {}: {error}", shown(manifest_path)))?;
     Ok((source, raw))
 }
 
@@ -209,12 +205,9 @@ pub fn set_project_language(manifest_path: &Path, language: Option<&str>) -> Res
             shown(manifest_path)
         )
     })?;
-    let mut document: toml_edit::DocumentMut = source.parse().map_err(|error| {
-        format!(
-            "invalid project manifest {}: {error}",
-            shown(manifest_path)
-        )
-    })?;
+    let mut document: toml_edit::DocumentMut = source
+        .parse()
+        .map_err(|error| format!("invalid project manifest {}: {error}", shown(manifest_path)))?;
     match language
         .map(str::trim)
         .filter(|language| !language.is_empty())
