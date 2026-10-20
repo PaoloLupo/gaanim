@@ -63,6 +63,10 @@ pub enum CameraViewError {
     InvalidZoom,
     #[error("view layer names must not be empty")]
     InvalidLayer,
+    #[error(
+        "a camera view's 3D camera needs a field of view between 0 and pi radians and a finite, non-zero up"
+    )]
+    InvalidCamera,
     #[error("this camera view follows a computed zoom and cannot set it")]
     ComputedZoom,
     #[error("camera inset size must be finite and greater than zero")]
@@ -445,6 +449,44 @@ impl DrawableHandle {
         source: Option<&DrawableHandle>,
         options: CameraViewOptions,
     ) -> Result<CameraViewHandle, CameraViewError> {
+        self.camera_view_spec(source, options, None)
+    }
+
+    /// Show inside this shape the scene's 3D content as a 3D camera of the
+    /// view's own sees it: from `eye`, looking at `target`, both read where
+    /// they are on every frame, with `up` and a vertical field of view of
+    /// `fov_y` radians, on a frame the screen's shape as tall as the main
+    /// camera's. The canvas's 2D drawables stay out of it; `options` set
+    /// the background and what it leaves out.
+    pub fn camera_view_3d(
+        self,
+        eye: super::CanvasEndpoint,
+        target: super::CanvasEndpoint,
+        up: gaanim_core::glam::DVec3,
+        fov_y: f64,
+        options: CameraViewOptions,
+    ) -> Result<CameraViewHandle, CameraViewError> {
+        if !(fov_y.is_finite() && fov_y > 0.0 && fov_y < std::f64::consts::PI)
+            || !up.is_finite()
+            || up.length_squared() <= f64::EPSILON
+        {
+            return Err(CameraViewError::InvalidCamera);
+        }
+        let camera = super::ops::ViewCamera3DSpec {
+            eye,
+            target,
+            up,
+            fov_y,
+        };
+        self.camera_view_spec(None, options, Some(camera))
+    }
+
+    fn camera_view_spec(
+        self,
+        source: Option<&DrawableHandle>,
+        options: CameraViewOptions,
+        camera_3d: Option<super::ops::ViewCamera3DSpec>,
+    ) -> Result<CameraViewHandle, CameraViewError> {
         let foreign = |handle: &DrawableHandle| !self.same_canvas(handle);
         if source.is_some_and(foreign) || options.exclude.iter().any(foreign) {
             return Err(CameraViewError::ForeignScene);
@@ -502,6 +544,7 @@ impl DrawableHandle {
             exclude: options.exclude.iter().map(|excluded| excluded.id).collect(),
             zoom: zoom.source(),
             layers,
+            camera_3d,
         };
         self.state
             .lock()

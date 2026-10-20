@@ -6541,6 +6541,18 @@ impl SceneModel {
                         .zoom
                         .as_ref()
                         .map(|zoom| compile_tracking_scalar(zoom, id_map, &builder.states));
+                    let camera_3d = view.camera_3d.as_ref().map(|camera| {
+                        gaanim_renderer::effects::ViewCamera3D {
+                            eye: compile_tracking_endpoint(&camera.eye, id_map, &builder.states),
+                            target: compile_tracking_endpoint(
+                                &camera.target,
+                                id_map,
+                                &builder.states,
+                            ),
+                            up: camera.up,
+                            fov_y: camera.fov_y,
+                        }
+                    });
                     let shown = gaanim_renderer::effects::CameraView {
                         source,
                         fit: view.fit,
@@ -6550,6 +6562,7 @@ impl SceneModel {
                         layers: view.layers.clone(),
                         since: builder.current_time,
                         until: None,
+                        camera_3d,
                     };
                     builder.camera_views.insert(screen, shown.clone());
                     builder.commands.entity(screen).insert(shown);
@@ -16393,6 +16406,73 @@ mod tests {
         for root in [effect.root, matte.root, matte.source, glass] {
             assert!(!live.contains(&root), "frozen keys are not live drawables");
         }
+    }
+
+    #[test]
+    fn a_camera_view_with_a_3d_camera_of_its_own_draws_from_where_it_stands() {
+        use bevy::prelude::App;
+        use gaanim_renderer::pipeline::capture_frame;
+
+        let mut canvas = SceneModel::new(1280, 720);
+        let ball = canvas
+            .sphere(0.5, 12, 8, gaanim_scene::Material3D::default())
+            .unwrap();
+        let label = canvas.rect(0.4, 0.4).move_to(-3.0, 0.0);
+        let screen = canvas.rect(4.0, 2.0).move_to(4.0, 2.0);
+        let eye = DVec3::new(0.0, 10.0, 0.1);
+        let view = screen
+            .clone()
+            .camera_view_3d(
+                CanvasEndpoint::Static(eye),
+                CanvasEndpoint::Entity(ball.id),
+                DVec3::Y,
+                0.6,
+                Default::default(),
+            )
+            .unwrap();
+        canvas.play(vec![ball.animate().move_to_3d(2.0, 0.0, 1.0).duration(1.0)]);
+        let _ = (view, label);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let screen = entity_of(app.world_mut(), &screen);
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(1.0);
+        app.update();
+        let camera = *app.world().resource::<gaanim_math::Camera>();
+        let frame = capture_frame(app.world_mut(), Some(&camera));
+        let shown = frame
+            .elements
+            .iter()
+            .find(|element| element.entity == screen)
+            .and_then(|element| element.screen.as_ref())
+            .expect("the screen shows its view");
+        // It shows only what its own camera draws, on a layer of its own.
+        assert!(shown.only_layers && shown.layers.len() == 1);
+        let own = shown
+            .frozen
+            .as_ref()
+            .expect("its camera draws the 3D content");
+        assert!((own.camera.position - eye).length() < 1e-9);
+        // It looks at the ball where the ball is now, on a frame the
+        // screen's shape as tall as the main camera's.
+        let ball_at = DVec3::new(2.0, 0.0, 1.0);
+        let center = own.camera.world_to_screen(ball_at)
+            - gaanim_core::glam::DVec2::new(
+                f64::from(own.camera.viewport_width) / 2.0,
+                f64::from(own.camera.viewport_height) / 2.0,
+            );
+        assert!(center.length() < 1e-6, "{center:?}");
+        assert!((own.region.width() / own.region.height() - 2.0).abs() < 1e-9);
+        assert_eq!(own.three_d.sources.len(), 1, "the ball, and no 2D drawable");
     }
 
     #[test]

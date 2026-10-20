@@ -1,4 +1,4 @@
-"""3D camera: aiming, orbiting, dollying, lenses, saved poses, bindings, follows and snapshots of the scene camera.
+"""3D camera: aiming, orbiting, dollying, lenses, saved poses, bindings, follows, snapshots and views of their own.
 
 Every segment starts from the same perspective pose over a few lit
 primitives on a floor and plays one camera move. The label, pinned to the
@@ -147,6 +147,15 @@ scene.play(
 )
 scene.wait(HOLD)
 
+# A view with a 3D camera of its own shows the stage from another angle:
+# from overhead, keeping the sphere at its center as it moves.
+ball = shot("view_3d", "view = screen.camera_view_3d(eye=(0, 12, 0.5), target=ball)")
+corner = scene.layout.zones(Zones.grid(rows=2, columns=2, padding="page_padding"))[1]
+top = scene.geometry.rounded_rect(4.8, 2.7, 0.15).stroke(accent, 0.04).hud().place(corner, anchor="top_right")
+top.camera_view_3d(eye=(0, 12, 0.5), target=ball, fov_y=0.6, up=(0, 0, -1))
+scene.play([ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE)])
+scene.wait(HOLD)
+
 # Before and after each move. Segments last one move, except the states
 # segment (two moves) and the bind_3d segment (two moves of the sphere).
 one = 2 * HOLD + MOVE
@@ -168,6 +177,9 @@ seeks += [snapshot + HOLD + MOVE + MOVE / 2, snapshot + HOLD + 3 * MOVE + HOLD /
 # Halfway through the turning follow and once it holds.
 turn = snapshot + 2 * HOLD + 3 * MOVE
 seeks += [turn + HOLD + MOVE, turn + HOLD + 2 * MOVE + HOLD / 2]
+# The view from overhead as the sphere starts and once it has moved.
+view_3d = turn + 2 * HOLD + 2 * MOVE
+seeks += [view_3d + HOLD + MOVE / 4, view_3d + HOLD + 2 * MOVE + HOLD / 2]
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, sorted(seeks))
 else:

@@ -1207,6 +1207,32 @@ scene.render()
 ]
 
 #api-entry(
+  name: "Drawable.camera_view_3d",
+  kind: "method",
+  params: (
+    (name: "eye", type: "Endpoint", default: none, desc: [Desde dónde mira la cámara de la vista.]),
+    (name: "target", type: "Endpoint", default: none, desc: [Adónde mira.]),
+    (name: "fov_y", type: "float", default: "0.75", desc: [Campo de visión vertical, en radianes.]),
+    (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
+    (name: "background", type: "Paint | \"canvas\" | None", default: "\"canvas\"", desc: [Fondo de la pantalla, como en `camera_view`.]),
+    (name: "exclude", type: "Sequence[Drawable]", default: "()", desc: [Objetos, con sus hijos, que la vista deja fuera.]),
+  ),
+  returns: (type: "CameraView", desc: [La vista.]),
+  desc: [Convierte esta figura en una pantalla que muestra el contenido 3D de la escena visto por una cámara propia: mira desde `eye` hacia `target` en perspectiva, sobre un cuadro con la forma de la pantalla y la altura del de la cámara principal, así que sus líneas y brillos se ven como en ella. Un objeto o un punto de anclaje como `eye` o `target` se lee donde está en cada fotograma: anímalo para mover la cámara, o pasa un objeto que se mueve como `target` para mantenerlo en el centro. Muestra primitivas, superficies, líneas 3D, modelos y objetos colocados en 3D; los objetos 2D del canvas y los de `exclude` quedan fuera. `snapshot` la congela como cualquier vista; `pan_to`, `zoom_to`, `rotate_to` y `follow` mueven el cuadro 2D, que esta vista no usa. Lanza `ValueError` con un `fov_y` fuera de `(0, pi)`, con un `up` nulo o con una pantalla que no sea una figura cerrada 2D.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>bola = scene.geometry.sphere(1.0).move_to_3d(-2, 0, 0)
+scene.camera.look_at(eye=(7, 5, 10), target=(0, 0, 0))
+scene.camera.perspective(0.75)
+arriba = scene.geometry.rounded_rect(4.8, 2.7, 0.15).hud().move_to(5, 2.6)
+arriba.camera_view_3d(eye=(0, 12, 0.5), target=bola, fov_y=0.6)
+scene.play([bola.animate.move_to_3d(2, 0, 1).duration(2.0)])
+```
+]
+
+#api-entry(
   name: "Drawable.no_camera_view",
   kind: "method",
   desc: [Quita la vista de cámara desde el cursor: a partir de ahí la figura vuelve a dibujarse como una forma normal, y antes la vista se sigue viendo.],

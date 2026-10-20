@@ -1437,9 +1437,10 @@ fn write_three_d(
             w.f32(glow.intensity);
         }
     }
-    // Last, the 3D content snapshots froze (format 7): by snapshot screen,
-    // the camera it was drawn through, the region and detail of its image,
-    // and its own content, encoded as a frame's.
+    // Last, the 3D content of camera views that draw their own (format 7):
+    // what snapshots froze and what views with a 3D camera of their own
+    // draw this frame. By screen, the camera it was drawn through, the
+    // region and detail of its image, and its content, encoded as a frame's.
     if !views.is_empty() {
         w.len(views.len());
         for &(screen, frozen) in views {
@@ -1454,12 +1455,16 @@ fn write_three_d(
     }
 }
 
-/// Decode what [`write_three_d`] wrote, and the snapshot screens' frozen
-/// content by their keys.
+/// The 3D content of camera views a frame's 3D block holds, by the key of
+/// their screen.
+type ViewsThreeD = Vec<(u32, Arc<FrozenThreeD>)>;
+
+/// Decode what [`write_three_d`] wrote, and the 3D content of the camera
+/// views that draw their own.
 fn read_three_d(
     r: &mut Reader<'_>,
     tables: &DecodedTables,
-) -> Result<(CapturedThreeD, Vec<(u32, Arc<FrozenThreeD>)>)> {
+) -> Result<(CapturedThreeD, ViewsThreeD)> {
     use gaanim_core::glam::{DMat4, DVec3};
     let lighting = gaanim_scene::Lighting3D {
         enabled: r.bool()?,
@@ -2560,7 +2565,7 @@ impl FrameRecord {
         if !frame.capture.glasses.is_empty() {
             tables.glass = true;
         }
-        // The 3D content snapshots froze goes with the frame's.
+        // The 3D content camera views draw on their own goes with the frame's.
         let frozen: Vec<(u32, &FrozenThreeD)> = frame
             .capture
             .elements

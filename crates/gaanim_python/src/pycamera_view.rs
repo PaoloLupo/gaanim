@@ -102,6 +102,37 @@ pub(crate) fn camera_view(
     Ok(PyCameraView { inner: view })
 }
 
+/// Create the view behind `Drawable.camera_view_3d`.
+pub(crate) fn camera_view_3d(
+    screen: &DrawableHandle,
+    eye: &Bound<'_, PyAny>,
+    target: &Bound<'_, PyAny>,
+    fov_y: f64,
+    up: Option<(f64, f64, f64)>,
+    background: CameraViewBackgroundArg,
+    exclude: Vec<PyDrawable>,
+) -> PyResult<PyCameraView> {
+    let options = CameraViewOptions {
+        background: parse_background(background),
+        exclude: exclude.into_iter().map(|drawable| drawable.0).collect(),
+        ..CameraViewOptions::default()
+    };
+    let up = up.map_or(gaanim_core::glam::DVec3::Y, |(x, y, z)| {
+        gaanim_core::glam::DVec3::new(x, y, z)
+    });
+    let view = screen
+        .clone()
+        .camera_view_3d(
+            crate::pycanvas::resolve_endpoint_3d(eye)?,
+            crate::pycanvas::resolve_endpoint_3d(target)?,
+            up,
+            fov_y,
+            options,
+        )
+        .map_err(view_error)?;
+    Ok(PyCameraView { inner: view })
+}
+
 fn parse_placement(at: &Bound<'_, PyAny>) -> PyResult<CameraInsetPlacement> {
     if let Ok(anchor) = at.extract::<PyRef<'_, PyAnchor>>() {
         return Ok(CameraInsetPlacement::Anchor(anchor.0));

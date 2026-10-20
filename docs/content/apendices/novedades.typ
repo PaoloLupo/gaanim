@@ -114,7 +114,14 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
   averiguarlo.
 - La cámara 2D se desplaza como antes, y las escenas sin cámara 3D no
   hacen ningún cálculo nuevo.
-- El ejemplo `3d/camera_3d` suma los segmentos `follow` e `inset`.
+- `pantalla.camera_view_3d(eye, target, fov_y=)` da a una vista de cámara
+  una cámara 3D propia: muestra el contenido 3D de la escena desde otro
+  ángulo, en la vista previa, las exportaciones, los paquetes `.gaanim` y
+  los reproductores web, y sus instantáneas lo congelan. El ojo y el
+  objetivo pueden ser objetos que se mueven. Antes una vista solo ampliaba
+  lo que dibujaba la cámara principal.
+- El ejemplo `3d/camera_3d` suma los segmentos `follow`, `inset`,
+  `snapshot`, `turn` y `view_3d`.
 
 == Paquetes más ligeros
 

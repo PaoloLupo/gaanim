@@ -9039,7 +9039,7 @@ pub(crate) fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoin
 
 /// Resolve a 3D camera endpoint. Static tuples must declare all three axes;
 /// drawable, anchor, and PointRef endpoints retain their native world Z.
-fn resolve_endpoint_3d(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
+pub(crate) fn resolve_endpoint_3d(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
     if let Ok(drawable) = obj.extract::<PyRef<PyDrawable>>() {
         Ok(CanvasEndpoint::Entity(drawable.0.id))
     } else if let Ok(anchor) = obj.extract::<PyRef<PyAnchorPoint>>() {

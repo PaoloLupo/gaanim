@@ -180,6 +180,94 @@ pub struct CameraView {
     pub since: f64,
     /// Timeline time `no_camera_view` removed it at, if it did.
     pub until: Option<f64>,
+    /// A 3D camera of the view's own, which draws the scene's 3D content
+    /// from where it stands instead of magnifying the canvas.
+    pub camera_3d: Option<ViewCamera3D>,
+}
+
+/// The 3D camera of a camera view that looks at the scene's 3D content from
+/// a place of its own: its eye and target, which may move, its up direction
+/// and its vertical field of view in radians. The view's screen shows the
+/// 3D content through it as the main camera would show it on a frame the
+/// screen's shape, with the main camera's lens limits; the canvas's 2D
+/// drawables stay out of it.
+#[derive(Debug, Clone)]
+pub struct ViewCamera3D {
+    pub eye: gaanim_animation::TrackingEndpoint,
+    pub target: gaanim_animation::TrackingEndpoint,
+    pub up: gaanim_core::glam::DVec3,
+    pub fov_y: f64,
+}
+
+/// Component: where the [`ViewCamera3D`] of a camera view's screen stands
+/// this frame, resolved by [`resolve_view_cameras_system`].
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ViewCamera(pub gaanim_math::Camera);
+
+/// System: resolve the eye and target of the 3D cameras of camera views
+/// where they are this frame, into a perspective camera on a frame as tall
+/// as the main camera's and shaped like each screen.
+pub fn resolve_view_cameras_system(world: &mut bevy::prelude::World) {
+    let mut screens = world.query::<(
+        Entity,
+        &CameraView,
+        &gaanim_scene::LocalBounds,
+        Option<&gaanim_scene::PathSource>,
+    )>();
+    let views: Vec<(Entity, ViewCamera3D, gaanim_core::kurbo::Rect)> = screens
+        .iter(world)
+        .filter_map(|(entity, view, bounds, source)| {
+            Some((
+                entity,
+                view.camera_3d.clone()?,
+                crate::pipeline::geometry_rect(bounds, source),
+            ))
+        })
+        .collect();
+    if views.is_empty() {
+        return;
+    }
+    let Some(main) = world
+        .get_resource::<gaanim_math::ResolvedCamera>()
+        .map(|resolved| resolved.camera)
+        .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())
+    else {
+        return;
+    };
+    let (near, far) = match main.projection {
+        gaanim_math::Projection::Perspective { near, far, .. } => (near, far),
+        gaanim_math::Projection::Orthographic { .. } => (0.1, 1000.0),
+    };
+    let mut resolved = Vec::with_capacity(views.len());
+    for (entity, camera_3d, rect) in views {
+        let (Some(eye), Some(target)) = (
+            gaanim_animation::resolve_tracking_endpoint(&camera_3d.eye, world),
+            gaanim_animation::resolve_tracking_endpoint(&camera_3d.target, world),
+        ) else {
+            continue;
+        };
+        if !(rect.width() > 0.0 && rect.height() > 0.0) {
+            continue;
+        }
+        let aspect = rect.width() / rect.height();
+        let height = main.frame_height;
+        let pixels = main.viewport_height.max(1);
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(
+            height * aspect,
+            height,
+            ((f64::from(pixels) * aspect).round() as u32).max(1),
+            pixels,
+        );
+        if camera.set_perspective(camera_3d.fov_y, near, far).is_err()
+            || camera.look_at(eye, target, camera_3d.up).is_err()
+        {
+            continue;
+        }
+        resolved.push((entity, camera));
+    }
+    for (entity, camera) in resolved {
+        world.entity_mut(entity).insert(ViewCamera(camera));
+    }
 }
 
 impl CameraView {
@@ -765,6 +853,7 @@ mod camera_view_follow_tests {
             layers: Vec::new(),
             since: 0.0,
             until: None,
+            camera_3d: None,
         });
         frame
     }

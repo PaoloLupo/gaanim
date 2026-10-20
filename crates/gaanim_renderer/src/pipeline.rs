@@ -571,6 +571,24 @@ struct ExtractedCameraView {
     background: CameraViewBackground,
     /// The 3D content a snapshot froze, which a capture keeps with it.
     frozen: Option<Arc<FrozenThreeD>>,
+    /// The 3D camera of the view's own, through which it draws the scene's
+    /// 3D content on the layer only it shows.
+    own: Option<OwnViewCamera>,
+    /// What that camera draws this frame, once the frame's 3D content is
+    /// extracted: a capture keeps it as a snapshot's.
+    own_frozen: std::sync::OnceLock<Arc<FrozenThreeD>>,
+}
+
+/// The 3D camera of a camera view's own (see [`crate::effects::ViewCamera3D`])
+/// as this frame resolves it.
+#[derive(Clone)]
+struct OwnViewCamera {
+    camera: gaanim_math::Camera,
+    /// The layer only the view shows, which its image goes on.
+    layer: Arc<str>,
+    /// Pixels of its image per unit of the camera's frame for an output 1080
+    /// pixels tall: as many as the screen covers.
+    resolution: f64,
 }
 
 impl ExtractedCameraView {
@@ -586,6 +604,8 @@ impl ExtractedCameraView {
             only_layers: self.only_layers,
             background: self.background.clone(),
             frozen: self.frozen.clone(),
+            own: self.own.clone(),
+            own_frozen: self.own_frozen.clone(),
         }
     }
 
@@ -739,7 +759,7 @@ fn bounds_rect(bounds: &gaanim_math::Bounds3D) -> kurbo::Rect {
 
 /// Local rectangle of a drawable's current geometry: its whole source path,
 /// which a morph rewrites but a reveal does not trim, or its spawn bounds.
-fn geometry_rect(bounds: &LocalBounds, source: Option<&PathSource>) -> kurbo::Rect {
+pub(crate) fn geometry_rect(bounds: &LocalBounds, source: Option<&PathSource>) -> kurbo::Rect {
     source
         .filter(|source| !source.0.elements().is_empty())
         .map_or_else(|| bounds_rect(&bounds.0), |source| source.0.bounding_box())
@@ -842,10 +862,47 @@ fn resolve_camera_views<'a>(
     >,
     mut source_frame: impl FnMut(Entity) -> Option<(kurbo::Rect, kurbo::Affine)>,
     mut zoom: impl FnMut(&gaanim_animation::TrackingScalar) -> Option<f64>,
+    mut view_camera: impl FnMut(Entity) -> Option<gaanim_math::Camera>,
 ) -> HashMap<Entity, Arc<ExtractedCameraView>> {
     screens
         .map(|(entity, view, transform, bounds, path, source)| {
             let screen = (geometry_rect(bounds, source), transform.affine_2d);
+            let mut excluded = Vec::with_capacity(view.exclude.len() + 2);
+            excluded.extend([entity, view.source]);
+            excluded.extend(view.exclude.iter().copied());
+            // A view with a 3D camera of its own shows the image it draws,
+            // its frame laid on the screen.
+            if view.camera_3d.is_some() {
+                let own = view_camera(entity);
+                let content = own.map(|camera| {
+                    screen.1
+                        * kurbo::Affine::translate(screen.0.center().to_vec2())
+                        * kurbo::Affine::scale(screen.0.height() / camera.frame_height)
+                });
+                let layer: Arc<str> = Arc::from(format!("\u{1}view {}", entity.to_bits()));
+                let own = own.map(|camera| {
+                    let scale = screen.1.determinant().abs().sqrt();
+                    OwnViewCamera {
+                        camera,
+                        layer: Arc::clone(&layer),
+                        resolution: 1080.0 * screen.0.height() * scale
+                            / camera.frame_height.powi(2).max(1e-12),
+                    }
+                });
+                let resolved = ExtractedCameraView {
+                    clip: Arc::clone(&path.0),
+                    content: content.filter(kurbo::Affine::is_finite),
+                    region: kurbo::Rect::ZERO,
+                    excluded,
+                    layers: vec![layer],
+                    only_layers: true,
+                    background: view.background.clone(),
+                    frozen: None,
+                    own,
+                    own_frozen: Default::default(),
+                };
+                return (entity, Arc::new(resolved));
+            }
             let content = source_frame(view.source).and_then(|source| match &view.zoom {
                 Some(scalar) => explicit_camera_view_transform(source, screen, zoom(scalar)?),
                 None => camera_view_transform(source, screen, view.fit),
@@ -859,9 +916,6 @@ fn resolve_camera_views<'a>(
                 let margin = seen.width().max(seen.height()) * 0.08;
                 seen.inflate(margin, margin)
             });
-            let mut excluded = Vec::with_capacity(view.exclude.len() + 2);
-            excluded.extend([entity, view.source]);
-            excluded.extend(view.exclude.iter().copied());
             let resolved = ExtractedCameraView {
                 clip: Arc::clone(&path.0),
                 content,
@@ -871,6 +925,8 @@ fn resolve_camera_views<'a>(
                 only_layers: false,
                 background: view.background.clone(),
                 frozen: None,
+                own: None,
+                own_frozen: Default::default(),
             };
             (entity, Arc::new(resolved))
         })
@@ -1291,6 +1347,33 @@ impl Freezer<'_> {
         level: usize,
         outer: f64,
     ) -> Option<Arc<FrozenThreeD>> {
+        // A view with a 3D camera of its own froze what that camera drew.
+        if let Some(own) = view.own_frozen.get() {
+            let sources = own
+                .three_d
+                .sources
+                .iter()
+                .map(|source| CapturedThreeDSource {
+                    entity: self.key(level, source.entity),
+                    composition: ThreeDComposition {
+                        layer: Some(Arc::clone(layer)),
+                        ..source.composition.clone()
+                    },
+                    ..source.clone()
+                })
+                .collect();
+            return Some(Arc::new(FrozenThreeD {
+                three_d: CapturedThreeD {
+                    lighting: own.three_d.lighting,
+                    lights: own.three_d.lights.clone(),
+                    opacity_fallback: own.three_d.opacity_fallback,
+                    sources,
+                },
+                camera: own.camera,
+                region: own.region,
+                resolution: own.resolution * outer,
+            }));
+        }
         let camera = self.camera?;
         let three_d = self.extraction.three_d.as_ref()?;
         let seen = view.content?;
@@ -1386,6 +1469,8 @@ fn snapshot_views<'a>(
                 only_layers: true,
                 background: view.background.clone(),
                 frozen: view.three_d.clone(),
+                own: None,
+                own_frozen: Default::default(),
             }),
         );
         shown.push(Arc::clone(view));
@@ -3603,6 +3688,11 @@ fn extract_world(
                 camera_source_frame(transform, local, source, bounds, group.is_some())
             },
             |zoom| zoom.evaluate(world),
+            |entity| {
+                world
+                    .get::<crate::effects::ViewCamera>(entity)
+                    .map(|camera| camera.0)
+            },
         )
     };
     // Only a scene with snapshots has frozen views.
@@ -4011,7 +4101,10 @@ fn extract_world(
         }
         pins.recorded = true;
     }
-    let mut three_d = capture_three_d.then(CapturedThreeD::default);
+    // Views with a 3D camera of their own draw from the frame's captured 3D
+    // content.
+    let own_views = own_views_in_order(&camera_views);
+    let mut three_d = (capture_three_d || !own_views.is_empty()).then(CapturedThreeD::default);
     let mut gpu_three_d = Vec::new();
     if let Some(camera) = camera {
         // The meshes draw into an image as large as the output, placed as
@@ -4058,19 +4151,38 @@ fn extract_world(
                         frozen_three_d_in_order(&frozen_shown).into_iter(),
                         &mut frozen.store.three_d,
                         size.1,
-                        0,
+                        VIEW_THREE_D_SLOT,
                         &mut extracted,
                     ));
                 });
             }
         }
+        if let Some(captured) = three_d.as_ref().filter(|_| !own_views.is_empty()) {
+            own_view_three_d(&own_views, captured);
+            if gpu_meshes && let Some(size) = output {
+                let mut sources = world
+                    .remove_resource::<OwnViewMeshSources>()
+                    .unwrap_or_default();
+                gpu_three_d.extend(frozen_three_d_frames(
+                    own_views
+                        .iter()
+                        .filter_map(|view| view.own_frozen.get().map(Arc::as_ref)),
+                    &mut sources.0,
+                    size.1,
+                    OWN_VIEW_THREE_D_SLOT,
+                    &mut extracted,
+                ));
+                world.insert_resource(sources);
+            }
+        }
         // The next frame keeps a captured mesh while its change tick stays:
         // a change made straight after this capture, outside a schedule,
         // must get a tick of its own.
-        if capture_three_d {
+        if three_d.is_some() {
             world.increment_change_tick();
         }
     }
+    let three_d = three_d.filter(|_| capture_three_d);
 
     extracted.sort_by(ExtractedElement::draw_order);
     if !frozen_shown.is_empty()
@@ -4535,7 +4647,7 @@ fn frozen_three_d_frames<'a>(
             camera: &frozen.camera,
             size,
             placement,
-            slot: slot + VIEW_THREE_D_SLOT + index,
+            slot: slot + index,
         };
         frames.extend(captured_gpu_three_d(
             &frozen.three_d,
@@ -4547,6 +4659,88 @@ fn frozen_three_d_frames<'a>(
     }
     sources.end_frame();
     frames
+}
+
+/// The image slots, past a host's first, that camera views with a 3D camera
+/// of their own draw into, past the snapshots'.
+const OWN_VIEW_THREE_D_SLOT: usize = 48;
+
+/// Resource: the uploads of what camera views with a 3D camera of their own
+/// draw, kept while they draw it.
+#[derive(Resource, Default)]
+struct OwnViewMeshSources(crate::three_d::MeshSources);
+
+/// What the canvas keeps from frame to frame for camera views with a 3D
+/// camera of their own: the frame's captured 3D content, the meshes it
+/// captured while they keep their change ticks, and their uploads.
+#[derive(Default)]
+pub struct OwnViewScratch {
+    captured: CapturedThreeD,
+    held: CapturedThreeDHeld,
+    sources: crate::three_d::MeshSources,
+}
+
+/// Freeze into each of `views` with a 3D camera of its own what it draws
+/// this frame: the frame's captured 3D content on no view layer, less what
+/// the view leaves out, on the layer only the view shows.
+fn own_view_three_d(views: &[&ExtractedCameraView], captured: &CapturedThreeD) {
+    for view in views {
+        let Some(own) = &view.own else {
+            continue;
+        };
+        if view.own_frozen.get().is_some() {
+            continue;
+        }
+        let sources: Vec<CapturedThreeDSource> = captured
+            .sources
+            .iter()
+            .filter(|source| {
+                let composition = &source.composition;
+                composition.in_views
+                    && composition.layer.is_none()
+                    && !view
+                        .excluded
+                        .iter()
+                        .any(|root| composition.lineage.contains(root))
+            })
+            .map(|source| CapturedThreeDSource {
+                composition: ThreeDComposition {
+                    in_views: true,
+                    post_exempt: false,
+                    layer: Some(Arc::clone(&own.layer)),
+                    transition_side: gaanim_scene::TransitionSide::None,
+                    lineage: Vec::new(),
+                },
+                ..source.clone()
+            })
+            .collect();
+        let (width, height) = (own.camera.frame_width, own.camera.frame_height);
+        let _ = view.own_frozen.set(Arc::new(FrozenThreeD {
+            three_d: CapturedThreeD {
+                lighting: captured.lighting,
+                lights: captured.lights.clone(),
+                opacity_fallback: captured.opacity_fallback,
+                sources,
+            },
+            camera: own.camera,
+            region: kurbo::Rect::new(-width / 2.0, -height / 2.0, width / 2.0, height / 2.0),
+            resolution: own.resolution,
+        }));
+    }
+}
+
+/// The views of `views` with a 3D camera of their own, in the order of
+/// their screens, so that each draws into the same image slot from frame to
+/// frame.
+fn own_views_in_order(
+    views: &HashMap<Entity, Arc<ExtractedCameraView>>,
+) -> Vec<&ExtractedCameraView> {
+    let mut ordered: Vec<(&Entity, &Arc<ExtractedCameraView>)> = views
+        .iter()
+        .filter(|(_, view)| view.own.is_some())
+        .collect();
+    ordered.sort_by_key(|(entity, _)| entity.to_bits());
+    ordered.into_iter().map(|(_, view)| view.as_ref()).collect()
 }
 
 /// The frozen 3D content of the snapshots `shown`, in the order of their
@@ -5944,7 +6138,10 @@ fn captured_element(element: ExtractedElement) -> CapturedElement {
                 layers: view.layers.clone(),
                 only_layers: view.only_layers,
                 background: view.background.clone(),
-                frozen: view.frozen.clone(),
+                frozen: view
+                    .frozen
+                    .clone()
+                    .or_else(|| view.own_frozen.get().cloned()),
             }
         }),
         echo_rank: element.echo_rank,
@@ -6157,6 +6354,8 @@ fn thawed_element(
                 only_layers: view.only_layers,
                 background: view.background.clone(),
                 frozen: view.frozen.clone(),
+                own: None,
+                own_frozen: Default::default(),
             }),
             overlay,
         }),
@@ -6203,7 +6402,7 @@ fn compose_captured_layers(
                 .filter_map(|element| element.screen.as_ref()?.frozen.as_deref()),
             &mut sources,
             target.size.1,
-            target.slot,
+            target.slot + VIEW_THREE_D_SLOT,
             &mut elements,
         ));
         store.view_three_d = sources;
@@ -6549,6 +6748,7 @@ type CameraViewQueries<'w, 's> = (
     Query<'w, 's, &'static gaanim_animation::FloatSignal>,
     Query<'w, 's, (), With<PostProcessExempt>>,
     CameraSnapshotQueries<'w, 's>,
+    Query<'w, 's, &'static crate::effects::ViewCamera>,
 );
 
 /// Transforms and bounds of the drawables that camera views frame.
@@ -6695,10 +6895,15 @@ pub fn gaanim_render_system(
         float_signals,
         exempt_query,
         (snapshot_query, mut frozen_views),
+        view_camera_query,
     ): CameraViewQueries,
-    mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
+    mut scratch: Local<(
+        Vec<ExtractedElement>,
+        std::collections::HashSet<Entity>,
+        OwnViewScratch,
+    )>,
 ) {
-    let (local_extracted, local_culled) = &mut *scratch;
+    let (local_extracted, local_culled, own_scratch) = &mut *scratch;
     local_extracted.clear();
     local_culled.clear();
 
@@ -6721,6 +6926,7 @@ pub fn gaanim_render_system(
                 })
                 .ok()
         },
+        |entity| view_camera_query.get(entity).ok().map(|camera| camera.0),
     );
     let frozen_shown = frozen_views.as_deref().map_or_else(Vec::new, |frozen| {
         snapshot_views(snapshot_query.iter(), frozen, &mut camera_views)
@@ -7220,6 +7426,13 @@ pub fn gaanim_render_system(
         });
         let mut glow_of = |entity| glow_query.get(entity).ok().cloned();
         let any_glow = !glow_query.is_empty();
+        // Views with a 3D camera of their own draw from the captured content.
+        let own_views = own_views_in_order(&camera_views);
+        let OwnViewScratch {
+            captured,
+            held,
+            sources: own_sources,
+        } = own_scratch;
         gpu_frames = three_d_elements(
             &camera.camera,
             &illumination(lighting.as_deref(), light_query.iter()),
@@ -7230,9 +7443,23 @@ pub fn gaanim_render_system(
             !camera_views.is_empty(),
             opacity_fallback,
             local_extracted,
-            None,
+            (!own_views.is_empty()).then_some((&mut *captured, &mut *held)),
             meshes,
         );
+        if !own_views.is_empty() {
+            own_view_three_d(&own_views, captured);
+            if let Some((size, _)) = placement {
+                gpu_frames.extend(frozen_three_d_frames(
+                    own_views
+                        .iter()
+                        .filter_map(|view| view.own_frozen.get().map(Arc::as_ref)),
+                    own_sources,
+                    size.1,
+                    OWN_VIEW_THREE_D_SLOT,
+                    local_extracted,
+                ));
+            }
+        }
         if let (Some((size, _)), Some(frozen)) = (placement, frozen_views.as_deref_mut())
             && !frozen_shown.is_empty()
         {
@@ -7240,7 +7467,7 @@ pub fn gaanim_render_system(
                 frozen_three_d_in_order(&frozen_shown).into_iter(),
                 &mut frozen.store.three_d,
                 size.1,
-                0,
+                VIEW_THREE_D_SLOT,
                 local_extracted,
             ));
         }
@@ -7732,6 +7959,7 @@ mod tests {
                 layers: Vec::new(),
                 since: 0.0,
                 until: None,
+                camera_3d: None,
             },
         ));
         screen
@@ -7769,6 +7997,7 @@ mod tests {
             layers: vec![Arc::from("xray")],
             since: 0.0,
             until: None,
+            camera_3d: None,
         });
         (lens, signal)
     }

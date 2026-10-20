@@ -4512,6 +4512,39 @@ class Drawable:
             scene.play([lens.animate.zoom_to(6), lens.animate.pan_to(3, 1)])
         """
         ...
+    def camera_view_3d(
+        self,
+        eye: Endpoint,
+        target: Endpoint,
+        *,
+        fov_y: float = 0.75,
+        up: Optional[tuple[float, float, float]] = None,
+        background: Paint | Literal["canvas"] | None = "canvas",
+        exclude: Sequence[Drawable] = (),
+    ) -> CameraView:
+        """Show inside this shape the scene's 3D content as a camera of its own sees it.
+
+        The view's camera looks from ``eye`` at ``target`` through a
+        perspective with a vertical field of view of ``fov_y`` radians, on a
+        frame the screen's shape as tall as the main camera's, so its lines
+        and glows look as they would on the main camera. A drawable or an
+        anchor point as ``eye`` or ``target`` is read where it is on every
+        frame: animate it to move the camera, or pass a moving drawable as
+        ``target`` to keep it at the center. ``up`` defaults to
+        ``(0, 1, 0)``. It shows primitives, surfaces, 3D lines, models and
+        drawables placed in 3D; the canvas's 2D drawables and the drawables
+        in ``exclude`` (with their children) stay out. ``snapshot`` freezes
+        it like any view; ``pan_to``, ``zoom_to``, ``rotate_to`` and
+        ``follow`` move the 2D frame, which this view does not use.
+
+        The screen must be a single closed 2D shape, as for ``camera_view``.
+        A ``fov_y`` outside ``(0, pi)`` or a zero ``up`` raise ``ValueError``.
+
+        Example:
+            top = scene.geometry.rounded_rect(4.8, 2.7, 0.15).hud().move_to(5, 2.6)
+            view = top.camera_view_3d(eye=(0, 12, 0.5), target=ball, fov_y=0.6)
+        """
+        ...
     def no_camera_view(self) -> Drawable:
         """Remove the camera view shown inside this drawable and return it.
 

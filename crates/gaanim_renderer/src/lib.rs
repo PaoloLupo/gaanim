@@ -84,6 +84,14 @@ impl Plugin for GaanimDerivedGeometryPlugin {
                 .after(gaanim_scene::systems::resolve_camera_system)
                 .in_set(gaanim_scene::SceneSet::Camera),
         );
+        // Camera views with a 3D camera of their own aim it where its eye
+        // and target are this frame.
+        app.add_systems(
+            Update,
+            effects::resolve_view_cameras_system
+                .after(effects::project_camera_view_follows_system)
+                .in_set(gaanim_scene::SceneSet::Camera),
+        );
         // Exports install only this plugin, so tips get their layers here,
         // and parallax layers their depth of field.
         app.add_systems(

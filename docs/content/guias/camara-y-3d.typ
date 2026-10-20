@@ -522,6 +522,25 @@ Las cámaras secundarias siguen al objeto donde la cámara principal lo
 dibuja: con `scene.camera.inset(bola, follow=True)` o `vista.follow(bola)`,
 el marco se queda sobre la esfera y la pantalla la muestra ampliada.
 
+=== Vistas con cámara 3D propia
+
+Una vista de cámara amplía lo que dibuja la cámara principal, desde su mismo
+ángulo. `pantalla.camera_view_3d(eye, target)` le da en cambio una cámara 3D
+propia: la pantalla muestra el contenido 3D de la escena desde `eye`,
+mirando a `target`, como lo mostraría la cámara principal desde allí. El ojo
+y el objetivo pueden ser objetos: se leen donde están en cada fotograma, así
+que una vista cenital puede seguir a la esfera mientras rueda.
+
+```python
+arriba = scene.geometry.rounded_rect(4.8, 2.7, 0.15).hud().move_to(5, 2.6)
+vista = arriba.camera_view_3d(eye=(0, 12, 0.5), target=bola, fov_y=0.6)
+scene.play([bola.animate.move_to_3d(3, 1.5, -2).duration(3.0)])
+```
+
+La vista muestra primitivas, superficies, líneas 3D, modelos y objetos
+colocados en 3D; los objetos 2D del canvas quedan fuera. `vista.snapshot()`
+la congela como a cualquier otra.
+
 == Ejes y superficies 3D
 
 `scene.viz.cartesian_3d` crea unos ejes 3D sobre los que puedes dibujar
