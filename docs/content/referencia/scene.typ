@@ -1419,11 +1419,12 @@ scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
   kind: "method",
   params: (
     (name: "target", type: "Endpoint", default: none, desc: [Objeto o punto que se sigue.]),
-    (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento de la vista respecto del objetivo.]),
+    (name: "offset", type: "tuple[float, float] | tuple[float, float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento de la vista respecto del objetivo; con tres valores, también en profundidad.]),
     (name: "offset_space", type: "\"world\" | \"local\"", default: "\"world\"", desc: [`"local"` gira el desplazamiento con el objetivo.]),
     (name: "lag", type: "float", default: "0.0", desc: [Retraso de seguimiento en segundos, determinista.]),
   ),
   returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`. Al terminar, la cámara se queda en la pose que alcanzó, calculada con la posición del objetivo al final del `play`, y el siguiente movimiento parte de ahí.]),
+  desc: [La cámara 2D se desplaza. Una cámara que mira la escena en ángulo o en perspectiva (tras `look_at`, `orbit` o `perspective`) sigue al objetivo en 3D: se mueve con él sin girar, a la misma distancia sobre su línea de visión, y su objetivo se mueve también, así que un `orbit` posterior gira alrededor del punto seguido.],
 )[
 ```python
 >>>from gaanim import *
@@ -1806,7 +1807,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
   kind: "method",
   params: ((name: "target", type: "Endpoint", default: none, desc: [Qué seguir.]), (name: "offset", type: "tuple[float, float]", default: "(0, 0)", desc: [Desplazamiento en unidades de escena.])),
   returns: (type: "CameraView", desc: [La misma vista.]),
-  desc: [Mantiene la cámara sobre `target` desde el cursor; `pan_to` deja de tener efecto después, y los movimientos anteriores se siguen viendo.],
+  desc: [Mantiene la cámara sobre `target` desde el cursor; `pan_to` deja de tener efecto después, y los movimientos anteriores se siguen viendo. Un objetivo que la cámara principal dibuja en 3D (una primitiva, una superficie, una línea 3D, un modelo, una de sus partes o un billboard) se sigue donde esa cámara lo dibuja, también si mira en ángulo o en perspectiva.],
   none,
 )
 

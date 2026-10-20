@@ -6545,8 +6545,11 @@ class CameraView:
 
         From the cursor the frame follows the endpoint every frame, so
         ``pan_to`` has no effect afterwards (earlier moves still play), and ``pop_out``/``pop_in`` start from where a
-        followed drawable or anchor point is at that moment. A non-finite
-        offset raises ``ValueError``.
+        followed drawable or anchor point is at that moment. A target the
+        main camera draws in 3D (a primitive, a surface, a 3D line, a model,
+        one of its parts or a billboard) is followed where that camera draws
+        it, also when it looks at the scene from an angle or through a
+        perspective. A non-finite offset raises ``ValueError``.
         """
         ...
     def snapshot(self) -> Drawable:
@@ -6707,7 +6710,7 @@ class CameraAnimation:
         self,
         target: Endpoint,
         *,
-        offset: tuple[float, float] = (0.0, 0.0),
+        offset: tuple[float, float] | tuple[float, float, float] = (0.0, 0.0),
         offset_space: Literal["world", "local"] = "world",
         lag: float = 0.0,
     ) -> Anim:
@@ -6718,6 +6721,13 @@ class CameraAnimation:
         animation ends the camera keeps the pose it reached, so the next camera
         move starts there; that pose comes from where the target is as
         authored at the end of the ``play``.
+
+        The 2D camera pans. A camera that looks at the scene from an angle
+        or through a perspective (after ``look_at``, ``orbit`` or
+        ``perspective``) follows a target moving in 3D: it moves with the
+        target without turning, keeping its distance to it along its line of
+        sight, and its target moves too, so a later ``orbit`` circles the
+        followed point. ``offset`` may then give a depth, ``(x, y, z)``.
 
         Example:
             scene.play([car.animate.move_to(6, 2), scene.camera.animate.follow(car, lag=0.2)])
