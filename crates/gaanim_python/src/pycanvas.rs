@@ -5462,6 +5462,47 @@ impl PyGeometry {
         Py::new(py, PyPrimitive3D::initializer(handle))
     }
 
+    /// A lit 3D line between two endpoints that follows them as they move.
+    #[pyo3(signature = (start, end, thickness=0.05, *, segments=16, caps=true, material=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn line_3d<'py>(
+        &self,
+        py: Python<'py>,
+        start: Bound<'py, PyAny>,
+        end: Bound<'py, PyAny>,
+        thickness: f64,
+        segments: u32,
+        caps: bool,
+        material: Option<PyMaterial3D>,
+    ) -> PyResult<Py<PyPrimitive3D>> {
+        crate::custom::ensure_authoring_allowed()?;
+        let from = resolve_endpoint(&start)?;
+        let to = resolve_endpoint(&end)?;
+        let mut canvas = self.inner.lock().expect("scene canvas poisoned");
+        // Drawables of other scenes may share ids with this one's.
+        let foreign = |end: &Bound<'py, PyAny>| {
+            end.extract::<PyRef<PyDrawable>>()
+                .is_ok_and(|drawable| !canvas.owns(&drawable.0))
+        };
+        if foreign(&start) || foreign(&end) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                gaanim_api::canvas::Line3DError::InvalidEndpoint.to_string(),
+            ));
+        }
+        let handle = canvas
+            .line_3d(
+                from,
+                to,
+                thickness,
+                segments,
+                caps,
+                material.map(|value| value.0).unwrap_or_default(),
+            )
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        drop(canvas);
+        Py::new(py, PyPrimitive3D::initializer(handle))
+    }
+
     /// A lit mesh from vertices and triangles in its own coordinates.
     #[pyo3(signature = (vertices, triangles, *, colors=None, material=None))]
     fn mesh<'py>(

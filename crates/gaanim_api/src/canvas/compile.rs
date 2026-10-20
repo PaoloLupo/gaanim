@@ -7055,6 +7055,21 @@ impl SceneModel {
                     }
                 }
 
+                Op::AttachTrackingLine3D { target, from, to } => {
+                    if let Some(target_id) = id_map.get(target).copied()
+                        && let Some(st) = builder.states.get(target_id)
+                    {
+                        let entity = st.entity;
+                        builder.commands.entity(entity).insert(
+                            gaanim_animation::TrackingLine3D::new(
+                                compile_tracking_endpoint(from, id_map, &builder.states),
+                                compile_tracking_endpoint(to, id_map, &builder.states),
+                            ),
+                        );
+                        builder.lines_3d.insert(target_id);
+                    }
+                }
+
                 Op::AttachTrackingConnector {
                     target,
                     points,
@@ -14954,6 +14969,91 @@ mod tests {
         seek(&mut app, 0.3);
         let held = app.world().resource::<gaanim_math::Camera>().target;
         assert!((held - ended).length() < 1e-6, "{held:?} {ended:?}");
+    }
+
+    #[test]
+    fn a_3d_line_lies_between_its_endpoints_and_grows_from_its_start() {
+        use bevy::prelude::App;
+        let mut canvas = SceneModel::new(1280, 720);
+        let material = gaanim_scene::Material3D::default();
+        let start = canvas
+            .sphere(0.2, 16, 8, material)
+            .unwrap()
+            .move_to_3d(-1.0, 0.0, 0.0);
+        let end = canvas
+            .sphere(0.2, 16, 8, material)
+            .unwrap()
+            .move_to_3d(1.0, 0.0, 0.0);
+        let line = canvas
+            .line_3d(
+                CanvasEndpoint::Entity(start.id),
+                CanvasEndpoint::Entity(end.id),
+                0.1,
+                12,
+                true,
+                material,
+            )
+            .unwrap();
+        canvas.play(vec![line.animate().create().duration(1.0)]);
+        canvas.play(vec![end.animate().move_to_3d(1.0, 2.0, 2.0).duration(1.0)]);
+        canvas.play(vec![line.animate().uncreate().duration(1.0)]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        // As a host does after a replay: the t=0 keyframe holds the scene, so
+        // seeking back restores it.
+        app.world_mut().resource_mut::<Timeline>().keyframes.clear();
+        gaanim_timeline::capture_reload_keyframe(app.world_mut());
+        let line = entity_of(app.world_mut(), &line);
+        let at = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            *app.world().get::<SpatialTransform>(line).unwrap()
+        };
+        let near = |a: DVec3, b: DVec3| a.distance(b) < 1e-6;
+        // Before `create` it is not there, caps and all.
+        assert_eq!(at(&mut app, 0.0).scale, DVec3::ZERO);
+        // Halfway through, it reaches halfway from its start, as thick as ever.
+        let half = at(&mut app, 0.5);
+        assert!(
+            near(half.translation, DVec3::new(-0.5, 0.0, 0.0)),
+            "{half:?}"
+        );
+        assert!(near(half.scale, DVec3::new(1.0, 1.0, 1.0)), "{half:?}");
+        // It follows the end where it moves.
+        let (from, to) = (DVec3::new(-1.0, 0.0, 0.0), DVec3::new(1.0, 2.0, 2.0));
+        let moved = at(&mut app, 2.0);
+        assert!(near(moved.translation, (from + to) / 2.0), "{moved:?}");
+        assert!(
+            (moved.scale.y - from.distance(to)).abs() < 1e-6,
+            "{moved:?}"
+        );
+        assert!(
+            near(moved.rotation * DVec3::Y, (to - from).normalize()),
+            "{moved:?}"
+        );
+        // `uncreate` takes it back to its start.
+        let leaving = at(&mut app, 2.5);
+        assert!(
+            near(leaving.translation, from + (to - from) / 4.0),
+            "{leaving:?}"
+        );
+        assert_eq!(at(&mut app, 3.0).scale, DVec3::ZERO);
+        // A seek back grows it again.
+        let again = at(&mut app, 0.5);
+        assert!(
+            near(again.translation, DVec3::new(-0.5, 0.0, 0.0)),
+            "{again:?}"
+        );
     }
 
     #[test]

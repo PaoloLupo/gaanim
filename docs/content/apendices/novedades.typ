@@ -123,6 +123,18 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
 - El ejemplo `3d/camera_3d` suma los segmentos `follow`, `inset`,
   `snapshot`, `turn` y `view_3d`.
 
+== Líneas 3D con grosor
+
+- `scene.geometry.line_3d(start, end, thickness=0.05)` une dos extremos con
+  una línea sólida e iluminada que conserva su grosor. Cada extremo es un
+  punto o un objeto, y si este se mueve la línea lo sigue en cada fotograma
+  y en cada salto, como el enlace entre dos átomos o la arista de un grafo
+  en 3D. Al seguirlo solo cambia su transformación, no su malla: la GPU y
+  el paquete `.gaanim` reciben la malla una vez y, en cada fotograma, solo
+  dónde está.
+  `create()` la hace crecer desde `start` y `uncreate()` la recoge hacia él.
+  Ver #link("/referencia/geometria/#api-geometry-line-3d")[Geometría].
+
 == Paquetes más ligeros
 
 - Una malla o línea 3D que cambia de un fotograma a otro guarda, sin perder

@@ -74,7 +74,7 @@ pub use updaters::{
     RotationBinding, RotationTranslationBinding, SampledInterpolation, SampledProperty,
     SampledSeriesDriver, SampledSeriesDrivers, SurroundingRays, SurroundingRect, SurroundingShape,
     TracedPath, TracedPath3D, TrackingAngle, TrackingAnglePart, TrackingEndpoint, TrackingLine,
-    TrackingRay, TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by,
+    TrackingLine3D, TrackingRay, TrackingScalar, TrackingVectorHead, Updater, advance_updaters_by,
     advance_x_updater, angle_label_placement_system, bob_updater, dimension_label_placement_system,
     endpoint_angle_system, endpoint_distance_system, endpoint_follow_system, entity_world_matrix,
     evaluate_reactive_positions, expire_trace_samples, follow_updater, has_reactive_positions,

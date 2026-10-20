@@ -339,8 +339,9 @@ scene.render()
 == Objetos, materiales y luz
 
 - `scene.geometry` crea primitivas 3D: `cube`, `sphere`, `cylinder`, `cone`,
-  `plane` y `torus`. `arrow_3d`, `tube` y `flat_3d` construyen flechas,
-  tubos y láminas a partir de puntos o de un dibujo 2D (ver más abajo).
+  `plane` y `torus`. `arrow_3d`, `tube`, `line_3d` y `flat_3d` construyen
+  flechas, tubos, líneas con grosor y láminas a partir de puntos, de objetos
+  o de un dibujo 2D (ver más abajo).
 - `mesh(vertices, triangles, colors=)` crea una malla con los vértices y
   triángulos que le des, y `revolve(profile)` el sólido que barre un perfil
   `(r, y)` al girar alrededor del eje y. Ambos conservan el origen de sus
@@ -436,6 +437,10 @@ Algunas formas se definen mejor con puntos del mundo que con medidas:
 - `tube(points, radius)` sigue una polilínea con un tubo iluminado, como una
   trayectoria o un muelle. La sección avanza sin retorcerse; `closed=True`
   cierra el lazo y `caps=False` deja los extremos abiertos.
+- `line_3d(start, end, thickness)` une dos extremos con una línea sólida
+  que conserva su grosor. Si un extremo es un objeto que se mueve, la línea
+  lo sigue en cada fotograma, como el enlace entre dos átomos;
+  `create()` la hace crecer desde `start`.
 - `flat_3d(source)` convierte el relleno de un texto, una ecuación o una
   forma en una lámina plana de dos caras. A diferencia de `billboard`, que
   mantiene un objeto 2D de frente a la cámara, la lámina es parte de la
@@ -443,7 +448,8 @@ Algunas formas se definen mejor con puntos del mundo que con medidas:
   la cámara.
 
 Las flechas y los tubos quedan en el centro de sus puntos, así que
-`move_to_3d` y los giros parten de ahí. Todas son mallas cerradas que
+`move_to_3d` y los giros parten de ahí; una `line_3d` la colocan sus
+extremos, así que se mueve moviéndolos. Todas son mallas cerradas que
 proyectan sombra.
 
 ```python

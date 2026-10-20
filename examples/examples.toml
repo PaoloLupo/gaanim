@@ -522,7 +522,7 @@ description = "Text, equations, SVGs, shapes with holes and groups extruded into
 
 [[example]]
 path = "3d/shapes_3d.py"
-description = "Tori, arrows between two points, tubes along open, creased and closed paths, and flat sheets of text, equations and shapes."
+description = "Tori, arrows between two points, tubes along open, creased and closed paths, flat sheets of text, equations and shapes, and lit lines between points or the drawables they follow."
 
 [[example]]
 path = "3d/drawables_in_3d.py"

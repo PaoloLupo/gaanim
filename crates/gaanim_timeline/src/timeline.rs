@@ -4772,9 +4772,15 @@ fn apply_lens_spec(
             let progress = (*from + (*to - *from) * t).clamp(0.0, 1.0);
             if let Some(mut connector) =
                 world.get_mut::<gaanim_animation::updaters::TrackingConnector>(target)
-                && connector.progress != progress
             {
-                connector.progress = progress;
+                if connector.progress != progress {
+                    connector.progress = progress;
+                }
+            } else if let Some(mut line) =
+                world.get_mut::<gaanim_animation::updaters::TrackingLine3D>(target)
+                && line.progress != progress
+            {
+                line.progress = progress;
             }
         }
         PropertyLensSpec::ArcSweep { from, to } => {

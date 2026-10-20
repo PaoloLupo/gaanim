@@ -1277,11 +1277,13 @@ scene.render()
 )
 
 Además de los sólidos básicos, `torus` crea toros, `arrow_3d` flechas entre
-dos puntos, `tube` tubos a lo largo de un recorrido y `flat_3d` láminas planas
-con la forma de un texto, una ecuación o un dibujo 2D. Las flechas y los tubos
-se definen con puntos del mundo; el objeto queda en su centro, así que
-`move_to_3d` mueve ese punto y los giros y `create()` parten de él. Todos son
-mallas cerradas: proyectan sombra y no se sombrean a sí mismas.
+dos puntos, `tube` tubos a lo largo de un recorrido, `line_3d` líneas con
+grosor que siguen a sus extremos y `flat_3d` láminas planas con la forma de un
+texto, una ecuación o un dibujo 2D. Las flechas y los tubos se definen con
+puntos del mundo; el objeto queda en su centro, así que `move_to_3d` mueve ese
+punto y los giros y `create()` parten de él. Una `line_3d`, en cambio, la
+colocan sus extremos. Todos son mallas cerradas: proyectan sombra y no se
+sombrean a sí mismas.
 
 ```python
 # output: primitivas-3d.webp
@@ -1373,6 +1375,31 @@ thin = scene.geometry.arrow_3d((0, 0, 0), (0, 3, 0), shaft_radius=0.03, head_len
 knot = [(math.sin(t) + 2 * math.sin(2 * t), math.cos(t) - 2 * math.cos(2 * t), -math.sin(3 * t))
         for t in (k * math.tau / 120 for k in range(120))]
 trefoil = scene.geometry.tube(knot, 0.25, closed=True, material=Material3D.metal(GOLD))
+```
+]
+
+#api-entry(
+  name: "Geometry.line_3d",
+  kind: "factory",
+  params: (
+    (name: "start", type: "Endpoint", default: none, desc: [Un extremo: un punto `(x, y, z)`, o `(x, y)` en z = 0, o un `Drawable`, `AnchorPoint` o `PointRef` al que la línea sigue.]),
+    (name: "end", type: "Endpoint", default: none, desc: [El otro extremo, de las mismas formas.]),
+    (name: "thickness", type: "float", default: "0.05", desc: [Grosor (diámetro) de la línea, en unidades de escena.]),
+    (name: "segments", type: "int", default: "16", desc: [Lados de la sección; al menos 3.]),
+    (name: "caps", type: "bool", default: "True", desc: [Cierra los dos extremos; sin tapas es una cáscara abierta.]),
+    (name: "material", type: "Material3D | None", default: "None", desc: [Material; sin él, mate blanco.]),
+  ),
+  returns: (type: "Primitive3D", desc: [Línea iluminada entre los dos extremos.]),
+  desc: [Un cilindro que la luz sombrea y que conserva su grosor por larga que sea: el enlace entre dos átomos, la arista de un grafo en 3D o una varilla entre dos piezas. En cada fotograma y en cada salto va de donde están sus extremos, así que sigue a los objetos que se mueven; al seguirlos solo cambia su transformación, nunca su malla. Sus extremos la colocan: para moverla, mueve los extremos; `move_to_3d`, `rotate_to_3d` y `scale` sobre la línea no hacen nada, mientras que la opacidad, el material, el glow y la visibilidad funcionan como en cualquier `Primitive3D`. `create()` la hace crecer de `start` a `end` y `uncreate()` la recoge hacia `start`. Un `thickness` no positivo o no finito, menos de 3 `segments` o un extremo no finito o de otra escena lanzan `ValueError`; cualquier otro extremo, `TypeError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+atom_a = scene.geometry.sphere(0.3).move_to_3d(-1, 0, 0)
+atom_b = scene.geometry.sphere(0.3).move_to_3d(1, 0, 0)
+bond = scene.geometry.line_3d(atom_a, atom_b, 0.08, material=Material3D.matte(GRAY))
+scene.play([bond.animate.create()])
+scene.play([atom_b.animate.move_to_3d(1, 1, 1)])
 ```
 ]
 

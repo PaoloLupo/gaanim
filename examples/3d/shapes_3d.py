@@ -1,7 +1,8 @@
-"""3D shapes from points and outlines: tori, arrows, tubes and flat sheets.
+"""3D shapes from points and outlines: tori, arrows, tubes, flat sheets and lines.
 
 Arrows run between two world-space points and tubes along a list of them;
 each sits at the center of its points, so it turns and grows about it there.
+A 3D line runs between two ends, points or drawables it follows.
 A flat sheet is the area a 2D drawable fills, like an extrusion with no
 depth, with a face on each side. All of them are lit, closed meshes that
 appear with ``create()``. The default camera is orthographic and looks down
@@ -159,6 +160,54 @@ for index, (label, build) in enumerate(entries):
     scene.text(label, role="code").place(table[2 * index], anchor="right")
     sheets.append(build(table[2 * index + 1]))
 reveal(sheets, turns=[(-1.0, 0, 0), (0.2, 2.6, 0)])
+
+
+def line(*args, **options):
+    """A line across its zone, from the lower left at the back to the upper right at the front."""
+
+    def build(zone):
+        a, b = centered(zone, [(-2.4, -0.5, -1.0), (2.4, 0.5, 1.0)])
+        return scene.geometry.line_3d(a, b, *args, **options)
+
+    return build
+
+
+# line_3d(start, end, thickness) runs a lit cylinder between two ends that
+# keeps its thickness, and create() grows it from start. segments sets how
+# many sides it has. An end may be a drawable: the line follows it as it
+# moves, like a bond between two atoms, so these two balls drag theirs along.
+scene.segment("lines")
+grid = scene.layout.zones(Zones.grid(rows=2, columns=2, gap="48px", padding="page_padding"))
+lines, balls, moves = [], [], []
+for cell, (label, build) in zip(
+    grid,
+    [
+        ("line_3d(a, b)", line()),
+        ("line_3d(a, b, 0.2)", line(0.2)),
+        ("line_3d(a, b, 0.3, segments=5)", line(0.3, segments=5)),
+        ("line_3d(left, right, 0.12)", None),
+    ],
+):
+    art, caption = cell.split(Zones.rows(["1fr", 0.5]))
+    scene.text(label, role="code").place(caption)
+    if build:
+        lines.append(build(art))
+        continue
+    ends = centered(art, [(-2.2, 0, 0), (2.2, 0, 0)])
+    left, right = (
+        scene.geometry.sphere(0.35, material=Material3D.matte(color)).move_to_3d(*end)
+        for end, color in zip(ends, (accent, success))
+    )
+    balls += [left, right]
+    lines.append(scene.geometry.line_3d(left, right, 0.12))
+    to_left, to_right = centered(art, [(-1.6, 0.8, 1.2), (2.0, -0.7, -1.2)])
+    moves += [left.animate.move_to_3d(*to_left), right.animate.move_to_3d(*to_right)]
+moments.append(scene.cursor + DRAW / 2)
+scene.play([shape.animate.create() for shape in balls + lines], duration=DRAW)
+moments.append(scene.cursor)
+scene.play(moves, duration=TURN)
+moments.append(scene.cursor)
+scene.wait(HOLD)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, moments)

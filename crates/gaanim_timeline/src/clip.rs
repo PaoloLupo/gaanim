@@ -488,8 +488,9 @@ pub enum PropertyLensSpec {
         from: f64,
         to: f64,
     },
-    /// Grow a reactive connector from its tail. Writes the visible fraction
-    /// of `TrackingConnector`; progress `1.0` is exactly the full connector.
+    /// Grow a reactive connector or 3D line from its tail. Writes the visible
+    /// fraction of `TrackingConnector` or `TrackingLine3D`; progress `1.0` is
+    /// exactly the full connector.
     ConnectorGrow {
         from: f64,
         to: f64,

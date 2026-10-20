@@ -8960,6 +8960,41 @@ class Geometry:
             knot = scene.geometry.tube(points, 0.12, closed=True, material=Material3D.metal(GOLD))
         """
         ...
+    def line_3d(
+        self,
+        start: Endpoint,
+        end: Endpoint,
+        thickness: float = 0.05,
+        *,
+        segments: int = 16,
+        caps: bool = True,
+        material: Optional[Material3D] = None,
+    ) -> Primitive3D:
+        """Create a lit 3D line ``thickness`` scene units across from ``start`` to ``end``.
+
+        Each end is a point, ``(x, y, z)`` or ``(x, y)`` at z = 0, or a
+        ``Drawable``, ``AnchorPoint`` or ``PointRef`` that the line follows:
+        in every frame and seek it runs between where its ends are, like a
+        bond between two atoms or an edge of a graph in 3D. It is a cylinder
+        of ``segments`` sides, closed at both ends unless ``caps`` is false,
+        that light shades and that keeps its thickness however long it gets;
+        only its transform changes as it follows, never its mesh. Its ends
+        place it, so move them to move it: ``move_to_3d``, ``rotate_to_3d``
+        and ``scale`` on the line do nothing, while its opacity, material,
+        glow and visibility work as on any ``Primitive3D``. ``create()``
+        grows it from ``start`` to ``end`` and ``uncreate()`` takes it back
+        to ``start``. Without a ``material`` it is matte white. A
+        non-positive or non-finite ``thickness``, fewer than 3 ``segments``,
+        or an end that is not finite or belongs to another scene raise
+        ``ValueError``; any other end raises ``TypeError``.
+
+        Example:
+            atom_a = scene.geometry.sphere(0.3).move_to_3d(-1, 0, 0)
+            atom_b = scene.geometry.sphere(0.3).move_to_3d(1, 0, 0)
+            bond = scene.geometry.line_3d(atom_a, atom_b, 0.08, material=Material3D.matte(GRAY))
+            scene.play([atom_b.animate.move_to_3d(1, 1, 1)])
+        """
+        ...
     def mesh(
         self,
         vertices: Sequence[tuple[float, float, float]],
