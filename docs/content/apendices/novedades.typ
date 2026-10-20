@@ -13,9 +13,14 @@ instalar una versión nueva, sigue
 
 = 0.16.0
 
-Sin publicar. Vuelven los modelos glTF: `scene.media.gltf(...)` importa sus
-mallas, materiales, texturas, esqueletos y animaciones, que dibuja el pase 3D
-en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
+Publicada el 20 de octubre de 2026. Vuelven los modelos glTF:
+`scene.media.gltf(...)` importa sus mallas, materiales, texturas, esqueletos y
+animaciones, que dibuja el pase 3D en GPU y que los paquetes `.gaanim` guardan
+ya resueltos. La cámara sigue objetos que se mueven en 3D, gira para no
+perderlos y termina donde ellos terminan; las vistas de cámara congelan lo que
+muestran en instantáneas y pueden tener una cámara 3D propia; el glow brilla
+también en 3D, y `line_3d` une dos objetos con una línea sólida que los sigue.
+Lee «Al actualizar».
 
 == Modelos glTF
 
@@ -83,6 +88,15 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
   siguen mostrando su pintura, para que dos vistas que se muestran entre sí
   terminen.
 - El ejemplo `camera/camera_views` suma el segmento `snapshots`.
+
+== De pantalla completa a un lado
+
+- Nuevo ejemplo, `camera/picture_in_picture`, y sección en
+  #link("/guias/camara-y-3d/#de-pantalla-completa-a-un-lado")[Cámara y 3D]:
+  una demo que empieza a pantalla completa pasa a una pantalla a un lado y
+  sigue animándose. La demo vive en una capa de vista que solo muestra un
+  rectángulo del tamaño del cuadro con `camera_view`; al colocar ese
+  rectángulo en una zona más pequeña, la vista se encoge con él.
 
 == Seguir objetos en 3D
 
