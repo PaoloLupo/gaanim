@@ -293,21 +293,18 @@ impl PyCameraView {
     }
 
     /// Keep the camera centered on an endpoint from now on.
-    #[pyo3(signature = (target, *, offset=(0.0, 0.0)))]
+    #[pyo3(signature = (target, *, offset=crate::pycanvas::FollowOffset::ZERO))]
     fn follow<'py>(
         slf: PyRef<'py, Self>,
         target: &Bound<'_, PyAny>,
-        offset: (f64, f64),
+        offset: crate::pycanvas::FollowOffset,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        if !offset.0.is_finite() || !offset.1.is_finite() {
+        if !offset.0.is_finite() {
             return Err(PyValueError::new_err("offset must be finite"));
         }
         let endpoint = crate::pycanvas::resolve_endpoint(target)?;
-        slf.inner.follow(
-            endpoint,
-            gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-        );
+        slf.inner.follow(endpoint, offset.0);
         Ok(slf)
     }
 

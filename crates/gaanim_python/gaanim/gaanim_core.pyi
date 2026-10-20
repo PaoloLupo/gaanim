@@ -6540,7 +6540,7 @@ class CameraView:
     def rotate_to(self, radians: ScalarSource) -> CameraView:
         """Turn the camera to ``radians``; the view turns the other way."""
         ...
-    def follow(self, target: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0)) -> CameraView:
+    def follow(self, target: Endpoint, *, offset: tuple[float, float] | tuple[float, float, float] = (0.0, 0.0)) -> CameraView:
         """Keep the camera on ``target`` plus ``offset`` from now on and return this view.
 
         From the cursor the frame follows the endpoint every frame, so
@@ -6549,7 +6549,8 @@ class CameraView:
         main camera draws in 3D (a primitive, a surface, a 3D line, a model,
         one of its parts or a billboard) is followed where that camera draws
         it, also when it looks at the scene from an angle or through a
-        perspective. A non-finite offset raises ``ValueError``.
+        perspective; an ``(x, y, z)`` offset is added to its 3D point before
+        that camera projects it. A non-finite offset raises ``ValueError``.
         """
         ...
     def snapshot(self) -> Drawable:

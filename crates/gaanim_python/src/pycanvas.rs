@@ -8980,13 +8980,11 @@ enum TypstSource {
     Asset(PathBuf),
 }
 
-/// Resolve a Python object into a CanvasEndpoint.
-/// Accepts a drawable, anchor, point reference, or static 2D/3D tuple.
 /// A follow offset: `(x, y)` on the scene plane or `(x, y, z)` in 3D.
 pub(crate) struct FollowOffset(pub gaanim_core::glam::DVec3);
 
 impl FollowOffset {
-    const ZERO: Self = Self(gaanim_core::glam::DVec3::ZERO);
+    pub(crate) const ZERO: Self = Self(gaanim_core::glam::DVec3::ZERO);
 }
 
 impl<'a, 'py> FromPyObject<'a, 'py> for FollowOffset {
@@ -9005,6 +9003,8 @@ impl<'a, 'py> FromPyObject<'a, 'py> for FollowOffset {
     }
 }
 
+/// Resolve a Python object into a CanvasEndpoint.
+/// Accepts a drawable, anchor, point reference, or static 2D/3D tuple.
 pub(crate) fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
     if let Ok(drawable) = obj.extract::<PyRef<PyDrawable>>() {
         Ok(CanvasEndpoint::Entity(drawable.0.id))

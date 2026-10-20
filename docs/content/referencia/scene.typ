@@ -1805,9 +1805,9 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
 #api-entry(
   name: "CameraView.follow",
   kind: "method",
-  params: ((name: "target", type: "Endpoint", default: none, desc: [Qué seguir.]), (name: "offset", type: "tuple[float, float]", default: "(0, 0)", desc: [Desplazamiento en unidades de escena.])),
+  params: ((name: "target", type: "Endpoint", default: none, desc: [Qué seguir.]), (name: "offset", type: "tuple[float, float] | tuple[float, float, float]", default: "(0, 0)", desc: [Desplazamiento en unidades de escena; con tres valores, también en profundidad.])),
   returns: (type: "CameraView", desc: [La misma vista.]),
-  desc: [Mantiene la cámara sobre `target` desde el cursor; `pan_to` deja de tener efecto después, y los movimientos anteriores se siguen viendo. Un objetivo que la cámara principal dibuja en 3D (una primitiva, una superficie, una línea 3D, un modelo, una de sus partes o un billboard) se sigue donde esa cámara lo dibuja, también si mira en ángulo o en perspectiva.],
+  desc: [Mantiene la cámara sobre `target` desde el cursor; `pan_to` deja de tener efecto después, y los movimientos anteriores se siguen viendo. Un objetivo que la cámara principal dibuja en 3D (una primitiva, una superficie, una línea 3D, un modelo, una de sus partes o un billboard) se sigue donde esa cámara lo dibuja, también si mira en ángulo o en perspectiva: el desplazamiento se suma a su punto 3D antes de proyectarlo, y si el objetivo pasa detrás de la cámara, el marco sale del cuadro por su lado.],
   none,
 )
 
