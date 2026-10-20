@@ -43,6 +43,10 @@ use peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
 use vello::wgpu;
 use wgpu::util::DeviceExt;
 
+use crate::effects::Glow;
+
+mod glow;
+
 /// A light as shading uses it: where it is in the world and its linear
 /// color, scaled by its intensity and its entity's opacity.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,6 +97,9 @@ pub(crate) struct Content<'a> {
     /// The matrices of a skinned mesh's joints (see
     /// [`gaanim_scene::SkinPalette`]).
     pub joints: Option<&'a Arc<[[f32; 16]]>>,
+    /// The glow of the drawable or of the group that holds it (see
+    /// [`glow`]).
+    pub glow: Option<Glow>,
 }
 
 /// Width of 3D lines without a stroke width, as a fraction of the frame's
@@ -875,6 +882,8 @@ struct GpuDraw {
     outlined: bool,
     /// A skinned mesh: where its palette starts in the frame's joints.
     joints: Option<u32>,
+    /// A glowing mesh or line: its glow's blur and gain.
+    glow: Option<glow::GlowDraw>,
 }
 
 /// The meshes and lines one image of a frame draws, with what the shader
@@ -923,6 +932,11 @@ impl GpuMeshFrame {
                 u8::from(draw.casts),
                 u8::from(draw.outlined),
             ]);
+            if let Some(glow) = &draw.glow {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                glow.hash(&mut hasher);
+                update(&hasher.finish().to_le_bytes());
+            }
             update(&draw.source.vertices);
             for index in &draw.source.indices {
                 update(&index.to_le_bytes());
@@ -960,6 +974,8 @@ struct Pending {
     /// The bounding sphere of what it draws, in model space: a skinned
     /// mesh's spans where its joints take it.
     sphere: (DVec3, f64),
+    /// A mesh's or lines' glow.
+    glow: Option<Glow>,
 }
 
 impl Pending {
@@ -1157,6 +1173,9 @@ impl<'a> GpuMeshes<'a> {
             } else {
                 None
             },
+            // Filled outlines keep the glow of 2D drawables placed in 3D, which
+            // leave it out.
+            glow: if fill { None } else { content.glow.clone() },
         });
     }
 
@@ -1266,6 +1285,10 @@ impl<'a> GpuMeshes<'a> {
                 let outline_px = pending.material.map_or(0.0, |material| {
                     f64::from(material.outline_width) * pixels_per_unit
                 });
+                let glow = pending
+                    .glow
+                    .as_ref()
+                    .and_then(|glow| glow::GlowDraw::new(glow, pixels_per_unit));
                 push_draw_uniforms(
                     &mut draw_uniforms,
                     pending,
@@ -1303,6 +1326,7 @@ impl<'a> GpuMeshes<'a> {
                         && !pending.source.outline.is_empty()
                         && pending.material.is_some_and(|material| material.outlined()),
                     joints: palette,
+                    glow,
                     source: Arc::clone(&pending.source),
                 });
             }
@@ -1324,6 +1348,7 @@ impl<'a> GpuMeshes<'a> {
                 draw.casts.hash(&mut hasher);
                 draw.outlined.hash(&mut hasher);
                 draw.joints.hash(&mut hasher);
+                draw.glow.hash(&mut hasher);
             }
             frames.push((
                 class,
@@ -2975,6 +3000,9 @@ pub struct GpuThreeD {
     pipelines: Option<Pipelines>,
     /// Built the first time a frame draws an imported model.
     models: Option<ModelPipelines>,
+    /// Built the first time a frame draws a glow, and its textures.
+    glow: Option<glow::GlowPipelines>,
+    glow_targets: Option<glow::GlowTargets>,
     uploads: HashMap<usize, Uploaded>,
     /// Models' textures by the id of their pixels, and their samplers.
     textures: HashMap<u64, wgpu::TextureView>,
@@ -3100,6 +3128,27 @@ impl GpuThreeD {
             self.models = Some(ModelPipelines::new(device, queue, pipelines));
         }
         let models = self.models.as_ref().filter(|_| draws_models);
+        let glows = frame.draws.iter().any(|draw| draw.glow.is_some());
+        if glows {
+            let glow = self
+                .glow
+                .get_or_insert_with(|| glow::GlowPipelines::new(device, pipelines));
+            if let Some(models) = models
+                && frame
+                    .draws
+                    .iter()
+                    .any(|draw| draw.glow.is_some() && draw.source.model.is_some())
+            {
+                glow.add_models(device, pipelines, models);
+            }
+            if self
+                .glow_targets
+                .as_ref()
+                .is_none_or(|targets| targets.size() != size)
+            {
+                self.glow_targets = Some(glow::GlowTargets::new(device, size));
+            }
+        }
         let textures = &mut self.textures;
         let samplers = &mut self.samplers;
         for draw in frame.draws.iter() {
@@ -3465,8 +3514,9 @@ impl GpuThreeD {
                     },
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
-                        // The translucent layers read the opaque depth.
-                        store: if opaque && !last {
+                        // The translucent layers read the opaque depth, and
+                        // the glows test their silhouettes against it.
+                        store: if opaque && (!last || glows) {
                             wgpu::StoreOp::Store
                         } else {
                             wgpu::StoreOp::Discard
@@ -3560,6 +3610,60 @@ impl GpuThreeD {
                 draw_one(&mut pass, next, next + 1);
                 next += 1;
             }
+        }
+        if glows
+            && let (Some(glow), Some(targets)) = (self.glow.as_ref(), self.glow_targets.as_mut())
+        {
+            // Draw `at`'s silhouette with the geometry its color pass binds.
+            let silhouette = |pass: &mut wgpu::RenderPass<'_>,
+                              glow: &glow::GlowPipelines,
+                              draw: &GpuDraw,
+                              at: usize| {
+                let Some(uploaded) = self.uploads.get(&(Arc::as_ptr(&draw.source) as usize)) else {
+                    return;
+                };
+                if uploaded.fill.is_some() {
+                    return;
+                }
+                let pipeline = match (&uploaded.model, models, joints_group) {
+                    (Some((vertices, texture)), Some(_), Some(joints)) => {
+                        let Some(pipeline) = glow.model(draw.culled) else {
+                            return;
+                        };
+                        pass.set_bind_group(2, texture, &[]);
+                        pass.set_bind_group(3, joints, &[draw.joints.unwrap_or(0)]);
+                        pass.set_vertex_buffer(2, vertices.slice(..));
+                        pipeline
+                    }
+                    (Some(_), ..) => return,
+                    _ if draw.source.lines => glow.lines(),
+                    _ => glow.mesh(draw.culled),
+                };
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, bind_group, &[(at * DRAW_STRIDE) as u32]);
+                pass.set_bind_group(1, &shadow_maps.group, &[]);
+                pass.set_vertex_buffer(0, uploaded.vertices.slice(..));
+                if draw.source.lines {
+                    if !draw.instances.is_empty() {
+                        pass.draw(0..6, draw.instances.clone());
+                    }
+                } else if let Some(indices) = &uploaded.indices {
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..draw.source.count, 0, at as u32..at as u32 + 1);
+                }
+            };
+            glow::draw_glows(
+                device,
+                queue,
+                &mut encoder,
+                glow,
+                targets,
+                &frame.draws,
+                &scratch.depth,
+                target,
+                &silhouette,
+            );
         }
         queue.submit(Some(encoder.finish()));
     }
@@ -4606,6 +4710,7 @@ mod tests {
             mesh: Some(&red),
             lines: None,
             material: None,
+            glow: None,
         };
         let mut sources = MeshSources::default();
         let mut meshes =
@@ -4668,6 +4773,7 @@ mod tests {
                 line_range: None,
                 fill: None,
                 joints: None,
+                glow: None,
             },
         );
         // The fixed key light casts one map, at full size.
@@ -4739,6 +4845,7 @@ mod tests {
                     line_range: None,
                     fill: None,
                     joints: None,
+                    glow: None,
                 },
             );
         }
@@ -4794,6 +4901,7 @@ mod tests {
                     line_range: range,
                     fill: None,
                     joints: None,
+                    glow: None,
                 },
             );
         }
@@ -4856,6 +4964,7 @@ mod tests {
                 line_range: Some([0.0, 0.5]),
                 fill: None,
                 joints: None,
+                glow: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -4908,6 +5017,7 @@ mod tests {
                     line_range: None,
                     fill: None,
                     joints: None,
+                    glow: None,
                 },
             );
         }
@@ -4993,6 +5103,7 @@ mod tests {
                 line_range: None,
                 fill: None,
                 joints: None,
+                glow: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5009,6 +5120,7 @@ mod tests {
                 line_range: None,
                 fill: Some(&fill),
                 joints: None,
+                glow: None,
             },
         ));
         let illumination = Illumination {
@@ -5082,6 +5194,7 @@ mod tests {
                 line_range: None,
                 fill: None,
                 joints: None,
+                glow: None,
             },
         );
         assert!(meshes.push_fill(
@@ -5098,6 +5211,7 @@ mod tests {
                 line_range: None,
                 fill: Some(&fill),
                 joints: None,
+                glow: None,
             },
         ));
         let illumination = Illumination {
@@ -5155,6 +5269,7 @@ mod tests {
                     line_range: None,
                     fill: None,
                     joints: None,
+                    glow: None,
                 },
             );
         }
@@ -5226,6 +5341,7 @@ mod tests {
                     line_range: None,
                     fill: None,
                     joints: None,
+                    glow: None,
                 },
             );
         }
@@ -5337,6 +5453,7 @@ mod tests {
                 line_range: None,
                 fill: None,
                 joints: None,
+                glow: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5396,6 +5513,7 @@ mod tests {
                 mesh: Some(&red),
                 lines: None,
                 material: None,
+                glow: None,
             },
         );
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5492,6 +5610,7 @@ mod tests {
                     line_range: None,
                     fill: None,
                     joints: joints.as_ref(),
+                    glow: None,
                 },
             );
         }
@@ -5513,6 +5632,141 @@ mod tests {
         pixels[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4]
             .try_into()
             .unwrap()
+    }
+
+    /// The RGBA pixels of `meshes`, each placed by its matrix and with its
+    /// glow, drawn as [`draw_meshes`] draws them, and whether the glow
+    /// pipelines were built.
+    fn draw_glowing(meshes: &[(TriangleMeshData, DMat4, Option<Glow>)]) -> Option<(Vec<u8>, bool)> {
+        let mut gpu = crate::background::test_gpu::test_gpu()?;
+        let mut camera = Camera::ortho_2d_frame(4.0, 4.0, 64, 64);
+        camera.position = DVec3::new(0.0, 0.0, 10.0);
+        let (ndc_to_canvas, line_width) = canvas_projection(&camera).unwrap();
+        let placement = camera.to_vello_transform();
+        let opacity = GlobalOpacity(1.0);
+        let transforms: Vec<GlobalSpatialTransform> = meshes
+            .iter()
+            .map(|(_, matrix, _)| GlobalSpatialTransform {
+                mat4: *matrix,
+                ..Default::default()
+            })
+            .collect();
+        let mut sources = MeshSources::default();
+        let mut pending = GpuMeshes::new(&mut sources, (64, 64), placement, 0).unwrap();
+        for (index, ((mesh, _, glow), transform)) in meshes.iter().zip(&transforms).enumerate() {
+            let key = index as u64 + 1;
+            pending.push(
+                0,
+                [(key, 1), (key, 1)],
+                [None, None],
+                &Content {
+                    transform,
+                    opacity: &opacity,
+                    mesh: Some(mesh),
+                    lines: None,
+                    material: mesh.material.as_ref(),
+                    line_width: None,
+                    line_range: None,
+                    fill: None,
+                    joints: None,
+                    glow: glow.clone(),
+                },
+            );
+        }
+        let frames: Vec<GpuMeshFrame> = pending
+            .finish(&camera, ndc_to_canvas, line_width, &Illumination::default())
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect();
+        let mut scene = vello::Scene::new();
+        scene.append(&frames[0].scene(), Some(placement));
+        let mut three_d = GpuThreeD::default();
+        three_d.prepare(&gpu.device, &gpu.queue, &mut gpu.renderer, &frames);
+        let target = gpu.target(64, 64);
+        gpu.render(&scene, &target);
+        Some((gpu.read(&target), three_d.glow.is_some()))
+    }
+
+    fn red_glow() -> Option<Glow> {
+        Some(Glow {
+            radius: 0.5,
+            intensity: 4.0,
+            color: peniko::Color::new([1.0, 0.0, 0.0, 1.0]),
+        })
+    }
+
+    /// A glowing mesh lights the pixels around it in its glow's color,
+    /// fading with the distance, and keeps its own.
+    #[test]
+    fn a_glow_lights_the_pixels_around_a_mesh() {
+        let white = quad(peniko::Color::WHITE);
+        let Some((plain, built)) = draw_glowing(&[(white.clone(), DMat4::IDENTITY, None)]) else {
+            return;
+        };
+        assert!(!built, "a frame without glows builds no glow pipeline");
+        let (glowing, built) = draw_glowing(&[(white, DMat4::IDENTITY, red_glow())]).unwrap();
+        assert!(built);
+        // The quad spans pixels 16 to 48; its glow blurs by 2 pixels.
+        assert_eq!(pixel(&glowing, 32, 32), [255, 255, 255, 255]);
+        assert_eq!(pixel(&plain, 50, 32), [0, 0, 0, 0]);
+        let near = pixel(&glowing, 50, 32);
+        assert!(
+            near[0] > 60 && near[3] > 60 && near[1] < 8 && near[2] < 8,
+            "{near:?}"
+        );
+        let far = pixel(&glowing, 53, 32);
+        assert!(far[3] < near[3], "{far:?} {near:?}");
+        assert!(pixel(&glowing, 62, 32)[3] < 4);
+    }
+
+    /// The glow of a mesh hidden behind an opaque one does not show.
+    #[test]
+    fn a_hidden_mesh_does_not_glow() {
+        let behind = DMat4::from_translation(DVec3::new(0.0, 0.0, -1.0))
+            * DMat4::from_scale(DVec3::splat(0.5));
+        let front = DMat4::from_scale(DVec3::splat(1.5));
+        let Some((pixels, _)) = draw_glowing(&[
+            (quad(peniko::Color::WHITE), behind, red_glow()),
+            (quad(peniko::Color::new([0.0, 0.0, 1.0, 1.0])), front, None),
+        ]) else {
+            return;
+        };
+        // Around where the small quad would glow, the front quad, and
+        // outside it nothing.
+        assert_eq!(pixel(&pixels, 44, 32), [0, 0, 255, 255]);
+        assert_eq!(pixel(&pixels, 58, 32), [0, 0, 0, 0]);
+    }
+
+    /// A drawable in front of a glowing one covers its glow, as a drawable
+    /// drawn over a 2D glow does, and one behind it receives the glow.
+    #[test]
+    fn what_lies_in_front_of_a_glow_covers_it() {
+        let glowing = DMat4::from_scale(DVec3::splat(0.5));
+        // Blue covers the right half of the frame in front of the glowing
+        // quad, and green its left half behind it.
+        let side = |x: f64, z: f64| {
+            DMat4::from_translation(DVec3::new(x, 0.0, z))
+                * DMat4::from_scale(DVec3::new(1.0, 2.0, 1.0))
+        };
+        let Some((pixels, _)) = draw_glowing(&[
+            (quad(peniko::Color::WHITE), glowing, red_glow()),
+            (
+                quad(peniko::Color::new([0.0, 0.0, 1.0, 1.0])),
+                side(1.05, 1.0),
+                None,
+            ),
+            (
+                quad(peniko::Color::new([0.0, 1.0, 0.0, 1.0])),
+                side(-1.05, -1.0),
+                None,
+            ),
+        ]) else {
+            return;
+        };
+        // The glowing quad spans pixels 24 to 40; blue starts at 33.
+        assert_eq!(pixel(&pixels, 36, 42), [0, 0, 255, 255]);
+        let behind = pixel(&pixels, 22, 32);
+        assert!(behind[0] > 40 && behind[1] < 250, "{behind:?}");
     }
 
     #[test]
@@ -5661,6 +5915,7 @@ mod tests {
             line_range: None,
             fill: None,
             joints: None,
+            glow: None,
         };
         meshes.push(0, [(2, 1), (2, 1)], [None, None], &card(&front));
         meshes.push(0, [(3, 1), (3, 1)], [None, None], &card(&back));
@@ -5678,6 +5933,7 @@ mod tests {
                 line_range: None,
                 fill: Some(&fill),
                 joints: None,
+                glow: None,
             },
         ));
         let frames: Vec<GpuMeshFrame> = meshes
@@ -5766,6 +6022,7 @@ mod tests {
                     line_range: None,
                     fill: Some(&fill),
                     joints: None,
+                    glow: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -5871,6 +6128,7 @@ mod tests {
                     line_range: None,
                     fill: Some(&fill),
                     joints: None,
+                    glow: None,
                 },
             ));
             let frames: Vec<GpuMeshFrame> = meshes
@@ -6179,6 +6437,7 @@ mod tests {
                     line_range: None,
                     fill: None,
                     joints: None,
+                    glow: None,
                 },
                 false,
             );
@@ -6221,6 +6480,7 @@ mod tests {
                         line_range: None,
                         fill: Some(&fill),
                         joints: None,
+                        glow: None,
                     },
                     true,
                 );

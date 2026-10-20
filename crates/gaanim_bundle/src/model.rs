@@ -1291,12 +1291,20 @@ fn write_three_d(
         .enumerate()
         .filter_map(|(index, source)| source.joints.as_ref().map(|joints| (index, joints)))
         .collect();
-    let skinned = !palettes.is_empty();
+    // Then the glows of 3D drawables (format 7): by source, its glow.
+    let glows: Vec<(usize, &gaanim_renderer::effects::Glow)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.glow.as_ref().map(|glow| (index, glow)))
+        .collect();
+    // Each section is written when it or a later one holds something.
+    let later = !palettes.is_empty() || !glows.is_empty();
     if !widths.is_empty()
         || !ranges.is_empty()
         || !outlines.is_empty()
         || !fills.is_empty()
-        || skinned
+        || later
     {
         w.len(widths.len());
         for (index, width) in widths {
@@ -1304,7 +1312,7 @@ fn write_three_d(
             w.f32(width);
         }
     }
-    if !ranges.is_empty() || !outlines.is_empty() || !fills.is_empty() || skinned {
+    if !ranges.is_empty() || !outlines.is_empty() || !fills.is_empty() || later {
         w.len(ranges.len());
         for (index, [from, to]) in ranges {
             w.len(index);
@@ -1312,7 +1320,7 @@ fn write_three_d(
             w.f32(to);
         }
     }
-    if !outlines.is_empty() || !fills.is_empty() || skinned {
+    if !outlines.is_empty() || !fills.is_empty() || later {
         w.len(outlines.len());
         for (index, material) in outlines {
             w.len(index);
@@ -1320,7 +1328,7 @@ fn write_three_d(
             w.f32(material.outline_width);
         }
     }
-    if !fills.is_empty() || skinned {
+    if !fills.is_empty() || later {
         w.len(fills.len());
         for &(index, fill) in &fills {
             w.len(index);
@@ -1378,7 +1386,7 @@ fn write_three_d(
             (!glyphs.is_empty()).then_some((index, glyphs))
         })
         .collect();
-    if !gradients.is_empty() || !clips.is_empty() || skinned {
+    if !gradients.is_empty() || !clips.is_empty() || later {
         w.len(gradients.len());
         for (index, glyphs) in gradients {
             w.len(index);
@@ -1392,7 +1400,7 @@ fn write_three_d(
             }
         }
     }
-    if !clips.is_empty() || skinned {
+    if !clips.is_empty() || later {
         w.len(clips.len());
         for (index, glyphs) in clips {
             w.len(index);
@@ -1406,7 +1414,7 @@ fn write_three_d(
             }
         }
     }
-    if skinned {
+    if later {
         w.len(palettes.len());
         for (index, joints) in palettes {
             w.len(index);
@@ -1416,6 +1424,15 @@ fn write_three_d(
                     w.f32(*value);
                 }
             }
+        }
+    }
+    if !glows.is_empty() {
+        w.len(glows.len());
+        for (index, glow) in glows {
+            w.len(index);
+            codec::write_color(w, glow.color);
+            w.f64(glow.radius);
+            w.f32(glow.intensity);
         }
     }
 }
@@ -1471,6 +1488,7 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
             line_range: None,
             fill: None,
             joints: None,
+            glow: None,
             composition: ThreeDComposition {
                 in_views,
                 post_exempt,
@@ -1611,6 +1629,20 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                 .get_mut(index)
                 .ok_or_else(|| corrupt("a palette of no 3D source"))?
                 .joints = Some(joints.into());
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let glow = gaanim_renderer::effects::Glow {
+                color: codec::read_color(r)?,
+                radius: r.f64()?,
+                intensity: r.f32()?,
+            };
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a glow of no 3D source"))?
+                .glow = Some(glow);
         }
     }
     for (index, glyphs) in fills {

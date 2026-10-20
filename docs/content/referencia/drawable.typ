@@ -576,7 +576,7 @@ efectos se aplican a rellenos y trazos, incluidos los degradados.
   name: "Drawable.glow",
   kind: "method",
   params: ((name: "color", type: "Color", default: none, desc: [Color del resplandor.]), (name: "radius", type: "float", default: "0.16", desc: [Radio en unidades de escena.]), (name: "intensity", type: "float", default: "1.0", desc: [Intensidad relativa.])),
-  desc: [Añade un resplandor alrededor del objeto.],
+  desc: [Añade un resplandor alrededor del objeto. En un objeto 3D (una primitiva, una superficie, una línea o un modelo glTF), o en el grupo que lo contiene, rodea su silueta visible: las partes que otro objeto tapa no brillan.],
 )[
 ```python
 # show-code: true

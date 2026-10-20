@@ -50,6 +50,19 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
 - Nuevo ejemplo, `3d/models_3d`, con el lobo del Cube World Kit de
   Quaternius, de dominio público (CC0).
 
+== Glow en 3D
+
+- `glow(...)` y `animate.glow(...)` brillan también en el contenido 3D:
+  primitivas, superficies, líneas 3D y modelos glTF, en el objeto o en el
+  grupo que lo contiene. El pase 3D dibuja la silueta visible del objeto con
+  el color del halo, contra la profundidad de la escena, la difumina como el
+  glow 2D y la pone alrededor del objeto, en la vista previa, las
+  exportaciones, los paquetes `.gaanim` y los dos reproductores web. Antes se
+  ignoraba sin aviso.
+- Solo los fotogramas con un halo construyen sus pipelines: las escenas 3D
+  sin glow se ven y tardan lo mismo que antes.
+- `blur` y `shadow` todavía no se aplican al contenido 3D.
+
 == Paquetes más ligeros
 
 - Una malla o línea 3D que cambia de un fotograma a otro guarda, sin perder

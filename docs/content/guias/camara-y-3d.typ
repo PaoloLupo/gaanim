@@ -502,6 +502,11 @@ puntos se reproducen a la frecuencia de la pantalla.
   En una línea con trazo, `animate.stroke_width(...)` anima el ancho.
 - Las superficies y las líneas que se cruzan se cortan donde corresponde, y
   la geometría que atraviesa el plano cercano de la cámara se recorta.
+- `glow(...)` y `animate.glow(...)` dan un halo a mallas, superficies, líneas
+  y modelos glTF. El pase 3D dibuja la silueta visible del objeto con el
+  color del halo, la difumina como el glow 2D y la pone a su alrededor,
+  debajo del objeto; las partes que otro objeto tapa no brillan. Solo los
+  fotogramas con un halo construyen sus pipelines.
 - Un objeto translúcido (con opacidad, o con colores con transparencia) se
   ve como una capa: su superficie más cercana se mezcla una vez sobre lo que
   tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante.

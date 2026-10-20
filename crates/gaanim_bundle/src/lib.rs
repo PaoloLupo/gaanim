@@ -2330,6 +2330,7 @@ mod tests {
                 line_range: None,
                 fill: Some(Arc::new(fill.clone())),
                 joints: None,
+                glow: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
                     post_exempt: false,
@@ -2357,6 +2358,70 @@ mod tests {
             &back.glyphs[0].outline,
             &back.glyphs[2].outline
         ));
+    }
+
+    /// The glow of a 3D drawable comes back with its frame, also in a frame
+    /// whose 3D content has no palette before it.
+    #[test]
+    fn glows_of_3d_drawables_round_trip() {
+        let mesh = Arc::new(gaanim_scene::TriangleMeshData {
+            vertices: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: None,
+            colors: None,
+            material: None,
+            surface: None,
+        });
+        let glow = gaanim_renderer::effects::Glow {
+            radius: 0.3,
+            intensity: 1.5,
+            color: gaanim_core::peniko::Color::new([1.0, 0.5, 0.0, 0.8]),
+        };
+        let source = |glow: Option<gaanim_renderer::effects::Glow>| {
+            gaanim_renderer::pipeline::CapturedThreeDSource {
+                entity: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
+                transform: gaanim_core::glam::DMat4::IDENTITY,
+                opacity: 1.0,
+                mesh: Some(Arc::clone(&mesh)),
+                lines: None,
+                material: None,
+                line_width: None,
+                line_range: None,
+                fill: None,
+                joints: None,
+                glow,
+                composition: gaanim_renderer::pipeline::ThreeDComposition {
+                    in_views: true,
+                    post_exempt: false,
+                    layer: None,
+                    transition_side: Default::default(),
+                    lineage: Vec::new(),
+                },
+            }
+        };
+        let glows = [Some(glow), None];
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for (index, glow) in glows.iter().enumerate() {
+            let mut captured = frame(index as f64 / 60.0);
+            captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
+                sources: vec![source(glow.clone())],
+                ..Default::default()
+            });
+            writer.push_frame(&captured, [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: 2.0 / 60.0,
+            ..Default::default()
+        };
+        let mut bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        for (index, glow) in glows.iter().enumerate() {
+            let three_d = bundle.frame(index).unwrap().capture.three_d.unwrap();
+            assert_eq!(&three_d.sources[0].glow, glow, "frame {index}");
+        }
     }
 
     /// An imported model's mesh comes back with its texture, alpha mode,
@@ -2412,6 +2477,7 @@ mod tests {
             line_range: None,
             fill: None,
             joints: Some(Arc::from(vec![palette, [1.0; 16]])),
+            glow: None,
             composition: gaanim_renderer::pipeline::ThreeDComposition {
                 in_views: true,
                 post_exempt: false,

@@ -2293,8 +2293,9 @@ class Anim:
         """Animate the glow toward ``color``/``radius``/``intensity``; ``None`` fades it out.
 
         A drawable without glow grows it from zero intensity. Combines with
-        other property targets such as ``scale_to``. Invalid values raise
-        ``ValueError``; text selections raise ``TypeError``.
+        other property targets such as ``scale_to``, and glows 3D content
+        too. Invalid values raise ``ValueError``; text selections raise
+        ``TypeError``.
 
         Example:
             scene.play(orb.animate.glow(CYAN, radius=0.5, intensity=2.0).repeat(3, yoyo=True))
@@ -4113,6 +4114,10 @@ class Drawable:
         ...
     def glow(self, color: ColorLike, radius: float = 0.16, intensity: float = 1.0) -> Drawable:
         """Apply glow to this drawable and return the result.
+
+        On 3D content (primitives, surfaces, 3D lines and glTF models), on
+        the drawable or a group holding it, the glow surrounds its visible
+        silhouette: the parts another drawable hides do not glow.
 
         Example:
             result = drawable.glow(BLUE)
