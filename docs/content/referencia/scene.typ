@@ -1815,7 +1815,7 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
   name: "CameraView.snapshot",
   kind: "method",
   returns: (type: "Drawable", desc: [Una copia de la pantalla con lo que la vista muestra en el cursor.]),
-  desc: [Congela la vista: la copia conserva esa imagen aunque se mueva o se escale, mientras la vista sigue. Empieza oculta y entra con su primera animación. La escena se construye otra vez para llegar al instante de la instantánea; solo se congelan los objetos 2D, sin contenido 3D ni efectos de sombreador, mates o vidrio.],
+  desc: [Congela la vista: la copia conserva esa imagen aunque se mueva o se escale, mientras la vista sigue. Empieza oculta y entra con su primera animación. La escena se construye otra vez para llegar al instante de la instantánea. Se congela todo lo que mostraba la vista: el contenido 3D, dibujado con la cámara principal de ese instante y el detalle que tenía la vista; los efectos de sombreador (que leen el tiempo de ese instante), mates y vidrio; y lo que mostraban en su vista las pantallas que se veían en ella.],
 )[
 ```python
 >>>from gaanim import *

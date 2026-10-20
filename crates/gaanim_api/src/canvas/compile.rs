@@ -15793,6 +15793,188 @@ mod tests {
     }
 
     #[test]
+    fn camera_snapshots_freeze_the_3d_content_their_view_showed() {
+        use bevy::prelude::App;
+        use gaanim_renderer::pipeline::capture_frame;
+
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 2.0).move_to(3.0, 0.0);
+        let screen = canvas.rect(2.0, 2.0).move_to(-3.0, 0.0);
+        let view = screen.clone().camera_view(&frame).unwrap();
+        let cube = canvas
+            .cube(0.4, gaanim_scene::Material3D::default())
+            .unwrap()
+            .move_to(2.5, 0.0);
+        // Out of the frame, but kept: it may shadow what the frame shows.
+        let sphere = canvas
+            .sphere(0.3, 8, 6, gaanim_scene::Material3D::default())
+            .unwrap()
+            .move_to(-5.0, 2.5);
+        canvas.play(vec![cube.animate().move_to(3.5, 0.0).duration(1.0)]);
+        let photo = view.snapshot();
+        canvas.play(vec![
+            photo.animate().move_to(0.0, -2.0).duration(1.0),
+            cube.animate().move_to(2.5, 0.5).duration(1.0),
+        ]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let photo_entity = entity_of(app.world_mut(), &photo);
+        let cube_entity = entity_of(app.world_mut(), &cube);
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(2.0);
+        app.update();
+        let after = capture_frame(app.world_mut(), None);
+        let frozen = after
+            .elements
+            .iter()
+            .find(|element| element.entity == photo_entity)
+            .and_then(|element| element.screen.as_ref())
+            .and_then(|view| view.frozen.clone())
+            .expect("the snapshot keeps the 3D content its view showed");
+        // The cube where the view saw it at 1 s and the sphere, under keys
+        // of their own.
+        let sources = &frozen.three_d.sources;
+        let sphere_entity = entity_of(app.world_mut(), &sphere);
+        assert_eq!(sources.len(), 2);
+        assert!(
+            sources
+                .iter()
+                .all(|source| source.entity != cube_entity && source.entity != sphere_entity)
+        );
+        assert!(
+            sources.iter().any(|source| {
+                let at = source.transform.w_axis;
+                (at.x - 3.5).abs() < 1e-9 && at.y.abs() < 1e-9
+            }),
+            "the cube where it stood"
+        );
+        // Its image covers what the frame framed, as the screen showed it.
+        let region = frozen.region;
+        assert!(
+            (region.x0 - 2.0).abs() < 1e-9
+                && (region.x1 - 4.0).abs() < 1e-9
+                && (region.y0 + 1.0).abs() < 1e-9
+                && (region.y1 - 1.0).abs() < 1e-9,
+            "{region:?}"
+        );
+        assert!(frozen.resolution > 0.0);
+    }
+
+    #[test]
+    fn camera_snapshots_keep_the_effects_mattes_and_glass_their_view_showed() {
+        use bevy::prelude::App;
+        use gaanim_renderer::pipeline::capture_frame;
+
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(4.0, 4.0).move_to(3.0, 0.0);
+        let screen = canvas.rect(4.0, 4.0).move_to(-3.0, 0.0);
+        let view = screen.clone().camera_view(&frame).unwrap();
+        let grade = gaanim_renderer::post_presets::PostPreset::ColorGrade.shader();
+        let graded = canvas.rect(0.5, 0.5).move_to(2.0, 1.0).shader_effect(
+            vec![
+                gaanim_renderer::post_process::PostProcessPass::constant(
+                    grade,
+                    &[0.0, 1.0, 0.0, 0.0],
+                )
+                .unwrap(),
+            ],
+            0.3,
+        );
+        let hole = canvas.circle(0.4).move_to(4.0, 1.0);
+        let matted = canvas
+            .rect(1.0, 1.0)
+            .move_to(4.0, 1.0)
+            .matte(
+                Some(&hole),
+                gaanim_renderer::object_effects::MatteMode::Alpha,
+            )
+            .unwrap();
+        let lens = canvas
+            .rect(1.0, 0.6)
+            .move_to(3.0, -1.0)
+            .glass(Some(gaanim_renderer::object_effects::Glass::default()));
+        canvas.wait(1.0);
+        let photo = view.snapshot();
+        canvas.play(vec![photo.animate().move_to(0.0, -2.0).duration(1.0)]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let live: Vec<Entity> = [&graded, &matted, &hole, &lens]
+            .into_iter()
+            .map(|handle| entity_of(app.world_mut(), handle))
+            .collect();
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(1.5);
+        app.update();
+        let after = capture_frame(app.world_mut(), None);
+        let photo_entity = entity_of(app.world_mut(), &photo);
+        let layer = after
+            .elements
+            .iter()
+            .find(|element| element.entity == photo_entity)
+            .and_then(|element| element.screen.as_ref())
+            .map(|view| view.layers[0].clone())
+            .expect("the snapshot draws its view");
+        let frozen: Vec<_> = after
+            .elements
+            .iter()
+            .filter(|element| element.layer.as_ref() == Some(&layer))
+            .collect();
+        // The frozen drawables keep their effect, matte and glass, under
+        // frozen keys the frame's lists draw them through.
+        let effect = frozen
+            .iter()
+            .find_map(|element| element.effect_root)
+            .expect("a frozen drawable keeps its shader effect");
+        let effect = after
+            .effects
+            .iter()
+            .find(|captured| captured.root == effect)
+            .expect("the frame draws the frozen effect");
+        assert_eq!(effect.time, Some(1.0), "frozen at the snapshot's instant");
+        let matte = frozen
+            .iter()
+            .find_map(|element| element.matte_root)
+            .expect("a frozen drawable keeps its matte");
+        let matte = after
+            .mattes
+            .iter()
+            .find(|captured| captured.root == matte)
+            .expect("the frame draws the frozen matte");
+        assert!(
+            frozen
+                .iter()
+                .any(|element| element.matte_of == Some(matte.source)),
+            "the matte's source is frozen with it"
+        );
+        let glass = frozen
+            .iter()
+            .find_map(|element| element.glass_root)
+            .expect("a frozen drawable keeps its glass");
+        assert!(after.glasses.iter().any(|captured| captured.root == glass));
+        for root in [effect.root, matte.root, matte.source, glass] {
+            assert!(!live.contains(&root), "frozen keys are not live drawables");
+        }
+    }
+
+    #[test]
     fn pop_out_and_pop_in_move_the_screen_through_the_region_its_camera_sees() {
         use crate::canvas::{CameraViewOptions, CameraViewZoom};
 

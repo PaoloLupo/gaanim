@@ -1,4 +1,4 @@
-"""3D camera: aiming, orbiting, dollying, lenses, saved poses, bindings and follows of the scene camera.
+"""3D camera: aiming, orbiting, dollying, lenses, saved poses, bindings, follows and snapshots of the scene camera.
 
 Every segment starts from the same perspective pose over a few lit
 primitives on a floor and plays one camera move. The label, pinned to the
@@ -119,6 +119,23 @@ scene.play([view.animate.pop_out().duration(MOVE)])
 scene.play([ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE)])
 scene.wait(HOLD)
 
+# view.snapshot() keeps what the inset shows at one instant, the 3D content
+# drawn as the main camera drew it then, while the inset goes on following
+# the sphere.
+ball = shot("snapshot", "photo = view.snapshot()")
+view = scene.camera.inset(ball, zoom=2, at=Anchor.TOP_RIGHT, follow=True)
+page = scene.layout.zones(Zones.rows(["1fr", 0.5], padding="page_padding"))[0]
+scene.play([view.animate.pop_out().duration(MOVE)])
+photo = view.snapshot()
+scene.play(
+    [
+        photo.animate.scale_to(0.5).duration(MOVE),
+        photo.animate.place(page, anchor="bottom_right").duration(MOVE),
+        ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE),
+    ]
+)
+scene.wait(HOLD)
+
 # Before and after each move. Segments last one move, except the states
 # segment (two moves) and the bind_3d segment (two moves of the sphere).
 one = 2 * HOLD + MOVE
@@ -134,6 +151,9 @@ follow = last + 2 * one
 inset = follow + 2 * (HOLD + MOVE)
 seeks += [follow + HOLD + MOVE, follow + HOLD + 2 * MOVE + HOLD / 2]
 seeks += [inset + HOLD + MOVE / 2, inset + HOLD + 2 * MOVE, inset + HOLD + 3 * MOVE + HOLD / 2]
+# The snapshot as it leaves the inset, and both once the sphere has moved.
+snapshot = inset + 2 * HOLD + 3 * MOVE
+seeks += [snapshot + HOLD + MOVE + MOVE / 2, snapshot + HOLD + 3 * MOVE + HOLD / 2]
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, sorted(seeks))
 else:

@@ -48,8 +48,11 @@ This file guides repository work; model selection belongs to the calling client.
     with pipelines built only when a frame first draws a glow. A camera
     view snapshot (`effects::CameraSnapshot`) shows what the view showed at
     one instant: `gaanim_api::runtime` builds the scene a second time, seeks
-    it to each snapshot and freezes the view's 2D drawables into
-    `pipeline::FrozenViews`, drawn on a view layer only the snapshot shows.
+    it to each snapshot and freezes what the view drew into
+    `pipeline::FrozenViews`, on a view layer only the snapshot shows: its
+    drawables with their effects, mattes and glass under frozen keys, and its
+    3D content (`FrozenThreeD`) with the main camera of that instant, which
+    each host draws into an image of its own.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.

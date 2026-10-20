@@ -73,8 +73,15 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
 - Para congelarla, la escena se construye otra vez y se lleva al instante de
   cada instantánea: la vista previa, las exportaciones y los paquetes de una
   escena con instantáneas la construyen dos veces; las demás no pagan nada.
-- Se congelan los objetos 2D de la vista: el contenido 3D no aparece, y los
-  efectos de sombreador, mates y vidrio se dibujan sin ellos.
+- Se congela todo lo que mostraba la vista: el contenido 3D, que el pase 3D
+  vuelve a dibujar con la cámara principal de ese instante y el detalle de
+  la vista; los efectos de sombreador, que leen el tiempo de ese instante;
+  los mates y el vidrio; y lo que mostraban en su propia vista las pantallas
+  que aparecían en ella.
+- Una pantalla que aparece dentro de otra vista muestra también su vista, un
+  nivel; antes solo mostraba su pintura. Las pantallas de dentro de esa
+  siguen mostrando su pintura, para que dos vistas que se muestran entre sí
+  terminen.
 - El ejemplo `camera/camera_views` suma el segmento `snapshots`.
 
 == Seguir objetos en 3D

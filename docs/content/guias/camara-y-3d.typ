@@ -306,9 +306,11 @@ scene.render()
 
 Para congelarla, Gaanim construye la escena otra vez y la lleva al instante
 de cada instantánea, así que una escena con instantáneas tarda algo más en
-cargar y exportar. Solo se congelan los objetos 2D: el contenido 3D no
-aparece en la instantánea, y los efectos de sombreador, mates y vidrio se
-dibujan sin ellos.
+cargar y exportar. Se congela todo lo que mostraba la vista: el contenido 3D,
+dibujado con la cámara principal de ese instante y con el detalle que tenía
+la vista, los efectos de sombreador (que leen el tiempo de ese instante), los
+mates y el vidrio, y lo que mostraban en su propia vista las pantallas que
+aparecían en ella.
 
 = Escenas 3D
 

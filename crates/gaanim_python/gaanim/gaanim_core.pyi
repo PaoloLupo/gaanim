@@ -4490,8 +4490,9 @@ class Drawable:
         of the view; hide a visible frame with ``no_stroke()`` to use it only
         as the camera. ``layers`` lists the view layers (see ``view_layer``)
         this view shows besides ordinary drawables. HUD overlays never appear
-        in a view, and screens seen inside another view show their own paint,
-        not their view. A later call or ``no_camera_view()`` replaces the
+        in a view. A screen seen inside another view shows its own view too,
+        one level deep: screens inside that one show their paint, so views
+        that show each other end. A later call or ``no_camera_view()`` replaces the
         view.
 
         The screen must be a single closed 2D shape: a rect, square, rounded
@@ -6561,8 +6562,11 @@ class CameraView:
         so its first animation, a move out of the screen for instance, is
         its entry. To freeze it the scene is built again and played to the
         snapshot's instant, so a scene with snapshots takes longer to load
-        and export. Only the view's 2D drawables are frozen: 3D content is
-        left out, and shader effects, mattes and glass draw plainly.
+        and export. Everything the view showed is frozen: its 3D content,
+        drawn through the main camera of that instant with the detail the
+        view had, its drawables' shader effects (their shaders read that
+        instant's time), mattes and glass, and what the screens it showed
+        showed in their own views.
 
         Example:
             photo = view.snapshot()
