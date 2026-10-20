@@ -34,7 +34,7 @@ pub fn replay_canvas_into(world: &mut World, canvas: SceneModel) {
 /// its own that plays to the end of each such hold and reads it there.
 /// Scenes without updaters or without camera moves on endpoints skip it.
 fn with_run_time_holds(canvas: SceneModel) -> SceneModel {
-    if !canvas.camera_hold_probes.is_empty() || !canvas.may_hold_on_updated_endpoints() {
+    if !canvas.camera_hold_probes.is_empty() || !canvas.may_hold_on_updated_endpoints(0) {
         return canvas;
     }
     let scene = canvas.clone();
@@ -70,6 +70,45 @@ fn with_run_time_holds(canvas: SceneModel) -> SceneModel {
     }
     let mut canvas = canvas;
     canvas.camera_hold_probes = Arc::new(found);
+    canvas
+}
+
+/// Where the last reload's probe found the camera holds that updaters move
+/// end, and the revision it probed.
+#[derive(Resource)]
+struct ProbedCameraHolds {
+    fingerprints: SceneFingerprints,
+    probes: Arc<HashMap<(usize, u8), gaanim_core::glam::DVec3>>,
+}
+
+/// [`with_run_time_holds`] for a reload, which probes the scene again only
+/// when the segments it recompiles move the camera to endpoints: the ones
+/// before compile as in the revision the last probe found, so their holds
+/// end where it found them.
+fn reload_run_time_holds(world: &mut World, canvas: SceneModel, allow_reuse: bool) -> SceneModel {
+    let probed = world.remove_resource::<ProbedCameraHolds>();
+    if !canvas.camera_hold_probes.is_empty() || !canvas.may_hold_on_updated_endpoints(0) {
+        return canvas;
+    }
+    let Some(fingerprints) = scene_fingerprints(world, &canvas) else {
+        return with_run_time_holds(canvas);
+    };
+    let canvas = match probed.filter(|probed| {
+        allow_reuse
+            && !canvas
+                .may_hold_on_updated_endpoints(probed.fingerprints.shared_prefix(&fingerprints))
+    }) {
+        Some(probed) => {
+            let mut canvas = canvas;
+            canvas.camera_hold_probes = probed.probes;
+            canvas
+        }
+        None => with_run_time_holds(canvas),
+    };
+    world.insert_resource(ProbedCameraHolds {
+        fingerprints,
+        probes: Arc::clone(&canvas.camera_hold_probes),
+    });
     canvas
 }
 
@@ -424,7 +463,7 @@ fn replay_incremental_for(
     // A reload ends camera moves where updaters take their endpoints; a
     // measurement only reads sizes.
     let canvas = if goal == ReplayGoal::Reload {
-        with_run_time_holds(canvas)
+        reload_run_time_holds(world, canvas, allow_reuse)
     } else {
         canvas
     };
@@ -1341,6 +1380,63 @@ Buenos días.
             kind,
             ReplayKind::Full,
             "reparenting a kept entity must fall back to a full replay"
+        );
+    }
+
+    #[test]
+    fn a_reload_probes_camera_holds_again_only_to_recompile_camera_moves_on_endpoints() {
+        use crate::canvas::CanvasEndpoint;
+        use gaanim_animation::FollowOffsetSpace;
+        use gaanim_core::glam::DVec3;
+        // A follow of a drawable an updater moves, then a caption, and
+        // perhaps a pan to it.
+        fn scene(caption: &str, pan: bool) -> SceneModel {
+            let mut canvas = SceneModel::new(640, 360);
+            canvas.segment("follow", None).unwrap();
+            let comet = canvas.circle(0.3);
+            comet.add_updater(crate::canvas::UpdaterPreset::Orbit {
+                cx: 0.0,
+                cy: 0.0,
+                radius: 2.0,
+                speed: 1.0,
+            });
+            let follow = canvas.camera_follow_endpoint(
+                CanvasEndpoint::Entity(comet.id),
+                DVec3::ZERO,
+                FollowOffsetSpace::World,
+                0.0,
+                1.0,
+            );
+            canvas.play(vec![follow]);
+            canvas.segment("caption", None).unwrap();
+            let caption = canvas.text(caption);
+            canvas.play(vec![caption.animate().fade_in().duration(0.5)]);
+            if pan {
+                let pan = canvas.camera_pan_to_endpoint(CanvasEndpoint::Entity(comet.id), 1.0);
+                canvas.play(vec![pan]);
+            }
+            canvas
+        }
+        let probes = |world: &World| Arc::clone(&world.resource::<ProbedCameraHolds>().probes);
+        let mut world = incremental_world();
+        hot_reload(&mut world, scene("first", false));
+        let found = probes(&world);
+        assert!(!found.is_empty(), "the follow's hold is probed");
+        // The edit recompiles no camera move: the follow ends where it did.
+        hot_reload(&mut world, scene("second", false));
+        assert!(Arc::ptr_eq(&found, &probes(&world)));
+        hot_reload(&mut world, scene("second", false));
+        assert!(Arc::ptr_eq(&found, &probes(&world)));
+        assert_eq!(
+            observe(&mut world),
+            full_replay_observation(scene("second", false))
+        );
+        // The edit recompiles a pan to the comet, which the probe must find.
+        hot_reload(&mut world, scene("second", true));
+        assert!(probes(&world).len() > found.len());
+        assert_eq!(
+            observe(&mut world),
+            full_replay_observation(scene("second", true))
         );
     }
 
