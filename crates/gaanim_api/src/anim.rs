@@ -281,6 +281,9 @@ pub enum AnimationType {
         offset: DVec3,
         offset_space: gaanim_animation::FollowOffsetSpace,
         lag: f64,
+        /// Turn the camera toward the endpoint where it stands, instead of
+        /// moving it.
+        turn: bool,
     },
     CameraShake {
         amplitude: f64,
@@ -293,8 +296,9 @@ pub enum AnimationType {
         target: DVec3,
         up: DVec3,
     },
+    /// Aim the camera at `target` from `eye`, or from where it stands.
     CameraLookAtSource {
-        eye: CanvasEndpoint,
+        eye: Option<CanvasEndpoint>,
         target: CanvasEndpoint,
         up: DVec3,
     },

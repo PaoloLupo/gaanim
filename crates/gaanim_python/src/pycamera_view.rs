@@ -102,6 +102,37 @@ pub(crate) fn camera_view(
     Ok(PyCameraView { inner: view })
 }
 
+/// Create the view behind `Drawable.camera_view_3d`.
+pub(crate) fn camera_view_3d(
+    screen: &DrawableHandle,
+    eye: &Bound<'_, PyAny>,
+    target: &Bound<'_, PyAny>,
+    fov_y: f64,
+    up: Option<(f64, f64, f64)>,
+    background: CameraViewBackgroundArg,
+    exclude: Vec<PyDrawable>,
+) -> PyResult<PyCameraView> {
+    let options = CameraViewOptions {
+        background: parse_background(background),
+        exclude: exclude.into_iter().map(|drawable| drawable.0).collect(),
+        ..CameraViewOptions::default()
+    };
+    let up = up.map_or(gaanim_core::glam::DVec3::Y, |(x, y, z)| {
+        gaanim_core::glam::DVec3::new(x, y, z)
+    });
+    let view = screen
+        .clone()
+        .camera_view_3d(
+            crate::pycanvas::resolve_endpoint_3d(eye)?,
+            crate::pycanvas::resolve_endpoint_3d(target)?,
+            up,
+            fov_y,
+            options,
+        )
+        .map_err(view_error)?;
+    Ok(PyCameraView { inner: view })
+}
+
 fn parse_placement(at: &Bound<'_, PyAny>) -> PyResult<CameraInsetPlacement> {
     if let Ok(anchor) = at.extract::<PyRef<'_, PyAnchor>>() {
         return Ok(CameraInsetPlacement::Anchor(anchor.0));
@@ -293,22 +324,26 @@ impl PyCameraView {
     }
 
     /// Keep the camera centered on an endpoint from now on.
-    #[pyo3(signature = (target, *, offset=(0.0, 0.0)))]
+    #[pyo3(signature = (target, *, offset=crate::pycanvas::FollowOffset::ZERO))]
     fn follow<'py>(
         slf: PyRef<'py, Self>,
         target: &Bound<'_, PyAny>,
-        offset: (f64, f64),
+        offset: crate::pycanvas::FollowOffset,
     ) -> PyResult<PyRef<'py, Self>> {
         crate::custom::ensure_authoring_allowed()?;
-        if !offset.0.is_finite() || !offset.1.is_finite() {
+        if !offset.0.is_finite() {
             return Err(PyValueError::new_err("offset must be finite"));
         }
         let endpoint = crate::pycanvas::resolve_endpoint(target)?;
-        slf.inner.follow(
-            endpoint,
-            gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
-        );
+        slf.inner.follow(endpoint, offset.0);
         Ok(slf)
+    }
+
+    /// A hidden copy of the screen that shows, frozen, what the view shows
+    /// at the cursor.
+    fn snapshot(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.snapshot()))
     }
 }
 

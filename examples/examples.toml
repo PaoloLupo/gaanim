@@ -498,7 +498,7 @@ description = "Insets that enlarge a detail in a screen joined to it: placement,
 
 [[example]]
 path = "camera/camera_views.py"
-description = "Shapes that show what a second camera sees: frames, fit modes, lenses and X-ray view layers."
+description = "Shapes that show what a second camera sees: frames, fit modes, lenses, X-ray view layers and snapshots."
 
 [[example]]
 path = "camera/parallax.py"
@@ -557,7 +557,7 @@ description = "A 3D model drawn as flat shapes from isometric, dimetric, plan, f
 
 [[example]]
 path = "3d/camera_3d.py"
-description = "The 3D camera: look_at, orbit, dolly and dolly zoom, perspective and orthographic lenses, saved poses, state_3d and bind_3d."
+description = "The 3D camera: look_at, orbit, dolly and dolly zoom, perspective and orthographic lenses, saved poses, state_3d, bind_3d, a camera and an inset that follow a moving sphere, a camera that turns to follow it, a snapshot of the inset, and a view with a 3D camera of its own."
 
 [[example]]
 path = "visualization/axes.py"

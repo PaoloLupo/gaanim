@@ -1419,11 +1419,13 @@ scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
   kind: "method",
   params: (
     (name: "target", type: "Endpoint", default: none, desc: [Objeto o punto que se sigue.]),
-    (name: "offset", type: "tuple[float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento de la vista respecto del objetivo.]),
+    (name: "offset", type: "tuple[float, float] | tuple[float, float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento de la vista respecto del objetivo; con tres valores, también en profundidad.]),
     (name: "offset_space", type: "\"world\" | \"local\"", default: "\"world\"", desc: [`"local"` gira el desplazamiento con el objetivo.]),
     (name: "lag", type: "float", default: "0.0", desc: [Retraso de seguimiento en segundos, determinista.]),
+    (name: "turn", type: "bool", default: "False", desc: [Una cámara en ángulo o en perspectiva se queda donde está y gira para mantener el objetivo en el centro, como sobre un trípode.]),
   ),
-  returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`. Al terminar, la cámara se queda en la pose que alcanzó, calculada con la posición del objetivo al final del `play`, y el siguiente movimiento parte de ahí.]),
+  returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`. Al terminar, la cámara se queda en la pose que alcanzó y el siguiente movimiento parte de ahí. Esa pose sale de donde está el objetivo al terminar: donde lo deja el script, donde su animación glTF pone una parte de un modelo o donde lo lleva un updater; una escena con updaters y movimientos así se construye una vez más para averiguarlo, así que tarda algo más en cargar y exportar.]),
+  desc: [La cámara 2D se desplaza, también con `turn`. Una cámara que mira la escena en ángulo o en perspectiva (tras `look_at`, `orbit` o `perspective`) sigue al objetivo en 3D: se mueve con él sin girar, a la misma distancia sobre su línea de visión, y su objetivo se mueve también, así que un `orbit` posterior gira alrededor del punto seguido. Con `turn=True` no se mueve: gira hacia el objetivo y termina mirándolo.],
 )[
 ```python
 >>>from gaanim import *
@@ -1804,11 +1806,26 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
 #api-entry(
   name: "CameraView.follow",
   kind: "method",
-  params: ((name: "target", type: "Endpoint", default: none, desc: [Qué seguir.]), (name: "offset", type: "tuple[float, float]", default: "(0, 0)", desc: [Desplazamiento en unidades de escena.])),
+  params: ((name: "target", type: "Endpoint", default: none, desc: [Qué seguir.]), (name: "offset", type: "tuple[float, float] | tuple[float, float, float]", default: "(0, 0)", desc: [Desplazamiento en unidades de escena; con tres valores, también en profundidad.])),
   returns: (type: "CameraView", desc: [La misma vista.]),
-  desc: [Mantiene la cámara sobre `target` desde el cursor; `pan_to` deja de tener efecto después, y los movimientos anteriores se siguen viendo.],
+  desc: [Mantiene la cámara sobre `target` desde el cursor; `pan_to` deja de tener efecto después, y los movimientos anteriores se siguen viendo. Un objetivo que la cámara principal dibuja en 3D (una primitiva, una superficie, una línea 3D, un modelo, una de sus partes o un billboard) se sigue donde esa cámara lo dibuja, también si mira en ángulo o en perspectiva: el desplazamiento se suma a su punto 3D antes de proyectarlo, y si el objetivo pasa detrás de la cámara, el marco sale del cuadro por su lado.],
   none,
 )
+
+#api-entry(
+  name: "CameraView.snapshot",
+  kind: "method",
+  returns: (type: "Drawable", desc: [Una copia de la pantalla con lo que la vista muestra en el cursor.]),
+  desc: [Congela la vista: la copia conserva esa imagen aunque se mueva o se escale, mientras la vista sigue. Empieza oculta y entra con su primera animación. La escena se construye otra vez para llegar al instante de la instantánea. Se congela todo lo que mostraba la vista: el contenido 3D, dibujado con la cámara principal de ese instante y el detalle que tenía la vista; los efectos de sombreador (que leen el tiempo de ese instante), mates y vidrio; y lo que mostraban en su vista las pantallas que se veían en ella.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>view = scene.geometry.rect(4, 2.25).move_to(4, 2).camera_view(center=(-4, 0), zoom=2)
+photo = view.snapshot()
+scene.play([photo.animate.move_to(4, -2).duration(1.0)])
+```
+]
 
 #api-entry(
   name: "CameraView.animate",
@@ -1894,7 +1911,7 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
   name: "Camera.look_at",
   kind: "method",
   params: (
-    (name: "eye", type: "Endpoint", default: none, desc: [Posición de la cámara en el mundo.]),
+    (name: "eye", type: "Endpoint | None", default: none, desc: [Posición de la cámara en el mundo; `None` la deja donde está.]),
     (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira.]),
     (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
   ),
@@ -1935,12 +1952,12 @@ rig.disable()
   name: "CameraAnimation.look_at",
   kind: "method",
   params: (
-    (name: "eye", type: "Endpoint", default: none, desc: [Posición final de la cámara.]),
+    (name: "eye", type: "Endpoint | None", default: none, desc: [Posición final de la cámara; `None` la deja donde está y solo gira.]),
     (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira al final.]),
     (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
   ),
   returns: (type: "Anim", desc: [Movimiento animado de la cámara.]),
-  none,
+  desc: [Un objeto o un punto de anclaje como `eye` o `target` se lee donde se dibuja en cada fotograma: la cámara gira hacia un objetivo que se mueve mientras dura la animación y termina apuntando a donde acaba, según lo escrito en el script, así que un `orbit` posterior parte de ahí. Para mantener en el centro todo el tiempo un objetivo que se mueve, usa `follow(objetivo, turn=True)`.],
 )
 
 #api-entry(

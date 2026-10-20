@@ -5084,13 +5084,37 @@ fn apply_lens_spec(
         // While the clip plays the camera phase resolves these after
         // persistent bindings (and layout, for the frame); a finished clip
         // leaves the camera on the pose it handed off.
-        PropertyLensSpec::CameraFollowEndpoint { hold, .. } => {
+        PropertyLensSpec::CameraFollowEndpoint {
+            hold,
+            hold_target,
+            turn,
+            ..
+        } => {
             if completed
                 && let Some(hold) = hold
                 && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
             {
-                camera.position.x = hold.x;
-                camera.position.y = hold.y;
+                match hold_target {
+                    // A camera that turned keeps looking where it ended.
+                    Some(target)
+                        if *turn
+                            && gaanim_math::Camera::validate_look_at(*hold, *target, camera.up)
+                                .is_ok() =>
+                    {
+                        let up = camera.up;
+                        camera
+                            .look_at(*hold, *target, up)
+                            .expect("validated held follow pose");
+                    }
+                    Some(target) => {
+                        camera.position = *hold;
+                        camera.target = *target;
+                    }
+                    None => {
+                        camera.position.x = hold.x;
+                        camera.position.y = hold.y;
+                    }
+                }
             }
         }
         PropertyLensSpec::CameraFrameDynamic { hold, .. } => {
@@ -5164,9 +5188,16 @@ fn apply_lens_spec(
             eye,
             target,
             up,
+            hold,
         } => {
-            let resolved = gaanim_animation::resolve_tracking_endpoint(eye, world)
-                .zip(gaanim_animation::resolve_tracking_endpoint(target, world));
+            // Once the clip ends the camera keeps the pose its endpoints were
+            // authored to end at; while it plays, the camera phase aims it
+            // where they are drawn (see `camera_rig_system`).
+            let resolved = match hold {
+                Some(held) if completed => Some(*held),
+                _ => gaanim_animation::resolve_tracking_endpoint(eye, world)
+                    .zip(gaanim_animation::resolve_tracking_endpoint(target, world)),
+            };
             if let Some((eye, target)) = resolved {
                 let position = from_position.lerp(eye, t);
                 let target = from_target.lerp(target, t);

@@ -62,6 +62,26 @@
       "id": "seek_0011_t_22_550000",
       "time_seconds": 22.55,
       "file": "seek_0011_t_22_550000.png"
+    },
+    {
+      "id": "seek_0012_t_24_250000",
+      "time_seconds": 24.25,
+      "file": "seek_0012_t_24_250000.png"
+    },
+    {
+      "id": "seek_0013_t_25_950000",
+      "time_seconds": 25.95,
+      "file": "seek_0013_t_25_950000.png"
+    },
+    {
+      "id": "seek_0014_t_27_650000",
+      "time_seconds": 27.65,
+      "file": "seek_0014_t_27_650000.png"
+    },
+    {
+      "id": "seek_0015_t_29_350000",
+      "time_seconds": 29.35,
+      "file": "seek_0015_t_29_350000.png"
     }
   ]
 }

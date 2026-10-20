@@ -63,6 +63,66 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
   sin glow se ven y tardan lo mismo que antes.
 - `blur` y `shadow` todavía no se aplican al contenido 3D.
 
+== Instantáneas de vistas de cámara
+
+- `view.snapshot()` congela lo que muestra una vista de cámara en el cursor
+  en una copia de su pantalla. La copia empieza oculta, entra con su primera
+  animación (por ejemplo, un `move_to` que la saca de la pantalla) y conserva
+  esa imagen aunque se mueva, se escale o la vista siga. Ver
+  #link("/guias/camara-y-3d/#instantaneas")[Cámara y 3D].
+- Para congelarla, la escena se construye otra vez y se lleva al instante de
+  cada instantánea: la vista previa, las exportaciones y los paquetes de una
+  escena con instantáneas la construyen dos veces; las demás no pagan nada.
+- Se congela todo lo que mostraba la vista: el contenido 3D, que el pase 3D
+  vuelve a dibujar con la cámara principal de ese instante y el detalle de
+  la vista; los efectos de sombreador, que leen el tiempo de ese instante;
+  los mates y el vidrio; y lo que mostraban en su propia vista las pantallas
+  que aparecían en ella.
+- Una pantalla que aparece dentro de otra vista muestra también su vista, un
+  nivel; antes solo mostraba su pintura. Las pantallas de dentro de esa
+  siguen mostrando su pintura, para que dos vistas que se muestran entre sí
+  terminen.
+- El ejemplo `camera/camera_views` suma el segmento `snapshots`.
+
+== Seguir objetos en 3D
+
+- `scene.camera.animate.follow(objeto)` sigue también a un objeto que se
+  mueve en 3D con una cámara en perspectiva o en ángulo: la cámara se
+  traslada con él sin girar, a la misma distancia sobre su línea de visión,
+  y lo mantiene en el centro, con `lag` y al terminar. Antes solo movía el
+  ojo en x e y (y lo llevaba a la profundidad del objeto), así que el objeto
+  se salía del centro. `offset` admite `(x, y, z)`. Ver
+  #link("/guias/camara-y-3d/#seguir-un-objeto-en-3d")[Cámara y 3D].
+- `follow(objeto, turn=True)` deja la cámara donde está y la gira para
+  mantener el objeto en el centro, como sobre un trípode, con `lag` y al
+  terminar.
+- `scene.camera.animate.look_at(eye, target)` con objetos que se mueven los
+  lee donde se dibujan en cada fotograma y termina apuntando a donde acaban:
+  antes los leía antes de que se movieran en ese fotograma, seguía
+  siguiéndolos después de terminar y un `orbit` posterior giraba alrededor
+  del objetivo anterior. `eye=None` gira la cámara sin moverla.
+- Las vistas de cámara e insets que siguen a contenido 3D (`view.follow`,
+  `scene.camera.inset(..., follow=True)`) ponen su marco donde la cámara
+  principal lo dibuja, con sus conectores, también con un `offset` en
+  profundidad, `(x, y, z)`. Si el objeto pasa detrás de la cámara, el marco
+  sale del cuadro por su lado en lugar de saltar al lado contrario.
+- Al terminar `follow`, `look_at` o `pan_to` sobre un objeto, la cámara se
+  queda donde el objeto está entonces, también cuando lo mueve una
+  animación glTF (una parte de un modelo) o un updater. Antes usaba su
+  posición escrita en el script y saltaba allí al terminar. Una escena con
+  updaters y esos movimientos de cámara se construye una vez más para
+  averiguarlo.
+- La cámara 2D se desplaza como antes, y las escenas sin cámara 3D no
+  hacen ningún cálculo nuevo.
+- `pantalla.camera_view_3d(eye, target, fov_y=)` da a una vista de cámara
+  una cámara 3D propia: muestra el contenido 3D de la escena desde otro
+  ángulo, en la vista previa, las exportaciones, los paquetes `.gaanim` y
+  los reproductores web, y sus instantáneas lo congelan. El ojo y el
+  objetivo pueden ser objetos que se mueven. Antes una vista solo ampliaba
+  lo que dibujaba la cámara principal.
+- El ejemplo `3d/camera_3d` suma los segmentos `follow`, `inset`,
+  `snapshot`, `turn` y `view_3d`.
+
 == Paquetes más ligeros
 
 - Una malla o línea 3D que cambia de un fotograma a otro guarda, sin perder
@@ -77,7 +137,8 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
 == Al actualizar
 
 - Los paquetes `.gaanim` pasan al formato 7, que guarda las texturas, los
-  modos alfa y los esqueletos, y las mallas que cambian como su cambio. Gaanim sigue abriendo los de formato 5 y 6;
+  modos alfa y los esqueletos, las mallas que cambian como su cambio y las
+  instantáneas de vistas. Gaanim sigue abriendo los de formato 5 y 6;
   un Gaanim anterior no abre los nuevos, así que actualiza los reproductores
   que los publican.
 - `Drawable.animations()` devuelve un diccionario de nombres y duraciones en

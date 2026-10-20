@@ -335,7 +335,10 @@ pub enum PropertyLensSpec {
     },
     /// Keep the camera on a tracked endpoint while the clip plays; the
     /// camera phase resolves it every frame. Once the clip ends the camera
-    /// keeps `hold`, the pose it reached as authored, when one is known.
+    /// keeps `hold`, the pose it reached as authored, when one is known:
+    /// its x and y, or with `hold_target`, the position and target of a
+    /// camera that looks at the scene from an angle. With `turn` such a
+    /// camera stays where it is and turns toward the endpoint instead.
     #[cfg_attr(feature = "serde", serde(skip))]
     CameraFollowEndpoint {
         target: gaanim_animation::TrackingEndpoint,
@@ -343,7 +346,9 @@ pub enum PropertyLensSpec {
         offset: gaanim_core::glam::DVec3,
         offset_space: gaanim_animation::FollowOffsetSpace,
         lag: f64,
+        turn: bool,
         hold: Option<gaanim_core::glam::DVec3>,
+        hold_target: Option<gaanim_core::glam::DVec3>,
     },
     /// Frame moving targets while the clip plays, resolved every frame in
     /// the camera phase. Once it ends the camera keeps `hold` (position and
@@ -402,6 +407,9 @@ pub enum PropertyLensSpec {
         eye: gaanim_animation::TrackingEndpoint,
         target: gaanim_animation::TrackingEndpoint,
         up: gaanim_core::glam::DVec3,
+        /// The eye and target the camera keeps once the clip ends, where its
+        /// endpoints were authored to be then; `None` reads them live.
+        hold: Option<(gaanim_core::glam::DVec3, gaanim_core::glam::DVec3)>,
     },
     /// Tween perspective projection fov/near/far.
     CameraPerspective {
@@ -751,6 +759,7 @@ impl PropertyLensSpec {
                 eye,
                 target,
                 up,
+                ..
             } => PropertyLens::CameraLookAtSource {
                 from_position: *from_position,
                 from_target: *from_target,

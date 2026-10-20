@@ -446,6 +446,9 @@ pub struct FragmentStore {
     generation: u64,
     /// The recorded meshes and lines the GPU draws, kept while drawn.
     pub(crate) three_d: crate::three_d::MeshSources,
+    /// Those camera views draw on their own, as snapshots draw what they
+    /// froze.
+    pub(crate) view_three_d: crate::three_d::MeshSources,
 }
 
 struct StoredFragment {

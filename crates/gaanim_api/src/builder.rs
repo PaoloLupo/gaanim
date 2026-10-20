@@ -1054,14 +1054,25 @@ pub(crate) struct PendingCameraHold {
 
 pub(crate) enum PendingCameraHoldKind {
     /// `follow`: the endpoint plus `offset`, reached through `lag` over the
-    /// clip's `duration` from `from`.
+    /// clip's `duration` from `from`. A camera at an angle (`posed`) moves
+    /// its framing there instead, its target with it.
     Follow {
         target: Box<crate::canvas::CanvasEndpoint>,
         from: DVec3,
         offset: DVec3,
         offset_space: gaanim_animation::FollowOffsetSpace,
         lag: f64,
+        /// Turned toward the endpoint where it stands, not moved.
+        turn: bool,
         duration: f64,
+        posed: Option<Box<gaanim_math::Camera>>,
+    },
+    /// `look_at` with endpoints: the eye and target where they are drawn as
+    /// authored, the camera's up `up`.
+    LookAt {
+        eye: Box<crate::canvas::CanvasEndpoint>,
+        target: Box<crate::canvas::CanvasEndpoint>,
+        up: DVec3,
     },
     /// `pan_to(endpoint)`: where the endpoint is drawn as authored.
     Pan {
@@ -1100,6 +1111,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// The last animation played on each imported glTF model, which the
     /// next one fades from.
     pub(crate) gltf_plays: HashMap<ObjectId, crate::gltf::ClipPlay>,
+    /// Every play of each model and the nodes they move, which give where a
+    /// model's parts are at any instant, as the camera's holds need.
+    pub(crate) gltf_poses: crate::gltf::GltfPoses,
     pub(crate) property_source_cursors: HashMap<
         (ObjectId, gaanim_animation::PropertyChannel),
         std::sync::Arc<gaanim_animation::PropertySourceLens>,
@@ -1230,7 +1244,36 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// The endpoint each drawable follows (`follow`), with its offset, so
     /// camera moves can find where a follower is drawn as authored.
     pub(crate) authored_follows: HashMap<ObjectId, AuthoredFollow>,
+    /// Camera holds on endpoints that only the run time moves, and where a
+    /// probe of the scene found them.
+    pub(crate) run_time_holds: RunTimeHolds,
 }
+
+/// A camera hold whose endpoint an updater moves: the `slot`-th endpoint
+/// of the `index`-th hold the scene resolves, as the clip ends at `time`.
+#[derive(Clone, Debug)]
+pub(crate) struct RunTimeHold {
+    pub index: usize,
+    pub slot: u8,
+    pub time: f64,
+    pub endpoint: gaanim_animation::TrackingEndpoint,
+}
+
+/// What a compilation knows of the endpoints only the run time moves: the
+/// drawables updaters move, the holds on them, and, from a probe of the
+/// scene, where those endpoints end (see `runtime::with_run_time_holds`).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RunTimeHolds {
+    pub updated: HashSet<ObjectId>,
+    pub resolved: usize,
+    pub found: Vec<RunTimeHold>,
+    pub probed: std::sync::Arc<HashMap<(usize, u8), DVec3>>,
+}
+
+/// Resource: the camera holds of the compiled scene whose endpoints only
+/// the run time moves.
+#[derive(bevy::prelude::Resource, Clone, Debug)]
+pub(crate) struct RunTimeCameraHolds(pub Vec<RunTimeHold>);
 
 /// The opacity an entrance shows `target` at: its `current` one, or the one
 /// it had before it faded out; 1 for an object that never had one.
@@ -1258,6 +1301,7 @@ pub(crate) struct LayoutRest {
 #[derive(Clone)]
 pub(crate) struct SceneBuilderState {
     gltf_plays: HashMap<ObjectId, crate::gltf::ClipPlay>,
+    gltf_poses: crate::gltf::GltfPoses,
     property_source_cursors: HashMap<
         (ObjectId, gaanim_animation::PropertyChannel),
         std::sync::Arc<gaanim_animation::PropertySourceLens>,
@@ -1311,6 +1355,7 @@ pub(crate) struct SceneBuilderState {
     faded_opacities: HashMap<ObjectId, f32>,
     backdrop_orders: HashMap<ObjectId, u64>,
     authored_follows: HashMap<ObjectId, AuthoredFollow>,
+    run_time_holds: RunTimeHolds,
 }
 
 impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
@@ -1318,6 +1363,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     pub(crate) fn state(&self) -> SceneBuilderState {
         SceneBuilderState {
             gltf_plays: self.gltf_plays.clone(),
+            gltf_poses: self.gltf_poses.clone(),
             property_source_cursors: self.property_source_cursors.clone(),
             property_bindings: self.property_bindings.clone(),
             id_counter: self.id_counter,
@@ -1359,6 +1405,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             faded_opacities: self.faded_opacities.clone(),
             authored_follows: self.authored_follows.clone(),
             backdrop_orders: self.backdrop_orders.clone(),
+            run_time_holds: self.run_time_holds.clone(),
         }
     }
 
@@ -1373,6 +1420,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     ) -> Self {
         let SceneBuilderState {
             gltf_plays,
+            gltf_poses,
             property_source_cursors,
             property_bindings,
             id_counter,
@@ -1414,9 +1462,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             faded_opacities,
             backdrop_orders,
             authored_follows,
+            run_time_holds,
         } = state;
         Self {
             gltf_plays,
+            gltf_poses,
             property_source_cursors,
             property_bindings,
             commands,
@@ -1472,6 +1522,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             faded_opacities,
             backdrop_orders,
             authored_follows,
+            run_time_holds,
         }
     }
 
@@ -1804,6 +1855,52 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
 
     /// Computes the true world-space transform of a Mobject by walking up the parent chain.
     /// This is necessary during group creation to calculate accurate world bounds for nested children.
+    /// The authored world matrix of `id` in 3D, with its parents', where
+    /// [`Self::get_world_transform`] keeps the 2D part.
+    pub(crate) fn world_matrix_3d(&self, id: ObjectId) -> gaanim_core::glam::DMat4 {
+        let mut matrix = gaanim_core::glam::DMat4::IDENTITY;
+        let mut current = Some(id);
+        while let Some(object) = current {
+            let Some(state) = self.states.get(object) else {
+                break;
+            };
+            matrix = state.transform.to_mat4() * matrix;
+            current = state.parent;
+        }
+        matrix
+    }
+
+    /// [`Self::world_matrix_3d`] at timeline second `time`, with the parts
+    /// of glTF models where their animations put them then.
+    pub(crate) fn world_matrix_3d_at(&self, id: ObjectId, time: f64) -> gaanim_core::glam::DMat4 {
+        let mut matrix = gaanim_core::glam::DMat4::IDENTITY;
+        let mut current = Some(id);
+        while let Some(object) = current {
+            let Some(state) = self.states.get(object) else {
+                break;
+            };
+            let local = self
+                .gltf_poses
+                .local_at(object, time)
+                .unwrap_or_else(|| state.transform.to_mat4());
+            matrix = local * matrix;
+            current = state.parent;
+        }
+        matrix
+    }
+
+    /// Whether a glTF animation moves `id` or one of its ancestors.
+    pub(crate) fn moved_by_gltf(&self, id: ObjectId) -> bool {
+        let mut current = Some(id);
+        while let Some(object) = current {
+            if self.gltf_poses.animates(object) {
+                return true;
+            }
+            current = self.states.get(object).and_then(|state| state.parent);
+        }
+        false
+    }
+
     pub fn get_world_transform(&self, id: ObjectId) -> SpatialTransform {
         let mut current_id = Some(id);
         let mut world_affine = gaanim_core::kurbo::Affine::IDENTITY;
@@ -1921,6 +2018,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             text_motion: Default::default(),
             property_bindings: HashMap::new(),
             gltf_plays: HashMap::new(),
+            gltf_poses: Default::default(),
             property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
             membership_managed_objects: HashSet::new(),
@@ -1932,6 +2030,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             faded_opacities: HashMap::new(),
             authored_follows: HashMap::new(),
             backdrop_orders: HashMap::new(),
+            run_time_holds: RunTimeHolds::default(),
         }
     }
 
@@ -7002,16 +7101,23 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             offset: start_time,
         };
         let previous = self.gltf_plays.insert(anim.target, play.clone());
-        let lens = crate::gltf::GltfClipLens::new(animations, play, previous, transition);
+        let lens = std::sync::Arc::new(crate::gltf::GltfClipLens::new(
+            animations, play, previous, transition,
+        ));
+        self.gltf_poses.played(
+            anim.target,
+            start,
+            anim.duration,
+            anim.rate_func.clone(),
+            std::sync::Arc::clone(&lens),
+        );
         self.timeline.add_clip(
             parent_track,
             start,
             anim.duration,
             ClipPayload::Animation(AnimationSpec {
                 target: anim.target,
-                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
-                    std::sync::Arc::new(lens),
-                )),
+                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(lens)),
                 rate_func: anim.rate_func.clone(),
                 delay: 0.0,
                 label: self.current_label.clone(),

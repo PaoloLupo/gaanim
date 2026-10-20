@@ -1188,7 +1188,7 @@ scene.render()
     (name: "layers", type: "Sequence[str]", default: "()", desc: [Capas de vista (ver `view_layer`) que la vista muestra además de los objetos normales.]),
   ),
   returns: (type: "CameraView", desc: [La cámara, con `pan_to`, `zoom_to`, `rotate_to`, `follow` y `animate`; ver #link("/referencia/scene/")[Escena].]),
-  desc: [Convierte esta figura en una pantalla que muestra lo que ve una segunda cámara, como un _picture-in-picture_ o una lupa. La pantalla dibuja su relleno, encima la vista recortada a su contorno y encima su trazo; la opacidad y los fundidos afectan a todo. La vista no muestra la pantalla, el marco, `exclude` ni las superposiciones HUD; una pantalla que aparece dentro de otra vista muestra su pintura pero no su vista. Solo una figura cerrada 2D puede ser pantalla (rectángulo, cuadrado, círculo, punto, elipse, polígono, estrella, sector, anillo, curva, camino SVG o booleano). Lanza `ValueError` con texto, grupos, imágenes u objetos 3D, con `frame` igual a la propia pantalla, con objetos o parámetros de otra escena, con un zoom no positivo, con un nombre de capa vacío o con un `fit` o `background` desconocido. Una llamada posterior o `no_camera_view()` sustituye la vista.],
+  desc: [Convierte esta figura en una pantalla que muestra lo que ve una segunda cámara, como un _picture-in-picture_ o una lupa. La pantalla dibuja su relleno, encima la vista recortada a su contorno y encima su trazo; la opacidad y los fundidos afectan a todo. La vista no muestra la pantalla, el marco, `exclude` ni las superposiciones HUD; una pantalla que aparece dentro de otra vista muestra también su vista, un nivel: las pantallas de dentro de esa muestran su pintura, para que dos vistas que se muestran entre sí terminen. Solo una figura cerrada 2D puede ser pantalla (rectángulo, cuadrado, círculo, punto, elipse, polígono, estrella, sector, anillo, curva, camino SVG o booleano). Lanza `ValueError` con texto, grupos, imágenes u objetos 3D, con `frame` igual a la propia pantalla, con objetos o parámetros de otra escena, con un zoom no positivo, con un nombre de capa vacío o con un `fit` o `background` desconocido. Una llamada posterior o `no_camera_view()` sustituye la vista.],
 )[
 ```python
 # show-code: true
@@ -1203,6 +1203,32 @@ scene.play([frame.animate.move_to(-1.5, 0).duration(1.2)])
 scene.play([frame.animate.scale_to(0.5).duration(0.8)])
 # output: preview.webp
 scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.camera_view_3d",
+  kind: "method",
+  params: (
+    (name: "eye", type: "Endpoint", default: none, desc: [Desde dónde mira la cámara de la vista.]),
+    (name: "target", type: "Endpoint", default: none, desc: [Adónde mira.]),
+    (name: "fov_y", type: "float", default: "0.75", desc: [Campo de visión vertical, en radianes.]),
+    (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
+    (name: "background", type: "Paint | \"canvas\" | None", default: "\"canvas\"", desc: [Fondo de la pantalla, como en `camera_view`.]),
+    (name: "exclude", type: "Sequence[Drawable]", default: "()", desc: [Objetos, con sus hijos, que la vista deja fuera.]),
+  ),
+  returns: (type: "CameraView", desc: [La vista.]),
+  desc: [Convierte esta figura en una pantalla que muestra el contenido 3D de la escena visto por una cámara propia: mira desde `eye` hacia `target` en perspectiva, sobre un cuadro con la forma de la pantalla y la altura del de la cámara principal, así que sus líneas y brillos se ven como en ella. Un objeto o un punto de anclaje como `eye` o `target` se lee donde está en cada fotograma: anímalo para mover la cámara, o pasa un objeto que se mueve como `target` para mantenerlo en el centro. Muestra primitivas, superficies, líneas 3D, modelos y objetos colocados en 3D; los objetos 2D del canvas y los de `exclude` quedan fuera. `snapshot` la congela como cualquier vista; `pan_to`, `zoom_to`, `rotate_to` y `follow` mueven el cuadro 2D, que esta vista no usa. Lanza `ValueError` con un `fov_y` fuera de `(0, pi)`, con un `up` nulo o con una pantalla que no sea una figura cerrada 2D.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>bola = scene.geometry.sphere(1.0).move_to_3d(-2, 0, 0)
+scene.camera.look_at(eye=(7, 5, 10), target=(0, 0, 0))
+scene.camera.perspective(0.75)
+arriba = scene.geometry.rounded_rect(4.8, 2.7, 0.15).hud().move_to(5, 2.6)
+arriba.camera_view_3d(eye=(0, 12, 0.5), target=bola, fov_y=0.6)
+scene.play([bola.animate.move_to_3d(2, 0, 1).duration(2.0)])
 ```
 ]
 

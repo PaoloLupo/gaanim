@@ -11,6 +11,7 @@ use gaanim_timeline::timeline::Timeline;
 use crate::canvas::{CompileCheckpoint, Compiled, SceneFingerprints, SceneModel, SegmentMarker};
 use gaanim_core::ObjectId;
 use gaanim_scene::prelude::{ArchetypeId, ComponentId, Tick};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// Replay a [`SceneModel`] into a Bevy world.
@@ -19,9 +20,173 @@ use std::sync::{Arc, Mutex};
 /// by future scripting language bindings. Bindings should not duplicate replay
 /// logic; they should construct `SceneModel` and call into this module indirectly.
 pub fn replay_canvas_into(world: &mut World, canvas: SceneModel) {
-    replay_prepared(world, &canvas, |commands, timeline, fonts, text_config| {
+    let canvas = with_run_time_holds(canvas);
+    compile_canvas_into(world, &canvas);
+    freeze_camera_snapshots(world, &canvas);
+}
+
+/// `canvas` with where the endpoints of its camera holds that updaters move
+/// end, found by a probe of the scene, so that the camera ends on them and
+/// later camera moves start there; `canvas` itself when it has none.
+///
+/// The compiler knows where an endpoint ends only as authored, and an
+/// updater moves it elsewhere at run time: the scene is built in a world of
+/// its own that plays to the end of each such hold and reads it there.
+/// Scenes without updaters or without camera moves on endpoints skip it.
+fn with_run_time_holds(canvas: SceneModel) -> SceneModel {
+    if !canvas.camera_hold_probes.is_empty() || !canvas.may_hold_on_updated_endpoints(0) {
+        return canvas;
+    }
+    let scene = canvas.clone();
+    let mut probe = match gaanim_export::bundle::recording_app(move |world| {
+        world.insert_resource(SnapshotProbe);
+        compile_canvas_into(world, &scene);
+    }) {
+        Ok(probe) => probe,
+        Err(error) => {
+            tracing::error!(
+                "could not build the scene again to find where the camera ends: {error}"
+            );
+            return canvas;
+        }
+    };
+    let Some(mut holds) = probe
+        .world()
+        .get_resource::<crate::builder::RunTimeCameraHolds>()
+        .map(|holds| holds.0.clone())
+    else {
+        return canvas;
+    };
+    holds.sort_by(|a, b| a.time.total_cmp(&b.time));
+    let mut found = HashMap::new();
+    for hold in holds {
+        probe.world_mut().resource_mut::<Timeline>().seek_request = Some(hold.time);
+        probe.update();
+        if let Some(point) =
+            gaanim_animation::resolve_tracking_endpoint(&hold.endpoint, probe.world())
+        {
+            found.insert((hold.index, hold.slot), point);
+        }
+    }
+    let mut canvas = canvas;
+    canvas.camera_hold_probes = Arc::new(found);
+    canvas
+}
+
+/// Where the last reload's probe found the camera holds that updaters move
+/// end, and the revision it probed.
+#[derive(Resource)]
+struct ProbedCameraHolds {
+    fingerprints: SceneFingerprints,
+    probes: Arc<HashMap<(usize, u8), gaanim_core::glam::DVec3>>,
+}
+
+/// [`with_run_time_holds`] for a reload, which probes the scene again only
+/// when the segments it recompiles move the camera to endpoints: the ones
+/// before compile as in the revision the last probe found, so their holds
+/// end where it found them.
+fn reload_run_time_holds(world: &mut World, canvas: SceneModel, allow_reuse: bool) -> SceneModel {
+    let probed = world.remove_resource::<ProbedCameraHolds>();
+    if !canvas.camera_hold_probes.is_empty() || !canvas.may_hold_on_updated_endpoints(0) {
+        return canvas;
+    }
+    let Some(fingerprints) = scene_fingerprints(world, &canvas) else {
+        return with_run_time_holds(canvas);
+    };
+    let canvas = match probed.filter(|probed| {
+        allow_reuse
+            && !canvas
+                .may_hold_on_updated_endpoints(probed.fingerprints.shared_prefix(&fingerprints))
+    }) {
+        Some(probed) => {
+            let mut canvas = canvas;
+            canvas.camera_hold_probes = probed.probes;
+            canvas
+        }
+        None => with_run_time_holds(canvas),
+    };
+    world.insert_resource(ProbedCameraHolds {
+        fingerprints,
+        probes: Arc::clone(&canvas.camera_hold_probes),
+    });
+    canvas
+}
+
+/// [`replay_canvas_into`] without freezing the scene's camera snapshots.
+fn compile_canvas_into(world: &mut World, canvas: &SceneModel) {
+    replay_prepared(world, canvas, |commands, timeline, fonts, text_config| {
         canvas.compile_into(commands, timeline, fonts, text_config);
     });
+}
+
+/// Marks the world in which [`freeze_camera_snapshots`] builds the scene a
+/// second time: its snapshots stay unfrozen there.
+#[derive(Resource)]
+struct SnapshotProbe;
+
+/// Freeze what the camera views of the scene's snapshots show at their
+/// instants into the world's [`FrozenViews`](gaanim_renderer::pipeline::FrozenViews),
+/// or remove them when the scene has no snapshot.
+///
+/// The world holds the scene as it starts, and its views show what moves
+/// later, so the scene is built again in a world of its own that plays to
+/// each snapshot's instant.
+fn freeze_camera_snapshots(world: &mut World, canvas: &SceneModel) {
+    use gaanim_renderer::effects::CameraSnapshot;
+    use gaanim_renderer::pipeline::{FrozenEntities, FrozenViews, freeze_camera_view};
+    if world.contains_resource::<SnapshotProbe>() {
+        return;
+    }
+    world.remove_resource::<FrozenViews>();
+    if !canvas.has_camera_snapshots() {
+        return;
+    }
+    let scene = canvas.clone();
+    let mut probe = match gaanim_export::bundle::recording_app(move |world| {
+        world.insert_resource(SnapshotProbe);
+        compile_canvas_into(world, &scene);
+    }) {
+        Ok(probe) => probe,
+        Err(error) => {
+            tracing::error!(
+                "could not build the scene again to freeze its camera snapshots: {error}"
+            );
+            return;
+        }
+    };
+    let mut snapshots: Vec<(Entity, CameraSnapshot)> = {
+        let probe = probe.world_mut();
+        let mut query = probe.query::<(Entity, &CameraSnapshot)>();
+        query
+            .iter(probe)
+            .map(|(entity, snapshot)| (entity, *snapshot))
+            .collect()
+    };
+    snapshots.sort_by(|(_, a), (_, b)| a.at.total_cmp(&b.at));
+    let mut entities = FrozenEntities::default();
+    let mut views = Vec::with_capacity(snapshots.len());
+    for (_, snapshot) in &snapshots {
+        probe.world_mut().resource_mut::<Timeline>().seek_request = Some(snapshot.at);
+        probe.update();
+        // A snapshot shows none taken at its instant, itself included.
+        let later: Vec<Entity> = snapshots
+            .iter()
+            .filter(|(_, other)| other.at >= snapshot.at)
+            .map(|(entity, _)| *entity)
+            .collect();
+        // A layer no author can name, which only the snapshot's view shows.
+        let layer = Arc::from(format!("\u{1}snapshot {}", snapshot.key.as_raw()));
+        if let Some(view) = freeze_camera_view(
+            probe.world_mut(),
+            snapshot.screen,
+            &later,
+            layer,
+            &mut entities,
+        ) {
+            views.push((snapshot.key, view));
+        }
+    }
+    world.insert_resource(FrozenViews::new(views));
 }
 
 /// Resolve the scene's text theme and fonts, ensure the preview cameras, and
@@ -295,6 +460,13 @@ fn replay_incremental_for(
     clear_scene: impl FnOnce(&mut World),
     goal: ReplayGoal,
 ) -> ReplayKind {
+    // A reload ends camera moves where updaters take their endpoints; a
+    // measurement only reads sizes.
+    let canvas = if goal == ReplayGoal::Reload {
+        reload_run_time_holds(world, canvas, allow_reuse)
+    } else {
+        canvas
+    };
     // Read from this revision even when the world keeps an earlier one's
     // entities: moving a line changes no fingerprint. Only the editor reads
     // it, and only once something is inspected.
@@ -308,7 +480,19 @@ fn replay_incremental_for(
         .into_iter()
         .map(|segment| (segment.id.raw(), segment.notes))
         .collect();
+    // A reload freezes the snapshots of the scene it shows; a measurement
+    // only reads sizes.
+    let snapshots =
+        (goal == ReplayGoal::Reload).then(|| canvas.has_camera_snapshots().then(|| canvas.clone()));
     let kind = replay_revision(world, canvas, allow_reuse, clear_scene, goal);
+    match snapshots {
+        Some(_) if matches!(kind, ReplayKind::Unchanged { .. }) => {}
+        Some(Some(canvas)) => freeze_camera_snapshots(world, &canvas),
+        Some(None) => {
+            world.remove_resource::<gaanim_renderer::pipeline::FrozenViews>();
+        }
+        None => {}
+    }
     refresh_segment_notes(world, notes);
     if let Some(canvas) = inspected {
         let ids = world
@@ -362,7 +546,7 @@ fn replay_revision(
     let previous = world.remove_resource::<RetainedReplay>();
     let Some(fingerprints) = scene_fingerprints(world, &canvas) else {
         clear_scene(world);
-        replay_canvas_into(world, canvas);
+        compile_canvas_into(world, &canvas);
         timings.phase("full compile");
         timings.report(ReplayKind::Full);
         return ReplayKind::Full;
@@ -1196,6 +1380,63 @@ Buenos días.
             kind,
             ReplayKind::Full,
             "reparenting a kept entity must fall back to a full replay"
+        );
+    }
+
+    #[test]
+    fn a_reload_probes_camera_holds_again_only_to_recompile_camera_moves_on_endpoints() {
+        use crate::canvas::CanvasEndpoint;
+        use gaanim_animation::FollowOffsetSpace;
+        use gaanim_core::glam::DVec3;
+        // A follow of a drawable an updater moves, then a caption, and
+        // perhaps a pan to it.
+        fn scene(caption: &str, pan: bool) -> SceneModel {
+            let mut canvas = SceneModel::new(640, 360);
+            canvas.segment("follow", None).unwrap();
+            let comet = canvas.circle(0.3);
+            comet.add_updater(crate::canvas::UpdaterPreset::Orbit {
+                cx: 0.0,
+                cy: 0.0,
+                radius: 2.0,
+                speed: 1.0,
+            });
+            let follow = canvas.camera_follow_endpoint(
+                CanvasEndpoint::Entity(comet.id),
+                DVec3::ZERO,
+                FollowOffsetSpace::World,
+                0.0,
+                1.0,
+            );
+            canvas.play(vec![follow]);
+            canvas.segment("caption", None).unwrap();
+            let caption = canvas.text(caption);
+            canvas.play(vec![caption.animate().fade_in().duration(0.5)]);
+            if pan {
+                let pan = canvas.camera_pan_to_endpoint(CanvasEndpoint::Entity(comet.id), 1.0);
+                canvas.play(vec![pan]);
+            }
+            canvas
+        }
+        let probes = |world: &World| Arc::clone(&world.resource::<ProbedCameraHolds>().probes);
+        let mut world = incremental_world();
+        hot_reload(&mut world, scene("first", false));
+        let found = probes(&world);
+        assert!(!found.is_empty(), "the follow's hold is probed");
+        // The edit recompiles no camera move: the follow ends where it did.
+        hot_reload(&mut world, scene("second", false));
+        assert!(Arc::ptr_eq(&found, &probes(&world)));
+        hot_reload(&mut world, scene("second", false));
+        assert!(Arc::ptr_eq(&found, &probes(&world)));
+        assert_eq!(
+            observe(&mut world),
+            full_replay_observation(scene("second", false))
+        );
+        // The edit recompiles a pan to the comet, which the probe must find.
+        hot_reload(&mut world, scene("second", true));
+        assert!(probes(&world).len() > found.len());
+        assert_eq!(
+            observe(&mut world),
+            full_replay_observation(scene("second", true))
         );
     }
 

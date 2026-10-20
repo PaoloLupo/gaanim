@@ -180,6 +180,94 @@ pub struct CameraView {
     pub since: f64,
     /// Timeline time `no_camera_view` removed it at, if it did.
     pub until: Option<f64>,
+    /// A 3D camera of the view's own, which draws the scene's 3D content
+    /// from where it stands instead of magnifying the canvas.
+    pub camera_3d: Option<ViewCamera3D>,
+}
+
+/// The 3D camera of a camera view that looks at the scene's 3D content from
+/// a place of its own: its eye and target, which may move, its up direction
+/// and its vertical field of view in radians. The view's screen shows the
+/// 3D content through it as the main camera would show it on a frame the
+/// screen's shape, with the main camera's lens limits; the canvas's 2D
+/// drawables stay out of it.
+#[derive(Debug, Clone)]
+pub struct ViewCamera3D {
+    pub eye: gaanim_animation::TrackingEndpoint,
+    pub target: gaanim_animation::TrackingEndpoint,
+    pub up: gaanim_core::glam::DVec3,
+    pub fov_y: f64,
+}
+
+/// Component: where the [`ViewCamera3D`] of a camera view's screen stands
+/// this frame, resolved by [`resolve_view_cameras_system`].
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ViewCamera(pub gaanim_math::Camera);
+
+/// System: resolve the eye and target of the 3D cameras of camera views
+/// where they are this frame, into a perspective camera on a frame as tall
+/// as the main camera's and shaped like each screen.
+pub fn resolve_view_cameras_system(world: &mut bevy::prelude::World) {
+    let mut screens = world.query::<(
+        Entity,
+        &CameraView,
+        &gaanim_scene::LocalBounds,
+        Option<&gaanim_scene::PathSource>,
+    )>();
+    let views: Vec<(Entity, ViewCamera3D, gaanim_core::kurbo::Rect)> = screens
+        .iter(world)
+        .filter_map(|(entity, view, bounds, source)| {
+            Some((
+                entity,
+                view.camera_3d.clone()?,
+                crate::pipeline::geometry_rect(bounds, source),
+            ))
+        })
+        .collect();
+    if views.is_empty() {
+        return;
+    }
+    let Some(main) = world
+        .get_resource::<gaanim_math::ResolvedCamera>()
+        .map(|resolved| resolved.camera)
+        .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())
+    else {
+        return;
+    };
+    let (near, far) = match main.projection {
+        gaanim_math::Projection::Perspective { near, far, .. } => (near, far),
+        gaanim_math::Projection::Orthographic { .. } => (0.1, 1000.0),
+    };
+    let mut resolved = Vec::with_capacity(views.len());
+    for (entity, camera_3d, rect) in views {
+        let (Some(eye), Some(target)) = (
+            gaanim_animation::resolve_tracking_endpoint(&camera_3d.eye, world),
+            gaanim_animation::resolve_tracking_endpoint(&camera_3d.target, world),
+        ) else {
+            continue;
+        };
+        if !(rect.width() > 0.0 && rect.height() > 0.0) {
+            continue;
+        }
+        let aspect = rect.width() / rect.height();
+        let height = main.frame_height;
+        let pixels = main.viewport_height.max(1);
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(
+            height * aspect,
+            height,
+            ((f64::from(pixels) * aspect).round() as u32).max(1),
+            pixels,
+        );
+        if camera.set_perspective(camera_3d.fov_y, near, far).is_err()
+            || camera.look_at(eye, target, camera_3d.up).is_err()
+        {
+            continue;
+        }
+        resolved.push((entity, camera));
+    }
+    for (entity, camera) in resolved {
+        world.entity_mut(entity).insert(ViewCamera(camera));
+    }
 }
 
 impl CameraView {
@@ -188,6 +276,113 @@ impl CameraView {
     pub fn shown_at(&self, time: f64) -> bool {
         time + 1e-9 >= self.since && self.until.is_none_or(|until| time + 1e-9 < until)
     }
+}
+
+/// Component: turns a closed vector leaf into a snapshot of a [`CameraView`]:
+/// it shows, frozen, what the view of `screen` showed at timeline time `at`,
+/// in its own outline and wherever it moves. The scene builder freezes it
+/// into [`crate::pipeline::FrozenViews`] under `key`; until then, or when
+/// the view showed nothing, the drawable draws as a plain shape.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct CameraSnapshot {
+    /// The screen whose view the snapshot freezes.
+    pub screen: Entity,
+    pub at: f64,
+    /// The authored drawable, the same in every world built from one scene.
+    pub key: gaanim_core::ObjectId,
+}
+
+/// System: the frame of a camera view that follows 3D content stays where
+/// the main camera draws that content on the canvas, so that the view shows
+/// it. The canvas a camera at an angle or in perspective draws 2D content
+/// on is not where it draws a 3D point, so a frame following a mesh, a 3D
+/// line, a model, one of its nodes or a billboard moves from the point
+/// `follow` put it at to the canvas point drawn over it. The lines of an
+/// inset follow it there.
+pub fn project_camera_view_follows_system(world: &mut bevy::prelude::World) {
+    use gaanim_animation::{EndpointFollow, TrackingEndpoint};
+    let Some(camera) = world
+        .get_resource::<gaanim_math::ResolvedCamera>()
+        .map(|resolved| resolved.camera)
+    else {
+        return;
+    };
+    // A flat camera draws a point where its x and y put it.
+    if camera.is_flat() {
+        return;
+    }
+    let time = world
+        .get_resource::<gaanim_animation::PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    let frames: Vec<Entity> = world
+        .query::<&CameraView>()
+        .iter(world)
+        .map(|view| view.source)
+        .collect();
+    let mut placed = Vec::new();
+    for frame in frames {
+        let Some(follow) = world
+            .get::<EndpointFollow>(frame)
+            .filter(|follow| follow.holds_at(time))
+        else {
+            continue;
+        };
+        let target = match &follow.endpoint {
+            TrackingEndpoint::Entity(entity) | TrackingEndpoint::EntityAnchor { entity, .. } => {
+                *entity
+            }
+            _ => continue,
+        };
+        if !drawn_through_camera(target, world) {
+            continue;
+        }
+        let Some(point) = gaanim_animation::resolve_tracking_endpoint_with_offset(
+            &follow.endpoint,
+            follow.offset,
+            follow.offset_space,
+            world,
+        ) else {
+            continue;
+        };
+        let at = camera.canvas_point(point).extend(0.0);
+        let local = world
+            .get::<gaanim_scene::prelude::ChildOf>(frame)
+            .and_then(|relation| gaanim_animation::entity_world_matrix(relation.parent(), world))
+            .filter(|matrix| matrix.determinant().abs() > f64::EPSILON)
+            .map_or(at, |matrix| matrix.inverse().transform_point3(at));
+        placed.push((frame, local));
+    }
+    if placed.is_empty() {
+        return;
+    }
+    for (frame, local) in placed {
+        if let Some(mut transform) = world.get_mut::<gaanim_math::SpatialTransform>(frame) {
+            transform.translation = local;
+        }
+    }
+    gaanim_animation::tracking_line_system(world);
+}
+
+/// Whether the main camera draws `entity` through its projection: no part
+/// of it is a 2D drawable of the canvas, or it is a billboard, which faces
+/// the camera where its 3D point is drawn.
+fn drawn_through_camera(entity: Entity, world: &bevy::prelude::World) -> bool {
+    if world.get::<gaanim_scene::Billboard>(entity).is_some() {
+        return true;
+    }
+    let mut pending = vec![entity];
+    while let Some(node) = pending.pop() {
+        let flat = world.get::<gaanim_scene::Path2D>(node).is_some()
+            || world.get::<gaanim_scene::RasterImage>(node).is_some()
+            || world.get::<crate::lottie::LottiePlayer>(node).is_some();
+        if flat && world.get::<gaanim_scene::DrawnIn3D>(node).is_none() {
+            return false;
+        }
+        if let Some(children) = world.get::<bevy::prelude::Children>(node) {
+            pending.extend(children.iter());
+        }
+    }
+    true
 }
 
 /// Component: puts a drawable on a named view layer. The main camera does not
@@ -627,5 +822,102 @@ mod connect_tests {
         };
         assert!(layer(0).owns(0.1) && layer(1).owns(0.6) && layer(3).owns(2.0));
         assert!(!layer(0).owns(1.9));
+    }
+}
+
+#[cfg(test)]
+mod camera_view_follow_tests {
+    use super::*;
+    use gaanim_core::glam::DVec3;
+    use gaanim_math::SpatialTransform;
+
+    /// A screen whose view looks through a frame following `target`.
+    fn following_frame(world: &mut bevy::prelude::World, target: Entity) -> Entity {
+        let frame = world
+            .spawn((
+                SpatialTransform::default(),
+                gaanim_animation::EndpointFollow {
+                    endpoint: gaanim_animation::TrackingEndpoint::Entity(target),
+                    offset: DVec3::ZERO,
+                    offset_space: gaanim_animation::FollowOffsetSpace::World,
+                    since: 0.0,
+                },
+            ))
+            .id();
+        world.spawn(CameraView {
+            source: frame,
+            fit: CameraViewFit::Contain,
+            background: CameraViewBackground::None,
+            exclude: Vec::new(),
+            zoom: None,
+            layers: Vec::new(),
+            since: 0.0,
+            until: None,
+            camera_3d: None,
+        });
+        frame
+    }
+
+    #[test]
+    fn view_frames_follow_3d_content_where_the_camera_draws_it() {
+        let mut world = bevy::prelude::World::new();
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1280, 720);
+        camera
+            .look_at(DVec3::new(0.0, 4.0, 10.0), DVec3::ZERO, DVec3::Y)
+            .unwrap();
+        camera.set_perspective(0.8, 0.1, 100.0).unwrap();
+        world.insert_resource(gaanim_math::ResolvedCamera::new(
+            camera,
+            gaanim_math::CameraViewport::default(),
+        ));
+        let point = DVec3::new(2.0, 1.0, -3.0);
+        let mesh = world
+            .spawn((
+                SpatialTransform::new_3d(point.x, point.y, point.z),
+                gaanim_scene::Mesh3DMarker,
+            ))
+            .id();
+        let shape = world
+            .spawn((
+                SpatialTransform::new_3d(point.x, point.y, point.z),
+                gaanim_scene::Path2D(std::sync::Arc::new(
+                    gaanim_core::kurbo::BezPath::from_svg("M0 0 L1 0 L1 1 Z").unwrap(),
+                )),
+            ))
+            .id();
+        let on_mesh = following_frame(&mut world, mesh);
+        let on_shape = following_frame(&mut world, shape);
+        project_camera_view_follows_system(&mut world);
+
+        // Drawn on the still canvas of the perspective camera, over the mesh.
+        let placed = world.get::<SpatialTransform>(on_mesh).unwrap().translation;
+        let scale = camera.pixels_per_unit();
+        let drawn = gaanim_core::kurbo::Affine::translate((640.0, 360.0))
+            * gaanim_core::kurbo::Affine::scale_non_uniform(scale, -scale)
+            * gaanim_core::kurbo::Point::new(placed.x, placed.y);
+        let screen = camera.world_to_screen(point);
+        assert!(
+            (drawn.x - screen.x).abs() < 1e-6 && (drawn.y - screen.y).abs() < 1e-6,
+            "{drawn:?} {screen:?}"
+        );
+        assert_eq!(placed.z, 0.0);
+        // A 2D drawable stays on the canvas where its x and y put it, so
+        // the frame `follow` placed is left alone.
+        assert_eq!(
+            world.get::<SpatialTransform>(on_shape).unwrap().translation,
+            DVec3::ZERO
+        );
+
+        // A flat camera leaves every frame where `follow` put it.
+        world.insert_resource(gaanim_math::ResolvedCamera::default());
+        world
+            .get_mut::<SpatialTransform>(on_mesh)
+            .unwrap()
+            .translation = DVec3::ZERO;
+        project_camera_view_follows_system(&mut world);
+        assert_eq!(
+            world.get::<SpatialTransform>(on_mesh).unwrap().translation,
+            DVec3::ZERO
+        );
     }
 }

@@ -1,4 +1,4 @@
-"""3D camera: aiming, orbiting, dollying, lenses, saved poses and bindings of the scene camera.
+"""3D camera: aiming, orbiting, dollying, lenses, saved poses, bindings, follows, snapshots and views of their own.
 
 Every segment starts from the same perspective pose over a few lit
 primitives on a floor and plays one camera move. The label, pinned to the
@@ -7,7 +7,7 @@ frame with ``hud()`` so the camera never moves it, is the code of the move.
 
 import os
 
-from gaanim import Material3D, Scene, Zones
+from gaanim import Anchor, Material3D, Scene, Zones
 
 HOLD = 0.5
 MOVE = 1.6
@@ -99,6 +99,63 @@ move(scene.camera.animate.orbit(delta_yaw=1.2, delta_pitch=0))
 shot("reset", "scene.camera.animate.reset()")
 move(scene.camera.animate.reset())
 
+# Follow the sphere as it rises and moves away: the camera moves with it,
+# without turning, and keeps it at the center as it framed the target; with
+# a lag it catches up. Unlike bind_3d, the eye moves too.
+ball = shot("follow", "scene.camera.animate.follow(ball, lag=0.3)")
+scene.play(
+    [
+        scene.camera.animate.follow(ball, lag=0.3).duration(2 * MOVE),
+        ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE),
+    ]
+)
+scene.wait(HOLD)
+
+# A second camera follows the sphere too: the inset's frame stays where the
+# main camera draws it, and the screen shows it enlarged.
+ball = shot("inset", "scene.camera.inset(ball, zoom=3, follow=True)")
+view = scene.camera.inset(ball, zoom=3, at=Anchor.TOP_RIGHT, follow=True)
+scene.play([view.animate.pop_out().duration(MOVE)])
+scene.play([ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE)])
+scene.wait(HOLD)
+
+# view.snapshot() keeps what the inset shows at one instant, the 3D content
+# drawn as the main camera drew it then, while the inset goes on following
+# the sphere.
+ball = shot("snapshot", "photo = view.snapshot()")
+view = scene.camera.inset(ball, zoom=2, at=Anchor.TOP_RIGHT, follow=True)
+page = scene.layout.zones(Zones.rows(["1fr", 0.5], padding="page_padding"))[0]
+scene.play([view.animate.pop_out().duration(MOVE)])
+photo = view.snapshot()
+scene.play(
+    [
+        photo.animate.scale_to(0.5).duration(MOVE),
+        photo.animate.place(page, anchor="bottom_right").duration(MOVE),
+        ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE),
+    ]
+)
+scene.wait(HOLD)
+
+# With turn=True the camera stays where it is and turns to keep the sphere
+# at the center, as on a tripod, and ends looking at it.
+ball = shot("turn", "scene.camera.animate.follow(ball, turn=True)")
+scene.play(
+    [
+        scene.camera.animate.follow(ball, turn=True).duration(2 * MOVE),
+        ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE),
+    ]
+)
+scene.wait(HOLD)
+
+# A view with a 3D camera of its own shows the stage from another angle:
+# from overhead, keeping the sphere at its center as it moves.
+ball = shot("view_3d", "view = screen.camera_view_3d(eye=(0, 12, 0.5), target=ball)")
+corner = scene.layout.zones(Zones.grid(rows=2, columns=2, padding="page_padding"))[1]
+top = scene.geometry.rounded_rect(4.8, 2.7, 0.15).stroke(accent, 0.04).hud().place(corner, anchor="top_right")
+top.camera_view_3d(eye=(0, 12, 0.5), target=ball, fov_y=0.6, up=(0, 0, -1))
+scene.play([ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE)])
+scene.wait(HOLD)
+
 # Before and after each move. Segments last one move, except the states
 # segment (two moves) and the bind_3d segment (two moves of the sphere).
 one = 2 * HOLD + MOVE
@@ -108,6 +165,21 @@ last = bind + 2 * (HOLD + MOVE)
 seeks = [start + t for start in (0, one, 2 * one, 3 * one, 4 * one, last, last + one) for t in (0.3, one - 0.2)]
 seeks += [states + 0.3, states + HOLD + MOVE + 0.2, bind - 0.2]
 seeks += [bind + HOLD + MOVE, last - 0.2, last + one + HOLD + MOVE / 2]
+# Halfway through the follow and once it holds; the inset as it opens,
+# halfway through the sphere's move and at its end.
+follow = last + 2 * one
+inset = follow + 2 * (HOLD + MOVE)
+seeks += [follow + HOLD + MOVE, follow + HOLD + 2 * MOVE + HOLD / 2]
+seeks += [inset + HOLD + MOVE / 2, inset + HOLD + 2 * MOVE, inset + HOLD + 3 * MOVE + HOLD / 2]
+# The snapshot as it leaves the inset, and both once the sphere has moved.
+snapshot = inset + 2 * HOLD + 3 * MOVE
+seeks += [snapshot + HOLD + MOVE + MOVE / 2, snapshot + HOLD + 3 * MOVE + HOLD / 2]
+# Halfway through the turning follow and once it holds.
+turn = snapshot + 2 * HOLD + 3 * MOVE
+seeks += [turn + HOLD + MOVE, turn + HOLD + 2 * MOVE + HOLD / 2]
+# The view from overhead as the sphere starts and once it has moved.
+view_3d = turn + 2 * HOLD + 2 * MOVE
+seeks += [view_3d + HOLD + MOVE / 4, view_3d + HOLD + 2 * MOVE + HOLD / 2]
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, sorted(seeks))
 else:

@@ -63,6 +63,10 @@ pub enum CameraViewError {
     InvalidZoom,
     #[error("view layer names must not be empty")]
     InvalidLayer,
+    #[error(
+        "a camera view's 3D camera needs a field of view between 0 and pi radians and a finite, non-zero up"
+    )]
+    InvalidCamera,
     #[error("this camera view follows a computed zoom and cannot set it")]
     ComputedZoom,
     #[error("camera inset size must be finite and greater than zero")]
@@ -341,6 +345,86 @@ impl CameraViewHandle {
                 offset_space: FollowOffsetSpace::World,
             });
     }
+
+    /// A drawable that shows, frozen, what the view shows at the cursor: a
+    /// copy of the screen (see [`DrawableHandle::copy`]) that keeps that
+    /// content in its outline wherever it moves and however it scales,
+    /// while the view goes on.
+    ///
+    /// It starts hidden, as [`DrawableHandle::hidden`] makes it, so the
+    /// animation that first shows it, a move out of the screen for
+    /// instance, is its entry. To freeze its content the scene is built a
+    /// second time and played to the snapshot's instant, so each preview,
+    /// export or recording of a scene with snapshots builds it twice. Only
+    /// the view's 2D drawables are frozen: 3D content is left out, and
+    /// shader effects, mattes and glass draw plainly.
+    pub fn snapshot(&self) -> DrawableHandle {
+        let snapshot = self
+            .screen
+            .copy()
+            .hidden()
+            .expect("a new copy has not been shown yet");
+        self.screen
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::SetCameraSnapshot {
+                target: snapshot.id,
+                screen: self.screen.id,
+            });
+        snapshot
+    }
+}
+
+impl SceneModel {
+    /// Whether a camera view of the scene has a snapshot.
+    pub(crate) fn has_camera_snapshots(&self) -> bool {
+        let state = self.state.lock().expect("canvas state poisoned");
+        state
+            .segments
+            .iter()
+            .flat_map(|segment| &segment.ops)
+            .any(|op| matches!(op, Op::SetCameraSnapshot { .. }))
+    }
+
+    /// Whether the camera may hold where an endpoint ends that only the run
+    /// time moves: the scene has updaters and, from segment `first` on,
+    /// camera moves that end on an endpoint (`follow`, `look_at`, `pan_to`).
+    pub(crate) fn may_hold_on_updated_endpoints(&self, first: usize) -> bool {
+        use crate::anim::AnimationType;
+        let holds = |anim: &crate::anim::AnimationBuilder| {
+            matches!(
+                anim.anim_type,
+                AnimationType::CameraFollowEndpoint { .. }
+                    | AnimationType::CameraLookAtSource { .. }
+                    | AnimationType::CameraPositionSource { .. }
+            )
+        };
+        let state = self.state.lock().expect("canvas state poisoned");
+        let (mut updaters, mut moves) = (false, false);
+        for (index, op) in state
+            .segments
+            .iter()
+            .enumerate()
+            .flat_map(|(index, segment)| segment.ops.iter().map(move |op| (index, op)))
+        {
+            let counts = index >= first;
+            match op {
+                Op::AttachUpdater { .. } | Op::AttachCustomUpdater { .. } => updaters = true,
+                Op::Play(anims) | Op::Launch(anims) => {
+                    moves |= counts && anims.iter().any(holds);
+                }
+                Op::Animate { anim, .. } | Op::Immediate(anim) => moves |= counts && holds(anim),
+                _ => {}
+            }
+            if updaters && moves {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 fn validate_layer(layer: &str) -> Result<Arc<str>, CameraViewError> {
@@ -372,6 +456,44 @@ impl DrawableHandle {
         self,
         source: Option<&DrawableHandle>,
         options: CameraViewOptions,
+    ) -> Result<CameraViewHandle, CameraViewError> {
+        self.camera_view_spec(source, options, None)
+    }
+
+    /// Show inside this shape the scene's 3D content as a 3D camera of the
+    /// view's own sees it: from `eye`, looking at `target`, both read where
+    /// they are on every frame, with `up` and a vertical field of view of
+    /// `fov_y` radians, on a frame the screen's shape as tall as the main
+    /// camera's. The canvas's 2D drawables stay out of it; `options` set
+    /// the background and what it leaves out.
+    pub fn camera_view_3d(
+        self,
+        eye: super::CanvasEndpoint,
+        target: super::CanvasEndpoint,
+        up: gaanim_core::glam::DVec3,
+        fov_y: f64,
+        options: CameraViewOptions,
+    ) -> Result<CameraViewHandle, CameraViewError> {
+        if !(fov_y.is_finite() && fov_y > 0.0 && fov_y < std::f64::consts::PI)
+            || !up.is_finite()
+            || up.length_squared() <= f64::EPSILON
+        {
+            return Err(CameraViewError::InvalidCamera);
+        }
+        let camera = super::ops::ViewCamera3DSpec {
+            eye,
+            target,
+            up,
+            fov_y,
+        };
+        self.camera_view_spec(None, options, Some(camera))
+    }
+
+    fn camera_view_spec(
+        self,
+        source: Option<&DrawableHandle>,
+        options: CameraViewOptions,
+        camera_3d: Option<super::ops::ViewCamera3DSpec>,
     ) -> Result<CameraViewHandle, CameraViewError> {
         let foreign = |handle: &DrawableHandle| !self.same_canvas(handle);
         if source.is_some_and(foreign) || options.exclude.iter().any(foreign) {
@@ -430,6 +552,7 @@ impl DrawableHandle {
             exclude: options.exclude.iter().map(|excluded| excluded.id).collect(),
             zoom: zoom.source(),
             layers,
+            camera_3d,
         };
         self.state
             .lock()

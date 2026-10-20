@@ -4490,8 +4490,9 @@ class Drawable:
         of the view; hide a visible frame with ``no_stroke()`` to use it only
         as the camera. ``layers`` lists the view layers (see ``view_layer``)
         this view shows besides ordinary drawables. HUD overlays never appear
-        in a view, and screens seen inside another view show their own paint,
-        not their view. A later call or ``no_camera_view()`` replaces the
+        in a view. A screen seen inside another view shows its own view too,
+        one level deep: screens inside that one show their paint, so views
+        that show each other end. A later call or ``no_camera_view()`` replaces the
         view.
 
         The screen must be a single closed 2D shape: a rect, square, rounded
@@ -4509,6 +4510,39 @@ class Drawable:
             scene.play([frame.animate.scale_to(0.5)])  # zoom in twice as much
             lens = scene.geometry.circle(1).camera_view(center=(2, 1), zoom=3)
             scene.play([lens.animate.zoom_to(6), lens.animate.pan_to(3, 1)])
+        """
+        ...
+    def camera_view_3d(
+        self,
+        eye: Endpoint,
+        target: Endpoint,
+        *,
+        fov_y: float = 0.75,
+        up: Optional[tuple[float, float, float]] = None,
+        background: Paint | Literal["canvas"] | None = "canvas",
+        exclude: Sequence[Drawable] = (),
+    ) -> CameraView:
+        """Show inside this shape the scene's 3D content as a camera of its own sees it.
+
+        The view's camera looks from ``eye`` at ``target`` through a
+        perspective with a vertical field of view of ``fov_y`` radians, on a
+        frame the screen's shape as tall as the main camera's, so its lines
+        and glows look as they would on the main camera. A drawable or an
+        anchor point as ``eye`` or ``target`` is read where it is on every
+        frame: animate it to move the camera, or pass a moving drawable as
+        ``target`` to keep it at the center. ``up`` defaults to
+        ``(0, 1, 0)``. It shows primitives, surfaces, 3D lines, models and
+        drawables placed in 3D; the canvas's 2D drawables and the drawables
+        in ``exclude`` (with their children) stay out. ``snapshot`` freezes
+        it like any view; ``pan_to``, ``zoom_to``, ``rotate_to`` and
+        ``follow`` move the 2D frame, which this view does not use.
+
+        The screen must be a single closed 2D shape, as for ``camera_view``.
+        A ``fov_y`` outside ``(0, pi)`` or a zero ``up`` raise ``ValueError``.
+
+        Example:
+            top = scene.geometry.rounded_rect(4.8, 2.7, 0.15).hud().move_to(5, 2.6)
+            view = top.camera_view_3d(eye=(0, 12, 0.5), target=ball, fov_y=0.6)
         """
         ...
     def no_camera_view(self) -> Drawable:
@@ -6310,7 +6344,7 @@ class Camera:
         """
         ...
     def rotate_to(self, angle: ScalarSource) -> Camera: ...
-    def look_at(self, eye: Endpoint, target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
+    def look_at(self, eye: Optional[Endpoint], target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
     def perspective(self, fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera: ...
     def depth_of_field(
         self,
@@ -6540,13 +6574,36 @@ class CameraView:
     def rotate_to(self, radians: ScalarSource) -> CameraView:
         """Turn the camera to ``radians``; the view turns the other way."""
         ...
-    def follow(self, target: Endpoint, *, offset: tuple[float, float] = (0.0, 0.0)) -> CameraView:
+    def follow(self, target: Endpoint, *, offset: tuple[float, float] | tuple[float, float, float] = (0.0, 0.0)) -> CameraView:
         """Keep the camera on ``target`` plus ``offset`` from now on and return this view.
 
         From the cursor the frame follows the endpoint every frame, so
         ``pan_to`` has no effect afterwards (earlier moves still play), and ``pop_out``/``pop_in`` start from where a
-        followed drawable or anchor point is at that moment. A non-finite
-        offset raises ``ValueError``.
+        followed drawable or anchor point is at that moment. A target the
+        main camera draws in 3D (a primitive, a surface, a 3D line, a model,
+        one of its parts or a billboard) is followed where that camera draws
+        it, also when it looks at the scene from an angle or through a
+        perspective; an ``(x, y, z)`` offset is added to its 3D point before
+        that camera projects it. A non-finite offset raises ``ValueError``.
+        """
+        ...
+    def snapshot(self) -> Drawable:
+        """A copy of the screen that shows, frozen, what the view shows at the cursor.
+
+        The copy keeps that picture wherever it moves and however it scales,
+        while the view goes on. It starts hidden, like ``Drawable.hidden``,
+        so its first animation, a move out of the screen for instance, is
+        its entry. To freeze it the scene is built again and played to the
+        snapshot's instant, so a scene with snapshots takes longer to load
+        and export. Everything the view showed is frozen: its 3D content,
+        drawn through the main camera of that instant with the detail the
+        view had, its drawables' shader effects (their shaders read that
+        instant's time), mattes and glass, and what the screens it showed
+        showed in their own views.
+
+        Example:
+            photo = view.snapshot()
+            scene.play([photo.animate.move_to(4, -2)])
         """
         ...
 
@@ -6629,7 +6686,7 @@ class CameraAnimation:
 
         A drawable target is centered where it is drawn while the pan plays,
         also when it follows a reactive point, and the camera then stays
-        where the target is drawn as authored at the end of the ``play``.
+        where the target is drawn at the end of the pan (see ``follow``).
 
         Example:
             scene.camera.animate.pan_to(1.0, 1.0)
@@ -6691,20 +6748,35 @@ class CameraAnimation:
         self,
         target: Endpoint,
         *,
-        offset: tuple[float, float] = (0.0, 0.0),
+        offset: tuple[float, float] | tuple[float, float, float] = (0.0, 0.0),
         offset_space: Literal["world", "local"] = "world",
         lag: float = 0.0,
+        turn: bool = False,
     ) -> Anim:
         """Keep ``target`` plus ``offset`` in the center while the animation plays.
 
         ``offset_space="local"`` turns the offset with the target, and ``lag``
         (seconds) eases the camera onto it from where it started. When the
         animation ends the camera keeps the pose it reached, so the next camera
-        move starts there; that pose comes from where the target is as
-        authored at the end of the ``play``.
+        move starts there. That pose comes from where the target is as the
+        animation ends: as the script moves it, where its glTF animation
+        puts a model's part, or where an updater takes it; a scene with
+        updaters and camera moves like this one is built once more to find
+        that out, so it takes a little longer to load and export.
+
+        The 2D camera pans. A camera that looks at the scene from an angle
+        or through a perspective (after ``look_at``, ``orbit`` or
+        ``perspective``) follows a target moving in 3D: it moves with the
+        target without turning, keeping its distance to it along its line of
+        sight, and its target moves too, so a later ``orbit`` circles the
+        followed point. ``offset`` may then give a depth, ``(x, y, z)``.
+        With ``turn=True`` it stays where it is instead and turns to keep
+        the target at the center, as a camera on a tripod does, and ends
+        looking at it; the 2D camera pans either way.
 
         Example:
             scene.play([car.animate.move_to(6, 2), scene.camera.animate.follow(car, lag=0.2)])
+            scene.play([ball.animate.move_to_3d(3, 1, -2), scene.camera.animate.follow(ball, turn=True)])
         """
         ...
     def shake(
@@ -6789,14 +6861,22 @@ class CameraAnimation:
         ...
     def look_at(
         self,
-        eye: Endpoint,
+        eye: Optional[Endpoint],
         target: Endpoint,
         up: Optional[tuple[float, float, float]] = None,
     ) -> Anim:
         """Aim the camera from ``eye`` toward ``target``.
 
+        A drawable or anchor point as ``eye`` or ``target`` is read where it
+        is drawn on every frame, so the camera turns toward a target that
+        moves while the animation plays, and ends aimed where it ends as
+        authored: later camera moves, an ``orbit`` for instance, start there.
+        To keep a moving target at the center all along, use
+        ``follow(target, turn=True)``.
+
         Args:
-            eye: Camera position in world coordinates.
+            eye: Camera position in world coordinates; ``None`` keeps the
+                camera where it stands, so it only turns.
             target: World-space point to look at.
             up: World-up direction. Defaults to ``(0, 1, 0)``.
         Configure timing afterward on the returned ``Anim``.

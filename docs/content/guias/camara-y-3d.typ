@@ -275,6 +275,43 @@ scene.play([
 scene.render()
 ```
 
+=== Instantáneas
+
+`vista.snapshot()` congela lo que muestra la vista en el cursor: devuelve una
+copia de la pantalla que guarda esa imagen aunque se mueva o se escale,
+mientras la vista sigue. La copia empieza oculta y entra con su primera
+animación, así que basta con llevarla a su sitio.
+
+```python
+# output: preview.webp
+from gaanim import CYAN, WHITE, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+for x in range(-7, 0):
+    for y in range(-3, 4):
+        scene.geometry.dot(0.04).fill("#334155").move_to(x, y)
+bola = scene.geometry.circle(0.12).fill(CYAN).move_to(-6, -2)
+pantalla = scene.geometry.rect(5, 2.8).stroke(WHITE, 0.05).move_to(3.5, 1.8)
+vista = pantalla.camera_view(center=(-6, -2), zoom=3)
+vista.follow(bola)
+scene.play([bola.animate.move_to(-3, 1).duration(1.5)])
+foto = vista.snapshot()
+scene.play([
+    foto.animate.move_to(3.5, -2.3).duration(1.0),
+    foto.animate.scale_to(0.6).duration(1.0),
+    bola.animate.move_to(-5, 2).duration(1.5),
+])
+scene.render()
+```
+
+Para congelarla, Gaanim construye la escena otra vez y la lleva al instante
+de cada instantánea, así que una escena con instantáneas tarda algo más en
+cargar y exportar. Se congela todo lo que mostraba la vista: el contenido 3D,
+dibujado con la cámara principal de ese instante y con el detalle que tenía
+la vista, los efectos de sombreador (que leen el tiempo de ese instante), los
+mates y el vidrio, y lo que mostraban en su propia vista las pantallas que
+aparecían en ella.
+
 = Escenas 3D
 
 Gaanim puede mezclar objetos 3D con el resto de la escena. Empieza con una
@@ -441,6 +478,68 @@ scene.render()
   `1`).
 - `orthographic()` vuelve a la proyección ortográfica y `reset()` al encuadre
   2D inicial.
+
+=== Seguir un objeto en 3D
+
+`animate.follow(objeto)` también funciona con una cámara en perspectiva o en
+ángulo: la cámara se mueve con el objeto sin girar, a la misma distancia
+sobre su línea de visión, y lo mantiene en el centro aunque suba, baje o se
+aleje. Su objetivo se mueve con ella, así que un `orbit` posterior gira
+alrededor del punto seguido. `offset` admite una profundidad, `(x, y, z)`.
+A diferencia de `bind_3d(target=)`, que gira la cámara desde un ojo fijo,
+aquí el ojo viaja.
+
+```python
+# output: preview.webp
+from gaanim import GOLD, Material3D, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+scene.camera.look_at(eye=(7, 5, 10), target=(0, -1, 0))
+scene.camera.perspective(0.75)
+scene.geometry.plane(11, 7, material=Material3D.matte("#334155")).move_to_3d(0, -1, 0)
+bola = scene.geometry.sphere(0.8, material=Material3D.matte(GOLD)).move_to_3d(-3, 0, 2)
+scene.play([
+    bola.animate.move_to_3d(3, 1.5, -2).duration(3.0),
+    scene.camera.animate.follow(bola, lag=0.3).duration(3.0),
+])
+scene.render()
+```
+
+Con `follow(bola, turn=True)` la cámara se queda donde está y gira para
+mantener la esfera en el centro, como sobre un trípode, y termina mirándola.
+`animate.look_at(None, bola)` también gira la cámara sin moverla, pero como
+una transición: llega a mirar la esfera al final de la animación, aunque se
+haya movido, y la siguiente animación de cámara parte de ahí.
+
+```python
+scene.play([
+    bola.animate.move_to_3d(3, 1.5, -2).duration(3.0),
+    scene.camera.animate.follow(bola, turn=True).duration(3.0),
+])
+```
+
+Las cámaras secundarias siguen al objeto donde la cámara principal lo
+dibuja: con `scene.camera.inset(bola, follow=True)` o `vista.follow(bola)`,
+el marco se queda sobre la esfera y la pantalla la muestra ampliada.
+
+=== Vistas con cámara 3D propia
+
+Una vista de cámara amplía lo que dibuja la cámara principal, desde su mismo
+ángulo. `pantalla.camera_view_3d(eye, target)` le da en cambio una cámara 3D
+propia: la pantalla muestra el contenido 3D de la escena desde `eye`,
+mirando a `target`, como lo mostraría la cámara principal desde allí. El ojo
+y el objetivo pueden ser objetos: se leen donde están en cada fotograma, así
+que una vista cenital puede seguir a la esfera mientras rueda.
+
+```python
+arriba = scene.geometry.rounded_rect(4.8, 2.7, 0.15).hud().move_to(5, 2.6)
+vista = arriba.camera_view_3d(eye=(0, 12, 0.5), target=bola, fov_y=0.6)
+scene.play([bola.animate.move_to_3d(3, 1.5, -2).duration(3.0)])
+```
+
+La vista muestra primitivas, superficies, líneas 3D, modelos y objetos
+colocados en 3D; los objetos 2D del canvas quedan fuera. `vista.snapshot()`
+la congela como a cualquier otra.
 
 == Ejes y superficies 3D
 

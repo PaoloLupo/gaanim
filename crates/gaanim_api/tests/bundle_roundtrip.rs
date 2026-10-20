@@ -177,6 +177,114 @@ fn every_recorded_frame_replays_bit_for_bit() {
 }
 
 #[test]
+fn camera_snapshots_record_the_view_they_froze() {
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let frame = canvas
+        .rect(2.0, 2.0)
+        .no_fill()
+        .stroke(Color::WHITE, 0.03)
+        .move_to(3.0, 0.0);
+    let view = canvas
+        .rect(3.0, 3.0)
+        .stroke(Color::WHITE, 0.05)
+        .move_to(-3.0, 2.0)
+        .camera_view(&frame)
+        .unwrap();
+    let dot = canvas
+        .dot(0.2)
+        .fill(Color::from_rgb8(0xff, 0xd1, 0x66))
+        .move_to(2.5, 0.0);
+    canvas.play(vec![dot.animate().move_to(3.5, 0.0).duration(1.0)]);
+    let photo = view.snapshot();
+    canvas.play(vec![
+        photo.animate().move_to(-3.0, -2.5).duration(1.0),
+        dot.animate().move_to(2.5, 0.5).duration(1.0),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("snapshot.gaanim");
+    let mut config = BundleConfig::new(&path);
+    config.fps = 12;
+    record_canvas(canvas, config).expect("record the bundle");
+
+    let mut bundle = Bundle::open(&path).expect("open the bundle");
+    let mismatched = bundle.verify().expect("decode every frame");
+    assert!(mismatched.is_empty(), "frames differ: {mismatched:?}");
+    let last = bundle.frame(bundle.frame_count() - 1).unwrap();
+    let snapshot = last
+        .capture
+        .elements
+        .iter()
+        .filter_map(|element| element.screen.as_ref())
+        .find(|view| view.only_layers)
+        .expect("the snapshot shows only its frozen layer");
+    let frozen: Vec<_> = last
+        .capture
+        .elements
+        .iter()
+        .filter(|element| element.layer.as_ref() == snapshot.layers.first())
+        .collect();
+    assert_eq!(frozen.len(), 1, "the dot as the view saw it");
+    let seen = frozen[0].transform.translation();
+    assert!(
+        (seen.x - 3.5).abs() < 1e-6 && seen.y.abs() < 1e-6,
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn camera_snapshots_record_the_3d_content_they_froze() {
+    let mut canvas = SceneModel::new(16.0, 9.0);
+    let frame = canvas
+        .rect(2.0, 2.0)
+        .no_fill()
+        .stroke(Color::WHITE, 0.03)
+        .move_to(3.0, 0.0);
+    let view = canvas
+        .rect(3.0, 3.0)
+        .stroke(Color::WHITE, 0.05)
+        .move_to(-3.0, 2.0)
+        .camera_view(&frame)
+        .unwrap();
+    let cube = canvas
+        .cube(
+            0.5,
+            gaanim_scene::Material3D::matte(Color::from_rgb8(0xff, 0xd1, 0x66)),
+        )
+        .unwrap()
+        .move_to(2.5, 0.0);
+    canvas.play(vec![cube.animate().move_to(3.5, 0.0).duration(1.0)]);
+    let photo = view.snapshot();
+    canvas.play(vec![
+        photo.animate().move_to(-3.0, -2.5).duration(1.0),
+        cube.animate().move_to(2.5, 0.5).duration(1.0),
+    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("snapshot_3d.gaanim");
+    let mut config = BundleConfig::new(&path);
+    config.fps = 12;
+    record_canvas(canvas, config).expect("record the bundle");
+
+    let mut bundle = Bundle::open(&path).expect("open the bundle");
+    let mismatched = bundle.verify().expect("decode every frame");
+    assert!(mismatched.is_empty(), "frames differ: {mismatched:?}");
+    let last = bundle.frame(bundle.frame_count() - 1).unwrap();
+    let frozen = last
+        .capture
+        .elements
+        .iter()
+        .filter_map(|element| element.screen.as_ref())
+        .find_map(|view| view.frozen.clone())
+        .expect("the snapshot keeps its frozen 3D content");
+    let seen = frozen.three_d.sources[0].transform.w_axis;
+    assert!(
+        (seen.x - 3.5).abs() < 1e-6 && seen.y.abs() < 1e-6,
+        "{seen:?}"
+    );
+    assert!(frozen.three_d.sources[0].mesh.is_some());
+    assert!(frozen.region.area() > 0.0 && frozen.resolution > 0.0);
+}
+
+#[test]
 fn a_damaged_bundle_is_rejected() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("small.gaanim");

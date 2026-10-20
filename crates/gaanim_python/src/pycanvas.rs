@@ -2643,17 +2643,19 @@ impl PyCameraAnimation {
         Ok(PyCanvasAnim { inner })
     }
 
-    /// Keep the camera centered on a drawable while it moves.
-    #[pyo3(signature = (target, *, offset=(0.0, 0.0), offset_space="world", lag=0.0))]
+    /// Keep the camera centered on a drawable while it moves, in 2D or 3D:
+    /// moving with it, or with `turn` turning toward it where it stands.
+    #[pyo3(signature = (target, *, offset=FollowOffset::ZERO, offset_space="world", lag=0.0, turn=false))]
     fn follow(
         &self,
         target: Bound<'_, PyAny>,
-        offset: (f64, f64),
+        offset: FollowOffset,
         offset_space: &str,
         lag: f64,
+        turn: bool,
     ) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
-        if !offset.0.is_finite() || !offset.1.is_finite() {
+        if !offset.0.is_finite() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "offset must be finite",
             ));
@@ -2676,11 +2678,12 @@ impl PyCameraAnimation {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_follow_endpoint(
+            .camera_follow_endpoint_with(
                 resolve_endpoint(&target)?,
-                gaanim_core::glam::DVec3::new(offset.0, offset.1, 0.0),
+                offset.0,
                 offset_space,
                 lag,
+                turn,
                 1.0,
             );
         Ok(PyCanvasAnim { inner })
@@ -2743,11 +2746,12 @@ impl PyCameraAnimation {
         Ok(PyCanvasAnim { inner })
     }
 
-    /// Set camera to look at target from eye (3D perspective).
+    /// Set camera to look at target from eye (3D perspective), or from
+    /// where it stands when `eye` is `None`.
     #[pyo3(signature = (eye, target, up=None))]
     fn look_at(
         &self,
-        eye: Bound<'_, PyAny>,
+        eye: Option<Bound<'_, PyAny>>,
         target: Bound<'_, PyAny>,
         up: Option<(f64, f64, f64)>,
     ) -> PyResult<PyCanvasAnim> {
@@ -2764,8 +2768,8 @@ impl PyCameraAnimation {
                 "up must be non-zero",
             ));
         }
-        if let (Ok(eye_tuple), Ok(target_tuple)) = (
-            eye.extract::<(f64, f64, f64)>(),
+        if let (Some(Ok(eye_tuple)), Ok(target_tuple)) = (
+            eye.as_ref().map(|eye| eye.extract::<(f64, f64, f64)>()),
             target.extract::<(f64, f64, f64)>(),
         ) {
             let eye_vec = gaanim_core::glam::DVec3::new(eye_tuple.0, eye_tuple.1, eye_tuple.2);
@@ -2779,7 +2783,7 @@ impl PyCameraAnimation {
             .lock()
             .expect("scene canvas poisoned")
             .camera_look_at_endpoints(
-                resolve_endpoint_3d(&eye)?,
+                eye.as_ref().map(resolve_endpoint_3d).transpose()?,
                 resolve_endpoint_3d(&target)?,
                 up_vec,
                 1.0,
@@ -3063,7 +3067,7 @@ impl PyCamera {
     #[pyo3(signature = (eye, target, up=None))]
     fn look_at(
         &self,
-        eye: Bound<'_, PyAny>,
+        eye: Option<Bound<'_, PyAny>>,
         target: Bound<'_, PyAny>,
         up: Option<(f64, f64, f64)>,
     ) -> PyResult<Self> {
@@ -8986,6 +8990,29 @@ enum TypstSource {
     Asset(PathBuf),
 }
 
+/// A follow offset: `(x, y)` on the scene plane or `(x, y, z)` in 3D.
+pub(crate) struct FollowOffset(pub gaanim_core::glam::DVec3);
+
+impl FollowOffset {
+    pub(crate) const ZERO: Self = Self(gaanim_core::glam::DVec3::ZERO);
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for FollowOffset {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok((x, y, z)) = obj.extract::<(f64, f64, f64)>() {
+            return Ok(Self(gaanim_core::glam::DVec3::new(x, y, z)));
+        }
+        if let Ok((x, y)) = obj.extract::<(f64, f64)>() {
+            return Ok(Self(gaanim_core::glam::DVec3::new(x, y, 0.0)));
+        }
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "offset must be an (x, y) or (x, y, z) tuple",
+        ))
+    }
+}
+
 /// Resolve a Python object into a CanvasEndpoint.
 /// Accepts a drawable, anchor, point reference, or static 2D/3D tuple.
 pub(crate) fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
@@ -9012,7 +9039,7 @@ pub(crate) fn resolve_endpoint(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoin
 
 /// Resolve a 3D camera endpoint. Static tuples must declare all three axes;
 /// drawable, anchor, and PointRef endpoints retain their native world Z.
-fn resolve_endpoint_3d(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
+pub(crate) fn resolve_endpoint_3d(obj: &Bound<'_, PyAny>) -> PyResult<CanvasEndpoint> {
     if let Ok(drawable) = obj.extract::<PyRef<PyDrawable>>() {
         Ok(CanvasEndpoint::Entity(drawable.0.id))
     } else if let Ok(anchor) = obj.extract::<PyRef<PyAnchorPoint>>() {

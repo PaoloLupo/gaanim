@@ -830,7 +830,7 @@ impl MeshSources {
     }
 
     /// Forget the meshes and lines this frame did not draw.
-    fn end_frame(&mut self) {
+    pub(crate) fn end_frame(&mut self) {
         let used = std::mem::take(&mut self.used);
         self.sources.retain(|key, _| used.contains(key));
         self.shared.retain(|_, source| source.strong_count() > 0);
@@ -838,17 +838,21 @@ impl MeshSources {
 }
 
 /// The image the meshes of a frame's `slot` draw into: one per size and
-/// slot, so that frames refresh the same slots of Vello's atlas.
+/// slot, so that frames refresh the same slots of Vello's atlas. The least
+/// recently drawn go first when camera views and snapshots take many.
 fn frame_image(width: u32, height: u32, slot: usize) -> ImageData {
     static IMAGES: Mutex<Vec<(usize, ImageData)>> = Mutex::new(Vec::new());
     let mut images = IMAGES.lock().expect("3D image cache poisoned");
-    if let Some((_, image)) = images
+    if let Some(index) = images
         .iter()
-        .find(|(held, image)| *held == slot && image.width == width && image.height == height)
+        .position(|(held, image)| *held == slot && image.width == width && image.height == height)
     {
-        return image.clone();
+        let held = images.remove(index);
+        let image = held.1.clone();
+        images.push(held);
+        return image;
     }
-    if images.len() >= 8 {
+    if images.len() >= 32 {
         images.remove(0);
     }
     // Vello copies the registered texture instead of reading these bytes; a
@@ -1004,6 +1008,10 @@ pub(crate) struct GpuMeshes<'a> {
     /// The first image slot the classes take (see [`frame_image`]).
     slot: usize,
     pending: Vec<Pending>,
+    /// Whether [`GpuMeshes::finish`] ends the frame of `sources`, forgetting
+    /// what it did not draw: not for one of several batches a frame draws
+    /// from them.
+    ends_frame: bool,
 }
 
 impl<'a> GpuMeshes<'a> {
@@ -1022,7 +1030,15 @@ impl<'a> GpuMeshes<'a> {
             placement,
             slot,
             pending: Vec::new(),
+            ends_frame: true,
         })
+    }
+
+    /// These meshes as one of several batches the frame draws from the
+    /// same sources, before the last, which ends the frame for all of them.
+    pub(crate) fn within_frame(mut self) -> Self {
+        self.ends_frame = false;
+        self
     }
 
     /// Take the mesh and the lines of a drawable into the image of `class`.
@@ -1189,7 +1205,9 @@ impl<'a> GpuMeshes<'a> {
         line_width: f64,
         illumination: &Illumination,
     ) -> Vec<(usize, GpuMeshFrame)> {
-        self.sources.end_frame();
+        if self.ends_frame {
+            self.sources.end_frame();
+        }
         if self.pending.is_empty() {
             return Vec::new();
         }

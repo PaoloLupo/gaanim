@@ -2420,6 +2420,10 @@ pub struct SceneModel {
     pub(crate) measured: super::measure::MeasureCache,
     /// What authoring this scene cost; see [`Self::measurement_warning`].
     pub(crate) profile: super::profile::SharedProfile,
+    /// Where a probe of the scene found the endpoints of camera holds that
+    /// only the run time moves, by hold and endpoint (see
+    /// `runtime::with_run_time_holds`).
+    pub(crate) camera_hold_probes: Arc<HashMap<(usize, u8), gaanim_core::glam::DVec3>>,
 }
 
 impl SceneModel {
@@ -2467,6 +2471,7 @@ impl SceneModel {
             lighting_3d: gaanim_scene::Lighting3D::default(),
             state: Arc::new(Authored::new(CanvasState::new())),
             measured: Default::default(),
+            camera_hold_probes: Default::default(),
             profile: Default::default(),
         }
     }
@@ -5673,12 +5678,28 @@ impl SceneModel {
         lag: f64,
         duration: f64,
     ) -> Anim {
+        self.camera_follow_endpoint_with(target, offset, offset_space, lag, false, duration)
+    }
+
+    /// [`Self::camera_follow_endpoint`]; with `turn`, a camera that looks at
+    /// the scene from an angle or through a perspective stays where it is
+    /// and turns to keep the endpoint at the center, as on a tripod.
+    pub fn camera_follow_endpoint_with(
+        &mut self,
+        target: CanvasEndpoint,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        lag: f64,
+        turn: bool,
+        duration: f64,
+    ) -> Anim {
         self.camera_anim(
             AnimationType::CameraFollowEndpoint {
                 target,
                 offset,
                 offset_space,
                 lag,
+                turn,
             },
             duration,
         )
@@ -5727,10 +5748,12 @@ impl SceneModel {
         self.camera_anim(AnimationType::CameraLookAt { eye, target, up }, duration)
     }
 
-    /// Aim the camera using native reactive endpoints.
+    /// Aim the camera using native reactive endpoints: from `eye`, or from
+    /// where the camera stands when it is `None`, toward `target`. Moving
+    /// endpoints are followed while the animation plays.
     pub fn camera_look_at_endpoints(
         &mut self,
-        eye: CanvasEndpoint,
+        eye: Option<CanvasEndpoint>,
         target: CanvasEndpoint,
         up: DVec3,
         duration: f64,

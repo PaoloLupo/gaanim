@@ -136,6 +136,8 @@ impl SceneModel {
             measured: _,
             // What authoring cost.
             profile: _,
+            // Derived from the rest by a probe of the scene.
+            camera_hold_probes: _,
         } = self;
         let mut global = DebugFingerprint::new();
         global.add(frame);

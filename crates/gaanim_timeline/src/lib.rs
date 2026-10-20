@@ -316,6 +316,7 @@ pub(crate) fn camera_clip_ids(timeline: &Timeline, world: &mut World) -> Vec<cli
                             | clip::PropertyLensSpec::CameraDollyZoom { .. }
                             | clip::PropertyLensSpec::CameraPanZoom { .. }
                             | clip::PropertyLensSpec::CameraState { .. }
+                            | clip::PropertyLensSpec::CameraLookAtSource { .. }
                     )
                 )
             })
@@ -324,6 +325,27 @@ pub(crate) fn camera_clip_ids(timeline: &Timeline, world: &mut World) -> Vec<cli
         index.key = Some(key);
     }
     index.ids.clone()
+}
+
+/// Where a camera constraint puts the camera this frame.
+enum Followed {
+    /// The camera's x and y, as a pan on the scene plane sets them.
+    At(gaanim_core::glam::DVec3),
+    /// The fraction `amount` of the way toward `point`, from `from` for a
+    /// flat camera; a camera at an angle moves its framing instead, or with
+    /// `turn` turns toward it where it stands.
+    Toward {
+        point: gaanim_core::glam::DVec3,
+        from: gaanim_core::glam::DVec3,
+        amount: f64,
+        turn: bool,
+    },
+    /// The eye at `position`, turned toward `target`.
+    Aimed {
+        position: gaanim_core::glam::DVec3,
+        target: gaanim_core::glam::DVec3,
+        up: gaanim_core::glam::DVec3,
+    },
 }
 
 /// Resolves temporary camera constraints and additive modifiers after reactive
@@ -340,24 +362,34 @@ pub fn camera_rig_system(world: &mut World) {
         .iter()
         .filter_map(|id| timeline.clips.get(*id))
         .filter(|clip| clip.start <= current_time && current_time < clip.end())
-        .filter_map(|clip| match &clip.payload {
-            clip::ClipPayload::Animation(anim) => match &anim.lens {
-                // A pan eases toward where its endpoint is drawn now, with
-                // the clip's easing at its progress.
+        .filter_map(|clip| {
+            let clip::ClipPayload::Animation(anim) = &clip.payload else {
+                return None;
+            };
+            // A pan eases toward where its endpoint is drawn now, with the
+            // clip's easing at its progress, and a look-at whose endpoints
+            // move turns toward where they are drawn: fixed ones the
+            // timeline already aimed.
+            let constrains = match &anim.lens {
                 clip::PropertyLensSpec::CameraFollow { .. }
                 | clip::PropertyLensSpec::CameraFollowEndpoint { .. }
-                | clip::PropertyLensSpec::CameraPositionSource { .. } => {
-                    let progress = if clip.duration > 0.0 {
-                        ((current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
-                    } else {
-                        1.0
-                    };
-                    let eased = anim.rate_func.evaluate(progress);
-                    Some((clip.start, eased, anim.lens.clone()))
+                | clip::PropertyLensSpec::CameraPositionSource { .. } => true,
+                clip::PropertyLensSpec::CameraLookAtSource { eye, target, .. } => {
+                    !matches!(eye, gaanim_animation::TrackingEndpoint::Static(_))
+                        || !matches!(target, gaanim_animation::TrackingEndpoint::Static(_))
                 }
-                _ => None,
-            },
-            _ => None,
+                _ => false,
+            };
+            if !constrains {
+                return None;
+            }
+            let progress = if clip.duration > 0.0 {
+                ((current_time - clip.start) / clip.duration).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            let eased = anim.rate_func.evaluate(progress);
+            Some((clip.start, eased, anim.lens.clone()))
         })
         .max_by(|(left, ..), (right, ..)| left.total_cmp(right));
     let dynamic_frame = camera_clips
@@ -425,7 +457,7 @@ pub fn camera_rig_system(world: &mut World) {
             query
                 .iter(world)
                 .find_map(|(id, transform)| (id.0 == target).then_some(transform.translation))
-                .map(|position| (start, position))
+                .map(|position| (start, Followed::At(position)))
         }
         clip::PropertyLensSpec::CameraFollowEndpoint {
             target,
@@ -433,6 +465,7 @@ pub fn camera_rig_system(world: &mut World) {
             offset,
             offset_space,
             lag,
+            turn,
             ..
         } => {
             let desired = gaanim_animation::resolve_tracking_endpoint_with_offset(
@@ -446,12 +479,39 @@ pub fn camera_rig_system(world: &mut World) {
             } else {
                 1.0 - (-(current_time - start).max(0.0) / lag).exp()
             };
-            Some((start, from.lerp(desired, influence)))
+            Some((
+                start,
+                Followed::Toward {
+                    point: desired,
+                    from,
+                    amount: influence,
+                    turn,
+                },
+            ))
         }
         clip::PropertyLensSpec::CameraPositionSource { from, to, .. } => {
             let target = gaanim_animation::resolve_tracking_endpoint(&to, world)?;
             let destination = gaanim_core::glam::DVec3::new(target.x, target.y, from.z);
-            Some((start, from.lerp(destination, eased)))
+            Some((start, Followed::At(from.lerp(destination, eased))))
+        }
+        clip::PropertyLensSpec::CameraLookAtSource {
+            from_position,
+            from_target,
+            eye,
+            target,
+            up,
+            ..
+        } => {
+            let eye = gaanim_animation::resolve_tracking_endpoint(&eye, world)?;
+            let target = gaanim_animation::resolve_tracking_endpoint(&target, world)?;
+            Some((
+                start,
+                Followed::Aimed {
+                    position: from_position.lerp(eye, eased),
+                    target: from_target.lerp(target, eased),
+                    up,
+                },
+            ))
         }
         _ => None,
     });
@@ -502,11 +562,11 @@ pub fn camera_rig_system(world: &mut World) {
     let Some(mut camera) = world.get_resource_mut::<gaanim_math::CameraRigCamera>() else {
         return;
     };
-    let selected_position = match (follow_position, frame_result) {
+    let selected = match (follow_position, frame_result) {
         (Some((follow_start, follow)), Some((frame_start, frame, zoom))) => {
             if frame_start >= follow_start {
                 camera.0.projection = gaanim_math::Projection::Orthographic { zoom };
-                Some(frame)
+                Some(Followed::At(frame))
             } else {
                 Some(follow)
             }
@@ -514,9 +574,55 @@ pub fn camera_rig_system(world: &mut World) {
         (Some((_, follow)), None) => Some(follow),
         (None, Some((_, frame, zoom))) => {
             camera.0.projection = gaanim_math::Projection::Orthographic { zoom };
-            Some(frame)
+            Some(Followed::At(frame))
         }
         (None, None) => None,
+    };
+    let selected_position = match selected {
+        Some(Followed::Toward {
+            point,
+            from,
+            amount,
+            ..
+        }) if camera.0.is_flat() => Some(from.lerp(point, amount)),
+        // A camera that looks at the scene from an angle, or through a
+        // perspective, keeps its framing: it moves with the point, or turns
+        // toward it where it stands.
+        Some(Followed::Toward {
+            point,
+            amount,
+            turn: true,
+            ..
+        }) => {
+            let target = camera.0.target.lerp(point, amount);
+            let (position, up) = (camera.0.position, camera.0.up);
+            if gaanim_math::Camera::validate_look_at(position, target, up).is_ok() {
+                camera
+                    .0
+                    .look_at(position, target, up)
+                    .expect("validated turned pose");
+            }
+            None
+        }
+        Some(Followed::Toward { point, amount, .. }) => {
+            camera.0 = camera.0.moved_toward(point, amount);
+            None
+        }
+        Some(Followed::At(position)) => Some(position),
+        Some(Followed::Aimed {
+            position,
+            target,
+            up,
+        }) => {
+            if gaanim_math::Camera::validate_look_at(position, target, up).is_ok() {
+                camera
+                    .0
+                    .look_at(position, target, up)
+                    .expect("validated aimed pose");
+            }
+            None
+        }
+        None => None,
     };
     if let Some(position) = selected_position {
         camera.0.position.x = position.x;
@@ -750,6 +856,64 @@ mod tests {
     }
 
     #[test]
+    fn a_camera_at_an_angle_follows_a_point_in_3d_keeping_its_framing() {
+        use gaanim_core::glam::{DVec2, DVec3};
+        let mut camera = gaanim_math::Camera::ortho_2d(1280, 720);
+        camera
+            .look_at(DVec3::new(0.0, 4.0, 10.0), DVec3::ZERO, DVec3::Y)
+            .unwrap();
+        camera.set_perspective(0.8, 0.1, 100.0).unwrap();
+        let point = DVec3::new(3.0, 1.0, -2.0);
+        let rig_at = |lag: f64, time: f64| {
+            let mut world = World::new();
+            world.insert_resource(camera);
+            let mut timeline = Timeline::new();
+            let track = timeline.add_track("Camera", 0);
+            timeline.add_clip(
+                track,
+                0.0,
+                10.0,
+                clip::ClipPayload::Animation(clip::AnimationSpec {
+                    target: gaanim_core::ObjectId::from_raw(0),
+                    lens: clip::PropertyLensSpec::CameraFollowEndpoint {
+                        target: gaanim_animation::TrackingEndpoint::Static(point),
+                        from: camera.position,
+                        offset: DVec3::ZERO,
+                        offset_space: gaanim_animation::FollowOffsetSpace::World,
+                        lag,
+                        turn: false,
+                        hold: None,
+                        hold_target: None,
+                    },
+                    rate_func: gaanim_math::RateFunc::Linear,
+                    delay: 0.0,
+                    label: Some("Camera".into()),
+                }),
+            );
+            timeline.current_time = time;
+            world.insert_resource(timeline);
+            camera_binding_system(&mut world);
+            camera_rig_system(&mut world);
+            world.resource::<gaanim_math::CameraRigCamera>().0
+        };
+        // The point is at the center of the view, seen as the origin was.
+        let followed = rig_at(0.0, 1.0);
+        let center = followed.world_to_screen(point) - DVec2::new(640.0, 360.0);
+        assert!(center.length() < 1e-6, "{center:?}");
+        assert_eq!(followed.rotation, camera.rotation);
+        assert!((followed.target - point).length() < 1e-9);
+        assert!(
+            (followed.position - followed.target - (camera.position - camera.target)).length()
+                < 1e-9
+        );
+        // With a lag the framing moves part of the way.
+        let lagged = rig_at(0.5, 0.5);
+        let reached = 1.0 - (-1.0f64).exp();
+        assert!((lagged.target - point * reached).length() < 1e-9);
+        assert!((lagged.position - (camera.position + point * reached)).length() < 1e-9);
+    }
+
+    #[test]
     fn follow_lag_is_bitwise_identical_for_direct_incremental_and_rewind_evaluation() {
         let mut world = World::new();
         world.insert_resource(gaanim_math::Camera::ortho_2d(1280, 720));
@@ -769,7 +933,9 @@ mod tests {
                     offset: gaanim_core::glam::DVec3::ZERO,
                     offset_space: gaanim_animation::FollowOffsetSpace::World,
                     lag: 0.5,
+                    turn: false,
                     hold: None,
+                    hold_target: None,
                 },
                 rate_func: gaanim_math::RateFunc::Linear,
                 delay: 0.0,

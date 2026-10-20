@@ -527,6 +527,19 @@ pub(crate) struct CameraViewSpec {
     /// Explicit magnification; `None` derives it from the source's size.
     pub zoom: Option<ScalarSource>,
     pub layers: Vec<Arc<str>>,
+    /// A 3D camera of the view's own (`camera_view_3d`).
+    pub camera_3d: Option<ViewCamera3DSpec>,
+}
+
+/// The 3D camera of a camera view's own: it looks from `eye` at `target`,
+/// read where they are on every frame, with `up` and a vertical field of
+/// view of `fov_y` radians.
+#[derive(Debug, Clone)]
+pub(crate) struct ViewCamera3DSpec {
+    pub eye: super::CanvasEndpoint,
+    pub target: super::CanvasEndpoint,
+    pub up: gaanim_core::glam::DVec3,
+    pub fov_y: f64,
 }
 
 /// A deferred operation accumulated by [`SceneModel`](super::SceneModel) and replayed
@@ -743,6 +756,9 @@ pub(crate) enum Op {
         target: ObjectId,
         view: Option<CameraViewSpec>,
     },
+    /// Make `target` a snapshot of what the camera view of `screen` shows
+    /// at the cursor.
+    SetCameraSnapshot { target: ObjectId, screen: ObjectId },
     /// Put a drawable hierarchy on a view layer, or back on none.
     SetViewLayer {
         target: ObjectId,

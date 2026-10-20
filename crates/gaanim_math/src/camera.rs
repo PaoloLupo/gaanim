@@ -579,6 +579,69 @@ impl Camera {
         self.look_at(self.target + new_dir, self.target, self.up)
     }
 
+    /// Whether the camera looks down the z axis through an orthographic
+    /// projection, as the 2D camera does: its x and y pan the view, and it
+    /// draws a point where the point's own x and y put it.
+    pub fn is_flat(&self) -> bool {
+        matches!(self.projection, Projection::Orthographic { .. })
+            && (self.rotation * DVec3::NEG_Z).z <= -1.0 + 1e-9
+    }
+
+    /// The camera moved without turning, so that the center of its view
+    /// travels the fraction `amount` of the way to `point`. It keeps its
+    /// distance along its view axis to the plane its target lies in, and
+    /// the target moves with it: at `amount` 1 the camera looks at `point`
+    /// as it looked at its target, and later orbits and dollies turn
+    /// around the point.
+    pub fn moved_toward(&self, point: DVec3, amount: f64) -> Self {
+        let forward = self.rotation * DVec3::NEG_Z;
+        let reach = self.target - self.position;
+        let along = reach.dot(forward);
+        let distance = if along > 1e-9 { along } else { reach.length() };
+        let shift = (point - (self.position + forward * distance)) * amount;
+        Self {
+            position: self.position + shift,
+            target: self.target + shift,
+            ..*self
+        }
+    }
+
+    /// The scene point the 2D canvas shows where the camera draws `point`:
+    /// the point's own x and y for a flat camera. A perspective camera
+    /// draws 2D content on a canvas that stays still, and a turned
+    /// orthographic one on a canvas that pans, zooms and rolls with it but
+    /// never tilts, so either draws a 3D point elsewhere than its x and y.
+    /// A point nearer than the perspective's near plane, or behind the eye,
+    /// is drawn as if it lay on that plane, where its direction from the
+    /// view axis puts it: off the frame toward its side, rather than
+    /// mirrored through the center as a projection behind the eye is.
+    pub fn canvas_point(&self, point: DVec3) -> DVec2 {
+        if self.is_flat() {
+            return point.truncate();
+        }
+        let mut point = point;
+        if let Projection::Perspective { near, .. } = self.projection {
+            let forward = self.rotation * DVec3::NEG_Z;
+            let depth = (point - self.position).dot(forward);
+            if depth < near {
+                point += forward * (near - depth);
+            }
+        }
+        let screen = self.world_to_screen(point);
+        let canvas = match self.projection {
+            Projection::Perspective { .. } => {
+                let scale = self.pixels_per_unit();
+                Affine::translate((
+                    self.viewport_width as f64 * 0.5,
+                    self.viewport_height as f64 * 0.5,
+                )) * Affine::scale_non_uniform(scale, -scale)
+            }
+            Projection::Orthographic { .. } => self.to_vello_transform(),
+        };
+        let at = canvas.inverse() * gaanim_core::kurbo::Point::new(screen.x, screen.y);
+        DVec2::new(at.x, at.y)
+    }
+
     /// Pan in screen space (pixels scaled to world).
     pub fn pan_screen_delta(&mut self, delta: DVec2) {
         self.pan_screen_delta_with_viewport(delta, CameraViewport::default());
@@ -1083,6 +1146,31 @@ mod tests {
             let restored = cam.screen_to_world_size(screen, width, height);
             assert!((restored - authored).abs().max_element() < 1.0e-9);
         }
+    }
+
+    #[test]
+    fn a_point_behind_a_perspective_camera_lands_off_the_frame_on_its_own_side() {
+        let mut cam = Camera::ortho_2d(1280, 720);
+        cam.set_perspective(0.785, 0.1, 1000.0).unwrap();
+        cam.look_at(DVec3::new(0.0, 0.0, 10.0), DVec3::ZERO, DVec3::Y)
+            .unwrap();
+        let half_width = cam.frame_width * 0.5;
+        // In front of the eye a point to the right lands to the right.
+        assert!(cam.canvas_point(DVec3::new(2.0, 0.0, 0.0)).x > 0.0);
+        // Behind the eye a projection would mirror it to the left; it stays
+        // on the right, past the frame, and moves on continuously as the
+        // point crosses the near plane.
+        for z in [9.95, 10.5, 30.0] {
+            let at = cam.canvas_point(DVec3::new(2.0, 0.0, z));
+            assert!(at.x > half_width, "z {z}: {at:?}");
+            assert!(at.x.is_finite() && at.y.abs() < 1e-9);
+        }
+        let on_near = cam.canvas_point(DVec3::new(2.0, 0.0, 9.9));
+        let just_in_front = cam.canvas_point(DVec3::new(2.0, 0.0, 9.9 - 1e-7));
+        assert!(
+            (on_near - just_in_front).length() < on_near.length() * 1e-5,
+            "{on_near:?} {just_in_front:?}"
+        );
     }
 
     #[test]

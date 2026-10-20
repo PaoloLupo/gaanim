@@ -13,7 +13,8 @@ use gaanim_renderer::fragment::{FragmentRecipe, GroupShadow};
 use gaanim_renderer::object_effects::{Glass, MatteMode};
 use gaanim_renderer::pipeline::{
     CapturedEffect, CapturedElement, CapturedGlass, CapturedMatte, CapturedThreeD,
-    CapturedThreeDSource, CapturedTransition, CapturedView, FrameCapture, ThreeDComposition,
+    CapturedThreeDSource, CapturedTransition, CapturedView, FrameCapture, FrozenThreeD,
+    ThreeDComposition,
 };
 use gaanim_renderer::post_process::PostProcessShader;
 use gaanim_scene::{
@@ -1199,6 +1200,7 @@ fn write_three_d(
     tables: &mut Tables,
     keys: &mut EntityKeys,
     three_d: &CapturedThreeD,
+    views: &[(u32, &FrozenThreeD)],
 ) {
     w.bool(three_d.lighting.enabled);
     w.f32(three_d.lighting.intensity);
@@ -1299,7 +1301,7 @@ fn write_three_d(
         .filter_map(|(index, source)| source.glow.as_ref().map(|glow| (index, glow)))
         .collect();
     // Each section is written when it or a later one holds something.
-    let later = !palettes.is_empty() || !glows.is_empty();
+    let later = !palettes.is_empty() || !glows.is_empty() || !views.is_empty();
     if !widths.is_empty()
         || !ranges.is_empty()
         || !outlines.is_empty()
@@ -1426,7 +1428,7 @@ fn write_three_d(
             }
         }
     }
-    if !glows.is_empty() {
+    if !glows.is_empty() || !views.is_empty() {
         w.len(glows.len());
         for (index, glow) in glows {
             w.len(index);
@@ -1435,10 +1437,34 @@ fn write_three_d(
             w.f32(glow.intensity);
         }
     }
+    // Last, the 3D content of camera views that draw their own (format 7):
+    // what snapshots froze and what views with a 3D camera of their own
+    // draw this frame. By screen, the camera it was drawn through, the
+    // region and detail of its image, and its content, encoded as a frame's.
+    if !views.is_empty() {
+        w.len(views.len());
+        for &(screen, frozen) in views {
+            w.var(u64::from(screen));
+            write_camera(w, &frozen.camera);
+            w.rect(frozen.region);
+            w.f64(frozen.resolution);
+            let mut content = Writer::new();
+            write_three_d(&mut content, tables, keys, &frozen.three_d, &[]);
+            w.bytes(&content.into_bytes());
+        }
+    }
 }
 
-/// Decode what [`write_three_d`] wrote.
-fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedThreeD> {
+/// The 3D content of camera views a frame's 3D block holds, by the key of
+/// their screen.
+type ViewsThreeD = Vec<(u32, Arc<FrozenThreeD>)>;
+
+/// Decode what [`write_three_d`] wrote, and the 3D content of the camera
+/// views that draw their own.
+fn read_three_d(
+    r: &mut Reader<'_>,
+    tables: &DecodedTables,
+) -> Result<(CapturedThreeD, ViewsThreeD)> {
     use gaanim_core::glam::{DMat4, DVec3};
     let lighting = gaanim_scene::Lighting3D {
         enabled: r.bool()?,
@@ -1645,15 +1671,37 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                 .glow = Some(glow);
         }
     }
+    let mut views = Vec::new();
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let screen = r.u32()?;
+            let camera = read_camera(r)?;
+            let region = r.rect()?;
+            let resolution = r.f64()?;
+            let (three_d, _) = read_three_d(&mut Reader::new(r.bytes()?), tables)?;
+            views.push((
+                screen,
+                Arc::new(FrozenThreeD {
+                    three_d,
+                    camera,
+                    region,
+                    resolution,
+                }),
+            ));
+        }
+    }
     for (index, glyphs) in fills {
         sources[index].fill = Some(Arc::new(gaanim_scene::PlaneFillData { glyphs }));
     }
-    Ok(CapturedThreeD {
-        lighting,
-        lights,
-        opacity_fallback,
-        sources,
-    })
+    Ok((
+        CapturedThreeD {
+            lighting,
+            lights,
+            opacity_fallback,
+            sources,
+        },
+        views,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -2091,6 +2139,8 @@ pub(crate) struct ViewRecord {
     pub region: kurbo::Rect,
     pub excluded: Vec<u32>,
     pub layers: Vec<u32>,
+    /// Shows only the drawables on `layers` (version 7 on).
+    pub only_layers: bool,
     pub background: ViewBackgroundRecord,
 }
 
@@ -2167,6 +2217,7 @@ impl ElementRecord {
                     .iter()
                     .map(|layer| tables.string(layer))
                     .collect(),
+                only_layers: view.only_layers,
                 background: match &view.background {
                     CameraViewBackground::Canvas => ViewBackgroundRecord::Canvas,
                     CameraViewBackground::None => ViewBackgroundRecord::None,
@@ -2224,6 +2275,7 @@ impl ElementRecord {
             w.rect(view.region);
             write_keys(w, &view.excluded);
             write_keys(w, &view.layers);
+            w.bool(view.only_layers);
             match &view.background {
                 ViewBackgroundRecord::Canvas => w.u8(0),
                 ViewBackgroundRecord::None => w.u8(1),
@@ -2246,7 +2298,8 @@ impl ElementRecord {
         w.option(self.glass_root, |w, key| w.var(u64::from(key)));
     }
 
-    pub fn read(r: &mut Reader<'_>) -> Result<Self> {
+    /// Read a record of a bundle of format `version`.
+    pub fn read(r: &mut Reader<'_>, version: u32) -> Result<Self> {
         Ok(Self {
             key: r.u32()?,
             recipe: r.u32()?,
@@ -2286,6 +2339,7 @@ impl ElementRecord {
                     region: r.rect()?,
                     excluded: read_keys(r)?,
                     layers: read_keys(r)?,
+                    only_layers: version >= 7 && r.bool()?,
                     background: match r.u8()? {
                         0 => ViewBackgroundRecord::Canvas,
                         1 => ViewBackgroundRecord::None,
@@ -2360,6 +2414,8 @@ impl ElementRecord {
                             .iter()
                             .map(|index| tables.string(*index))
                             .collect::<Result<_>>()?,
+                        only_layers: view.only_layers,
+                        frozen: None,
                         background: match &view.background {
                             ViewBackgroundRecord::Canvas => CameraViewBackground::Canvas,
                             ViewBackgroundRecord::None => CameraViewBackground::None,
@@ -2428,6 +2484,8 @@ pub(crate) struct EffectRecord {
     pub root: u32,
     pub margin: f64,
     pub passes: Vec<PostPass>,
+    /// The second a snapshot froze the effect at (version 7 on).
+    pub time: Option<f64>,
 }
 
 impl EffectRecord {
@@ -2435,13 +2493,19 @@ impl EffectRecord {
         w.var(u64::from(self.root));
         w.f64(self.margin);
         write_passes(w, &self.passes);
+        w.option(self.time.as_ref(), |w, time| w.f64(*time));
     }
 
-    fn read(r: &mut Reader<'_>) -> Result<Self> {
+    fn read(r: &mut Reader<'_>, version: u32) -> Result<Self> {
         Ok(Self {
             root: r.u32()?,
             margin: r.f64()?,
             passes: read_passes(r)?,
+            time: if version >= 7 {
+                r.option(|r| r.f64())?
+            } else {
+                None
+            },
         })
     }
 }
@@ -2501,10 +2565,26 @@ impl FrameRecord {
         if !frame.capture.glasses.is_empty() {
             tables.glass = true;
         }
+        // The 3D content camera views draw on their own goes with the frame's.
+        let frozen: Vec<(u32, &FrozenThreeD)> = frame
+            .capture
+            .elements
+            .iter()
+            .filter_map(|element| {
+                let frozen = element.screen.as_ref()?.frozen.as_deref()?;
+                Some((keys.key(element.entity), frozen))
+            })
+            .collect();
+        let empty = CapturedThreeD::default();
+        let three_d = frame
+            .capture
+            .three_d
+            .as_ref()
+            .or_else(|| (!frozen.is_empty()).then_some(&empty));
         Self {
-            three_d: frame.capture.three_d.as_ref().map(|three_d| {
+            three_d: three_d.map(|three_d| {
                 let mut w = Writer::new();
-                write_three_d(&mut w, tables, keys, three_d);
+                write_three_d(&mut w, tables, keys, three_d, &frozen);
                 w.into_bytes()
             }),
             time: frame.time,
@@ -2538,6 +2618,7 @@ impl FrameRecord {
                             values: values.clone(),
                         })
                         .collect(),
+                    time: effect.time,
                 })
                 .collect(),
             mattes: frame
@@ -2567,11 +2648,13 @@ impl FrameRecord {
     ) -> Result<Frame> {
         // The GPU draws the 3D content from what was recorded (see
         // `gaanim_renderer::three_d`).
-        let three_d = self
+        let (three_d, frozen) = self
             .three_d
             .as_ref()
             .map(|bytes| read_three_d(&mut Reader::new(bytes), tables))
-            .transpose()?;
+            .transpose()?
+            .unzip();
+        let frozen = frozen.unwrap_or_default();
         let mut elements = Vec::with_capacity(self.elements.len());
         for element in &self.elements {
             let scene = element
@@ -2579,7 +2662,14 @@ impl FrameRecord {
                 .map(&mut *lottie_scene)
                 .transpose()?
                 .flatten();
-            elements.push(element.resolve(tables, scene)?);
+            let mut resolved = element.resolve(tables, scene)?;
+            if let Some(view) = resolved.screen.as_mut() {
+                view.frozen = frozen
+                    .iter()
+                    .find(|(screen, _)| *screen == element.key)
+                    .map(|(_, frozen)| Arc::clone(frozen));
+            }
+            elements.push(resolved);
         }
         Ok(Frame {
             time: self.time,
@@ -2607,6 +2697,7 @@ impl FrameRecord {
                                     Ok((tables.effect_shader(pass.shader)?, pass.values.clone()))
                                 })
                                 .collect::<Result<_>>()?,
+                            time: effect.time,
                         })
                     })
                     .collect::<Result<_>>()?,
@@ -2843,7 +2934,7 @@ impl DeltaDecoder {
         let effect_count = r.len()?;
         let mut effects = Vec::with_capacity(effect_count.min(1 << 12));
         for _ in 0..effect_count {
-            effects.push(EffectRecord::read(r)?);
+            effects.push(EffectRecord::read(r, self.version)?);
         }
         let matte_count = r.len()?;
         let mut mattes = Vec::with_capacity(matte_count.min(1 << 12));
@@ -2887,7 +2978,7 @@ impl DeltaDecoder {
                 let count = r.len()?;
                 let mut elements = Vec::with_capacity(count.min(1 << 20));
                 for _ in 0..count {
-                    elements.push(ElementRecord::read(r)?);
+                    elements.push(ElementRecord::read(r, self.version)?);
                 }
                 elements
             }
@@ -2904,7 +2995,7 @@ impl DeltaDecoder {
                 let changed = r.len()?;
                 let mut changed_order = Vec::with_capacity(changed.min(1 << 20));
                 for _ in 0..changed {
-                    let element = ElementRecord::read(r)?;
+                    let element = ElementRecord::read(r, self.version)?;
                     changed_order.push(element.key);
                     by_key.insert(element.key, element);
                 }

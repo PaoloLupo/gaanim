@@ -3855,6 +3855,21 @@ impl PyDrawable {
             layers,
         )
     }
+    /// Show inside this closed shape the scene's 3D content as a 3D camera
+    /// of its own sees it, from `eye` toward `target`.
+    #[pyo3(signature = (eye, target, *, fov_y=0.75, up=None, background=CameraViewBackgroundArg::Canvas, exclude=Vec::new()))]
+    fn camera_view_3d(
+        &self,
+        eye: Bound<'_, PyAny>,
+        target: Bound<'_, PyAny>,
+        fov_y: f64,
+        up: Option<(f64, f64, f64)>,
+        background: CameraViewBackgroundArg,
+        exclude: Vec<PyDrawable>,
+    ) -> PyResult<crate::pycamera_view::PyCameraView> {
+        crate::custom::ensure_authoring_allowed()?;
+        crate::pycamera_view::camera_view_3d(&self.0, &eye, &target, fov_y, up, background, exclude)
+    }
     /// Remove the camera view shown inside this drawable.
     fn no_camera_view<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().no_camera_view_impl();

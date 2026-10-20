@@ -11,6 +11,7 @@
 //! takes over from it: the timeline applies clips in start order, so the
 //! later play's pose is the one shown.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bevy::prelude::{Component, Entity, World};
@@ -88,6 +89,81 @@ impl ClipPlay {
     }
 }
 
+/// One play of a model's animation as the timeline schedules it.
+#[derive(Debug, Clone)]
+struct ScheduledPlay {
+    start: f64,
+    duration: f64,
+    rate_func: gaanim_math::RateFunc,
+    lens: Arc<GltfClipLens>,
+}
+
+/// The plays of each imported model and the nodes of each, by object:
+/// where a model's parts are at any instant, as its animations put them.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct GltfPoses {
+    /// By model root, in the order they were scheduled.
+    plays: HashMap<ObjectId, Vec<ScheduledPlay>>,
+    /// By node: its model's root and its index among the model's nodes.
+    nodes: HashMap<ObjectId, (ObjectId, usize)>,
+}
+
+impl GltfPoses {
+    /// Note that `lens` plays on the model of `root` from timeline second
+    /// `start`, for `duration` seconds eased by `rate_func`.
+    pub(crate) fn played(
+        &mut self,
+        root: ObjectId,
+        start: f64,
+        duration: f64,
+        rate_func: gaanim_math::RateFunc,
+        lens: Arc<GltfClipLens>,
+    ) {
+        self.plays.entry(root).or_default().push(ScheduledPlay {
+            start,
+            duration,
+            rate_func,
+            lens,
+        });
+    }
+
+    /// Note the nodes of the model whose root is `root`, by their index.
+    pub(crate) fn rigged(&mut self, root: ObjectId, nodes: impl IntoIterator<Item = ObjectId>) {
+        for (index, node) in nodes.into_iter().enumerate() {
+            self.nodes.insert(node, (root, index));
+        }
+    }
+
+    /// Whether an animation of its model moves `node`.
+    pub(crate) fn animates(&self, node: ObjectId) -> bool {
+        self.nodes
+            .get(&node)
+            .and_then(|(root, index)| Some((self.plays.get(root)?, *index)))
+            .is_some_and(|(plays, index)| plays.iter().any(|play| play.lens.moves(index)))
+    }
+
+    /// The local matrix an animation gives `node` at timeline second `time`:
+    /// that of the latest play started by then that moves it, as the
+    /// timeline evaluates it; `None` before any.
+    pub(crate) fn local_at(&self, node: ObjectId, time: f64) -> Option<DMat4> {
+        let (root, index) = self.nodes.get(&node)?;
+        let play = self
+            .plays
+            .get(root)?
+            .iter()
+            .filter(|play| play.start <= time + 1e-9 && play.lens.moves(*index))
+            .max_by(|a, b| a.start.total_cmp(&b.start))?;
+        let progress = if play.duration > 0.0 {
+            ((time - play.start) / play.duration).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let eased = play.rate_func.evaluate(progress);
+        let pose = play.lens.pose(eased * play.duration);
+        Some(pose.get(*index)?.to_mat4())
+    }
+}
+
 /// Plays an animation of an imported model; the clip's target is the
 /// model's root, whose [`GltfRig`] names the nodes it moves.
 #[derive(Debug, Clone)]
@@ -129,6 +205,11 @@ impl GltfClipLens {
             transition,
             nodes: nodes.into(),
         }
+    }
+
+    /// Whether the play writes the pose of node `node`.
+    pub fn moves(&self, node: usize) -> bool {
+        self.nodes.contains(&node)
     }
 
     /// The pose of every node `elapsed` seconds into the play.
