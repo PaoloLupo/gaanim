@@ -580,8 +580,9 @@ una transición: llega a mirar la esfera al final de la animación, aunque se
 haya movido, y la siguiente animación de cámara parte de ahí.
 
 ```python
+# continue
 scene.play([
-    bola.animate.move_to_3d(3, 1.5, -2).duration(3.0),
+    bola.animate.move_to_3d(-3, 0.5, -1).duration(3.0),
     scene.camera.animate.follow(bola, turn=True).duration(3.0),
 ])
 ```
@@ -600,9 +601,10 @@ y el objetivo pueden ser objetos: se leen donde están en cada fotograma, así
 que una vista cenital puede seguir a la esfera mientras rueda.
 
 ```python
+# continue
 arriba = scene.geometry.rounded_rect(4.8, 2.7, 0.15).hud().move_to(5, 2.6)
 vista = arriba.camera_view_3d(eye=(0, 12, 0.5), target=bola, fov_y=0.6)
-scene.play([bola.animate.move_to_3d(3, 1.5, -2).duration(3.0)])
+scene.play([bola.animate.move_to_3d(2, 0, 2).duration(3.0)])
 ```
 
 La vista muestra primitivas, superficies, líneas 3D, modelos y objetos
