@@ -6,7 +6,10 @@
 //! time alone: seeks land exactly, and a recording keeps the matrices it
 //! produced, so players never evaluate the animation. A play with a
 //! `transition` fades from the pose of the play before it on the same
-//! model, which keeps running meanwhile, to its own.
+//! model, which keeps running meanwhile, to its own. A play that starts
+//! while the model's previous one still runs (one `Scene.launch` started)
+//! takes over from it: the timeline applies clips in start order, so the
+//! later play's pose is the one shown.
 
 use std::sync::Arc;
 
@@ -264,7 +267,29 @@ mod tests {
         Entity,
         Arc<GltfAnimations>,
     ) {
-        use crate::canvas::{PlayItem, SceneModel};
+        compiled_wolf_with(|canvas, wolf| {
+            for (name, transition) in [("Idle", 0.0), ("Walk", 0.3)] {
+                let play = wolf
+                    .animation(name, None, 1.0, true, false, transition, 0.0)
+                    .unwrap();
+                canvas
+                    .play_items_configured(vec![PlayItem::Animation(play)], Some(1.0), None)
+                    .unwrap();
+            }
+        })
+    }
+
+    use crate::canvas::{DrawableHandle, PlayItem, SceneModel};
+
+    /// The sample wolf, its plays scheduled by `schedule`, compiled.
+    fn compiled_wolf_with(
+        schedule: impl FnOnce(&mut SceneModel, &DrawableHandle),
+    ) -> (
+        bevy::prelude::World,
+        gaanim_timeline::timeline::Timeline,
+        Entity,
+        Arc<GltfAnimations>,
+    ) {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../docs/fixtures/assets/Wolf.glb");
         let mut canvas = SceneModel::new(640, 360);
@@ -274,14 +299,7 @@ mod tests {
                 .unwrap()
                 .animations,
         );
-        for (name, transition) in [("Idle", 0.0), ("Walk", 0.3)] {
-            let play = wolf
-                .animation(name, None, 1.0, true, false, transition, 0.0)
-                .unwrap();
-            canvas
-                .play_items_configured(vec![PlayItem::Animation(play)], Some(1.0), None)
-                .unwrap();
-        }
+        schedule(&mut canvas, &wolf);
         let mut world = bevy::prelude::World::new();
         world.insert_resource(gaanim_timeline::timeline::Timeline::new());
         world.insert_resource(gaanim_text::font::FontRegistry::new());
@@ -373,6 +391,58 @@ mod tests {
         let expected = DQuat::from_array(leg.sample(0.8_f64.rem_euclid(length)));
         let pose = &seen.iter().find(|(at, _)| *at == 1.8).unwrap().1;
         assert!(pose[leg.node].rotation.dot(expected).abs() > 1.0 - 1e-9);
+    }
+
+    /// A play that starts while the model's launched one still runs takes
+    /// over from it, fading from it: from then on, and after both end, the
+    /// pose is the new play's alone.
+    #[test]
+    fn a_new_play_takes_over_from_a_launched_one() {
+        let (mut world, mut timeline, root, animations) = compiled_wolf_with(|canvas, wolf| {
+            let walk = wolf
+                .animation("Walk", Some(4.0), 1.0, true, false, 0.0, 0.0)
+                .unwrap();
+            canvas
+                .launch_composition_configured(
+                    crate::canvas::Composition::leaf(PlayItem::Animation(walk)),
+                    None,
+                    None,
+                )
+                .unwrap();
+            canvas.wait(1.0);
+            let run = wolf
+                .animation("Run", None, 1.0, true, false, 0.3, 0.0)
+                .unwrap();
+            canvas
+                .play_items_configured(vec![PlayItem::Animation(run)], Some(1.0), None)
+                .unwrap();
+            // The walk stopped where the run took over: nothing runs past
+            // the scene's end.
+            assert_eq!(canvas.launched_past_end_warning(), None);
+        });
+        let run = ClipPlay {
+            clip: animations.clip("Run").unwrap(),
+            start: 1.0,
+            duration: 1.0,
+            speed: 1.0,
+            looped: true,
+            reverse: false,
+            offset: 0.0,
+        };
+        let alone = GltfClipLens::new(Arc::clone(&animations), run, None, 0.0);
+        let moved = animations.animated_nodes(alone.play.clip);
+        for time in [1.5, 1.95, 3.0] {
+            timeline.seek(&mut world, time);
+            let pose = poses(&world, root);
+            let expected = alone.pose((time - 1.0_f64).min(1.0));
+            for &node in &moved {
+                assert!(
+                    pose[node].translation.distance(expected[node].translation) < 1e-9
+                        && pose[node].rotation.dot(expected[node].rotation).abs() > 1.0 - 1e-9,
+                    "node {node} at {time}"
+                );
+            }
+        }
     }
 
     #[test]

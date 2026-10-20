@@ -35,6 +35,11 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
   `STEP` o `CUBICSPLINE`. Con `transition`, funde desde la animación anterior,
   que sigue corriendo, como al pasar de andar a correr. La pose sale del
   tiempo: los saltos y `--diff` son exactos.
+- Con `scene.launch(modelo.animation("Walk", loop=True), duration=6)` el
+  modelo camina mientras se programan otras animaciones, como desplazarlo, y
+  su siguiente animación toma el relevo de la que sigue en marcha. Las
+  animaciones glTF escriben solo la pose de los nodos, así que se combinan con
+  los efectos y las propiedades enlazadas del modelo.
 - Los esqueletos se deforman en la GPU: cada malla se sube una vez y en cada
   fotograma solo cambian las matrices de sus huesos, que el sombreador de
   vértices mezcla. Un personaje animado se dibuja tan rápido como una malla

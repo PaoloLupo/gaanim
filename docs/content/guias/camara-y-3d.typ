@@ -362,7 +362,10 @@ que se anima como cualquier objeto.
 (`loop=True`), más lenta o más rápida (`speed`), al revés (`reverse`) o desde
 un instante (`start_time`). Con `transition=0.4`, la animación funde en 0,4 s
 desde la anterior, que sigue corriendo mientras tanto, como al pasar de andar
-a correr.
+a correr. Con `scene.launch`, una animación sigue en marcha mientras se
+programan otras: el modelo camina mientras se desplaza, y su siguiente
+animación toma el relevo, como en los mezcladores de animación de los motores
+de juegos.
 
 ```python
 from gaanim import Scene

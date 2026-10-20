@@ -3854,12 +3854,15 @@ class Drawable:
         runs linearly unless ``.easing(...)`` is given. Seeks land exactly:
         the pose is computed from the time alone. Before its first animation
         a model shows its rest pose, and after an animation ends it holds its
-        last pose. Unknown names raise ``KeyError``; drawables that are not
-        glTF models, ``TypeError``.
+        last pose. Under ``Scene.launch`` it keeps running while later plays
+        are scheduled, and the model's next animation takes over from it,
+        fading from it over its ``transition``. Unknown names raise
+        ``KeyError``; drawables that are not glTF models, ``TypeError``.
 
         Example:
             wolf = scene.media.gltf("Wolf.glb").scale_to(1.7)
-            scene.play(wolf.animation("Walk", loop=True), duration=3)
+            scene.launch(wolf.animation("Walk", loop=True), duration=6)
+            scene.play(wolf.animate.shift_by(3, 0), duration=3)
             scene.play(wolf.animation("Run", loop=True, transition=0.4), duration=2)
         """
         ...

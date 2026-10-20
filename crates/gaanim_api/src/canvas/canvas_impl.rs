@@ -322,6 +322,9 @@ pub enum PlayItem {
     Lottie(LottieClip),
 }
 
+/// The channel a glTF model's animations write: the pose of its nodes.
+const GLTF_POSE: &str = "gltf_pose";
+
 /// A channel a launched animation drives until `end`.
 #[derive(Clone, Debug)]
 pub(crate) struct LaunchedChannel {
@@ -1660,6 +1663,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         CameraShake { .. } => "camera_shake",
         CameraDepthOfField { .. } => "camera_depth_of_field",
         TextPathOffset { .. } => "text_path",
+        GltfAnimation { .. } => GLTF_POSE,
         _ => "effect",
     };
     vec![channel.to_owned()]
@@ -6234,6 +6238,10 @@ impl SceneModel {
             .launched_channels
             .iter()
             .filter(|launched| launched.end > cursor + OVERLAP_EPSILON)
+            // A model's new animation takes over from the one it runs.
+            .filter(|launched| {
+                launched.channel != GLTF_POSE || launched.start > cursor + OVERLAP_EPSILON
+            })
             .map(|launched| {
                 (
                     launched.target,
@@ -6449,6 +6457,19 @@ impl SceneModel {
 
         self.launched_channels
             .retain(|launched| launched.end > cursor + OVERLAP_EPSILON);
+        for item in &resolved {
+            let PlayItem::Animation(anim) = &item.item else {
+                continue;
+            };
+            if matches!(anim.inner.anim_type, AnimationType::GltfAnimation { .. }) {
+                let start = cursor + item.start;
+                for running in &mut self.launched_channels {
+                    if running.target == anim.inner.target && running.channel == GLTF_POSE {
+                        running.end = running.end.min(start);
+                    }
+                }
+            }
+        }
         self.launched_channels.extend(launched);
         self.audio_tracks.extend(anchored_sounds);
         let play_start = self.current_time();
@@ -13962,6 +13983,20 @@ mod tests {
         scene
             .play_composition_configured(staggered, None, None)
             .expect("adjacent sequence steps share the translation channel in turn");
+    }
+
+    /// A glTF model's animations write the pose of its nodes alone, so
+    /// they combine with effects and moves of the model.
+    #[test]
+    fn gltf_plays_write_the_pose_channel() {
+        let mut scene = SceneModel::new(320, 180);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/fixtures/assets/Wolf.glb");
+        let wolf = scene.gltf(&path, &Default::default()).unwrap();
+        let walk = wolf
+            .animation("Walk", None, 1.0, true, false, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(animation_channels(&walk), [GLTF_POSE]);
     }
 
     #[test]

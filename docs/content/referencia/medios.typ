@@ -238,14 +238,16 @@ print(scene.media.gltf("assets/Wolf.glb").animations())
   name: "Drawable.animation",
   kind: "method",
   params: ((name: "name", type: "str", default: none, desc: [Nombre de la animación, de `animations()`.]), (name: "duration", type: "float | None", default: "None", desc: [Segundos que dura en la línea de tiempo; por defecto, la duración de `scene.play` o, sin ella, una pasada: de `start_time` al final, o un ciclo con `loop`.]), (name: "speed", type: "float", default: "1.0", desc: [Velocidad de la animación; mayor que cero.]), (name: "loop", type: "bool", default: "False", desc: [Vuelve a empezar al terminar mientras dure.]), (name: "reverse", type: "bool", default: "False", desc: [La reproduce hacia atrás.]), (name: "transition", type: "float", default: "0.0", desc: [Segundos en que funde desde la animación anterior del modelo, que sigue corriendo mientras tanto; la primera funde desde la pose de reposo.]), (name: "start_time", type: "float", default: "0.0", desc: [Segundos dentro de la animación donde empieza.])),
-  desc: [Devuelve un `Anim` que reproduce esa animación en `scene.play`. La pose se calcula a partir del tiempo, así que un salto a cualquier instante es exacto y las exportaciones, los paquetes y `--diff` muestran lo mismo que la vista previa. El tiempo de la animación avanza lineal salvo que se le dé `.easing(...)`. Antes de su primera animación el modelo muestra su pose de reposo y, al terminar una, conserva su última pose. La animación fija la traslación, la rotación y la escala de los nodos que mueve; para desplazar, girar o escalar el modelo entero, anima su raíz. Un nombre desconocido lanza `KeyError`; un objeto que no es un modelo glTF, `TypeError`; una velocidad, duración o transición inválidas, `ValueError`.],
+  desc: [Devuelve un `Anim` que reproduce esa animación en `scene.play`. La pose se calcula a partir del tiempo, así que un salto a cualquier instante es exacto y las exportaciones, los paquetes y `--diff` muestran lo mismo que la vista previa. El tiempo de la animación avanza lineal salvo que se le dé `.easing(...)`. Antes de su primera animación el modelo muestra su pose de reposo y, al terminar una, conserva su última pose. Con `scene.launch`, la animación sigue corriendo mientras se programan otras (el modelo camina mientras se desplaza o mientras aparece un texto), y la siguiente animación del modelo toma el relevo de la que sigue en marcha, fundiendo desde ella con `transition`. La animación fija la traslación, la rotación y la escala de los nodos que mueve; para desplazar, girar o escalar el modelo entero, anima su raíz. Un nombre desconocido lanza `KeyError`; un objeto que no es un modelo glTF, `TypeError`; una velocidad, duración o transición inválidas, `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
-wolf = scene.media.gltf("assets/Wolf.glb").scale_to(1.7).move_to(0, -2)
+wolf = scene.media.gltf("assets/Wolf.glb").scale_to(1.7).move_to(-4, -2)
 scene.play(wolf.animation("Idle_Eating"))
-scene.play(wolf.animation("Walk", loop=True, transition=0.4), duration=3)
+# Camina en bucle mientras avanza; correr toma el relevo
+scene.launch(wolf.animation("Walk", loop=True, transition=0.4), duration=6)
+scene.play(wolf.animate.shift_by(3, 0), duration=3)
 scene.play(wolf.animation("Run", loop=True, transition=0.3, speed=1.2), duration=2)
 ```
 ]
