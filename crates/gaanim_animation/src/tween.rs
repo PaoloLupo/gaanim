@@ -223,8 +223,8 @@ pub enum PropertyLens {
         from: f64,
         to: f64,
     },
-    /// Grow a reactive connector from its tail by animating its visible
-    /// fraction; the derived-geometry system rebuilds the path every frame.
+    /// Grow a reactive connector or 3D line from its tail by animating its
+    /// visible fraction; the tracking system lays it out again every frame.
     ConnectorGrow {
         from: f64,
         to: f64,
@@ -537,9 +537,10 @@ pub fn evaluate_tweens_system(
     mut paths: Query<&mut Path2D>,
     mut fill_progress: Query<&mut FillDrawProgress>,
     mut fill_levels: Query<&mut gaanim_scene::FillLevel>,
-    (mut surrounding_rects, mut connectors): (
+    (mut surrounding_rects, mut connectors, mut lines_3d): (
         Query<&mut crate::SurroundingRect>,
         Query<&mut crate::updaters::TrackingConnector>,
+        Query<&mut crate::updaters::TrackingLine3D>,
     ),
     mut tip_glows: Query<&mut WriteTipGlow>,
     mut float_signals: Query<&mut crate::signals::FloatSignal>,
@@ -779,8 +780,11 @@ pub fn evaluate_tweens_system(
                 }
             }
             PropertyLens::ConnectorGrow { from, to } => {
+                let progress = (*from + (*to - *from) * t).clamp(0.0, 1.0);
                 if let Ok(mut connector) = connectors.get_mut(tween.target) {
-                    connector.progress = (*from + (*to - *from) * t).clamp(0.0, 1.0);
+                    connector.progress = progress;
+                } else if let Ok(mut line) = lines_3d.get_mut(tween.target) {
+                    line.progress = progress;
                 }
             }
             PropertyLens::PathFollow {

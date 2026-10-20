@@ -67,7 +67,8 @@ pub struct EntitySnapshot {
     /// Live target/interpolation state for a reactive surrounding rectangle.
     #[cfg_attr(feature = "serde", serde(default))]
     pub surrounding_rect: Option<gaanim_animation::SurroundingRect>,
-    /// Visible fraction of a reactive connector, animated by `grow_arrow`.
+    /// Visible fraction of a reactive connector, animated by `grow_arrow`, or
+    /// of a 3D line, animated by `create`.
     #[cfg_attr(feature = "serde", serde(default))]
     pub connector_progress: Option<f64>,
     /// Runtime progress for the transient Write pen-tip illumination.
@@ -347,15 +348,21 @@ fn insert_snapshot_parts(
     if parts.has(RestoredParts::SURROUNDING_RECT) {
         sync_optional(entity_mut, snap.surrounding_rect.clone());
     }
-    // Only connector-grow clips move a connector's progress, and a seek
-    // restores their targets whole.
-    if all
-        && let Some(progress) = snap.connector_progress
-        && let Some(mut connector) =
+    // Only connector-grow clips move a connector's or 3D line's progress, and
+    // a seek restores their targets whole.
+    if all && let Some(progress) = snap.connector_progress {
+        if let Some(mut connector) =
             entity_mut.get_mut::<gaanim_animation::updaters::TrackingConnector>()
-        && connector.progress != progress
-    {
-        connector.progress = progress;
+        {
+            if connector.progress != progress {
+                connector.progress = progress;
+            }
+        } else if let Some(mut line) =
+            entity_mut.get_mut::<gaanim_animation::updaters::TrackingLine3D>()
+            && line.progress != progress
+        {
+            line.progress = progress;
+        }
     }
     if parts.has(RestoredParts::WRITE_TIP_GLOW) {
         sync_optional(entity_mut, snap.write_tip_glow.clone());
@@ -487,7 +494,10 @@ type CaptureState = (
     Option<&'static gaanim_animation::FillDrawProgress>,
     Option<&'static FillLevel>,
     Option<&'static gaanim_animation::SurroundingRect>,
-    Option<&'static gaanim_animation::updaters::TrackingConnector>,
+    (
+        Option<&'static gaanim_animation::updaters::TrackingConnector>,
+        Option<&'static gaanim_animation::updaters::TrackingLine3D>,
+    ),
     Option<&'static gaanim_animation::WriteTipGlow>,
     Option<&'static gaanim_animation::PathReveal>,
     Option<&'static gaanim_animation::PathTrimWindow>,
@@ -550,7 +560,7 @@ impl WorldSnapshot {
                 fill_draw_progress,
                 fill_level,
                 surrounding_rect,
-                connector,
+                (connector, line_3d),
                 write_tip_glow,
                 path_reveal,
                 path_trim_window,
@@ -584,7 +594,9 @@ impl WorldSnapshot {
                 fill_draw_progress: fill_draw_progress.map(|p| p.0),
                 fill_level: fill_level.map(|level| level.0),
                 surrounding_rect: surrounding_rect.cloned(),
-                connector_progress: connector.map(|connector| connector.progress),
+                connector_progress: connector
+                    .map(|connector| connector.progress)
+                    .or(line_3d.map(|line| line.progress)),
                 write_tip_glow: write_tip_glow.cloned(),
                 path_reveal: path_reveal.map(|p| p.0),
                 path_trim_window: path_trim_window.copied(),
@@ -931,7 +943,12 @@ mod tests {
                         .cloned(),
                     connector_progress: world
                         .get::<gaanim_animation::updaters::TrackingConnector>(entity)
-                        .map(|connector| connector.progress),
+                        .map(|connector| connector.progress)
+                        .or_else(|| {
+                            world
+                                .get::<gaanim_animation::updaters::TrackingLine3D>(entity)
+                                .map(|line| line.progress)
+                        }),
                     write_tip_glow: world.get::<gaanim_animation::WriteTipGlow>(entity).cloned(),
                     path_reveal: world
                         .get::<gaanim_animation::PathReveal>(entity)

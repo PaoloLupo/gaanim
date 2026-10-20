@@ -1189,6 +1189,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     pub(crate) arc_slices: HashMap<ObjectId, ArcSliceMark>,
     /// Reactive connectors, which `GrowArrow` grows through their progress.
     pub(crate) connectors: HashSet<ObjectId>,
+    /// 3D lines between endpoints, which `Create` and `Uncreate` grow and
+    /// retract through their progress.
+    pub(crate) lines_3d: HashSet<ObjectId>,
     /// Objects a clip mask cuts: their content may leave their box.
     pub(crate) clipped: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
@@ -1332,6 +1335,7 @@ pub(crate) struct SceneBuilderState {
     arrow_shapes: HashMap<ObjectId, gaanim_math::ArrowShape>,
     arc_slices: HashMap<ObjectId, ArcSliceMark>,
     connectors: HashSet<ObjectId>,
+    lines_3d: HashSet<ObjectId>,
     clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
     motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
@@ -1388,6 +1392,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arrow_shapes: self.arrow_shapes.clone(),
             arc_slices: self.arc_slices.clone(),
             connectors: self.connectors.clone(),
+            lines_3d: self.lines_3d.clone(),
             clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
             text_paths: self.text_paths.clone(),
@@ -1445,6 +1450,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arrow_shapes,
             arc_slices,
             connectors,
+            lines_3d,
             clipped,
             text_tracking,
             text_paths,
@@ -1505,6 +1511,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arrow_shapes,
             arc_slices,
             connectors,
+            lines_3d,
             clipped,
             text_tracking,
             text_paths,
@@ -2009,6 +2016,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arrow_shapes: HashMap::new(),
             arc_slices: HashMap::new(),
             connectors: HashSet::new(),
+            lines_3d: HashSet::new(),
             clipped: HashSet::new(),
             text_tracking: HashMap::new(),
             text_paths: HashMap::new(),
@@ -4587,6 +4595,12 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     }
 
     fn play_draw_animation_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        if matches!(anim.anim_type, AnimationType::Uncreate { .. })
+            && self.lines_3d.contains(&anim.target)
+        {
+            self.play_line_3d_growth(anim, parent_track, false);
+            return;
+        }
         const DRAW_RATIO: f64 = 0.7;
         let start_time = self.current_time + anim.delay.max(0.0);
 
@@ -5187,7 +5201,11 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         });
     }
 
-    fn play_create_3d_internal(&mut self, anim: AnimationBuilder, _track: TrackId) {
+    fn play_create_3d_internal(&mut self, anim: AnimationBuilder, track: TrackId) {
+        if self.lines_3d.contains(&anim.target) {
+            self.play_line_3d_growth(anim, track, true);
+            return;
+        }
         self.play_internal(AnimationBuilder {
             target: anim.target,
             anim_type: AnimationType::FadeIn,
@@ -5202,6 +5220,37 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             rate_func: anim.rate_func,
             delay: anim.delay,
         });
+    }
+
+    /// Grow a 3D line from its start to its end (`grow`), or retract it to
+    /// its start, through its progress. A growing line hides before its clip
+    /// starts, as a connector does.
+    fn play_line_3d_growth(&mut self, anim: AnimationBuilder, parent_track: TrackId, grow: bool) {
+        let Some(state) = self.states.get(anim.target) else {
+            return;
+        };
+        if grow {
+            self.commands.entity(state.entity).queue(
+                |mut line: bevy::prelude::EntityWorldMut<'_>| {
+                    if let Some(mut line) = line.get_mut::<gaanim_animation::TrackingLine3D>() {
+                        line.progress = 0.0;
+                    }
+                },
+            );
+        }
+        let (from, to) = if grow { (0.0, 1.0) } else { (1.0, 0.0) };
+        self.timeline.add_clip(
+            parent_track,
+            self.current_time + anim.delay,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::ConnectorGrow { from, to },
+                rate_func: anim.rate_func,
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
     }
 
     fn play_spin_in_from_nothing_internal(

@@ -1675,6 +1675,15 @@ pub const DEFAULT_SPRING_STRAIGHT: f64 = 12.0;
 /// Default nominal font size for labels, values, and units in reactive annotations.
 pub const DEFAULT_REACTIVE_TEXT_SIZE: f64 = 0.48;
 
+/// Why a 3D line between endpoints could not be made.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum Line3DError {
+    #[error(transparent)]
+    Mesh(#[from] primitives3d::Primitive3DError),
+    #[error("3D line endpoints must be finite and belong to this Scene")]
+    InvalidEndpoint,
+}
+
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BooleanError {
     #[error("boolean operations require at least two vector drawables")]
@@ -4282,6 +4291,41 @@ impl SceneModel {
         let points: Vec<DVec3> = points.iter().copied().map(DVec3::from_array).collect();
         let tube = primitives3d::tube(&points, radius, segments, closed, caps, material)?;
         Ok(self.spawn_placed_mesh(tube))
+    }
+
+    /// A lit 3D line `thickness` across between two endpoints, which follows
+    /// them as they move: a cylinder of `segments` sides, capped unless
+    /// `caps` is false, that every frame lays between them by its transform,
+    /// so its mesh stays the same. `create` grows it from `from` and
+    /// `uncreate` takes it back there.
+    pub fn line_3d(
+        &mut self,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+        thickness: f64,
+        segments: u32,
+        caps: bool,
+        material: gaanim_scene::Material3D,
+    ) -> Result<DrawableHandle, Line3DError> {
+        {
+            let state = self.state.lock().expect("canvas state poisoned");
+            if !(endpoint_is_valid(&from, &state) && endpoint_is_valid(&to, &state)) {
+                return Err(Line3DError::InvalidEndpoint);
+            }
+        }
+        let mesh = primitives3d::cylinder(thickness / 2.0, 1.0, segments, caps, material)?;
+        let handle = self.spawn(SpawnKind::Primitive3D(mesh));
+        self.state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::AttachTrackingLine3D {
+                target: handle.id,
+                from,
+                to,
+            });
+        Ok(handle)
     }
 
     /// A lit mesh of `vertices` in its own coordinates (its origin stays the
@@ -8416,62 +8460,7 @@ impl SceneModel {
         points.push(to);
         {
             let state = self.state.lock().expect("canvas state poisoned");
-            fn valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
-                let scalar = |s: &ScalarSource| {
-                    s.scene_owners().iter().all(|id| *id == state.scene_id)
-                        && s.constant_value().is_none_or(f64::is_finite)
-                };
-                match point {
-                    CanvasEndpoint::Static(p) => p.is_finite(),
-                    CanvasEndpoint::Entity(id) => state.object_specs.contains_key(id),
-                    CanvasEndpoint::Anchor(p) => {
-                        p.scene_id == state.scene_id
-                            && state.object_specs.contains_key(&p.object)
-                            && p.normalized.is_finite()
-                            && p.offset.is_finite()
-                    }
-                    CanvasEndpoint::Expression { x, y } => scalar(x) && scalar(y),
-                    CanvasEndpoint::MediaPixel { object, x, y } => {
-                        state.object_specs.contains_key(object) && x.is_finite() && y.is_finite()
-                    }
-                    CanvasEndpoint::LocalExpression { space, x, y, z } => {
-                        state.object_specs.contains_key(space)
-                            && scalar(x)
-                            && scalar(y)
-                            && scalar(z)
-                    }
-                    CanvasEndpoint::LocalNumberLine {
-                        space,
-                        value,
-                        normal_offset,
-                        ..
-                    } => {
-                        state.object_specs.contains_key(space)
-                            && scalar(value)
-                            && scalar(normal_offset)
-                    }
-                    CanvasEndpoint::Offset { origin, dx, dy } => {
-                        valid(origin, state) && scalar(dx) && scalar(dy)
-                    }
-                    CanvasEndpoint::Between {
-                        from,
-                        to,
-                        alpha,
-                        offset,
-                    } => {
-                        valid(from, state)
-                            && valid(to, state)
-                            && scalar(alpha)
-                            && offset.is_finite()
-                    }
-                    CanvasEndpoint::Polar {
-                        origin,
-                        radius,
-                        angle,
-                    } => valid(origin, state) && scalar(radius) && scalar(angle),
-                }
-            }
-            if !points.iter().all(|p| valid(p, &state)) {
+            if !points.iter().all(|p| endpoint_is_valid(p, &state)) {
                 return Err("connector endpoints must be finite and belong to this Scene");
             }
         }
@@ -8817,6 +8806,57 @@ impl SceneModel {
         let mut scene = self.clone();
         scene.complete_narration();
         crate::export::export_canvas_to_path(scene, path, fps, transparent)
+    }
+}
+
+/// Whether `point` is finite and refers only to drawables and sources of the
+/// scene `state` describes.
+fn endpoint_is_valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
+    let scalar = |s: &ScalarSource| {
+        s.scene_owners().iter().all(|id| *id == state.scene_id)
+            && s.constant_value().is_none_or(f64::is_finite)
+    };
+    match point {
+        CanvasEndpoint::Static(p) => p.is_finite(),
+        CanvasEndpoint::Entity(id) => state.object_specs.contains_key(id),
+        CanvasEndpoint::Anchor(p) => {
+            p.scene_id == state.scene_id
+                && state.object_specs.contains_key(&p.object)
+                && p.normalized.is_finite()
+                && p.offset.is_finite()
+        }
+        CanvasEndpoint::Expression { x, y } => scalar(x) && scalar(y),
+        CanvasEndpoint::MediaPixel { object, x, y } => {
+            state.object_specs.contains_key(object) && x.is_finite() && y.is_finite()
+        }
+        CanvasEndpoint::LocalExpression { space, x, y, z } => {
+            state.object_specs.contains_key(space) && scalar(x) && scalar(y) && scalar(z)
+        }
+        CanvasEndpoint::LocalNumberLine {
+            space,
+            value,
+            normal_offset,
+            ..
+        } => state.object_specs.contains_key(space) && scalar(value) && scalar(normal_offset),
+        CanvasEndpoint::Offset { origin, dx, dy } => {
+            endpoint_is_valid(origin, state) && scalar(dx) && scalar(dy)
+        }
+        CanvasEndpoint::Between {
+            from,
+            to,
+            alpha,
+            offset,
+        } => {
+            endpoint_is_valid(from, state)
+                && endpoint_is_valid(to, state)
+                && scalar(alpha)
+                && offset.is_finite()
+        }
+        CanvasEndpoint::Polar {
+            origin,
+            radius,
+            angle,
+        } => endpoint_is_valid(origin, state) && scalar(radius) && scalar(angle),
     }
 }
 

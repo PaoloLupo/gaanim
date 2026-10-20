@@ -903,6 +903,12 @@ pub(crate) enum Op {
         /// Dash and gap lengths, for a dashed line.
         dashes: Option<(f64, f64)>,
     },
+    /// Lay a 3D line's unit mesh between two endpoints every frame.
+    AttachTrackingLine3D {
+        target: ObjectId,
+        from: CanvasEndpoint,
+        to: CanvasEndpoint,
+    },
     /// Filled arrow following endpoints and optional intermediate points.
     AttachTrackingConnector {
         target: ObjectId,

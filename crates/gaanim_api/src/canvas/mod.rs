@@ -103,7 +103,7 @@ pub use canvas_impl::{
     AngleDimensionHandle, AngleDimensionOptions, AssetPreloadError, AssetRootError, AudioClip,
     BooleanError, CameraBindingError, CameraConstraintHandle, CameraStateError, CameraStateHandle,
     CodeThemeError, Composition, DEFAULT_REACTIVE_TEXT_SIZE, DimensionExtensionStyle,
-    DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError, LottieClip,
+    DimensionHandle, DimensionOptions, ForceVectorHandle, ImageLoadError, Line3DError, LottieClip,
     LottieLoadError, PlayError, PlayItem, SceneModel, SceneObjectError, Schedule, ScheduleEntry,
     StaggerLayout, StaggerOrigin, StopLoopError, SupportHandle, SurroundingRectError,
     SurroundingRectHandle, ThemeError, TypstAssetError, VideoClip, VideoLoadError, VideoSegment,

@@ -1724,6 +1724,55 @@ pub struct TrackingConnector {
     pub local: bool,
 }
 
+/// A lit 3D line between two reactive endpoints. Its mesh lies along Y, one
+/// unit long and centered on its origin; every frame `tracking_line_system`
+/// lays it from `from` toward `to` by its transform alone, so the mesh never
+/// changes.
+#[derive(Component)]
+pub struct TrackingLine3D {
+    pub from: TrackingEndpoint,
+    pub to: TrackingEndpoint,
+    /// How far toward `to` the line reaches from `from`, as a fraction of the
+    /// way, which `create` animates.
+    pub progress: f64,
+}
+
+impl TrackingLine3D {
+    pub fn new(from: TrackingEndpoint, to: TrackingEndpoint) -> Self {
+        Self {
+            from,
+            to,
+            progress: 1.0,
+        }
+    }
+}
+
+/// The transform, in the frame of a parent whose world matrix is `parent`,
+/// that lays a [`TrackingLine3D`]'s unit mesh from `from` toward `to`, as
+/// far as `progress` of the way, both points in the scene. Its sides keep
+/// their thickness. A line too short to see shrinks to nothing, caps and all.
+pub fn line_3d_transform(parent: DMat4, from: DVec3, to: DVec3, progress: f64) -> SpatialTransform {
+    let inverse = parent.inverse();
+    let from = inverse.transform_point3(from);
+    let to = inverse.transform_point3(to);
+    let end = from.lerp(to, progress.clamp(0.0, 1.0));
+    let span = end - from;
+    let length = span.length();
+    if !length.is_finite() || length <= 1e-9 || !from.is_finite() {
+        return SpatialTransform {
+            translation: if from.is_finite() { from } else { DVec3::ZERO },
+            scale: DVec3::ZERO,
+            ..SpatialTransform::default()
+        };
+    }
+    SpatialTransform {
+        translation: (from + end) * 0.5,
+        rotation: DQuat::from_rotation_arc(DVec3::Y, span / length),
+        scale: DVec3::new(1.0, length, 1.0),
+        ..SpatialTransform::default()
+    }
+}
+
 /// A card background reads its parent's resolved local layout box.
 #[derive(Component)]
 pub struct LayoutBackground {
@@ -2385,6 +2434,26 @@ pub fn tracking_line_system(world: &mut World) {
     }
     for (entity, path) in updates {
         write_path(world, entity, path);
+    }
+
+    let mut lines_3d = world.query::<(Entity, &TrackingLine3D)>();
+    let mut placements = Vec::new();
+    for (entity, line) in lines_3d.iter(world) {
+        if let (Some(from), Some(to)) = (
+            resolve_tracking_endpoint(&line.from, world),
+            resolve_tracking_endpoint(&line.to, world),
+        ) {
+            let parent = world
+                .get::<ChildOf>(entity)
+                .and_then(|relation| entity_world_matrix(relation.parent(), world))
+                .unwrap_or(DMat4::IDENTITY);
+            placements.push((entity, line_3d_transform(parent, from, to, line.progress)));
+        }
+    }
+    for (entity, placement) in placements {
+        if let Some(mut transform) = world.get_mut::<SpatialTransform>(entity) {
+            transform.set_if_neq(placement);
+        }
     }
 }
 
@@ -3352,6 +3421,43 @@ fn set_sampled_fill(world: &mut World, entity: Entity, color: gaanim_core::penik
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_3d_line_lays_its_mesh_along_any_direction_and_hides_when_too_short() {
+        let near = |a: DVec3, b: DVec3| a.distance(b) < 1e-9;
+        let from = DVec3::new(1.0, 2.0, 3.0);
+        // Straight down, against the mesh's own axis.
+        let down = line_3d_transform(DMat4::IDENTITY, from, from - DVec3::Y * 4.0, 1.0);
+        assert!(near(down.translation, from - DVec3::Y * 2.0), "{down:?}");
+        assert!(near(down.rotation * DVec3::Y, -DVec3::Y), "{down:?}");
+        assert!(near(down.scale, DVec3::new(1.0, 4.0, 1.0)), "{down:?}");
+        // Nothing of it shows before it grows, nor between ends that meet.
+        assert_eq!(
+            line_3d_transform(DMat4::IDENTITY, from, DVec3::ZERO, 0.0).scale,
+            DVec3::ZERO
+        );
+        assert_eq!(
+            line_3d_transform(DMat4::IDENTITY, from, from, 1.0).scale,
+            DVec3::ZERO
+        );
+        // Under a parent, the ends stay where they are in the scene.
+        let parent = DMat4::from_scale_rotation_translation(
+            DVec3::splat(2.0),
+            DQuat::from_rotation_z(0.7),
+            DVec3::new(-1.0, 0.5, 0.0),
+        );
+        let to = DVec3::new(-2.0, 1.0, 0.5);
+        let placed = line_3d_transform(parent, from, to, 1.0).to_mat4();
+        let world = parent * placed;
+        assert!(
+            near(world.transform_point3(DVec3::Y * -0.5), from),
+            "{world:?}"
+        );
+        assert!(
+            near(world.transform_point3(DVec3::Y * 0.5), to),
+            "{world:?}"
+        );
+    }
     use bevy::prelude::BuildChildrenTransformExt;
     use gaanim_core::kurbo::Shape;
 

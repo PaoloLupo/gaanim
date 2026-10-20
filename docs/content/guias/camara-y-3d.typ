@@ -275,6 +275,68 @@ scene.play([
 scene.render()
 ```
 
+=== De pantalla completa a un lado
+
+Una demostración que ocupa toda la imagen puede pasar a una pantalla en una
+esquina sin detenerse, como en los vídeos de 3Blue1Brown. Pon la
+demostración en una capa y haz que la muestre una pantalla tan grande como el
+fotograma, que la ve entera; después mueve y escala la pantalla.
+
+```python
+# output: preview.webp
+import math
+from gaanim import GOLD, WHITE, Easing, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+circulo = scene.geometry.circle(3.2).no_fill().stroke(WHITE, 0.03)
+brazo = scene.geometry.line(0, 0, 3.2, 0).stroke(GOLD, 0.06)
+giro = scene.geometry.group(brazo, origin=(0, 0))
+scene.geometry.group(circulo, giro).view_layer("demo")
+
+publico = [
+    scene.character(name=nombre, size=2.4).move_to(x, -2.9).hidden()
+    for nombre, x in (("ana", -5.5), ("beto", -2.5), ("caro", 0.5))
+]
+marco = scene.geometry.rect(16, 9).no_fill().no_stroke()
+pantalla = scene.geometry.rect(16, 9).no_fill().stroke(WHITE, 0)
+pantalla.camera_view(marco, layers=["demo"], exclude=publico)
+
+scene.launch(giro.animate.rotate_by(math.tau * 2).duration(8).easing(Easing.LINEAR))
+scene.wait(1)
+scene.play([
+    pantalla.animate.scale_to(0.5).move_to(-3.6, 2.0),
+    pantalla.animate.stroke_width(0.04),
+    *(persona.animate.fade_in() for persona in publico),
+], duration=1.5)
+scene.wait(4)
+scene.render()
+```
+
+- La capa saca la demostración de la cámara principal; sin ella, al encogerse
+  la pantalla quedaría detrás una copia a tamaño completo.
+- Mientras la pantalla cubre el fotograma se ve igual que la escena, porque
+  su marco tiene el mismo tamaño. El aumento es la pantalla entre el marco:
+  al escalarla a la mitad, la vista se encoge con ella y lo que sobresale
+  queda recortado.
+- `scene.launch` arranca la animación sin mover el cursor, así que sigue
+  durante los `play` siguientes. Lo mismo vale para los updaters y para las
+  animaciones de la demostración que pongas en esos `play`.
+- La vista ve todo el fotograma, también lo que pongas encima, como los
+  personajes: `exclude=` los deja fuera. Solo admite objetos que ya existen,
+  así que créalos antes, ocultos con `.hidden()`.
+- La pantalla empieza sin borde, con un trazo de ancho 0, y
+  `animate.stroke_width` lo hace aparecer al encogerse. Para volver a
+  pantalla completa, anímala de vuelta, por ejemplo con
+  `animate.place(scene.layout.frame, fit="contain")`.
+- Escalar un grupo con la demostración, como se hace en Manim, también
+  funciona, pero no recorta, y lo que depende de coordenadas del mundo
+  (updaters como `orbit`, seguimientos o contenido 3D) no se mueve con el
+  grupo.
+
+El ejemplo `camera/picture_in_picture` lleva la pantalla a varias zonas del
+layout con `animate.place(zona, fit="contain")` y la devuelve a pantalla
+completa.
+
 === Instantáneas
 
 `vista.snapshot()` congela lo que muestra la vista en el cursor: devuelve una
@@ -339,8 +401,9 @@ scene.render()
 == Objetos, materiales y luz
 
 - `scene.geometry` crea primitivas 3D: `cube`, `sphere`, `cylinder`, `cone`,
-  `plane` y `torus`. `arrow_3d`, `tube` y `flat_3d` construyen flechas,
-  tubos y láminas a partir de puntos o de un dibujo 2D (ver más abajo).
+  `plane` y `torus`. `arrow_3d`, `tube`, `line_3d` y `flat_3d` construyen
+  flechas, tubos, líneas con grosor y láminas a partir de puntos, de objetos
+  o de un dibujo 2D (ver más abajo).
 - `mesh(vertices, triangles, colors=)` crea una malla con los vértices y
   triángulos que le des, y `revolve(profile)` el sólido que barre un perfil
   `(r, y)` al girar alrededor del eje y. Ambos conservan el origen de sus
@@ -436,6 +499,10 @@ Algunas formas se definen mejor con puntos del mundo que con medidas:
 - `tube(points, radius)` sigue una polilínea con un tubo iluminado, como una
   trayectoria o un muelle. La sección avanza sin retorcerse; `closed=True`
   cierra el lazo y `caps=False` deja los extremos abiertos.
+- `line_3d(start, end, thickness)` une dos extremos con una línea sólida
+  que conserva su grosor. Si un extremo es un objeto que se mueve, la línea
+  lo sigue en cada fotograma, como el enlace entre dos átomos;
+  `create()` la hace crecer desde `start`.
 - `flat_3d(source)` convierte el relleno de un texto, una ecuación o una
   forma en una lámina plana de dos caras. A diferencia de `billboard`, que
   mantiene un objeto 2D de frente a la cámara, la lámina es parte de la
@@ -443,7 +510,8 @@ Algunas formas se definen mejor con puntos del mundo que con medidas:
   la cámara.
 
 Las flechas y los tubos quedan en el centro de sus puntos, así que
-`move_to_3d` y los giros parten de ahí. Todas son mallas cerradas que
+`move_to_3d` y los giros parten de ahí; una `line_3d` la colocan sus
+extremos, así que se mueve moviéndolos. Todas son mallas cerradas que
 proyectan sombra.
 
 ```python
@@ -512,8 +580,9 @@ una transición: llega a mirar la esfera al final de la animación, aunque se
 haya movido, y la siguiente animación de cámara parte de ahí.
 
 ```python
+# continue
 scene.play([
-    bola.animate.move_to_3d(3, 1.5, -2).duration(3.0),
+    bola.animate.move_to_3d(-3, 0.5, -1).duration(3.0),
     scene.camera.animate.follow(bola, turn=True).duration(3.0),
 ])
 ```
@@ -532,9 +601,10 @@ y el objetivo pueden ser objetos: se leen donde están en cada fotograma, así
 que una vista cenital puede seguir a la esfera mientras rueda.
 
 ```python
+# continue
 arriba = scene.geometry.rounded_rect(4.8, 2.7, 0.15).hud().move_to(5, 2.6)
 vista = arriba.camera_view_3d(eye=(0, 12, 0.5), target=bola, fov_y=0.6)
-scene.play([bola.animate.move_to_3d(3, 1.5, -2).duration(3.0)])
+scene.play([bola.animate.move_to_3d(2, 0, 2).duration(3.0)])
 ```
 
 La vista muestra primitivas, superficies, líneas 3D, modelos y objetos
