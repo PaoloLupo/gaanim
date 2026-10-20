@@ -1031,19 +1031,21 @@ fn snapshot_views<'a>(
 }
 
 /// Append the drawables of the frozen views `shown`, after the frame's
-/// sorted elements: they keep the order their view drew them in.
+/// sorted elements: they keep the order their view drew them in. With
+/// `capture` they keep what a capture of the frame records.
 fn append_frozen_views(
     elements: &mut Vec<ExtractedElement>,
     shown: &[Arc<FrozenView>],
     frozen: &mut FrozenViews,
     gpu: bool,
     margin: f64,
+    capture: bool,
 ) {
     for view in shown {
         elements.extend(
             view.elements
                 .iter()
-                .map(|element| thawed_element(element, &mut frozen.store, gpu, margin)),
+                .map(|element| thawed_element(element, &mut frozen.store, gpu, margin, capture)),
         );
     }
     frozen.store.end_frame();
@@ -3678,7 +3680,14 @@ fn extract_world(
     if !frozen_shown.is_empty()
         && let Some(mut frozen) = world.get_resource_mut::<FrozenViews>()
     {
-        append_frozen_views(&mut extracted, &frozen_shown, &mut frozen, gpu, antialias);
+        append_frozen_views(
+            &mut extracted,
+            &frozen_shown,
+            &mut frozen,
+            gpu,
+            antialias,
+            true,
+        );
     }
     world.insert_resource(ExtractedFragments {
         fragments,
@@ -5573,12 +5582,14 @@ pub fn compose_captured_frame(
 
 /// The extracted form of captured `element`: its fragments from `store`, with
 /// object effects as images when `gpu`, and its opacity layer padded by
-/// `margin`. It keeps its recipe and extent, so a capture records it again.
+/// `margin`. With `capture` it keeps its recipe and extent, so that a capture
+/// of the frame records it again.
 fn thawed_element(
     element: &CapturedElement,
     store: &mut crate::fragment::FragmentStore,
     gpu: bool,
     margin: f64,
+    capture: bool,
 ) -> ExtractedElement {
     let (scene, overlay, soft) = store.get_with(&element.recipe, element.lottie.as_ref(), gpu);
     // As in `extract_world`, a drawable inside a shader effect also has
@@ -5591,8 +5602,8 @@ fn thawed_element(
         persistent: false,
         post_exempt: element.post_exempt,
         entity: element.entity,
-        recipe: Some(Arc::clone(&element.recipe)),
-        lottie: element.lottie.clone(),
+        recipe: capture.then(|| Arc::clone(&element.recipe)),
+        lottie: element.lottie.clone().filter(|_| capture),
         transform: element.transform,
         opacity: element.opacity,
         opacity_bounds: element
@@ -5607,6 +5618,7 @@ fn thawed_element(
             }),
         opacity_extent: element
             .opacity_reach
+            .filter(|_| capture)
             .map(|reach| (element.opacity_bounds, reach)),
         opacity_group: element.opacity_group,
         group_opacity: element.group_opacity,
@@ -5683,7 +5695,7 @@ fn compose_captured_layers(
         frame
             .elements
             .iter()
-            .map(|element| thawed_element(element, store, effect_density.is_some(), margin)),
+            .map(|element| thawed_element(element, store, effect_density.is_some(), margin, false)),
     );
     let mut effects = soft_layers(&elements);
     if effect_density.is_some() {
@@ -6716,6 +6728,7 @@ pub fn gaanim_render_system(
             frozen,
             effect_layers.is_some(),
             antialias,
+            false,
         );
     }
     let soft = soft_layers(local_extracted);
