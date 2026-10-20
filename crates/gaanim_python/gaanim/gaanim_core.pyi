@@ -9782,7 +9782,7 @@ class Geometry:
         animation is included in ``scene.play(...)``.
 
         Example:
-            result = scene.traced_path(source, dissipating_time=2.0)
+            trail = scene.geometry.traced_path(source, dissipating_time=2.0)
         """
         ...
     def traced_path_3d(
@@ -9802,9 +9802,9 @@ class Geometry:
         colormaps are ``"inferno"``, ``"viridis"``, and ``"plasma"``.
 
         Example:
-            dot = scene.dot(7).move_to_3d(1, 0, 0)
+            dot = scene.geometry.dot(0.09).move_to_3d(1, 0, 0)
             dot.add_updater(Updater.orbit(0, 0, 1, 1.5))
-            trail = scene.traced_path_3d(
+            trail = scene.geometry.traced_path_3d(
                 dot, colormap="viridis", max_points=600
             )
         """
