@@ -3224,17 +3224,18 @@ fn extract_world(
             |zoom| zoom.evaluate(world),
         )
     };
-    let frozen_shown = {
+    // Only a scene with snapshots has frozen views.
+    let frozen_shown = if world.contains_resource::<FrozenViews>() {
         let mut snapshots = world.query_filtered::<(
             Entity,
             &CameraSnapshot,
             &GlobalSpatialTransform,
             &Path2D,
         ), With<Visible>>();
-        match world.get_resource::<FrozenViews>() {
-            Some(frozen) => snapshot_views(snapshots.iter(world), frozen, &mut camera_views),
-            None => Vec::new(),
-        }
+        let frozen = world.resource::<FrozenViews>();
+        snapshot_views(snapshots.iter(world), frozen, &mut camera_views)
+    } else {
+        Vec::new()
     };
 
     let mut query_mobjects = world.query_filtered::<(
