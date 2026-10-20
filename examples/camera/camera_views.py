@@ -2,8 +2,9 @@
 
 ``drawable.camera_view(...)`` turns a closed shape into a screen. Its camera
 looks through a frame drawable, or at a center with a zoom of its own, and can
-show view layers the main camera hides. The map's labels are too small to read
-until a view magnifies them; a strip pinned to the screen names each call.
+show view layers the main camera hides, and ``view.snapshot()`` keeps what it
+shows at one instant. The map's labels are too small to read until a view
+magnifies them; a strip pinned to the screen names each call.
 """
 
 import os
@@ -137,6 +138,34 @@ captions.shot(
     view.animate.pan_to(-5, 0),
     duration=2.0,
 )
+
+# view.snapshot() freezes what the view shows at the cursor into a copy of
+# its screen. The copy starts hidden, enters with its first animation and
+# keeps that picture wherever it goes and however it scales, while the view
+# goes on following the rover.
+scene.segment("snapshots")
+left, right = stage.split(Zones.columns(["2fr", "3fr"], gap="48px"))
+world(left)
+live, shelf = right.split(Zones.rows(["3fr", "2fr"], gap="32px"))
+width = min(live.width, live.height * 16 / 9)
+screen = scene.geometry.rounded_rect(width, width * 9 / 16, 0.12).stroke(accent, 0.05)
+screen.move_to(*live.center)
+# Tile corners, so that the rover hides none of the labels around it.
+stops = [(-3.5, 0.5), (-5.5, -1.5), (-6.5, 1.5)]
+rover = scene.geometry.dot(0.1).fill(accent).move_to(-5.5, -0.5)
+frame = scene.geometry.rect(2.4, 1.35).no_fill().stroke(accent, 0.03).move_to(-5.5, -0.5)
+view = screen.camera_view(frame)
+view.follow(rover)
+slots = shelf.split(Zones.columns(3, gap="24px"))
+scale = min(slots[0].width / width, slots[0].height / (width * 9 / 16))
+captions = Captions()
+captions.shot("view.follow(rover)", screen.animate.fade_in(), rover.animate.move_to(*stops[0]))
+for index, slot in enumerate(slots):
+    photo = view.snapshot()
+    moves = [photo.animate.move_to(*slot.center), photo.animate.scale_to(scale)]
+    if index + 1 < len(stops):
+        moves.append(rover.animate.move_to(*stops[index + 1]))
+    captions.shot("photo = view.snapshot()", *moves)
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, SEEKS)

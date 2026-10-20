@@ -190,6 +190,20 @@ impl CameraView {
     }
 }
 
+/// Component: turns a closed vector leaf into a snapshot of a [`CameraView`]:
+/// it shows, frozen, what the view of `screen` showed at timeline time `at`,
+/// in its own outline and wherever it moves. The scene builder freezes it
+/// into [`crate::pipeline::FrozenViews`] under `key`; until then, or when
+/// the view showed nothing, the drawable draws as a plain shape.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct CameraSnapshot {
+    /// The screen whose view the snapshot freezes.
+    pub screen: Entity,
+    pub at: f64,
+    /// The authored drawable, the same in every world built from one scene.
+    pub key: gaanim_core::ObjectId,
+}
+
 /// Component: puts a drawable on a named view layer. The main camera does not
 /// draw it; only camera views that list the layer show it.
 #[derive(Component, Debug, Clone, PartialEq, Eq, Hash)]

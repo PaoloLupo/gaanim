@@ -1811,6 +1811,21 @@ label = scene.viz.readout(view.zoom, format=".1f", prefix="x")
 )
 
 #api-entry(
+  name: "CameraView.snapshot",
+  kind: "method",
+  returns: (type: "Drawable", desc: [Una copia de la pantalla con lo que la vista muestra en el cursor.]),
+  desc: [Congela la vista: la copia conserva esa imagen aunque se mueva o se escale, mientras la vista sigue. Empieza oculta y entra con su primera animación. La escena se construye otra vez para llegar al instante de la instantánea; solo se congelan los objetos 2D, sin contenido 3D ni efectos de sombreador, mates o vidrio.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+>>>view = scene.geometry.rect(4, 2.25).move_to(4, 2).camera_view(center=(-4, 0), zoom=2)
+photo = view.snapshot()
+scene.play([photo.animate.move_to(4, -2).duration(1.0)])
+```
+]
+
+#api-entry(
   name: "CameraView.animate",
   kind: "property",
   returns: (type: "CameraViewAnimation", desc: [Proxy de animación; sus resultados se pasan a `scene.play`.]),

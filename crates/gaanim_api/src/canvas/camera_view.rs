@@ -341,6 +341,49 @@ impl CameraViewHandle {
                 offset_space: FollowOffsetSpace::World,
             });
     }
+
+    /// A drawable that shows, frozen, what the view shows at the cursor: a
+    /// copy of the screen (see [`DrawableHandle::copy`]) that keeps that
+    /// content in its outline wherever it moves and however it scales,
+    /// while the view goes on.
+    ///
+    /// It starts hidden, as [`DrawableHandle::hidden`] makes it, so the
+    /// animation that first shows it, a move out of the screen for
+    /// instance, is its entry. To freeze its content the scene is built a
+    /// second time and played to the snapshot's instant, so each preview,
+    /// export or recording of a scene with snapshots builds it twice. Only
+    /// the view's 2D drawables are frozen: 3D content is left out, and
+    /// shader effects, mattes and glass draw plainly.
+    pub fn snapshot(&self) -> DrawableHandle {
+        let snapshot = self
+            .screen
+            .copy()
+            .hidden()
+            .expect("a new copy has not been shown yet");
+        self.screen
+            .state
+            .lock()
+            .expect("canvas state poisoned")
+            .active_mut()
+            .ops
+            .push(Op::SetCameraSnapshot {
+                target: snapshot.id,
+                screen: self.screen.id,
+            });
+        snapshot
+    }
+}
+
+impl SceneModel {
+    /// Whether a camera view of the scene has a snapshot.
+    pub(crate) fn has_camera_snapshots(&self) -> bool {
+        let state = self.state.lock().expect("canvas state poisoned");
+        state
+            .segments
+            .iter()
+            .flat_map(|segment| &segment.ops)
+            .any(|op| matches!(op, Op::SetCameraSnapshot { .. }))
+    }
 }
 
 fn validate_layer(layer: &str) -> Result<Arc<str>, CameraViewError> {

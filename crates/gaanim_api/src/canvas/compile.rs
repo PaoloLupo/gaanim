@@ -6528,6 +6528,25 @@ impl SceneModel {
                     builder.camera_views.insert(screen, shown.clone());
                     builder.commands.entity(screen).insert(shown);
                 }
+                Op::SetCameraSnapshot { target, screen } => {
+                    let entity_of = |id: &ObjectId| {
+                        let id = id_map.get(id).copied()?;
+                        builder.states.get(id).map(|state| state.entity)
+                    };
+                    let (Some(snapshot), Some(screen)) = (entity_of(target), entity_of(screen))
+                    else {
+                        continue;
+                    };
+                    // Keyed by the authored drawable, which every world
+                    // built from the scene shares.
+                    builder.commands.entity(snapshot).insert(
+                        gaanim_renderer::effects::CameraSnapshot {
+                            screen,
+                            at: builder.current_time,
+                            key: *target,
+                        },
+                    );
+                }
                 Op::SetViewLayer { target, layer } => {
                     let Some(target) = id_map.get(target).copied() else {
                         continue;
@@ -15524,6 +15543,90 @@ mod tests {
             .unwrap();
         assert_eq!(follow.since, 1.0);
         assert!(!follow.holds_at(0.5) && follow.holds_at(1.0));
+    }
+
+    #[test]
+    fn camera_snapshots_freeze_what_their_view_showed() {
+        use bevy::prelude::App;
+        use gaanim_core::kurbo::Point;
+        use gaanim_renderer::pipeline::{FrozenViews, capture_frame};
+
+        let mut canvas = SceneModel::new(640, 360);
+        let frame = canvas.rect(2.0, 2.0).move_to(3.0, 0.0);
+        let screen = canvas.rect(2.0, 2.0).move_to(-3.0, 0.0);
+        let view = screen.clone().camera_view(&frame).unwrap();
+        let dot = canvas.dot(0.2).move_to(2.5, 0.0);
+        canvas.play(vec![dot.animate().move_to(3.5, 0.0).duration(1.0)]);
+        let photo = view.snapshot();
+        canvas.play(vec![
+            photo.animate().move_to(0.0, -2.0).duration(1.0),
+            dot.animate().move_to(2.5, 0.5).duration(1.0),
+        ]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        assert_eq!(app.world().resource::<FrozenViews>().len(), 1);
+        let photo_entity = entity_of(app.world_mut(), &photo);
+        let dot_entity = entity_of(app.world_mut(), &dot);
+        let captured = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            capture_frame(app.world_mut(), None)
+        };
+        // Hidden until its move starts, as it was created.
+        let before = captured(&mut app, 0.5);
+        assert!(
+            before
+                .elements
+                .iter()
+                .all(|element| element.entity != photo_entity)
+        );
+
+        let after = captured(&mut app, 2.0);
+        let shown = after
+            .elements
+            .iter()
+            .find(|element| element.entity == photo_entity)
+            .and_then(|element| element.screen.as_ref())
+            .expect("the snapshot draws its view");
+        assert!(shown.only_layers && shown.layers.len() == 1);
+        let frozen: Vec<_> = after
+            .elements
+            .iter()
+            .filter(|element| element.layer.as_ref() == Some(&shown.layers[0]))
+            .collect();
+        // The dot where the view saw it at 1 s, not where it went since.
+        assert_eq!(frozen.len(), 1, "the view showed only the dot");
+        assert_ne!(frozen[0].entity, dot_entity);
+        let seen = frozen[0].transform.translation();
+        assert!(
+            (seen.x - 3.5).abs() < 1e-9 && seen.y.abs() < 1e-9,
+            "{seen:?}"
+        );
+        // What the camera framed lands on the snapshot where it moved.
+        let center = shown.content.unwrap() * Point::new(3.0, 0.0);
+        assert!(
+            center.x.abs() < 1e-9 && (center.y + 2.0).abs() < 1e-9,
+            "{center:?}"
+        );
+        // The live view goes on showing the dot that moved.
+        let live = after
+            .elements
+            .iter()
+            .find(|element| element.entity == dot_entity)
+            .unwrap();
+        assert!(live.layer.is_none());
+        let moved = live.transform.translation();
+        assert!((moved.x - 2.5).abs() < 1e-9 && (moved.y - 0.5).abs() < 1e-9);
     }
 
     #[test]

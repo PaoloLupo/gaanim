@@ -310,6 +310,13 @@ impl PyCameraView {
         );
         Ok(slf)
     }
+
+    /// A hidden copy of the screen that shows, frozen, what the view shows
+    /// at the cursor.
+    fn snapshot(&self) -> PyResult<PyDrawable> {
+        crate::custom::ensure_authoring_allowed()?;
+        Ok(PyDrawable(self.inner.snapshot()))
+    }
 }
 
 /// Animations of a camera view, each returned as an `Anim`.

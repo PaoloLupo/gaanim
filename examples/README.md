@@ -214,7 +214,7 @@ Pan, zoom and rotation, camera paths, insets and parallax.
 | [Camera shots](camera/camera_shots.py) | Drive the camera along a path, whip pan with motion blur, and shake it with the trauma model. |
 | [Camera bindings](camera/camera_bindings.py) | Bind the camera's center, zoom and rotation to drawables and reactive values, blended by influence and switched on and off. |
 | [Camera insets](camera/camera_insets.py) | Insets that enlarge a detail in a screen joined to it: placement, shapes, view moves, following and fixed screens. |
-| [Camera views](camera/camera_views.py) | Shapes that show what a second camera sees: frames, fit modes, lenses and X-ray view layers. |
+| [Camera views](camera/camera_views.py) | Shapes that show what a second camera sees: frames, fit modes, lenses, X-ray view layers and snapshots. |
 | [Parallax](camera/parallax.py) | Parallax layers at several depths under pan, zoom and rotation, and depth of field with a rack focus. |
 
 ## 3D

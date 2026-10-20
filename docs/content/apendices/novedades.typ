@@ -63,6 +63,20 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
   sin glow se ven y tardan lo mismo que antes.
 - `blur` y `shadow` todavía no se aplican al contenido 3D.
 
+== Instantáneas de vistas de cámara
+
+- `view.snapshot()` congela lo que muestra una vista de cámara en el cursor
+  en una copia de su pantalla. La copia empieza oculta, entra con su primera
+  animación (por ejemplo, un `move_to` que la saca de la pantalla) y conserva
+  esa imagen aunque se mueva, se escale o la vista siga. Ver
+  #link("/guias/camara-y-3d/#instantaneas")[Cámara y 3D].
+- Para congelarla, la escena se construye otra vez y se lleva al instante de
+  cada instantánea: la vista previa, las exportaciones y los paquetes de una
+  escena con instantáneas la construyen dos veces; las demás no pagan nada.
+- Se congelan los objetos 2D de la vista: el contenido 3D no aparece, y los
+  efectos de sombreador, mates y vidrio se dibujan sin ellos.
+- El ejemplo `camera/camera_views` suma el segmento `snapshots`.
+
 == Paquetes más ligeros
 
 - Una malla o línea 3D que cambia de un fotograma a otro guarda, sin perder
@@ -77,7 +91,8 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
 == Al actualizar
 
 - Los paquetes `.gaanim` pasan al formato 7, que guarda las texturas, los
-  modos alfa y los esqueletos, y las mallas que cambian como su cambio. Gaanim sigue abriendo los de formato 5 y 6;
+  modos alfa y los esqueletos, las mallas que cambian como su cambio y las
+  instantáneas de vistas. Gaanim sigue abriendo los de formato 5 y 6;
   un Gaanim anterior no abre los nuevos, así que actualiza los reproductores
   que los publican.
 - `Drawable.animations()` devuelve un diccionario de nombres y duraciones en

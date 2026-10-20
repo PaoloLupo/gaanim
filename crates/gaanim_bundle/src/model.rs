@@ -2091,6 +2091,8 @@ pub(crate) struct ViewRecord {
     pub region: kurbo::Rect,
     pub excluded: Vec<u32>,
     pub layers: Vec<u32>,
+    /// Shows only the drawables on `layers` (version 7 on).
+    pub only_layers: bool,
     pub background: ViewBackgroundRecord,
 }
 
@@ -2167,6 +2169,7 @@ impl ElementRecord {
                     .iter()
                     .map(|layer| tables.string(layer))
                     .collect(),
+                only_layers: view.only_layers,
                 background: match &view.background {
                     CameraViewBackground::Canvas => ViewBackgroundRecord::Canvas,
                     CameraViewBackground::None => ViewBackgroundRecord::None,
@@ -2224,6 +2227,7 @@ impl ElementRecord {
             w.rect(view.region);
             write_keys(w, &view.excluded);
             write_keys(w, &view.layers);
+            w.bool(view.only_layers);
             match &view.background {
                 ViewBackgroundRecord::Canvas => w.u8(0),
                 ViewBackgroundRecord::None => w.u8(1),
@@ -2246,7 +2250,8 @@ impl ElementRecord {
         w.option(self.glass_root, |w, key| w.var(u64::from(key)));
     }
 
-    pub fn read(r: &mut Reader<'_>) -> Result<Self> {
+    /// Read a record of a bundle of format `version`.
+    pub fn read(r: &mut Reader<'_>, version: u32) -> Result<Self> {
         Ok(Self {
             key: r.u32()?,
             recipe: r.u32()?,
@@ -2286,6 +2291,7 @@ impl ElementRecord {
                     region: r.rect()?,
                     excluded: read_keys(r)?,
                     layers: read_keys(r)?,
+                    only_layers: version >= 7 && r.bool()?,
                     background: match r.u8()? {
                         0 => ViewBackgroundRecord::Canvas,
                         1 => ViewBackgroundRecord::None,
@@ -2360,6 +2366,7 @@ impl ElementRecord {
                             .iter()
                             .map(|index| tables.string(*index))
                             .collect::<Result<_>>()?,
+                        only_layers: view.only_layers,
                         background: match &view.background {
                             ViewBackgroundRecord::Canvas => CameraViewBackground::Canvas,
                             ViewBackgroundRecord::None => CameraViewBackground::None,
@@ -2887,7 +2894,7 @@ impl DeltaDecoder {
                 let count = r.len()?;
                 let mut elements = Vec::with_capacity(count.min(1 << 20));
                 for _ in 0..count {
-                    elements.push(ElementRecord::read(r)?);
+                    elements.push(ElementRecord::read(r, self.version)?);
                 }
                 elements
             }
@@ -2904,7 +2911,7 @@ impl DeltaDecoder {
                 let changed = r.len()?;
                 let mut changed_order = Vec::with_capacity(changed.min(1 << 20));
                 for _ in 0..changed {
-                    let element = ElementRecord::read(r)?;
+                    let element = ElementRecord::read(r, self.version)?;
                     changed_order.push(element.key);
                     by_key.insert(element.key, element);
                 }

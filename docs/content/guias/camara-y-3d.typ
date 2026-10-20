@@ -275,6 +275,41 @@ scene.play([
 scene.render()
 ```
 
+=== Instantáneas
+
+`vista.snapshot()` congela lo que muestra la vista en el cursor: devuelve una
+copia de la pantalla que guarda esa imagen aunque se mueva o se escale,
+mientras la vista sigue. La copia empieza oculta y entra con su primera
+animación, así que basta con llevarla a su sitio.
+
+```python
+# output: preview.webp
+from gaanim import CYAN, WHITE, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+for x in range(-7, 0):
+    for y in range(-3, 4):
+        scene.geometry.dot(0.04).fill("#334155").move_to(x, y)
+bola = scene.geometry.circle(0.12).fill(CYAN).move_to(-6, -2)
+pantalla = scene.geometry.rect(5, 2.8).stroke(WHITE, 0.05).move_to(3.5, 1.8)
+vista = pantalla.camera_view(center=(-6, -2), zoom=3)
+vista.follow(bola)
+scene.play([bola.animate.move_to(-3, 1).duration(1.5)])
+foto = vista.snapshot()
+scene.play([
+    foto.animate.move_to(3.5, -2.3).duration(1.0),
+    foto.animate.scale_to(0.6).duration(1.0),
+    bola.animate.move_to(-5, 2).duration(1.5),
+])
+scene.render()
+```
+
+Para congelarla, Gaanim construye la escena otra vez y la lleva al instante
+de cada instantánea, así que una escena con instantáneas tarda algo más en
+cargar y exportar. Solo se congelan los objetos 2D: el contenido 3D no
+aparece en la instantánea, y los efectos de sombreador, mates y vidrio se
+dibujan sin ellos.
+
 = Escenas 3D
 
 Gaanim puede mezclar objetos 3D con el resto de la escena. Empieza con una

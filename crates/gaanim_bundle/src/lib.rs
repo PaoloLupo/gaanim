@@ -93,7 +93,8 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// 0.9 to 0.12) stored each table whole in `tables/*.bin`, which a player
 /// downloaded before the first frame, and every frame's time as an `f64`;
 /// version 6 (Gaanim 0.13 to 0.15) had no textures, alpha modes, sides nor
-/// skin weights on meshes, nor the palettes of skinned meshes, and stored
+/// skin weights on meshes, nor the palettes of skinned meshes, nor camera
+/// views that show only their own layers (snapshots of views), and stored
 /// every mesh and line list whole, where version 7 stores one that only
 /// moves its vertices as their change from the last of its drawable.
 pub const VERSION: u32 = 7;

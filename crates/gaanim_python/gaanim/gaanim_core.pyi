@@ -6549,6 +6549,22 @@ class CameraView:
         offset raises ``ValueError``.
         """
         ...
+    def snapshot(self) -> Drawable:
+        """A copy of the screen that shows, frozen, what the view shows at the cursor.
+
+        The copy keeps that picture wherever it moves and however it scales,
+        while the view goes on. It starts hidden, like ``Drawable.hidden``,
+        so its first animation, a move out of the screen for instance, is
+        its entry. To freeze it the scene is built again and played to the
+        snapshot's instant, so a scene with snapshots takes longer to load
+        and export. Only the view's 2D drawables are frozen: 3D content is
+        left out, and shader effects, mattes and glass draw plainly.
+
+        Example:
+            photo = view.snapshot()
+            scene.play([photo.animate.move_to(4, -2)])
+        """
+        ...
 
 class CameraViewAnimation:
     """Animations of a ``CameraView``, each returned as an ``Anim``."""

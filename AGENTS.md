@@ -45,7 +45,11 @@ This file guides repository work; model selection belongs to the calling client.
     Animations are timeline clips (`gaanim_api::gltf::GltfClipLens`). Glow
     on 3D content is drawn by the same pass (`three_d/glow.rs`): visible
     silhouettes against the opaque depth, blurred and laid into the image,
-    with pipelines built only when a frame first draws a glow.
+    with pipelines built only when a frame first draws a glow. A camera
+    view snapshot (`effects::CameraSnapshot`) shows what the view showed at
+    one instant: `gaanim_api::runtime` builds the scene a second time, seeks
+    it to each snapshot and freezes the view's 2D drawables into
+    `pipeline::FrozenViews`, drawn on a view layer only the snapshot shows.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.

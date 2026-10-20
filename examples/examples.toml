@@ -498,7 +498,7 @@ description = "Insets that enlarge a detail in a screen joined to it: placement,
 
 [[example]]
 path = "camera/camera_views.py"
-description = "Shapes that show what a second camera sees: frames, fit modes, lenses and X-ray view layers."
+description = "Shapes that show what a second camera sees: frames, fit modes, lenses, X-ray view layers and snapshots."
 
 [[example]]
 path = "camera/parallax.py"

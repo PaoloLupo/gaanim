@@ -2,8 +2,8 @@ use crate::background::{BackgroundPaint, ShaderBackgroundRequest};
 #[cfg(not(target_os = "emscripten"))]
 use crate::background_gpu::ShaderBackgroundFrame;
 use crate::effects::{
-    BooleanBinding, CameraView, CameraViewBackground, CameraViewFit, ChalkBrush, ClipMask,
-    DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt,
+    BooleanBinding, CameraSnapshot, CameraView, CameraViewBackground, CameraViewFit, ChalkBrush,
+    ClipMask, DropShadow, ElementBlend, FillLevelBinding, GaussianBlur, Glow, MotionBlurExempt,
     PostProcessExempt, StrokeAlign, StrokeProfile, StrokeScalesWithObject, VectorOutlineBinding,
     ViewLayer,
 };
@@ -566,6 +566,8 @@ struct ExtractedCameraView {
     excluded: Vec<Entity>,
     /// View layers the view shows besides the drawables on no layer.
     layers: Vec<Arc<str>>,
+    /// Shows only the drawables on `layers`, as a snapshot does.
+    only_layers: bool,
     background: CameraViewBackground,
 }
 
@@ -577,7 +579,7 @@ impl ExtractedCameraView {
             && element
                 .layer
                 .as_ref()
-                .is_none_or(|layer| self.layers.contains(layer))
+                .map_or(!self.only_layers, |layer| self.layers.contains(layer))
             && !self
                 .excluded
                 .iter()
@@ -821,6 +823,7 @@ fn resolve_camera_views<'a>(
                 region,
                 excluded,
                 layers: view.layers.clone(),
+                only_layers: false,
                 background: view.background.clone(),
             };
             (entity, Arc::new(resolved))
@@ -852,7 +855,198 @@ fn seen_by_camera_views(
     let rect = bounds_rect(bounds);
     views
         .values()
-        .any(|view| view.content.is_some() && rects_overlap(rect, view.region))
+        .any(|view| view.content.is_some() && !view.only_layers && rects_overlap(rect, view.region))
+}
+
+/// Resource: what each [`CameraSnapshot`] shows, by its
+/// [`CameraSnapshot::key`], frozen with [`freeze_camera_view`] by the scene
+/// builder.
+#[derive(Resource, Default)]
+pub struct FrozenViews {
+    views: HashMap<ObjectId, Arc<FrozenView>>,
+    /// Fragments of the frozen drawables, built once for every frame.
+    store: crate::fragment::FragmentStore,
+}
+
+impl FrozenViews {
+    pub fn new(views: impl IntoIterator<Item = (ObjectId, FrozenView)>) -> Self {
+        Self {
+            views: views
+                .into_iter()
+                .map(|(key, view)| (key, Arc::new(view)))
+                .collect(),
+            store: Default::default(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.views.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.views.is_empty()
+    }
+}
+
+/// What a camera view showed at one instant: the drawables it showed, in
+/// draw order on a view layer of their own, and where its camera looked.
+pub struct FrozenView {
+    elements: Vec<CapturedElement>,
+    /// Maps what the camera saw onto its screen's local coordinates.
+    content: kurbo::Affine,
+    layer: Arc<str>,
+    background: CameraViewBackground,
+}
+
+impl FrozenView {
+    /// How many drawables the view showed.
+    pub fn len(&self) -> usize {
+        self.elements.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty()
+    }
+}
+
+/// Hands out entities no world spawns for the drawables of frozen views, so
+/// that they never share a key with a live drawable or with each other.
+#[derive(Default)]
+pub struct FrozenEntities {
+    next: u32,
+}
+
+impl FrozenEntities {
+    fn next(&mut self) -> Entity {
+        // Rows count down from the largest an entity can have.
+        let row = u32::MAX - 1 - self.next;
+        self.next += 1;
+        Entity::from_raw_u32(row).expect("frozen entity rows stay below u32::MAX")
+    }
+}
+
+/// Freeze what the camera view of `screen` shows in `world` as it stands,
+/// leaving out the subtrees of `exclude` (the snapshot itself, which its
+/// entry may already show), for a [`CameraSnapshot`] that draws it on view
+/// layer `layer`; `None` when the screen shows no view.
+///
+/// What the view showed keeps its 2D drawables only: 3D content is left out,
+/// a drawable's shader effect, matte or glass draws it plainly, and a screen
+/// it showed draws its paint without its view, as inside any view.
+pub fn freeze_camera_view(
+    world: &mut World,
+    screen: Entity,
+    exclude: &[Entity],
+    layer: Arc<str>,
+    entities: &mut FrozenEntities,
+) -> Option<FrozenView> {
+    let extraction = extract_world(world, None, None, false, false, false, false);
+    let shown = extraction
+        .elements
+        .iter()
+        .find(|element| element.entity == screen)?;
+    let view = &shown.screen.as_ref()?.view;
+    let content = shown.transform.inverse() * view.content?;
+    let mut keys = HashMap::new();
+    let mut key = |entity: Entity| *keys.entry(entity).or_insert_with(|| entities.next());
+    let elements = extraction
+        .elements
+        .iter()
+        .filter(|element| {
+            element.matte_of.is_none()
+                && !exclude
+                    .iter()
+                    .any(|root| *root == element.entity || element.lineage.contains(root))
+                && view.shows(element, shown)
+        })
+        .map(|element| {
+            let mut frozen = captured_element(element.clone());
+            frozen.entity = key(frozen.entity);
+            frozen.opacity_group = key(frozen.opacity_group);
+            if let Some(clip) = &mut frozen.clip_mask {
+                for source in &mut clip.sources {
+                    *source = key(*source);
+                }
+            }
+            frozen.lineage.clear();
+            frozen.view_bounds = None;
+            frozen.in_views = true;
+            frozen.layer = Some(Arc::clone(&layer));
+            frozen.transition_side = gaanim_scene::TransitionSide::None;
+            frozen.post_exempt = false;
+            frozen.effect_root = None;
+            frozen.effect_extent = None;
+            frozen.matte_root = None;
+            frozen.glass_root = None;
+            if let Some(view) = &mut frozen.screen {
+                view.excluded.clear();
+            }
+            frozen
+        })
+        .collect();
+    Some(FrozenView {
+        elements,
+        content,
+        layer,
+        background: view.background.clone(),
+    })
+}
+
+/// Add to `views` the view of each visible snapshot drawable whose content
+/// is frozen, and return those contents.
+fn snapshot_views<'a>(
+    snapshots: impl Iterator<
+        Item = (
+            Entity,
+            &'a CameraSnapshot,
+            &'a GlobalSpatialTransform,
+            &'a Path2D,
+        ),
+    >,
+    frozen: &FrozenViews,
+    views: &mut HashMap<Entity, Arc<ExtractedCameraView>>,
+) -> Vec<Arc<FrozenView>> {
+    let mut shown = Vec::new();
+    for (entity, snapshot, transform, path) in snapshots {
+        let Some(view) = frozen.views.get(&snapshot.key) else {
+            continue;
+        };
+        let content = transform.affine_2d * view.content;
+        views.insert(
+            entity,
+            Arc::new(ExtractedCameraView {
+                clip: Arc::clone(&path.0),
+                content: content.is_finite().then_some(content),
+                // A snapshot sees no live drawable, so it culls none.
+                region: kurbo::Rect::ZERO,
+                excluded: Vec::new(),
+                layers: vec![Arc::clone(&view.layer)],
+                only_layers: true,
+                background: view.background.clone(),
+            }),
+        );
+        shown.push(Arc::clone(view));
+    }
+    shown
+}
+
+/// Append the drawables of the frozen views `shown`, after the frame's
+/// sorted elements: they keep the order their view drew them in.
+fn append_frozen_views(
+    elements: &mut Vec<ExtractedElement>,
+    shown: &[Arc<FrozenView>],
+    frozen: &mut FrozenViews,
+    gpu: bool,
+    margin: f64,
+) {
+    for view in shown {
+        elements.extend(
+            view.elements
+                .iter()
+                .map(|element| thawed_element(element, &mut frozen.store, gpu, margin)),
+        );
+    }
+    frozen.store.end_frame();
 }
 
 /// The element and its ancestors, nearest first.
@@ -3001,7 +3195,7 @@ fn extract_world(
         }
     });
 
-    let camera_views = {
+    let mut camera_views = {
         let mut screens = world.query_filtered::<(
             Entity,
             &CameraView,
@@ -3027,6 +3221,18 @@ fn extract_world(
             },
             |zoom| zoom.evaluate(world),
         )
+    };
+    let frozen_shown = {
+        let mut snapshots = world.query_filtered::<(
+            Entity,
+            &CameraSnapshot,
+            &GlobalSpatialTransform,
+            &Path2D,
+        ), With<Visible>>();
+        match world.get_resource::<FrozenViews>() {
+            Some(frozen) => snapshot_views(snapshots.iter(world), frozen, &mut camera_views),
+            None => Vec::new(),
+        }
     };
 
     let mut query_mobjects = world.query_filtered::<(
@@ -3469,6 +3675,11 @@ fn extract_world(
     }
 
     extracted.sort_by(ExtractedElement::draw_order);
+    if !frozen_shown.is_empty()
+        && let Some(mut frozen) = world.get_resource_mut::<FrozenViews>()
+    {
+        append_frozen_views(&mut extracted, &frozen_shown, &mut frozen, gpu, antialias);
+    }
     world.insert_resource(ExtractedFragments {
         fragments,
         three_d: held_three_d,
@@ -5126,6 +5337,8 @@ pub struct CapturedView {
     /// Roots of the subtrees the view leaves out.
     pub excluded: Vec<Entity>,
     pub layers: Vec<Arc<str>>,
+    /// Shows only the drawables on `layers`: a snapshot's frozen content.
+    pub only_layers: bool,
     pub background: CameraViewBackground,
 }
 
@@ -5218,6 +5431,7 @@ fn captured_element(element: ExtractedElement) -> CapturedElement {
                 region: view.region,
                 excluded: view.excluded.clone(),
                 layers: view.layers.clone(),
+                only_layers: view.only_layers,
                 background: view.background.clone(),
             }
         }),
@@ -5357,6 +5571,83 @@ pub fn compose_captured_frame(
     )
 }
 
+/// The extracted form of captured `element`: its fragments from `store`, with
+/// object effects as images when `gpu`, and its opacity layer padded by
+/// `margin`. It keeps its recipe and extent, so a capture records it again.
+fn thawed_element(
+    element: &CapturedElement,
+    store: &mut crate::fragment::FragmentStore,
+    gpu: bool,
+    margin: f64,
+) -> ExtractedElement {
+    let (scene, overlay, soft) = store.get_with(&element.recipe, element.lottie.as_ref(), gpu);
+    // As in `extract_world`, a drawable inside a shader effect also has
+    // its fragment without its shadow.
+    let effect_shadow = (gpu && element.effect_root.is_some())
+        .then(|| store.effect_shadow(&element.recipe, element.lottie.as_ref()))
+        .flatten();
+    ExtractedElement {
+        soft,
+        persistent: false,
+        post_exempt: element.post_exempt,
+        entity: element.entity,
+        recipe: Some(Arc::clone(&element.recipe)),
+        lottie: element.lottie.clone(),
+        transform: element.transform,
+        opacity: element.opacity,
+        opacity_bounds: element
+            .opacity_reach
+            .map_or(element.opacity_bounds, |reach| {
+                pad_opacity_layer(
+                    element.opacity_bounds,
+                    reach,
+                    margin,
+                    element.opacity_bounds,
+                )
+            }),
+        opacity_extent: element
+            .opacity_reach
+            .map(|reach| (element.opacity_bounds, reach)),
+        opacity_group: element.opacity_group,
+        group_opacity: element.group_opacity,
+        group_shadow: element.group_shadow.clone(),
+        effect_shadow,
+        effect_root: element.effect_root,
+        effect_extent: element.effect_extent,
+        matte_root: element.matte_root,
+        matte_of: element.matte_of,
+        glass_root: element.glass_root,
+        outline: element.glass_root.and_then(|_| element.recipe.path.clone()),
+        render_order: element.render_order,
+        // Captured elements are already in draw order.
+        z_layer: 0,
+        scene,
+        clip_mask: element.clip_mask.clone(),
+        blend: element.blend,
+        transition_side: element.transition_side,
+        lineage: element.lineage.clone(),
+        view_bounds: element.view_bounds,
+        in_views: element.in_views,
+        layer: element.layer.clone(),
+        screen: element.screen.as_ref().map(|view| ExtractedScreen {
+            view: Arc::new(ExtractedCameraView {
+                clip: Arc::clone(&view.clip),
+                content: view.content,
+                region: view.region,
+                excluded: view.excluded.clone(),
+                layers: view.layers.clone(),
+                only_layers: view.only_layers,
+                background: view.background.clone(),
+            }),
+            overlay,
+        }),
+        echo_rank: element.echo_rank,
+        // Captured frames keep their recorded order.
+        tip: false,
+        backdrop: None,
+    }
+}
+
 /// [`compose_captured_frame`]; without `effect_density`, drawables under a
 /// shader effect are drawn plainly.
 #[allow(clippy::too_many_arguments)]
@@ -5388,75 +5679,12 @@ fn compose_captured_layers(
     for element in &mut elements {
         element.z_layer = 0;
     }
-    elements.extend(frame.elements.iter().map(|element| {
-        let (scene, overlay, soft) = store.get_with(
-            &element.recipe,
-            element.lottie.as_ref(),
-            effect_density.is_some(),
-        );
-        // As in `extract_world`, a drawable inside a shader effect also has
-        // its fragment without its shadow.
-        let effect_shadow = (effect_density.is_some() && element.effect_root.is_some())
-            .then(|| store.effect_shadow(&element.recipe, element.lottie.as_ref()))
-            .flatten();
-        ExtractedElement {
-            soft,
-            persistent: false,
-            post_exempt: element.post_exempt,
-            entity: element.entity,
-            recipe: None,
-            lottie: None,
-            transform: element.transform,
-            opacity: element.opacity,
-            opacity_bounds: element
-                .opacity_reach
-                .map_or(element.opacity_bounds, |reach| {
-                    pad_opacity_layer(
-                        element.opacity_bounds,
-                        reach,
-                        margin,
-                        element.opacity_bounds,
-                    )
-                }),
-            opacity_extent: None,
-            opacity_group: element.opacity_group,
-            group_opacity: element.group_opacity,
-            group_shadow: element.group_shadow.clone(),
-            effect_shadow,
-            effect_root: element.effect_root,
-            effect_extent: element.effect_extent,
-            matte_root: element.matte_root,
-            matte_of: element.matte_of,
-            glass_root: element.glass_root,
-            outline: element.glass_root.and_then(|_| element.recipe.path.clone()),
-            render_order: element.render_order,
-            // Captured elements are already in draw order.
-            z_layer: 0,
-            scene,
-            clip_mask: element.clip_mask.clone(),
-            blend: element.blend,
-            transition_side: element.transition_side,
-            lineage: element.lineage.clone(),
-            view_bounds: element.view_bounds,
-            in_views: element.in_views,
-            layer: element.layer.clone(),
-            screen: element.screen.as_ref().map(|view| ExtractedScreen {
-                view: Arc::new(ExtractedCameraView {
-                    clip: Arc::clone(&view.clip),
-                    content: view.content,
-                    region: view.region,
-                    excluded: view.excluded.clone(),
-                    layers: view.layers.clone(),
-                    background: view.background.clone(),
-                }),
-                overlay,
-            }),
-            echo_rank: element.echo_rank,
-            // Captured frames keep their recorded order.
-            tip: false,
-            backdrop: None,
-        }
-    }));
+    elements.extend(
+        frame
+            .elements
+            .iter()
+            .map(|element| thawed_element(element, store, effect_density.is_some(), margin)),
+    );
     let mut effects = soft_layers(&elements);
     if effect_density.is_some() {
         crate::soft_effects::collect_group_shadows();
@@ -5761,6 +5989,22 @@ type CameraScreenQuery<'w, 's> = Query<
     With<Visible>,
 >;
 
+/// Visible snapshots of camera views and what they froze.
+type CameraSnapshotQueries<'w, 's> = (
+    Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static CameraSnapshot,
+            &'static GlobalSpatialTransform,
+            &'static Path2D,
+        ),
+        With<Visible>,
+    >,
+    Option<ResMut<'w, FrozenViews>>,
+);
+
 /// Everything the render system reads to compose camera views, and the
 /// drawables left out of the post-process.
 type CameraViewQueries<'w, 's> = (
@@ -5770,6 +6014,7 @@ type CameraViewQueries<'w, 's> = (
     Query<'w, 's, &'static ViewLayer>,
     Query<'w, 's, &'static gaanim_animation::FloatSignal>,
     Query<'w, 's, (), With<PostProcessExempt>>,
+    CameraSnapshotQueries<'w, 's>,
 );
 
 /// Transforms and bounds of the drawables that camera views frame.
@@ -5908,7 +6153,15 @@ pub fn gaanim_render_system(
         Local<crate::three_d::MeshSources>,
         Query<(&Camera, &Transform, &Projection), With<crate::canvas::VelloView>>,
     ),
-    (camera_screens, camera_sources, hud_query, layer_query, float_signals, exempt_query): CameraViewQueries,
+    (
+        camera_screens,
+        camera_sources,
+        hud_query,
+        layer_query,
+        float_signals,
+        exempt_query,
+        (snapshot_query, mut frozen_views),
+    ): CameraViewQueries,
     mut scratch: Local<(Vec<ExtractedElement>, std::collections::HashSet<Entity>)>,
 ) {
     let (local_extracted, local_culled) = &mut *scratch;
@@ -5918,7 +6171,7 @@ pub fn gaanim_render_system(
     let time_seconds = playback_state
         .as_ref()
         .map_or(0.0, |state| state.current_time);
-    let camera_views = resolve_camera_views(
+    let mut camera_views = resolve_camera_views(
         camera_screens
             .iter()
             .filter(|(_, view, ..)| view.shown_at(time_seconds)),
@@ -5935,6 +6188,9 @@ pub fn gaanim_render_system(
                 .ok()
         },
     );
+    let frozen_shown = frozen_views.as_deref().map_or_else(Vec::new, |frozen| {
+        snapshot_views(snapshot_query.iter(), frozen, &mut camera_views)
+    });
 
     // Viewport pixels per world unit, as in the culling bounds below.
     let antialias = antialias_margin(gaanim_camera.as_ref().and_then(|cam| match cam.projection {
@@ -6450,6 +6706,18 @@ pub fn gaanim_render_system(
 
     // Sort elements deterministically by RenderOrder to ensure correct layering
     local_extracted.sort_by(ExtractedElement::draw_order);
+    if let Some(frozen) = frozen_views
+        .as_deref_mut()
+        .filter(|_| !frozen_shown.is_empty())
+    {
+        append_frozen_views(
+            local_extracted,
+            &frozen_shown,
+            frozen,
+            effect_layers.is_some(),
+            antialias,
+        );
+    }
     let soft = soft_layers(local_extracted);
     if effect_layers.is_some() {
         crate::soft_effects::collect_group_shadows();
@@ -7154,6 +7422,81 @@ mod tests {
         // Ending the view returns the stroke to the retained fragment.
         app.world_mut().entity_mut(screen).remove::<CameraView>();
         assert_fresh(&mut app, "plain shape");
+    }
+
+    #[test]
+    fn snapshots_draw_the_view_they_froze_live_as_in_a_fresh_compile() {
+        let mut app = App::new();
+        let screen = camera_view_world(app.world_mut());
+        let mut entities = FrozenEntities::default();
+        let frozen = freeze_camera_view(
+            app.world_mut(),
+            screen,
+            &[],
+            Arc::from("\u{1}snapshot"),
+            &mut entities,
+        )
+        .expect("the screen shows its view");
+        assert_eq!(frozen.len(), 1, "the view shows the framed square only");
+        // The framed square moves away after the snapshot.
+        let square = app
+            .world_mut()
+            .query::<(Entity, &MobjectId)>()
+            .iter(app.world())
+            .find(|(_, id)| id.0 == ObjectId::from_raw(1))
+            .unwrap()
+            .0;
+        let moved = gaanim_math::SpatialTransform::new_2d(3.0, 1.0);
+        app.world_mut()
+            .entity_mut(square)
+            .insert(GlobalSpatialTransform::from_local(&moved));
+        let key = ObjectId::from_raw(90);
+        let photo = spawn_shape(app.world_mut(), 7, (4.0, 3.0), centered_rect(4.0, 2.0), 7);
+        app.world_mut().entity_mut(photo).insert((
+            StrokeBrush::new(peniko::Color::BLACK, 0.05),
+            CameraSnapshot {
+                screen,
+                at: 0.0,
+                key,
+            },
+        ));
+        app.world_mut()
+            .insert_resource(FrozenViews::new([(key, frozen)]));
+        app.init_resource::<GaanimRenderCache>()
+            .add_systems(Update, gaanim_render_system);
+        app.update();
+        let fresh = compile_scene_from_world(app.world_mut(), None);
+        let live = app
+            .world_mut()
+            .query::<&VelloScene2d>()
+            .single(app.world())
+            .unwrap();
+        assert!(
+            live.encoding().path_data == fresh.encoding().path_data
+                && live.encoding().draw_data == fresh.encoding().draw_data
+                && live.encoding().transforms == fresh.encoding().transforms,
+            "the live frame differs from a fresh compile"
+        );
+        // The snapshot shows the square where the view saw it, below its
+        // stroke, carried by the snapshot's transform.
+        let seen = kurbo::Affine::translate((4.0, 3.0))
+            * kurbo::Affine::scale(2.0)
+            * kurbo::Affine::translate((-3.0, -2.0));
+        let frozen_square = transform_index(&fresh, seen * kurbo::Affine::translate((3.5, 2.0)))
+            .expect("the snapshot draws the square it froze");
+        let stroke = *transform_indices(&fresh, kurbo::Affine::translate((4.0, 3.0)))
+            .last()
+            .unwrap();
+        assert!(
+            frozen_square < stroke,
+            "the snapshot stroke must cover its view"
+        );
+        assert!(
+            transform_index(&fresh, seen * kurbo::Affine::translate((3.0, 1.0))).is_none(),
+            "the snapshot does not follow the square"
+        );
+        // The frozen square stays out of the main camera.
+        assert!(transform_index(&fresh, kurbo::Affine::translate((3.5, 2.0))).is_none());
     }
 
     #[test]

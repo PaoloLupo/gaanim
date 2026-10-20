@@ -743,6 +743,9 @@ pub(crate) enum Op {
         target: ObjectId,
         view: Option<CameraViewSpec>,
     },
+    /// Make `target` a snapshot of what the camera view of `screen` shows
+    /// at the cursor.
+    SetCameraSnapshot { target: ObjectId, screen: ObjectId },
     /// Put a drawable hierarchy on a view layer, or back on none.
     SetViewLayer {
         target: ObjectId,

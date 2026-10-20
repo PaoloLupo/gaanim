@@ -19,9 +19,85 @@ use std::sync::{Arc, Mutex};
 /// by future scripting language bindings. Bindings should not duplicate replay
 /// logic; they should construct `SceneModel` and call into this module indirectly.
 pub fn replay_canvas_into(world: &mut World, canvas: SceneModel) {
-    replay_prepared(world, &canvas, |commands, timeline, fonts, text_config| {
+    compile_canvas_into(world, &canvas);
+    freeze_camera_snapshots(world, &canvas);
+}
+
+/// [`replay_canvas_into`] without freezing the scene's camera snapshots.
+fn compile_canvas_into(world: &mut World, canvas: &SceneModel) {
+    replay_prepared(world, canvas, |commands, timeline, fonts, text_config| {
         canvas.compile_into(commands, timeline, fonts, text_config);
     });
+}
+
+/// Marks the world in which [`freeze_camera_snapshots`] builds the scene a
+/// second time: its snapshots stay unfrozen there.
+#[derive(Resource)]
+struct SnapshotProbe;
+
+/// Freeze what the camera views of the scene's snapshots show at their
+/// instants into the world's [`FrozenViews`](gaanim_renderer::pipeline::FrozenViews),
+/// or remove them when the scene has no snapshot.
+///
+/// The world holds the scene as it starts, and its views show what moves
+/// later, so the scene is built again in a world of its own that plays to
+/// each snapshot's instant.
+fn freeze_camera_snapshots(world: &mut World, canvas: &SceneModel) {
+    use gaanim_renderer::effects::CameraSnapshot;
+    use gaanim_renderer::pipeline::{FrozenEntities, FrozenViews, freeze_camera_view};
+    if world.contains_resource::<SnapshotProbe>() {
+        return;
+    }
+    world.remove_resource::<FrozenViews>();
+    if !canvas.has_camera_snapshots() {
+        return;
+    }
+    let scene = canvas.clone();
+    let mut probe = match gaanim_export::bundle::recording_app(move |world| {
+        world.insert_resource(SnapshotProbe);
+        compile_canvas_into(world, &scene);
+    }) {
+        Ok(probe) => probe,
+        Err(error) => {
+            tracing::error!(
+                "could not build the scene again to freeze its camera snapshots: {error}"
+            );
+            return;
+        }
+    };
+    let mut snapshots: Vec<(Entity, CameraSnapshot)> = {
+        let probe = probe.world_mut();
+        let mut query = probe.query::<(Entity, &CameraSnapshot)>();
+        query
+            .iter(probe)
+            .map(|(entity, snapshot)| (entity, *snapshot))
+            .collect()
+    };
+    snapshots.sort_by(|(_, a), (_, b)| a.at.total_cmp(&b.at));
+    let mut entities = FrozenEntities::default();
+    let mut views = Vec::with_capacity(snapshots.len());
+    for (_, snapshot) in &snapshots {
+        probe.world_mut().resource_mut::<Timeline>().seek_request = Some(snapshot.at);
+        probe.update();
+        // A snapshot shows none taken at its instant, itself included.
+        let later: Vec<Entity> = snapshots
+            .iter()
+            .filter(|(_, other)| other.at >= snapshot.at)
+            .map(|(entity, _)| *entity)
+            .collect();
+        // A layer no author can name, which only the snapshot's view shows.
+        let layer = Arc::from(format!("\u{1}snapshot {}", snapshot.key.as_raw()));
+        if let Some(view) = freeze_camera_view(
+            probe.world_mut(),
+            snapshot.screen,
+            &later,
+            layer,
+            &mut entities,
+        ) {
+            views.push((snapshot.key, view));
+        }
+    }
+    world.insert_resource(FrozenViews::new(views));
 }
 
 /// Resolve the scene's text theme and fonts, ensure the preview cameras, and
@@ -308,7 +384,19 @@ fn replay_incremental_for(
         .into_iter()
         .map(|segment| (segment.id.raw(), segment.notes))
         .collect();
+    // A reload freezes the snapshots of the scene it shows; a measurement
+    // only reads sizes.
+    let snapshots =
+        (goal == ReplayGoal::Reload).then(|| canvas.has_camera_snapshots().then(|| canvas.clone()));
     let kind = replay_revision(world, canvas, allow_reuse, clear_scene, goal);
+    match snapshots {
+        Some(_) if matches!(kind, ReplayKind::Unchanged { .. }) => {}
+        Some(Some(canvas)) => freeze_camera_snapshots(world, &canvas),
+        Some(None) => {
+            world.remove_resource::<gaanim_renderer::pipeline::FrozenViews>();
+        }
+        None => {}
+    }
     refresh_segment_notes(world, notes);
     if let Some(canvas) = inspected {
         let ids = world
@@ -362,7 +450,7 @@ fn replay_revision(
     let previous = world.remove_resource::<RetainedReplay>();
     let Some(fingerprints) = scene_fingerprints(world, &canvas) else {
         clear_scene(world);
-        replay_canvas_into(world, canvas);
+        compile_canvas_into(world, &canvas);
         timings.phase("full compile");
         timings.report(ReplayKind::Full);
         return ReplayKind::Full;
