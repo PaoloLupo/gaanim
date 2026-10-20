@@ -177,6 +177,11 @@ pub struct Tables {
     pub(crate) lines: Vec<Vec<u8>>,
     lines_by_hash: HashMap<blake3::Hash, u32>,
     lines_by_address: ByAddress<gaanim_scene::LineListData>,
+    /// The last meshes and line lists of the segment being filled, by the
+    /// drawable that drew them and their layout: a mesh that only moves its
+    /// vertices stores their change from them (see [`predict`]).
+    mesh_chains: HashMap<(u32, blake3::Hash), Chain>,
+    line_chains: HashMap<(u32, blake3::Hash), Chain>,
     /// Keys of the drawables the post-process leaves out.
     pub(crate) post_exempt: BTreeSet<u32>,
     /// Whether a frame draws glass, which only a GPU pass composes.
@@ -220,6 +225,8 @@ impl Default for Tables {
             lines: Vec::new(),
             lines_by_hash: HashMap::new(),
             lines_by_address: ByAddress::default(),
+            mesh_chains: HashMap::new(),
+            line_chains: HashMap::new(),
             post_exempt: BTreeSet::new(),
             glass: false,
             starts: vec![TableCounts::default()],
@@ -236,6 +243,187 @@ impl Default for Tables {
 /// may have: half its grid step. A shift this small changes an edge pixel's
 /// coverage by under 2%.
 pub(crate) const GRID_PIXELS: f64 = 1.0 / 32.0;
+
+/// A mesh or line list of the segment being filled, as later ones with its
+/// layout are predicted from it: its index, and its positions and normals
+/// as the bundle decodes them, on the grid they are stored on.
+struct Recent {
+    index: u32,
+    points: Vec<[f32; 3]>,
+    normals: Option<Vec<[f32; 3]>>,
+    grid: Option<i32>,
+}
+
+/// The last two items of one layout in the segment being filled.
+#[derive(Default)]
+struct Chain {
+    last: Option<Recent>,
+    before: Option<Recent>,
+}
+
+/// An item [`predict`] stores: its index, where its table's segment being
+/// filled starts, whether the bundle is packed for the web, and its
+/// positions and normals.
+struct Item<'a> {
+    index: u32,
+    start: u32,
+    web: bool,
+    points: &'a [[f32; 3]],
+    normals: Option<&'a [[f32; 3]]>,
+}
+
+/// Encode a new mesh or line list (`whole` is its lossless whole encoding,
+/// `encode` writes it with a storage) as the smallest of: whole, or the
+/// change of its positions and normals from the last one its drawable drew
+/// with its layout in the segment, or from the line through the last two,
+/// as a surface that bends or a curve that moves from frame to frame
+/// changes little. Packed for the web, its positions go on a grid
+/// ([`grid_bounds`]), the one of the last item when that is fine enough,
+/// so it can be predicted from it. Then it becomes the last of its chain.
+fn predict(
+    chain: &mut Chain,
+    item: Item<'_>,
+    whole: Vec<u8>,
+    mut encode: impl FnMut(codec::Storage<'_>) -> Vec<u8>,
+) -> Vec<u8> {
+    let start = item.start;
+    fn in_segment(recent: Option<&Recent>, start: u32) -> Option<&Recent> {
+        recent.filter(|recent| recent.index >= start)
+    }
+    let grid = match item.web.then(|| grid_bounds(item.points)).flatten() {
+        Some((coarsest, finest)) => Some(
+            in_segment(chain.last.as_ref(), start)
+                .and_then(|last| last.grid)
+                .filter(|grid| (finest..=coarsest).contains(grid))
+                .unwrap_or(coarsest),
+        ),
+        None => None,
+    };
+    let mut bases = Vec::new();
+    for recent in [chain.last.as_ref(), chain.before.as_ref()] {
+        match in_segment(recent, start).filter(|recent| recent.grid == grid) {
+            Some(recent) => bases.push(codec::Base {
+                back: item.index - recent.index,
+                points: &recent.points,
+                normals: recent.normals.as_deref(),
+            }),
+            None => break,
+        }
+    }
+    let mut best = match grid {
+        None => whole,
+        Some(_) => encode(codec::Storage { bases: &[], grid }),
+    };
+    for count in 1..=bases.len() {
+        let bytes = encode(codec::Storage {
+            bases: &bases[..count],
+            grid,
+        });
+        if bytes.len() < best.len() {
+            best = bytes;
+        }
+    }
+    let decoded = |points: &[[f32; 3]], grid: Option<i32>| -> Vec<[f32; 3]> {
+        points
+            .iter()
+            .map(|point| codec::on_grid(*point, grid))
+            .collect()
+    };
+    let recent = Recent {
+        index: item.index,
+        points: decoded(item.points, grid),
+        normals: item
+            .normals
+            .map(|normals| decoded(normals, grid.map(|_| codec::NORMAL_GRID))),
+        grid,
+    };
+    chain.before = chain.last.replace(recent);
+    best
+}
+
+/// The interner a mesh is encoded again with, its texture already in the
+/// images table at `texture`.
+struct Interned {
+    texture: Option<u32>,
+}
+
+impl codec::Interner for Interned {
+    fn path(&mut self, _: &Arc<kurbo::BezPath>) -> u32 {
+        unreachable!("a mesh holds no paths")
+    }
+
+    fn image(&mut self, _: &peniko::ImageData) -> u32 {
+        self.texture.expect("the mesh's texture is in the table")
+    }
+}
+
+/// What a predicted mesh shares with the meshes it is predicted from:
+/// everything but the values of its positions and normals. Its surface
+/// (an imported model's) counts by address.
+fn mesh_layout(mesh: &gaanim_scene::TriangleMeshData) -> blake3::Hash {
+    let mut w = Writer::new();
+    w.len(mesh.vertices.len());
+    w.option(mesh.normals.as_ref(), |w, normals| w.len(normals.len()));
+    codec::write_indices(&mut w, &mesh.indices);
+    w.option(mesh.uvs.as_deref(), codec::write_points);
+    w.option(mesh.color, codec::write_color);
+    w.option(mesh.colors.as_deref(), codec::write_points);
+    w.option(mesh.material.as_ref(), codec::write_material);
+    w.option(mesh.surface.as_ref(), |w, surface| {
+        w.var(Arc::as_ptr(surface) as usize as u64)
+    });
+    blake3::hash(&w.buf)
+}
+
+/// What a predicted line list shares with those it is predicted from:
+/// everything but its points' values.
+fn lines_layout(lines: &gaanim_scene::LineListData) -> blake3::Hash {
+    let mut w = Writer::new();
+    w.len(lines.points.len());
+    w.option(lines.indices.as_deref(), codec::write_indices);
+    w.bool(lines.strip);
+    codec::write_color(&mut w, lines.color);
+    w.option(lines.colors.as_deref(), codec::write_points);
+    blake3::hash(&w.buf)
+}
+
+/// The grids (exponents of powers of two) a bundle packed for the web may
+/// store `points` on, the coarsest and the finest: the coarsest power of
+/// two finer than 2^-17 of their size, so a 4K export in which they fill
+/// the frame moves no point more than 1/64 of a pixel, as paths, and the
+/// finest on which an `f32` still holds every multiple out to the farthest
+/// point.
+/// `None` when a point is not finite: those are stored exactly.
+pub(crate) fn grid_bounds(points: &[[f32; 3]]) -> Option<(i32, i32)> {
+    let mut low = [f32::INFINITY; 3];
+    let mut high = [f32::NEG_INFINITY; 3];
+    let mut reach = 0.0_f32;
+    for point in points {
+        for axis in 0..3 {
+            let value = point[axis];
+            if !value.is_finite() {
+                return None;
+            }
+            low[axis] = low[axis].min(value);
+            high[axis] = high[axis].max(value);
+            reach = reach.max(value.abs());
+        }
+    }
+    let size = (0..3)
+        .map(|axis| high[axis] - low[axis])
+        .filter(|size| size.is_finite())
+        .fold(0.0_f32, f32::max);
+    let exponent = |value: f32, offset: i32, round: fn(f64) -> f64| {
+        if value > 0.0 {
+            (round(f64::from(value).log2()) as i32 + offset).clamp(-149, 127)
+        } else {
+            -149
+        }
+    };
+    let finest = exponent(reach, -23, f64::ceil);
+    let coarsest = exponent(size, -17, f64::floor).max(finest);
+    Some((coarsest, finest))
+}
 
 /// Exponent of the grid (2^exponent units) for `path`, drawn at most at
 /// `pixels_per_unit` output pixels per unit of its own coordinates: the
@@ -421,21 +609,49 @@ impl Tables {
     }
 
     /// Store a mesh once and return its index. A frame that draws it needs
-    /// its segment and that of its texture.
-    pub(crate) fn mesh(&mut self, mesh: &Arc<gaanim_scene::TriangleMeshData>) -> u32 {
+    /// its segment and that of its texture. `track` is the key of the
+    /// drawable that draws it, whose earlier meshes it is predicted from.
+    pub(crate) fn mesh(&mut self, mesh: &Arc<gaanim_scene::TriangleMeshData>, track: u32) -> u32 {
         let index = match self.mesh_by_address.get(mesh) {
             Some(index) => index,
             None => {
-                let (bytes, deps) = self.collect(|tables| {
+                // Stored once by its whole encoding, which also puts its
+                // texture in the images table.
+                let (whole, deps) = self.collect(|tables| {
                     let mut w = Writer::new();
-                    codec::write_mesh(&mut w, tables, mesh);
+                    codec::write_mesh(&mut w, tables, mesh, codec::Storage::default());
                     w.into_bytes()
                 });
-                let hash = blake3::hash(&bytes);
+                let hash = blake3::hash(&whole);
                 let index = match self.mesh_by_hash.get(&hash) {
                     Some(index) => *index,
                     None => {
                         let index = self.meshes.len() as u32;
+                        let start = self.starts.last().expect("a segment is open").meshes;
+                        // Encoded again, its texture is the one already in the table.
+                        let mut texture = Interned {
+                            texture: mesh
+                                .surface
+                                .as_ref()
+                                .and_then(|surface| surface.texture.as_ref())
+                                .map(|texture| self.image_index(&texture.image)),
+                        };
+                        let chain = self
+                            .mesh_chains
+                            .entry((track, mesh_layout(mesh)))
+                            .or_default();
+                        let item = Item {
+                            index,
+                            start,
+                            web: self.grid.is_some(),
+                            points: &mesh.vertices,
+                            normals: mesh.normals.as_deref(),
+                        };
+                        let bytes = predict(chain, item, whole, |storage| {
+                            let mut w = Writer::new();
+                            codec::write_mesh(&mut w, &mut texture, mesh, storage);
+                            w.into_bytes()
+                        });
                         self.pending_bytes += bytes.len();
                         self.meshes.push(bytes);
                         self.mesh_deps.push(deps.into());
@@ -453,19 +669,37 @@ impl Tables {
         index
     }
 
-    /// Store a line list once and return its index.
-    pub(crate) fn line_list(&mut self, lines: &Arc<gaanim_scene::LineListData>) -> u32 {
+    /// Store a line list once and return its index, predicted from the
+    /// earlier ones of the drawable `track`.
+    pub(crate) fn line_list(&mut self, lines: &Arc<gaanim_scene::LineListData>, track: u32) -> u32 {
         let index = match self.lines_by_address.get(lines) {
             Some(index) => index,
             None => {
                 let mut w = Writer::new();
-                codec::write_lines(&mut w, lines);
-                let bytes = w.into_bytes();
-                let hash = blake3::hash(&bytes);
+                codec::write_lines(&mut w, lines, codec::Storage::default());
+                let whole = w.into_bytes();
+                let hash = blake3::hash(&whole);
                 let index = match self.lines_by_hash.get(&hash) {
                     Some(index) => *index,
                     None => {
                         let index = self.lines.len() as u32;
+                        let start = self.starts.last().expect("a segment is open").lines;
+                        let chain = self
+                            .line_chains
+                            .entry((track, lines_layout(lines)))
+                            .or_default();
+                        let item = Item {
+                            index,
+                            start,
+                            web: self.grid.is_some(),
+                            points: &lines.points,
+                            normals: None,
+                        };
+                        let bytes = predict(chain, item, whole, |storage| {
+                            let mut w = Writer::new();
+                            codec::write_lines(&mut w, lines, storage);
+                            w.into_bytes()
+                        });
                         self.pending_bytes += bytes.len();
                         self.lines.push(bytes);
                         self.lines_by_hash.insert(hash, index);
@@ -558,6 +792,9 @@ impl Tables {
         }
         self.starts.push(end);
         self.pending_bytes = 0;
+        // Items predict only from their own segment, which loads whole.
+        self.mesh_chains.clear();
+        self.line_chains.clear();
         Some((w.into_bytes(), counts))
     }
 
@@ -823,11 +1060,13 @@ impl DecodedTables {
         };
         let mut meshes = Vec::new();
         for _ in 0..count(&mut r, expected.meshes, "meshes")? {
-            meshes.push(Arc::new(codec::read_mesh(&mut r, self.version, &image)?));
+            let mesh = codec::read_mesh(&mut r, self.version, &image, &meshes)?;
+            meshes.push(Arc::new(mesh));
         }
         decoded.meshes = meshes;
         for _ in 0..count(&mut r, expected.lines, "line lists")? {
-            decoded.lines.push(Arc::new(codec::read_lines(&mut r)?));
+            let lines = codec::read_lines(&mut r, self.version, &decoded.lines)?;
+            decoded.lines.push(Arc::new(lines));
         }
         if !r.is_empty() {
             return Err(corrupt("a segment has trailing data"));
@@ -980,16 +1219,17 @@ fn write_three_d(
     w.var(0);
     w.len(three_d.sources.len());
     for source in &three_d.sources {
-        w.var(u64::from(keys.key(source.entity)));
+        let key = keys.key(source.entity);
+        w.var(u64::from(key));
         for value in source.transform.to_cols_array() {
             w.f64(value);
         }
         w.f32(source.opacity);
         w.option(source.mesh.as_ref(), |w, mesh| {
-            w.var(u64::from(tables.mesh(mesh)))
+            w.var(u64::from(tables.mesh(mesh, key)))
         });
         w.option(source.lines.as_ref(), |w, lines| {
-            w.var(u64::from(tables.line_list(lines)))
+            w.var(u64::from(tables.line_list(lines, key)))
         });
         w.option(source.material.as_ref(), codec::write_material);
         let composition = &source.composition;
@@ -2700,18 +2940,240 @@ mod tests {
     fn meshes_are_stored_once_by_address_and_by_content() {
         let mut tables = Tables::default();
         let mesh = Arc::new(triangle(vec![0, 1, 2]));
-        let first = tables.mesh(&mesh);
+        let first = tables.mesh(&mesh, 0);
         assert_eq!(tables.mesh_by_address.get(&mesh), Some(first));
-        assert_eq!(tables.mesh(&mesh), first);
+        assert_eq!(tables.mesh(&mesh, 0), first);
         let copy = Arc::new((*mesh).clone());
         assert_eq!(tables.mesh_by_address.get(&copy), None);
-        assert_eq!(tables.mesh(&copy), first);
-        assert_ne!(tables.mesh(&Arc::new(triangle(vec![0, 2, 1]))), first);
+        assert_eq!(tables.mesh(&copy, 0), first);
+        assert_ne!(tables.mesh(&Arc::new(triangle(vec![0, 2, 1])), 0), first);
         assert_eq!(tables.meshes.len(), 2);
         for _ in 0..300 {
-            tables.mesh(&Arc::new(triangle(vec![0, 1, 2])));
+            tables.mesh(&Arc::new(triangle(vec![0, 1, 2])), 0);
         }
         assert!(tables.mesh_by_address.entries.len() < 150);
         assert_eq!(tables.mesh_by_address.get(&mesh), Some(first));
+    }
+
+    /// A sheet of `side` × `side` vertices bent by `angle`, with colors and
+    /// normals that stay, as a parametric surface that changes every frame.
+    fn sheet(side: u32, angle: f32) -> gaanim_scene::TriangleMeshData {
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        for row in 0..side {
+            for column in 0..side {
+                let (u, v) = (column as f32 / 7.0 - 3.0, row as f32 / 7.0 - 2.0);
+                vertices.push([u * angle.cos(), v, u * angle.sin() + 0.3 * v * v]);
+                if row + 1 < side && column + 1 < side {
+                    let at = row * side + column;
+                    indices.extend([at, at + 1, at + side, at + 1, at + side + 1, at + side]);
+                }
+            }
+        }
+        let count = vertices.len();
+        gaanim_scene::TriangleMeshData {
+            normals: Some(vec![[0.0, 0.6, 0.8]; count]),
+            colors: Some(
+                (0..count)
+                    .map(|i| [i as f32 / count as f32, 0.5, 0.2, 1.0])
+                    .collect(),
+            ),
+            vertices,
+            indices,
+            ..triangle(Vec::new())
+        }
+    }
+
+    /// Write `meshes` and `lines` through tables, closing a segment every
+    /// `per` frames, and decode them again; with the segments' size once
+    /// compressed, as the bundle stores them.
+    fn round_trip(
+        mut tables: Tables,
+        meshes: &[gaanim_scene::TriangleMeshData],
+        lines: &[gaanim_scene::LineListData],
+        per: usize,
+    ) -> (
+        Vec<Arc<gaanim_scene::TriangleMeshData>>,
+        Vec<Arc<gaanim_scene::LineListData>>,
+        usize,
+    ) {
+        let mut segments = Vec::new();
+        let (mut mesh_indices, mut line_indices) = (Vec::new(), Vec::new());
+        for frame in 0..meshes.len().max(lines.len()) {
+            if let Some(mesh) = meshes.get(frame) {
+                mesh_indices.push(tables.mesh(&Arc::new(mesh.clone()), 0));
+            }
+            if let Some(list) = lines.get(frame) {
+                line_indices.push(tables.line_list(&Arc::new(list.clone()), 0));
+            }
+            if (frame + 1) % per == 0 {
+                segments.extend(tables.close_segment());
+            }
+        }
+        segments.extend(tables.close_segment());
+        let size = segments
+            .iter()
+            .map(|(bytes, _)| crate::compress(bytes).unwrap().len())
+            .sum();
+        let counts: Vec<_> = segments.iter().map(|(_, counts)| *counts).collect();
+        let mut decoded = DecodedTables::new(&counts, crate::VERSION);
+        for (index, (bytes, _)) in segments.iter().enumerate() {
+            decoded.load(index, bytes).unwrap();
+        }
+        let meshes = mesh_indices
+            .iter()
+            .map(|i| decoded.mesh(*i).unwrap())
+            .collect();
+        let lines = line_indices
+            .iter()
+            .map(|i| decoded.line_list(*i).unwrap())
+            .collect();
+        (meshes, lines, size)
+    }
+
+    /// The compressed size of `meshes` and `lines` each stored whole, in
+    /// one segment.
+    fn stored_whole(
+        meshes: &[gaanim_scene::TriangleMeshData],
+        lines: &[gaanim_scene::LineListData],
+    ) -> usize {
+        let mut w = Writer::new();
+        for mesh in meshes {
+            codec::write_mesh(
+                &mut w,
+                &mut Tables::default(),
+                mesh,
+                codec::Storage::default(),
+            );
+        }
+        for list in lines {
+            codec::write_lines(&mut w, list, codec::Storage::default());
+        }
+        crate::compress(&w.buf).unwrap().len()
+    }
+
+    fn curve(shift: f32) -> gaanim_scene::LineListData {
+        gaanim_scene::LineListData {
+            points: (0..200)
+                .map(|i| {
+                    let t = i as f32 / 20.0;
+                    [t.cos() + shift, t.sin(), 0.1 * t * shift]
+                })
+                .collect(),
+            indices: None,
+            strip: true,
+            color: peniko::Color::new([0.2, 0.4, 0.6, 1.0]),
+            colors: None,
+            revealed: None,
+        }
+    }
+
+    /// A mesh that bends from frame to frame, and a curve that moves, store
+    /// their change from the frames before and decode bit for bit, in
+    /// segments that each decode alone.
+    #[test]
+    fn meshes_and_lines_that_move_store_their_change_and_decode_exactly() {
+        let meshes: Vec<_> = (0..40)
+            .map(|frame| sheet(30, frame as f32 * 0.02))
+            .collect();
+        let lines: Vec<_> = (0..40).map(|frame| curve(frame as f32 * 0.01)).collect();
+        let (decoded, decoded_lines, size) = round_trip(Tables::default(), &meshes, &lines, 16);
+        for (mesh, back) in meshes.iter().zip(&decoded) {
+            assert_eq!(back.vertices, mesh.vertices);
+            assert_eq!(back.normals, mesh.normals);
+            assert_eq!(back.indices, mesh.indices);
+            assert_eq!(back.colors, mesh.colors);
+        }
+        for (list, back) in lines.iter().zip(&decoded_lines) {
+            assert_eq!(back.points, list.points);
+            assert_eq!((back.strip, back.color), (list.strip, list.color));
+        }
+        let whole = stored_whole(&meshes, &lines);
+        assert!(size * 3 < whole * 2, "{size} of {whole}");
+    }
+
+    /// Packed for the web, positions and normals go on a grid within
+    /// 2^-18 of the mesh's size, still predicted from frame to frame.
+    #[test]
+    fn web_bundles_store_meshes_on_a_grid() {
+        let meshes: Vec<_> = (0..40)
+            .map(|frame| sheet(30, frame as f32 * 0.02))
+            .collect();
+        let lines: Vec<_> = (0..40).map(|frame| curve(frame as f32 * 0.01)).collect();
+        let web = Tables {
+            grid: Some(HashMap::new()),
+            ..Tables::default()
+        };
+        let (decoded, decoded_lines, size) = round_trip(web, &meshes, &lines, 16);
+        let (_, _, exact) = round_trip(Tables::default(), &meshes, &lines, 16);
+        assert!(size * 2 < exact, "{size} of {exact}");
+        let close = |a: &[[f32; 3]], b: &[[f32; 3]], tolerance: f32| {
+            a.iter()
+                .zip(b)
+                .all(|(a, b)| (0..3).all(|axis| (a[axis] - b[axis]).abs() <= tolerance))
+        };
+        for (mesh, back) in meshes.iter().zip(&decoded) {
+            // The sheet is about 4.6 units across.
+            assert!(close(&back.vertices, &mesh.vertices, 4.6 / 2_f32.powi(18)));
+            assert_ne!(back.vertices, mesh.vertices);
+            let normals = back.normals.as_ref().unwrap();
+            assert!(close(
+                normals,
+                mesh.normals.as_ref().unwrap(),
+                2_f32.powi(-17)
+            ));
+            assert_eq!(back.colors, mesh.colors);
+        }
+        for (list, back) in lines.iter().zip(&decoded_lines) {
+            assert!(close(&back.points, &list.points, 2.5 / 2_f32.powi(18)));
+        }
+    }
+
+    /// Two drawables whose items share a layout, such as a curve drawn on
+    /// each side of a surface, each predict from their own.
+    #[test]
+    fn each_drawable_predicts_from_its_own_items() {
+        let mut tables = Tables {
+            grid: Some(HashMap::new()),
+            ..Tables::default()
+        };
+        for frame in 0..6 {
+            let shift = frame as f32 * 0.01;
+            tables.line_list(&Arc::new(curve(shift)), 1);
+            tables.line_list(&Arc::new(curve(shift + 3.0)), 2);
+        }
+        for (index, bytes) in tables.lines.iter().enumerate() {
+            // Stored how, on which grid, and how many items back the base is.
+            let mut r = Reader::new(bytes);
+            let predicted = r.u8().unwrap() == 1;
+            r.option(|r| r.ivar()).unwrap();
+            assert_eq!(predicted, index >= 2, "item {index}");
+            if predicted {
+                assert_eq!(r.var().unwrap(), 2, "item {index}");
+            }
+        }
+    }
+
+    /// A mesh whose layout changes, such as a sheet that gains vertices,
+    /// is stored whole and decodes as it was.
+    #[test]
+    fn meshes_of_another_layout_are_stored_whole() {
+        let meshes = [
+            sheet(10, 0.1),
+            sheet(10, 0.2),
+            sheet(12, 0.3),
+            sheet(12, 0.4),
+        ];
+        let mut tables = Tables::default();
+        for mesh in &meshes {
+            tables.mesh(&Arc::new(mesh.clone()), 0);
+        }
+        let stored: Vec<u8> = tables.meshes.iter().map(|bytes| bytes[0]).collect();
+        assert_eq!(stored, [0, 1, 0, 1]);
+        let (decoded, _, _) = round_trip(Tables::default(), &meshes, &[], 64);
+        for (mesh, back) in meshes.iter().zip(&decoded) {
+            assert_eq!(back.vertices, mesh.vertices);
+            assert_eq!(back.indices, mesh.indices);
+        }
     }
 }

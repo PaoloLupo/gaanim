@@ -377,7 +377,7 @@ fn read_grid_path_as(r: &mut Reader<'_>, relative: bool) -> Result<kurbo::BezPat
 // 3D content
 // ---------------------------------------------------------------------------
 
-fn write_points<const N: usize>(w: &mut Writer, points: &[[f32; N]]) {
+pub(crate) fn write_points<const N: usize>(w: &mut Writer, points: &[[f32; N]]) {
     w.len(points.len());
     for point in points {
         for value in point {
@@ -399,7 +399,7 @@ fn read_points<const N: usize>(r: &mut Reader<'_>) -> Result<Vec<[f32; N]>> {
     Ok(points)
 }
 
-fn write_indices(w: &mut Writer, indices: &[u32]) {
+pub(crate) fn write_indices(w: &mut Writer, indices: &[u32]) {
     w.len(indices.len());
     for index in indices {
         w.var(u64::from(*index));
@@ -434,16 +434,218 @@ pub fn read_material(r: &mut Reader<'_>) -> Result<gaanim_scene::Material3D> {
     })
 }
 
+/// How a bundle of format 7 stores a mesh or line list: whole, or as the
+/// change of its positions (and normals) from earlier ones of its segment
+/// with the same layout, whose other fields it shares.
+const STORED_WHOLE: u8 = 0;
+const STORED_PREDICTED: u8 = 1;
+
+/// Exponent of the grid a bundle packed for the web stores normals on:
+/// 2^-16, under a thousandth of a degree.
+pub(crate) const NORMAL_GRID: i32 = -16;
+
+/// An earlier mesh or line list of the segment that one is predicted from:
+/// how many items back it is, and its positions and normals as the bundle
+/// decodes them.
+#[derive(Clone, Copy)]
+pub struct Base<'a> {
+    pub back: u32,
+    pub points: &'a [[f32; 3]],
+    pub normals: Option<&'a [[f32; 3]]>,
+}
+
+/// How [`write_mesh`] and [`write_lines`] store an item: predicted from
+/// `bases` (the last earlier one first, at most two, all with its layout)
+/// or whole without them, and its positions on the grid 2^`grid` in a
+/// bundle packed for the web.
+#[derive(Clone, Copy, Default)]
+pub struct Storage<'a> {
+    pub bases: &'a [Base<'a>],
+    pub grid: Option<i32>,
+}
+
+/// A position or normal coordinate as the integer it is predicted in: its
+/// bits, or on the grid 2^`grid` its multiple of it.
+fn to_integer(value: f32, grid: Option<i32>) -> i64 {
+    match grid {
+        None => i64::from(value.to_bits() as i32),
+        Some(exponent) => (f64::from(value) * 2_f64.powi(-exponent)).round() as i64,
+    }
+}
+
+fn from_integer(value: i64, grid: Option<i32>) -> f32 {
+    match grid {
+        None => f32::from_bits(value as i32 as u32),
+        Some(exponent) => (value as f64 * 2_f64.powi(exponent)) as f32,
+    }
+}
+
+/// `point` as a bundle decodes it from the grid 2^`grid`, or as it is.
+pub(crate) fn on_grid<const N: usize>(point: [f32; N], grid: Option<i32>) -> [f32; N] {
+    match grid {
+        None => point,
+        Some(_) => point.map(|value| from_integer(to_integer(value, grid), grid)),
+    }
+}
+
+/// The prediction of coordinate `axis` of point `index`: the last base's,
+/// the line through the last two, or with no base `before`, the same
+/// coordinate of the point before. Saturating, so corrupt bases cannot
+/// overflow.
+fn predicted<const N: usize>(
+    bases: &[&[[f32; N]]],
+    index: usize,
+    axis: usize,
+    grid: Option<i32>,
+    before: i64,
+) -> i64 {
+    match bases {
+        [] => before,
+        [last] => to_integer(last[index][axis], grid),
+        [last, earlier, ..] => to_integer(last[index][axis], grid)
+            .saturating_mul(2)
+            .saturating_sub(to_integer(earlier[index][axis], grid)),
+    }
+}
+
+/// Write `points` as each coordinate less its prediction: from the bases,
+/// the last one's or the line through the last two; without, the same
+/// coordinate of the point before, on the grid only. Without a grid and a
+/// base, the points are written whole.
+fn write_changes<const N: usize>(
+    w: &mut Writer,
+    points: &[[f32; N]],
+    bases: &[&[[f32; N]]],
+    grid: Option<i32>,
+) {
+    if bases.is_empty() && grid.is_none() {
+        write_points(w, points);
+        return;
+    }
+    if bases.is_empty() {
+        w.len(points.len());
+    }
+    let mut before = [0_i64; N];
+    for (index, point) in points.iter().enumerate() {
+        for axis in 0..N {
+            let value = to_integer(point[axis], grid);
+            w.ivar(value - predicted(bases, index, axis, grid, before[axis]));
+            before[axis] = value;
+        }
+    }
+}
+
+/// Read what [`write_changes`] wrote, `count` points when predicted from
+/// `bases`.
+fn read_changes<const N: usize>(
+    r: &mut Reader<'_>,
+    count: usize,
+    bases: &[&[[f32; N]]],
+    grid: Option<i32>,
+) -> Result<Vec<[f32; N]>> {
+    if bases.is_empty() && grid.is_none() {
+        return read_points(r);
+    }
+    let count = if bases.is_empty() { r.len()? } else { count };
+    let mut points = Vec::with_capacity(count.min(1 << 22));
+    let mut before = [0_i64; N];
+    for index in 0..count {
+        let mut point = [0.0; N];
+        for axis in 0..N {
+            let value = predicted(bases, index, axis, grid, before[axis])
+                .checked_add(r.ivar()?)
+                .ok_or_else(|| corrupt("a predicted coordinate out of range"))?;
+            point[axis] = from_integer(value, grid);
+            before[axis] = value;
+        }
+        points.push(point);
+    }
+    Ok(points)
+}
+
+/// Write how an item is stored and, predicted, which bases it is
+/// predicted from.
+fn write_storage(w: &mut Writer, storage: Storage<'_>) {
+    w.u8(if storage.bases.is_empty() {
+        STORED_WHOLE
+    } else {
+        STORED_PREDICTED
+    });
+    w.option(storage.grid, |w, exponent| w.ivar(i64::from(exponent)));
+    if !storage.bases.is_empty() {
+        for base in storage.bases.iter().take(2) {
+            w.var(u64::from(base.back));
+        }
+        if storage.bases.len() == 1 {
+            w.var(0);
+        }
+    }
+}
+
+/// Read what [`write_storage`] wrote: the grid, and the bases among
+/// `earlier` (the items of the segment decoded so far), the last first.
+fn read_storage<'a, T>(
+    r: &mut Reader<'_>,
+    earlier: &'a [Arc<T>],
+) -> Result<(Option<i32>, Vec<&'a T>)> {
+    let predicted = match r.u8()? {
+        STORED_WHOLE => false,
+        STORED_PREDICTED => true,
+        _ => return Err(corrupt("an item stored in an unknown way")),
+    };
+    let grid = r.option(|r| {
+        i32::try_from(r.ivar()?)
+            .ok()
+            .filter(|exponent| (-149..=127).contains(exponent))
+            .ok_or_else(|| corrupt("a grid exponent out of range"))
+    })?;
+    let mut bases = Vec::new();
+    if predicted {
+        for _ in 0..2 {
+            let back = r.len()?;
+            if back == 0 && !bases.is_empty() {
+                break;
+            }
+            let base = earlier
+                .len()
+                .checked_sub(back)
+                .filter(|_| back > 0)
+                .and_then(|index| earlier.get(index))
+                .ok_or_else(|| corrupt("an item predicted from one its segment does not hold"))?;
+            bases.push(&**base);
+        }
+    }
+    Ok((grid, bases))
+}
+
 /// Encode `mesh`; the texture of an imported model's primitive goes in the
-/// images table.
+/// images table. Predicted, only its positions and normals are written.
 pub fn write_mesh(
     w: &mut Writer,
     tables: &mut impl Interner,
     mesh: &gaanim_scene::TriangleMeshData,
+    storage: Storage<'_>,
 ) {
-    write_points(w, &mesh.vertices);
+    write_storage(w, storage);
+    let normal_grid = storage.grid.map(|_| NORMAL_GRID);
+    if !storage.bases.is_empty() {
+        let points: Vec<_> = storage.bases.iter().map(|base| base.points).collect();
+        write_changes(w, &mesh.vertices, &points, storage.grid);
+        if let Some(normals) = &mesh.normals {
+            let bases: Vec<_> = storage
+                .bases
+                .iter()
+                .map(|base| base.normals.expect("a base with the mesh's layout"))
+                .collect();
+            write_changes(w, normals, &bases, normal_grid);
+        }
+        return;
+    }
+    write_changes(w, &mesh.vertices, &[], storage.grid);
     write_indices(w, &mesh.indices);
-    w.option(mesh.normals.as_deref(), write_points);
+    w.option(mesh.normals.as_deref(), |w, normals| {
+        write_changes(w, normals, &[], normal_grid)
+    });
     w.option(mesh.uvs.as_deref(), write_points);
     w.option(mesh.color, write_color);
     w.option(mesh.colors.as_deref(), write_points);
@@ -454,26 +656,68 @@ pub fn write_mesh(
 }
 
 /// Decode what [`write_mesh`] wrote in a bundle of format `version`, its
-/// texture read from the images table through `image`.
+/// texture read from the images table through `image` and its bases among
+/// `earlier`, the meshes of its segment before it.
 pub fn read_mesh(
     r: &mut Reader<'_>,
     version: u32,
     image: &dyn Fn(u32) -> Result<peniko::ImageData>,
+    earlier: &[Arc<gaanim_scene::TriangleMeshData>],
 ) -> Result<gaanim_scene::TriangleMeshData> {
+    // Format 7 added imported models' surfaces and predicted meshes.
+    if version < 7 {
+        return Ok(gaanim_scene::TriangleMeshData {
+            vertices: read_points(r)?,
+            indices: read_indices(r)?,
+            normals: r.option(read_points)?,
+            uvs: r.option(read_points)?,
+            color: r.option(read_color)?,
+            colors: r.option(read_points)?,
+            material: r.option(read_material)?,
+            surface: None,
+        });
+    }
+    let (grid, bases) = read_storage(r, earlier)?;
+    let normal_grid = grid.map(|_| NORMAL_GRID);
+    if let Some(base) = bases.first() {
+        if bases.iter().any(|other| {
+            other.vertices.len() != base.vertices.len()
+                || other.normals.as_ref().map(Vec::len) != base.normals.as_ref().map(Vec::len)
+        }) {
+            return Err(corrupt("a mesh predicted from meshes of other layouts"));
+        }
+        let points: Vec<_> = bases.iter().map(|base| &base.vertices[..]).collect();
+        let vertices = read_changes(r, base.vertices.len(), &points, grid)?;
+        let normals = match &base.normals {
+            Some(normals) => {
+                let bases: Vec<_> = bases
+                    .iter()
+                    .filter_map(|base| base.normals.as_deref())
+                    .collect();
+                Some(read_changes(r, normals.len(), &bases, normal_grid)?)
+            }
+            None => None,
+        };
+        return Ok(gaanim_scene::TriangleMeshData {
+            vertices,
+            indices: base.indices.clone(),
+            normals,
+            uvs: base.uvs.clone(),
+            color: base.color,
+            colors: base.colors.clone(),
+            material: base.material,
+            surface: base.surface.clone(),
+        });
+    }
     Ok(gaanim_scene::TriangleMeshData {
-        vertices: read_points(r)?,
+        vertices: read_changes(r, 0, &[], grid)?,
         indices: read_indices(r)?,
-        normals: r.option(read_points)?,
+        normals: r.option(|r| read_changes(r, 0, &[], normal_grid))?,
         uvs: r.option(read_points)?,
         color: r.option(read_color)?,
         colors: r.option(read_points)?,
         material: r.option(read_material)?,
-        // Format 7 added imported models' surfaces.
-        surface: if version >= 7 {
-            r.option(|r| read_surface(r, image))?.map(Arc::new)
-        } else {
-            None
-        },
+        surface: r.option(|r| read_surface(r, image))?.map(Arc::new),
     })
 }
 
@@ -565,17 +809,51 @@ fn read_surface(
     })
 }
 
-pub fn write_lines(w: &mut Writer, lines: &gaanim_scene::LineListData) {
-    write_points(w, &lines.points);
+/// Encode a line list. Predicted (format 7), only its points are written.
+pub fn write_lines(w: &mut Writer, lines: &gaanim_scene::LineListData, storage: Storage<'_>) {
+    write_storage(w, storage);
+    let bases: Vec<_> = storage.bases.iter().map(|base| base.points).collect();
+    write_changes(w, &lines.points, &bases, storage.grid);
+    if !bases.is_empty() {
+        return;
+    }
     w.option(lines.indices.as_deref(), write_indices);
     w.bool(lines.strip);
     write_color(w, lines.color);
     w.option(lines.colors.as_deref(), write_points);
 }
 
-pub fn read_lines(r: &mut Reader<'_>) -> Result<gaanim_scene::LineListData> {
+/// Decode what [`write_lines`] wrote in a bundle of format `version`, its
+/// bases among `earlier`, the line lists of its segment before it.
+pub fn read_lines(
+    r: &mut Reader<'_>,
+    version: u32,
+    earlier: &[Arc<gaanim_scene::LineListData>],
+) -> Result<gaanim_scene::LineListData> {
+    let (grid, bases) = if version >= 7 {
+        read_storage(r, earlier)?
+    } else {
+        (None, Vec::new())
+    };
+    if let Some(base) = bases.first() {
+        if bases
+            .iter()
+            .any(|other| other.points.len() != base.points.len())
+        {
+            return Err(corrupt("a line list predicted from ones of other layouts"));
+        }
+        let points: Vec<_> = bases.iter().map(|base| &base.points[..]).collect();
+        return Ok(gaanim_scene::LineListData {
+            points: read_changes(r, base.points.len(), &points, grid)?,
+            indices: base.indices.clone(),
+            strip: base.strip,
+            color: base.color,
+            colors: base.colors.clone(),
+            revealed: None,
+        });
+    }
     Ok(gaanim_scene::LineListData {
-        points: read_points(r)?,
+        points: read_changes(r, 0, &[], grid)?,
         indices: r.option(read_indices)?,
         strip: r.bool()?,
         color: read_color(r)?,
