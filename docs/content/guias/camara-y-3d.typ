@@ -275,6 +275,68 @@ scene.play([
 scene.render()
 ```
 
+=== De pantalla completa a un lado
+
+Una demostración que ocupa toda la imagen puede pasar a una pantalla en una
+esquina sin detenerse, como en los vídeos de 3Blue1Brown. Pon la
+demostración en una capa y haz que la muestre una pantalla tan grande como el
+fotograma, que la ve entera; después mueve y escala la pantalla.
+
+```python
+# output: preview.webp
+import math
+from gaanim import GOLD, WHITE, Easing, Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+circulo = scene.geometry.circle(3.2).no_fill().stroke(WHITE, 0.03)
+brazo = scene.geometry.line(0, 0, 3.2, 0).stroke(GOLD, 0.06)
+giro = scene.geometry.group(brazo, origin=(0, 0))
+scene.geometry.group(circulo, giro).view_layer("demo")
+
+publico = [
+    scene.character(name=nombre, size=2.4).move_to(x, -2.9).hidden()
+    for nombre, x in (("ana", -5.5), ("beto", -2.5), ("caro", 0.5))
+]
+marco = scene.geometry.rect(16, 9).no_fill().no_stroke()
+pantalla = scene.geometry.rect(16, 9).no_fill().stroke(WHITE, 0)
+pantalla.camera_view(marco, layers=["demo"], exclude=publico)
+
+scene.launch(giro.animate.rotate_by(math.tau * 2).duration(8).easing(Easing.LINEAR))
+scene.wait(1)
+scene.play([
+    pantalla.animate.scale_to(0.5).move_to(-3.6, 2.0),
+    pantalla.animate.stroke_width(0.04),
+    *(persona.animate.fade_in() for persona in publico),
+], duration=1.5)
+scene.wait(4)
+scene.render()
+```
+
+- La capa saca la demostración de la cámara principal; sin ella, al encogerse
+  la pantalla quedaría detrás una copia a tamaño completo.
+- Mientras la pantalla cubre el fotograma se ve igual que la escena, porque
+  su marco tiene el mismo tamaño. El aumento es la pantalla entre el marco:
+  al escalarla a la mitad, la vista se encoge con ella y lo que sobresale
+  queda recortado.
+- `scene.launch` arranca la animación sin mover el cursor, así que sigue
+  durante los `play` siguientes. Lo mismo vale para los updaters y para las
+  animaciones de la demostración que pongas en esos `play`.
+- La vista ve todo el fotograma, también lo que pongas encima, como los
+  personajes: `exclude=` los deja fuera. Solo admite objetos que ya existen,
+  así que créalos antes, ocultos con `.hidden()`.
+- La pantalla empieza sin borde, con un trazo de ancho 0, y
+  `animate.stroke_width` lo hace aparecer al encogerse. Para volver a
+  pantalla completa, anímala de vuelta, por ejemplo con
+  `animate.place(scene.layout.frame, fit="contain")`.
+- Escalar un grupo con la demostración, como se hace en Manim, también
+  funciona, pero no recorta, y lo que depende de coordenadas del mundo
+  (updaters como `orbit`, seguimientos o contenido 3D) no se mueve con el
+  grupo.
+
+El ejemplo `camera/picture_in_picture` lleva la pantalla a varias zonas del
+layout con `animate.place(zona, fit="contain")` y la devuelve a pantalla
+completa.
+
 === Instantáneas
 
 `vista.snapshot()` congela lo que muestra la vista en el cursor: devuelve una

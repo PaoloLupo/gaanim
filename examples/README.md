@@ -215,6 +215,7 @@ Pan, zoom and rotation, camera paths, insets and parallax.
 | [Camera bindings](camera/camera_bindings.py) | Bind the camera's center, zoom and rotation to drawables and reactive values, blended by influence and switched on and off. |
 | [Camera insets](camera/camera_insets.py) | Insets that enlarge a detail in a screen joined to it: placement, shapes, view moves, following and fixed screens. |
 | [Camera views](camera/camera_views.py) | Shapes that show what a second camera sees: frames, fit modes, lenses, X-ray view layers and snapshots. |
+| [Picture in picture](camera/picture_in_picture.py) | A demo that starts full screen and moves into a screen at the side while it keeps playing: view layers, a frame-sized camera view and placing the screen in layout zones. |
 | [Parallax](camera/parallax.py) | Parallax layers at several depths under pan, zoom and rotation, and depth of field with a rack focus. |
 
 ## 3D

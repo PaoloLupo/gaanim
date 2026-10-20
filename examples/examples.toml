@@ -501,6 +501,10 @@ path = "camera/camera_views.py"
 description = "Shapes that show what a second camera sees: frames, fit modes, lenses, X-ray view layers and snapshots."
 
 [[example]]
+path = "camera/picture_in_picture.py"
+description = "A demo that starts full screen and moves into a screen at the side while it keeps playing: view layers, a frame-sized camera view and placing the screen in layout zones."
+
+[[example]]
 path = "camera/parallax.py"
 description = "Parallax layers at several depths under pan, zoom and rotation, and depth of field with a rack focus."
 
