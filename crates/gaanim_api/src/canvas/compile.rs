@@ -3982,6 +3982,7 @@ impl SceneModel {
                                     camera_position,
                                     camera_zoom,
                                     camera_target,
+                                    camera_rotation,
                                 );
                                 builder.wait(anim.delay.max(0.0) + anim.duration.max(0.0));
                             } else {
@@ -4129,6 +4130,7 @@ impl SceneModel {
                         camera_position,
                         camera_zoom,
                         camera_target,
+                        camera_rotation,
                     );
                     // A launch schedules like a play but leaves the cursor
                     // where it was, so what follows runs over it.
@@ -8740,18 +8742,43 @@ impl SceneModel {
         camera_position: &mut DVec3,
         camera_zoom: &mut f64,
         camera_target: &mut DVec3,
+        camera_rotation: &mut gaanim_core::glam::DQuat,
     ) {
         use crate::builder::PendingCameraHoldKind;
         use gaanim_timeline::clip::{ClipPayload, PropertyLensSpec};
         for pending in std::mem::take(&mut builder.pending_camera_holds) {
             let mut target_held = None;
             let (position, zoom) = match &pending.kind {
+                PendingCameraHoldKind::LookAt { eye, target, up } => {
+                    let (Some((eye, _)), Some((target, _))) = (
+                        Self::authored_endpoint_in_3d(builder, id_map, eye),
+                        Self::authored_endpoint_in_3d(builder, id_map, target),
+                    ) else {
+                        continue;
+                    };
+                    if gaanim_math::Camera::validate_look_at(eye, target, *up).is_err() {
+                        continue;
+                    }
+                    if let Some(clip) = builder.timeline.clips.get_mut(pending.clip)
+                        && let ClipPayload::Animation(animation) = &mut clip.payload
+                        && let PropertyLensSpec::CameraLookAtSource { hold, .. } =
+                            &mut animation.lens
+                    {
+                        *hold = Some((eye, target));
+                    }
+                    let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(eye, target, *up);
+                    *camera_position = eye;
+                    *camera_target = target;
+                    *camera_rotation = view.inverse().to_scale_rotation_translation().1;
+                    continue;
+                }
                 PendingCameraHoldKind::Follow {
                     target,
                     from,
                     offset,
                     offset_space,
                     lag,
+                    turn,
                     duration,
                     posed,
                 } => {
@@ -8776,6 +8803,27 @@ impl SceneModel {
                         1.0 - (-duration / lag).exp()
                     };
                     match posed {
+                        // Turned where it stands: its eye stays, its target
+                        // reaches the point.
+                        Some(posed) if *turn => {
+                            let target = posed.target.lerp(point + offset, reached);
+                            if gaanim_math::Camera::validate_look_at(
+                                posed.position,
+                                target,
+                                posed.up,
+                            )
+                            .is_ok()
+                            {
+                                let view = gaanim_core::glam::dcamera::rh::view::look_at_mat4(
+                                    posed.position,
+                                    target,
+                                    posed.up,
+                                );
+                                *camera_rotation = view.inverse().to_scale_rotation_translation().1;
+                            }
+                            target_held = Some(target);
+                            (posed.position, None)
+                        }
                         Some(posed) => {
                             let moved = posed.moved_toward(point + offset, reached);
                             target_held = Some(moved.target);
@@ -9270,6 +9318,7 @@ impl SceneModel {
                 offset,
                 offset_space,
                 lag,
+                turn,
             } => {
                 let clip = Self::add_camera_clip(
                     builder,
@@ -9281,6 +9330,7 @@ impl SceneModel {
                         offset: *offset,
                         offset_space: *offset_space,
                         lag: *lag,
+                        turn: *turn,
                         hold: None,
                         hold_target: None,
                     },
@@ -9305,6 +9355,7 @@ impl SceneModel {
                             offset: *offset,
                             offset_space: *offset_space,
                             lag: *lag,
+                            turn: *turn,
                             duration: anim.duration.max(0.0),
                             posed: (!posed.is_flat()).then(|| Box::new(posed)),
                         },
@@ -9355,7 +9406,11 @@ impl SceneModel {
                 *camera_rotation = to_rotation;
             }
             AnimationType::CameraLookAtSource { eye, target, up } => {
-                let compiled_eye = compile_tracking_endpoint(eye, id_map, &builder.states);
+                // Without an eye the camera turns where it stands.
+                let eye = eye
+                    .clone()
+                    .unwrap_or(CanvasEndpoint::Static(*camera_position));
+                let compiled_eye = compile_tracking_endpoint(&eye, id_map, &builder.states);
                 let compiled_target = compile_tracking_endpoint(target, id_map, &builder.states);
                 let from_position =
                     if (*camera_position - *camera_target).length_squared() <= f64::EPSILON {
@@ -9366,7 +9421,7 @@ impl SceneModel {
                     } else {
                         *camera_position
                     };
-                Self::add_camera_lens(
+                let clip = Self::add_camera_clip(
                     builder,
                     start,
                     anim,
@@ -9377,6 +9432,7 @@ impl SceneModel {
                         eye: compiled_eye.clone(),
                         target: compiled_target.clone(),
                         up: *up,
+                        hold: None,
                     },
                 );
                 *camera_up = *up;
@@ -9389,6 +9445,19 @@ impl SceneModel {
                     *camera_position = eye;
                     *camera_target = target;
                     *camera_rotation = view.inverse().to_scale_rotation_translation().1;
+                } else {
+                    // Moving endpoints: the camera ends aimed where they
+                    // end as authored, and later moves start from there.
+                    builder
+                        .pending_camera_holds
+                        .push(crate::builder::PendingCameraHold {
+                            clip,
+                            kind: crate::builder::PendingCameraHoldKind::LookAt {
+                                eye: Box::new(eye),
+                                target: Box::new(target.clone()),
+                                up: *up,
+                            },
+                        });
                 }
             }
             AnimationType::CameraOrbit {
@@ -14413,7 +14482,7 @@ mod tests {
         let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
         canvas.play(vec![perspective]);
         let aim = canvas.camera_look_at_endpoints(
-            CanvasEndpoint::Static(DVec3::new(12.0, -7.0, 3.0)),
+            Some(CanvasEndpoint::Static(DVec3::new(12.0, -7.0, 3.0))),
             CanvasEndpoint::Static(DVec3::new(0.0, 0.0, 0.5)),
             DVec3::Z,
             0.5,
@@ -14576,6 +14645,136 @@ mod tests {
         let orbited = camera(&world);
         assert!((orbited.target - held).length() < 1e-9);
         assert!(((orbited.position - held).length() - eye.length()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_camera_that_looks_at_a_moving_drawable_turns_with_it_and_keeps_where_it_ends() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let cube = canvas
+            .cube(0.5, gaanim_scene::Material3D::default())
+            .unwrap();
+        let eye = DVec3::new(0.0, 4.0, 10.0);
+        let look = canvas.camera_look_at((0.0, 4.0, 10.0), (0.0, 0.0, 0.0), None, 0.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 100.0, 0.0);
+        canvas.play(vec![look, perspective]);
+        // From where it stands, the camera turns to the cube as it moves.
+        let aim = canvas
+            .camera_look_at_endpoints(None, CanvasEndpoint::Entity(cube.id), DVec3::Y, 2.0)
+            .rate_func(gaanim_math::RateFunc::Linear);
+        canvas.play(vec![
+            aim,
+            cube.animate()
+                .move_to_3d(4.0, 1.0, -2.0)
+                .duration(2.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        let orbit = canvas.camera_orbit(0.5, 0.0, 1.0);
+        canvas.play(vec![orbit]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        // What the camera phase shows: the timeline's pose with the rig's.
+        let rig_at = |world: &mut World, timeline: &mut Timeline, time: f64| {
+            timeline.seek(world, time);
+            world.insert_resource(std::mem::replace(timeline, Timeline::new()));
+            gaanim_timeline::camera_binding_system(world);
+            gaanim_timeline::camera_rig_system(world);
+            *timeline = world.remove_resource::<Timeline>().unwrap();
+            world.resource::<gaanim_math::CameraRigCamera>().0
+        };
+        let end = DVec3::new(4.0, 1.0, -2.0);
+        // Halfway the camera has turned halfway toward where the cube is
+        // then, without moving.
+        let middle = rig_at(&mut world, &mut timeline, 1.0);
+        assert!(
+            (middle.position - eye).length() < 1e-9,
+            "{:?}",
+            middle.position
+        );
+        assert!(
+            (middle.target - end * 0.25).length() < 1e-9,
+            "{:?}",
+            middle.target
+        );
+        let center = middle.world_to_screen(end * 0.25) - DVec2::new(640.0, 360.0);
+        assert!(center.length() < 1e-6, "{center:?}");
+        // Once it ends it keeps looking where the cube ended, and the orbit
+        // after it turns around that point.
+        let ended = rig_at(&mut world, &mut timeline, 2.0);
+        assert!((ended.target - end).length() < 1e-9, "{:?}", ended.target);
+        assert!((ended.position - eye).length() < 1e-9);
+        let orbited = rig_at(&mut world, &mut timeline, 3.0);
+        assert!(
+            (orbited.target - end).length() < 1e-9,
+            "{:?}",
+            orbited.target
+        );
+        assert!(((orbited.position - end).length() - (eye - end).length()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_camera_that_follows_turning_keeps_its_eye_and_the_target_centered() {
+        use gaanim_animation::FollowOffsetSpace;
+        let mut canvas = SceneModel::new(1280, 720);
+        let cube = canvas
+            .cube(0.5, gaanim_scene::Material3D::default())
+            .unwrap();
+        let eye = DVec3::new(0.0, 4.0, 10.0);
+        let look = canvas.camera_look_at((0.0, 4.0, 10.0), (0.0, 0.0, 0.0), None, 0.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 100.0, 0.0);
+        canvas.play(vec![look, perspective]);
+        let follow = canvas.camera_follow_endpoint_with(
+            CanvasEndpoint::Entity(cube.id),
+            DVec3::ZERO,
+            FollowOffsetSpace::World,
+            0.0,
+            true,
+            2.0,
+        );
+        canvas.play(vec![
+            follow,
+            cube.animate()
+                .move_to_3d(4.0, 1.0, -2.0)
+                .duration(2.0)
+                .rate_func(gaanim_math::RateFunc::Linear),
+        ]);
+        let orbit = canvas.camera_orbit(0.5, 0.0, 1.0);
+        canvas.play(vec![orbit]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+        let rig_at = |world: &mut World, timeline: &mut Timeline, time: f64| {
+            timeline.seek(world, time);
+            world.insert_resource(std::mem::replace(timeline, Timeline::new()));
+            gaanim_timeline::camera_binding_system(world);
+            gaanim_timeline::camera_rig_system(world);
+            *timeline = world.remove_resource::<Timeline>().unwrap();
+            world.resource::<gaanim_math::CameraRigCamera>().0
+        };
+        let end = DVec3::new(4.0, 1.0, -2.0);
+        // Halfway the eye has not moved and the cube is at the center.
+        let middle = rig_at(&mut world, &mut timeline, 1.0);
+        assert!(
+            (middle.position - eye).length() < 1e-9,
+            "{:?}",
+            middle.position
+        );
+        let center = middle.world_to_screen(end * 0.5) - DVec2::new(640.0, 360.0);
+        assert!(center.length() < 1e-6, "{center:?}");
+        // Once it ends the camera keeps looking where the cube ended, and
+        // the orbit after it turns around that point.
+        let ended = rig_at(&mut world, &mut timeline, 2.0);
+        assert!(
+            (ended.position - eye).length() < 1e-9,
+            "{:?}",
+            ended.position
+        );
+        assert!((ended.target - end).length() < 1e-9, "{:?}", ended.target);
+        let center = ended.world_to_screen(end) - DVec2::new(640.0, 360.0);
+        assert!(center.length() < 1e-6, "{center:?}");
+        let orbited = rig_at(&mut world, &mut timeline, 3.0);
+        assert!(
+            (orbited.target - end).length() < 1e-9,
+            "{:?}",
+            orbited.target
+        );
+        assert!(((orbited.position - end).length() - (eye - end).length()).abs() < 1e-9);
     }
 
     #[test]
@@ -14785,7 +14984,7 @@ mod tests {
         let perspective = canvas.camera_perspective(0.7, 0.1, 1000.0, 0.0);
         canvas.play(vec![perspective]);
         let look_at = canvas.camera_look_at_endpoints(
-            CanvasEndpoint::Static(eye),
+            Some(CanvasEndpoint::Static(eye)),
             CanvasEndpoint::Static(target),
             DVec3::Y,
             0.0,
@@ -14823,7 +15022,7 @@ mod tests {
         let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
         canvas.play(vec![perspective]);
         let look_at = canvas.camera_look_at_endpoints(
-            CanvasEndpoint::Static(eye),
+            Some(CanvasEndpoint::Static(eye)),
             CanvasEndpoint::Static(target),
             DVec3::Y,
             0.5,
@@ -14886,7 +15085,7 @@ mod tests {
         let perspective = canvas.camera_perspective(0.8, 0.1, 1000.0, 0.0);
         canvas.play(vec![perspective]);
         let look_at = canvas.camera_look_at_endpoints(
-            CanvasEndpoint::Static(eye),
+            Some(CanvasEndpoint::Static(eye)),
             CanvasEndpoint::Static(target),
             DVec3::Y,
             0.0,

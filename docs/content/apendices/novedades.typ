@@ -93,9 +93,19 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
   ojo en x e y (y lo llevaba a la profundidad del objeto), así que el objeto
   se salía del centro. `offset` admite `(x, y, z)`. Ver
   #link("/guias/camara-y-3d/#seguir-un-objeto-en-3d")[Cámara y 3D].
+- `follow(objeto, turn=True)` deja la cámara donde está y la gira para
+  mantener el objeto en el centro, como sobre un trípode, con `lag` y al
+  terminar.
+- `scene.camera.animate.look_at(eye, target)` con objetos que se mueven los
+  lee donde se dibujan en cada fotograma y termina apuntando a donde acaban:
+  antes los leía antes de que se movieran en ese fotograma, seguía
+  siguiéndolos después de terminar y un `orbit` posterior giraba alrededor
+  del objetivo anterior. `eye=None` gira la cámara sin moverla.
 - Las vistas de cámara e insets que siguen a contenido 3D (`view.follow`,
   `scene.camera.inset(..., follow=True)`) ponen su marco donde la cámara
-  principal lo dibuja, con sus conectores.
+  principal lo dibuja, con sus conectores, también con un `offset` en
+  profundidad, `(x, y, z)`. Si el objeto pasa detrás de la cámara, el marco
+  sale del cuadro por su lado en lugar de saltar al lado contrario.
 - La cámara 2D se desplaza como antes, y las escenas sin cámara 3D no
   hacen ningún cálculo nuevo.
 - El ejemplo `3d/camera_3d` suma los segmentos `follow` e `inset`.

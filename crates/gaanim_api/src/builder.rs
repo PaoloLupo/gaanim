@@ -1062,8 +1062,17 @@ pub(crate) enum PendingCameraHoldKind {
         offset: DVec3,
         offset_space: gaanim_animation::FollowOffsetSpace,
         lag: f64,
+        /// Turned toward the endpoint where it stands, not moved.
+        turn: bool,
         duration: f64,
         posed: Option<Box<gaanim_math::Camera>>,
+    },
+    /// `look_at` with endpoints: the eye and target where they are drawn as
+    /// authored, the camera's up `up`.
+    LookAt {
+        eye: Box<crate::canvas::CanvasEndpoint>,
+        target: Box<crate::canvas::CanvasEndpoint>,
+        up: DVec3,
     },
     /// `pan_to(endpoint)`: where the endpoint is drawn as authored.
     Pan {

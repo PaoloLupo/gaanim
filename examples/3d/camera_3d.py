@@ -136,6 +136,17 @@ scene.play(
 )
 scene.wait(HOLD)
 
+# With turn=True the camera stays where it is and turns to keep the sphere
+# at the center, as on a tripod, and ends looking at it.
+ball = shot("turn", "scene.camera.animate.follow(ball, turn=True)")
+scene.play(
+    [
+        scene.camera.animate.follow(ball, turn=True).duration(2 * MOVE),
+        ball.animate.move_to_3d(3, 1.5, -2).duration(2 * MOVE),
+    ]
+)
+scene.wait(HOLD)
+
 # Before and after each move. Segments last one move, except the states
 # segment (two moves) and the bind_3d segment (two moves of the sphere).
 one = 2 * HOLD + MOVE
@@ -154,6 +165,9 @@ seeks += [inset + HOLD + MOVE / 2, inset + HOLD + 2 * MOVE, inset + HOLD + 3 * M
 # The snapshot as it leaves the inset, and both once the sphere has moved.
 snapshot = inset + 2 * HOLD + 3 * MOVE
 seeks += [snapshot + HOLD + MOVE + MOVE / 2, snapshot + HOLD + 3 * MOVE + HOLD / 2]
+# Halfway through the turning follow and once it holds.
+turn = snapshot + 2 * HOLD + 3 * MOVE
+seeks += [turn + HOLD + MOVE, turn + HOLD + 2 * MOVE + HOLD / 2]
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, sorted(seeks))
 else:

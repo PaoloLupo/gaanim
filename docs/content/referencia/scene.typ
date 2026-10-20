@@ -1422,9 +1422,10 @@ scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
     (name: "offset", type: "tuple[float, float] | tuple[float, float, float]", default: "(0.0, 0.0)", desc: [Desplazamiento de la vista respecto del objetivo; con tres valores, también en profundidad.]),
     (name: "offset_space", type: "\"world\" | \"local\"", default: "\"world\"", desc: [`"local"` gira el desplazamiento con el objetivo.]),
     (name: "lag", type: "float", default: "0.0", desc: [Retraso de seguimiento en segundos, determinista.]),
+    (name: "turn", type: "bool", default: "False", desc: [Una cámara en ángulo o en perspectiva se queda donde está y gira para mantener el objetivo en el centro, como sobre un trípode.]),
   ),
   returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`. Al terminar, la cámara se queda en la pose que alcanzó, calculada con la posición del objetivo al final del `play`, y el siguiente movimiento parte de ahí.]),
-  desc: [La cámara 2D se desplaza. Una cámara que mira la escena en ángulo o en perspectiva (tras `look_at`, `orbit` o `perspective`) sigue al objetivo en 3D: se mueve con él sin girar, a la misma distancia sobre su línea de visión, y su objetivo se mueve también, así que un `orbit` posterior gira alrededor del punto seguido.],
+  desc: [La cámara 2D se desplaza, también con `turn`. Una cámara que mira la escena en ángulo o en perspectiva (tras `look_at`, `orbit` o `perspective`) sigue al objetivo en 3D: se mueve con él sin girar, a la misma distancia sobre su línea de visión, y su objetivo se mueve también, así que un `orbit` posterior gira alrededor del punto seguido. Con `turn=True` no se mueve: gira hacia el objetivo y termina mirándolo.],
 )[
 ```python
 >>>from gaanim import *
@@ -1910,7 +1911,7 @@ scene.camera.perspective(fov_y=0.785, near=0.1, far=1000.0)
   name: "Camera.look_at",
   kind: "method",
   params: (
-    (name: "eye", type: "Endpoint", default: none, desc: [Posición de la cámara en el mundo.]),
+    (name: "eye", type: "Endpoint | None", default: none, desc: [Posición de la cámara en el mundo; `None` la deja donde está.]),
     (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira.]),
     (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
   ),
@@ -1951,12 +1952,12 @@ rig.disable()
   name: "CameraAnimation.look_at",
   kind: "method",
   params: (
-    (name: "eye", type: "Endpoint", default: none, desc: [Posición final de la cámara.]),
+    (name: "eye", type: "Endpoint | None", default: none, desc: [Posición final de la cámara; `None` la deja donde está y solo gira.]),
     (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira al final.]),
     (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
   ),
   returns: (type: "Anim", desc: [Movimiento animado de la cámara.]),
-  none,
+  desc: [Un objeto o un punto de anclaje como `eye` o `target` se lee donde se dibuja en cada fotograma: la cámara gira hacia un objetivo que se mueve mientras dura la animación y termina apuntando a donde acaba, según lo escrito en el script, así que un `orbit` posterior parte de ahí. Para mantener en el centro todo el tiempo un objetivo que se mueve, usa `follow(objetivo, turn=True)`.],
 )
 
 #api-entry(

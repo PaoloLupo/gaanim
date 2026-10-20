@@ -2643,14 +2643,16 @@ impl PyCameraAnimation {
         Ok(PyCanvasAnim { inner })
     }
 
-    /// Keep the camera centered on a drawable while it moves, in 2D or 3D.
-    #[pyo3(signature = (target, *, offset=FollowOffset::ZERO, offset_space="world", lag=0.0))]
+    /// Keep the camera centered on a drawable while it moves, in 2D or 3D:
+    /// moving with it, or with `turn` turning toward it where it stands.
+    #[pyo3(signature = (target, *, offset=FollowOffset::ZERO, offset_space="world", lag=0.0, turn=false))]
     fn follow(
         &self,
         target: Bound<'_, PyAny>,
         offset: FollowOffset,
         offset_space: &str,
         lag: f64,
+        turn: bool,
     ) -> PyResult<PyCanvasAnim> {
         crate::custom::ensure_authoring_allowed()?;
         if !offset.0.is_finite() {
@@ -2676,7 +2678,14 @@ impl PyCameraAnimation {
             .inner
             .lock()
             .expect("scene canvas poisoned")
-            .camera_follow_endpoint(resolve_endpoint(&target)?, offset.0, offset_space, lag, 1.0);
+            .camera_follow_endpoint_with(
+                resolve_endpoint(&target)?,
+                offset.0,
+                offset_space,
+                lag,
+                turn,
+                1.0,
+            );
         Ok(PyCanvasAnim { inner })
     }
 
@@ -2737,11 +2746,12 @@ impl PyCameraAnimation {
         Ok(PyCanvasAnim { inner })
     }
 
-    /// Set camera to look at target from eye (3D perspective).
+    /// Set camera to look at target from eye (3D perspective), or from
+    /// where it stands when `eye` is `None`.
     #[pyo3(signature = (eye, target, up=None))]
     fn look_at(
         &self,
-        eye: Bound<'_, PyAny>,
+        eye: Option<Bound<'_, PyAny>>,
         target: Bound<'_, PyAny>,
         up: Option<(f64, f64, f64)>,
     ) -> PyResult<PyCanvasAnim> {
@@ -2758,8 +2768,8 @@ impl PyCameraAnimation {
                 "up must be non-zero",
             ));
         }
-        if let (Ok(eye_tuple), Ok(target_tuple)) = (
-            eye.extract::<(f64, f64, f64)>(),
+        if let (Some(Ok(eye_tuple)), Ok(target_tuple)) = (
+            eye.as_ref().map(|eye| eye.extract::<(f64, f64, f64)>()),
             target.extract::<(f64, f64, f64)>(),
         ) {
             let eye_vec = gaanim_core::glam::DVec3::new(eye_tuple.0, eye_tuple.1, eye_tuple.2);
@@ -2773,7 +2783,7 @@ impl PyCameraAnimation {
             .lock()
             .expect("scene canvas poisoned")
             .camera_look_at_endpoints(
-                resolve_endpoint_3d(&eye)?,
+                eye.as_ref().map(resolve_endpoint_3d).transpose()?,
                 resolve_endpoint_3d(&target)?,
                 up_vec,
                 1.0,
@@ -3057,7 +3067,7 @@ impl PyCamera {
     #[pyo3(signature = (eye, target, up=None))]
     fn look_at(
         &self,
-        eye: Bound<'_, PyAny>,
+        eye: Option<Bound<'_, PyAny>>,
         target: Bound<'_, PyAny>,
         up: Option<(f64, f64, f64)>,
     ) -> PyResult<Self> {

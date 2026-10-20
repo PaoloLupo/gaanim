@@ -6311,7 +6311,7 @@ class Camera:
         """
         ...
     def rotate_to(self, angle: ScalarSource) -> Camera: ...
-    def look_at(self, eye: Endpoint, target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
+    def look_at(self, eye: Optional[Endpoint], target: Endpoint, up: Optional[tuple[float, float, float]] = None) -> Camera: ...
     def perspective(self, fov_y: float, near: float = 0.1, far: float = 1000.0) -> Camera: ...
     def depth_of_field(
         self,
@@ -6718,6 +6718,7 @@ class CameraAnimation:
         offset: tuple[float, float] | tuple[float, float, float] = (0.0, 0.0),
         offset_space: Literal["world", "local"] = "world",
         lag: float = 0.0,
+        turn: bool = False,
     ) -> Anim:
         """Keep ``target`` plus ``offset`` in the center while the animation plays.
 
@@ -6733,9 +6734,13 @@ class CameraAnimation:
         target without turning, keeping its distance to it along its line of
         sight, and its target moves too, so a later ``orbit`` circles the
         followed point. ``offset`` may then give a depth, ``(x, y, z)``.
+        With ``turn=True`` it stays where it is instead and turns to keep
+        the target at the center, as a camera on a tripod does, and ends
+        looking at it; the 2D camera pans either way.
 
         Example:
             scene.play([car.animate.move_to(6, 2), scene.camera.animate.follow(car, lag=0.2)])
+            scene.play([ball.animate.move_to_3d(3, 1, -2), scene.camera.animate.follow(ball, turn=True)])
         """
         ...
     def shake(
@@ -6820,14 +6825,22 @@ class CameraAnimation:
         ...
     def look_at(
         self,
-        eye: Endpoint,
+        eye: Optional[Endpoint],
         target: Endpoint,
         up: Optional[tuple[float, float, float]] = None,
     ) -> Anim:
         """Aim the camera from ``eye`` toward ``target``.
 
+        A drawable or anchor point as ``eye`` or ``target`` is read where it
+        is drawn on every frame, so the camera turns toward a target that
+        moves while the animation plays, and ends aimed where it ends as
+        authored: later camera moves, an ``orbit`` for instance, start there.
+        To keep a moving target at the center all along, use
+        ``follow(target, turn=True)``.
+
         Args:
-            eye: Camera position in world coordinates.
+            eye: Camera position in world coordinates; ``None`` keeps the
+                camera where it stands, so it only turns.
             target: World-space point to look at.
             up: World-up direction. Defaults to ``(0, 1, 0)``.
         Configure timing afterward on the returned ``Anim``.

@@ -505,6 +505,19 @@ scene.play([
 scene.render()
 ```
 
+Con `follow(bola, turn=True)` la cámara se queda donde está y gira para
+mantener la esfera en el centro, como sobre un trípode, y termina mirándola.
+`animate.look_at(None, bola)` también gira la cámara sin moverla, pero como
+una transición: llega a mirar la esfera al final de la animación, aunque se
+haya movido, y la siguiente animación de cámara parte de ahí.
+
+```python
+scene.play([
+    bola.animate.move_to_3d(3, 1.5, -2).duration(3.0),
+    scene.camera.animate.follow(bola, turn=True).duration(3.0),
+])
+```
+
 Las cámaras secundarias siguen al objeto donde la cámara principal lo
 dibuja: con `scene.camera.inset(bola, follow=True)` o `vista.follow(bola)`,
 el marco se queda sobre la esfera y la pantalla la muestra ampliada.

@@ -5673,12 +5673,28 @@ impl SceneModel {
         lag: f64,
         duration: f64,
     ) -> Anim {
+        self.camera_follow_endpoint_with(target, offset, offset_space, lag, false, duration)
+    }
+
+    /// [`Self::camera_follow_endpoint`]; with `turn`, a camera that looks at
+    /// the scene from an angle or through a perspective stays where it is
+    /// and turns to keep the endpoint at the center, as on a tripod.
+    pub fn camera_follow_endpoint_with(
+        &mut self,
+        target: CanvasEndpoint,
+        offset: DVec3,
+        offset_space: gaanim_animation::FollowOffsetSpace,
+        lag: f64,
+        turn: bool,
+        duration: f64,
+    ) -> Anim {
         self.camera_anim(
             AnimationType::CameraFollowEndpoint {
                 target,
                 offset,
                 offset_space,
                 lag,
+                turn,
             },
             duration,
         )
@@ -5727,10 +5743,12 @@ impl SceneModel {
         self.camera_anim(AnimationType::CameraLookAt { eye, target, up }, duration)
     }
 
-    /// Aim the camera using native reactive endpoints.
+    /// Aim the camera using native reactive endpoints: from `eye`, or from
+    /// where the camera stands when it is `None`, toward `target`. Moving
+    /// endpoints are followed while the animation plays.
     pub fn camera_look_at_endpoints(
         &mut self,
-        eye: CanvasEndpoint,
+        eye: Option<CanvasEndpoint>,
         target: CanvasEndpoint,
         up: DVec3,
         duration: f64,
