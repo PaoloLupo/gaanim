@@ -12,6 +12,9 @@ pub mod prelude;
 pub mod systems;
 pub mod transition_frame;
 
+pub use axis_box::{
+    AxisBoxLayout, AxisBoxPart, AxisBoxRole, AxisBoxShown, AxisBoxSides, PlaneEdge,
+};
 /// Bevy's handlers of ECS errors no system or command handled, such as
 /// [`ecs_error::warn`], for an app to choose with `App::set_error_handler`.
 pub use bevy::ecs::error as ecs_error;
@@ -27,7 +30,6 @@ pub use components::{
     RenderLayer, RenderOrder, SegmentContent, ShapeDeform, StepRate, StrokeBrush, TextBaseline,
     TriangleMeshData, Visible, WorldBounds, ZLayer, stepped,
 };
-pub use axis_box::{AxisBoxLayout, AxisBoxPart, AxisBoxRole, AxisBoxShown, AxisBoxSides, PlaneEdge};
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
 pub use occlusion::Occlusion;
 
