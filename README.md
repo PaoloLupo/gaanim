@@ -203,8 +203,9 @@ en los bordes, conservando el color de cada material. Consulta
 El 3D se rasteriza en la GPU, con búfer de profundidad, antialiasing MSAA y luz
 calculada en cada píxel, y Vello compone el resultado debajo del contenido 2D:
 el coste de un fotograma depende de cuántos objetos 3D hay, no de cuántos
-triángulos tienen. No hay sombras. Gaanim ya no importa glTF:
-`scene.media.gltf(...)` lanza `NotImplementedError`.
+triángulos tienen. No hay sombras. `scene.media.gltf(...)` importa modelos
+glTF con sus materiales, texturas, esqueletos y animaciones, que se deforman en
+la GPU; consulta `examples/3d/models_3d.py`.
 
 Las escenas 2D y 3D abren con el modo interactivo desactivado. Cuando el usuario
 pulsa `I` o usa **Interactivo: ON/OFF** en Overlays (`O`), la cámara interactiva
@@ -402,7 +403,7 @@ linker = "rust-lld.exe"
 Si el comando no está disponible, instala `cargo-binutils` y el componente
 `llvm-tools-preview` de Rust. Las funciones de Bevy se activan en los crates
 que las necesitan: matemáticas usa la base ECS, escena añade assets y render
-(sin PBR ni glTF), el renderizador añade el pipeline 2D donde compone el
+(sin PBR ni el glTF de Bevy), el renderizador añade el pipeline 2D donde compone el
 lienzo de Vello, multimedia añade audio y los hosts añaden ventanas nativas.
 Bevy UI, sprites, texto y gizmos no se compilan.
 

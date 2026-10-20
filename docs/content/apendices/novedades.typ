@@ -11,6 +11,81 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.16.0
+
+Sin publicar. Vuelven los modelos glTF: `scene.media.gltf(...)` importa sus
+mallas, materiales, texturas, esqueletos y animaciones, que dibuja el pase 3D
+en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
+
+== Modelos glTF
+
+- `scene.media.gltf(path, scene=None)` importa un modelo glTF 2.0 (`.gltf` o
+  `.glb`): un grupo por nodo en su pose de reposo y una malla iluminada por
+  primitiva, en las unidades del archivo y con su origen en el de la escena.
+  `part(nombre)` alcanza un nodo y `parts()` los lista. Ver
+  #link("/referencia/medios/#modelos-gltf")[Medios].
+- Los materiales llegan con su color, rugosidad, metalicidad, emisión
+  (también `KHR_materials_emissive_strength`) y textura de color; los
+  materiales sin luz (`KHR_materials_unlit`) no reciben luz, los de dos caras
+  muestran las dos y los modos alfa recortan (`MASK`, también en las
+  sombras) o mezclan (`BLEND`) como en el archivo.
+- `animations()` lista las animaciones con su duración, y
+  `animation(nombre, duration=, speed=, loop=, reverse=, transition=,
+  start_time=)` reproduce una en `scene.play`, con interpolación `LINEAR`,
+  `STEP` o `CUBICSPLINE`. Con `transition`, funde desde la animación anterior,
+  que sigue corriendo, como al pasar de andar a correr. La pose sale del
+  tiempo: los saltos y `--diff` son exactos.
+- Con `scene.launch(modelo.animation("Walk", loop=True), duration=6)` el
+  modelo camina mientras se programan otras animaciones, como desplazarlo, y
+  su siguiente animación toma el relevo de la que sigue en marcha. Las
+  animaciones glTF escriben solo la pose de los nodos, así que se combinan con
+  los efectos y las propiedades enlazadas del modelo.
+- Los esqueletos se deforman en la GPU: cada malla se sube una vez y en cada
+  fotograma solo cambian las matrices de sus huesos, que el sombreador de
+  vértices mezcla. Un personaje animado se dibuja tan rápido como una malla
+  quieta, y su paquete guarda unas decenas de matrices por fotograma.
+- Las escenas sin modelos no pagan nada: las pipelines de modelos se crean
+  la primera vez que un fotograma dibuja uno, y las demás mallas se dibujan
+  como antes.
+- Nuevo ejemplo, `3d/models_3d`, con el lobo del Cube World Kit de
+  Quaternius, de dominio público (CC0).
+
+== Glow en 3D
+
+- `glow(...)` y `animate.glow(...)` brillan también en el contenido 3D:
+  primitivas, superficies, líneas 3D y modelos glTF, en el objeto o en el
+  grupo que lo contiene. El pase 3D dibuja la silueta visible del objeto con
+  el color del halo, contra la profundidad de la escena, la difumina como el
+  glow 2D y la pone alrededor del objeto, en la vista previa, las
+  exportaciones, los paquetes `.gaanim` y los dos reproductores web. Antes se
+  ignoraba sin aviso.
+- Solo los fotogramas con un halo construyen sus pipelines: las escenas 3D
+  sin glow se ven y tardan lo mismo que antes.
+- `blur` y `shadow` todavía no se aplican al contenido 3D.
+
+== Paquetes más ligeros
+
+- Una malla o línea 3D que cambia de un fotograma a otro guarda, sin perder
+  nada, el cambio de sus vértices respecto de los dos fotogramas anteriores
+  del mismo objeto, y comparte con ellos los índices, colores y materiales.
+  El paquete de `gallery/catenoid_helicoid` baja de 62 a 30 MB, y
+  `gaanim check` sigue confirmando cada fotograma.
+- `gaanim pack --web` guarda además esos vértices en una rejilla de
+  2#super[−17] del tamaño de la malla, que en un vídeo 4K no mueve ninguno
+  más de 1/64 de píxel: el mismo paquete queda en 12 MB.
+
+== Al actualizar
+
+- Los paquetes `.gaanim` pasan al formato 7, que guarda las texturas, los
+  modos alfa y los esqueletos, y las mallas que cambian como su cambio. Gaanim sigue abriendo los de formato 5 y 6;
+  un Gaanim anterior no abre los nuevos, así que actualiza los reproductores
+  que los publican.
+- `Drawable.animations()` devuelve un diccionario de nombres y duraciones en
+  lugar de una tupla vacía, y `animation(...)` ya no lanza
+  `NotImplementedError`.
+- `part(id)` en un objeto sin partes dice que solo los SVG y los modelos glTF
+  las tienen.
+
 = 0.15.0
 
 Publicada el 19 de octubre de 2026. Los gráficos declarativos dibujan

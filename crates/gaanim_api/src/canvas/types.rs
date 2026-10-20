@@ -1023,6 +1023,11 @@ pub struct ObjectSpec {
     /// A group's origin in scene coordinates: its pivot, and the point that
     /// `move_to` places. `None` uses the center of its members' box.
     pub(crate) group_origin: Option<DVec3>,
+    /// The rest pose of a node of an imported glTF model, in its parent's
+    /// space.
+    pub(crate) gltf_pose: Option<gaanim_objects::gltf::NodePose>,
+    /// The nodes and skins of an imported glTF model, on its root.
+    pub(crate) gltf_rig: Option<crate::gltf::GltfRigSpec>,
     pub fill_level_cursor: Option<f64>,
     /// Typed state after queued typewriter/scramble motions, keyed by the
     /// Text spec version it applies to.
@@ -1207,6 +1212,8 @@ impl ObjectSpec {
             layout_ops: Vec::new(),
             reactive_readout_layout: None,
             group_origin: None,
+            gltf_pose: None,
+            gltf_rig: None,
             fill_level_cursor: None,
             repeat_count: None,
             typed_text: None,

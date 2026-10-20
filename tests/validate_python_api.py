@@ -1579,6 +1579,44 @@ def validate_primitives_3d_contract(module: object) -> list[str]:
     return failures
 
 
+def validate_gltf_contract(module: object) -> list[str]:
+    """Import the sample wolf: its nodes, animations, plays and errors."""
+    failures: list[str] = []
+    assets = ROOT / "docs/fixtures/assets"
+    scene = module.Scene(frame=(16, 9))
+    wolf = scene.media.gltf(str(assets / "Wolf.glb"))
+    animations = wolf.animations()
+    expected = ["Death", "Headbutt", "Idle", "Idle_Eating", "Jump_Loop", "Jump_Start", "Run", "Walk"]
+    if list(animations) != expected:
+        failures.append(f"the wolf's animations are {animations!r}")
+    elif not all(duration > 0 for duration in animations.values()):
+        failures.append("a glTF animation has no duration")
+    if not {"Wolf", "Head", "Tail"} <= set(wolf.parts()):
+        failures.append(f"the wolf's nodes are not among its parts: {wolf.parts()!r}")
+    if not isinstance(wolf.animation("Walk", loop=True, transition=0.4), module.Anim):
+        failures.append("Drawable.animation does not return an Anim")
+    if scene.geometry.cube(1.0).animations():
+        failures.append("a drawable that is not a glTF model has animations")
+    copy = wolf.copy()
+    if list(copy.animations()) != list(animations) or copy.parts() != wolf.parts():
+        failures.append("Drawable.copy lost the glTF nodes or animations")
+    for expected_error, operation in (
+        (KeyError, lambda: wolf.animation("Swim")),
+        (TypeError, lambda: scene.geometry.cube(1.0).animation("Walk")),
+        (ValueError, lambda: wolf.animation("Walk", speed=0)),
+        (ValueError, lambda: wolf.animation("Walk", transition=-1)),
+        (ValueError, lambda: wolf.animation("Walk", duration=float("nan"))),
+        (FileNotFoundError, lambda: scene.media.gltf(str(assets / "missing.glb"))),
+        (ValueError, lambda: scene.media.gltf(str(assets / "Wolf.glb"), scene=3)),
+        (ValueError, lambda: scene.media.gltf(str(assets / "Wolf.glb"), scene="Nowhere")),
+        (RuntimeError, lambda: scene.media.gltf(str(assets / "robot.svg"))),
+        (TypeError, lambda: scene.media.gltf(str(assets / "Wolf.glb"), scene=1.5)),
+    ):
+        if not raises_error(expected_error, operation):
+            failures.append(f"a glTF call did not raise {expected_error.__name__}")
+    return failures
+
+
 def validate_in_3d_contract(module: object) -> list[str]:
     """Exercise 2D drawables placed in the 3D world."""
     failures: list[str] = []
@@ -3636,6 +3674,7 @@ def main() -> int:
     missing.extend(validate_rough_notation_contract(module))
     missing.extend(validate_extrude_contract(module))
     missing.extend(validate_primitives_3d_contract(module))
+    missing.extend(validate_gltf_contract(module))
     missing.extend(validate_in_3d_contract(module))
     missing.extend(validate_deg_contract(module))
     missing.extend(validate_matrix_contract(module))

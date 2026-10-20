@@ -1097,6 +1097,9 @@ pub struct ArcSliceMark {
 }
 
 pub struct SceneBuilder<'w, 's, 'a> {
+    /// The last animation played on each imported glTF model, which the
+    /// next one fades from.
+    pub(crate) gltf_plays: HashMap<ObjectId, crate::gltf::ClipPlay>,
     pub(crate) property_source_cursors: HashMap<
         (ObjectId, gaanim_animation::PropertyChannel),
         std::sync::Arc<gaanim_animation::PropertySourceLens>,
@@ -1254,6 +1257,7 @@ pub(crate) struct LayoutRest {
 /// borrows so an incremental replay can resume compilation at a segment.
 #[derive(Clone)]
 pub(crate) struct SceneBuilderState {
+    gltf_plays: HashMap<ObjectId, crate::gltf::ClipPlay>,
     property_source_cursors: HashMap<
         (ObjectId, gaanim_animation::PropertyChannel),
         std::sync::Arc<gaanim_animation::PropertySourceLens>,
@@ -1313,6 +1317,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
     /// Copy every piece of compilation state that is not an ECS or timeline borrow.
     pub(crate) fn state(&self) -> SceneBuilderState {
         SceneBuilderState {
+            gltf_plays: self.gltf_plays.clone(),
             property_source_cursors: self.property_source_cursors.clone(),
             property_bindings: self.property_bindings.clone(),
             id_counter: self.id_counter,
@@ -1367,6 +1372,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         state: SceneBuilderState,
     ) -> Self {
         let SceneBuilderState {
+            gltf_plays,
             property_source_cursors,
             property_bindings,
             id_counter,
@@ -1410,6 +1416,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             authored_follows,
         } = state;
         Self {
+            gltf_plays,
             property_source_cursors,
             property_bindings,
             commands,
@@ -1913,6 +1920,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             camera_view_rests: HashMap::new(),
             text_motion: Default::default(),
             property_bindings: HashMap::new(),
+            gltf_plays: HashMap::new(),
             property_source_cursors: HashMap::new(),
             persistent_objects: HashSet::new(),
             membership_managed_objects: HashSet::new(),
@@ -2192,6 +2200,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             AnimationType::Spotlight { .. } => "Spotlight",
             AnimationType::TextAnimator(_) => "TextAnimator",
             AnimationType::TextPathOffset { .. } => "TextPathOffset",
+            AnimationType::GltfAnimation { .. } => "GltfAnimation",
         }
     }
 
@@ -3931,6 +3940,10 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             self.play_wiggle_internal(anim, track);
             return;
         }
+        if matches!(anim.anim_type, AnimationType::GltfAnimation { .. }) {
+            self.play_gltf_animation_internal(anim, track);
+            return;
+        }
         if matches!(anim.anim_type, AnimationType::EffectsTo { .. }) {
             self.play_effects_internal(anim, track);
             return;
@@ -4335,7 +4348,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             | AnimationType::Broadcast { .. }
             | AnimationType::Spotlight { .. }
             | AnimationType::TextAnimator(_)
-            | AnimationType::TextPathOffset { .. } => {
+            | AnimationType::TextPathOffset { .. }
+            | AnimationType::GltfAnimation { .. } => {
                 unreachable!("Expansion is dispatched in the early branch above")
             }
             AnimationType::SignalFloat { to } => {
@@ -6962,6 +6976,49 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         }
     }
 
+    /// A play of an imported model's animation: one clip on the model's
+    /// root, which fades from the model's previous play.
+    fn play_gltf_animation_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
+        let AnimationType::GltfAnimation {
+            animations,
+            clip,
+            speed,
+            looped,
+            reverse,
+            transition,
+            start_time,
+        } = anim.anim_type
+        else {
+            return;
+        };
+        let start = self.current_time + anim.delay;
+        let play = crate::gltf::ClipPlay {
+            clip,
+            start,
+            duration: anim.duration,
+            speed,
+            looped,
+            reverse,
+            offset: start_time,
+        };
+        let previous = self.gltf_plays.insert(anim.target, play.clone());
+        let lens = crate::gltf::GltfClipLens::new(animations, play, previous, transition);
+        self.timeline.add_clip(
+            parent_track,
+            start,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                    std::sync::Arc::new(lens),
+                )),
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+    }
+
     fn play_dash_offset_internal(&mut self, anim: AnimationBuilder, parent_track: TrackId) {
         let AnimationType::DashOffsetTo { to } = anim.anim_type else {
             return;
@@ -8747,6 +8804,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             color,
             colors,
             material: None,
+            surface: None,
         })
     }
 

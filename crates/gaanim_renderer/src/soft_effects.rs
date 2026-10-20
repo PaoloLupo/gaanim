@@ -349,7 +349,7 @@ pub(crate) fn draw_blur_image(
 const GLOW_LINE: f64 = 0.15;
 /// A glow's radius in sigmas of its blur: the vector glow's rings fade as
 /// the cube of the distance left to the radius, about this Gaussian.
-const GLOW_SIGMAS: f64 = 4.0;
+pub(crate) const GLOW_SIGMAS: f64 = 4.0;
 
 /// The glow around `path` as an image, or `None` for a glow that draws
 /// nothing (or a zoomed coordinate view's pen, which keeps the vector
@@ -394,7 +394,7 @@ pub(crate) fn draw_glow_image(
 /// Optical depth of a glow on its outline: the vector glow stacks rings
 /// whose alphas, from the outline out to the radius, compose to
 /// `1 - exp(-depth)`.
-fn glow_depth(intensity: f32) -> f64 {
+pub(crate) fn glow_depth(intensity: f32) -> f64 {
     const SAMPLES: u32 = 256;
     let intensity = f64::from(intensity);
     (0..SAMPLES)

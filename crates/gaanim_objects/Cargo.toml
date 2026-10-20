@@ -19,6 +19,18 @@ peniko = { workspace = true }
 thiserror = { workspace = true }
 i_overlay = { workspace = true }
 usvg = { version = "0.47", default-features = false, features = ["text", "system-fonts"] }
+# glTF 2.0 models: the document, its buffers and accessors. Images are
+# decoded here with `image`, and only those a material shows.
+gltf = { version = "1.4", default-features = false, features = [
+    "import",
+    "names",
+    "utils",
+    "KHR_materials_unlit",
+    "KHR_materials_emissive_strength",
+] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+base64 = "0.22"
+tracing = { workspace = true }
 
 # Serialization: the character catalog is JSON; the `serde` feature also
 # derives it for the other types.

@@ -348,6 +348,47 @@ scene.render()
 Los ejes son los de la escena 2D: `x` hacia la derecha, `y` hacia arriba y `z`
 hacia el espectador.
 
+== Modelos glTF
+
+`scene.media.gltf("modelo.glb")` importa un modelo hecho en Blender u otra
+herramienta: un grupo por nodo, en su pose de reposo, con una malla iluminada
+por primitiva, su material y su textura de color. El modelo llega en las
+unidades del archivo y con su origen en el de la escena; escálalo con
+`scale_to` y coloca su origen con `move_to`. `part(nombre)` alcanza un nodo,
+que se anima como cualquier objeto.
+
+`animations()` lista las animaciones del archivo con su duración, y
+`animation(nombre, ...)` reproduce una en `scene.play`: una vez, en bucle
+(`loop=True`), más lenta o más rápida (`speed`), al revés (`reverse`) o desde
+un instante (`start_time`). Con `transition=0.4`, la animación funde en 0,4 s
+desde la anterior, que sigue corriendo mientras tanto, como al pasar de andar
+a correr. Con `scene.launch`, una animación sigue en marcha mientras se
+programan otras: el modelo camina mientras se desplaza, y su siguiente
+animación toma el relevo, como en los mezcladores de animación de los motores
+de juegos.
+
+```python
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9), background="#0f172a")
+wolf = scene.media.gltf("assets/Wolf.glb").scale_to(1.7).move_to(0, -2)
+wolf.rotate_to_3d(0.2, 0.9, 0)
+
+scene.play(wolf.animation("Idle_Eating"))
+scene.play(wolf.animation("Walk", loop=True, transition=0.4), duration=3)
+scene.play(wolf.animation("Run", loop=True, transition=0.3), duration=2)
+scene.render()
+```
+
+Los esqueletos se deforman en la GPU: la malla se sube una vez y en cada
+fotograma solo cambian las matrices de sus huesos, así que un personaje
+animado cuesta lo mismo que una malla quieta y un paquete `.gaanim` guarda
+unas decenas de matrices por fotograma. La pose sale del tiempo, de modo que
+los saltos de la línea de tiempo y las capturas de `--diff` son exactos. Las
+escenas sin modelos no cargan nada de esto: sus mallas se dibujan como
+siempre. El detalle de lo que se importa está en
+#link("/referencia/medios/#modelos-gltf")[Medios].
+
 == Vectores, recorridos y texto en el espacio
 
 Algunas formas se definen mejor con puntos del mundo que con medidas:
@@ -447,7 +488,10 @@ hay, no de cuántos triángulos tienen: superficies densas y curvas de miles de
 puntos se reproducen a la frecuencia de la pantalla.
 
 - Las primitivas con `Material3D` reciben luz, calculada en cada píxel, y
-  ocultan sus caras traseras. Las mallas sin material (superficies, gráficos
+  ocultan sus caras traseras, salvo las de un material glTF de dos caras.
+  Las mallas de un modelo glTF multiplican su color por su textura, recortan
+  o mezclan su alfa como dice su material y se deforman con los huesos de su
+  esqueleto en el sombreador de vértices. Las mallas sin material (superficies, gráficos
   3D) no reciben luz y se ven por las dos caras; las líneas 3D tampoco
   reciben luz y tienen extremos redondeados. `surface` y
   `parametric_surface` aceptan `material=` y entonces se iluminan por las
@@ -458,6 +502,11 @@ puntos se reproducen a la frecuencia de la pantalla.
   En una línea con trazo, `animate.stroke_width(...)` anima el ancho.
 - Las superficies y las líneas que se cruzan se cortan donde corresponde, y
   la geometría que atraviesa el plano cercano de la cámara se recorta.
+- `glow(...)` y `animate.glow(...)` dan un halo a mallas, superficies, líneas
+  y modelos glTF. El pase 3D dibuja la silueta visible del objeto con el
+  color del halo, la difumina como el glow 2D y la pone a su alrededor,
+  debajo del objeto; las partes que otro objeto tapa no brillan. Solo los
+  fotogramas con un halo construyen sus pipelines.
 - Un objeto translúcido (con opacidad, o con colores con transparencia) se
   ve como una capa: su superficie más cercana se mezcla una vez sobre lo que
   tiene detrás. Los objetos translúcidos se dibujan de atrás hacia delante.

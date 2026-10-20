@@ -3,6 +3,7 @@ pub use media_frame::{ImageFit, MediaFrame};
 pub mod axis_box;
 pub mod components;
 pub mod hierarchy;
+pub mod model;
 pub mod occlusion;
 // Bevy's log and asset subsystems are left out of the playground's Pyodide
 // extension (wasm32-unknown-emscripten); see Cargo.toml.
@@ -31,6 +32,9 @@ pub use components::{
     TriangleMeshData, Visible, WorldBounds, ZLayer, stepped,
 };
 pub use hierarchy::{GaanimScenePlugin, SceneSet};
+pub use model::{
+    AlphaMode, MeshSkin, MeshSurface, MeshTexture, SkinPalette, SkinWeights, TextureWrap,
+};
 pub use occlusion::Occlusion;
 
 /// Bevy's render visibility, which scene entities carry for Bevy's own

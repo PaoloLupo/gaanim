@@ -322,6 +322,9 @@ pub enum PlayItem {
     Lottie(LottieClip),
 }
 
+/// The channel a glTF model's animations write: the pose of its nodes.
+const GLTF_POSE: &str = "gltf_pose";
+
 /// A channel a launched animation drives until `end`.
 #[derive(Clone, Debug)]
 pub(crate) struct LaunchedChannel {
@@ -1660,6 +1663,7 @@ fn animation_channels(anim: &Anim) -> Vec<String> {
         CameraShake { .. } => "camera_shake",
         CameraDepthOfField { .. } => "camera_depth_of_field",
         TextPathOffset { .. } => "text_path",
+        GltfAnimation { .. } => GLTF_POSE,
         _ => "effect",
     };
     vec![channel.to_owned()]
@@ -4871,6 +4875,97 @@ impl SceneModel {
         })
     }
 
+    /// Import scene `selector` of the glTF 2.0 model at `path` (`.gltf` or
+    /// `.glb`): a group per node in its rest pose, holding a lit mesh per
+    /// primitive, under a root at the model's origin. The root's parts are
+    /// its nodes by name, and its animations play with
+    /// [`DrawableHandle::animation`].
+    pub fn gltf(
+        &mut self,
+        path: impl AsRef<Path>,
+        selector: &gaanim_objects::gltf::GltfSceneSelector,
+    ) -> Result<DrawableHandle, gaanim_objects::gltf::GltfLoadError> {
+        let model = gaanim_objects::gltf::GltfModel::load(self.resolve_asset_path(path), selector)?;
+        let count = model.nodes.len();
+        let skin_data: Vec<(Arc<[usize]>, Arc<[gaanim_core::glam::DMat4]>)> = model
+            .skins
+            .iter()
+            .map(|skin| {
+                (
+                    Arc::from(skin.joints.as_slice()),
+                    Arc::from(skin.inverse_bind.as_slice()),
+                )
+            })
+            .collect();
+        let mut handles: Vec<Option<DrawableHandle>> = vec![None; count];
+        let mut node_ids = vec![None; count];
+        let mut parts = HashMap::new();
+        let mut skins = Vec::new();
+        // Children come after their parents: they are built first.
+        for index in (0..count).rev() {
+            let node = &model.nodes[index];
+            let mut members = Vec::new();
+            for primitive in &node.primitives {
+                let handle =
+                    self.spawn_registered(SpawnKind::Primitive3D(primitive.mesh.clone()), false);
+                let skinned = primitive
+                    .mesh
+                    .surface
+                    .as_ref()
+                    .is_some_and(|surface| surface.skin.is_some());
+                if skinned && let Some((joints, bind)) = node.skin.map(|skin| &skin_data[skin]) {
+                    skins.push((handle.id, Arc::clone(joints), Arc::clone(bind)));
+                }
+                members.push(handle);
+            }
+            members.extend(
+                node.children
+                    .iter()
+                    .filter_map(|child| handles[*child].take()),
+            );
+            let handle = self
+                .spawn_registered(
+                    SpawnKind::GroupNoCenter(members.iter().map(|member| member.id).collect()),
+                    false,
+                )
+                .with_style_targets(
+                    members
+                        .iter()
+                        .flat_map(|member| member.inherited_style_targets())
+                        .collect(),
+                );
+            handle
+                .spec
+                .lock()
+                .expect("glTF node spec poisoned")
+                .gltf_pose = Some(node.rest);
+            parts.insert(node.name.clone(), handle.clone());
+            node_ids[index] = Some(handle.id);
+            handles[index] = Some(handle);
+        }
+        let roots: Vec<DrawableHandle> = model
+            .roots
+            .iter()
+            .filter_map(|root| handles[*root].take())
+            .collect();
+        let root = self
+            .spawn(SpawnKind::GroupNoCenter(
+                roots.iter().map(|root| root.id).collect(),
+            ))
+            .with_style_targets(
+                roots
+                    .iter()
+                    .flat_map(|root| root.inherited_style_targets())
+                    .collect(),
+            );
+        root.spec.lock().expect("glTF model spec poisoned").gltf_rig =
+            Some(crate::gltf::GltfRigSpec {
+                nodes: node_ids.into_iter().flatten().collect(),
+                skins,
+            });
+        Ok(root.with_gltf(parts, Arc::clone(&model.animations)))
+    }
+
     /// Load an SVG as an animatable group of resolved vector paths.
     ///
     /// Shapes, paths, solid or gradient paints, outlined text, transforms,
@@ -6143,6 +6238,10 @@ impl SceneModel {
             .launched_channels
             .iter()
             .filter(|launched| launched.end > cursor + OVERLAP_EPSILON)
+            // A model's new animation takes over from the one it runs.
+            .filter(|launched| {
+                launched.channel != GLTF_POSE || launched.start > cursor + OVERLAP_EPSILON
+            })
             .map(|launched| {
                 (
                     launched.target,
@@ -6358,6 +6457,19 @@ impl SceneModel {
 
         self.launched_channels
             .retain(|launched| launched.end > cursor + OVERLAP_EPSILON);
+        for item in &resolved {
+            let PlayItem::Animation(anim) = &item.item else {
+                continue;
+            };
+            if matches!(anim.inner.anim_type, AnimationType::GltfAnimation { .. }) {
+                let start = cursor + item.start;
+                for running in &mut self.launched_channels {
+                    if running.target == anim.inner.target && running.channel == GLTF_POSE {
+                        running.end = running.end.min(start);
+                    }
+                }
+            }
+        }
         self.launched_channels.extend(launched);
         self.audio_tracks.extend(anchored_sounds);
         let play_start = self.current_time();
@@ -13871,6 +13983,20 @@ mod tests {
         scene
             .play_composition_configured(staggered, None, None)
             .expect("adjacent sequence steps share the translation channel in turn");
+    }
+
+    /// A glTF model's animations write the pose of its nodes alone, so
+    /// they combine with effects and moves of the model.
+    #[test]
+    fn gltf_plays_write_the_pose_channel() {
+        let mut scene = SceneModel::new(320, 180);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/fixtures/assets/Wolf.glb");
+        let wolf = scene.gltf(&path, &Default::default()).unwrap();
+        let walk = wolf
+            .animation("Walk", None, 1.0, true, false, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(animation_channels(&walk), [GLTF_POSE]);
     }
 
     #[test]

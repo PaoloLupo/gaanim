@@ -2293,8 +2293,9 @@ class Anim:
         """Animate the glow toward ``color``/``radius``/``intensity``; ``None`` fades it out.
 
         A drawable without glow grows it from zero intensity. Combines with
-        other property targets such as ``scale_to``. Invalid values raise
-        ``ValueError``; text selections raise ``TypeError``.
+        other property targets such as ``scale_to``, and glows 3D content
+        too. Invalid values raise ``ValueError``; text selections raise
+        ``TypeError``.
 
         Example:
             scene.play(orb.animate.glow(CYAN, radius=0.5, intensity=2.0).repeat(3, yoyo=True))
@@ -3755,7 +3756,15 @@ class Drawable:
     width: LayoutExpression
     height: LayoutExpression
     def part(self, id: str) -> Drawable:
-        """Return a named SVG part by unique name or canonical path."""
+        """Return a named SVG part, or a node of a glTF model, by its name.
+
+        A glTF node without a name is ``node<index>``; a name two nodes share
+        takes ``#<index>`` after it. ``parts()`` lists them.
+
+        Example:
+            head = wolf.part("Head")
+            scene.play(head.animate.scale_by(1.3))
+        """
         ...
     def copy(self) -> Drawable:
         """An independent drawable declared like this one.
@@ -3773,8 +3782,16 @@ class Drawable:
         ...
 
     def parts(self) -> tuple[str, ...]: ...
-    def animations(self) -> tuple[str, ...]:
-        """Always empty: glTF models and their Actions are no longer supported."""
+    def animations(self) -> dict[str, float]:
+        """The animations of a glTF model, in the file's order, with their durations in seconds.
+
+        Empty for drawables that are not glTF models. Iterating it gives the
+        names, which ``animation(name)`` plays.
+
+        Example:
+            wolf = scene.media.gltf("Wolf.glb")
+            wolf.animations()  # {"Death": 0.9, ..., "Run": 0.5, "Walk": 0.73}
+        """
         ...
     @property
     def modifiers(self) -> PathModifiers:
@@ -3826,8 +3843,29 @@ class Drawable:
         transition: float = 0.0,
         start_time: float = 0.0,
     ) -> Anim:
-        """Raise ``NotImplementedError``: glTF models and their Actions are no
-        longer supported."""
+        """Play the animation ``name`` of a glTF model on the timeline.
+
+        By default it plays once through, from ``start_time`` seconds into the
+        animation to its end, at ``speed``; a ``duration`` given here or to
+        ``scene.play`` sets how long it lasts instead. ``loop=True`` wraps
+        around for as long as it lasts (one cycle by default), and
+        ``reverse`` plays it backwards. ``transition`` fades from the model's previous
+        animation, which keeps running meanwhile, over that many seconds;
+        the first animation fades from the rest pose. The animation's time
+        runs linearly unless ``.easing(...)`` is given. Seeks land exactly:
+        the pose is computed from the time alone. Before its first animation
+        a model shows its rest pose, and after an animation ends it holds its
+        last pose. Under ``Scene.launch`` it keeps running while later plays
+        are scheduled, and the model's next animation takes over from it,
+        fading from it over its ``transition``. Unknown names raise
+        ``KeyError``; drawables that are not glTF models, ``TypeError``.
+
+        Example:
+            wolf = scene.media.gltf("Wolf.glb").scale_to(1.7)
+            scene.launch(wolf.animation("Walk", loop=True), duration=6)
+            scene.play(wolf.animate.shift_by(3, 0), duration=3)
+            scene.play(wolf.animation("Run", loop=True, transition=0.4), duration=2)
+        """
         ...
     def fill(self, paint: Paint) -> Self:
         """Apply fill to this drawable and return the result.
@@ -4076,6 +4114,10 @@ class Drawable:
         ...
     def glow(self, color: ColorLike, radius: float = 0.16, intensity: float = 1.0) -> Drawable:
         """Apply glow to this drawable and return the result.
+
+        On 3D content (primitives, surfaces, 3D lines and glTF models), on
+        the drawable or a group holding it, the glow surrounds its visible
+        silhouette: the parts another drawable hides do not glow.
 
         Example:
             result = drawable.glow(BLUE)
@@ -10037,7 +10079,7 @@ class LayoutBuilder:
         ...
 
 class MediaLibrary:
-    """Scene-owned loader for image, SVG, video, Lottie, and audio assets."""
+    """Scene-owned loader for image, SVG, glTF, video, Lottie, and audio assets."""
     def audio(
         self,
         path: str,
@@ -10203,10 +10245,28 @@ class MediaLibrary:
         """
         ...
     def gltf(self, path: str, *, scene: str | int | None = None) -> Drawable:
-        """Raise ``NotImplementedError``: glTF models are no longer supported.
+        """Import a glTF 2.0 model (``.gltf`` or ``.glb``) as 3D content.
 
-        Gaanim draws 3D with Vello from its own primitives, surfaces and lines
-        (``scene.geometry.cube``, ``sphere``, ``surface``, ``polyline_3d``).
+        Each node becomes a drawable in its rest pose, holding a lit mesh per
+        primitive, under a root at the model's origin, in the file's units:
+        scale it to the scene with ``scale_to``. ``part(name)`` reaches a
+        node, ``animations()`` lists the file's animations and
+        ``animation(name)`` plays one. ``scene`` picks one of the file's
+        scenes by name or index; by default, its default scene.
+
+        Imported: triangles, normals, vertex colors, the metallic-roughness
+        material's factors and base-color texture, emission, unlit materials,
+        alpha modes (opaque, cut out at ``alphaCutoff``, blended), two-sided
+        materials, skins of up to 256 joints and animations of node
+        translations, rotations and scales. Left out: morph targets, normal
+        and occlusion maps, texture transforms, the file's cameras and
+        lights, and the outlines of ``Material3D.outlined``. Textures are scaled down to 2048 pixels on their longest side.
+        A missing file raises ``FileNotFoundError``; an unknown scene,
+        ``ValueError``; a file that is not glTF, ``RuntimeError``.
+
+        Example:
+            wolf = scene.media.gltf("Wolf.glb").scale_to(1.7)
+            print(wolf.animations())
         """
         ...
 

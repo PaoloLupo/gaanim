@@ -3515,6 +3515,7 @@ type ThreeDData = (
     Option<Ref<'static, gaanim_scene::PlaneFillData>>,
     Option<&'static gaanim_scene::InWorld3D>,
     Option<&'static gaanim_scene::BillboardPlane>,
+    Option<&'static gaanim_scene::SkinPalette>,
 );
 /// 3D primitives, and 2D drawables placed in the 3D world.
 type ThreeDFilter = (
@@ -3577,6 +3578,7 @@ type ThreeDItem<'a> = (
     Option<Ref<'a, gaanim_scene::PlaneFillData>>,
     Option<&'a gaanim_scene::InWorld3D>,
     Option<&'a gaanim_scene::BillboardPlane>,
+    Option<&'a gaanim_scene::SkinPalette>,
 );
 
 fn three_d_source<'a>(
@@ -3595,6 +3597,7 @@ fn three_d_source<'a>(
         fill,
         in_world,
         billboard,
+        palette,
     ): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
@@ -3624,6 +3627,9 @@ fn three_d_source<'a>(
             line_width: line_width(stroke),
             line_range,
             fill: fill.map(Ref::into_inner),
+            joints: palette.map(|palette| &palette.0),
+            // Looked up on its ancestors too (see `three_d_elements`).
+            glow: None,
         },
         hud,
         exempt,
@@ -3651,12 +3657,16 @@ fn extract_three_d(
     );
     let mut content = world.query_filtered::<ThreeDData, ThreeDFilter>();
     let mut parents = world.query::<&ChildOf>();
+    let mut glows = world.query::<&crate::effects::Glow>();
     let world: &World = world;
+    let any_glow = glows.iter(world).next().is_some();
+    let mut glow_of = |entity| glows.get(world, entity).ok().cloned();
     three_d_elements(
         camera,
         &lighting,
         content.iter(world).map(three_d_source),
         |entity| parents.get(world, entity).ok().map(ChildOf::parent),
+        any_glow.then_some(&mut glow_of as &mut dyn FnMut(Entity) -> Option<_>),
         transition_frame,
         with_lineage,
         opacity_fallback,
@@ -3734,6 +3744,10 @@ pub struct CapturedThreeDSource {
     pub line_range: Option<[f32; 2]>,
     /// Outlines filled in the drawable's plane.
     pub fill: Option<Arc<gaanim_scene::PlaneFillData>>,
+    /// The matrices of a skinned mesh's joints this frame.
+    pub joints: Option<Arc<[[f32; 16]]>>,
+    /// The glow of the drawable or of the group that holds it.
+    pub glow: Option<crate::effects::Glow>,
     pub composition: ThreeDComposition,
 }
 
@@ -3801,6 +3815,8 @@ fn captured_gpu_three_d(
                     line_width: source.line_width.map(f64::from),
                     line_range: source.line_range,
                     fill: source.fill.as_deref(),
+                    joints: source.joints.as_ref(),
+                    glow: source.glow.clone(),
                 },
                 source.composition.clone(),
             )
@@ -3853,6 +3869,7 @@ fn three_d_elements<'a>(
     lighting: &crate::three_d::Illumination,
     sources: impl Iterator<Item = ThreeDSource<'a>>,
     mut parent_of: impl FnMut(Entity) -> Option<Entity>,
+    mut glow_of: Option<&mut dyn FnMut(Entity) -> Option<crate::effects::Glow>>,
     transition_frame: Option<&gaanim_scene::SceneTransitionFrame>,
     with_lineage: bool,
     opacity_fallback: kurbo::Rect,
@@ -3863,8 +3880,20 @@ fn three_d_elements<'a>(
     let mut revisions = Vec::new();
     // How each drawable's elements compose, the same for all of them.
     let mut sources: Vec<(Entity, crate::three_d::Content<'a>, ThreeDComposition)> = sources
-        .map(|(entity, content, hud, exempt, layer, revision)| {
+        .map(|(entity, mut content, hud, exempt, layer, revision)| {
             revisions.push(revision);
+            // A drawable glows with its own glow or that of the nearest
+            // group holding it, as a glTF model's nodes take its root's.
+            if let Some(glow_of) = glow_of.as_mut() {
+                let mut at = Some(entity);
+                while let Some(current) = at {
+                    if let Some(glow) = glow_of(current) {
+                        content.glow = Some(glow);
+                        break;
+                    }
+                    at = parent_of(current);
+                }
+            }
             let composition = ThreeDComposition {
                 in_views: !hud,
                 post_exempt: exempt,
@@ -3905,6 +3934,8 @@ fn three_d_elements<'a>(
                     fill: content.fill.map(|fill| {
                         CapturedThreeDHeld::held(&mut held.fills, *entity, revision[2], fill)
                     }),
+                    joints: content.joints.cloned(),
+                    glow: content.glow.clone(),
                     composition: composition.clone(),
                 },
             )
@@ -5791,7 +5822,7 @@ pub fn gaanim_render_system(
         tip_query,
         backdrop_query,
         three_d_query,
-        (lighting, light_query),
+        (lighting, light_query, glow_query),
         opacity_query,
         effect_query,
         signal_query,
@@ -5805,7 +5836,11 @@ pub fn gaanim_render_system(
         TipQuery,
         Query<&gaanim_scene::LayoutBackdrop>,
         ThreeDQuery,
-        (Option<Res<gaanim_scene::Lighting3D>>, LightQuery),
+        (
+            Option<Res<gaanim_scene::Lighting3D>>,
+            LightQuery,
+            Query<&crate::effects::Glow>,
+        ),
         Query<&GlobalOpacity>,
         Query<&crate::object_effects::ShaderEffect>,
         Query<&gaanim_animation::FloatSignal>,
@@ -6393,11 +6428,14 @@ pub fn gaanim_render_system(
         let meshes = placement.and_then(|(size, placement)| {
             crate::three_d::GpuMeshes::new(&mut mesh_sources, size, placement, 0)
         });
+        let mut glow_of = |entity| glow_query.get(entity).ok().cloned();
+        let any_glow = !glow_query.is_empty();
         gpu_frames = three_d_elements(
             &camera.camera,
             &illumination(lighting.as_deref(), light_query.iter()),
             three_d_query.iter().map(three_d_source),
             |entity| child_query.get(entity).ok().map(ChildOf::parent),
+            any_glow.then_some(&mut glow_of as &mut dyn FnMut(Entity) -> Option<_>),
             transition_frame.as_deref(),
             !camera_views.is_empty(),
             opacity_fallback,
@@ -6607,6 +6645,7 @@ mod tests {
             color: None,
             colors: None,
             material: None,
+            surface: None,
         };
         let entity = world
             .spawn((

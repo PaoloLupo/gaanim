@@ -6059,13 +6059,43 @@ impl PyMediaLibrary {
             .map_err(|error| pyo3::exceptions::PyRuntimeError::new_err(error.to_string()))
     }
 
-    /// glTF models are no longer supported: Gaanim draws 3D with Vello, from
-    /// its own primitives, surfaces, and lines.
+    /// Import a glTF 2.0 model (`.gltf` or `.glb`): a drawable per node in
+    /// its rest pose, under a root at the model's origin. `scene` picks one
+    /// of the file's scenes by name or index; by default its default scene.
     #[pyo3(signature = (path, *, scene=None))]
     fn gltf(&self, path: &str, scene: Option<&Bound<'_, PyAny>>) -> PyResult<PyDrawable> {
-        let _ = (path, scene);
         crate::custom::ensure_authoring_allowed()?;
-        Err(crate::gltf_unsupported())
+        use gaanim_objects::gltf::{GltfLoadError, GltfSceneSelector};
+        let selector = match scene {
+            None => GltfSceneSelector::Default,
+            Some(scene) if scene.is_none() => GltfSceneSelector::Default,
+            Some(scene) => {
+                if let Ok(index) = scene.extract::<usize>() {
+                    GltfSceneSelector::Index(index)
+                } else if let Ok(name) = scene.extract::<String>() {
+                    GltfSceneSelector::Name(name)
+                } else {
+                    return Err(pyo3::exceptions::PyTypeError::new_err(
+                        "scene must be a scene's name, its index, or None",
+                    ));
+                }
+            }
+        };
+        self.inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .gltf(path, &selector)
+            .map(PyDrawable)
+            .map_err(|error| match error {
+                GltfLoadError::Missing { .. } => {
+                    pyo3::exceptions::PyFileNotFoundError::new_err(error.to_string())
+                }
+                GltfLoadError::UnknownSceneIndex { .. }
+                | GltfLoadError::UnknownSceneName { .. } => {
+                    pyo3::exceptions::PyValueError::new_err(error.to_string())
+                }
+                _ => pyo3::exceptions::PyRuntimeError::new_err(error.to_string()),
+            })
     }
 }
 

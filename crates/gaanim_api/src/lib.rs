@@ -4,6 +4,7 @@ pub mod canvas;
 pub mod count_lens;
 pub mod effect_lens;
 pub mod export;
+pub mod gltf;
 pub mod host;
 pub mod matrix;
 pub mod pivot_lens;

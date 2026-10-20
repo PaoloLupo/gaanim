@@ -2,6 +2,7 @@ pub mod boolean;
 pub mod character;
 pub mod earcut;
 pub mod extrude;
+pub mod gltf;
 pub mod metaballs;
 pub mod offset;
 pub mod prelude;

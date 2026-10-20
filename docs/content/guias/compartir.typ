@@ -313,7 +313,9 @@ gaanim pack circulo.gaanim animaciones/circulo.gaanim --web
 
 Con `--web` guarda los trazados en una rejilla tan fina que, en un vídeo 4K,
 ningún punto se mueve más de 1/64 de píxel en cada eje (solo cambia el
-suavizado de algunos píxeles de borde), y deja fuera lo que el
+suavizado de algunos píxeles de borde), y los vértices de las mallas y líneas
+3D en una rejilla de 2#super[−17] de su tamaño, que tampoco mueve ninguno más
+de 1/64 de píxel aunque la malla llene un vídeo 4K. Deja fuera lo que el
 reproductor no usa: los resúmenes de `gaanim check` y los subfotogramas del
 desenfoque de movimiento. En los ejemplos de esta documentación pesa, en la
 mediana, un 41 % menos, y hasta un 97 % menos en escenas con muchas formas en
@@ -586,7 +588,12 @@ bloque y los segmentos que usa, y descarga los demás bloques con sus
 segmentos a medida que los reproduce. Así, una presentación larga empieza a
 verse sin esperar a descargar los trazados de todas sus diapositivas.
 
-Este es el formato 6. Gaanim sigue leyendo el formato 5 (versiones 0.9 a
-0.12), así que los paquetes ya publicados siguen abriéndose. Los grabados con
+Este es el formato 7, que añade las texturas, los modos alfa y los
+esqueletos de los modelos glTF, y guarda las mallas y líneas 3D que cambian de
+un fotograma a otro (una superficie que se dobla, una curva que se mueve) como
+el cambio de sus vértices respecto de los fotogramas anteriores de su
+segmento, sin perder un bit: en `gallery/catenoid_helicoid` el paquete pasa de
+62 a 30 MB, y a 12 MB con `--web`. Gaanim sigue leyendo los formatos 5 y 6
+(versiones 0.9 a 0.15), así que los paquetes ya publicados siguen abriéndose. Los grabados con
 versiones anteriores a la 0.9 ya no se abren: vuelve a grabarlos desde su
 script.

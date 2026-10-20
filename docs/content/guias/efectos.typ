@@ -71,6 +71,12 @@ efectos que no cambian se reutilizan desde la caché del renderizador. En un
 `Text` conservan el handle especializado, así que puedes seguir encadenando
 métodos de texto.
 
+`glow` también brilla en el contenido 3D: primitivas, superficies, líneas 3D
+y modelos glTF, con `glow(...)` o `animate.glow(...)` en el objeto o en el
+grupo que lo contiene. El pase 3D dibuja la silueta visible del objeto con el
+color del halo, la difumina como el glow 2D y la pone a su alrededor, debajo
+del objeto: las partes que otro objeto tapa no brillan.
+
 == Animar efectos
 
 `animate.glow(...)`, `animate.blur(sigma)` y `animate.shadow(...)` interpolan
@@ -262,6 +268,7 @@ líneas vivas (`connect`) o animar el trazo (`stroke_profile`,
   vectoriales. Con una cámara en perspectiva y en escenas 3D sí se aplica.
 - El desenfoque de movimiento solo se ve al exportar y en los snapshots; la
   vista previa interactiva queda nítida. También afecta al contenido 3D.
+- `blur` y `shadow` todavía no se aplican al contenido 3D; `glow` sí.
 
 == Referencia
 

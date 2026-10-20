@@ -332,6 +332,7 @@ mod tests {
             color: None,
             colors: None,
             material: None,
+            surface: None,
         }
     }
 

@@ -19,7 +19,9 @@ const GRID_OUTPUT_WIDTH: u32 = 3840;
 pub struct RepackOptions {
     /// Pack for publishing in other pages (`gaanim pack --web`): store each
     /// path's points on a grid fine enough that a 4K export of any frame
-    /// moves no point more than 1/64 of a pixel, and leave out the frame
+    /// moves no point more than 1/64 of a pixel, the vertices of 3D meshes
+    /// and line lists on one of 2^-17 of their size (as fine for a mesh
+    /// that fills a 4K frame), and leave out the frame
     /// digests and the sub-frames of motion blur, which players do not use.
     /// The result plays and exports as the original within that tolerance,
     /// but no longer composes bit for bit.
