@@ -339,6 +339,17 @@ pub enum AnimationType {
     CameraDollyZoom {
         factor: f64,
     },
+    /// An animation of an imported glTF model (`DrawableHandle::animation`):
+    /// a play of clip `clip` that its lens evaluates from time alone.
+    GltfAnimation {
+        animations: std::sync::Arc<gaanim_objects::gltf::GltfAnimations>,
+        clip: usize,
+        speed: f64,
+        looped: bool,
+        reverse: bool,
+        transition: f64,
+        start_time: f64,
+    },
     TranslateTo {
         to: DVec3,
     },
@@ -889,6 +900,7 @@ impl AnimationType {
             Self::CameraFollow { .. }
             | Self::CameraFollowEndpoint { .. }
             | Self::CameraShake { .. }
+            | Self::GltfAnimation { .. }
             | Self::Write { .. }
             | Self::Unwrite { .. }
             | Self::Uncreate { .. }

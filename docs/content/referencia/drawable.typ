@@ -1252,10 +1252,9 @@ scene.play([node.animate.move_to(3, 0).fill(GOLD).scale_to(1.5).duration(1.2)])
 ```
 ]
 
-Gaanim ya no importa glTF, así que tampoco reproduce sus acciones:
-`Drawable.animations()` devuelve una tupla vacía y
-`Drawable.animation(name, ...)` lanza `NotImplementedError`. `part` y `parts`
-están en #link("/referencia/medios/")[Medios].
+Las animaciones de un modelo glTF, `Drawable.animations()` y
+`Drawable.animation(name, ...)`, y las partes de un SVG o de un modelo, `part`
+y `parts`, están en #link("/referencia/medios/")[Medios].
 
 == Relaciones reactivas
 

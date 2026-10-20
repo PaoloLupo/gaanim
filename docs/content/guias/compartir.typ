@@ -586,7 +586,8 @@ bloque y los segmentos que usa, y descarga los demás bloques con sus
 segmentos a medida que los reproduce. Así, una presentación larga empieza a
 verse sin esperar a descargar los trazados de todas sus diapositivas.
 
-Este es el formato 6. Gaanim sigue leyendo el formato 5 (versiones 0.9 a
-0.12), así que los paquetes ya publicados siguen abriéndose. Los grabados con
+Este es el formato 7, que añade las texturas, los modos alfa y los
+esqueletos de los modelos glTF. Gaanim sigue leyendo los formatos 5 y 6
+(versiones 0.9 a 0.15), así que los paquetes ya publicados siguen abriéndose. Los grabados con
 versiones anteriores a la 0.9 ya no se abren: vuelve a grabarlos desde su
 script.

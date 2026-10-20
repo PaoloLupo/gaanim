@@ -1,4 +1,7 @@
 pub use crate::GaanimObjectsPlugin;
+pub use crate::gltf::{
+    GltfAnimations, GltfClip, GltfLoadError, GltfModel, GltfNode, GltfSceneSelector, NodePose,
+};
 pub use crate::primitives::{
     ImageView, MobjectBundle, arc, arrow, brace, checkmark, circle, curved_arrow, curved_arrow_arc,
     dot, ellipse, image, line, open_path, polygon, rectangle, regular_polygon, rounded_rect,

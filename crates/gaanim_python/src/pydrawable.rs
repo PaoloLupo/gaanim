@@ -2240,9 +2240,9 @@ impl PyDrawable {
         }
         match self.0.part(id) {
             Ok(part) => Ok(Self(part)),
-            Err(gaanim_api::canvas::SvgPartError::NotSvg) => Err(PyValueError::new_err(
-                "this drawable has no named SVG parts",
-            )),
+            Err(error @ gaanim_api::canvas::SvgPartError::NotSvg) => {
+                Err(PyValueError::new_err(error.to_string()))
+            }
             Err(error @ gaanim_api::canvas::SvgPartError::Unknown { .. }) => {
                 Err(PyKeyError::new_err(error.to_string()))
             }
@@ -3379,10 +3379,15 @@ impl PyDrawable {
         Ok(PyTuple::new(py, self.0.parts())?.unbind())
     }
 
-    /// glTF Actions; always empty, since glTF models are no longer supported.
-    fn animations(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
+    /// The animations of an imported glTF model, in the file's order, with
+    /// their durations in seconds; empty for other drawables.
+    fn animations(&self, py: Python<'_>) -> PyResult<Py<pyo3::types::PyDict>> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(PyTuple::empty(py).unbind())
+        let animations = pyo3::types::PyDict::new(py);
+        for (name, duration) in self.0.animations() {
+            animations.set_item(name, duration)?;
+        }
+        Ok(animations.unbind())
     }
 
     /// Return a fresh, pure animation proxy. Accessing it never schedules work.
@@ -3406,11 +3411,22 @@ impl PyDrawable {
         transition: f64,
         start_time: f64,
     ) -> PyResult<PyCanvasAnim> {
-        let _ = (
-            name, duration, speed, r#loop, reverse, transition, start_time,
-        );
         crate::custom::ensure_authoring_allowed()?;
-        Err(crate::gltf_unsupported())
+        let inner = self
+            .0
+            .animation(
+                name, duration, speed, r#loop, reverse, transition, start_time,
+            )
+            .map_err(|error| match error {
+                gaanim_api::canvas::GltfAnimationError::Unknown { .. } => {
+                    pyo3::exceptions::PyKeyError::new_err(error.to_string())
+                }
+                gaanim_api::canvas::GltfAnimationError::NotGltf => {
+                    pyo3::exceptions::PyTypeError::new_err(error.to_string())
+                }
+                _ => pyo3::exceptions::PyValueError::new_err(error.to_string()),
+            })?;
+        Ok(PyCanvasAnim { inner })
     }
 
     fn fill<'py>(slf: &Bound<'py, Self>, paint: PyPaint) -> PyResult<Bound<'py, PyAny>> {

@@ -118,6 +118,7 @@ impl SceneModel {
             color: None,
             colors: None,
             material: Some(material.unwrap_or_default()),
+            surface: None,
         }));
         mesh.spec.lock().expect("object spec poisoned").extrusion = Some(ExtrusionSpec {
             source: source.id,

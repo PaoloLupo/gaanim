@@ -340,6 +340,7 @@ fn surface_sheet(
         color: None,
         colors: Some(colors),
         material,
+        surface: None,
     }
 }
 
@@ -2619,6 +2620,57 @@ impl SceneModel {
             }
         }
         leaves
+    }
+
+    /// Rig the imported glTF model whose root compiled as `root`: the root
+    /// names its nodes' entities, which its animations move, and each
+    /// skinned primitive names its joints' entities.
+    fn rig_gltf_model(
+        builder: &mut SceneBuilder<'_, '_, '_>,
+        root: ObjectId,
+        rig: &crate::gltf::GltfRigSpec,
+        id_map: &HashMap<ObjectId, ObjectId>,
+    ) {
+        let entity_of = |builder: &SceneBuilder<'_, '_, '_>, id: &ObjectId| {
+            let compiled = id_map.get(id)?;
+            Some(builder.states.get(*compiled)?.entity)
+        };
+        let Some(nodes) = rig
+            .nodes
+            .iter()
+            .map(|id| entity_of(builder, id))
+            .collect::<Option<Vec<Entity>>>()
+        else {
+            tracing::warn!("a glTF model lost some of its nodes; its animations are left out");
+            return;
+        };
+        for (mesh, joints, inverse_bind) in &rig.skins {
+            let Some(entity) = entity_of(builder, mesh) else {
+                continue;
+            };
+            let joints: Option<Vec<Entity>> = joints
+                .iter()
+                .map(|node| nodes.get(*node).copied())
+                .collect();
+            let Some(joints) = joints else {
+                continue;
+            };
+            builder.commands.entity(entity).insert((
+                gaanim_scene::MeshSkin {
+                    joints: joints.into(),
+                    inverse_bind: Arc::clone(inverse_bind),
+                },
+                gaanim_scene::SkinPalette::default(),
+            ));
+        }
+        if let Some(state) = builder.states.get(root) {
+            builder
+                .commands
+                .entity(state.entity)
+                .insert(crate::gltf::GltfRig {
+                    nodes: nodes.into(),
+                });
+        }
     }
 
     /// The mesh extruded from the outline `source` fills in the scene (a
@@ -11686,7 +11738,22 @@ impl SceneModel {
                     .filter_map(|id| id_map.get(id).copied().map(|id| MobjectRef { id }))
                     .collect();
                 let mr = builder.group_identity(&refs);
+                // A glTF node starts in its rest pose, in its parent's space.
+                if let Some(pose) = spec.gltf_pose
+                    && let Some(state) = builder.states.get_mut(mr.id)
+                {
+                    state.transform.translation = pose.translation;
+                    state.transform.rotation = pose.rotation;
+                    state.transform.scale = pose.scale;
+                    builder
+                        .commands
+                        .entity(state.entity)
+                        .insert(state.transform);
+                }
                 Self::post_apply(builder, mr.id, spec, id_map, frame_bounds);
+                if let Some(rig) = &spec.gltf_rig {
+                    Self::rig_gltf_model(builder, mr.id, rig, id_map);
+                }
                 mr
             }
             SpawnKind::ValueTracker(initial) => {

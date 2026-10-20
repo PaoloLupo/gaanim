@@ -822,6 +822,9 @@ pub struct TriangleMeshData {
     pub colors: Option<Vec<[f32; 4]>>,
     /// `None` preserves the historical unlit surface-mesh behavior.
     pub material: Option<Material3D>,
+    /// What an imported model's primitive adds: its texture, alpha mode,
+    /// sides and skin (see [`crate::model`]); `None` for Gaanim's own meshes.
+    pub surface: Option<Arc<crate::model::MeshSurface>>,
 }
 
 /// A 3D line list (point pairs, or a strip), projected by the renderer.

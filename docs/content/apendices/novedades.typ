@@ -11,6 +11,52 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.16.0
+
+Sin publicar. Vuelven los modelos glTF: `scene.media.gltf(...)` importa sus
+mallas, materiales, texturas, esqueletos y animaciones, que dibuja el pase 3D
+en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
+
+== Modelos glTF
+
+- `scene.media.gltf(path, scene=None)` importa un modelo glTF 2.0 (`.gltf` o
+  `.glb`): un grupo por nodo en su pose de reposo y una malla iluminada por
+  primitiva, en las unidades del archivo y con su origen en el de la escena.
+  `part(nombre)` alcanza un nodo y `parts()` los lista. Ver
+  #link("/referencia/medios/#modelos-gltf")[Medios].
+- Los materiales llegan con su color, rugosidad, metalicidad, emisión
+  (también `KHR_materials_emissive_strength`) y textura de color; los
+  materiales sin luz (`KHR_materials_unlit`) no reciben luz, los de dos caras
+  muestran las dos y los modos alfa recortan (`MASK`, también en las
+  sombras) o mezclan (`BLEND`) como en el archivo.
+- `animations()` lista las animaciones con su duración, y
+  `animation(nombre, duration=, speed=, loop=, reverse=, transition=,
+  start_time=)` reproduce una en `scene.play`, con interpolación `LINEAR`,
+  `STEP` o `CUBICSPLINE`. Con `transition`, funde desde la animación anterior,
+  que sigue corriendo, como al pasar de andar a correr. La pose sale del
+  tiempo: los saltos y `--diff` son exactos.
+- Los esqueletos se deforman en la GPU: cada malla se sube una vez y en cada
+  fotograma solo cambian las matrices de sus huesos, que el sombreador de
+  vértices mezcla. Un personaje animado se dibuja tan rápido como una malla
+  quieta, y su paquete guarda unas decenas de matrices por fotograma.
+- Las escenas sin modelos no pagan nada: las pipelines de modelos se crean
+  la primera vez que un fotograma dibuja uno, y las demás mallas se dibujan
+  como antes.
+- Nuevo ejemplo, `3d/models_3d`, con el zorro de los modelos de ejemplo de
+  Khronos.
+
+== Al actualizar
+
+- Los paquetes `.gaanim` pasan al formato 7, que guarda las texturas, los
+  modos alfa y los esqueletos. Gaanim sigue abriendo los de formato 5 y 6;
+  un Gaanim anterior no abre los nuevos, así que actualiza los reproductores
+  que los publican.
+- `Drawable.animations()` devuelve un diccionario de nombres y duraciones en
+  lugar de una tupla vacía, y `animation(...)` ya no lanza
+  `NotImplementedError`.
+- `part(id)` en un objeto sin partes dice que solo los SVG y los modelos glTF
+  las tienen.
+
 = 0.15.0
 
 Publicada el 19 de octubre de 2026. Los gráficos declarativos dibujan

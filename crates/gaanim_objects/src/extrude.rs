@@ -332,6 +332,7 @@ impl MeshBuilder {
                 color: None,
                 colors: None,
                 material: Some(material),
+                surface: None,
             },
             center: Point::new(center.x, center.y),
         })

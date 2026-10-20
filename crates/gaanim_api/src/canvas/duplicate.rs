@@ -458,6 +458,10 @@ pub(crate) fn clone_spec_recording(
         target.kind = kind;
         // The copy is placed explicitly, not by the source's layout.
         target.layout_owner = None;
+        // A copied glTF model moves and skins its own copied nodes.
+        if let Some(rig) = &spec.gltf_rig {
+            target.gltf_rig = Some(rig.remapped(copies));
+        }
     }
     copies.insert(spec.id, handle.clone());
     if members.is_empty() {

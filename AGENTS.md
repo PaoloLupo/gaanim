@@ -38,7 +38,11 @@ This file guides repository work; model selection belongs to the calling client.
     Vello composes beneath the 2D content through `override_image`; every
     host that renders frames (canvas, exporter, embed player, offscreen
     previews) prepares those images with `GpuThreeD` before Vello renders.
-    There is no Bevy 3D pipeline and no glTF support.
+    There is no Bevy 3D pipeline. glTF models (`gaanim_objects::gltf`) become
+    plain nodes and meshes whose `MeshSurface` adds a texture, alpha mode and
+    skin weights; `ModelPipelines` draws those, built only when a frame first
+    draws one, and each frame only a skin's palette (`SkinPalette`) changes.
+    Animations are timeline clips (`gaanim_api::gltf::GltfClipLens`).
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.

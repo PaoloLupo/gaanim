@@ -43,6 +43,8 @@ pub struct DrawableHandle {
     pub(crate) state: SharedCanvasState,
     pub(crate) segment_idx: usize,
     named_parts: Option<Arc<HashMap<String, DrawableHandle>>>,
+    /// The animations of an imported glTF model, on its root.
+    gltf: Option<Arc<gaanim_objects::gltf::GltfAnimations>>,
     style_targets: Arc<Vec<SharedObjectSpec>>,
 }
 
@@ -58,10 +60,22 @@ pub enum ImagePixelError {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SvgPartError {
-    #[error("this drawable has no named SVG parts")]
+    #[error("this drawable has no named parts: only imported SVGs and glTF models do")]
     NotSvg,
-    #[error("unknown SVG part '{id}'; available ids: {available}")]
+    #[error("unknown part '{id}'; available parts: {available}")]
     Unknown { id: String, available: String },
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum GltfAnimationError {
+    #[error("this drawable is not an imported glTF model, which alone has animations")]
+    NotGltf,
+    #[error("unknown glTF animation '{name}'; available animations: {available}")]
+    Unknown { name: String, available: String },
+    #[error("glTF animation speed must be finite and greater than zero")]
+    InvalidSpeed,
+    #[error("glTF animation duration, transition and start time must be finite and non-negative")]
+    InvalidTiming,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -540,6 +554,7 @@ impl DrawableHandle {
             state: self.state.clone(),
             segment_idx: self.segment_idx,
             named_parts: None,
+            gltf: None,
             style_targets: Arc::new(Vec::new()),
         })
     }
@@ -891,6 +906,7 @@ impl DrawableHandle {
             state,
             segment_idx,
             named_parts: None,
+            gltf: None,
             style_targets: Arc::new(Vec::new()),
         }
     }
@@ -1132,6 +1148,100 @@ impl DrawableHandle {
         self
     }
 
+    /// The root of an imported glTF model: its named nodes, as parts, and
+    /// its animations.
+    pub(crate) fn with_gltf(
+        mut self,
+        parts: HashMap<String, DrawableHandle>,
+        animations: Arc<gaanim_objects::gltf::GltfAnimations>,
+    ) -> Self {
+        self.named_parts = Some(Arc::new(parts));
+        self.gltf = Some(animations);
+        self
+    }
+
+    /// The animations of an imported glTF model, in the file's order, with
+    /// their durations in seconds; empty for other drawables.
+    pub fn animations(&self) -> Vec<(String, f64)> {
+        self.gltf
+            .as_ref()
+            .map(|animations| {
+                animations
+                    .clips
+                    .iter()
+                    .map(|clip| (clip.name.clone(), clip.duration))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Play the animation `name` of an imported glTF model: for `duration`
+    /// seconds (by default once through, from `start_time`, at `speed`,
+    /// unless `Scene.play` gives a duration),
+    /// wrapping when `looped`, backwards when `reverse`, fading from the
+    /// model's previous animation over `transition` seconds. Its time runs
+    /// linearly unless the result is given an easing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn animation(
+        &self,
+        name: &str,
+        duration: Option<f64>,
+        speed: f64,
+        looped: bool,
+        reverse: bool,
+        transition: f64,
+        start_time: f64,
+    ) -> Result<Anim, GltfAnimationError> {
+        let Some(animations) = &self.gltf else {
+            return Err(GltfAnimationError::NotGltf);
+        };
+        if !speed.is_finite() || speed <= 0.0 {
+            return Err(GltfAnimationError::InvalidSpeed);
+        }
+        let valid = |value: f64| value.is_finite() && value >= 0.0;
+        if !valid(transition) || !valid(start_time) || duration.is_some_and(|value| !valid(value)) {
+            return Err(GltfAnimationError::InvalidTiming);
+        }
+        let Some(clip) = animations.clip(name) else {
+            return Err(GltfAnimationError::Unknown {
+                name: name.to_owned(),
+                available: animations
+                    .clips
+                    .iter()
+                    .map(|clip| clip.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
+        };
+        let length = animations.clips[clip].duration;
+        // Once through: from the start time to its end, or a whole cycle
+        // when it loops.
+        let once = if looped {
+            length
+        } else {
+            (length - start_time).max(0.0)
+        };
+        let anim = Anim::queued(
+            self.id,
+            AnimationType::GltfAnimation {
+                animations: Arc::clone(animations),
+                clip,
+                speed,
+                looped,
+                reverse,
+                transition,
+                start_time,
+            },
+            self.state.clone(),
+            self.segment_idx,
+        );
+        // A duration given to `Scene.play` replaces the natural one.
+        Ok(match duration {
+            Some(duration) => anim.duration(duration),
+            None => anim.default_duration(once / speed),
+        })
+    }
+
     /// If this drawable is an axes, return its x/y ranges and full config.
     pub fn axes_info(&self) -> Option<(AxisRange, AxisRange, crate::canvas::AxesConfig)> {
         let spec = self.spec.lock().ok()?;
@@ -1201,7 +1311,10 @@ impl DrawableHandle {
                 Some((name.clone(), part))
             })
             .collect();
-        copy.with_svg_parts(parts)
+        match &self.gltf {
+            Some(animations) => copy.with_gltf(parts, Arc::clone(animations)),
+            None => copy.with_svg_parts(parts),
+        }
     }
 
     /// Resolve a named source group or path from an imported SVG.

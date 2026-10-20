@@ -3,7 +3,7 @@
 
 #show: docs-chapter.with(
   title: "Medios",
-  description: "Fábricas de scene.media: imágenes, SVG, video y Lottie",
+  description: "Fábricas de scene.media: imágenes, SVG, modelos glTF, video y Lottie",
   route: "/referencia/medios/",
   nav: "Medios",
 )
@@ -11,7 +11,7 @@
 = Medios
 
 `scene.media` carga archivos locales como objetos de la escena: imágenes, SVG,
-video y animaciones Lottie. Todos son `Drawable`, así que se
+modelos glTF, video y animaciones Lottie. Todos son `Drawable`, así que se
 colocan, escalan y animan como cualquier forma. Una ruta relativa se resuelve
 desde la carpeta de recursos de la escena si se fijó con
 `scene.assets.load_project()` o `scene.assets.assets_dir(...)`; si no, desde el
@@ -168,7 +168,7 @@ scene.render()
 #api-entry(
   name: "Drawable.part",
   kind: "method",
-  desc: [Devuelve la parte con ese `id` de un SVG como un `Drawable` propio. Los nombres distinguen mayúsculas; un nombre desconocido lanza `KeyError` con la lista de nombres disponibles. El estilo de un grupo llega a todos sus caminos.],
+  desc: [Devuelve la parte con ese `id` de un SVG, o el nodo con ese nombre de un modelo glTF, como un `Drawable` propio. Los nombres distinguen mayúsculas; un nombre desconocido lanza `KeyError` con la lista de nombres disponibles, y un objeto sin partes, `ValueError`. El estilo de un grupo llega a todos sus caminos.],
 )[
 ```python
 >>>from gaanim import *
@@ -188,6 +188,65 @@ head = robot.part("head").fill(GOLD)
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 print(scene.media.svg("assets/robot.svg").parts())
+```
+]
+
+== Modelos glTF
+
+Modelos 3D en glTF 2.0 (`.gltf` con sus archivos, o `.glb`), con sus
+materiales, texturas, esqueletos y animaciones. El modelo se lee al ejecutar el
+script y se vuelve contenido 3D normal: un grupo por nodo y una malla
+iluminada por primitiva, que dibuja el mismo pase 3D que las primitivas de
+#link("/referencia/geometria/")[Geometría]. Los paquetes `.gaanim` guardan lo ya
+resuelto, así que el reproductor web y el ligero muestran el modelo sin leer
+glTF.
+
+#api-entry(
+  name: "MediaLibrary.gltf",
+  kind: "factory",
+  params: ((name: "path", type: "str", default: none, desc: [Archivo `.gltf` o `.glb` local.]), (name: "scene", type: "str | int | None", default: "None", desc: [Escena del archivo por nombre o índice; por defecto, su escena principal.])),
+  desc: [Importa el modelo en las unidades del archivo, con su origen en el origen de la escena: `scale_to` lo lleva a la escala de la escena y `move_to` coloca su origen, que suele estar a los pies. Cada nodo es un `Drawable` en su pose de reposo, alcanzable con `part(nombre)`. Se importan los triángulos, las normales, los colores de vértice, los factores y la textura de color del material metallic-roughness, la emisión, los materiales sin luz (`KHR_materials_unlit`), los modos alfa (opaco, recortado en `alphaCutoff` y mezclado), los materiales de dos caras, los esqueletos de hasta 256 huesos y las animaciones de traslación, rotación y escala de los nodos. Quedan fuera los morph targets, los mapas de normales y de oclusión, las transformaciones de textura, las cámaras y luces del archivo y los contornos de `Material3D.outlined`, que un modelo no dibuja. Las texturas se reducen a 2048 píxeles en su lado mayor. Un archivo que no existe lanza `FileNotFoundError`; una escena desconocida, `ValueError`, y un archivo que no es glTF, `RuntimeError`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+# El zorro mide unas 80 unidades: scale_to(0.04) lo deja en 3,2
+fox = scene.media.gltf("assets/Fox.glb").scale_to(0.04).move_to(0, -2)
+fox.rotate_to_3d(0.2, 0.9, 0)
+scene.play(fox.animation("Walk", loop=True), duration=2)
+# output: preview.webp
+scene.render()
+```
+]
+
+#api-entry(
+  name: "Drawable.animations",
+  kind: "method",
+  signature: "animations() -> dict[str, float]",
+  desc: [Las animaciones de un modelo glTF, en el orden del archivo, con su duración en segundos. Vacío para los demás objetos. Recorrerlo da los nombres que acepta `animation`.],
+)[
+```python
+# hide-code
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+print(scene.media.gltf("assets/Fox.glb").animations())
+```
+]
+
+#api-entry(
+  name: "Drawable.animation",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Nombre de la animación, de `animations()`.]), (name: "duration", type: "float | None", default: "None", desc: [Segundos que dura en la línea de tiempo; por defecto, la duración de `scene.play` o, sin ella, una pasada: de `start_time` al final, o un ciclo con `loop`.]), (name: "speed", type: "float", default: "1.0", desc: [Velocidad de la animación; mayor que cero.]), (name: "loop", type: "bool", default: "False", desc: [Vuelve a empezar al terminar mientras dure.]), (name: "reverse", type: "bool", default: "False", desc: [La reproduce hacia atrás.]), (name: "transition", type: "float", default: "0.0", desc: [Segundos en que funde desde la animación anterior del modelo, que sigue corriendo mientras tanto; la primera funde desde la pose de reposo.]), (name: "start_time", type: "float", default: "0.0", desc: [Segundos dentro de la animación donde empieza.])),
+  desc: [Devuelve un `Anim` que reproduce esa animación en `scene.play`. La pose se calcula a partir del tiempo, así que un salto a cualquier instante es exacto y las exportaciones, los paquetes y `--diff` muestran lo mismo que la vista previa. El tiempo de la animación avanza lineal salvo que se le dé `.easing(...)`. Antes de su primera animación el modelo muestra su pose de reposo y, al terminar una, conserva su última pose. La animación fija la traslación, la rotación y la escala de los nodos que mueve; para desplazar, girar o escalar el modelo entero, anima su raíz. Un nombre desconocido lanza `KeyError`; un objeto que no es un modelo glTF, `TypeError`; una velocidad, duración o transición inválidas, `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+fox = scene.media.gltf("assets/Fox.glb").scale_to(0.04).move_to(0, -2)
+scene.play(fox.animation("Survey"))
+scene.play(fox.animation("Walk", loop=True, transition=0.4), duration=3)
+scene.play(fox.animation("Run", loop=True, transition=0.3, speed=1.2), duration=2)
 ```
 ]
 

@@ -3515,6 +3515,7 @@ type ThreeDData = (
     Option<Ref<'static, gaanim_scene::PlaneFillData>>,
     Option<&'static gaanim_scene::InWorld3D>,
     Option<&'static gaanim_scene::BillboardPlane>,
+    Option<&'static gaanim_scene::SkinPalette>,
 );
 /// 3D primitives, and 2D drawables placed in the 3D world.
 type ThreeDFilter = (
@@ -3577,6 +3578,7 @@ type ThreeDItem<'a> = (
     Option<Ref<'a, gaanim_scene::PlaneFillData>>,
     Option<&'a gaanim_scene::InWorld3D>,
     Option<&'a gaanim_scene::BillboardPlane>,
+    Option<&'a gaanim_scene::SkinPalette>,
 );
 
 fn three_d_source<'a>(
@@ -3595,6 +3597,7 @@ fn three_d_source<'a>(
         fill,
         in_world,
         billboard,
+        palette,
     ): ThreeDItem<'a>,
 ) -> ThreeDSource<'a> {
     // A line revealing part of its source draws the source over that part:
@@ -3624,6 +3627,7 @@ fn three_d_source<'a>(
             line_width: line_width(stroke),
             line_range,
             fill: fill.map(Ref::into_inner),
+            joints: palette.map(|palette| &palette.0),
         },
         hud,
         exempt,
@@ -3734,6 +3738,8 @@ pub struct CapturedThreeDSource {
     pub line_range: Option<[f32; 2]>,
     /// Outlines filled in the drawable's plane.
     pub fill: Option<Arc<gaanim_scene::PlaneFillData>>,
+    /// The matrices of a skinned mesh's joints this frame.
+    pub joints: Option<Arc<[[f32; 16]]>>,
     pub composition: ThreeDComposition,
 }
 
@@ -3801,6 +3807,7 @@ fn captured_gpu_three_d(
                     line_width: source.line_width.map(f64::from),
                     line_range: source.line_range,
                     fill: source.fill.as_deref(),
+                    joints: source.joints.as_ref(),
                 },
                 source.composition.clone(),
             )
@@ -3905,6 +3912,7 @@ fn three_d_elements<'a>(
                     fill: content.fill.map(|fill| {
                         CapturedThreeDHeld::held(&mut held.fills, *entity, revision[2], fill)
                     }),
+                    joints: content.joints.cloned(),
                     composition: composition.clone(),
                 },
             )
@@ -6607,6 +6615,7 @@ mod tests {
             color: None,
             colors: None,
             material: None,
+            surface: None,
         };
         let entity = world
             .spawn((

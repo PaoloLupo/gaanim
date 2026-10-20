@@ -4871,6 +4871,97 @@ impl SceneModel {
         })
     }
 
+    /// Import scene `selector` of the glTF 2.0 model at `path` (`.gltf` or
+    /// `.glb`): a group per node in its rest pose, holding a lit mesh per
+    /// primitive, under a root at the model's origin. The root's parts are
+    /// its nodes by name, and its animations play with
+    /// [`DrawableHandle::animation`].
+    pub fn gltf(
+        &mut self,
+        path: impl AsRef<Path>,
+        selector: &gaanim_objects::gltf::GltfSceneSelector,
+    ) -> Result<DrawableHandle, gaanim_objects::gltf::GltfLoadError> {
+        let model = gaanim_objects::gltf::GltfModel::load(self.resolve_asset_path(path), selector)?;
+        let count = model.nodes.len();
+        let skin_data: Vec<(Arc<[usize]>, Arc<[gaanim_core::glam::DMat4]>)> = model
+            .skins
+            .iter()
+            .map(|skin| {
+                (
+                    Arc::from(skin.joints.as_slice()),
+                    Arc::from(skin.inverse_bind.as_slice()),
+                )
+            })
+            .collect();
+        let mut handles: Vec<Option<DrawableHandle>> = vec![None; count];
+        let mut node_ids = vec![None; count];
+        let mut parts = HashMap::new();
+        let mut skins = Vec::new();
+        // Children come after their parents: they are built first.
+        for index in (0..count).rev() {
+            let node = &model.nodes[index];
+            let mut members = Vec::new();
+            for primitive in &node.primitives {
+                let handle =
+                    self.spawn_registered(SpawnKind::Primitive3D(primitive.mesh.clone()), false);
+                let skinned = primitive
+                    .mesh
+                    .surface
+                    .as_ref()
+                    .is_some_and(|surface| surface.skin.is_some());
+                if skinned && let Some((joints, bind)) = node.skin.map(|skin| &skin_data[skin]) {
+                    skins.push((handle.id, Arc::clone(joints), Arc::clone(bind)));
+                }
+                members.push(handle);
+            }
+            members.extend(
+                node.children
+                    .iter()
+                    .filter_map(|child| handles[*child].take()),
+            );
+            let handle = self
+                .spawn_registered(
+                    SpawnKind::GroupNoCenter(members.iter().map(|member| member.id).collect()),
+                    false,
+                )
+                .with_style_targets(
+                    members
+                        .iter()
+                        .flat_map(|member| member.inherited_style_targets())
+                        .collect(),
+                );
+            handle
+                .spec
+                .lock()
+                .expect("glTF node spec poisoned")
+                .gltf_pose = Some(node.rest);
+            parts.insert(node.name.clone(), handle.clone());
+            node_ids[index] = Some(handle.id);
+            handles[index] = Some(handle);
+        }
+        let roots: Vec<DrawableHandle> = model
+            .roots
+            .iter()
+            .filter_map(|root| handles[*root].take())
+            .collect();
+        let root = self
+            .spawn(SpawnKind::GroupNoCenter(
+                roots.iter().map(|root| root.id).collect(),
+            ))
+            .with_style_targets(
+                roots
+                    .iter()
+                    .flat_map(|root| root.inherited_style_targets())
+                    .collect(),
+            );
+        root.spec.lock().expect("glTF model spec poisoned").gltf_rig =
+            Some(crate::gltf::GltfRigSpec {
+                nodes: node_ids.into_iter().flatten().collect(),
+                skins,
+            });
+        Ok(root.with_gltf(parts, Arc::clone(&model.animations)))
+    }
+
     /// Load an SVG as an animatable group of resolved vector paths.
     ///
     /// Shapes, paths, solid or gradient paints, outlined text, transforms,

@@ -172,6 +172,8 @@ pub struct Tables {
     pub(crate) meshes: Vec<Vec<u8>>,
     mesh_by_hash: HashMap<blake3::Hash, u32>,
     mesh_by_address: ByAddress<gaanim_scene::TriangleMeshData>,
+    /// Segments each mesh needs besides its own: those of its texture.
+    mesh_deps: Vec<Box<[u32]>>,
     pub(crate) lines: Vec<Vec<u8>>,
     lines_by_hash: HashMap<blake3::Hash, u32>,
     lines_by_address: ByAddress<gaanim_scene::LineListData>,
@@ -213,6 +215,7 @@ impl Default for Tables {
             effect_shaders: Vec::new(),
             meshes: Vec::new(),
             mesh_by_hash: HashMap::new(),
+            mesh_deps: Vec::new(),
             mesh_by_address: ByAddress::default(),
             lines: Vec::new(),
             lines_by_hash: HashMap::new(),
@@ -417,14 +420,17 @@ impl Tables {
         }
     }
 
-    /// Store a mesh once and return its index.
+    /// Store a mesh once and return its index. A frame that draws it needs
+    /// its segment and that of its texture.
     pub(crate) fn mesh(&mut self, mesh: &Arc<gaanim_scene::TriangleMeshData>) -> u32 {
         let index = match self.mesh_by_address.get(mesh) {
             Some(index) => index,
             None => {
-                let mut w = Writer::new();
-                codec::write_mesh(&mut w, mesh);
-                let bytes = w.into_bytes();
+                let (bytes, deps) = self.collect(|tables| {
+                    let mut w = Writer::new();
+                    codec::write_mesh(&mut w, tables, mesh);
+                    w.into_bytes()
+                });
                 let hash = blake3::hash(&bytes);
                 let index = match self.mesh_by_hash.get(&hash) {
                     Some(index) => *index,
@@ -432,6 +438,7 @@ impl Tables {
                         let index = self.meshes.len() as u32;
                         self.pending_bytes += bytes.len();
                         self.meshes.push(bytes);
+                        self.mesh_deps.push(deps.into());
                         self.mesh_by_hash.insert(hash, index);
                         index
                     }
@@ -441,6 +448,8 @@ impl Tables {
             }
         };
         self.note(segment_of(&self.starts, |c| c.meshes, index));
+        let deps = self.mesh_deps[index as usize].clone();
+        self.note_all(&deps);
         index
     }
 
@@ -684,6 +693,8 @@ impl SegmentRecipe {
 /// Decoded tables of an open bundle, segment by segment as frames need
 /// them (see [`Tables`]).
 pub struct DecodedTables {
+    /// The bundle's format, which some items' encoding depends on.
+    version: u32,
     /// Where each segment starts, then the totals.
     starts: Vec<TableCounts>,
     segments: Vec<Option<Segment>>,
@@ -728,13 +739,14 @@ impl Resolver for DecodedTables {
 impl DecodedTables {
     /// Tables of `counts.len()` segments, holding `counts[i]` items each,
     /// none decoded yet.
-    pub fn new(counts: &[TableCounts]) -> Self {
+    pub fn new(counts: &[TableCounts], version: u32) -> Self {
         let mut starts = vec![TableCounts::default()];
         for segment in counts {
             starts.push(starts.last().expect("a start").add(*segment));
         }
         // The last start is the totals: no segment starts there.
         Self {
+            version,
             starts,
             segments: counts.iter().map(|_| None).collect(),
             post_exempt: HashSet::new(),
@@ -798,9 +810,22 @@ impl DecodedTables {
         for _ in 0..recipes {
             decoded.recipes.push(SegmentRecipe::new(r.bytes()?));
         }
+        // A mesh's texture is among this segment's images or those of an
+        // earlier segment, which a chunk loads first.
+        let first_image = self.starts[segment].images;
+        let image = |index: u32| -> Result<peniko::ImageData> {
+            match index.checked_sub(first_image) {
+                Some(local) if (local as usize) < decoded.images.len() => {
+                    Ok(decoded.images[local as usize].clone())
+                }
+                _ => lookup(self, |c| c.images, |s| &s.images, index, "image").cloned(),
+            }
+        };
+        let mut meshes = Vec::new();
         for _ in 0..count(&mut r, expected.meshes, "meshes")? {
-            decoded.meshes.push(Arc::new(codec::read_mesh(&mut r)?));
+            meshes.push(Arc::new(codec::read_mesh(&mut r, self.version, &image)?));
         }
+        decoded.meshes = meshes;
         for _ in 0..count(&mut r, expected.lines, "line lists")? {
             decoded.lines.push(Arc::new(codec::read_lines(&mut r)?));
         }
@@ -858,7 +883,7 @@ impl DecodedTables {
             meshes: 0,
             lines: 0,
         };
-        let mut tables = Self::new(&[counts]);
+        let mut tables = Self::new(&[counts], 5);
         tables.segments[0] = Some(decoded);
         Ok(tables)
     }
@@ -1018,14 +1043,28 @@ fn write_three_d(
         .enumerate()
         .filter_map(|(index, source)| source.fill.as_deref().map(|fill| (index, fill)))
         .collect();
-    if !widths.is_empty() || !ranges.is_empty() || !outlines.is_empty() || !fills.is_empty() {
+    // Last, the palettes of skinned meshes (format 7): by source, its
+    // joints' matrices.
+    let palettes: Vec<(usize, &Arc<[[f32; 16]]>)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.joints.as_ref().map(|joints| (index, joints)))
+        .collect();
+    let skinned = !palettes.is_empty();
+    if !widths.is_empty()
+        || !ranges.is_empty()
+        || !outlines.is_empty()
+        || !fills.is_empty()
+        || skinned
+    {
         w.len(widths.len());
         for (index, width) in widths {
             w.len(index);
             w.f32(width);
         }
     }
-    if !ranges.is_empty() || !outlines.is_empty() || !fills.is_empty() {
+    if !ranges.is_empty() || !outlines.is_empty() || !fills.is_empty() || skinned {
         w.len(ranges.len());
         for (index, [from, to]) in ranges {
             w.len(index);
@@ -1033,7 +1072,7 @@ fn write_three_d(
             w.f32(to);
         }
     }
-    if !outlines.is_empty() || !fills.is_empty() {
+    if !outlines.is_empty() || !fills.is_empty() || skinned {
         w.len(outlines.len());
         for (index, material) in outlines {
             w.len(index);
@@ -1041,7 +1080,7 @@ fn write_three_d(
             w.f32(material.outline_width);
         }
     }
-    if !fills.is_empty() {
+    if !fills.is_empty() || skinned {
         w.len(fills.len());
         for &(index, fill) in &fills {
             w.len(index);
@@ -1099,7 +1138,7 @@ fn write_three_d(
             (!glyphs.is_empty()).then_some((index, glyphs))
         })
         .collect();
-    if !gradients.is_empty() || !clips.is_empty() {
+    if !gradients.is_empty() || !clips.is_empty() || skinned {
         w.len(gradients.len());
         for (index, glyphs) in gradients {
             w.len(index);
@@ -1113,7 +1152,7 @@ fn write_three_d(
             }
         }
     }
-    if !clips.is_empty() {
+    if !clips.is_empty() || skinned {
         w.len(clips.len());
         for (index, glyphs) in clips {
             w.len(index);
@@ -1124,6 +1163,18 @@ fn write_three_d(
                 w.f32(clip.offset.x as f32);
                 w.f32(clip.offset.y as f32);
                 w.bool(clip.outside);
+            }
+        }
+    }
+    if skinned {
+        w.len(palettes.len());
+        for (index, joints) in palettes {
+            w.len(index);
+            w.len(joints.len());
+            for matrix in joints.iter() {
+                for value in matrix {
+                    w.f32(*value);
+                }
             }
         }
     }
@@ -1179,6 +1230,7 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
             line_width: None,
             line_range: None,
             fill: None,
+            joints: None,
             composition: ThreeDComposition {
                 in_views,
                 post_exempt,
@@ -1298,6 +1350,27 @@ fn read_three_d(r: &mut Reader<'_>, tables: &DecodedTables) -> Result<CapturedTh
                     outside,
                 });
             }
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let count = r.len()?;
+            if count > gaanim_scene::model::MAX_JOINTS {
+                return Err(corrupt("a palette of more joints than a skin moves"));
+            }
+            let mut joints = Vec::with_capacity(count);
+            for _ in 0..count {
+                let mut matrix = [0.0_f32; 16];
+                for value in &mut matrix {
+                    *value = r.f32()?;
+                }
+                joints.push(matrix);
+            }
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("a palette of no 3D source"))?
+                .joints = Some(joints.into());
         }
     }
     for (index, glyphs) in fills {
@@ -2616,6 +2689,7 @@ mod tests {
             color: None,
             colors: None,
             material: None,
+            surface: None,
         }
     }
 

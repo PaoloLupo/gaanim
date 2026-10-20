@@ -434,7 +434,13 @@ pub fn read_material(r: &mut Reader<'_>) -> Result<gaanim_scene::Material3D> {
     })
 }
 
-pub fn write_mesh(w: &mut Writer, mesh: &gaanim_scene::TriangleMeshData) {
+/// Encode `mesh`; the texture of an imported model's primitive goes in the
+/// images table.
+pub fn write_mesh(
+    w: &mut Writer,
+    tables: &mut impl Interner,
+    mesh: &gaanim_scene::TriangleMeshData,
+) {
     write_points(w, &mesh.vertices);
     write_indices(w, &mesh.indices);
     w.option(mesh.normals.as_deref(), write_points);
@@ -442,9 +448,18 @@ pub fn write_mesh(w: &mut Writer, mesh: &gaanim_scene::TriangleMeshData) {
     w.option(mesh.color, write_color);
     w.option(mesh.colors.as_deref(), write_points);
     w.option(mesh.material.as_ref(), write_material);
+    w.option(mesh.surface.as_deref(), |w, surface| {
+        write_surface(w, tables, surface)
+    });
 }
 
-pub fn read_mesh(r: &mut Reader<'_>) -> Result<gaanim_scene::TriangleMeshData> {
+/// Decode what [`write_mesh`] wrote in a bundle of format `version`, its
+/// texture read from the images table through `image`.
+pub fn read_mesh(
+    r: &mut Reader<'_>,
+    version: u32,
+    image: &dyn Fn(u32) -> Result<peniko::ImageData>,
+) -> Result<gaanim_scene::TriangleMeshData> {
     Ok(gaanim_scene::TriangleMeshData {
         vertices: read_points(r)?,
         indices: read_indices(r)?,
@@ -453,6 +468,100 @@ pub fn read_mesh(r: &mut Reader<'_>) -> Result<gaanim_scene::TriangleMeshData> {
         color: r.option(read_color)?,
         colors: r.option(read_points)?,
         material: r.option(read_material)?,
+        // Format 7 added imported models' surfaces.
+        surface: if version >= 7 {
+            r.option(|r| read_surface(r, image))?.map(Arc::new)
+        } else {
+            None
+        },
+    })
+}
+
+fn write_wrap(w: &mut Writer, wrap: gaanim_scene::TextureWrap) {
+    w.u8(match wrap {
+        gaanim_scene::TextureWrap::Repeat => 0,
+        gaanim_scene::TextureWrap::MirroredRepeat => 1,
+        gaanim_scene::TextureWrap::ClampToEdge => 2,
+    });
+}
+
+fn read_wrap(r: &mut Reader<'_>) -> Result<gaanim_scene::TextureWrap> {
+    match r.u8()? {
+        0 => Ok(gaanim_scene::TextureWrap::Repeat),
+        1 => Ok(gaanim_scene::TextureWrap::MirroredRepeat),
+        2 => Ok(gaanim_scene::TextureWrap::ClampToEdge),
+        _ => Err(corrupt("invalid texture wrap")),
+    }
+}
+
+/// An imported model's texture (an index into the images table), alpha
+/// mode, sides and skin weights.
+fn write_surface(w: &mut Writer, tables: &mut impl Interner, surface: &gaanim_scene::MeshSurface) {
+    w.option(surface.texture.as_ref(), |w, texture| {
+        w.var(u64::from(tables.image(&texture.image)));
+        write_wrap(w, texture.wrap[0]);
+        write_wrap(w, texture.wrap[1]);
+        w.bool(texture.nearest);
+    });
+    match surface.alpha {
+        gaanim_scene::AlphaMode::Opaque => w.u8(0),
+        gaanim_scene::AlphaMode::Mask(cutoff) => {
+            w.u8(1);
+            w.f32(cutoff);
+        }
+        gaanim_scene::AlphaMode::Blend => w.u8(2),
+    }
+    w.bool(surface.double_sided);
+    w.option(surface.skin.as_ref(), |w, skin| {
+        w.len(skin.joints.len());
+        for joints in &skin.joints {
+            for joint in joints {
+                w.var(u64::from(*joint));
+            }
+        }
+        write_points(w, &skin.weights);
+    });
+}
+
+fn read_surface(
+    r: &mut Reader<'_>,
+    image: &dyn Fn(u32) -> Result<peniko::ImageData>,
+) -> Result<gaanim_scene::MeshSurface> {
+    let texture = r.option(|r| {
+        Ok(gaanim_scene::MeshTexture {
+            image: image(r.u32()?)?,
+            wrap: [read_wrap(r)?, read_wrap(r)?],
+            nearest: r.bool()?,
+        })
+    })?;
+    let alpha = match r.u8()? {
+        0 => gaanim_scene::AlphaMode::Opaque,
+        1 => gaanim_scene::AlphaMode::Mask(r.f32()?),
+        2 => gaanim_scene::AlphaMode::Blend,
+        _ => return Err(corrupt("invalid alpha mode")),
+    };
+    let double_sided = r.bool()?;
+    let skin = r.option(|r| {
+        let count = r.len()?;
+        let mut joints = Vec::with_capacity(count.min(1 << 22));
+        for _ in 0..count {
+            let mut vertex = [0_u16; 4];
+            for joint in &mut vertex {
+                *joint = u16::try_from(r.var()?).map_err(|_| corrupt("a joint index"))?;
+            }
+            joints.push(vertex);
+        }
+        let weights = read_points(r)?;
+        if weights.len() != joints.len() {
+            return Err(corrupt("skin weights that do not match its joints"));
+        }
+        Ok(gaanim_scene::SkinWeights { joints, weights })
+    })?;
+    Ok(gaanim_scene::MeshSurface {
+        texture,
+        alpha,
+        double_sided,
+        skin,
     })
 }
 

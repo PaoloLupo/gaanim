@@ -91,8 +91,10 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// glass; version 4 (development builds of Gaanim 0.9) had no reactive
 /// uniforms on shader transitions nor shader backgrounds; version 5 (Gaanim
 /// 0.9 to 0.12) stored each table whole in `tables/*.bin`, which a player
-/// downloaded before the first frame, and every frame's time as an `f64`.
-pub const VERSION: u32 = 6;
+/// downloaded before the first frame, and every frame's time as an `f64`;
+/// version 6 (Gaanim 0.13 to 0.15) had no textures, alpha modes, sides nor
+/// skin weights on meshes, nor the palettes of skinned meshes.
+pub const VERSION: u32 = 7;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;
@@ -1670,7 +1672,7 @@ impl Bundle {
                 .iter()
                 .map(|segment| segment.counts)
                 .collect();
-            let mut tables = DecodedTables::new(&counts);
+            let mut tables = DecodedTables::new(&counts, version);
             for segment in &opening {
                 tables.load(*segment, &read(&manifest.table_segments[*segment].entry)?)?;
             }
@@ -2325,6 +2327,7 @@ mod tests {
                 line_width: None,
                 line_range: None,
                 fill: Some(Arc::new(fill.clone())),
+                joints: None,
                 composition: gaanim_renderer::pipeline::ThreeDComposition {
                     in_views: true,
                     post_exempt: false,
@@ -2352,6 +2355,116 @@ mod tests {
             &back.glyphs[0].outline,
             &back.glyphs[2].outline
         ));
+    }
+
+    /// An imported model's mesh comes back with its texture, alpha mode,
+    /// sides and skin weights, stored once, and each frame with the palette
+    /// of its joints.
+    #[test]
+    fn skinned_textured_meshes_and_their_palettes_round_trip() {
+        use gaanim_core::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
+        let texture = gaanim_scene::MeshTexture {
+            image: ImageData {
+                data: Blob::from(vec![255, 0, 0, 255, 0, 0, 255, 128]),
+                format: ImageFormat::Rgba8,
+                alpha_type: ImageAlphaType::Alpha,
+                width: 2,
+                height: 1,
+            },
+            wrap: [
+                gaanim_scene::TextureWrap::MirroredRepeat,
+                gaanim_scene::TextureWrap::ClampToEdge,
+            ],
+            nearest: true,
+        };
+        let mesh = Arc::new(gaanim_scene::TriangleMeshData {
+            vertices: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
+            color: None,
+            colors: None,
+            material: Some(gaanim_scene::Material3D::default()),
+            surface: Some(Arc::new(gaanim_scene::MeshSurface {
+                texture: Some(texture),
+                alpha: gaanim_scene::AlphaMode::Mask(0.3),
+                double_sided: true,
+                skin: Some(gaanim_scene::SkinWeights {
+                    joints: vec![[0, 1, 0, 0], [1, 0, 0, 0], [300, 2, 1, 0]],
+                    weights: vec![
+                        [0.5, 0.5, 0.0, 0.0],
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.2, 0.3, 0.5, 0.0],
+                    ],
+                }),
+            })),
+        });
+        let source = |palette: [f32; 16]| gaanim_renderer::pipeline::CapturedThreeDSource {
+            entity: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
+            transform: gaanim_core::glam::DMat4::IDENTITY,
+            opacity: 1.0,
+            mesh: Some(Arc::clone(&mesh)),
+            lines: None,
+            material: mesh.material,
+            line_width: None,
+            line_range: None,
+            fill: None,
+            joints: Some(Arc::from(vec![palette, [1.0; 16]])),
+            composition: gaanim_renderer::pipeline::ThreeDComposition {
+                in_views: true,
+                post_exempt: false,
+                layer: None,
+                transition_side: Default::default(),
+                lineage: Vec::new(),
+            },
+        };
+        let identity = gaanim_core::glam::Mat4::IDENTITY.to_cols_array();
+        let moved =
+            gaanim_core::glam::Mat4::from_translation(gaanim_core::glam::Vec3::X).to_cols_array();
+        let mut writer = BundleWriter::new(std::io::Cursor::new(Vec::new()), "test");
+        for (index, palette) in [identity, moved].into_iter().enumerate() {
+            let mut captured = frame(index as f64 / 60.0);
+            captured.capture.three_d = Some(gaanim_renderer::pipeline::CapturedThreeD {
+                sources: vec![source(palette)],
+                ..Default::default()
+            });
+            writer.push_frame(&captured, [0; 32]).unwrap();
+        }
+        let scene = SceneData {
+            fps: 60,
+            duration: 2.0 / 60.0,
+            ..Default::default()
+        };
+        let mut bundle =
+            Bundle::from_bytes(writer.finish(&scene).unwrap().into_inner().into()).unwrap();
+        assert_eq!(bundle.manifest.version, VERSION);
+        for (index, palette) in [identity, moved].into_iter().enumerate() {
+            let decoded = bundle.frame(index).unwrap();
+            let three_d = decoded.capture.three_d.unwrap();
+            let back = &three_d.sources[0];
+            let back_mesh = back.mesh.as_deref().unwrap();
+            assert_eq!(back_mesh.vertices, mesh.vertices, "frame {index}");
+            assert_eq!(back_mesh.uvs, mesh.uvs);
+            assert_eq!(back_mesh.material, mesh.material);
+            // Images compare by their blob; their texels come back.
+            let (back_surface, surface) = (
+                back_mesh.surface.as_deref().unwrap(),
+                mesh.surface.as_deref().unwrap(),
+            );
+            let (back_texture, texture) = (
+                back_surface.texture.as_ref().unwrap(),
+                surface.texture.as_ref().unwrap(),
+            );
+            assert_eq!(back_texture.image.data.data(), texture.image.data.data());
+            assert_eq!(
+                (back_texture.wrap, back_texture.nearest),
+                (texture.wrap, texture.nearest)
+            );
+            assert_eq!(back_surface.alpha, surface.alpha);
+            assert_eq!(back_surface.double_sided, surface.double_sided);
+            assert_eq!(back_surface.skin, surface.skin);
+            assert_eq!(back.joints.as_deref(), Some(&[palette, [1.0; 16]][..]));
+        }
     }
 
     /// A bundle says when its frames draw glass, which players without GPU
