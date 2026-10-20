@@ -2644,6 +2644,12 @@ impl SceneModel {
             tracing::warn!("a glTF model lost some of its nodes; its animations are left out");
             return;
         };
+        let compiled: Vec<ObjectId> = rig
+            .nodes
+            .iter()
+            .filter_map(|id| id_map.get(id).copied())
+            .collect();
+        builder.gltf_poses.rigged(root, compiled);
         for (mesh, joints, inverse_bind) in &rig.skins {
             let Some(entity) = entity_of(builder, mesh) else {
                 continue;
@@ -2908,6 +2914,7 @@ impl SceneModel {
             None => SceneBuilder::new(commands, timeline, font_registry, text_config),
         };
         builder.readout_reserves = self.layout_readout_reserves();
+        builder.run_time_holds.probed = Arc::clone(&self.camera_hold_probes);
         if let Ok(accent) = self.theme_color("accent") {
             builder.emphasis_color = accent;
         }
@@ -3054,6 +3061,16 @@ impl SceneModel {
             });
             builder.end_scene();
         }
+        // Holds on endpoints only the run time moves, which a probe of the
+        // scene can find where they end.
+        let run_time_holds = std::mem::take(&mut builder.run_time_holds.found);
+        builder.commands.queue(move |world: &mut World| {
+            if run_time_holds.is_empty() {
+                world.remove_resource::<crate::builder::RunTimeCameraHolds>();
+            } else {
+                world.insert_resource(crate::builder::RunTimeCameraHolds(run_time_holds));
+            }
+        });
         let segment_paints: Vec<gaanim_renderer::pipeline::SegmentBackgroundPaint> = segments
             .iter()
             .zip(&segment_metadata)
@@ -6769,6 +6786,7 @@ impl SceneModel {
                             .into_updater()
                             .starting_at(builder.current_time);
                         builder.commands.entity(st.entity).insert(updater);
+                        builder.run_time_holds.updated.insert(target_id);
                     }
                 }
 
@@ -7827,6 +7845,7 @@ impl SceneModel {
                             .commands
                             .entity(state.entity)
                             .insert(updater.clone().starting_at(builder.current_time));
+                        builder.run_time_holds.updated.insert(target_id);
                     }
                 }
                 Op::AttachReactiveArrowField2D {
@@ -8731,11 +8750,12 @@ impl SceneModel {
     }
 
     /// Give the dynamic camera clips just scheduled the pose the camera
-    /// keeps once they end, from where their targets are as authored after
-    /// the whole play, and continue the authored camera from it. Without
-    /// it a `follow` or a dynamic `frame_to` cut back to the pose before
-    /// the shot. Targets driven at run time (updaters, physics) can end
-    /// elsewhere; the camera then cuts to this estimate when the clip ends.
+    /// keeps once they end, from where their targets are as they end (as
+    /// authored after the whole play, glTF parts where their animations put
+    /// them), and continue the authored camera from it. Without it a
+    /// `follow` or a dynamic `frame_to` cut back to the pose before the
+    /// shot. A target an updater moves is where a probe of the scene found
+    /// it (see [`Self::held_endpoint`]).
     fn resolve_camera_holds(
         builder: &mut SceneBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
@@ -8748,11 +8768,19 @@ impl SceneModel {
         use gaanim_timeline::clip::{ClipPayload, PropertyLensSpec};
         for pending in std::mem::take(&mut builder.pending_camera_holds) {
             let mut target_held = None;
+            let index = builder.run_time_holds.resolved;
+            builder.run_time_holds.resolved += 1;
+            // Where the endpoints are as the clip ends.
+            let at = builder
+                .timeline
+                .clips
+                .get(pending.clip)
+                .map_or(builder.current_time, |clip| clip.end());
             let (position, zoom) = match &pending.kind {
                 PendingCameraHoldKind::LookAt { eye, target, up } => {
                     let (Some((eye, _)), Some((target, _))) = (
-                        Self::authored_endpoint_in_3d(builder, id_map, eye),
-                        Self::authored_endpoint_in_3d(builder, id_map, target),
+                        Self::held_endpoint(builder, id_map, eye, true, at, (index, 0)),
+                        Self::held_endpoint(builder, id_map, target, true, at, (index, 1)),
                     ) else {
                         continue;
                     };
@@ -8782,11 +8810,14 @@ impl SceneModel {
                     duration,
                     posed,
                 } => {
-                    let found = if posed.is_some() {
-                        Self::authored_endpoint_in_3d(builder, id_map, target)
-                    } else {
-                        Self::authored_endpoint(builder, id_map, target)
-                    };
+                    let found = Self::held_endpoint(
+                        builder,
+                        id_map,
+                        target,
+                        posed.is_some(),
+                        at,
+                        (index, 0),
+                    );
                     let Some((point, basis)) = found else {
                         continue;
                     };
@@ -8833,7 +8864,9 @@ impl SceneModel {
                     }
                 }
                 PendingCameraHoldKind::Pan { target } => {
-                    let Some((point, _)) = Self::authored_endpoint(builder, id_map, target) else {
+                    let Some((point, _)) =
+                        Self::held_endpoint(builder, id_map, target, false, at, (index, 0))
+                    else {
                         continue;
                     };
                     (point, None)
@@ -8927,30 +8960,100 @@ impl SceneModel {
     /// endpoint is, and reactive points take the authored values of their
     /// sources. `None` for endpoints only the run time resolves (number
     /// lines, sources driven by updaters).
-    fn authored_endpoint(
+    /// Where camera hold `key` finds `endpoint` as its clip ends at `at`:
+    /// as authored (see [`Self::authored_endpoint_at_depth`]), or
+    /// where a probe of the scene found it, when an updater moves it. Such
+    /// an endpoint is noted for the probe.
+    fn held_endpoint(
+        builder: &mut SceneBuilder,
+        id_map: &HashMap<ObjectId, ObjectId>,
+        endpoint: &CanvasEndpoint,
+        in_3d: bool,
+        at: f64,
+        key: (usize, u8),
+    ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
+        let authored = Self::authored_endpoint_at_depth(builder, id_map, endpoint, 0, in_3d, at);
+        if builder.run_time_holds.updated.is_empty()
+            || !Self::moved_at_run_time(builder, id_map, endpoint, 0)
+        {
+            return authored;
+        }
+        builder
+            .run_time_holds
+            .found
+            .push(crate::builder::RunTimeHold {
+                index: key.0,
+                slot: key.1,
+                time: at,
+                endpoint: compile_tracking_endpoint(endpoint, id_map, &builder.states),
+            });
+        match builder.run_time_holds.probed.get(&key) {
+            Some(point) => Some((
+                *point,
+                authored.map_or(gaanim_core::glam::DMat4::IDENTITY, |(_, basis)| basis),
+            )),
+            None => authored,
+        }
+    }
+
+    /// Whether an updater moves `endpoint`: a drawable it moves or one inside
+    /// it, or an endpoint built on one.
+    fn moved_at_run_time(
         builder: &SceneBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
         endpoint: &CanvasEndpoint,
-    ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
-        Self::authored_endpoint_at_depth(builder, id_map, endpoint, 0, false)
+        depth: usize,
+    ) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        let moved = |id: &ObjectId| {
+            let Some(&runtime) = id_map.get(id) else {
+                return false;
+            };
+            if let Some(follow) = builder.authored_follows.get(&runtime) {
+                return Self::moved_at_run_time(builder, id_map, &follow.endpoint, depth + 1);
+            }
+            let mut current = Some(runtime);
+            while let Some(object) = current {
+                if builder.run_time_holds.updated.contains(&object) {
+                    return true;
+                }
+                current = builder.states.get(object).and_then(|state| state.parent);
+            }
+            false
+        };
+        let built_on = |endpoint: &CanvasEndpoint| {
+            Self::moved_at_run_time(builder, id_map, endpoint, depth + 1)
+        };
+        match endpoint {
+            CanvasEndpoint::Entity(id)
+            | CanvasEndpoint::LocalExpression { space: id, .. }
+            | CanvasEndpoint::MediaPixel { object: id, .. } => moved(id),
+            CanvasEndpoint::Anchor(anchor) => moved(&anchor.object),
+            CanvasEndpoint::Offset { origin, .. } | CanvasEndpoint::Polar { origin, .. } => {
+                built_on(origin)
+            }
+            CanvasEndpoint::Between { from, to, .. } => built_on(from) || built_on(to),
+            _ => false,
+        }
     }
 
-    /// [`Self::authored_endpoint`] with the depth of drawables moved in 3D,
-    /// which a camera at an angle sees.
-    fn authored_endpoint_in_3d(
-        builder: &SceneBuilder,
-        id_map: &HashMap<ObjectId, ObjectId>,
-        endpoint: &CanvasEndpoint,
-    ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
-        Self::authored_endpoint_at_depth(builder, id_map, endpoint, 0, true)
-    }
-
+    /// Where `endpoint` is as authored, with the world matrix its local
+    /// offsets turn with: a drawable that follows an endpoint is where that
+    /// endpoint is, and reactive points take the authored values of their
+    /// sources. With `in_3d` drawables keep the depth they were moved to,
+    /// which a camera at an angle sees, and parts of glTF models are where
+    /// their animations put them at timeline second `at`. `None` for
+    /// endpoints only the run time resolves (number lines, sources driven
+    /// by updaters).
     fn authored_endpoint_at_depth(
         builder: &SceneBuilder,
         id_map: &HashMap<ObjectId, ObjectId>,
         endpoint: &CanvasEndpoint,
         depth: usize,
         in_3d: bool,
+        at: f64,
     ) -> Option<(DVec3, gaanim_core::glam::DMat4)> {
         use gaanim_core::glam::DMat4;
         // Follows can chain; a cycle has no authored position.
@@ -8959,10 +9062,13 @@ impl SceneModel {
         }
         let scalar = |source: &ScalarSource| Self::authored_scalar(builder, id_map, source);
         let point = |endpoint: &CanvasEndpoint| {
-            Self::authored_endpoint_at_depth(builder, id_map, endpoint, depth + 1, in_3d)
+            Self::authored_endpoint_at_depth(builder, id_map, endpoint, depth + 1, in_3d, at)
         };
+        // A part of a glTF model is where its animation puts it then.
         let world = |runtime: ObjectId| {
-            if in_3d {
+            if builder.moved_by_gltf(runtime) {
+                builder.world_matrix_3d_at(runtime, at)
+            } else if in_3d {
                 builder.world_matrix_3d(runtime)
             } else {
                 builder.get_world_transform(runtime).to_mat4()
@@ -14775,6 +14881,122 @@ mod tests {
             orbited.target
         );
         assert!(((orbited.position - end).length() - (eye - end).length()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_camera_that_follows_a_part_of_a_model_keeps_where_its_animation_takes_it() {
+        use bevy::prelude::App;
+        use gaanim_animation::{FollowOffsetSpace, TrackingEndpoint};
+        let mut canvas = SceneModel::new(1280, 720);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/fixtures/assets/Wolf.glb");
+        let wolf = canvas.gltf(&path, &Default::default()).unwrap();
+        let head = wolf.part("Head").unwrap();
+        let look = canvas.camera_look_at((0.0, 4.0, 10.0), (0.0, 0.0, 0.0), None, 0.0);
+        let perspective = canvas.camera_perspective(0.8, 0.1, 100.0, 0.0);
+        canvas.play(vec![look, perspective]);
+        // The follow ends early in the headbutt, with the head away from
+        // where it rests.
+        let headbutt = wolf
+            .animation("Headbutt", Some(2.0), 1.0, false, false, 0.0, 0.0)
+            .unwrap();
+        let follow = canvas.camera_follow_endpoint(
+            CanvasEndpoint::Entity(head.id),
+            DVec3::ZERO,
+            FollowOffsetSpace::World,
+            0.0,
+            0.2,
+        );
+        canvas.play(vec![follow, headbutt]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let head = entity_of(app.world_mut(), &head);
+        let seek = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+        };
+        let head_at = |app: &mut App, time: f64| {
+            seek(app, time);
+            gaanim_animation::resolve_tracking_endpoint(
+                &TrackingEndpoint::Entity(head),
+                app.world(),
+            )
+            .unwrap()
+        };
+        let rest = head_at(&mut app, 0.0);
+        let ended = head_at(&mut app, 0.2);
+        assert!((ended - rest).length() > 0.01, "{rest:?} {ended:?}");
+        // After the follow the camera looks where the head was as it ended,
+        // not where it rests.
+        seek(&mut app, 0.3);
+        let held = app.world().resource::<gaanim_math::Camera>().target;
+        assert!((held - ended).length() < 1e-6, "{held:?} {ended:?}");
+    }
+
+    #[test]
+    fn a_camera_that_follows_a_drawable_an_updater_moves_keeps_where_it_ends() {
+        use bevy::prelude::App;
+        use gaanim_animation::{FollowOffsetSpace, TrackingEndpoint};
+        let mut canvas = SceneModel::new(1280, 720);
+        let comet = canvas.circle(0.3);
+        comet.add_updater(crate::canvas::UpdaterPreset::Orbit {
+            cx: 0.0,
+            cy: 0.0,
+            radius: 3.0,
+            speed: 1.0,
+        });
+        let follow = canvas.camera_follow_endpoint(
+            CanvasEndpoint::Entity(comet.id),
+            DVec3::ZERO,
+            FollowOffsetSpace::World,
+            0.0,
+            1.0,
+        );
+        canvas.play(vec![follow]);
+        // A pan after it starts where the follow ended.
+        let pan = canvas.camera_pan_to(0.0, 0.0, 1.0);
+        canvas.play(vec![pan]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let comet = entity_of(app.world_mut(), &comet);
+        let seek = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+        };
+        seek(&mut app, 1.0);
+        let ended = gaanim_animation::resolve_tracking_endpoint(
+            &TrackingEndpoint::Entity(comet),
+            app.world(),
+        )
+        .unwrap();
+        // Where the comet was as the follow ended, not where it was authored.
+        assert!(ended.truncate().distance(gaanim_core::glam::DVec2::ZERO) > 1.0);
+        seek(&mut app, 1.0 + 1e-6);
+        let held = app.world().resource::<gaanim_math::Camera>().position;
+        assert!(
+            (held.truncate() - ended.truncate()).length() < 1e-3,
+            "{held:?} {ended:?}"
+        );
     }
 
     #[test]

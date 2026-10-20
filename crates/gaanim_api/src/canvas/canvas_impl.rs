@@ -2420,6 +2420,10 @@ pub struct SceneModel {
     pub(crate) measured: super::measure::MeasureCache,
     /// What authoring this scene cost; see [`Self::measurement_warning`].
     pub(crate) profile: super::profile::SharedProfile,
+    /// Where a probe of the scene found the endpoints of camera holds that
+    /// only the run time moves, by hold and endpoint (see
+    /// `runtime::with_run_time_holds`).
+    pub(crate) camera_hold_probes: Arc<HashMap<(usize, u8), gaanim_core::glam::DVec3>>,
 }
 
 impl SceneModel {
@@ -2467,6 +2471,7 @@ impl SceneModel {
             lighting_3d: gaanim_scene::Lighting3D::default(),
             state: Arc::new(Authored::new(CanvasState::new())),
             measured: Default::default(),
+            camera_hold_probes: Default::default(),
             profile: Default::default(),
         }
     }

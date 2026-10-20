@@ -384,6 +384,35 @@ impl SceneModel {
             .flat_map(|segment| &segment.ops)
             .any(|op| matches!(op, Op::SetCameraSnapshot { .. }))
     }
+
+    /// Whether the camera may hold where an endpoint ends that only the run
+    /// time moves: the scene has updaters and camera moves that end on an
+    /// endpoint (`follow`, `look_at`, `pan_to`).
+    pub(crate) fn may_hold_on_updated_endpoints(&self) -> bool {
+        use crate::anim::AnimationType;
+        let holds = |anim: &crate::anim::AnimationBuilder| {
+            matches!(
+                anim.anim_type,
+                AnimationType::CameraFollowEndpoint { .. }
+                    | AnimationType::CameraLookAtSource { .. }
+                    | AnimationType::CameraPositionSource { .. }
+            )
+        };
+        let state = self.state.lock().expect("canvas state poisoned");
+        let (mut updaters, mut moves) = (false, false);
+        for op in state.segments.iter().flat_map(|segment| &segment.ops) {
+            match op {
+                Op::AttachUpdater { .. } | Op::AttachCustomUpdater { .. } => updaters = true,
+                Op::Play(anims) | Op::Launch(anims) => moves |= anims.iter().any(holds),
+                Op::Animate { anim, .. } | Op::Immediate(anim) => moves |= holds(anim),
+                _ => {}
+            }
+            if updaters && moves {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 fn validate_layer(layer: &str) -> Result<Arc<str>, CameraViewError> {

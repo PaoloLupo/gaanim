@@ -6653,7 +6653,7 @@ class CameraAnimation:
 
         A drawable target is centered where it is drawn while the pan plays,
         also when it follows a reactive point, and the camera then stays
-        where the target is drawn as authored at the end of the ``play``.
+        where the target is drawn at the end of the pan (see ``follow``).
 
         Example:
             scene.camera.animate.pan_to(1.0, 1.0)
@@ -6725,8 +6725,11 @@ class CameraAnimation:
         ``offset_space="local"`` turns the offset with the target, and ``lag``
         (seconds) eases the camera onto it from where it started. When the
         animation ends the camera keeps the pose it reached, so the next camera
-        move starts there; that pose comes from where the target is as
-        authored at the end of the ``play``.
+        move starts there. That pose comes from where the target is as the
+        animation ends: as the script moves it, where its glTF animation
+        puts a model's part, or where an updater takes it; a scene with
+        updaters and camera moves like this one is built once more to find
+        that out, so it takes a little longer to load and export.
 
         The 2D camera pans. A camera that looks at the scene from an angle
         or through a perspective (after ``look_at``, ``orbit`` or

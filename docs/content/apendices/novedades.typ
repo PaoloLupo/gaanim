@@ -106,6 +106,12 @@ en GPU y que los paquetes `.gaanim` guardan ya resueltos. Lee «Al actualizar».
   principal lo dibuja, con sus conectores, también con un `offset` en
   profundidad, `(x, y, z)`. Si el objeto pasa detrás de la cámara, el marco
   sale del cuadro por su lado en lugar de saltar al lado contrario.
+- Al terminar `follow`, `look_at` o `pan_to` sobre un objeto, la cámara se
+  queda donde el objeto está entonces, también cuando lo mueve una
+  animación glTF (una parte de un modelo) o un updater. Antes usaba su
+  posición escrita en el script y saltaba allí al terminar. Una escena con
+  updaters y esos movimientos de cámara se construye una vez más para
+  averiguarlo.
 - La cámara 2D se desplaza como antes, y las escenas sin cámara 3D no
   hacen ningún cálculo nuevo.
 - El ejemplo `3d/camera_3d` suma los segmentos `follow` e `inset`.

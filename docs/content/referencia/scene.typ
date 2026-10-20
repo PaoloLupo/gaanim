@@ -1424,7 +1424,7 @@ scene.play([scene.camera.animate.rotate_to(0.15).duration(0.5)])
     (name: "lag", type: "float", default: "0.0", desc: [Retraso de seguimiento en segundos, determinista.]),
     (name: "turn", type: "bool", default: "False", desc: [Una cámara en ángulo o en perspectiva se queda donde está y gira para mantener el objetivo en el centro, como sobre un trípode.]),
   ),
-  returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`. Al terminar, la cámara se queda en la pose que alcanzó, calculada con la posición del objetivo al final del `play`, y el siguiente movimiento parte de ahí.]),
+  returns: (type: "Anim", desc: [Seguimiento durante la duración del `Anim`. Al terminar, la cámara se queda en la pose que alcanzó y el siguiente movimiento parte de ahí. Esa pose sale de donde está el objetivo al terminar: donde lo deja el script, donde su animación glTF pone una parte de un modelo o donde lo lleva un updater; una escena con updaters y movimientos así se construye una vez más para averiguarlo, así que tarda algo más en cargar y exportar.]),
   desc: [La cámara 2D se desplaza, también con `turn`. Una cámara que mira la escena en ángulo o en perspectiva (tras `look_at`, `orbit` o `perspective`) sigue al objetivo en 3D: se mueve con él sin girar, a la misma distancia sobre su línea de visión, y su objetivo se mueve también, así que un `orbit` posterior gira alrededor del punto seguido. Con `turn=True` no se mueve: gira hacia el objetivo y termina mirándolo.],
 )[
 ```python

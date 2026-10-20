@@ -52,7 +52,10 @@ This file guides repository work; model selection belongs to the calling client.
     `pipeline::FrozenViews`, on a view layer only the snapshot shows: its
     drawables with their effects, mattes and glass under frozen keys, and its
     3D content (`FrozenThreeD`) with the main camera of that instant, which
-    each host draws into an image of its own.
+    each host draws into an image of its own. A scene with updaters and
+    camera moves that end on an endpoint is probed the same way
+    (`runtime::with_run_time_holds`), so the camera ends where the updater
+    takes the endpoint rather than where it was authored.
   - `gaanim_objects` — primitive bundles (circle, rect, etc.), text objects.
   - `gaanim_layout` — anchors, grids, regions, flow, and positioning queries.
   - `gaanim_visualization` — scales, coordinate spaces, sampling, data, and statistics.
