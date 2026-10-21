@@ -329,6 +329,115 @@ pub(crate) fn sync_in_world_system(
     }
 }
 
+/// System: the mask of a wipe on a drawable placed in the 3D world sweeps
+/// across the drawable in its own plane. A wipe's mask is a 2D drawable
+/// that follows a point between two anchors of the wiped drawable, turned
+/// toward the travel in the scene's plane, and [`crate::pipeline::
+/// resolve_dynamic_clip_masks_system`] brings it into each part through the
+/// parts' projection on that plane, which a drawable turned out of it (its
+/// x axis along z, say) flattens. Here that point is found in the wiped
+/// drawable's own units, the mask is turned there, and each part takes it
+/// through its transform relative to the wiped drawable, whatever way the
+/// drawable faces. Before the wipe's cursor the mask waits off the drawable,
+/// which keeps nothing of it.
+pub(crate) fn resolve_in_world_wipes_system(world: &mut World) {
+    use gaanim_animation::{EndpointFollow, TrackingEndpoint};
+
+    let time = world
+        .get_resource::<gaanim_animation::PlaybackState>()
+        .map_or(0.0, |state| state.current_time);
+    let mut targets = world.query::<(Entity, &ClipMask)>();
+    let candidates: Vec<(Entity, Entity)> = targets
+        .iter(world)
+        .filter(|(_, mask)| !mask.invert && mask.sources.len() == 1)
+        .map(|(target, mask)| (target, mask.sources[0]))
+        .collect();
+    let mut updates = Vec::new();
+    for (target, mask) in candidates {
+        let in_world = std::iter::successors(Some(target), |node| {
+            world.get::<ChildOf>(*node).map(ChildOf::parent)
+        })
+        .any(|node| world.get::<InWorld3D>(node).is_some());
+        if !in_world {
+            continue;
+        }
+        let Some(follow) = world.get::<EndpointFollow>(mask) else {
+            continue;
+        };
+        let TrackingEndpoint::Between {
+            from,
+            to,
+            alpha,
+            offset,
+        } = &follow.endpoint
+        else {
+            continue;
+        };
+        let (
+            TrackingEndpoint::EntityAnchor {
+                entity: wiped,
+                normalized: start,
+                offset: start_offset,
+            },
+            TrackingEndpoint::EntityAnchor {
+                entity: wiped_too,
+                normalized: end,
+                offset: end_offset,
+            },
+        ) = (from.as_ref(), to.as_ref())
+        else {
+            continue;
+        };
+        if wiped != wiped_too {
+            continue;
+        }
+        if !follow.holds_at(time) {
+            updates.push((target, BezPath::new()));
+            continue;
+        }
+        let (Some(bounds), Some(alpha), Some(outline), Some(turn)) = (
+            world.get::<gaanim_scene::LocalBounds>(*wiped),
+            alpha.evaluate(world),
+            world.get::<Path2D>(mask),
+            world.get::<gaanim_math::SpatialTransform>(mask),
+        ) else {
+            continue;
+        };
+        let (Some(wiped_world), Some(target_world)) = (
+            world.get::<GlobalSpatialTransform>(*wiped),
+            world.get::<GlobalSpatialTransform>(target),
+        ) else {
+            continue;
+        };
+        // The edge's point in the wiped drawable's units, and the mask
+        // around it, turned toward the travel in that plane.
+        let (center, half) = (bounds.0.center(), bounds.0.size() * 0.5);
+        let from = center + half * *start + *start_offset;
+        let to = center + half * *end + *end_offset;
+        let at = from.lerp(to, alpha) + *offset;
+        let [a, b, c, d, _, _] = turn.to_affine_2d().as_coeffs();
+        let in_wiped = Affine::new([a, b, c, d, at.x, at.y]);
+        // From the wiped drawable's units to the part's, in their plane.
+        let relative = target_world.mat4.inverse() * wiped_world.mat4;
+        let to_target = Affine::new([
+            relative.x_axis.x,
+            relative.x_axis.y,
+            relative.y_axis.x,
+            relative.y_axis.y,
+            relative.w_axis.x,
+            relative.w_axis.y,
+        ]);
+        updates.push((target, (to_target * in_wiped) * (*outline.0).clone()));
+    }
+    for (target, path) in updates {
+        if let Some(mut mask) = world.get_mut::<ClipMask>(target)
+            && mask.path != path
+        {
+            mask.path = path;
+        }
+    }
+}
+
 /// Whether two lists of glyphs draw the same: outlines compared by address
 /// first, as unchanged parts keep theirs.
 fn same_glyphs(a: &[PlaneGlyph], b: &[PlaneGlyph]) -> bool {
@@ -637,6 +746,87 @@ mod tests {
             .insert(mask(BezPath::new(), false));
         run(&mut world);
         assert_eq!(world.get::<PlaneFillData>(root).unwrap().glyphs.len(), 1);
+    }
+
+    /// A wipe halfway across a strip laid with its x axis along -z keeps
+    /// its first half, in the strip's own units; before the wipe's cursor,
+    /// nothing.
+    #[test]
+    fn wipes_sweep_in_world_drawables_in_their_own_plane() {
+        use gaanim_animation::{EndpointFollow, FollowOffsetSpace, TrackingEndpoint};
+        use gaanim_core::glam::DVec3;
+
+        let mut world = World::new();
+        world.insert_resource(gaanim_animation::PlaybackState::default());
+        let mut laid = gaanim_math::SpatialTransform::default();
+        laid.rotation =
+            gaanim_math::orientation_from_axes(DVec3::NEG_Z, DVec3::NEG_X).expect("valid axes");
+        let root = world
+            .spawn((
+                InWorld3D::default(),
+                GlobalSpatialTransform::from_local(&laid),
+            ))
+            .id();
+        let anchor = |x: f64| TrackingEndpoint::EntityAnchor {
+            entity: root,
+            normalized: DVec3::new(x, 0.0, 0.0),
+            offset: DVec3::ZERO,
+        };
+        let mask = world
+            .spawn((
+                Path2D(Arc::new(
+                    kurbo::Rect::new(-1000.0, -1000.0, 1000.0, 1000.0).to_path(0.1),
+                )),
+                gaanim_math::SpatialTransform::default(),
+            ))
+            .id();
+        let curve = world
+            .spawn((
+                gaanim_scene::LocalBounds(gaanim_math::Bounds3D::new_2d(0.0, -1.0, 10.0, 1.0)),
+                GlobalSpatialTransform::from_local(&laid),
+                ClipMask {
+                    path: BezPath::new(),
+                    rule: peniko::Fill::NonZero,
+                    sources: vec![mask],
+                    invert: false,
+                },
+                ChildOf(root),
+            ))
+            .id();
+        world
+            .entity_mut(root)
+            .insert(gaanim_scene::LocalBounds(gaanim_math::Bounds3D::new_2d(
+                0.0, -1.0, 10.0, 1.0,
+            )));
+        let follow = |since: f64| EndpointFollow {
+            endpoint: TrackingEndpoint::Between {
+                from: Box::new(anchor(-1.0)),
+                to: Box::new(anchor(1.0)),
+                alpha: 0.5.into(),
+                offset: DVec3::new(-1000.0, 0.0, 0.0),
+            },
+            offset: DVec3::ZERO,
+            offset_space: FollowOffsetSpace::World,
+            since,
+        };
+        world.entity_mut(mask).insert(follow(0.0));
+        resolve_in_world_wipes_system(&mut world);
+        let kept = world.get::<ClipMask>(curve).unwrap().path.bounding_box();
+        assert!((kept.x1 - 5.0).abs() < 1e-9, "{kept:?}");
+        assert!(
+            kept.x0 < -1000.0 && kept.y0 < -100.0 && kept.y1 > 100.0,
+            "{kept:?}"
+        );
+        world.entity_mut(mask).insert(follow(1.0));
+        resolve_in_world_wipes_system(&mut world);
+        assert!(
+            world
+                .get::<ClipMask>(curve)
+                .unwrap()
+                .path
+                .elements()
+                .is_empty()
+        );
     }
 
     #[test]
