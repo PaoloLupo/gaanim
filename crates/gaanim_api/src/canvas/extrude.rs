@@ -89,6 +89,7 @@ impl SceneModel {
             SpawnKind::Primitive3D(_)
                 | SpawnKind::SurfaceMesh { .. }
                 | SpawnKind::Polyline3D { .. }
+                | SpawnKind::ReactivePolyline3D { .. }
                 | SpawnKind::LineSegments3D { .. }
                 | SpawnKind::Image { .. }
                 | SpawnKind::Video { .. }

@@ -98,6 +98,43 @@ fn reactive_polyline_path(
     path
 }
 
+/// The 3D line strip through `points` evaluated at `time`, in `color` or
+/// with `colors` (one per point): a point whose value cannot be read is
+/// left out, with its color.
+fn reactive_polyline_3d_line(
+    points: &[[gaanim_animation::ScalarSource; 3]],
+    colors: Option<&[[f32; 4]]>,
+    color: PenikoColor,
+    time: f64,
+    signal: impl Fn(gaanim_core::ObjectId) -> Option<f64>,
+) -> LineListData {
+    let mut line = LineListData {
+        points: Vec::with_capacity(points.len()),
+        indices: None,
+        strip: true,
+        color,
+        colors: colors.map(|_| Vec::with_capacity(points.len())),
+        revealed: None,
+    };
+    for (index, [x, y, z]) in points.iter().enumerate() {
+        let (Ok(x), Ok(y), Ok(z)) = (
+            x.evaluate(time, &signal),
+            y.evaluate(time, &signal),
+            z.evaluate(time, &signal),
+        ) else {
+            continue;
+        };
+        if !(x.is_finite() && y.is_finite() && z.is_finite()) {
+            continue;
+        }
+        line.points.push([x as f32, y as f32, z as f32]);
+        if let (Some(kept), Some(colors)) = (line.colors.as_mut(), colors) {
+            kept.push(colors[index]);
+        }
+    }
+    line
+}
+
 /// Where source pixel `(x, y)` of the image or video `media` shows in the
 /// scene as authored so far: through its media frame and world transform.
 fn authored_media_point(builder: &SceneBuilder, media: ObjectId, x: f64, y: f64) -> Option<DVec3> {
@@ -850,6 +887,9 @@ fn compile_tracking_endpoint(
             radius: compile_tracking_scalar(radius, id_map, states),
             angle: compile_tracking_scalar(angle, id_map, states),
         },
+        CanvasEndpoint::Screen(point) => {
+            TrackingEndpoint::Screen(Box::new(compile_tracking_endpoint(point, id_map, states)))
+        }
     }
 }
 
@@ -5156,6 +5196,7 @@ impl SceneModel {
                         };
                         const OVERFLOW: &str = "content leaves its box";
                         const OVERLAP: &str = "overlaps the box before it";
+                        const WRAPS: &str = "the row leaves less than a line";
                         // Where to look: the box, the text it holds, and the
                         // segment and time it is laid out at.
                         let at = format!(
@@ -5238,12 +5279,44 @@ impl SceneModel {
                                 }
                             }
                         }
+                        // A row that leaves a text less than one line breaks
+                        // it, which a text that did not choose a width to wrap
+                        // at rarely means: usually the row holds too much.
+                        if matches!(kind, Some(gaanim_layout::LayoutNodeKind::Row { .. })) {
+                            let wrapped: Vec<String> = placed
+                                .iter()
+                                .filter(|(child, bounds, _)| {
+                                    tree.texts.get(child).is_some_and(|text| {
+                                        matches!(text.spec.flow.wrap, StructuredTextWrap::Auto)
+                                    }) && matches!(
+                                        measurer.final_composition(*child, bounds.width()),
+                                        Some(TextComposition::Wrapped { .. })
+                                    )
+                                })
+                                .filter_map(|(child, ..)| layout_text_excerpt(&tree, *child))
+                                .map(|text| format!("\"{text}\""))
+                                .collect();
+                            if let Some(first) = wrapped.first() {
+                                let (which, breaks) = match wrapped.len() {
+                                    1 => (format!("text {first}"), "it breaks"),
+                                    count => (format!("{count} texts, from {first}"), "they break"),
+                                };
+                                reports.push(format!(
+                                    "{} {at}: {WRAPS} to {which}, so {breaks} onto more lines; \
+                                     give the row room (fewer items, a smaller size), or choose \
+                                     the width a text wraps at with wrap=<width>",
+                                    layout_box_path(&tree, layout_snapshots, *container_id),
+                                ));
+                            }
+                        }
                         // Keyed by the box that holds them, so resolving it
                         // again replaces the earlier report.
                         let mut state = diagnostic_state.lock().expect("canvas state poisoned");
                         state.layout_diagnostics.retain(|(owner, message)| {
                             *owner != Some(*source)
-                                || !(message.contains(OVERFLOW) || message.contains(OVERLAP))
+                                || !(message.contains(OVERFLOW)
+                                    || message.contains(OVERLAP)
+                                    || message.contains(WRAPS))
                         });
                         state
                             .layout_diagnostics
@@ -6667,6 +6740,8 @@ impl SceneModel {
                     space,
                     target,
                     local,
+                    anchor,
+                    offset,
                 } => {
                     if let (Some(space), Some(target)) =
                         (id_map.get(space).copied(), id_map.get(target).copied())
@@ -6681,10 +6756,30 @@ impl SceneModel {
                             .unwrap_or_default();
                         let inv = view_local.to_affine_2d().inverse();
                         let desired_point = Point::new(local.x, local.y);
-                        let local_point = inv * desired_point;
+                        let mut local_point = inv * desired_point;
+                        // An offset in scene units, in the space's own units.
+                        if *offset != DVec2::ZERO {
+                            let to_space = builder.get_world_transform(space).to_affine_2d();
+                            if to_space.determinant().abs() > 1e-12 {
+                                let [a, b, c, d, _, _] = to_space.inverse().as_coeffs();
+                                local_point += Vec2::new(
+                                    a * offset.x + c * offset.y,
+                                    b * offset.x + d * offset.y,
+                                );
+                            }
+                        }
                         if let Some(state) = builder.states.get_mut(target) {
                             state.transform.translation =
                                 DVec3::new(local_point.x, local_point.y, local.z);
+                            // The anchor's point of the box, not the origin,
+                            // goes to the coordinate.
+                            if let Some(anchor) = anchor {
+                                let point = anchor.get_point(&state.bounds);
+                                let placed =
+                                    state.transform.to_affine_2d() * Point::new(point.x, point.y);
+                                state.transform.translation.x += local_point.x - placed.x;
+                                state.transform.translation.y += local_point.y - placed.y;
+                            }
                             // Preserve any existing rotation/scale from add_to_group (which is identity for dots)
                             // but ensure translation is correct.
                             builder
@@ -11794,6 +11889,85 @@ impl SceneModel {
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
+            SpawnKind::ReactivePolyline3D { points, colors } => {
+                let base_color = line_3d_color(spec);
+                let mut parameter_ids: Vec<gaanim_core::ObjectId> = points
+                    .iter()
+                    .flatten()
+                    .flat_map(|source| source.parameter_ids())
+                    .collect();
+                parameter_ids.sort_unstable();
+                parameter_ids.dedup();
+                let parameters: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> = parameter_ids
+                    .into_iter()
+                    .filter_map(|logical| {
+                        let actual = id_map.get(&logical).copied()?;
+                        Some((logical, builder.states.get(actual)?.entity))
+                    })
+                    .collect();
+                let initial: Vec<(gaanim_core::ObjectId, f64)> = parameters
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        Some((*logical, builder.float_signals.get(&actual).copied()?))
+                    })
+                    .collect();
+                let colors: Option<Vec<[f32; 4]>> = colors
+                    .as_ref()
+                    .filter(|colors| colors.len() == points.len())
+                    .map(|colors| {
+                        colors
+                            .iter()
+                            .map(|color| {
+                                let rgba = color.to_rgba8();
+                                [rgba.r, rgba.g, rgba.b, rgba.a].map(|c| f32::from(c) / 255.0)
+                            })
+                            .collect()
+                    });
+                let line = reactive_polyline_3d_line(
+                    points,
+                    colors.as_deref(),
+                    base_color,
+                    builder.current_time,
+                    |id| {
+                        initial
+                            .iter()
+                            .find(|(logical, _)| *logical == id)
+                            .map(|(_, value)| *value)
+                    },
+                );
+                let mref =
+                    builder.spawn_line_strip_with_colors(line.points, base_color, line.colors);
+                Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                let changes = !parameters.is_empty()
+                    || points
+                        .iter()
+                        .flatten()
+                        .any(|source| source.depends_on_time());
+                if changes && let Some(state) = builder.states.get(mref.id) {
+                    let points = points.clone();
+                    let regen = ReactiveLineRegen::new(move |world| {
+                        let time = world
+                            .get_resource::<gaanim_animation::PlaybackState>()
+                            .map_or(0.0, |state| state.current_time);
+                        reactive_polyline_3d_line(
+                            &points,
+                            colors.as_deref(),
+                            base_color,
+                            time,
+                            |id| {
+                                let entity =
+                                    parameters.iter().find(|(logical, _)| *logical == id)?.1;
+                                world
+                                    .get::<gaanim_animation::FloatSignal>(entity)
+                                    .map(|signal| signal.value)
+                            },
+                        )
+                    });
+                    builder.commands.entity(state.entity).insert(regen);
+                }
+                mref
+            }
             SpawnKind::LineSegments3D { points, colors } => {
                 let base_color = line_3d_color(spec);
                 let colors = colors.as_ref().map(|colors| {
@@ -16825,6 +16999,41 @@ mod tests {
         assert!((bounds.width() - 110.0).abs() < 1e-3);
     }
 
+    /// A 3D polyline with a parameter in a coordinate is redrawn from it.
+    #[test]
+    fn reactive_3d_polylines_follow_their_coordinates() {
+        let mut canvas = SceneModel::new(640, 360);
+        let lift = canvas.parameter(0.0).unwrap();
+        let color = PenikoColor::from_rgb8(192, 80, 46);
+        canvas
+            .reactive_polyline_3d(
+                vec![
+                    [0.0.into(), lift.source(), 0.0.into()],
+                    [1.0.into(), 0.0.into(), 2.0.into()],
+                ],
+                None,
+            )
+            .stroke(color, 0.05);
+        canvas.wait(0.5);
+        lift.set(2.0).unwrap();
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let entity = world
+            .query_filtered::<Entity, With<gaanim_animation::ReactiveLineRegen>>()
+            .single(&world)
+            .unwrap();
+        let mut first_y = |world: &mut World, time: f64| {
+            timeline.seek(world, time);
+            gaanim_animation::reactive_3d_regen_system(world);
+            let line = world.get::<LineListData>(entity).unwrap();
+            assert_eq!(line.color, color);
+            assert_eq!(line.points[1], [1.0, 0.0, 2.0]);
+            line.points[0][1]
+        };
+        assert_eq!(first_y(&mut world, 0.2), 0.0);
+        assert_eq!(first_y(&mut world, 0.8), 2.0);
+    }
+
     #[test]
     fn traced_3d_paths_draw_in_their_stroke_color() {
         let mut canvas = SceneModel::new(640, 360);
@@ -18577,6 +18786,34 @@ mod tests {
             .find(|(object, _)| object.0 == id)
             .unwrap()
             .1
+    }
+
+    /// `orient_3d` points the local axes where it is told, set or animated.
+    #[test]
+    fn orient_3d_points_the_local_axes_along_the_given_directions() {
+        let mut canvas = SceneModel::new(640, 360);
+        let laid = canvas
+            .rect(2.0, 1.0)
+            .orient_3d(DVec3::NEG_Z, DVec3::NEG_X)
+            .unwrap();
+        let turned = canvas.rect(2.0, 1.0);
+        assert!(turned.clone().orient_3d(DVec3::X, DVec3::X).is_err());
+        canvas.play(vec![
+            turned
+                .animate()
+                .orient_3d(DVec3::Y, DVec3::NEG_X)
+                .unwrap()
+                .duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.0);
+        let rotation = transform_of(&mut world, &laid).rotation;
+        assert!((rotation * DVec3::X - DVec3::NEG_Z).length() < 1e-9);
+        assert!((rotation * DVec3::Y - DVec3::NEG_X).length() < 1e-9);
+        timeline.seek(&mut world, 1.5);
+        let rotation = transform_of(&mut world, &turned).rotation;
+        assert!((rotation * DVec3::X - DVec3::Y).length() < 1e-9);
+        assert!((rotation * DVec3::Y - DVec3::NEG_X).length() < 1e-9);
     }
 
     #[test]
@@ -24239,6 +24476,73 @@ mod tests {
         );
     }
 
+    /// A row too narrow for its texts on one line breaks them, and check
+    /// says so; a row with room, or a text that chose its wrap width, not.
+    #[test]
+    fn check_reports_rows_that_break_their_texts() {
+        let report = |width: f64, wrap: gaanim_text::prelude::TextWrap| {
+            let mut canvas = SceneModel::new(16.0, 9.0);
+            let members: Vec<_> = ["Un sismo", "fuerte"]
+                .into_iter()
+                .map(|word| {
+                    let spec = gaanim_text::prelude::TextSpec::new(
+                        vec![word.into()],
+                        None,
+                        gaanim_text::prelude::TextStyle::default(),
+                        gaanim_text::prelude::TextFlow {
+                            wrap,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    canvas.text_spec(spec)
+                })
+                .collect();
+            let container = canvas.group(&members.iter().collect::<Vec<_>>());
+            for member in &members {
+                member.claim_layout(&container).unwrap();
+            }
+            canvas.reflow_layout(
+                &container,
+                members
+                    .iter()
+                    .map(|member| crate::canvas::LayoutMemberSpec {
+                        id: member.id,
+                        style: gaanim_layout::LayoutItemStyle::default(),
+                    })
+                    .collect(),
+                crate::canvas::LayoutSpec {
+                    kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+                    style: gaanim_layout::LayoutStyle {
+                        width: gaanim_layout::SizeRule::Fixed(width),
+                        ..gaanim_layout::LayoutStyle::default()
+                    },
+                    within: LayoutWithin::Safe,
+                },
+                1,
+                None,
+                None,
+                None,
+            );
+            canvas
+                .compiled_layout_diagnostics()
+                .into_iter()
+                .map(|(_, message)| message)
+                .filter(|message| message.contains("leaves less than a line"))
+                .collect::<Vec<_>>()
+        };
+        let auto = gaanim_text::prelude::TextWrap::Auto;
+        let tight = report(1.2, auto);
+        assert_eq!(tight.len(), 1, "{tight:?}");
+        assert!(
+            tight[0].contains("to text \"Un sismo\", so it breaks"),
+            "{tight:?}"
+        );
+        assert!(report(12.0, auto).is_empty());
+        let chosen = report(1.2, gaanim_text::prelude::TextWrap::Width(0.5));
+        assert!(chosen.is_empty(), "{chosen:?}");
+    }
+
     /// A row of two rectangles, laid out twice with a play in between.
     fn reflowed_row(
         animate: impl FnOnce(&mut SceneModel, &DrawableHandle, &DrawableHandle, &DrawableHandle),
@@ -24679,6 +24983,51 @@ mod tests {
         assert_eq!(driver.scale, 10.0);
         assert_eq!(driver.start_at, 1.5, "driver starts at the authored cursor");
         assert!(driver.base.is_none());
+    }
+
+    /// One series drives several drawables, each at its own scale, and is
+    /// kept once.
+    #[test]
+    fn one_series_drives_each_target_at_its_scale() {
+        use gaanim_animation::{SampledInterpolation, SampledProperty};
+
+        let mut canvas = SceneModel::new(640, 360);
+        let low = canvas.rect(1.0, 1.0);
+        let high = canvas.rect(1.0, 1.0);
+        assert!(
+            DrawableHandle::drive_each_from_samples(
+                &[(&low, f64::NAN)],
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                SampledProperty::TranslateX,
+                SampledInterpolation::Linear,
+                0.0,
+                false,
+            )
+            .is_err()
+        );
+        DrawableHandle::drive_each_from_samples(
+            &[(&low, 0.5), (&high, 2.0)],
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            SampledProperty::TranslateX,
+            SampledInterpolation::Linear,
+            0.0,
+            false,
+        )
+        .unwrap();
+        let mut world = compile_canvas_for_layout(canvas);
+        let drivers: Vec<_> = world
+            .query::<&gaanim_animation::SampledSeriesDrivers>()
+            .iter(&world)
+            .map(|drivers| drivers.get(SampledProperty::TranslateX).unwrap().clone())
+            .collect();
+        assert_eq!(drivers.len(), 2);
+        let mut scales: Vec<f64> = drivers.iter().map(|driver| driver.scale).collect();
+        scales.sort_by(f64::total_cmp);
+        assert_eq!(scales, vec![0.5, 2.0]);
+        assert!(Arc::ptr_eq(&drivers[0].values, &drivers[1].values));
+        assert!(Arc::ptr_eq(&drivers[0].times, &drivers[1].times));
     }
 
     /// Bars of a leaderboard, named after their player, grouped in rank order.

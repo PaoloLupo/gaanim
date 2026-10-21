@@ -911,7 +911,7 @@ mod line_tests {
 }
 
 /// Immutable source geometry retained while `PathCompletion` reveals a 3D line.
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, PartialEq)]
 pub struct LineListSource(pub LineListData);
 
 /// A 2D drawable placed in the 3D world: its 3D position and rotation tilt

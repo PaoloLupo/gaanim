@@ -2427,7 +2427,7 @@ scene.render()
     (name: "absolute", type: "bool", default: "False", desc: [Las muestras de traslación y de `rotation` son posiciones y ángulos propios (`offset + scale * muestra`), en coordenadas del padre (de la escena para un objeto de primer nivel), en lugar de sumarse a la pose declarada. Útil cuando ya calculaste la trayectoria. Los demás canales ya son absolutos.]),
   ),
   returns: (type: "Drawable", desc: [El mismo objeto.]),
-  desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`), salvo con `absolute=True`; `scale`, `opacity` y `signal` son absolutos. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Antes de ese cursor la serie no toca el canal, que sigue con lo que lo animara antes: un `fade_in` seguido de una serie de `"opacity"` se ve entero. Después de su última muestra mantiene la última. Cada canal es independiente; volver a mover el mismo canal toma el relevo desde el nuevo cursor, o reemplaza la serie declarada en el mismo cursor. `remove_updater()` lo quita. Con `"orientation"` las muestras son orientaciones absolutas, sin `scale` ni `offset`: sirve para un sólido rígido simulado, sea cual sea la convención de ángulos que lo calculó, sin Python en cada fotograma. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],
+  desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`), salvo con `absolute=True`; `scale`, `opacity` y `signal` son absolutos. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Antes de ese cursor la serie no toca el canal, que sigue con lo que lo animara antes: un `fade_in` seguido de una serie de `"opacity"` se ve entero. Después de su última muestra mantiene la última. Cada canal es independiente; volver a mover el mismo canal toma el relevo desde el nuevo cursor, o reemplaza la serie declarada en el mismo cursor. `remove_updater()` lo quita. Las traslaciones van en las unidades del padre: en un nodo de un modelo glTF (`part`), en las del archivo, así que el `scale_to` del modelo escala también el movimiento. Con `"orientation"` las muestras son orientaciones absolutas, sin `scale` ni `offset`: sirve para un sólido rígido simulado, sea cual sea la convención de ángulos que lo calculó, sin Python en cada fotograma. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],
 )[
 ```python
 >>>import math
@@ -2440,6 +2440,30 @@ building = scene.geometry.rounded_rect(2, 4.5, 0.125).fill(CYAN).move_to(-2.5, -
 # El edificio oscila con el registro medido; el seek es determinista.
 building.drive_from_samples(times, accel, "x", scale=6.5)
 scene.play([building.animate.grow_from_center()])
+scene.wait(4.0)
+```
+]
+
+#api-entry(
+  name: "Scene.drive_from_samples",
+  kind: "method",
+  signature: "drive_from_samples(times, values, property=\"x\", *, targets, interpolation=\"linear\", offset=0.0, absolute=False) -> None",
+  params: (
+    (name: "targets", type: "Sequence[tuple[Drawable, float]]", default: none, desc: [Pares `(objeto, escala)`: cada objeto sigue la serie con su propia escala.]),
+    (name: "times, values, property, interpolation, offset, absolute", type: "—", default: "—", desc: [Como en `Drawable.drive_from_samples`, para `"x"`, `"y"`, `"z"`, `"rotation"`, `"scale"` y `"opacity"`.]),
+  ),
+  desc: [Conduce varios objetos con una misma serie, cada uno con su escala, como si a cada uno se le llamara `drive_from_samples(times, values, property, scale=escala, offset=offset, absolute=absolute)`; pero la serie se valida y se guarda una vez y la comparten todos. Sirve, por ejemplo, para mover los pisos de un edificio con la forma de un modo: un piso por nodo de un modelo glTF, cada uno con su factor. `targets` vacío, la propiedad `"signal"` (usa `Parameter.drive_from_samples`), una escala no finita o una serie inválida lanzan `ValueError`.],
+)[
+```python
+>>>import math
+>>>drift = [0.3 * math.sin(0.2 * i) for i in range(200)]
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9))
+times = [i * 0.02 for i in range(len(drift))]
+floors = [scene.geometry.rect(3, 0.3).move_to(0, -3 + 0.6 * i) for i in range(8)]
+# Cada piso se desplaza con su factor de la forma modal.
+scene.drive_from_samples(times, drift, "x", targets=[(floor, (i + 1) / 8) for i, floor in enumerate(floors)])
 scene.wait(4.0)
 ```
 ]
@@ -2833,10 +2857,25 @@ perspectiva. Las rotaciones de Euler usan orden XYZ y radianes.
 #api-entry(
   name: "Anim.rotate_to_3d",
   kind: "method",
-  params: ((name: "x, y, z", type: "ScalarSource", default: none, desc: [Orientación de Euler XYZ absoluta, en radianes.]),),
+  params: ((name: "x, y, z", type: "ScalarSource", default: none, desc: [Orientación de Euler XYZ absoluta, en radianes, compuesta como en `Drawable.rotate_to_3d`.]),),
   returns: (type: "Anim", desc: [Giro a una orientación.]),
   none,
 )
+
+#api-entry(
+  name: "Anim.orient_3d",
+  kind: "method",
+  params: ((name: "x_axis, y_axis", type: "tuple[float, float, float]", default: none, desc: [Direcciones del mundo de los ejes x e y locales, como en `Drawable.orient_3d`.]),),
+  returns: (type: "Anim", desc: [Giro por el camino más corto hasta esa orientación.]),
+  desc: [Ejes nulos, no finitos o paralelos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+card = scene.geometry.rect(3, 2).in_3d()
+scene.play(card.animate.orient_3d((0, 0, -1), (-1, 0, 0)), duration=1.5)
+```
+]
 
 #api-entry(
   name: "Anim.rotate_by_3d",

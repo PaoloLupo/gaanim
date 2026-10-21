@@ -1953,9 +1953,21 @@ class Anim:
     def rotate_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Anim:
         """Target an absolute XYZ Euler orientation in radians.
 
-        Reactive targets are evaluated at the clip start and frozen for this
-        interpolation. An already linked target channel must first be fixed
-        with a numeric setter, or animated through its Parameter.
+        The angles compose as in ``Drawable.rotate_to_3d``. Reactive targets
+        are evaluated at the clip start and frozen for this interpolation. An
+        already linked target channel must first be fixed with a numeric
+        setter, or animated through its Parameter.
+        """
+        ...
+    def orient_3d(self, x_axis: tuple[float, float, float], y_axis: tuple[float, float, float]) -> Anim:
+        """Turn to the orientation that points the local x and y axes along world directions.
+
+        Takes the axes as ``Drawable.orient_3d`` does and turns along the
+        shortest arc. Axes that are zero, not finite or parallel raise
+        ``ValueError``.
+
+        Example:
+            scene.play(card.animate.orient_3d((0, 0, -1), (-1, 0, 0)), duration=1.5)
         """
         ...
     def place(self, target: Zone | Drawable, *, anchor: Optional[AnchorName | Anchor] = None, fit: Optional[Fit] = None, padding: Optional[Padding] = None, offset: Optional[tuple[Length, Length]] = None) -> Anim:
@@ -3759,7 +3771,9 @@ class Drawable:
         """Return a named SVG part, or a node of a glTF model, by its name.
 
         A glTF node without a name is ``node<index>``; a name two nodes share
-        takes ``#<index>`` after it. ``parts()`` lists them.
+        takes ``#<index>`` after it. ``parts()`` lists them. A node moves,
+        turns and scales in the frame of its parent node, in the file's
+        units: ``scale_to`` on the model scales its moves too.
 
         Example:
             head = wolf.part("Head")
@@ -4792,8 +4806,24 @@ class Drawable:
     def port(self, name: str) -> AnchorPoint:
         """Return a named reactive endpoint; an unknown name raises KeyError."""
         ...
-    def at_coordinate(self, coordinate: CoordinateRef) -> Drawable:
-        """Place this drawable at a symbolic coordinate owned by a coordinate space."""
+    def at_coordinate(
+        self,
+        coordinate: CoordinateRef,
+        *,
+        anchor: Optional[AnchorName | Anchor] = None,
+        offset: Optional[tuple[float, float]] = None,
+    ) -> Drawable:
+        """Place this drawable at a symbolic coordinate owned by a coordinate space.
+
+        The drawable becomes a child of the space and follows its view. Its
+        origin goes to the coordinate, or with ``anchor`` that point of its
+        box (``"left"`` puts its left edge on the data point); ``offset``
+        then moves it that far in scene units, whatever the axes' scales. A
+        non-finite offset raises ``ValueError``.
+
+        Example:
+            peak.at_coordinate(plane.coord(4.2, 0.3), anchor="left", offset=(0.15, 0))
+        """
         ...
     def move_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Self:
         """Place the drawable at a 3D world-space position.
@@ -4954,6 +4984,14 @@ class Drawable:
     def rotate_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Self:
         """Apply Euler rotation in radians and preserve the specialized handle.
 
+        The angles compose as ``Rx(x) · Ry(y) · Rz(z)`` acting on the
+        drawable's points: it turns ``z`` about the world z axis first, then
+        ``y`` about the world y axis, then ``x`` about the world x axis. A
+        positive angle turns counterclockwise looking down the axis toward
+        the origin, so ``rotate_to_3d(-math.pi / 2, 0, 0)`` lays a 2D drawable
+        on the ground (y up), facing up. ``orient_3d`` sets the same
+        orientation from the directions of its axes instead.
+
         Example:
             label = scene.text("axis").rotate_to_3d(0.0, 0.0, 0.5)
 
@@ -4962,6 +5000,21 @@ class Drawable:
         source replaces it and a numeric setter ends the binding reversibly.
         Sources must belong to this Scene. Animate the source Parameter while
         linked; direct animation or relative writes to this channel error.
+        """
+        ...
+    def orient_3d(self, x_axis: tuple[float, float, float], y_axis: tuple[float, float, float]) -> Self:
+        """Turn the drawable so its local x and y axes point along world directions.
+
+        ``x_axis`` is where its local x axis points and ``y_axis`` where its
+        local y axis points, squared to ``x_axis`` within the plane both
+        span; their lengths do not matter. Its local z axis, the side a 2D
+        drawable faces, ends along ``x_axis × y_axis``. This sets the
+        orientation ``rotate_to_3d`` would, without working out its angles;
+        ``.animate.orient_3d`` turns to it. Axes that are zero, not finite or
+        parallel raise ``ValueError``. Chainable; returns the same handle.
+
+        Example:
+            chart.drawable().in_3d().orient_3d(x_axis=(0, 0, -1), y_axis=(-1, 0, 0))
         """
         ...
     def with_pivot(self, x: float, y: float) -> Self:
@@ -5147,7 +5200,9 @@ class Drawable:
         an independent channel: driving ``"x"`` and then ``"y"`` keeps both,
         while driving the same property again takes over from the new cursor
         (or replaces a series made at the same cursor). Detach with
-        ``remove_updater()``.
+        ``remove_updater()``. Translations are in the units of the drawable's
+        parent: for a node of a glTF model (``part``), the file's units, so
+        the model's ``scale_to`` scales the motion too.
 
         Example:
             times = [i * 0.02 for i in range(len(accel))]
@@ -6329,6 +6384,37 @@ class Camera:
     def state_2d(self, center: tuple[float, float] = (0.0, 0.0), zoom: float = 1.0, rotation: float = 0.0) -> CameraState: ...
     def state_3d(self, eye: tuple[float, float, float], target: tuple[float, float, float], up: tuple[float, float, float] = (0.0, 1.0, 0.0), fov_y: float = 0.7853981633974483, near: float = 0.1, far: float = 1000.0) -> CameraState: ...
     def capture(self) -> CameraState: ...
+    def project(self, point: tuple[float, float, float], state: CameraState) -> tuple[float, float]:
+        """Where a camera in ``state`` draws the world ``point`` on the frame.
+
+        The result is in HUD units, the ones ``hud()`` drawables are placed
+        in: scene units of the unmoved camera, from the frame's center, y
+        up. ``scene.text("A").hud().move_to(*scene.camera.project(p, top))``
+        puts a label over ``p`` as seen from ``top``. Only a state from
+        ``state_2d`` or ``state_3d`` is known while the scene is written; a
+        captured or saved one, a state of another scene or a non-finite
+        point raise ``ValueError``. A point behind a perspective camera is
+        drawn on its near plane, toward its side.
+
+        Example:
+            top = scene.camera.state_3d(eye=(0, 20, 0.01), target=(0, 0, 0))
+            x, y = scene.camera.project((2, 0, 1), top)
+        """
+        ...
+    def screen_point(self, target: Endpoint) -> PointRef:
+        """A point that is, every frame, where the main camera draws ``target`` on the frame.
+
+        It is in HUD units, so a HUD drawable that follows it stays over
+        ``target`` however the camera moves, also when it looks at the scene
+        from an angle or in perspective: ``label.hud().follow(
+        scene.camera.screen_point(ball))``. ``target`` is any endpoint, a 3D
+        point or a drawable. A drawable that is not ``hud()`` would place
+        the point in the scene instead, where a moving 2D camera shifts it.
+
+        Example:
+            tag = scene.text("ball").hud().follow(scene.camera.screen_point(ball), offset=(0, 0.6))
+        """
+        ...
     def save(self, name: str) -> CameraState: ...
     def to(self, state: CameraState) -> Camera: ...
     def restore(self, name: str) -> Camera: ...
@@ -7061,7 +7147,18 @@ class Axis:
         ``bottom`` are aliases for vertical-axis endpoints.
         """
         ...
-    def crossing(self, value: Literal["auto", "zero", "min", "max", "minimum", "maximum"] | float) -> Axis: ...
+    def crossing(self, value: Literal["auto", "zero", "min", "max", "minimum", "maximum"] | float) -> Axis:
+        """Set the value along this axis where the other axis passes.
+
+        ``"min"`` on the y axis puts the x axis at the bottom of the plane,
+        and on the x axis puts the y axis at its left edge. ``"auto"`` (the
+        default) is zero when the domain holds it, else the end nearest to
+        it; a number is clamped to the domain. Returns a new ``Axis``.
+
+        Example:
+            plane = scene.viz.cartesian_2d(Axis.linear(0, 10), Axis.linear(-60, 60).crossing("min"))
+        """
+        ...
     def style(
         self,
         *,
@@ -8084,7 +8181,25 @@ class Variable(Drawable):
 _ReactiveScalar: TypeAlias = ScalarSource
 
 class CoordinateRef:
-    def place(self, drawable: Drawable) -> Drawable: ...
+    def place(
+        self,
+        drawable: Drawable,
+        *,
+        anchor: Optional[AnchorName | Anchor] = None,
+        offset: Optional[tuple[float, float]] = None,
+    ) -> Drawable:
+        """Place ``drawable`` at this coordinate, as ``Drawable.at_coordinate`` does.
+
+        Without ``anchor`` the drawable is centered on the data point (its
+        origin goes there); with one, that point of its box goes there, and
+        ``offset`` moves it further in scene units: ``anchor="left",
+        offset=(0.15, 0)`` sets a label just right of a point, however wide
+        it is and whatever the axis scale.
+
+        Example:
+            plane.coord(t_max, peak).place(scene.text("max 0.30 g"), anchor="left", offset=(0.15, 0))
+        """
+        ...
 
 class DataTable:
     def __init__(self, columns: Mapping[str, Sequence[float | str | None]] | Any) -> None: ...
@@ -9499,7 +9614,7 @@ class Geometry:
         ...
     def polyline_3d(
         self,
-        points: Sequence[tuple[float, float, float]],
+        points: Sequence[tuple[ScalarSource, ScalarSource, ScalarSource]],
         color: Optional[ColorLike] = None,
         *,
         colors: Optional[Sequence[Color]] = None,
@@ -9514,11 +9629,19 @@ class Geometry:
         in scene units, and without one 2 pixels of a 1080-pixel-tall
         output, the same share of the frame at any output size.
 
+        A coordinate may be a Parameter, Computed or ``scene.time``, as in
+        ``polyline``: the line is then redrawn every frame from the current
+        values. A point whose value cannot be read is left out of that
+        frame, with its color. Fewer than two points or a non-finite fixed
+        coordinate raise ``ValueError``.
+
         Example:
             path = scene.polyline_3d(
                 [(-2, 0, 0), (0, 1, 1), (2, 0, 0)],
                 colormap="viridis",
             )
+            drift = scene.viz.parameter(0.0)
+            strip = scene.geometry.polyline_3d([(x, drift, 0) for x in range(-3, 4)])
         """
         ...
     def bezier(self, start: tuple[float, float], controls: Sequence[tuple[float, float]], end: tuple[float, float]) -> Drawable:
@@ -11746,6 +11869,32 @@ class Scene:
             far = scene.layer(depth=3.0).add(mountains)
             near = scene.layer(depth=0.6).add(trees)
             scene.play([scene.camera.animate.pan_to(6, 0).duration(3)])
+        """
+        ...
+    def drive_from_samples(
+        self,
+        times: Sequence[float],
+        values: Sequence[float],
+        property: Literal["x", "y", "z", "rotation", "scale", "opacity"] = "x",
+        *,
+        targets: Sequence[tuple[Drawable, float]],
+        interpolation: Literal["linear", "step"] = "linear",
+        offset: float = 0.0,
+        absolute: bool = False,
+    ) -> None:
+        """Drive several drawables along one sampled series, each at its own scale.
+
+        Each ``(drawable, scale)`` in ``targets`` is driven as
+        ``drawable.drive_from_samples(times, values, property, scale=scale,
+        offset=offset, absolute=absolute)`` would drive it, but the series is
+        checked and kept once and shared by every target: the floors of a
+        building moving with one mode shape, each by its own factor, without
+        copying a long series per floor. Empty ``targets``, the ``"signal"``
+        property, a non-finite scale or an invalid series raise
+        ``ValueError``.
+
+        Example:
+            scene.drive_from_samples(times, drift, "x", targets=[(model.part(f"floor_{i}"), phi[i]) for i in range(8)])
         """
         ...
     def z_layers(self, *names: str, default: Optional[str] = None) -> None:

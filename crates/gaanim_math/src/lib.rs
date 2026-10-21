@@ -33,5 +33,5 @@ pub use path::{
 };
 pub use random::{Noise, SeededRng};
 pub use rough::{BracketSides, NotationShape, RoughNotation};
-pub use spatial::{GlobalSpatialTransform, SpatialTransform};
+pub use spatial::{GlobalSpatialTransform, SpatialTransform, orientation_from_axes};
 pub use time_warp::{TimeMap, TimeStage, TimeWarp, TimeWarpSpec, step_time};

@@ -1553,9 +1553,36 @@ pub struct PyCoordinateRef(pub CoordinateRef);
 
 #[pymethods]
 impl PyCoordinateRef {
-    fn place(&self, drawable: &PyDrawable) -> PyResult<PyDrawable> {
+    #[pyo3(signature = (drawable, *, anchor=None, offset=None))]
+    fn place(
+        &self,
+        drawable: &PyDrawable,
+        anchor: Option<crate::pylayout::PyAnchor>,
+        offset: Option<(f64, f64)>,
+    ) -> PyResult<PyDrawable> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(PyDrawable(drawable.0.clone().at_coordinate(self.0)))
+        drawable.at_coordinate_by(self, anchor, offset)
+    }
+}
+
+impl PyDrawable {
+    /// Place this drawable at `coordinate`, by `anchor`'s point of its box
+    /// and `offset` further in scene units.
+    fn at_coordinate_by(
+        &self,
+        coordinate: &PyCoordinateRef,
+        anchor: Option<crate::pylayout::PyAnchor>,
+        offset: Option<(f64, f64)>,
+    ) -> PyResult<Self> {
+        let offset = offset.unwrap_or_default();
+        if !(offset.0.is_finite() && offset.1.is_finite()) {
+            return Err(PyValueError::new_err("offset must be finite"));
+        }
+        Ok(Self(self.0.clone().at_coordinate_by(
+            coordinate.0,
+            anchor.map(|anchor| anchor.0),
+            gaanim_core::glam::DVec2::new(offset.0, offset.1),
+        )))
     }
 }
 
@@ -3230,9 +3257,15 @@ impl PyDataSource {
 
 #[pymethods]
 impl PyDrawable {
-    fn at_coordinate(&self, coordinate: &PyCoordinateRef) -> PyResult<Self> {
+    #[pyo3(signature = (coordinate, *, anchor=None, offset=None))]
+    fn at_coordinate(
+        &self,
+        coordinate: &PyCoordinateRef,
+        anchor: Option<crate::pylayout::PyAnchor>,
+        offset: Option<(f64, f64)>,
+    ) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
-        Ok(Self(self.0.clone().at_coordinate(coordinate.0)))
+        self.at_coordinate_by(coordinate, anchor, offset)
     }
 }
 

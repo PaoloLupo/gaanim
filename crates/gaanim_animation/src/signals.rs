@@ -1703,6 +1703,35 @@ mod tests {
     }
 
     #[test]
+    fn regenerated_lines_keep_the_part_a_reveal_shows() {
+        let strip = |y: f32| gaanim_scene::LineListData {
+            points: vec![[0.0, y, 0.0], [1.0, y, 0.0], [2.0, y, 0.0]],
+            indices: None,
+            strip: true,
+            color: Color::BLACK,
+            colors: None,
+            revealed: None,
+        };
+        let mut world = World::new();
+        let old = strip(0.0);
+        let half = crate::tween::trim_line_strip(&old, 0.0, 0.5, 0.0).unwrap();
+        assert_eq!(half.revealed, Some([0.0, 0.5]));
+        let line = world
+            .spawn((
+                half,
+                gaanim_scene::LineListSource(old),
+                ReactiveLineRegen::new(move |_| strip(1.0)),
+            ))
+            .id();
+        reactive_3d_regen_system(&mut world);
+        let source = &world.get::<gaanim_scene::LineListSource>(line).unwrap().0;
+        assert_eq!(source.points[2], [2.0, 1.0, 0.0]);
+        let shown = world.get::<gaanim_scene::LineListData>(line).unwrap();
+        assert_eq!(shown.revealed, Some([0.0, 0.5]));
+        assert_eq!(shown.points.last(), Some(&[1.0, 1.0, 0.0]));
+    }
+
+    #[test]
     fn reactive_readout_layout_spaces_parts_by_their_advance() {
         let ids = [31, 32, 33].map(gaanim_core::ObjectId::from_raw);
         let mut app = App::new();
@@ -2126,8 +2155,25 @@ pub fn reactive_3d_regen_system(world: &mut World) {
             .collect::<Vec<_>>()
     };
     for (entity, data) in line_updates {
+        // A line a reveal shows part of keeps showing that part of the new
+        // line: its source is the new line, and its points the same part.
+        let shown = match world.get_mut::<gaanim_scene::LineListSource>(entity) {
+            Some(mut source) => {
+                source.set_if_neq(gaanim_scene::LineListSource(data.clone()));
+                world
+                    .get::<gaanim_scene::LineListData>(entity)
+                    .and_then(|current| current.revealed)
+                    .and_then(|[start, end]| {
+                        crate::tween::trim_line_strip(&data, start.into(), end.into(), 0.0)
+                    })
+                    .unwrap_or(data)
+            }
+            None => data,
+        };
+        // A line whose inputs hold still keeps its change tick, by which the
+        // 3D pass and recordings keep its upload.
         if let Some(mut current) = world.get_mut::<gaanim_scene::LineListData>(entity) {
-            *current = data;
+            current.set_if_neq(shown);
         }
     }
     for (entity, data) in mesh_updates {

@@ -13,10 +13,44 @@ instalar una versión nueva, sigue
 
 = 0.16.1
 
-Sin publicar. Corrige seis detalles encontrados al hacer un video real: el
+Sin publicar. Corrige detalles encontrados al hacer un video real: el
 rótulo del cero de los ejes con pasos decimales, el giro de la cámara al
-cambiar `up`, el color de `traced_path_3d`, `wipe` dentro de `in_3d`, el
-tamaño de `gaanim export` con solo `--width` y el espaciado de las lecturas.
+cambiar `up`, el color de `traced_path_3d` y de `polyline_3d`, `wipe` dentro
+de `in_3d`, el tamaño de `gaanim export` con solo `--width` y el espaciado de
+las lecturas. `orient_3d` orienta un objeto en 3D dando las direcciones de sus
+ejes, `polyline_3d` acepta coordenadas reactivas y `place` coloca una etiqueta
+junto a un dato por un ancla.
+
+== Cambios
+
+- `Drawable.orient_3d(x_axis, y_axis)` y `.animate.orient_3d(...)` orientan un
+  objeto dando hacia dónde apuntan sus ejes x e y locales, sin buscar los
+  ángulos de `rotate_to_3d`: `orient_3d((0, 0, -1), (-1, 0, 0))` tiende una
+  gráfica `in_3d` en el suelo con su eje x hacia −z.
+- `scene.geometry.polyline_3d` acepta en cada coordenada un `Parameter`, un
+  `Computed` o `scene.time`, como `polyline`, y se vuelve a trazar en cada
+  fotograma: una línea 3D que crece o se deforma con los datos.
+- `scene.camera.project(punto, estado)` dice dónde dibuja un estado de
+  cámara un punto del mundo, en las unidades de los objetos `hud()`, y
+  `scene.camera.screen_point(objetivo)` es un punto que sigue en cada
+  fotograma dónde lo dibuja la cámara: una etiqueta `hud()` que lo sigue con
+  `follow` queda sobre un objeto 3D aunque la cámara se mueva.
+- `scene.drive_from_samples(times, values, "x", targets=[(objeto, escala), ...])`
+  conduce varios objetos con una misma serie, cada uno con su escala, sin
+  copiar la serie por objeto: los pisos de un modelo glTF con la forma de un
+  modo, por ejemplo.
+- `CoordinateRef.place` y `Drawable.at_coordinate` aceptan `anchor` y
+  `offset`, como `Drawable.place`: `plane.coord(t, pico).place(etiqueta,
+  anchor="left", offset=(0.15, 0))` deja la etiqueta a la derecha del punto,
+  en unidades de escena, sin desplazar la coordenada en unidades de datos.
+- `gaanim check` avisa de un texto que se sale del área segura en una pausa
+  o al final de un segmento, y de una fila de un layout que parte un texto en
+  varias líneas por falta de ancho, con el texto y dónde.
+- La referencia dice en qué orden se componen los ángulos de `rotate_to_3d`
+  (`Rx · Ry · Rz`: primero z, luego y, luego x, sobre los ejes del mundo),
+  qué eje mueve `Axis.crossing` (`crossing("min")` en el eje y baja el eje x)
+  y que un nodo de glTF se mueve en las unidades del archivo, que escalan con
+  el `scale_to` del modelo.
 
 == Correcciones
 
@@ -32,6 +66,9 @@ tamaño de `gaanim export` con solo `--width` y el espaciado de las lecturas.
   estela siempre en blanco. Ahora usa el color del trazo, o el del estilo
   `plot` del tema si no se da, como `polyline_3d`; un `colormap` la sigue
   coloreando en el tiempo.
+- `polyline_3d(..., color=...)` ignoraba el color en una escena con tema: el
+  trazo del estilo `plot` del tema lo tapaba. Ahora el trazo del tema toma ese
+  color y conserva su ancho.
 - `wipe(reveal)`, `animate.wipe()` y `clip` no recortaban un objeto llevado al
   mundo con `in_3d()`: la curva se veía entera desde el inicio. El pase 3D
   recorta ahora sus contornos con la máscara, como en 2D.

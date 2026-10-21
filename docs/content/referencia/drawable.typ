@@ -1472,12 +1472,30 @@ label = scene.text("origen").move_to_3d(0, 0, 0.5).billboard()
 #api-entry(
   name: "Drawable.rotate_to_3d",
   kind: "method",
-  desc: [Rotación de Euler absoluta en radianes, en orden XYZ. Acepta fuentes reactivas.],
+  desc: [Rotación de Euler absoluta en radianes, en orden XYZ. Los ángulos se componen como `Rx(x) · Ry(y) · Rz(z)` sobre los puntos del objeto: primero gira `z` alrededor del eje z del mundo, luego `y` alrededor del eje y y por último `x` alrededor del eje x. Un ángulo positivo gira en sentido antihorario mirando el eje desde su extremo positivo hacia el origen; así, `rotate_to_3d(-math.pi / 2, 0, 0)` tiende un objeto 2D en el suelo (con y hacia arriba) mirando hacia arriba. `orient_3d` da la misma orientación a partir de las direcciones de sus ejes. Acepta fuentes reactivas.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 panel = scene.geometry.rect(2, 1).move_to_3d(0, 0, 0).rotate_to_3d(0.3, 0.6, 0)
+```
+]
+
+#api-entry(
+  name: "Drawable.orient_3d",
+  kind: "method",
+  params: (
+    (name: "x_axis", type: "tuple[float, float, float]", default: none, desc: [Dirección del mundo hacia la que apunta el eje x local del objeto.]),
+    (name: "y_axis", type: "tuple[float, float, float]", default: none, desc: [Dirección hacia la que apunta su eje y local; se endereza para quedar perpendicular a `x_axis`, en el plano que forman los dos.]),
+  ),
+  returns: (type: "Drawable", desc: [El mismo objeto.]),
+  desc: [Orienta el objeto dando las direcciones de sus ejes en vez de ángulos de Euler. Su eje z local, la cara que muestra un objeto 2D, queda a lo largo de `x_axis × y_axis`. La longitud de los vectores no importa. Es la misma orientación que daría `rotate_to_3d`, y `.animate.orient_3d` gira hasta ella. Ejes nulos, no finitos o paralelos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+# Una gráfica tendida en el suelo: su eje x hacia -z, su eje y hacia -x.
+chart = scene.geometry.rect(4, 2).in_3d().orient_3d(x_axis=(0, 0, -1), y_axis=(-1, 0, 0))
 ```
 ]
 

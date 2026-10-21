@@ -1926,6 +1926,43 @@ scene.camera.look_at(eye=(7, 5, 6), target=(0, 0, 0))
 ]
 
 #api-entry(
+  name: "Camera.project",
+  kind: "method",
+  params: (
+    (name: "point", type: "tuple[float, float, float]", default: none, desc: [Punto del mundo.]),
+    (name: "state", type: "CameraState", default: none, desc: [Estado de cámara creado con `state_2d` o `state_3d`.]),
+  ),
+  returns: (type: "tuple[float, float]", desc: [Dónde dibuja esa cámara el punto, en unidades HUD.]),
+  desc: [Las unidades HUD son las de los objetos `hud()`: unidades de escena de la cámara sin mover, desde el centro del encuadre y con y hacia arriba. Sirve para poner en el mismo sitio un objeto 2D que sustituye a una vista 3D. Solo se conoce al escribir la escena un estado de `state_2d` o `state_3d`; uno capturado o guardado, uno de otra escena o un punto no finito lanzan `ValueError`. Un punto detrás de una cámara en perspectiva se dibuja en su plano cercano, hacia su lado.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+top = scene.camera.state_3d(eye=(0, 20, 0.01), target=(0, 0, 0))
+x, y = scene.camera.project((2, 0, 1), top)
+mark = scene.text("A").hud().move_to(x, y)
+```
+]
+
+#api-entry(
+  name: "Camera.screen_point",
+  kind: "method",
+  params: ((name: "target", type: "Endpoint", default: none, desc: [Punto 3D, objeto o punto de anclaje.]),),
+  returns: (type: "PointRef", desc: [Punto que está, en cada fotograma, donde la cámara principal dibuja `target`, en unidades HUD.]),
+  desc: [Un objeto `hud()` que lo sigue con `follow` queda sobre `target` aunque la cámara se mueva, gire o mire en perspectiva: una etiqueta de pantalla para un objeto 3D. Con un objeto que no es `hud()`, el punto quedaría en la escena, donde una cámara 2D que se mueve lo desplaza.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+ball = scene.geometry.sphere(0.3).move_to_3d(2, 1, 0)
+tag = scene.text("pelota").hud().follow(scene.camera.screen_point(ball), offset=(0, 0.6))
+scene.camera.perspective(0.7)
+scene.camera.look_at(eye=(6, 4, 8), target=(0, 0, 0))
+scene.play([tag.animate.fade_in(), scene.camera.animate.orbit(0.6, 0)], duration=2)
+```
+]
+
+#api-entry(
   name: "Camera.bind_3d",
   kind: "method",
   params: (

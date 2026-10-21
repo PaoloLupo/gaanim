@@ -2414,6 +2414,38 @@ impl PyCamera {
         Ok(PyCameraState { inner })
     }
 
+    /// Where a camera in `state` draws the world `point` on the frame, in
+    /// HUD units.
+    fn project(&self, point: (f64, f64, f64), state: &PyCameraState) -> PyResult<(f64, f64)> {
+        crate::custom::ensure_authoring_allowed()?;
+        let point = gaanim_core::glam::DVec3::new(point.0, point.1, point.2);
+        if !point.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "point must be finite",
+            ));
+        }
+        let at = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_project(&state.inner, point)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok((at.x, at.y))
+    }
+
+    /// A point that is, every frame, where the main camera draws `target`
+    /// on the frame, in HUD units.
+    fn screen_point(&self, target: &Bound<'_, PyAny>) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
+        let target = resolve_endpoint_3d(target)?;
+        Ok(PyPointRef(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .camera_screen_point(target),
+        ))
+    }
+
     /// Capture authored camera state at the current timeline cursor.
     fn capture(&self) -> PyResult<PyCameraState> {
         crate::custom::ensure_authoring_allowed()?;
@@ -5688,7 +5720,7 @@ impl PyGeometry {
     #[pyo3(signature = (points, color=None, *, colors=None, colormap=None))]
     fn polyline_3d(
         &self,
-        points: Vec<(f64, f64, f64)>,
+        points: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>, Bound<'_, PyAny>)>,
         color: Option<PyColor>,
         colors: Option<Vec<PyColor>>,
         colormap: Option<PyColorMapArg>,
@@ -5699,6 +5731,43 @@ impl PyGeometry {
                 "polyline_3d requires at least 2 points",
             ));
         }
+        let constant = |value: &Bound<'_, PyAny>| {
+            value
+                .extract::<f64>()
+                .ok()
+                .filter(|_| !value.is_instance_of::<pyo3::types::PyBool>())
+        };
+        let fixed: Option<Vec<(f64, f64, f64)>> = points
+            .iter()
+            .map(|(x, y, z)| Some((constant(x)?, constant(y)?, constant(z)?)))
+            .collect();
+        // Signals in the coordinates make a line redrawn every frame.
+        let Some(points) = fixed else {
+            let mut sources = Vec::with_capacity(points.len());
+            for (x, y, z) in points {
+                let mut point = Vec::with_capacity(3);
+                for value in [x, y, z] {
+                    let scalar = crate::visualization::extract_deferred_scalar(value)?;
+                    scalar.validate(&self.inner)?;
+                    point.push(scalar.source);
+                }
+                let [x, y, z]: [gaanim_animation::ScalarSource; 3] =
+                    point.try_into().expect("three coordinates are read");
+                sources.push([x, y, z]);
+            }
+            let per_vertex = polyline_3d_colors(sources.len(), colors, colormap)?;
+            let mut handle = self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .reactive_polyline_3d(sources, per_vertex.clone());
+            if per_vertex.is_none()
+                && let Some(color) = color
+            {
+                handle = handle.fill(color.0);
+            }
+            return Ok(PyDrawable(handle));
+        };
         for (x, y, z) in &points {
             if ![x, y, z].iter().all(|v| v.is_finite()) {
                 return Err(pyo3::exceptions::PyValueError::new_err(
@@ -5711,25 +5780,7 @@ impl PyGeometry {
             .map(|(x, y, z)| [*x as f32, *y as f32, *z as f32])
             .collect();
 
-        // Resolve per-vertex colors: explicit list > colormap > uniform color
-        let per_vertex: Option<Vec<gaanim_core::peniko::Color>> = if let Some(cols) = colors {
-            if cols.len() != points.len() {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "colors length {} must match points length {}",
-                    cols.len(),
-                    points.len()
-                )));
-            }
-            Some(cols.into_iter().map(|c| c.0).collect())
-        } else if let Some(map) = colormap {
-            Some(
-                map.0
-                    .colors(points.len())
-                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?,
-            )
-        } else {
-            None
-        };
+        let per_vertex = polyline_3d_colors(points.len(), colors, colormap)?;
 
         let handle = if let Some(cols) = per_vertex {
             self.inner
@@ -5755,6 +5806,32 @@ impl PyGeometry {
         // If both per-vertex and uniform color provided, we respect per-vertex.
         Ok(PyDrawable(handle))
     }
+}
+
+/// The colors of a 3D polyline of `count` points, one per point: the
+/// explicit list, which must match, else the colormap's; `None` for one
+/// color.
+fn polyline_3d_colors(
+    count: usize,
+    colors: Option<Vec<PyColor>>,
+    colormap: Option<PyColorMapArg>,
+) -> PyResult<Option<Vec<gaanim_core::peniko::Color>>> {
+    if let Some(colors) = colors {
+        if colors.len() != count {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "colors length {} must match points length {count}",
+                colors.len(),
+            )));
+        }
+        return Ok(Some(colors.into_iter().map(|color| color.0).collect()));
+    }
+    colormap
+        .map(|map| {
+            map.0
+                .colors(count)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+        })
+        .transpose()
 }
 
 #[pymethods]
@@ -7347,6 +7424,53 @@ impl PyScene {
             .expect("scene canvas poisoned")
             .z_layers(&names, default.as_deref())
             .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
+    /// Drive several drawables along one sampled series, each at its own
+    /// scale, as `Drawable.drive_from_samples` drives one.
+    #[pyo3(signature = (times, values, property = "x", *, targets, interpolation = "linear", offset = 0.0, absolute = false))]
+    #[allow(clippy::too_many_arguments)]
+    fn drive_from_samples(
+        &self,
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: &str,
+        targets: Vec<(PyRef<'_, PyDrawable>, f64)>,
+        interpolation: &str,
+        offset: f64,
+        absolute: bool,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let property = crate::pydrawable::parse_sampled_property(property)?;
+        if matches!(property, gaanim_animation::SampledProperty::Signal) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "property 'signal' drives a Parameter; use Parameter.drive_from_samples",
+            ));
+        }
+        let interpolation = crate::pydrawable::parse_sampled_interpolation(interpolation)?;
+        if targets.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "targets must name at least one (drawable, scale) pair",
+            ));
+        }
+        let targets: Vec<(&gaanim_api::canvas::DrawableHandle, f64)> = targets
+            .iter()
+            .map(|(target, scale)| (&target.0, *scale))
+            .collect();
+        gaanim_api::canvas::DrawableHandle::drive_each_from_samples(
+            &targets,
+            times,
+            values,
+            property,
+            interpolation,
+            offset,
+            absolute,
+        )
+        .map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err(
+                "drive_from_samples requires non-empty matching times/values, finite values,                  scales and offset, and non-decreasing times",
+            )
+        })
     }
 
     /// Keep one or more drawables available across future segments.

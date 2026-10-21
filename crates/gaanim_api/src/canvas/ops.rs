@@ -9,7 +9,7 @@ use gaanim_animation::{
 };
 use gaanim_animation::{ReactiveFunction, ScalarSource};
 use gaanim_core::ObjectId;
-use gaanim_core::glam::{DQuat, DVec3};
+use gaanim_core::glam::{DQuat, DVec2, DVec3};
 use gaanim_core::peniko::Color;
 use gaanim_layout::LayoutConstraint;
 use gaanim_renderer::background::BackgroundPaint;
@@ -783,6 +783,11 @@ pub(crate) enum Op {
         space: ObjectId,
         target: ObjectId,
         local: DVec3,
+        /// The point of the target's box that goes to the coordinate; its
+        /// origin without one.
+        anchor: Option<gaanim_layout::Anchor>,
+        /// Then moved this far, in scene units.
+        offset: DVec2,
     },
     /// Adopt an existing drawable into the active segment.
     Reuse(ObjectId),
@@ -1219,6 +1224,9 @@ pub enum CanvasEndpoint {
     /// A source pixel of an image or video, from its top-left corner with y
     /// down, through the media's frame, crop and transforms.
     MediaPixel { object: ObjectId, x: f64, y: f64 },
+    /// Where the main camera draws another endpoint on the frame, in the
+    /// units a HUD drawable is placed in, every frame.
+    Screen(Box<CanvasEndpoint>),
 }
 
 /// Lightweight public reference to a derived, non-rendered endpoint.

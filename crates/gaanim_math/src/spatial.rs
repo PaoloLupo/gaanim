@@ -284,9 +284,35 @@ impl GlobalSpatialTransform {
     }
 }
 
+/// The rotation that turns the local x axis toward `x_axis` and the local y
+/// axis toward `y_axis` (made square to `x_axis`, in the plane they span),
+/// both world directions; the local z axis follows as `x_axis × y_axis`.
+/// `None` when either is zero or not finite, or both are parallel.
+pub fn orientation_from_axes(x_axis: DVec3, y_axis: DVec3) -> Option<DQuat> {
+    let x = x_axis.try_normalize()?;
+    let z = x.cross(y_axis).try_normalize()?;
+    let y = z.cross(x);
+    Some(DQuat::from_mat3(&gaanim_core::glam::DMat3::from_cols(x, y, z)).normalize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orientation_from_axes_points_the_local_axes() {
+        // A plane laid with its x along -z and its y along -x faces up.
+        let rotation = orientation_from_axes(DVec3::NEG_Z, DVec3::NEG_X).unwrap();
+        assert!((rotation * DVec3::X - DVec3::NEG_Z).length() < 1e-12);
+        assert!((rotation * DVec3::Y - DVec3::NEG_X).length() < 1e-12);
+        assert!((rotation * DVec3::Z - DVec3::Y).length() < 1e-12);
+        // y is squared to x, at any length.
+        let tilted = orientation_from_axes(DVec3::X * 3.0, DVec3::new(1.0, 2.0, 0.0)).unwrap();
+        assert!((tilted * DVec3::Y - DVec3::Y).length() < 1e-12);
+        assert!(orientation_from_axes(DVec3::ZERO, DVec3::Y).is_none());
+        assert!(orientation_from_axes(DVec3::X, DVec3::NEG_X * 2.0).is_none());
+        assert!(orientation_from_axes(DVec3::X, DVec3::new(f64::NAN, 1.0, 0.0)).is_none());
+    }
 
     #[test]
     fn a_new_pivot_moves_nothing_and_is_drawn_where_it_was_asked() {

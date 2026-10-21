@@ -713,6 +713,13 @@ pub enum SpawnKind {
         points: Vec<[f32; 3]>,
         colors: Option<Vec<Color>>,
     },
+    /// A 3D polyline whose coordinates are reactive sources, redrawn every
+    /// frame from their current values; `colors`, one per point, as in
+    /// `Polyline3D`.
+    ReactivePolyline3D {
+        points: Vec<[gaanim_animation::ScalarSource; 3]>,
+        colors: Option<Vec<Color>>,
+    },
     /// Independent 3D line segments stored in one retained mesh.
     LineSegments3D {
         points: Vec<[f32; 3]>,
@@ -2495,6 +2502,20 @@ impl Anim {
                 z,
             )))
         })
+    }
+
+    /// Turn the drawable to point its local x and y axes along `x_axis` and
+    /// `y_axis`, as [`super::DrawableHandle::orient_3d`] sets it.
+    pub fn orient_3d(
+        self,
+        x_axis: DVec3,
+        y_axis: DVec3,
+    ) -> Result<Self, crate::canvas::InvalidOrientation> {
+        let rotation = gaanim_math::orientation_from_axes(x_axis, y_axis)
+            .ok_or(crate::canvas::InvalidOrientation)?;
+        Ok(self.update_properties(|properties| {
+            properties.rotation = Some(PropertyRotation::To(rotation))
+        }))
     }
 
     /// Select the drawable's entry fade effect. Scheduling still belongs to `Scene.play`.

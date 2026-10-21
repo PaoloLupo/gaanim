@@ -127,6 +127,11 @@ impl Default for ClipOptions {
 #[error("wipe direction must be a finite, non-zero vector")]
 pub struct InvalidWipe;
 
+/// `orient_3d` needs two finite, non-zero axes that are not parallel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("orient_3d needs two finite, non-zero axes that are not parallel")]
+pub struct InvalidOrientation;
+
 /// Side of the square mask a wipe slides over its target, in scene units:
 /// it reaches far past any target, so only its leading edge ever shows.
 const WIPE_MASK_SIDE: f64 = 2000.0;
@@ -2446,6 +2451,18 @@ impl DrawableHandle {
         self.push_layout(LayoutOp::SetRotation3D(DVec3::new(x, y, z)))
     }
 
+    /// Turn the drawable so its local x axis points along `x_axis` and its
+    /// local y axis along `y_axis`, squared to it, both world directions:
+    /// the orientation `rotate_to_3d` would give, without its angles. Its
+    /// local z axis, the side a 2D drawable faces, ends along
+    /// `x_axis × y_axis`.
+    pub fn orient_3d(self, x_axis: DVec3, y_axis: DVec3) -> Result<Self, InvalidOrientation> {
+        let rotation =
+            gaanim_math::orientation_from_axes(x_axis, y_axis).ok_or(InvalidOrientation)?;
+        let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
+        Ok(self.rotate_to_3d(x, y, z))
+    }
+
     /// Set the scene-space pivot used by rotations, scales and skews.
     ///
     /// Without one, shapes declared in scene coordinates (lines, polygons,
@@ -3128,6 +3145,37 @@ impl DrawableHandle {
             SampledSeriesDriver::new(times, values, property, interpolation, scale, offset)?
                 .absolute();
         Ok(self.attach_sampled_series(driver))
+    }
+
+    /// Drive each of `targets` along one sampled series at its own scale,
+    /// as [`Self::drive_from_samples`] (or, with `absolute`,
+    /// [`Self::drive_absolute_from_samples`]) drives one drawable: the
+    /// times and values are validated and kept once, and shared by every
+    /// target. A non-finite scale is rejected before any target is driven.
+    pub fn drive_each_from_samples(
+        targets: &[(&DrawableHandle, f64)],
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: SampledProperty,
+        interpolation: SampledInterpolation,
+        offset: f64,
+        absolute: bool,
+    ) -> Result<(), InvalidSampledSeries> {
+        if targets.iter().any(|(_, scale)| !scale.is_finite()) {
+            return Err(InvalidSampledSeries);
+        }
+        let mut driver =
+            SampledSeriesDriver::new(times, values, property, interpolation, 1.0, offset)?;
+        if absolute {
+            driver = driver.absolute();
+        }
+        for (target, scale) in targets {
+            target.attach_sampled_series(SampledSeriesDriver {
+                scale: *scale,
+                ..driver.clone()
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn attach_sampled_series(&self, driver: SampledSeriesDriver) -> Self {

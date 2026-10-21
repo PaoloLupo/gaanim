@@ -294,6 +294,15 @@ termina con `pass` o `fail`:
   Un texto oculto a propósito (con opacidad 0) o detrás de una figura
   translúcida, de una imagen o de una figura marcada con
   `covers_on_purpose()` no cuenta.
+- Que ningún texto visible en una pausa o al final de un segmento se salga
+  del área segura (el marco menos `margin`): dice cuánto se sale y dónde. Un
+  texto `hud()` cuenta donde está fijado, y uno del lienzo 2D donde lo pone la
+  cámara. Un texto que queda entero fuera del marco, porque la cámara mira a
+  otro lado, o uno colocado en el mundo 3D, no cuenta.
+- Que una fila de un layout (`row`) no parta en varias líneas sus textos por
+  no darles el ancho de una línea; un aviso por fila, con cuántos textos y el
+  primero. Suele ser una fila con demasiados elementos: dale sitio, o elige el
+  ancho al que un texto se parte con `wrap=<ancho>` y deja de contar.
 - Si la escena usa segmentos (una presentación): que exista al menos un
   segmento, que ninguno dure cero segundos, que cada uno tenga notas y que
   las pausas tengan nombre; avisa si el marco no es 16:9 o si la escena dura

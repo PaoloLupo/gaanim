@@ -1,5 +1,5 @@
-//! Texts that an opaque shape hides completely where a presentation rests,
-//! for `gaanim check`.
+//! Texts that an opaque shape hides completely, or that leave the safe
+//! frame, where a presentation rests, for `gaanim check`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -9,8 +9,9 @@ use gaanim_core::peniko::Brush;
 use gaanim_math::GlobalSpatialTransform;
 use gaanim_scene::components::TextSpan;
 use gaanim_scene::{
-    CoversOnPurpose, FillBrush, GlobalOpacity, HudOverlay, LayoutBackdrop, LocalBounds, ObjectTag,
-    Path2D, RasterImage, RenderLayer, RenderOrder, SegmentContent, Visible, ZLayer,
+    Billboard, CoversOnPurpose, DrawnIn3D, FillBrush, GlobalOpacity, HudOverlay, InWorld3D,
+    LayoutBackdrop, LocalBounds, ObjectTag, Path2D, RasterImage, RenderLayer, RenderOrder,
+    SegmentContent, Visible, ZLayer,
 };
 use gaanim_timeline::timeline::Timeline;
 
@@ -44,35 +45,65 @@ impl SceneModel {
     /// translucent shape, an image or a shape that covers it on purpose, is
     /// not reported.
     pub fn covered_text_warnings(&self) -> Vec<String> {
+        self.rest_text_warnings(true, false)
+    }
+
+    /// The warnings `gaanim check` gives about texts where a presentation
+    /// rests, in one pass over the rests: texts an opaque shape hides (see
+    /// [`Self::covered_text_warnings`]) and texts that leave the safe frame,
+    /// with how far, wherever the camera shows them.
+    pub fn rest_warnings(&self) -> Vec<String> {
+        self.rest_text_warnings(true, true)
+    }
+
+    fn rest_text_warnings(&self, covers: bool, frames: bool) -> Vec<String> {
         let rests = self.rests();
         if rests.is_empty() {
             return Vec::new();
         }
+        let rect = |bounds: gaanim_math::Bounds3D| {
+            Rect::new(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y)
+        };
+        let (frame, safe) = (rect(self.frame.bounds()), rect(self.safe_frame()));
         let mut app = self.app_for_check();
         let mut covered: Vec<(Entity, Entity, String)> = Vec::new();
-        let mut reported = HashSet::new();
+        let mut outside: Vec<(Entity, f64, String)> = Vec::new();
+        let (mut hidden, mut out) = (HashSet::new(), HashSet::new());
         for rest in &rests {
             app.world_mut().resource_mut::<Timeline>().seek_request = Some(rest.time);
             // The seek and the systems that follow what it moved.
             app.update();
-            for (text, shape) in covered_texts(app.world_mut()) {
-                if reported.insert(text) {
-                    covered.push((text, shape, rest.place.clone()));
+            if covers {
+                for (text, shape) in covered_texts(app.world_mut()) {
+                    if hidden.insert(text) {
+                        covered.push((text, shape, rest.place.clone()));
+                    }
+                }
+            }
+            if frames {
+                for (text, by) in unframed_texts(app.world_mut(), frame, safe) {
+                    if out.insert(text) {
+                        outside.push((text, by, rest.place.clone()));
+                    }
                 }
             }
         }
         let world = app.world();
-        covered
-            .into_iter()
-            .map(|(text, shape, place)| {
-                format!(
-                    "text \"{}\" is hidden behind a {} {place}; draw it above with z_layer or z_index, or mark the {} with covers_on_purpose()",
-                    text_content(world, text),
-                    shape_name(world, shape),
-                    cover_name(world, shape),
-                )
-            })
-            .collect()
+        let covered = covered.into_iter().map(|(text, shape, place)| {
+            format!(
+                "text \"{}\" is hidden behind a {} {place}; draw it above with z_layer or z_index, or mark the {} with covers_on_purpose()",
+                text_content(world, text),
+                shape_name(world, shape),
+                cover_name(world, shape),
+            )
+        });
+        let outside = outside.into_iter().map(|(text, by, place)| {
+            format!(
+                "text \"{}\" leaves the safe area by {by:.2} scene units {place}; move it in, or give the layout that holds it more room",
+                text_content(world, text),
+            )
+        });
+        covered.chain(outside).collect()
     }
 
     /// The stops and segment ends, where a presentation shows a still frame.
@@ -219,6 +250,108 @@ fn covered_texts(world: &mut World) -> Vec<(Entity, Entity)> {
         .collect();
     covered.sort();
     covered
+}
+
+/// Texts, by root, centered in the frame whose shown glyphs reach past
+/// `safe`, with how far: a HUD text where it is pinned and a text of the 2D
+/// canvas where the canvas puts it (a perspective camera keeps that canvas
+/// still). A text centered out of the frame, part of a world larger than
+/// the frame that the camera shows a piece of, a text placed in the 3D
+/// world, which a moving camera brings in and out of the frame, and a
+/// clipped text, as a ticker crawling through its band, are left alone.
+fn unframed_texts(world: &mut World, frame: Rect, safe: Rect) -> Vec<(Entity, f64)> {
+    // Antialiasing may graze the edge.
+    const SLACK: f64 = 0.01;
+    let mut glyphs = world.query::<(Entity, &ChildOf, &TextSpan, &LocalBounds)>();
+    let world: &World = world;
+    let Some(camera) = world
+        .get_resource::<gaanim_math::ResolvedCamera>()
+        .map(|resolved| resolved.camera)
+        .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())
+    else {
+        return Vec::new();
+    };
+    let unmoved = gaanim_math::Camera::ortho_2d_frame(
+        camera.frame_width,
+        camera.frame_height,
+        camera.viewport_width,
+        camera.viewport_height,
+    )
+    .to_vello_transform()
+    .inverse();
+    let mut texts: HashMap<Entity, Rect> = HashMap::new();
+    for (glyph, parent, _, bounds) in glyphs.iter(world) {
+        let shown = world.get::<Visible>(glyph).is_some()
+            && world
+                .get::<GlobalOpacity>(glyph)
+                .is_some_and(|opacity| opacity.0 >= SHOWN);
+        let Some(transform) = world.get::<GlobalSpatialTransform>(glyph) else {
+            continue;
+        };
+        if !shown || bounds.0.width() <= 0.0 || bounds.0.height() <= 0.0 {
+            continue;
+        }
+        let (mut hud, mut in_3d) = (false, world.get::<DrawnIn3D>(glyph).is_some());
+        let mut clipped = false;
+        let mut current = Some(glyph);
+        while let Some(node) = current {
+            hud |= world.get::<HudOverlay>(node).is_some();
+            in_3d |=
+                world.get::<InWorld3D>(node).is_some() || world.get::<Billboard>(node).is_some();
+            clipped |= world
+                .get::<gaanim_renderer::effects::ClipMask>(node)
+                .is_some();
+            current = world.get::<ChildOf>(node).map(ChildOf::parent);
+        }
+        if in_3d || clipped {
+            continue;
+        }
+        let on_frame = |point: gaanim_core::glam::DVec3| {
+            if hud {
+                return Point::new(point.x, point.y);
+            }
+            match camera.projection {
+                gaanim_math::Projection::Perspective { .. } => Point::new(point.x, point.y),
+                gaanim_math::Projection::Orthographic { .. } => {
+                    unmoved * (camera.to_vello_transform() * Point::new(point.x, point.y))
+                }
+            }
+        };
+        let b = bounds.0;
+        let mut rect: Option<Rect> = None;
+        for (x, y) in [
+            (b.min.x, b.min.y),
+            (b.max.x, b.min.y),
+            (b.max.x, b.max.y),
+            (b.min.x, b.max.y),
+        ] {
+            let corner = transform
+                .mat4
+                .transform_point3(gaanim_core::glam::DVec3::new(x, y, 0.0));
+            let point = on_frame(corner);
+            rect = Some(rect.map_or(Rect::from_points(point, point), |rect| rect.union_pt(point)));
+        }
+        let Some(rect) = rect.filter(|rect| rect.is_finite()) else {
+            continue;
+        };
+        texts
+            .entry(parent.parent())
+            .and_modify(|bounds| *bounds = bounds.union(rect))
+            .or_insert(rect);
+    }
+    let mut outside: Vec<(Entity, f64)> = texts
+        .into_iter()
+        .filter(|(_, rect)| frame.inset(-1.0e-6).contains(rect.center()))
+        .filter_map(|(text, rect)| {
+            let by = (safe.x0 - rect.x0)
+                .max(rect.x1 - safe.x1)
+                .max(safe.y0 - rect.y0)
+                .max(rect.y1 - safe.y1);
+            (by > SLACK).then_some((text, by))
+        })
+        .collect();
+    outside.sort_by_key(|(text, _)| *text);
+    outside
 }
 
 /// `entity`'s place in the draw order and the opacity it draws with, when
@@ -450,6 +583,61 @@ mod tests {
             dialog(canvas).covers_on_purpose();
         });
         assert!(hidden.is_empty(), "{hidden:?}");
+    }
+
+    /// Warnings about texts that leave the safe area, for a scene `build`
+    /// fills in a 16 x 9 frame.
+    fn outside(build: impl FnOnce(&mut SceneModel)) -> Vec<String> {
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        build(&mut canvas);
+        canvas.wait(1.0);
+        canvas
+            .rest_warnings()
+            .into_iter()
+            .filter(|warning| warning.contains("safe area"))
+            .collect()
+    }
+
+    #[test]
+    fn a_text_cut_by_the_frame_leaves_the_safe_area() {
+        let cut = outside(|canvas| {
+            canvas.text("Borde").move_to(7.8, 0.0);
+        });
+        assert_eq!(cut.len(), 1, "{cut:?}");
+        assert!(
+            cut[0].starts_with("text \"Borde\" leaves the safe area by")
+                && cut[0].contains("at the end of the scene"),
+            "{cut:?}"
+        );
+        let pinned = outside(|canvas| {
+            canvas.text("Pinned").hud().move_to(0.0, 4.4);
+        });
+        assert_eq!(pinned.len(), 1, "{pinned:?}");
+        // A clipped text, as a ticker crawling through its band, is meant to
+        // reach past it.
+        assert!(
+            outside(|canvas| {
+                let band = canvas.rect(2.0, 1.0).move_to(7.0, 0.0);
+                canvas
+                    .text("Borde")
+                    .move_to(7.8, 0.0)
+                    .clip(&band, gaanim_core::peniko::Fill::NonZero);
+            })
+            .is_empty()
+        );
+        // Inside the frame, or wholly out of it where the camera does not look.
+        assert!(
+            outside(|canvas| {
+                canvas.text("Centro");
+            })
+            .is_empty()
+        );
+        assert!(
+            outside(|canvas| {
+                canvas.text("Lejos").move_to(30.0, 0.0);
+            })
+            .is_empty()
+        );
     }
 
     #[test]
