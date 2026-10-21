@@ -942,10 +942,10 @@ mod tests {
         let readout = scene.reactive_readout_group(Some(&label), None, &number, None, 0.1);
         let bounds = scene.bounds_of(&readout).unwrap();
         assert!(bounds.center().x.abs() < 1e-6, "{bounds:?}");
-        assert!(
-            (bounds.width() - (widths[0] + 0.1 + widths[1])).abs() < 1e-6,
-            "{bounds:?} from {widths:?}"
-        );
+        // The parts are 0.1 apart from their advances: their inks, by that
+        // and the room the font leaves beside the R and the 4.
+        let room = bounds.width() - (widths[0] + 0.1 + widths[1]);
+        assert!(room > 0.0 && room < 0.1, "{bounds:?} from {widths:?}");
     }
 
     #[test]

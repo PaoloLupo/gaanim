@@ -323,8 +323,14 @@ const EXPORT: Page = Page {
                     "--fps <RATE>",
                     "Frames per second, from 1 to 240, instead of the\nquality's: 24, 25, 50, or a fraction such as 24000/1001\n(23.976 also works). A bundle records a whole rate, and\na video exported from a bundle runs at that rate",
                 ),
-                ("--width <PX>", "Output width in pixels (default 1920)"),
-                ("--height <PX>", "Output height in pixels (default 1080)"),
+                (
+                    "--width <PX>",
+                    "Output width in pixels (default 1920). Given alone, the\nheight follows the scene frame's proportion",
+                ),
+                (
+                    "--height <PX>",
+                    "Output height in pixels (default 1080). Given alone, the\nwidth follows the scene frame's proportion",
+                ),
                 (
                     "--fit <MODE>",
                     "When the output aspect differs from the scene frame:\nerror (default), contain (letterbox), or cover (crop)",

@@ -479,8 +479,9 @@ pub struct ExportCommand {
     pub quality: String,
     pub encoder: VideoEncoder,
     pub transparent: bool,
-    pub width: u32,
-    pub height: u32,
+    /// `--width` and `--height`; see [`Self::output_size`].
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     pub fit: OutputFit,
     pub from: Option<ExportBound>,
     pub to: Option<ExportBound>,
@@ -505,8 +506,8 @@ impl Default for ExportCommand {
             quality: "standard".to_string(),
             encoder: VideoEncoder::Auto,
             transparent: false,
-            width: 1920,
-            height: 1080,
+            width: None,
+            height: None,
             fit: OutputFit::Error,
             from: None,
             to: None,
@@ -607,9 +608,9 @@ impl ExportCommand {
                         .filter(|value| *value > 0)
                         .ok_or_else(|| format!("{flag} requires a positive integer"))?;
                     if flag == "--width" {
-                        command.width = value;
+                        command.width = Some(value);
                     } else {
-                        command.height = value;
+                        command.height = Some(value);
                     }
                 }
                 "--fit" => {
@@ -636,6 +637,26 @@ impl ExportCommand {
             return Err("quality must be draft, standard, or production".to_string());
         }
         Ok(command)
+    }
+
+    /// The size of the output for a scene whose frame is `aspect` times as
+    /// wide as it is tall: `--width` and `--height`; one of them alone, with
+    /// the other side in the frame's proportion, rounded to an even number
+    /// of pixels as video encoders need; neither, 1920 × 1080.
+    pub fn output_size(&self, aspect: f64) -> (u32, u32) {
+        let even = |side: f64| {
+            if side.is_finite() {
+                ((side / 2.0).round() * 2.0).clamp(2.0, f64::from(u32::MAX)) as u32
+            } else {
+                2
+            }
+        };
+        match (self.width, self.height) {
+            (Some(width), Some(height)) => (width, height),
+            (Some(width), None) => (width, even(f64::from(width) / aspect)),
+            (None, Some(height)) => (even(f64::from(height) * aspect), height),
+            (None, None) => (1920, 1080),
+        }
     }
 
     /// Check the placeholders of `--output` against the other options:
@@ -812,12 +833,14 @@ pub fn export_format(format: &str) -> Option<ExportFormat> {
     })
 }
 
-/// The export configuration a video export of `command` uses.
+/// The export configuration a video export of `command` uses, for a scene
+/// whose frame has `aspect` (see [`ExportCommand::output_size`]).
 pub fn video_config(
     command: &ExportCommand,
     output: &str,
     format: ExportFormat,
     range: (Option<f64>, Option<f64>),
+    aspect: f64,
 ) -> ExportConfig {
     let mut config = ExportConfig::new(output);
     // The preset sets fps, CRF and speed for the format; an explicit --fps
@@ -827,8 +850,7 @@ pub fn video_config(
     if let Some(fps) = command.fps {
         config.fps = fps;
     }
-    config.width = command.width;
-    config.height = command.height;
+    (config.width, config.height) = command.output_size(aspect);
     config.fit = command.fit;
     config.start_time = range.0;
     config.end_time = range.1;
@@ -856,8 +878,7 @@ pub fn export_frames(
         })
         .collect::<Result<Vec<f64>, String>>()?;
     let mut config = ExportConfig::new(output).with_quality(quality_preset(&command.quality));
-    config.width = command.width;
-    config.height = command.height;
+    (config.width, config.height) = command.output_size(canvas.frame.aspect_ratio());
     config.fit = command.fit;
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.transparent = command.transparent;
@@ -1008,9 +1029,9 @@ pub fn export_slides_pdf(
         )
     }));
     let pages = gaanim_export::deck::deck_pages(&slides, manifest.duration(), command.notes);
+    let size = command.output_size(canvas.frame.aspect_ratio());
     let mut config = ExportConfig::new(output).with_quality(quality_preset(&command.quality));
-    config.width = command.width;
-    config.height = command.height;
+    (config.width, config.height) = size;
     config.fit = command.fit;
     config.aspect_ratio = AspectRatioPreset::Custom;
     config.headless = true;
@@ -1024,14 +1045,12 @@ pub fn export_slides_pdf(
     )
     .map_err(|error| error.to_string())?;
     let title = script.and_then(bundle_title).unwrap_or_default();
-    write_deck(
-        output,
-        &pages,
-        &slides,
-        frames,
-        (command.width, command.height),
-        &title,
-    )
+    write_deck(output, &pages, &slides, frames, size, &title)
+}
+
+/// The aspect of the frame a bundle recorded at `output_size`.
+fn bundle_aspect((width, height): (u32, u32)) -> f64 {
+    f64::from(width) / f64::from(height.max(1))
 }
 
 /// Export a playback bundle as a PDF deck, without Python: every page is
@@ -1050,9 +1069,10 @@ pub fn export_bundle_pdf(
     command.validate_pdf().map_err(CommandError::Usage)?;
     let bundle = gaanim_bundle::Bundle::open(input)
         .map_err(|error| CommandError::Failed(format!("{}: {error}", input.display())))?;
+    let (width, height) = command.output_size(bundle_aspect(bundle.scene.output_size));
     gaanim_export::prelude::check_bundle_fit(
         bundle.scene.output_size,
-        (command.width, command.height),
+        (width, height),
         command.fit,
     )
     .map_err(|error| CommandError::Usage(error.to_string()))?;
@@ -1070,22 +1090,15 @@ pub fn export_bundle_pdf(
     let mut frames = Vec::with_capacity(times.len());
     gaanim_export::prelude::capture_bundle_streaming(
         input,
-        command.width,
-        command.height,
+        width,
+        height,
         command.fit,
         &times,
         |frame| capture_page(&mut frames, &frame, times.len(), &telemetry),
     )
     .map_err(|error| CommandError::Failed(error.to_string()))?;
-    write_deck(
-        &output,
-        &pages,
-        &slides,
-        frames,
-        (command.width, command.height),
-        &title,
-    )
-    .map_err(CommandError::Failed)
+    write_deck(&output, &pages, &slides, frames, (width, height), &title)
+        .map_err(CommandError::Failed)
 }
 
 /// Frames per second a bundle records for an export `quality`: the rate a
@@ -1196,9 +1209,11 @@ pub fn export_bundle_video(command: &ExportCommand) -> Result<(), CommandError> 
         )));
     }
     let format = export_format(&format).expect("validated export format");
+    let aspect = bundle_aspect(bundle.scene.output_size);
     drop(bundle);
     // The video runs at the bundle's recorded rate.
-    gaanim_export::prelude::export_bundle(input, video_config(command, &output, format, range))
+    let config = video_config(command, &output, format, range, aspect);
+    gaanim_export::prelude::export_bundle(input, config)
         .map_err(|error| CommandError::Failed(error.to_string()))
 }
 
@@ -1452,7 +1467,8 @@ mod tests {
         );
         assert_eq!(command.from, Some(ExportBound::Name("intro".into())));
         assert_eq!(command.to, Some(ExportBound::Seconds(12.0)));
-        assert_eq!((command.width, command.height), (1280, 720));
+        assert_eq!((command.width, command.height), (Some(1280), Some(720)));
+        assert_eq!(command.output_size(1.0), (1280, 720));
         assert!(command.validate_video("mp4").is_ok());
 
         let bundle =
@@ -1523,7 +1539,13 @@ mod tests {
         let ntsc = FrameRate::new(24_000, 1001).unwrap();
         assert_eq!(command.fps, Some(ntsc));
         assert!(command.validate_video("mp4").is_ok());
-        let config = video_config(&command, "film.mp4", ExportFormat::Mp4, (None, None));
+        let config = video_config(
+            &command,
+            "film.mp4",
+            ExportFormat::Mp4,
+            (None, None),
+            16.0 / 9.0,
+        );
         // The exporter applies the presets again; the explicit rate survives.
         assert_eq!(config.apply_presets().fps, ntsc);
         // A bundle cannot record a fractional rate.
@@ -1531,11 +1553,23 @@ mod tests {
 
         // Without --fps the preset decides, and GIF stays at 30.
         let preset = ExportCommand::parse(&args(&["scene.py", "-o", "loop.gif"])).unwrap();
-        let config = video_config(&preset, "loop.gif", ExportFormat::Gif, (None, None));
+        let config = video_config(
+            &preset,
+            "loop.gif",
+            ExportFormat::Gif,
+            (None, None),
+            16.0 / 9.0,
+        );
         assert_eq!(config.apply_presets().fps, FrameRate::whole(30));
         let explicit =
             ExportCommand::parse(&args(&["scene.py", "-o", "loop.gif", "--fps", "50"])).unwrap();
-        let config = video_config(&explicit, "loop.gif", ExportFormat::Gif, (None, None));
+        let config = video_config(
+            &explicit,
+            "loop.gif",
+            ExportFormat::Gif,
+            (None, None),
+            16.0 / 9.0,
+        );
         assert_eq!(config.apply_presets().fps, FrameRate::whole(50));
 
         let still = ExportCommand::parse(&args(&[
@@ -1559,11 +1593,39 @@ mod tests {
             ("lower.MOV".to_string(), "mov".to_string())
         );
         assert_eq!(export_format("mov"), Some(ExportFormat::Mov));
-        let config = video_config(&command, "lower.MOV", ExportFormat::Mov, (None, None));
+        let config = video_config(
+            &command,
+            "lower.MOV",
+            ExportFormat::Mov,
+            (None, None),
+            16.0 / 9.0,
+        );
         assert_eq!(config.format, ExportFormat::Mov);
         let encoder =
             ExportCommand::parse(&args(&["a.py", "-o", "a.mov", "--encoder", "nvenc"])).unwrap();
         assert!(encoder.validate_video("mov").is_err());
+    }
+
+    #[test]
+    fn one_side_of_the_output_takes_the_other_from_the_frame() {
+        let size = |list: &[&str], aspect| {
+            ExportCommand::parse(&args(list))
+                .unwrap()
+                .output_size(aspect)
+        };
+        let wide = 16.0 / 9.0;
+        assert_eq!(size(&["a.py", "-o", "a.png"], wide), (1920, 1080));
+        assert_eq!(size(&["a.py", "--width", "960"], wide), (960, 540));
+        assert_eq!(
+            size(&["a.py", "--height", "1920"], 9.0 / 16.0),
+            (1080, 1920)
+        );
+        // A derived side is even, as video encoders need: 1001 × 9/16 is 563.06.
+        assert_eq!(size(&["a.py", "--width", "1001"], wide), (1001, 564));
+        assert_eq!(
+            size(&["a.py", "--width", "640", "--height", "640"], wide),
+            (640, 640)
+        );
     }
 
     #[test]

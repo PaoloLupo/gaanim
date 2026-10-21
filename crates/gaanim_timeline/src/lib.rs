@@ -500,16 +500,25 @@ pub fn camera_rig_system(world: &mut World) {
             eye,
             target,
             up,
+            from_up,
             ..
         } => {
             let eye = gaanim_animation::resolve_tracking_endpoint(&eye, world)?;
             let target = gaanim_animation::resolve_tracking_endpoint(&target, world)?;
+            let position = from_position.lerp(eye, eased);
+            let target = from_target.lerp(target, eased);
             Some((
                 start,
                 Followed::Aimed {
-                    position: from_position.lerp(eye, eased),
-                    target: from_target.lerp(target, eased),
-                    up,
+                    position,
+                    target,
+                    up: gaanim_math::Camera::turning_up(
+                        from_up.unwrap_or(up),
+                        up,
+                        eased,
+                        position,
+                        target,
+                    ),
                 },
             ))
         }

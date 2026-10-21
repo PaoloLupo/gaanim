@@ -1145,8 +1145,9 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// The camera view each screen shows, so `no_camera_view` can end it at
     /// its cursor instead of removing it from the whole timeline.
     pub(crate) camera_views: HashMap<Entity, gaanim_renderer::effects::CameraView>,
-    /// Local baselines of reactive numbers, which readouts align their row on.
-    pub readout_baselines: HashMap<ObjectId, f64>,
+    /// Local baselines of reactive numbers, which readouts align their row
+    /// on, and the advance their row sets them by (none for rolling ones).
+    pub readout_baselines: HashMap<ObjectId, (f64, Option<gaanim_scene::TextAdvance>)>,
     /// Values whose text each reactive number inside a layout keeps room
     /// for, by authored id; see `SceneModel::layout_readout_reserves`.
     pub(crate) readout_reserves: HashMap<ObjectId, Vec<f64>>,
@@ -1319,7 +1320,7 @@ pub(crate) struct SceneBuilderState {
     text_metrics: HashMap<ObjectId, gaanim_text::prelude::TextMetrics>,
     rolling_tween_sources: Vec<(Entity, Vec<ObjectId>)>,
     procedural_signal_tracks: Vec<(Entity, ObjectId, f64, f64)>,
-    readout_baselines: HashMap<ObjectId, f64>,
+    readout_baselines: HashMap<ObjectId, (f64, Option<gaanim_scene::TextAdvance>)>,
     default_track: TrackId,
     mobject_tracks: HashMap<ObjectId, TrackId>,
     mobject_names: HashMap<ObjectId, String>,
@@ -11217,11 +11218,13 @@ mod tests {
             gaanim_text::prelude::TextMetrics {
                 first_baseline: -0.1,
                 line_count: 1,
+                ..Default::default()
             },
         );
         let target_metrics = gaanim_text::prelude::TextMetrics {
             first_baseline: -0.3,
             line_count: 1,
+            ..Default::default()
         };
         builder.text_metrics.insert(target_id, target_metrics);
 

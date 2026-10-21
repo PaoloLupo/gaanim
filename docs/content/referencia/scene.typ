@@ -1954,7 +1954,7 @@ rig.disable()
   params: (
     (name: "eye", type: "Endpoint | None", default: none, desc: [Posición final de la cámara; `None` la deja donde está y solo gira.]),
     (name: "target", type: "Endpoint", default: none, desc: [Punto al que mira al final.]),
-    (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical; `(0, 1, 0)` si se omite.]),
+    (name: "up", type: "tuple[float, float, float] | None", default: "None", desc: [Dirección vertical al final; `(0, 1, 0)` si se omite. Si cambia, la imagen gira hacia ella a lo largo de la animación, como se mueven el ojo y el objetivo.]),
   ),
   returns: (type: "Anim", desc: [Movimiento animado de la cámara.]),
   desc: [Un objeto o un punto de anclaje como `eye` o `target` se lee donde se dibuja en cada fotograma: la cámara gira hacia un objetivo que se mueve mientras dura la animación y termina apuntando a donde acaba, según lo escrito en el script, así que un `orbit` posterior parte de ahí. Para mantener en el centro todo el tiempo un objetivo que se mueve, usa `follow(objetivo, turn=True)`.],

@@ -11,6 +11,48 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.16.1
+
+Sin publicar. Corrige seis detalles encontrados al hacer un video real: el
+rótulo del cero de los ejes con pasos decimales, el giro de la cámara al
+cambiar `up`, el color de `traced_path_3d`, `wipe` dentro de `in_3d`, el
+tamaño de `gaanim export` con solo `--width` y el espaciado de las lecturas.
+
+== Correcciones
+
+- Con un paso decimal, la marca del cero de un eje se rotulaba con el residuo
+  de coma flotante: `Axis.linear(-0.35, 0.35).ticks(0.1)` mostraba
+  `−2.776e−17`. Cada marca es ahora un múltiplo exacto del paso, en vez de
+  sumarlo una y otra vez desde el mínimo, y el cero dice `0`.
+- `camera.animate.look_at(..., up=...)` con otro `up` giraba la imagen de golpe
+  en el primer fotograma. Ahora `up` gira hacia el nuevo a lo largo de la
+  animación, como el ojo y el objetivo; si no cambia, la cámara se mueve igual
+  que antes.
+- `traced_path_3d(...).stroke(color, ancho)` tomaba el ancho pero dibujaba la
+  estela siempre en blanco. Ahora usa el color del trazo, o el del estilo
+  `plot` del tema si no se da, como `polyline_3d`; un `colormap` la sigue
+  coloreando en el tiempo.
+- `wipe(reveal)`, `animate.wipe()` y `clip` no recortaban un objeto llevado al
+  mundo con `in_3d()`: la curva se veía entera desde el inicio. El pase 3D
+  recorta ahora sus contornos con la máscara, como en 2D.
+- `gaanim export` con solo `--width` (o solo `--height`) dejaba el otro lado
+  en 1080 (o 1920) y añadía franjas vacías: una escena 16 × 9 con
+  `--width 960` salía de 960 × 1080. Ahora el otro lado sigue la proporción del
+  marco, redondeado a un número par de píxeles: 960 × 540.
+- Una lectura (`scene.viz.readout`, `variable`) separaba sus términos por la
+  tinta de cada uno, así que `T = 1.62 s` dejaba más aire entre `T` y `=` que
+  entre `=` y el número. Ahora los compone como un texto, desde el avance de
+  cada término, y conservan el blanco que la fuente da a cada glifo.
+
+== Al actualizar
+
+- La estela de un `traced_path_3d` sin `stroke` ni `colormap` ya no es blanca:
+  toma el color del estilo `plot` del tema, como una `polyline_3d`. Para
+  conservar el blanco, añade `.stroke(WHITE, 0.03)`.
+- Las lecturas son un poco más anchas: entre cada término queda, además de
+  `spacing`, el blanco de los glifos de sus bordes. Si una lectura llenaba
+  justo su sitio, reduce `spacing`.
+
 = 0.16.0
 
 Publicada el 20 de octubre de 2026. Vuelven los modelos glTF:

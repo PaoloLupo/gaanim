@@ -1107,8 +1107,8 @@ pub fn export_dialog_system(
                             input: bundle_source,
                             output: Some(out.clone()),
                             quality: qual.arg().to_string(),
-                            width: output_size.0,
-                            height: output_size.1,
+                            width: Some(output_size.0),
+                            height: Some(output_size.1),
                             fit: output_fit,
                             notes: deck.unwrap_or(false),
                             ..Default::default()

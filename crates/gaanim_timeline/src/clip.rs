@@ -387,6 +387,11 @@ pub enum PropertyLensSpec {
         eye: gaanim_core::glam::DVec3,
         target: gaanim_core::glam::DVec3,
         up: gaanim_core::glam::DVec3,
+        /// The camera's `up` when the move starts, which turns toward `up`
+        /// over it (see [`gaanim_math::Camera::turning_up`]); `None` takes
+        /// `up` from the start.
+        #[cfg_attr(feature = "serde", serde(default))]
+        from_up: Option<gaanim_core::glam::DVec3>,
     },
     /// Orbit from an authored pose, scaling the eye-target radius by
     /// `dolly` at a constant rate of change (`1` keeps it).
@@ -407,6 +412,9 @@ pub enum PropertyLensSpec {
         eye: gaanim_animation::TrackingEndpoint,
         target: gaanim_animation::TrackingEndpoint,
         up: gaanim_core::glam::DVec3,
+        /// The camera's `up` when the move starts, as in
+        /// [`Self::CameraLookAt`].
+        from_up: Option<gaanim_core::glam::DVec3>,
         /// The eye and target the camera keeps once the clip ends, where its
         /// endpoints were authored to be then; `None` reads them live.
         hold: Option<(gaanim_core::glam::DVec3, gaanim_core::glam::DVec3)>,
@@ -732,6 +740,7 @@ impl PropertyLensSpec {
                 eye,
                 target,
                 up,
+                ..
             } => PropertyLens::CameraLookAt {
                 from_position: *from_position,
                 from_target: *from_target,

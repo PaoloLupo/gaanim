@@ -74,6 +74,10 @@ impl CachedTypstHierarchy {
             parent_bounds: bounds(self.parent_bounds),
             metrics: TextMetrics {
                 first_baseline: self.metrics.first_baseline * scale,
+                advance: self
+                    .metrics
+                    .advance
+                    .map(|(left, right)| (left * scale, right * scale)),
                 ..self.metrics
             },
             advance: self.advance * scale,
@@ -110,6 +114,10 @@ pub struct TextMetrics {
     pub first_baseline: f64,
     /// Number of visual text lines represented by the compiled frame.
     pub line_count: usize,
+    /// Local x of the left and right edges of the glyphs' pen advance,
+    /// widened to any ink that overhangs it (see
+    /// [`gaanim_scene::TextAdvance`]); `None` without glyphs.
+    pub advance: Option<(f64, f64)>,
 }
 
 impl Default for TextMetrics {
@@ -117,6 +125,7 @@ impl Default for TextMetrics {
         Self {
             first_baseline: 0.0,
             line_count: 0,
+            advance: None,
         }
     }
 }
@@ -1060,6 +1069,30 @@ struct LineBaselineSample {
     size: f64,
 }
 
+/// Widen `extent` to the x the glyph runs of `frame` cover under
+/// `transform`, from where each starts to where its advances end.
+fn collect_pen_extent(frame: &Frame, transform: &kurbo::Affine, extent: &mut Option<(f64, f64)>) {
+    for (pos, item) in frame.items() {
+        let item_transform = *transform * kurbo::Affine::translate((pos.x.to_pt(), pos.y.to_pt()));
+        match item {
+            FrameItem::Text(text) => {
+                let start = (item_transform * kurbo::Point::ORIGIN).x;
+                let end = (item_transform * kurbo::Point::new(text.width().to_pt(), 0.0)).x;
+                let (left, right) = (start.min(end), start.max(end));
+                *extent = Some(
+                    extent.map_or((left, right), |(min, max)| (min.min(left), max.max(right))),
+                );
+            }
+            FrameItem::Group(group) => collect_pen_extent(
+                &group.frame,
+                &(item_transform * typst_transform_to_affine(&group.transform)),
+                extent,
+            ),
+            _ => {}
+        }
+    }
+}
+
 fn collect_visual_line_baselines(
     frame: &Frame,
     current_transform: &kurbo::Affine,
@@ -1265,11 +1298,13 @@ fn compile_typst_source_with_resources(
     let mut extracted_children = Vec::new();
     let mut line_baselines = Vec::new();
     let mut advance = 0.0;
+    let mut pen = None;
 
     if let Some(page) = document.pages().first() {
         advance = page.frame.width().to_pt();
         line_baselines =
             effective_line_baselines(collect_visual_line_baselines(&page.frame, &root_transform));
+        collect_pen_extent(&page.frame, &root_transform, &mut pen);
         let mut char_index_counter = 0;
         extract_frame_items(
             &page.frame,
@@ -1285,6 +1320,13 @@ fn compile_typst_source_with_resources(
 
     let mut total_bounds = total_bounds.unwrap_or_default();
     let text_center = total_bounds.center();
+    // The pen box, widened to ink that overhangs it, centered as the ink is.
+    let pen = pen.map(|(left, right)| {
+        (
+            left.min(total_bounds.min.x) - text_center.x,
+            right.max(total_bounds.max.x) - text_center.x,
+        )
+    });
     let mut centered_children = Vec::with_capacity(extracted_children.len());
     for child in extracted_children {
         centered_children.push(CachedTypstChild {
@@ -1317,6 +1359,7 @@ fn compile_typst_source_with_resources(
     let metrics = TextMetrics {
         first_baseline: line_baselines.first().copied().unwrap_or(0.0),
         line_count: line_baselines.len(),
+        advance: pen,
     };
 
     Ok(CachedTypstHierarchy {
@@ -1949,6 +1992,39 @@ mod tests {
             "a subscripted formula baseline must not collapse to its visual center"
         );
         assert_eq!(compiled.metrics.line_count, 1);
+    }
+
+    #[test]
+    fn typst_metrics_keep_the_pen_advance_around_the_ink() {
+        let registry = FontRegistry::new();
+        let advance = |source: &str| {
+            let compiled = compile_typst_source(
+                &registry,
+                source,
+                false,
+                Some("New Computer Modern"),
+                Some("New Computer Modern Math"),
+                Some(32.0),
+                Some(32.0),
+                &Some(peniko::Brush::Solid(peniko::Color::WHITE)),
+                &StrokeBrush::transparent(),
+            )
+            .expect("text should compile");
+            let ink = compiled.parent_bounds;
+            let (left, right) = compiled.metrics.advance.expect("glyphs have an advance");
+            (left, right, ink.min.x, ink.max.x)
+        };
+        // A digit 1 sits well inside its tabular advance, half an em wide,
+        // also on a page wider than the text.
+        let (left, right, ink_left, ink_right) =
+            advance("#set page(width: 200pt, height: auto, margin: 0pt)\n1");
+        assert!((right - left - 16.0).abs() < 1e-6, "{left} {right}");
+        assert!(ink_left - left > 1.0, "{left} {ink_left}");
+        assert!(right - ink_right > 0.5, "{right} {ink_right}");
+        // An italic letter that overhangs its advance keeps its ink.
+        let (_, right, _, ink_right) =
+            advance("#set page(width: auto, height: auto, margin: 0pt)\n$T$");
+        assert!(right >= ink_right, "{right} {ink_right}");
     }
 
     #[test]

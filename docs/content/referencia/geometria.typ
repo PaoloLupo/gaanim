@@ -1559,7 +1559,7 @@ helix = scene.geometry.polyline_3d(points, colormap="inferno")
 #api-entry(
   name: "Geometry.traced_path_3d",
   kind: "factory",
-  desc: [Estela 3D de la posición de un objeto en el mundo. Funciona con `Updater` y `add_updater_fn`; el muestreo empieza donde se declara. Revélala con `fade_in` o `create`. `dissipating_time` hace caducar la cola, `max_points` limita la memoria y `min_distance` (0.1 por defecto) filtra muestras casi iguales. Admite los mapas `"inferno"`, `"viridis"` y `"plasma"`.],
+  desc: [Estela 3D de la posición de un objeto en el mundo. Funciona con `Updater` y `add_updater_fn`; el muestreo empieza donde se declara. Revélala con `fade_in` o `create`. `dissipating_time` hace caducar la cola, `max_points` limita la memoria y `min_distance` (0.1 por defecto) filtra muestras casi iguales. Toma el color y el ancho de `stroke(color, ancho)`, o los del estilo `plot` del tema si no se dan; un `colormap` (`"inferno"`, `"viridis"` o `"plasma"`) la colorea en cambio a lo largo del tiempo.],
 )[
 ```python
 >>>from gaanim import *

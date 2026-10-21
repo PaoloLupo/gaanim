@@ -2472,7 +2472,8 @@ pub fn resolve_dynamic_clip_masks_system(
         if mask.invert {
             // The renderer's layer clips to filled geometry. A stable enclosing
             // rectangle plus even-odd filling is the vector equivalent of an
-            // inverse mask without requiring raster alpha composition.
+            // inverse mask without requiring raster alpha composition. The
+            // rectangle comes first, as `ClipMask::kept_contour` expects.
             let b = target_bounds.0;
             let margin = b.width().max(b.height()).max(1.0) * 2.0;
             let mut inverse = kurbo::Rect::new(
