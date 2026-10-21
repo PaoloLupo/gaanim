@@ -590,6 +590,7 @@ mod tests {
                     last_path: empty.clone(),
                     last_bounds: Bounds3D::default(),
                     reserve: 0.0,
+                    reserve_advance: 0.0,
                 },
                 Path2D(empty.clone()),
                 PathSource(empty.clone()),

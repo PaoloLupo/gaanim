@@ -4841,7 +4841,8 @@ class Drawable:
         outlines, so its edges stay sharp at any size and meshes in front of
         it hide it pixel by pixel, instead of drawing it above all 3D content.
         It keeps its animations, colors, gradients and strokes: a write, a
-        fade or a color change plays as in 2D. Without a ``material`` it keeps
+        fade or a color change plays as in 2D, and a ``clip`` or ``wipe``
+        clips it as in 2D. Without a ``material`` it keeps
         its colors unlit; with one it is lit, and receives shadows, as a
         surface. Either way it casts shadows on lit 3D content, as an opaque
         mesh does, where it is at least half opaque. Its 2D drop shadows,
@@ -6878,7 +6879,9 @@ class CameraAnimation:
             eye: Camera position in world coordinates; ``None`` keeps the
                 camera where it stands, so it only turns.
             target: World-space point to look at.
-            up: World-up direction. Defaults to ``(0, 1, 0)``.
+            up: World-up direction at the end. Defaults to ``(0, 1, 0)``. A
+                new one turns the image toward it over the animation, as
+                the eye and the target move.
         Configure timing afterward on the returned ``Anim``.
         """
         ...
@@ -9798,8 +9801,10 @@ class Geometry:
 
         ``dissipating_time`` makes samples expire after the given number of
         seconds. ``max_points`` limits retained samples. ``min_distance`` ignores
-        samples that are closer than the given world-space distance. Supported
-        colormaps are ``"inferno"``, ``"viridis"``, and ``"plasma"``.
+        samples that are closer than the given world-space distance. The trail
+        takes the color and width of ``stroke(color, width)``, or the theme's
+        ``plot`` style; a ``colormap`` (``"inferno"``, ``"viridis"`` or
+        ``"plasma"``) colors it along time instead.
 
         Example:
             dot = scene.geometry.dot(0.09).move_to_3d(1, 0, 0)
@@ -10688,7 +10693,9 @@ class Visualization:
 
         ``spacing`` is the space between the label, ``=``, number and unit, in
         scene units; by default a thin space that grows with ``font_size``
-        (0.1 at the default size). A ``prefix`` or ``suffix`` belongs to the
+        (0.1 at the default size). It is counted as type is set, from each
+        term's advance rather than its ink, so the room a font leaves beside
+        a glyph stays and the terms look evenly spaced. A ``prefix`` or ``suffix`` belongs to the
         number, so ``suffix=" m"`` keeps its space and ``suffix="%"`` none. A
         negative or non-finite spacing raises ``ValueError``.
 

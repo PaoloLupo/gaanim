@@ -26,7 +26,8 @@ use gaanim_scene::{
 };
 
 use crate::effects::{
-    ChalkBrush, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile, StrokeScalesWithObject,
+    ChalkBrush, ClipMask, DropShadow, GaussianBlur, Glow, StrokeAlign, StrokeProfile,
+    StrokeScalesWithObject,
 };
 use crate::fragment::{FragmentParts, FragmentRecipe, fragment_recipe};
 use crate::lottie::LottiePlayer;
@@ -193,7 +194,8 @@ pub(crate) fn billboards_in_world_system(
 
 /// Keep the [`PlaneFillData`] of each [`InWorld3D`] drawable: the outlines
 /// its visible parts draw, placed in its plane relative to it, at their
-/// opacity within it. A drawable whose outlines did not change keeps its
+/// opacity within it, and clipped by their [`ClipMask`], as a wipe reveals
+/// them. A drawable whose outlines did not change keeps its
 /// data untouched, so its change tick, by which the 3D pass and recordings
 /// keep their uploads, stays.
 pub(crate) fn sync_in_world_system(
@@ -209,6 +211,7 @@ pub(crate) fn sync_in_world_system(
     >,
     children: Query<&Children>,
     parts: Query<PartData>,
+    masks: Query<&ClipMask>,
     mut held: Local<InWorldParts>,
 ) {
     let held = &mut *held;
@@ -285,23 +288,33 @@ pub(crate) fn sync_in_world_system(
                     drawn
                 }
             };
+            // The part's mask, in its own units as its outlines are. A mask
+            // that encloses nothing keeps nothing, or all of it inverted.
+            let mask = match masks.get(entity).map(ClipMask::kept_contour) {
+                Ok((contour, outside)) => match lay(contour, &mut held.alike) {
+                    Some((contour, corner)) => Some((contour, corner, outside)),
+                    None if outside => None,
+                    None => continue,
+                },
+                Err(_) => None,
+            };
             let placement = to_root * transform.affine_2d;
             let alpha = (opacity.0 / root_opacity).clamp(0.0, 1.0);
             for laid in drawn.iter() {
                 let (color, gradient) = laid.paint.glyph(alpha, laid.corner);
+                // A glyph takes one contour: a stroke aligned inside or
+                // outside its shape keeps the one that aligns it.
+                let clip = laid.clip.as_ref().or(mask.as_ref());
                 glyphs.push(PlaneGlyph {
                     outline: Arc::clone(&laid.outline),
                     placement: placement * Affine::translate(laid.corner),
                     color,
                     gradient,
-                    clip: laid
-                        .clip
-                        .as_ref()
-                        .map(|(outline, corner, outside)| PlaneClip {
-                            outline: Arc::clone(outline),
-                            offset: laid.corner - *corner,
-                            outside: *outside,
-                        }),
+                    clip: clip.map(|(outline, corner, outside)| PlaneClip {
+                        outline: Arc::clone(outline),
+                        offset: laid.corner - *corner,
+                        outside: *outside,
+                    }),
                 });
             }
         }
@@ -594,6 +607,50 @@ mod tests {
             fill.glyphs[1].color,
             peniko::Color::WHITE.multiply_alpha(0.5)
         );
+    }
+
+    #[test]
+    fn clip_masks_clip_the_outlines_of_their_part() {
+        let (mut world, root, parts) = world_with_text(peniko::Color::BLACK);
+        let mask = |path: BezPath, invert| ClipMask {
+            path,
+            rule: peniko::Fill::NonZero,
+            sources: Vec::new(),
+            invert,
+        };
+        // In the part's units: the left half of the first letter.
+        let half = kurbo::Rect::new(9.0, -1.0, 10.25, 2.0).to_path(0.0);
+        world.entity_mut(parts[0]).insert(mask(half.clone(), false));
+        world.entity_mut(parts[1]).insert(mask(half, true));
+        run(&mut world);
+        let fill = world.get::<PlaneFillData>(root).unwrap();
+        let clip = fill.glyphs[0].clip.as_ref().unwrap();
+        assert!(!clip.outside);
+        // From the letter's corner to the mask's.
+        assert_eq!(clip.offset, kurbo::Vec2::new(1.0, 1.0));
+        assert!((clip.outline.bounding_box().width() - 1.25).abs() < 1e-9);
+        assert!(fill.glyphs[1].clip.as_ref().unwrap().outside);
+
+        // A mask that encloses nothing keeps nothing.
+        world
+            .entity_mut(parts[0])
+            .insert(mask(BezPath::new(), false));
+        run(&mut world);
+        assert_eq!(world.get::<PlaneFillData>(root).unwrap().glyphs.len(), 1);
+    }
+
+    #[test]
+    fn inverted_masks_keep_their_own_contour() {
+        let contour = kurbo::Circle::new((0.0, 0.0), 1.0).to_path(0.1);
+        let mut enclosed = kurbo::Rect::new(-9.0, -9.0, 9.0, 9.0).to_path(0.1);
+        enclosed.extend(contour.iter());
+        let mask = ClipMask {
+            path: enclosed,
+            rule: peniko::Fill::EvenOdd,
+            sources: vec![Entity::PLACEHOLDER],
+            invert: true,
+        };
+        assert_eq!(mask.kept_contour(), (contour, true));
     }
 
     #[test]

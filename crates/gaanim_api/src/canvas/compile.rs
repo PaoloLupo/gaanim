@@ -238,6 +238,20 @@ fn sampled_reactive_parametric_2d(
     .unwrap_or_default()
 }
 
+/// The color a 3D line of `spec` is drawn in: its stroke's, else its fill's
+/// when that is solid, else a near black.
+fn line_3d_color(spec: &ObjectSpec) -> PenikoColor {
+    let solid = |brush: &gaanim_core::peniko::Brush| match brush {
+        gaanim_core::peniko::Brush::Solid(color) => Some(*color),
+        _ => None,
+    };
+    spec.stroke
+        .as_ref()
+        .and_then(|(brush, _)| solid(brush))
+        .or_else(|| spec.fill.as_ref().and_then(solid))
+        .unwrap_or(PenikoColor::from_rgb8(20, 20, 20))
+}
+
 fn sampled_reactive_parametric_3d(
     map: &gaanim_visualization::CoordinateMap3D,
     function: &ReactiveFunction,
@@ -6338,6 +6352,7 @@ impl SceneModel {
                                     eye: to_eye,
                                     target: to_target,
                                     up: *up,
+                                    from_up: Some(*camera_up),
                                 },
                                 rate_func: gaanim_math::RateFunc::Smooth,
                                 delay: 0.0,
@@ -6347,6 +6362,7 @@ impl SceneModel {
                     );
                     *camera_position = to_eye;
                     *camera_target = to_target;
+                    *camera_up = *up;
                     *camera_rotation = to_rot;
                     builder.wait(*duration);
                 }
@@ -9527,6 +9543,7 @@ impl SceneModel {
                         eye: *eye,
                         target: *target,
                         up: *up,
+                        from_up: Some(*camera_up),
                     },
                 );
                 let to_rotation =
@@ -9566,6 +9583,7 @@ impl SceneModel {
                         eye: compiled_eye.clone(),
                         target: compiled_target.clone(),
                         up: *up,
+                        from_up: Some(*camera_up),
                         hold: None,
                     },
                 );
@@ -11435,7 +11453,7 @@ impl SceneModel {
                     *decimal_separator,
                 );
                 let text = format!("{prefix}{number}{suffix}");
-                let (path, bounds) = gaanim_animation::shape_readout_text_with_weight(
+                let (path, bounds, pen) = gaanim_animation::shape_readout_text_advance(
                     builder.font_registry,
                     prefix,
                     &number,
@@ -11444,37 +11462,50 @@ impl SceneModel {
                     *font_weight,
                     size,
                 )
-                .unwrap_or_else(|_| (gaanim_core::kurbo::BezPath::new(), Bounds3D::default()));
+                .unwrap_or_else(|_| (gaanim_core::kurbo::BezPath::new(), Bounds3D::default(), 0.0));
                 let baseline = gaanim_animation::right_aligned_readout_baseline(bounds);
+                let ink = bounds;
                 let (path, bounds) = gaanim_animation::right_align_readout_path(path, bounds);
-                // Inside a layout, the widest text it will show.
-                let reserve = builder
-                    .readout_reserves
-                    .get(&spec.id)
-                    .map_or(0.0, |values| {
-                        values
-                            .iter()
-                            .filter_map(|value| {
-                                let number = gaanim_animation::localize_decimal_separator(
-                                    &gaanim_animation::format_reactive_number(
-                                        *value, format, invalid,
-                                    ),
-                                    *decimal_separator,
-                                );
-                                gaanim_animation::shape_readout_text_with_weight(
-                                    builder.font_registry,
-                                    prefix,
-                                    &number,
-                                    suffix,
-                                    digit_family,
-                                    *font_weight,
-                                    size,
-                                )
-                                .ok()
-                            })
-                            .map(|(_, bounds)| bounds.width())
-                            .fold(0.0, f64::max)
-                    });
+                // Inside a layout, the widest text it will show: of its ink
+                // and of its advance.
+                let (reserve, reserve_advance) =
+                    builder
+                        .readout_reserves
+                        .get(&spec.id)
+                        .map_or((0.0, 0.0), |values| {
+                            values
+                                .iter()
+                                .filter_map(|value| {
+                                    let number = gaanim_animation::localize_decimal_separator(
+                                        &gaanim_animation::format_reactive_number(
+                                            *value, format, invalid,
+                                        ),
+                                        *decimal_separator,
+                                    );
+                                    gaanim_animation::shape_readout_text_advance(
+                                        builder.font_registry,
+                                        prefix,
+                                        &number,
+                                        suffix,
+                                        digit_family,
+                                        *font_weight,
+                                        size,
+                                    )
+                                    .ok()
+                                })
+                                .map(|(_, bounds, pen)| {
+                                    let advance =
+                                        gaanim_animation::readout_advance(bounds, pen, 0.0);
+                                    (bounds.width(), advance.right - advance.left)
+                                })
+                                .fold((0.0, 0.0), |(ink, advance), (width, length)| {
+                                    (f64::max(ink, width), f64::max(advance, length))
+                                })
+                        });
+                // A rolling number keeps its cells; its ink sets it in a row.
+                let advance = rolling
+                    .is_none()
+                    .then(|| gaanim_animation::readout_advance(ink, pen, reserve_advance));
                 let rolling_component = rolling.as_ref().map(|options| {
                     let mut options = options.clone();
                     options
@@ -11511,13 +11542,14 @@ impl SceneModel {
                 let source_path = std::sync::Arc::new(svg_path.path.clone());
                 let b = builder.svg_path(&svg_path);
                 let mr = Self::finish_spawn_builder(b, spec);
-                builder.readout_baselines.insert(mr.id, baseline);
+                builder.readout_baselines.insert(mr.id, (baseline, advance));
                 if rolling_component.is_some() {
                     builder.text_metrics.insert(
                         mr.id,
                         gaanim_text::prelude::TextMetrics {
                             first_baseline: baseline,
                             line_count: 1,
+                            ..Default::default()
                         },
                     );
                 }
@@ -11538,6 +11570,9 @@ impl SceneModel {
                         }
                         builder.commands.entity(entity).insert(rolling);
                     }
+                    if let Some(advance) = advance {
+                        builder.commands.entity(entity).insert(advance);
+                    }
                     builder.commands.entity(entity).insert((
                         gaanim_scene::PathSource(source_path.clone()),
                         gaanim_scene::TextBaseline(baseline),
@@ -11556,6 +11591,7 @@ impl SceneModel {
                             last_path: source_path,
                             last_bounds: bounds,
                             reserve,
+                            reserve_advance,
                         },
                     ));
                 }
@@ -11727,20 +11763,7 @@ impl SceneModel {
                 mr
             }
             SpawnKind::Polyline3D { points, colors } => {
-                let base_color = spec
-                    .stroke
-                    .as_ref()
-                    .and_then(|(brush, _)| match brush {
-                        gaanim_core::peniko::Brush::Solid(color) => Some(*color),
-                        _ => None,
-                    })
-                    .or_else(|| {
-                        spec.fill.as_ref().and_then(|brush| match brush {
-                            gaanim_core::peniko::Brush::Solid(color) => Some(*color),
-                            _ => None,
-                        })
-                    })
-                    .unwrap_or(gaanim_core::peniko::Color::from_rgb8(20, 20, 20));
+                let base_color = line_3d_color(spec);
                 let mref = if let Some(cols) = colors {
                     // Convert peniko::Color Vec to linear RGBA f32 for vertex colors
                     let cols_f32: Vec<[f32; 4]> = cols
@@ -11772,20 +11795,7 @@ impl SceneModel {
                 mref
             }
             SpawnKind::LineSegments3D { points, colors } => {
-                let base_color = spec
-                    .stroke
-                    .as_ref()
-                    .and_then(|(brush, _)| match brush {
-                        gaanim_core::peniko::Brush::Solid(color) => Some(*color),
-                        _ => None,
-                    })
-                    .or_else(|| {
-                        spec.fill.as_ref().and_then(|brush| match brush {
-                            gaanim_core::peniko::Brush::Solid(color) => Some(*color),
-                            _ => None,
-                        })
-                    })
-                    .unwrap_or(gaanim_core::peniko::Color::from_rgb8(20, 20, 20));
+                let base_color = line_3d_color(spec);
                 let colors = colors.as_ref().map(|colors| {
                     colors
                         .iter()
@@ -11998,6 +12008,7 @@ impl SceneModel {
                         gaanim_text::prelude::TextMetrics {
                             first_baseline: baseline,
                             line_count: 1,
+                            ..Default::default()
                         },
                     );
                 }
@@ -12086,8 +12097,9 @@ impl SceneModel {
                 Self::finish_spawn_builder(b, spec)
             }
             SpawnKind::TracedPath3DLine => {
-                // Empty 3D line placeholder; TracedPath3D will fill its LineListData.
-                let mref = builder.spawn_line_strip(vec![], gaanim_core::peniko::Color::WHITE);
+                // Empty 3D line placeholder; TracedPath3D will fill its
+                // LineListData, keeping the color of its stroke.
+                let mref = builder.spawn_line_strip(vec![], line_3d_color(spec));
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
@@ -12939,7 +12951,7 @@ impl SceneModel {
         id_map: &HashMap<ObjectId, ObjectId>,
         layout: &super::types::ReactiveReadoutLayoutSpec,
     ) -> Option<f64> {
-        let parts: Vec<(ObjectId, Bounds3D, f64)> = [
+        let parts: Vec<(ObjectId, Bounds3D, f64, Option<gaanim_scene::TextAdvance>)> = [
             layout.label,
             layout.equals,
             Some(layout.number),
@@ -12949,24 +12961,30 @@ impl SceneModel {
         .flatten()
         .filter_map(|id| {
             let id = *id_map.get(&id)?;
-            let bounds = builder.states.get(id)?.bounds;
-            let baseline = builder
+            let state = builder.states.get(id)?;
+            let (bounds, entity) = (state.bounds, state.entity);
+            let (baseline, advance) = builder
                 .readout_baselines
                 .get(&id)
                 .copied()
                 .or_else(|| {
-                    builder
-                        .text_metrics
-                        .get(&id)
-                        .map(|metrics| metrics.first_baseline)
+                    let metrics = builder.text_metrics.get(&id)?;
+                    let advance = metrics
+                        .advance
+                        .map(|(left, right)| gaanim_scene::TextAdvance { left, right });
+                    Some((metrics.first_baseline, advance))
                 })
-                .unwrap_or((bounds.min.y + bounds.max.y) * 0.5);
-            Some((id, bounds, baseline))
+                .unwrap_or(((bounds.min.y + bounds.max.y) * 0.5, None));
+            // The frame sets the texts in the row by their advance too.
+            if let Some(advance) = advance {
+                builder.commands.entity(entity).insert(advance);
+            }
+            Some((id, bounds, baseline, advance))
         })
         .collect();
         let rows: Vec<_> = parts
             .iter()
-            .map(|(_, bounds, baseline)| (*bounds, *baseline))
+            .map(|(_, bounds, baseline, advance)| (*bounds, *baseline, *advance))
             .collect();
         let translations =
             gaanim_animation::signals::readout_row(&rows, layout.spacing, layout.align);
@@ -12974,8 +12992,8 @@ impl SceneModel {
         let baseline = parts
             .first()
             .zip(translations.first())
-            .map(|((_, _, baseline), translation)| baseline + translation.y);
-        for ((id, _, _), translation) in parts.iter().zip(translations) {
+            .map(|((_, _, baseline, _), translation)| baseline + translation.y);
+        for ((id, ..), translation) in parts.iter().zip(translations) {
             let Some(state) = builder.states.get_mut(*id) else {
                 continue;
             };
@@ -15308,6 +15326,53 @@ mod tests {
         assert!((middle.position - middle.target).length() > 1.0);
     }
 
+    /// A look-at with another `up` rolls the view over the move: its first
+    /// frame is the pose before it, and it ends on the new `up`.
+    #[test]
+    fn animated_look_at_turns_to_a_new_up_over_the_move() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let _marker = canvas.circle(1.0);
+        let perspective = canvas.camera_perspective(0.6, 0.1, 1000.0, 0.0);
+        canvas.play(vec![perspective]);
+        let start = canvas.camera_look_at_endpoints(
+            Some(CanvasEndpoint::Static(DVec3::new(-5.0, 4.0, 8.0))),
+            CanvasEndpoint::Static(DVec3::new(0.0, 0.5, 0.0)),
+            DVec3::Y,
+            0.0,
+        );
+        canvas.play(vec![start]);
+        canvas.wait(1.0);
+        let overhead = canvas.camera_look_at_endpoints(
+            Some(CanvasEndpoint::Static(DVec3::new(0.0, 20.0, 0.01))),
+            CanvasEndpoint::Static(DVec3::ZERO),
+            DVec3::NEG_X,
+            3.0,
+        );
+        canvas.play(vec![overhead]);
+        let (mut world, mut timeline) = compile_camera_timeline(canvas);
+
+        let rotation_at = |world: &mut World, timeline: &mut Timeline, time: f64| {
+            timeline.seek(world, time);
+            world.resource::<gaanim_math::Camera>().rotation
+        };
+        let before = rotation_at(&mut world, &mut timeline, 0.9);
+        let first = rotation_at(&mut world, &mut timeline, 1.0);
+        assert!(
+            before.angle_between(first) < 1e-9,
+            "{before:?} -> {first:?}"
+        );
+        let early = rotation_at(&mut world, &mut timeline, 1.05);
+        assert!(
+            before.angle_between(early) < 0.05,
+            "{before:?} -> {early:?}"
+        );
+        timeline.seek(&mut world, 4.5);
+        let end = *world.resource::<gaanim_math::Camera>();
+        assert_eq!(end.up, DVec3::NEG_X);
+        let screen_up = end.rotation * DVec3::Y;
+        assert!((screen_up - DVec3::NEG_X).length() < 1e-3, "{screen_up:?}");
+    }
+
     /// Turning a perspective camera orthographic flattens it over the
     /// animation, with the target centered, and ends on the same pose.
     #[test]
@@ -16758,6 +16823,19 @@ mod tests {
         let bounds = masks[0].path.bounding_box();
         assert!((bounds.center().x).abs() < 1e-6);
         assert!((bounds.width() - 110.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn traced_3d_paths_draw_in_their_stroke_color() {
+        let mut canvas = SceneModel::new(640, 360);
+        let pen = canvas.dot(0.1);
+        let color = PenikoColor::from_rgb8(192, 80, 46);
+        let trace = canvas
+            .traced_path_3d(&pen, None, None, 0.01)
+            .stroke(color, 0.06);
+        let (mut world, _) = compiled_world(&canvas);
+        let entity = entity_of(&mut world, &trace);
+        assert_eq!(world.get::<LineListData>(entity).unwrap().color, color);
     }
 
     #[test]
@@ -24497,6 +24575,67 @@ mod tests {
         let mut query = world.query::<&gaanim_animation::ReactiveReadout>();
         let readout = query.single(&world).expect("exactly one compiled readout");
         assert_eq!(readout.last_text, "1,23");
+    }
+
+    /// `T = 1.62 s` is set as type is: `spacing` apart from each term's
+    /// advance, which holds its ink, rather than from the ink.
+    #[test]
+    fn readout_rows_set_their_terms_by_their_advance() {
+        let mut canvas = SceneModel::new(640, 360);
+        let number = canvas.reactive_readout(
+            gaanim_animation::ScalarSource::constant(1.62),
+            ".2f",
+            "",
+            "",
+            "—",
+            None,
+        );
+        let text = |canvas: &mut SceneModel, value: &str| {
+            let spec = gaanim_text::prelude::TextSpec::new(
+                vec![value.into()],
+                None,
+                gaanim_text::prelude::TextStyle::default(),
+                gaanim_text::prelude::TextFlow::default(),
+            )
+            .unwrap();
+            canvas.text_spec(spec)
+        };
+        let label = text(&mut canvas, "$T$");
+        let equals = text(&mut canvas, "=");
+        let unit = text(&mut canvas, "s");
+        canvas.reactive_readout_group(Some(&label), Some(&equals), &number, Some(&unit), 0.1);
+        let mut world = compile_canvas_for_layout(canvas);
+        let layout = world
+            .query::<&gaanim_animation::ReactiveReadoutLayout>()
+            .single(&world)
+            .unwrap()
+            .clone();
+        let parts = [
+            layout.label,
+            layout.equals,
+            Some(layout.number),
+            layout.unit,
+        ];
+        let mut edges = Vec::new();
+        for id in parts.into_iter().flatten() {
+            let (advance, x, ink) = world
+                .query::<(
+                    &MobjectId,
+                    &gaanim_scene::TextAdvance,
+                    &SpatialTransform,
+                    &LocalBounds,
+                )>()
+                .iter(&world)
+                .find(|(object, ..)| object.0 == id)
+                .map(|(_, advance, transform, ink)| (*advance, transform.translation.x, ink.0))
+                .expect("each term keeps its advance");
+            assert!(advance.left <= ink.min.x && ink.max.x <= advance.right);
+            edges.push((x + advance.left, x + advance.right));
+        }
+        assert_eq!(edges.len(), 4);
+        for pair in edges.windows(2) {
+            assert!((pair[1].0 - pair[0].1 - 0.1).abs() < 1e-9, "{edges:?}");
+        }
     }
 
     #[test]

@@ -127,6 +127,21 @@ pub struct ClipMask {
     pub invert: bool,
 }
 
+impl ClipMask {
+    /// The contour that keeps what the target draws, and whether it keeps
+    /// what lies outside it instead: an inverted mask's own contour, without
+    /// the rectangle `resolve_dynamic_clip_masks_system` encloses it in.
+    pub fn kept_contour(&self) -> (gaanim_core::kurbo::BezPath, bool) {
+        if !self.invert || self.sources.is_empty() {
+            return (self.path.clone(), self.invert);
+        }
+        // The enclosing rectangle comes first: a move, three lines and a close.
+        let elements = self.path.elements();
+        let own = elements.get(5..).unwrap_or_default();
+        (gaanim_core::kurbo::BezPath::from_vec(own.to_vec()), true)
+    }
+}
+
 /// How the region framed by a [`CameraView`] source fills its screen.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

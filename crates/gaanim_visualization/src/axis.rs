@@ -504,11 +504,16 @@ impl Axis {
         if !step.is_finite() || step <= 0.0 {
             return Err(AxisError::InvalidTickStep);
         }
-        let first = (self.min / step).ceil() * step;
+        // Each tick is a whole multiple of the step, not a running sum: adding
+        // 0.1 three times to -0.3 lands on -2.8e-17, not on zero.
+        let first = (self.min / step).ceil();
         let mut ticks = Vec::new();
-        let mut value = first;
         let mut guard = 0usize;
-        while value <= self.max + step * 1e-9 && guard < 10_000 {
+        loop {
+            let value = (first + guard as f64) * step;
+            if value > self.max + step * 1e-9 || guard >= 10_000 {
+                break;
+            }
             ticks.push(Tick {
                 value,
                 label: self.format_value(value),
@@ -527,7 +532,6 @@ impl Axis {
                     }
                 }
             }
-            value += step;
             guard += 1;
         }
         ticks.sort_by(|left, right| left.value.total_cmp(&right.value));
@@ -704,6 +708,30 @@ mod tests {
                         <= 1e-9 * expected.abs().max(1.0)),
             "{values:?} != {expected:?}"
         );
+    }
+
+    #[test]
+    fn decimal_steps_put_a_tick_exactly_on_zero() {
+        let axis = Axis::linear(-0.35, 0.35).unwrap().ticks(0.1).unwrap();
+        let ticks = axis.ticks_values(7).unwrap();
+        let labels: Vec<&str> = ticks.iter().map(|tick| tick.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "\u{2212}0.3",
+                "\u{2212}0.2",
+                "\u{2212}0.1",
+                "0",
+                "0.1",
+                "0.2",
+                "0.3"
+            ]
+        );
+        assert_eq!(ticks[3].value, 0.0);
+        // The last tick of a long run of small steps lands on the maximum.
+        let long = Axis::linear(0.0, 1.0).unwrap().ticks(0.01).unwrap();
+        let last = long.ticks_values(7).unwrap().pop().unwrap();
+        assert_eq!(last.label, "1");
     }
 
     #[test]

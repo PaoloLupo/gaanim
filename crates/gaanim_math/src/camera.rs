@@ -459,6 +459,28 @@ impl Camera {
         Ok(())
     }
 
+    /// The `up` a look-at toward `target` from `eye` takes `t` of the way
+    /// through a move that started with `from_up`: `from_up` turned toward
+    /// `up` along the shortest arc, so a new `up` rolls the view over the
+    /// move instead of all at its first frame. It is `up` itself at the end,
+    /// when both point the same way, and where the turned one would lie
+    /// along the view.
+    pub fn turning_up(from_up: DVec3, up: DVec3, t: f64, eye: DVec3, target: DVec3) -> DVec3 {
+        let (Some(start), Some(end)) = (from_up.try_normalize(), up.try_normalize()) else {
+            return up;
+        };
+        if t >= 1.0 || start == end {
+            return up;
+        }
+        let turn = DQuat::IDENTITY.slerp(DQuat::from_rotation_arc(start, end), t.max(0.0));
+        let turned = turn * start;
+        if Self::validate_look_at(eye, target, turned).is_ok() {
+            turned
+        } else {
+            up
+        }
+    }
+
     pub fn validate_perspective(
         fov_y: f64,
         near: f64,
@@ -858,6 +880,23 @@ mod tests {
             cam.projection,
             Projection::Orthographic { zoom: 1.0 }
         ));
+    }
+
+    #[test]
+    fn a_new_look_at_up_turns_over_the_move() {
+        let (eye, target) = (DVec3::new(0.0, 0.0, 10.0), DVec3::ZERO);
+        let turned = |t| Camera::turning_up(DVec3::Y, DVec3::NEG_X, t, eye, target);
+        assert!((turned(0.0) - DVec3::Y).length() < 1e-12);
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((turned(0.5) - DVec3::new(-half, half, 0.0)).length() < 1e-12);
+        assert_eq!(turned(1.0), DVec3::NEG_X);
+        // The same up, at any length, is the target's own.
+        let up = DVec3::new(0.0, 2.0, 0.0);
+        assert_eq!(Camera::turning_up(DVec3::Y, up, 0.3, eye, target), up);
+        // An up the turn would lay along the view falls back to the target's.
+        let down = DVec3::new(0.0, -10.0, 0.0);
+        let along = Camera::turning_up(DVec3::Y, DVec3::X, 0.0, down, target);
+        assert_eq!(along, DVec3::X);
     }
 
     #[test]

@@ -483,8 +483,8 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
   [`-o`, `--output <ARCHIVO>`], [en un proyecto, `<output_dir>/<nombre>.mp4`], [Archivo de salida; su extensión elige el formato. Puede llevar marcadores que exportan varios archivos (ver #link(<exportar-varias>)[Varias salidas]). Fuera de un proyecto es obligatorio. El nombre por defecto es el del script, o el de su carpeta si es un `main.py`, como en el editor; con `--frame` es un `.png`.],
   [`--quality <PRESET>`], [`standard`], [`draft`: 30 fps y codificación rápida. `standard`: 60 fps y equilibrio. `production`: 60 fps y la mejor compresión, más lenta. GIF y WebP se quedan en 30 fps.],
   [`--fps <TASA>`], [la de `--quality`], [Fotogramas por segundo, de 1 a 240: un entero (`24`), una fracción (`24000/1001`) o un decimal (`23.976`). Sustituye a la tasa de la calidad.],
-  [`--width <PX>`], [`1920`], [Ancho de salida en píxeles.],
-  [`--height <PX>`], [`1080`], [Alto de salida en píxeles.],
+  [`--width <PX>`], [`1920`], [Ancho de salida en píxeles. Solo, sin `--height`, el alto sigue la proporción del marco de la escena.],
+  [`--height <PX>`], [`1080`], [Alto de salida en píxeles. Solo, sin `--width`, el ancho sigue la proporción del marco de la escena.],
   [`--fit <MODO>`], [`error`], [Qué hacer si la proporción de salida no coincide con el marco de la escena: `error` falla, `contain` añade bandas y `cover` recorta los bordes.],
   [`--encoder <CODIFICADOR>`], [`auto`], [Solo MP4: `auto`, `libx264`, `nvenc`, `amf`, `qsv` o `vaapi`.],
   [`--transparent`], [desactivado], [Conserva el canal alfa en WebM, MOV, WebP y PNG. MP4 y GIF lo rechazan.],
@@ -500,7 +500,9 @@ número de fotograma desde 0 (`frames/f_%04d.png` escribe `f_0000.png`,
 La composición se define en unidades lógicas, así que `--width` y `--height`
 cambian la nitidez, no la disposición. Con una proporción distinta de la del
 marco (por ejemplo 1080×1920 para una escena 16×9) hace falta `--fit contain`
-o `--fit cover`.
+o `--fit cover`. Basta con dar uno de los dos: `--width 960` exporta una escena
+16×9 a 960×540. El lado que se calcula se redondea a un número par de píxeles,
+como piden los códecs de vídeo.
 
 Con `--encoder auto`, MP4 prueba NVENC, AMF y QSV con una codificación real y
 usa el primero que funciona; si ninguno funciona, usa `libx264`. Un

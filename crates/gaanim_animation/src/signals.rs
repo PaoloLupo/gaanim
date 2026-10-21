@@ -3,7 +3,7 @@ use gaanim_core::glam::DVec3;
 use gaanim_core::kurbo::{Affine, BezPath, PathEl, Point, Shape};
 use gaanim_core::peniko::Color;
 use gaanim_math::{Bounds3D, SpatialTransform};
-use gaanim_scene::{LocalBounds, MobjectId, Path2D, PathSource, TextBaseline};
+use gaanim_scene::{LocalBounds, MobjectId, Path2D, PathSource, TextAdvance, TextBaseline};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -55,12 +55,26 @@ pub struct ReactiveReadout {
     /// reaches this far left of its right edge, so the layout's cell holds
     /// the widest text it will show and the row around it stays still.
     pub reserve: f64,
+    /// The width its [`TextAdvance`] keeps, as `reserve` its ink's.
+    pub reserve_advance: f64,
 }
 
 /// `bounds`, right-aligned at `x = 0`, at least `reserve` wide.
 pub fn reserve_readout_bounds(mut bounds: Bounds3D, reserve: f64) -> Bounds3D {
     bounds.min.x = bounds.min.x.min(bounds.max.x - reserve);
     bounds
+}
+
+/// The [`TextAdvance`] of a readout's text shaped with its ink at `ink` and
+/// its pen `advance` long from `x = 0`, once [`right_align_readout_path`]
+/// ends its ink at `x = 0`, at least `reserve` wide.
+pub fn readout_advance(ink: Bounds3D, advance: f64, reserve: f64) -> TextAdvance {
+    let right = advance.max(ink.max.x) - ink.max.x;
+    let left = ink.min.x.min(0.0) - ink.max.x;
+    TextAdvance {
+        left: left.min(right - reserve),
+        right,
+    }
 }
 
 /// Keeps the independently styleable pieces of a reactive readout laid out as
@@ -421,6 +435,28 @@ pub fn shape_readout_text_with_weight(
     weight: Option<u16>,
     font_size: f64,
 ) -> Result<(BezPath, Bounds3D), String> {
+    shape_readout_text_advance(
+        registry,
+        prefix,
+        number,
+        suffix,
+        font_family,
+        weight,
+        font_size,
+    )
+    .map(|(path, bounds, _)| (path, bounds))
+}
+
+/// [`shape_readout_text_with_weight`] with the length of its pen advance.
+pub fn shape_readout_text_advance(
+    registry: &gaanim_text::font::FontRegistry,
+    prefix: &str,
+    number: &str,
+    suffix: &str,
+    font_family: &str,
+    weight: Option<u16>,
+    font_size: f64,
+) -> Result<(BezPath, Bounds3D, f64), String> {
     let mut path = BezPath::new();
     let mut pen = 0.0;
     let mut place = |run: &str| -> Result<(), String> {
@@ -447,7 +483,11 @@ pub fn shape_readout_text_with_weight(
     }
     place(suffix)?;
     let rect = path.bounding_box();
-    Ok((path, Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1)))
+    Ok((
+        path,
+        Bounds3D::new_2d(rect.x0, rect.y0, rect.x1, rect.y1),
+        pen,
+    ))
 }
 
 /// Restore the cached outline after snapshot replay and only recompile it when
@@ -465,11 +505,21 @@ pub fn reactive_readout_update_system(
         Option<&crate::writing::PathReveal>,
         Option<&mut crate::RollingNumber>,
         Option<&crate::RollingTweens>,
+        Option<&mut TextAdvance>,
     )>,
     signals: Query<&FloatSignal>,
 ) {
-    for (mut readout, mut path, path_source, mut bounds, mut baseline, reveal, rolling, tweens) in
-        &mut query
+    for (
+        mut readout,
+        mut path,
+        path_source,
+        mut bounds,
+        mut baseline,
+        reveal,
+        rolling,
+        tweens,
+        advance,
+    ) in &mut query
     {
         let reveal = reveal
             .map(|progress| progress.0)
@@ -537,7 +587,7 @@ pub fn reactive_readout_update_system(
             bounds.0 = readout.last_bounds;
             continue;
         }
-        if let Ok((new_path, new_bounds)) = shape_readout_text_with_weight(
+        if let Ok((new_path, new_bounds, pen)) = shape_readout_text_advance(
             &registry,
             &readout.prefix,
             &number,
@@ -547,6 +597,9 @@ pub fn reactive_readout_update_system(
             readout.font_size,
         ) {
             baseline.0 = right_aligned_readout_baseline(new_bounds);
+            if let Some(mut advance) = advance {
+                *advance = readout_advance(new_bounds, pen, readout.reserve_advance);
+            }
             let (new_path, new_bounds) = right_align_readout_path(new_path, new_bounds);
             let new_bounds = reserve_readout_bounds(new_bounds, readout.reserve);
             let new_path = std::sync::Arc::new(new_path);
@@ -574,6 +627,7 @@ pub fn reactive_readout_layout_system(
     ids: Query<(Entity, &MobjectId)>,
     bounds: Query<&LocalBounds>,
     baselines: Query<&TextBaseline>,
+    advances: Query<&TextAdvance>,
     mut transforms: Query<&mut SpatialTransform>,
 ) {
     if layouts.is_empty() {
@@ -615,7 +669,8 @@ pub fn reactive_readout_layout_system(
                     .get(entity)
                     .map(|baseline| baseline.0)
                     .unwrap_or((local.min.y + local.max.y) * 0.5);
-                Some((id, entity, local, baseline))
+                let advance = advances.get(entity).ok().copied();
+                Some((id, entity, local, baseline, advance))
             })
             .collect::<Vec<_>>();
         if parts.is_empty() {
@@ -624,10 +679,10 @@ pub fn reactive_readout_layout_system(
 
         let rows = parts
             .iter()
-            .map(|(_, _, local, baseline)| (*local, *baseline))
+            .map(|(_, _, local, baseline, advance)| (*local, *baseline, *advance))
             .collect::<Vec<_>>();
         let translations = readout_row(&rows, layout.spacing, layout.align);
-        for ((_, entity, _, _), translation) in parts.into_iter().zip(translations) {
+        for ((_, entity, ..), translation) in parts.into_iter().zip(translations) {
             if let Ok(mut transform) = transforms.get_mut(entity) {
                 transform.translation.x = translation.x;
                 transform.translation.y = translation.y;
@@ -636,48 +691,64 @@ pub fn reactive_readout_layout_system(
     }
 }
 
-/// Where a readout's parts go, in order: each part's local box and the
-/// height of its baseline, laid out as one row `spacing` apart, its
-/// baselines aligned and the row centered vertically on the origin and
-/// placed on it horizontally by `align` (see [`ReactiveReadoutLayout`]).
+/// Where a readout's parts go, in order: each part's local ink box, the
+/// height of its baseline and its pen advance when it has one. The parts
+/// are set as one row, as type is: `spacing` apart from their advances (or
+/// from their ink without one), so the room a font leaves beside a glyph
+/// stays. Their baselines align, the row is centered vertically on the
+/// origin, and its ink is placed on it horizontally by `align` (see
+/// [`ReactiveReadoutLayout`]).
 pub fn readout_row(
-    parts: &[(Bounds3D, f64)],
+    parts: &[(Bounds3D, f64, Option<TextAdvance>)],
     spacing: f64,
     align: f64,
 ) -> Vec<gaanim_core::glam::DVec2> {
-    let widths = parts
-        .iter()
-        .map(|(bounds, _)| (bounds.max.x - bounds.min.x).max(0.0))
-        .collect::<Vec<_>>();
-    let total_width =
-        widths.iter().sum::<f64>() + spacing.max(0.0) * (parts.len().saturating_sub(1) as f64);
     let provisional_y = parts
         .iter()
-        .map(|(_, baseline)| -*baseline)
+        .map(|(_, baseline, _)| -*baseline)
         .collect::<Vec<_>>();
     let row_min_y = parts
         .iter()
         .zip(&provisional_y)
-        .map(|((local, _), translation)| local.min.y + translation)
+        .map(|((local, ..), translation)| local.min.y + translation)
         .fold(f64::INFINITY, f64::min);
     let row_max_y = parts
         .iter()
         .zip(&provisional_y)
-        .map(|((local, _), translation)| local.max.y + translation)
+        .map(|((local, ..), translation)| local.max.y + translation)
         .fold(f64::NEG_INFINITY, f64::max);
     let vertical_centering = -(row_min_y + row_max_y) * 0.5;
-    let mut cursor = -total_width * 0.5 * (1.0 + align.clamp(-1.0, 1.0));
-    let mut translations = Vec::with_capacity(parts.len());
-    for (((local, _), width), translation_y) in parts.iter().zip(widths).zip(provisional_y) {
-        let target_center_x = cursor + width * 0.5;
-        let local_center_x = (local.min.x + local.max.x) * 0.5;
-        translations.push(gaanim_core::glam::DVec2::new(
-            target_center_x - local_center_x,
-            translation_y + vertical_centering,
-        ));
-        cursor += width + spacing.max(0.0);
+    // Each part starts where the one before it ends, `spacing` on.
+    let mut cursor = 0.0;
+    let mut shifts = Vec::with_capacity(parts.len());
+    for (local, _, advance) in parts {
+        let (left, right) = advance.map_or((local.min.x, local.max.x), |advance| {
+            (advance.left, advance.right)
+        });
+        shifts.push(cursor - left);
+        cursor += (right - left).max(0.0) + spacing.max(0.0);
     }
-    translations
+    // The row's ink, placed by `align`.
+    let (ink_left, ink_right) = parts.iter().zip(&shifts).fold(
+        (f64::INFINITY, f64::NEG_INFINITY),
+        |(left, right), ((local, ..), shift)| {
+            (
+                left.min(local.min.x + shift),
+                right.max(local.max.x + shift),
+            )
+        },
+    );
+    let start = -(ink_right - ink_left) * 0.5 * (1.0 + align.clamp(-1.0, 1.0));
+    shifts
+        .into_iter()
+        .zip(provisional_y)
+        .map(|(shift, translation_y)| {
+            gaanim_core::glam::DVec2::new(
+                shift + start - ink_left,
+                translation_y + vertical_centering,
+            )
+        })
+        .collect()
 }
 
 /// Component defining a binding constraint between a source signal and a target entity.
@@ -1354,6 +1425,7 @@ mod tests {
                     last_path: empty.clone(),
                     last_bounds: Bounds3D::default(),
                     reserve: 0.0,
+                    reserve_advance: 0.0,
                 },
                 Path2D(empty.clone()),
                 PathSource(empty),
@@ -1402,6 +1474,7 @@ mod tests {
                     last_path: initial_path.clone(),
                     last_bounds: Bounds3D::default(),
                     reserve: 0.0,
+                    reserve_advance: 0.0,
                 },
                 Path2D(initial_path.clone()),
                 PathSource(initial_path),
@@ -1511,6 +1584,7 @@ mod tests {
                     last_path: empty.clone(),
                     last_bounds: Bounds3D::default(),
                     reserve: 0.0,
+                    reserve_advance: 0.0,
                 },
                 Path2D(empty.clone()),
                 PathSource(empty),
@@ -1626,6 +1700,79 @@ mod tests {
         assert_eq!(unit_edges.0 - number_edges.1, 10.0);
         assert_eq!(label_edges.0, -75.0);
         assert_eq!(unit_edges.1, 75.0);
+    }
+
+    #[test]
+    fn reactive_readout_layout_spaces_parts_by_their_advance() {
+        let ids = [31, 32, 33].map(gaanim_core::ObjectId::from_raw);
+        let mut app = App::new();
+        app.add_systems(Update, reactive_readout_layout_system);
+        // Ink 10 wide inside advances that leave 1, 4 and 3 units beside it.
+        let parts = [(0.0, 1.0), (4.0, 1.0), (3.0, 0.0)].map(|(left, right)| {
+            (
+                LocalBounds(Bounds3D::new_2d(0.0, -5.0, 10.0, 5.0)),
+                TextAdvance {
+                    left: -left,
+                    right: 10.0 + right,
+                },
+            )
+        });
+        let entities = ids
+            .iter()
+            .zip(parts)
+            .map(|(id, (bounds, advance))| {
+                app.world_mut()
+                    .spawn((MobjectId(*id), bounds, advance, SpatialTransform::default()))
+                    .id()
+            })
+            .collect::<Vec<_>>();
+        app.world_mut().spawn(ReactiveReadoutLayout {
+            label: Some(ids[0]),
+            equals: Some(ids[1]),
+            number: ids[2],
+            unit: None,
+            spacing: 2.0,
+            align: 0.0,
+        });
+        app.update();
+        let ink = |entity| {
+            let x = app
+                .world()
+                .get::<SpatialTransform>(entity)
+                .unwrap()
+                .translation
+                .x;
+            (x, x + 10.0)
+        };
+        let [label, equals, number] = [0, 1, 2].map(|index| ink(entities[index]));
+        // Each gap is the spacing plus the room beside the ink on both sides.
+        assert_eq!(equals.0 - label.1, 1.0 + 2.0 + 4.0);
+        assert_eq!(number.0 - equals.1, 1.0 + 2.0 + 3.0);
+        // The row's ink is centered.
+        assert_eq!(label.0, -number.1);
+    }
+
+    #[test]
+    fn readout_numbers_keep_their_advance_and_reserve() {
+        // Ink from 1 to 9 of a 10 long pen advance, ended at x = 0.
+        let ink = Bounds3D::new_2d(1.0, 0.0, 9.0, 1.0);
+        assert_eq!(
+            readout_advance(ink, 10.0, 0.0),
+            TextAdvance {
+                left: -9.0,
+                right: 1.0
+            }
+        );
+        assert_eq!(readout_advance(ink, 10.0, 15.0).left, -14.0);
+        // Ink that overhangs the pen widens the box to it.
+        let overhang = Bounds3D::new_2d(-1.0, 0.0, 11.0, 1.0);
+        assert_eq!(
+            readout_advance(overhang, 10.0, 0.0),
+            TextAdvance {
+                left: -12.0,
+                right: 0.0
+            }
+        );
     }
 
     #[test]

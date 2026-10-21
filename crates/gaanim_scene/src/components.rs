@@ -211,6 +211,17 @@ pub fn stepped(rate: Option<&StepRate>, time: f64) -> f64 {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TextBaseline(pub f64);
 
+/// Local x of the left and right edges of a text's pen advance, widened to
+/// any ink that overhangs it: the box type is set by. A row of texts, such
+/// as a readout's, puts each next to the one before it at these edges, so
+/// the space the font gives each glyph beside its ink stays, rather than
+/// at its ink.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct TextAdvance {
+    pub left: f64,
+    pub right: f64,
+}
+
 /// The computed world bounding box of a Mobject in world coordinates.
 ///
 /// Propagated automatically down the scene hierarchy.

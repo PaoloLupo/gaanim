@@ -531,8 +531,13 @@ fn export_segments(
     for (name, start, end) in &segments {
         let path = gaanim_editor::cli::fill_placeholder(output, "{segment}", name);
         console::info("export", format!("segment {name} · {path}"));
-        let config =
-            gaanim_editor::cli::video_config(command, &path, format, (Some(*start), Some(*end)));
+        let config = gaanim_editor::cli::video_config(
+            command,
+            &path,
+            format,
+            (Some(*start), Some(*end)),
+            canvas.frame.aspect_ratio(),
+        );
         gaanim_api::export::export_canvas(canvas.clone(), config)
             .map_err(|error| format!("segment {name}: {error}"))?;
     }
@@ -584,8 +589,9 @@ struct ExportWorkerArgs {
     format: String,
     encoder: VideoEncoder,
     transparent: bool,
-    width: u32,
-    height: u32,
+    /// `--width` and `--height`; one alone takes the other from the frame.
+    width: Option<u32>,
+    height: Option<u32>,
     fit: gaanim_export::prelude::OutputFit,
     /// Frame rate of the video (or whole rate of the bundle); `None` takes
     /// the quality preset's.
@@ -613,8 +619,8 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
     }
     let mut encoder = VideoEncoder::Auto;
     let mut transparent = false;
-    let mut width = 1920_u32;
-    let mut height = 1080_u32;
+    let mut width = None;
+    let mut height = None;
     let mut fit = gaanim_export::prelude::OutputFit::Error;
     let mut fps = None;
     let mut from = None;
@@ -650,19 +656,21 @@ fn parse_export_worker_args(args: &[String]) -> Result<ExportWorkerArgs, String>
             }
             "--width" => {
                 index += 1;
-                width = args
-                    .get(index)
-                    .and_then(|value| value.parse().ok())
-                    .filter(|value| *value > 0)
-                    .ok_or_else(|| "--width requires a positive integer".to_string())?;
+                width = Some(
+                    args.get(index)
+                        .and_then(|value| value.parse().ok())
+                        .filter(|value| *value > 0)
+                        .ok_or_else(|| "--width requires a positive integer".to_string())?,
+                );
             }
             "--height" => {
                 index += 1;
-                height = args
-                    .get(index)
-                    .and_then(|value| value.parse().ok())
-                    .filter(|value| *value > 0)
-                    .ok_or_else(|| "--height requires a positive integer".to_string())?;
+                height = Some(
+                    args.get(index)
+                        .and_then(|value| value.parse().ok())
+                        .filter(|value| *value > 0)
+                        .ok_or_else(|| "--height requires a positive integer".to_string())?,
+                );
             }
             "--fit" => {
                 index += 1;
@@ -766,7 +774,13 @@ fn run_export_worker(worker: ExportWorkerArgs) -> Result<(), String> {
         fps: worker.fps,
         ..Default::default()
     };
-    let config = gaanim_editor::cli::video_config(&command, &worker.output, format, range);
+    let config = gaanim_editor::cli::video_config(
+        &command,
+        &worker.output,
+        format,
+        range,
+        canvas.frame.aspect_ratio(),
+    );
     gaanim_api::export::export_canvas(canvas, config).map_err(|error| error.to_string())
 }
 
@@ -1831,8 +1845,8 @@ mod tests {
                 format: "mp4".to_string(),
                 encoder: VideoEncoder::Auto,
                 transparent: false,
-                width: 1920,
-                height: 1080,
+                width: None,
+                height: None,
                 fit: gaanim_export::prelude::OutputFit::Error,
                 fps: None,
                 from: None,

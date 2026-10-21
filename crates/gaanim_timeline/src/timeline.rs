@@ -5152,14 +5152,17 @@ fn apply_lens_spec(
             eye,
             target,
             up,
+            from_up,
         } => {
             let position = from_position.lerp(*eye, t);
             let target = from_target.lerp(*target, t);
-            if gaanim_math::Camera::validate_look_at(position, target, *up).is_ok()
+            let up =
+                gaanim_math::Camera::turning_up(from_up.unwrap_or(*up), *up, t, position, target);
+            if gaanim_math::Camera::validate_look_at(position, target, up).is_ok()
                 && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
             {
                 camera
-                    .look_at(position, target, *up)
+                    .look_at(position, target, up)
                     .expect("validated look-at pose");
             }
         }
@@ -5194,6 +5197,7 @@ fn apply_lens_spec(
             eye,
             target,
             up,
+            from_up,
             hold,
         } => {
             // Once the clip ends the camera keeps the pose its endpoints were
@@ -5207,11 +5211,18 @@ fn apply_lens_spec(
             if let Some((eye, target)) = resolved {
                 let position = from_position.lerp(eye, t);
                 let target = from_target.lerp(target, t);
-                if gaanim_math::Camera::validate_look_at(position, target, *up).is_ok()
+                let up = gaanim_math::Camera::turning_up(
+                    from_up.unwrap_or(*up),
+                    *up,
+                    t,
+                    position,
+                    target,
+                );
+                if gaanim_math::Camera::validate_look_at(position, target, up).is_ok()
                     && let Some(mut camera) = world.get_resource_mut::<gaanim_math::Camera>()
                 {
                     camera
-                        .look_at(position, target, *up)
+                        .look_at(position, target, up)
                         .expect("validated tracked look-at pose");
                 }
             }
