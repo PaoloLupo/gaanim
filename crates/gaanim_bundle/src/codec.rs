@@ -439,6 +439,8 @@ pub fn read_material(r: &mut Reader<'_>) -> Result<gaanim_scene::Material3D> {
 /// with the same layout, whose other fields it shares.
 const STORED_WHOLE: u8 = 0;
 const STORED_PREDICTED: u8 = 1;
+/// A mesh that blends two earlier ones (format 8).
+const STORED_BLEND: u8 = 2;
 
 /// Exponent of the grid a bundle packed for the web stores normals on:
 /// 2^-16, under a thousandth of a degree.
@@ -588,7 +590,17 @@ fn read_storage<'a, T>(
     r: &mut Reader<'_>,
     earlier: &'a [Arc<T>],
 ) -> Result<(Option<i32>, Vec<&'a T>)> {
-    let predicted = match r.u8()? {
+    let tag = r.u8()?;
+    read_storage_tagged(r, tag, earlier)
+}
+
+/// [`read_storage`] once its first byte, `tag`, is read.
+fn read_storage_tagged<'a, T>(
+    r: &mut Reader<'_>,
+    tag: u8,
+    earlier: &'a [Arc<T>],
+) -> Result<(Option<i32>, Vec<&'a T>)> {
+    let predicted = match tag {
         STORED_WHOLE => false,
         STORED_PREDICTED => true,
         _ => return Err(corrupt("an item stored in an unknown way")),
@@ -655,15 +667,49 @@ pub fn write_mesh(
     });
 }
 
-/// Decode what [`write_mesh`] wrote in a bundle of format `version`, its
-/// texture read from the images table through `image` and its bases among
-/// `earlier`, the meshes of its segment before it.
+/// Encode a mesh that blends the meshes at indices `ends` of the mesh
+/// table, `t` of the way from the first to the second (see
+/// [`gaanim_scene::MeshBlend`]): both are stored before it.
+pub fn write_mesh_blend(w: &mut Writer, ends: [u32; 2], t: f32) {
+    w.u8(STORED_BLEND);
+    for end in ends {
+        w.var(u64::from(end));
+    }
+    w.f32(t);
+}
+
+/// The meshes a mesh decoded from a segment may refer to: those of its
+/// segment before it (`earlier`, from index `first` of the mesh table on),
+/// and, through `table`, those of segments loaded before it.
+pub struct MeshTable<'a> {
+    pub earlier: &'a [Arc<gaanim_scene::TriangleMeshData>],
+    pub first: u32,
+    pub table: &'a dyn Fn(u32) -> Result<Arc<gaanim_scene::TriangleMeshData>>,
+}
+
+impl MeshTable<'_> {
+    fn get(&self, index: u32) -> Result<Arc<gaanim_scene::TriangleMeshData>> {
+        match index.checked_sub(self.first) {
+            Some(local) => self
+                .earlier
+                .get(local as usize)
+                .cloned()
+                .ok_or_else(|| corrupt("a mesh blends one stored after it")),
+            None => (self.table)(index),
+        }
+    }
+}
+
+/// Decode what [`write_mesh`] or [`write_mesh_blend`] wrote in a bundle of
+/// format `version`, its texture read from the images table through
+/// `image`, and its bases, or the meshes it blends, among `meshes`.
 pub fn read_mesh(
     r: &mut Reader<'_>,
     version: u32,
     image: &dyn Fn(u32) -> Result<peniko::ImageData>,
-    earlier: &[Arc<gaanim_scene::TriangleMeshData>],
+    meshes: &MeshTable<'_>,
 ) -> Result<gaanim_scene::TriangleMeshData> {
+    let earlier = meshes.earlier;
     // Format 7 added imported models' surfaces and predicted meshes.
     if version < 7 {
         return Ok(gaanim_scene::TriangleMeshData {
@@ -675,9 +721,24 @@ pub fn read_mesh(
             colors: r.option(read_points)?,
             material: r.option(read_material)?,
             surface: None,
+            blend: None,
         });
     }
-    let (grid, bases) = read_storage(r, earlier)?;
+    let tag = r.u8()?;
+    // Format 8 added blended meshes.
+    if tag == STORED_BLEND && version >= 8 {
+        let mut end = || -> Result<Arc<gaanim_scene::TriangleMeshData>> {
+            let index =
+                u32::try_from(r.var()?).map_err(|_| corrupt("a mesh index out of range"))?;
+            meshes.get(index)
+        };
+        let (from, to) = (end()?, end()?);
+        let t = r.f32()?;
+        let blend = Arc::new(gaanim_scene::MeshBlend { from, to, t });
+        return gaanim_scene::MeshBlend::mesh(blend)
+            .ok_or_else(|| corrupt("a mesh blends two meshes of other layouts"));
+    }
+    let (grid, bases) = read_storage_tagged(r, tag, earlier)?;
     let normal_grid = grid.map(|_| NORMAL_GRID);
     if let Some(base) = bases.first() {
         if bases.iter().any(|other| {
@@ -707,6 +768,7 @@ pub fn read_mesh(
             colors: base.colors.clone(),
             material: base.material,
             surface: base.surface.clone(),
+            blend: None,
         });
     }
     Ok(gaanim_scene::TriangleMeshData {
@@ -718,6 +780,7 @@ pub fn read_mesh(
         colors: r.option(read_points)?,
         material: r.option(read_material)?,
         surface: r.option(|r| read_surface(r, image))?.map(Arc::new),
+        blend: None,
     })
 }
 

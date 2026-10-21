@@ -29,12 +29,21 @@ Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`.
   texto extruido). Los puntos se emparejan como menos se mueven, así que los
   polos de una esfera se abren en el agujero de un toro. Antes y después del
   morph cada malla se dibuja exacta.
-- Solo cuesta mientras dura: la malla cambia en cada fotograma y el paquete
-  `.gaanim` guarda su cambio. Las escenas sin morph 3D no hacen nada nuevo.
+- Solo cuesta mientras dura: la malla cambia en cada fotograma, y el
+  paquete `.gaanim` guarda las dos rejillas una vez y en cada fotograma solo
+  cuánto avanza entre ellas. El paquete de `3d/morph_3d` ocupa 1,9 MB, donde
+  guardar el cambio de cada fotograma ocupaba 76. Las escenas sin morph 3D
+  no hacen nada nuevo.
+- Las mallas iluminadas que cambian de un fotograma a otro se preparan para
+  la GPU en menos de la mitad de tiempo: el contorno de ilustración solo se
+  calcula para los materiales que lo dibujan.
 - Nuevo ejemplo, `3d/morph_3d`.
 
 == Al actualizar
 
+- Los paquetes `.gaanim` pasan al formato 8, que guarda los morphs 3D. Gaanim
+  sigue abriendo los de formato 5 a 7; un Gaanim anterior no abre los
+  nuevos, así que actualiza los reproductores que los publican.
 - `transform_to` y `replacement_transform_to` entre una malla 3D y un objeto
   que no lo es, o entre una malla con material y otra sin él, lanzan
   `ValueError`. Antes la malla no cambiaba.

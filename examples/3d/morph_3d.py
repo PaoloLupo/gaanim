@@ -2,12 +2,13 @@
 
 Both meshes are sampled on one grid, and each grid point moves from one to the
 other. A mesh whose texture coordinates cover it once (a sphere, a torus, a
-plane) is sampled by them, so a sphere opens its poles into a torus's hole and
-a plane rolls up into a sphere; any other (a cube, a capped cylinder) by rays
-from its center, so a sphere swells into a cube point by point. The target is
-a template that stays hidden: the morphing mesh also takes its place, turn,
-size and material. Each label is the call that plays the morph, and before and
-after it every mesh is drawn exactly as built.
+revolved profile) is sampled by them, so a sphere opens its poles into a
+torus's hole and a vase rounds into a sphere along its profile; any other (a
+cube, a capped cylinder or cone)
+by rays from its center, so a sphere swells into a cube point by point. The
+target is a template that stays hidden: the morphing mesh also takes its
+place, turn, size and material. Each label is the call that plays the morph,
+and before and after it every mesh is drawn exactly as built.
 """
 
 import os
@@ -19,6 +20,9 @@ MORPH = 2.0
 HOLD = 0.8
 # Turn every mesh about x to show its top and about y to show a side.
 TILT = (0.45, -0.6, 0)
+# A vase's (r, y) profile, from the axis at its foot up to the axis at its
+# mouth, in fractions of its zone around its middle.
+VASE = [(0, -0.3), (0.2, -0.3), (0.25, -0.12), (0.12, 0.12), (0.16, 0.3), (0, 0.3)]
 SEEKS = []
 
 scene = Scene()
@@ -27,21 +31,25 @@ success = Material3D.matte(scene.canvas.color("success"))
 danger = Material3D.matte(scene.canvas.color("danger"))
 
 
-def cells(count):
-    """``count`` zones side by side, each split into its art and its caption."""
-    row = scene.layout.zones(Zones.columns(count, gap="48px", padding="page_padding"))
-    return [zone.split(Zones.rows(["1fr", 0.4])) for zone in row]
+def morph(plays):
+    """Play ``plays`` together and hold the result, noting the instants to capture."""
+    SEEKS.append(scene.cursor + MORPH / 2)
+    scene.play(plays, duration=MORPH)
+    SEEKS.append(scene.cursor + HOLD / 2)
+    scene.wait(HOLD)
 
 
 def morphs(variants):
-    """Morph each (label, source, target) pair in place, above its label.
+    """Morph each (label, source, target) pair in its own column, above its label.
 
-    Sources and targets of a pair stand in the same zone, sized to it by
-    ``build(side)``; the sources grow in, morph together and hold.
+    A pair's meshes stand in the same zone, sized to it by ``build(side)``;
+    the sources grow in, then morph together.
     """
+    columns = scene.layout.zones(Zones.columns(len(variants), gap="48px", padding="page_padding"))
     sources = []
     plays = []
-    for (art, caption), (label, build_source, build_target) in zip(cells(len(variants)), variants):
+    for zone, (label, build_source, build_target) in zip(columns, variants):
+        art, caption = zone.split(Zones.rows(["1fr", 0.4]))
         side = min(art.width, art.height)
         source = build_source(side).move_to(*art.center).rotate_to_3d(*TILT)
         target = build_target(side).move_to(*art.center).rotate_to_3d(*TILT)
@@ -50,62 +58,57 @@ def morphs(variants):
         plays.append(source.animate.transform_to(target))
     scene.play([source.animate.create() for source in sources], duration=DRAW)
     SEEKS.append(scene.cursor)
-    SEEKS.append(scene.cursor + MORPH / 2)
-    scene.play(plays, duration=MORPH)
-    SEEKS.append(scene.cursor + HOLD / 2)
-    scene.wait(HOLD)
+    morph(plays)
 
 
-# Spheres, tori and planes are sampled by their texture coordinates.
+# Spheres, tori and revolved profiles are sampled by their texture coordinates.
 scene.segment("coordinates")
 morphs([
     ("ball.animate.transform_to(ring)",
-     lambda side: scene.geometry.sphere(side * 0.32, material=accent),
-     lambda side: scene.geometry.torus(side * 0.3, side * 0.12, material=success)),
-    ("sheet.animate.transform_to(ball)",
-     lambda side: scene.geometry.plane(side * 0.8, side * 0.55, subdivisions=(24, 16), material=accent),
-     lambda side: scene.geometry.sphere(side * 0.3, material=success)),
-    ("ring.animate.transform_to(ball)",
-     lambda side: scene.geometry.torus(side * 0.3, side * 0.12, material=accent),
-     lambda side: scene.geometry.sphere(side * 0.32, material=danger)),
+     lambda side: scene.geometry.sphere(side * 0.3, material=accent),
+     lambda side: scene.geometry.torus(side * 0.28, side * 0.11, material=success)),
+    ("vase.animate.transform_to(ball)",
+     lambda side: scene.geometry.revolve(
+         [(r * side, y * side) for r, y in VASE], material=accent,
+     ),
+     lambda side: scene.geometry.sphere(side * 0.28, material=success)),
 ])
 
 # Cubes and capped cylinders and cones are sampled by rays from their center.
 scene.segment("rays")
 morphs([
     ("ball.animate.transform_to(box)",
-     lambda side: scene.geometry.sphere(side * 0.32, material=accent),
-     lambda side: scene.geometry.cube(side * 0.5, material=success)),
-    ("box.animate.transform_to(can)",
-     lambda side: scene.geometry.cube(side * 0.5, material=accent),
-     lambda side: scene.geometry.cylinder(side * 0.25, side * 0.6, material=success)),
+     lambda side: scene.geometry.sphere(side * 0.3, material=accent),
+     lambda side: scene.geometry.cube(side * 0.46, material=success)),
     ("can.animate.transform_to(cone)",
-     lambda side: scene.geometry.cylinder(side * 0.25, side * 0.6, material=accent),
-     lambda side: scene.geometry.cone(side * 0.32, side * 0.6, material=danger)),
+     lambda side: scene.geometry.cylinder(side * 0.24, side * 0.56, material=accent),
+     lambda side: scene.geometry.cone(side * 0.3, side * 0.56, material=danger)),
 ])
 
 # One mesh morphs through three targets in turn, each from the last: it moves
-# to where each one stands and takes its turn, size and material.
+# to where each one stands and takes its turn, size and material. The caption
+# below names each call as it plays.
 scene.segment("chain")
-stops = cells(3)
-arts = [art for art, _ in stops]
-sides = [min(art.width, art.height) for art in arts]
-ball = scene.geometry.sphere(sides[0] * 0.32, material=accent)
-ball.move_to(*arts[0].center).rotate_to_3d(*TILT)
-targets = [
-    scene.geometry.cube(sides[1] * 0.5, material=success).move_to(*arts[1].center).rotate_to_3d(0.6, 0.5, 0),
-    scene.geometry.torus(sides[2] * 0.3, sides[2] * 0.12, material=danger).move_to(*arts[2].center).rotate_to_3d(1.1, 0, 0),
-    scene.geometry.sphere(sides[0] * 0.32, material=accent).move_to(*arts[0].center),
+page = scene.layout.zones(Zones.rows(["1fr", "80px"]))
+stops = page[0].inset("page_padding").split(Zones.columns(3, gap="48px"))
+strip = page[1].inset((0, "page_padding"))
+side = min(stops[0].width, stops[0].height)
+ball = scene.geometry.sphere(side * 0.3, material=accent).move_to(*stops[0].center).rotate_to_3d(*TILT)
+calls = [
+    ("ball.animate.transform_to(box)",
+     scene.geometry.cube(side * 0.46, material=success).move_to(*stops[1].center).rotate_to_3d(0.6, 0.5, 0)),
+    ("ball.animate.transform_to(ring)",
+     scene.geometry.torus(side * 0.28, side * 0.11, material=danger).move_to(*stops[2].center).rotate_to_3d(1.1, 0, 0)),
+    ("ball.animate.transform_to(home)",
+     scene.geometry.sphere(side * 0.3, material=accent).move_to(*stops[0].center)),
 ]
-labels = ("ball.animate.transform_to(home)", "ball.animate.transform_to(box)", "ball.animate.transform_to(ring)")
-for (_, caption), label in zip(stops, labels):
-    scene.text(label, role="code").place(caption)
+captions = [scene.text(label, role="code").place(strip, anchor="left").hidden() for label, _ in calls]
 scene.play([ball.animate.create()], duration=DRAW)
-for target in targets:
-    SEEKS.append(scene.cursor + MORPH / 2)
-    scene.play([ball.animate.transform_to(target)], duration=MORPH)
-    SEEKS.append(scene.cursor + HOLD / 2)
-    scene.wait(HOLD)
+for index, (_, target) in enumerate(calls):
+    swap = [captions[index].animate.fade_in().duration(0.2)]
+    if index:
+        swap.append(captions[index - 1].animate.fade_out().duration(0.15))
+    morph(swap + [ball.animate.transform_to(target).duration(MORPH)])
 
 if snapshots := os.environ.get("GAANIM_SNAPSHOTS"):
     scene.snapshots(snapshots, SEEKS)

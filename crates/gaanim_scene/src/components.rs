@@ -836,6 +836,96 @@ pub struct TriangleMeshData {
     /// What an imported model's primitive adds: its texture, alpha mode,
     /// sides and skin (see [`crate::model`]); `None` for Gaanim's own meshes.
     pub surface: Option<Arc<crate::model::MeshSurface>>,
+    /// The two meshes this one lies between, when it is a frame of a
+    /// morph: a recording stores them once and this mesh as how far
+    /// between them it lies (see [`MeshBlend`]).
+    pub blend: Option<Arc<MeshBlend>>,
+}
+
+/// A mesh partway between two meshes of one layout, as a morph's frames
+/// are: each position `t` of the way along the line between theirs, each
+/// normal between theirs and of unit length, and each vertex color
+/// between theirs. [`MeshBlend::mesh`] is the one place that blends them,
+/// so a recording that stores the two meshes and `t` rebuilds each frame
+/// exactly.
+#[derive(Debug, Clone)]
+pub struct MeshBlend {
+    pub from: Arc<TriangleMeshData>,
+    pub to: Arc<TriangleMeshData>,
+    pub t: f32,
+}
+
+impl MeshBlend {
+    /// The mesh `blend` describes, which keeps it as its `blend`: the
+    /// triangles, material and colors of `from`, its base color that of
+    /// the nearer end. `None` when the two meshes' vertices, normals or
+    /// colors do not pair.
+    pub fn mesh(blend: Arc<Self>) -> Option<TriangleMeshData> {
+        use gaanim_core::glam::Vec3;
+        let (from, to, t) = (&*blend.from, &*blend.to, blend.t);
+        let pairs = |a: Option<usize>, b: Option<usize>| a == b;
+        if from.vertices.len() != to.vertices.len()
+            || !pairs(
+                from.normals.as_ref().map(Vec::len),
+                to.normals.as_ref().map(Vec::len),
+            )
+            || !pairs(
+                from.colors.as_ref().map(Vec::len),
+                to.colors.as_ref().map(Vec::len),
+            )
+        {
+            return None;
+        }
+        let vertices = from
+            .vertices
+            .iter()
+            .zip(&to.vertices)
+            .map(|(a, b)| {
+                Vec3::from_array(*a)
+                    .lerp(Vec3::from_array(*b), t)
+                    .to_array()
+            })
+            .collect();
+        let normals = from
+            .normals
+            .as_ref()
+            .zip(to.normals.as_ref())
+            .map(|(a, b)| {
+                a.iter()
+                    .zip(b)
+                    .map(|(a, b)| {
+                        let (a, b) = (Vec3::from_array(*a), Vec3::from_array(*b));
+                        let normal = a.lerp(b, t);
+                        // Opposite normals cancel halfway; either end then does.
+                        let normal = if normal.length_squared() > 1e-8 {
+                            normal.normalize()
+                        } else if t < 0.5 {
+                            a
+                        } else {
+                            b
+                        };
+                        normal.to_array()
+                    })
+                    .collect()
+            });
+        let colors = from.colors.as_ref().zip(to.colors.as_ref()).map(|(a, b)| {
+            a.iter()
+                .zip(b)
+                .map(|(a, b)| std::array::from_fn(|k| a[k] + (b[k] - a[k]) * t))
+                .collect()
+        });
+        Some(TriangleMeshData {
+            vertices,
+            indices: from.indices.clone(),
+            normals,
+            uvs: None,
+            color: if t < 0.5 { from.color } else { to.color },
+            colors,
+            material: from.material,
+            surface: None,
+            blend: Some(blend),
+        })
+    }
 }
 
 /// A 3D line list (point pairs, or a strip), projected by the renderer.

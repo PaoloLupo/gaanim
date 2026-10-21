@@ -476,16 +476,21 @@ scene.render()
   sus coordenadas de textura cuando cubren la malla una sola vez (esfera,
   toro, plano, perfil de `revolve`) y, si no, con rayos desde el centro de
   su caja (cubo, cilindro con tapas, `mesh`, texto extruido). Los puntos se
-  emparejan como menos se mueven: un plano se enrolla en una esfera y la
-  esfera se convierte en el cubo punto a punto, a lo largo de cada rayo.
+  emparejan como menos se mueven: un jarrón de `revolve` se redondea en una
+  esfera a lo largo de su perfil, y la esfera se convierte en el cubo punto
+  a punto, a lo largo de cada rayo. Una malla abierta con material, como un
+  plano, oculta las caras que dan la espalda a la cámara mientras se curva,
+  igual que quieta.
 - Antes y después del morph cada malla se dibuja tal cual, así que un cubo
-  conserva sus aristas. Una segunda transformación parte de la última malla:
+  conserva sus aristas; durante el morph, sus aristas se ven como un bisel
+  estrecho. Una segunda transformación parte de la última malla:
   la esfera que se hizo cubo se hace toro desde el cubo.
 - Una malla solo se transforma en otra malla 3D con la misma iluminación:
   las dos con material o ninguna. Lo demás lanza `ValueError`.
-- Mientras dura el morph, la malla cambia en cada fotograma: se sube de
-  nuevo a la GPU y el paquete `.gaanim` guarda su cambio. Antes y después no
-  cuesta nada.
+- Mientras dura el morph, la malla cambia en cada fotograma y se sube de
+  nuevo a la GPU; el paquete `.gaanim` guarda las dos rejillas una vez y, en
+  cada fotograma, solo cuánto avanza entre ellas. Antes y después no cuesta
+  nada.
 
 == Modelos glTF
 

@@ -9170,6 +9170,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             colors,
             material: None,
             surface: None,
+            blend: None,
         })
     }
 

@@ -20,9 +20,10 @@
 
 use std::collections::VecDeque;
 use std::f32::consts::{PI, TAU};
+use std::sync::Arc;
 
 use gaanim_core::glam::{Vec2, Vec3};
-use gaanim_scene::TriangleMeshData;
+use gaanim_scene::{MeshBlend, TriangleMeshData};
 
 /// Grid steps around (`u`, the longitude of a ray).
 pub const COLUMNS: usize = 128;
@@ -69,26 +70,17 @@ struct Hit {
     weights: Vec3,
     /// How far out the point lies: the ray's distance, or a sheet's height.
     depth: f32,
+    /// For a point on a crease, the triangle and weights of the same point
+    /// on the crease's other side, whose normal it shares.
+    across: Option<(usize, Vec3)>,
 }
 
-/// Two meshes sampled on one grid, its points paired from one to the
-/// other, and the grid's triangles.
+/// Two meshes sampled on one grid, as two meshes of one layout whose
+/// vertices pair: each frame of the morph blends them ([`MeshBlend`]).
 #[derive(Debug, Clone)]
 pub struct MeshMorph {
-    from: Grid,
-    to: Grid,
-    indices: Vec<u32>,
-}
-
-/// A mesh partway through a morph.
-#[derive(Debug, Clone)]
-pub struct MorphFrame {
-    pub vertices: Vec<[f32; 3]>,
-    pub normals: Vec<[f32; 3]>,
-    pub colors: Option<Vec<[f32; 4]>>,
-    pub indices: Vec<u32>,
-    pub min: Vec3,
-    pub max: Vec3,
+    from: Arc<TriangleMeshData>,
+    to: Arc<TriangleMeshData>,
 }
 
 impl MeshMorph {
@@ -100,93 +92,84 @@ impl MeshMorph {
         to: &TriangleMeshData,
         base_colors: ([f32; 4], [f32; 4]),
     ) -> Option<Self> {
-        let mut from = sample(from)?;
-        let mut to = sample(to)?;
-        match (&from.colors, &to.colors) {
-            (Some(_), None) => to.colors = Some(vec![base_colors.1; POINTS]),
-            (None, Some(_)) => from.colors = Some(vec![base_colors.0; POINTS]),
+        let mut a = sample(from)?;
+        let mut b = sample(to)?;
+        match (&a.colors, &b.colors) {
+            (Some(_), None) => b.colors = Some(vec![base_colors.1; POINTS]),
+            (None, Some(_)) => a.colors = Some(vec![base_colors.0; POINTS]),
             _ => {}
         }
-        if from.sampling != Sampling::Rays || to.sampling != Sampling::Rays {
-            let remap = align(&from, &to);
-            from = remap.a.apply(&from);
-            to = remap.b.apply(&to);
+        if a.sampling != Sampling::Rays || b.sampling != Sampling::Rays {
+            let remap = align(&a, &b);
+            a = remap.a.apply(&a);
+            b = remap.b.apply(&b);
         }
+        let indices = grid_indices([&a, &b]);
+        let mesh = |grid: Grid, of: &TriangleMeshData| {
+            Arc::new(TriangleMeshData {
+                vertices: grid.positions.iter().map(|p| p.to_array()).collect(),
+                indices: indices.clone(),
+                normals: Some(grid.normals.iter().map(|n| n.to_array()).collect()),
+                uvs: None,
+                color: of.color,
+                colors: grid.colors,
+                material: of.material,
+                surface: None,
+                blend: None,
+            })
+        };
         Some(Self {
-            from,
-            to,
-            indices: grid_indices(),
+            from: mesh(a, from),
+            to: mesh(b, to),
         })
     }
 
     /// The mesh `t` of the way from one mesh to the other; `t` may leave
     /// `[0, 1]`, as an overshooting easing does.
-    pub fn at(&self, t: f32) -> MorphFrame {
-        let mut min = Vec3::splat(f32::INFINITY);
-        let mut max = Vec3::splat(f32::NEG_INFINITY);
-        let vertices = self
-            .from
-            .positions
-            .iter()
-            .zip(&self.to.positions)
-            .map(|(a, b)| {
-                let point = a.lerp(*b, t);
-                min = min.min(point);
-                max = max.max(point);
-                point.to_array()
-            })
-            .collect();
-        let normals = self
-            .from
-            .normals
-            .iter()
-            .zip(&self.to.normals)
-            .map(|(a, b)| {
-                let normal = a.lerp(*b, t);
-                // Opposite normals cancel halfway; either side then does.
-                let normal = if normal.length_squared() > 1e-8 {
-                    normal.normalize()
-                } else if t < 0.5 {
-                    *a
-                } else {
-                    *b
-                };
-                normal.to_array()
-            })
-            .collect();
-        let colors = self
-            .from
-            .colors
-            .as_ref()
-            .zip(self.to.colors.as_ref())
-            .map(|(a, b)| {
-                a.iter()
-                    .zip(b)
-                    .map(|(a, b)| std::array::from_fn(|k| a[k] + (b[k] - a[k]) * t))
-                    .collect()
-            });
-        MorphFrame {
-            vertices,
-            normals,
-            colors,
-            indices: self.indices.clone(),
-            min,
-            max,
-        }
+    pub fn at(&self, t: f32) -> TriangleMeshData {
+        let blend = Arc::new(MeshBlend {
+            from: Arc::clone(&self.from),
+            to: Arc::clone(&self.to),
+            t,
+        });
+        MeshBlend::mesh(blend).expect("the two grids share their layout")
     }
 }
 
 /// Two triangles per grid quad, `(i, j)`, `(i + 1, j)`, `(i + 1, j + 1)`
-/// and `(i, j + 1)`, which face along `du × dv`.
-fn grid_indices() -> Vec<u32> {
+/// and `(i, j + 1)`, which face along `du × dv`. Each quad is split along
+/// the diagonal whose triangles turn least from the normals the grids
+/// sampled at their corners, so a crease that crosses quads aslant runs
+/// along their diagonals instead of being cut across.
+fn grid_indices(grids: [&Grid; 2]) -> Vec<u32> {
+    let deviation = |corners: [usize; 3]| {
+        grids
+            .iter()
+            .map(|grid| {
+                let [a, b, c] = corners.map(|corner| grid.positions[corner]);
+                let face = (b - a).cross(c - a).normalize_or_zero();
+                corners
+                    .iter()
+                    .map(|&corner| 1.0 - face.dot(grid.normals[corner]))
+                    .sum::<f32>()
+            })
+            .sum::<f32>()
+    };
     let mut indices = Vec::with_capacity(COLUMNS * ROWS * 6);
     for j in 0..ROWS {
         for i in 0..COLUMNS {
-            let a = index(i, j) as u32;
-            let b = index(i + 1, j) as u32;
-            let c = index(i + 1, j + 1) as u32;
-            let d = index(i, j + 1) as u32;
-            indices.extend_from_slice(&[a, b, c, a, c, d]);
+            let a = index(i, j);
+            let b = index(i + 1, j);
+            let c = index(i + 1, j + 1);
+            let d = index(i, j + 1);
+            let along_ac = deviation([a, b, c]) + deviation([a, c, d]);
+            let along_bd = deviation([a, b, d]) + deviation([b, c, d]);
+            let quad = if along_bd < along_ac {
+                [a, b, d, b, c, d]
+            } else {
+                [a, b, c, a, c, d]
+            };
+            indices.extend(quad.map(|corner| corner as u32));
         }
     }
     indices
@@ -305,6 +288,7 @@ fn rasterize(
                         triangle,
                         weights,
                         depth,
+                        across: None,
                     });
                 }
             }
@@ -370,6 +354,7 @@ fn by_rays(positions: &[Vec3], triangles: &[[usize; 3]]) -> (Vec<Option<Hit>>, u
                 triangle,
                 weights,
                 depth: distance,
+                across: None,
             });
         }
     };
@@ -419,8 +404,131 @@ fn by_rays(positions: &[Vec3], triangles: &[[usize; 3]]) -> (Vec<Option<Hit>>, u
             }
         }
     }
+    snap_to_creases(&mut hits, positions, triangles, center);
     let met = hits.iter().filter(|hit| hit.is_some()).count();
     (hits, met)
+}
+
+/// Two faces meet in a crease when their normals part by more than this
+/// cosine's angle (35°), as a tube's corners do.
+const CREASE_COSINE: f32 = 0.819;
+
+/// The direction of the ray at grid parameters `(i, j)`, which may lie
+/// between grid points.
+fn direction_at(i: f32, j: f32) -> Vec3 {
+    let theta = TAU * i / COLUMNS as f32;
+    let phi = PI * j / ROWS as f32;
+    Vec3::new(phi.sin() * theta.cos(), phi.cos(), phi.sin() * theta.sin())
+}
+
+/// Moves each grid point beside a crease onto it. Rays meet a cube's edge
+/// between two grid points, so its quads would cut the edge in steps;
+/// where two neighbors along a row or column meet faces that part in a
+/// crease, the ray between them where the faces change is found by
+/// bisection, and the nearer of the two points moves to it. A crease then
+/// runs through grid points and stays straight.
+fn snap_to_creases(
+    hits: &mut [Option<Hit>],
+    positions: &[Vec3],
+    triangles: &[[usize; 3]],
+    center: Vec3,
+) {
+    let face = |triangle: usize| {
+        let [a, b, c] = triangles[triangle];
+        (positions[b] - positions[a])
+            .cross(positions[c] - positions[a])
+            .normalize_or_zero()
+    };
+    let original = hits.to_vec();
+    // The triangles met around grid point `(i, j)`, where the ray between
+    // it and a neighbor meets the mesh.
+    let around = |i: usize, j: usize, triangles: &mut Vec<usize>| {
+        for nj in j.saturating_sub(1)..=(j + 1).min(ROWS) {
+            for ni in i.saturating_sub(1)..=(i + 1).min(COLUMNS) {
+                if let Some(hit) = original[index(ni, nj)]
+                    && !triangles.contains(&hit.triangle)
+                {
+                    triangles.push(hit.triangle);
+                }
+            }
+        }
+    };
+    let mut moved = vec![false; POINTS];
+    let mut candidates = Vec::new();
+    for (di, dj) in [(1, 0), (0, 1)] {
+        for j in 0..=ROWS - dj {
+            for i in 0..=COLUMNS - di {
+                let (a, b) = (index(i, j), index(i + di, j + dj));
+                let (Some(first), Some(second)) = (original[a], original[b]) else {
+                    continue;
+                };
+                let side = face(first.triangle);
+                if side.dot(face(second.triangle)) > CREASE_COSINE {
+                    continue;
+                }
+                candidates.clear();
+                around(i, j, &mut candidates);
+                around(i + di, j + dj, &mut candidates);
+                let cast = |s: f32| {
+                    let direction =
+                        direction_at(i as f32 + di as f32 * s, j as f32 + dj as f32 * s);
+                    candidates
+                        .iter()
+                        .filter_map(|&triangle| {
+                            let [p, q, r] = triangles[triangle];
+                            let corners =
+                                [positions[p], positions[q], positions[r]].map(|v| v - center);
+                            ray_triangle(direction, &corners).map(|(depth, weights)| Hit {
+                                triangle,
+                                weights,
+                                depth,
+                                across: None,
+                            })
+                        })
+                        .max_by(|x, y| x.depth.total_cmp(&y.depth))
+                };
+                let (mut low, mut high) = ((0.0, first), (1.0, second));
+                for _ in 0..12 {
+                    let middle = (low.0 + high.0) * 0.5;
+                    let Some(hit) = cast(middle) else {
+                        break;
+                    };
+                    if face(hit.triangle).dot(side) > CREASE_COSINE {
+                        low = (middle, hit);
+                    } else {
+                        high = (middle, hit);
+                    }
+                }
+                // The point lies on the crease, and shades halfway between
+                // its two sides, so the crease shows as an even bevel.
+                let (point, hit) = if low.0 + high.0 < 1.0 {
+                    (
+                        a,
+                        Hit {
+                            across: Some((high.1.triangle, high.1.weights)),
+                            ..low.1
+                        },
+                    )
+                } else {
+                    (
+                        b,
+                        Hit {
+                            across: Some((low.1.triangle, low.1.weights)),
+                            ..high.1
+                        },
+                    )
+                };
+                if !moved[point] {
+                    moved[point] = true;
+                    hits[point] = Some(hit);
+                }
+            }
+        }
+    }
+    // The last column is the first one again.
+    for j in 0..=ROWS {
+        hits[index(COLUMNS, j)] = hits[index(0, j)];
+    }
 }
 
 /// The cone of directions from the center that holds a triangle: its
@@ -528,7 +636,18 @@ fn resolve(
         .collect();
     let normals = hits
         .iter()
-        .map(|hit| blend(hit, &|v| normals[v]).normalize_or_zero())
+        .map(|hit| {
+            let normal = blend(hit, &|v| normals[v]);
+            let across = hit.across.map_or(Vec3::ZERO, |(triangle, weights)| {
+                let across = Hit {
+                    triangle,
+                    weights,
+                    ..*hit
+                };
+                blend(&across, &|v| normals[v])
+            });
+            (normal.normalize_or_zero() + across.normalize_or_zero()).normalize_or_zero()
+        })
         .collect();
     let colors = colors.map(|colors| {
         hits.iter()
@@ -732,7 +851,7 @@ mod tests {
 
     const WHITE: [f32; 4] = [1.0; 4];
 
-    fn volume(frame: &MorphFrame) -> f32 {
+    fn volume(frame: &TriangleMeshData) -> f32 {
         frame
             .indices
             .as_chunks::<3>()
@@ -751,8 +870,11 @@ mod tests {
         let sphere = primitives3d::sphere(1.0, 32, 16, Material3D::default()).unwrap();
         let cube = primitives3d::cube(2.0, Material3D::default()).unwrap();
         let morph = MeshMorph::new(&sphere, &cube, (WHITE, WHITE)).unwrap();
-        assert_eq!(morph.from.sampling, Sampling::TextureCoordinates);
-        assert_eq!(morph.to.sampling, Sampling::Rays);
+        assert_eq!(
+            sample(&sphere).unwrap().sampling,
+            Sampling::TextureCoordinates
+        );
+        assert_eq!(sample(&cube).unwrap().sampling, Sampling::Rays);
         let (start, end) = (morph.at(0.0), morph.at(1.0));
         // Each sphere point lies on the sphere and moves out along its own
         // direction onto the cube's surface.
@@ -767,8 +889,62 @@ mod tests {
         assert!((volume(&start) - sphere_volume).abs() < 0.05 * sphere_volume);
         assert!((volume(&end) - 8.0).abs() < 0.1);
         assert!(volume(&morph.at(0.5)) > sphere_volume);
-        assert!((end.min + 1.0).abs().max_element() < 1e-3);
-        assert!((end.max - 1.0).abs().max_element() < 1e-3);
+        let points: Vec<Vec3> = end.vertices.iter().map(|v| Vec3::from_array(*v)).collect();
+        let (min, max) = bounds(&points);
+        assert!((min + 1.0).abs().max_element() < 1e-3);
+        assert!((max - 1.0).abs().max_element() < 1e-3);
+        // Each frame keeps the two grids it blends, for a recording.
+        let blend = morph.at(0.25).blend.unwrap();
+        assert_eq!((blend.t, blend.from.vertices.len()), (0.25, POINTS));
+    }
+
+    #[test]
+    fn a_cube_sampled_by_rays_keeps_grid_points_along_its_edges() {
+        let cube = primitives3d::cube(2.0, Material3D::default()).unwrap();
+        let grid = sample(&cube).unwrap();
+        assert_eq!(grid.sampling, Sampling::Rays);
+        let on = |value: f32| (value.abs() - 1.0).abs() < 1e-3;
+        // Every edge of the top face, which rows of rays cross aslant,
+        // runs through grid points from end to end.
+        for along_x in [true, false] {
+            for sign in [-1.0, 1.0] {
+                let mut spots: Vec<f32> = grid
+                    .positions
+                    .iter()
+                    .filter(|p| {
+                        let side = if along_x { p.z } else { p.x };
+                        (p.y - 1.0).abs() < 1e-3 && on(side) && side * sign > 0.0
+                    })
+                    .map(|p| if along_x { p.x } else { p.z })
+                    .collect();
+                spots.sort_by(f32::total_cmp);
+                let widest = spots.windows(2).map(|w| w[1] - w[0]).fold(0.0, f32::max);
+                assert!(spots.len() > 8 && widest < 0.15, "{spots:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_cube_grid_cuts_into_the_cube_only_at_its_corners() {
+        let cube = primitives3d::cube(2.0, Material3D::default()).unwrap();
+        let grid = sample(&cube).unwrap();
+        let indices = grid_indices([&grid, &grid]);
+        // How far inside the cube each grid triangle's center lies.
+        let depths: Vec<f32> = indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| {
+                let [a, b, c] = t.map(|v| grid.positions[v as usize]);
+                1.0 - ((a + b + c) / 3.0).abs().max_element()
+            })
+            .collect();
+        let cut = depths.iter().filter(|depth| **depth > 0.005).count();
+        let deepest = depths.iter().copied().fold(0.0, f32::max);
+        assert!(
+            cut <= 8 && deepest < 0.01,
+            "{cut} triangles, {deepest} deep"
+        );
     }
 
     #[test]
@@ -776,7 +952,7 @@ mod tests {
         let sphere = primitives3d::sphere(1.0, 32, 16, Material3D::default()).unwrap();
         let torus = primitives3d::torus(1.0, 0.4, 32, 16, Material3D::default()).unwrap();
         let morph = MeshMorph::new(&sphere, &torus, (WHITE, WHITE)).unwrap();
-        assert_eq!(morph.to.wraps, (true, true));
+        assert_eq!(sample(&torus).unwrap().wraps, (true, true));
         let end = morph.at(1.0);
         let point = |i, j| Vec3::from_array(end.vertices[index(i, j)]);
         // The poles land on the inner circle, the equator on the outer one.
@@ -818,10 +994,11 @@ mod tests {
                 colors: None,
                 material: None,
                 surface: None,
+                blend: None,
             }
         };
         let morph = MeshMorph::new(&mesh(0.5), &mesh(1.0), (WHITE, WHITE)).unwrap();
-        assert_eq!(morph.from.sampling, Sampling::Sheet);
+        assert_eq!(sample(&mesh(0.5)).unwrap().sampling, Sampling::Sheet);
         // Each point keeps its place across the sheet and only rises.
         let (start, end) = (morph.at(0.0), morph.at(1.0));
         for (a, b) in start.vertices.iter().zip(&end.vertices) {

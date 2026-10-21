@@ -1861,9 +1861,10 @@ class Anim:
         when these cover the mesh once (a sphere, a torus, a plane, a revolved
         profile), otherwise by rays from the center of their bounds (a cube,
         a capped cylinder, an extruded text). The points pair as they move
-        least, so a sphere's poles open into a torus's hole and a plane rolls
-        up into a sphere. Before and after the morph each mesh is drawn
-        exactly as built. A 3D mesh transforms only into another 3D mesh lit
+        least, so a sphere's poles open into a torus's hole. Before and after
+        the morph each mesh is drawn exactly as built; an open lit mesh, as a
+        plane, hides the faces it turns away while it bends, as it does at
+        rest. A 3D mesh transforms only into another 3D mesh lit
         as it is (both with a material, or neither); anything else raises
         ``ValueError``.
         """

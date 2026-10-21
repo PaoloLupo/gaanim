@@ -7692,6 +7692,7 @@ mod tests {
             colors: None,
             material: None,
             surface: None,
+            blend: None,
         };
         let entity = world
             .spawn((

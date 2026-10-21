@@ -96,22 +96,8 @@ impl MeshMorphLens {
             None => return to(),
             Some(grid) => grid,
         };
-        let frame = grid.at(t as f32);
-        let mesh = TriangleMeshData {
-            vertices: frame.vertices,
-            indices: frame.indices,
-            normals: Some(frame.normals),
-            uvs: None,
-            color: if t < 0.5 {
-                morph.from.color
-            } else {
-                morph.to.color
-            },
-            colors: frame.colors,
-            material: morph.from.material,
-            surface: None,
-        };
-        let bounds = Bounds3D::new(frame.min.as_dvec3(), frame.max.as_dvec3());
+        let mesh = grid.at(t as f32);
+        let bounds = mesh_bounds(&mesh.vertices);
         (mesh, bounds)
     }
 

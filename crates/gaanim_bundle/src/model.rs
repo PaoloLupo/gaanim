@@ -613,6 +613,12 @@ impl Tables {
     /// its segment and that of its texture. `track` is the key of the
     /// drawable that draws it, whose earlier meshes it is predicted from.
     pub(crate) fn mesh(&mut self, mesh: &Arc<gaanim_scene::TriangleMeshData>, track: u32) -> u32 {
+        if let Some(blend) = &mesh.blend
+            && self.mesh_by_address.get(mesh).is_none()
+        {
+            let index = self.blend(blend, track);
+            self.mesh_by_address.insert(mesh, index);
+        }
         let index = match self.mesh_by_address.get(mesh) {
             Some(index) => index,
             None => {
@@ -667,6 +673,33 @@ impl Tables {
         self.note(segment_of(&self.starts, |c| c.meshes, index));
         let deps = self.mesh_deps[index as usize].clone();
         self.note_all(&deps);
+        index
+    }
+
+    /// Store a mesh that blends two others, a frame of a morph, and return
+    /// its index: the two meshes once, as any meshes of `track` (the second
+    /// predicted from the first), and the blend as their indices and how
+    /// far between them it lies. A frame that draws it needs their
+    /// segments too.
+    fn blend(&mut self, blend: &gaanim_scene::MeshBlend, track: u32) -> u32 {
+        let ends = [self.mesh(&blend.from, track), self.mesh(&blend.to, track)];
+        let mut w = Writer::new();
+        codec::write_mesh_blend(&mut w, ends, blend.t);
+        let bytes = w.into_bytes();
+        let hash = blake3::hash(&bytes);
+        if let Some(index) = self.mesh_by_hash.get(&hash) {
+            return *index;
+        }
+        let mut deps: BTreeSet<u32> = BTreeSet::new();
+        for end in ends {
+            deps.insert(segment_of(&self.starts, |c| c.meshes, end));
+            deps.extend(self.mesh_deps[end as usize].iter().copied());
+        }
+        let index = self.meshes.len() as u32;
+        self.pending_bytes += bytes.len();
+        self.meshes.push(bytes);
+        self.mesh_deps.push(deps.into_iter().collect());
+        self.mesh_by_hash.insert(hash, index);
         index
     }
 
@@ -1059,9 +1092,20 @@ impl DecodedTables {
                 _ => lookup(self, |c| c.images, |s| &s.images, index, "image").cloned(),
             }
         };
+        // A blended mesh's ends are among this segment's meshes before it
+        // or those of an earlier segment.
+        let first = self.starts[segment].meshes;
+        let table = |index: u32| -> Result<Arc<gaanim_scene::TriangleMeshData>> {
+            lookup(self, |c| c.meshes, |s| &s.meshes, index, "mesh").cloned()
+        };
         let mut meshes = Vec::new();
         for _ in 0..count(&mut r, expected.meshes, "meshes")? {
-            let mesh = codec::read_mesh(&mut r, self.version, &image, &meshes)?;
+            let table = codec::MeshTable {
+                earlier: &meshes,
+                first,
+                table: &table,
+            };
+            let mesh = codec::read_mesh(&mut r, self.version, &image, &table)?;
             meshes.push(Arc::new(mesh));
         }
         decoded.meshes = meshes;
@@ -3053,6 +3097,7 @@ mod tests {
             colors: None,
             material: None,
             surface: None,
+            blend: None,
         }
     }
 
@@ -3194,6 +3239,44 @@ mod tests {
     /// A mesh that bends from frame to frame, and a curve that moves, store
     /// their change from the frames before and decode bit for bit, in
     /// segments that each decode alone.
+    /// The frames of a morph store the two meshes they blend once, and
+    /// each frame as how far between them it lies, also in later
+    /// segments; they decode exactly and keep the blend, for a repack.
+    #[test]
+    fn blended_meshes_store_their_ends_once_and_decode_exactly() {
+        let (from, to) = (Arc::new(sheet(24, 0.0)), Arc::new(sheet(24, 1.2)));
+        let frames: Vec<_> = (0..=30)
+            .map(|k| {
+                let blend = Arc::new(gaanim_scene::MeshBlend {
+                    from: Arc::clone(&from),
+                    to: Arc::clone(&to),
+                    t: k as f32 / 30.0,
+                });
+                gaanim_scene::MeshBlend::mesh(blend).unwrap()
+            })
+            .collect();
+        let (decoded, _, size) = round_trip(Tables::default(), &frames, &[], 7);
+        for (frame, decoded) in frames.iter().zip(&decoded) {
+            assert_eq!(frame.vertices, decoded.vertices);
+            assert_eq!(frame.normals, decoded.normals);
+            assert_eq!(frame.colors, decoded.colors);
+            assert_eq!(
+                decoded.blend.as_ref().map(|blend| blend.t),
+                frame.blend.as_ref().map(|blend| blend.t)
+            );
+        }
+        // Stored as their change from frame to frame, they take far more.
+        let unblended: Vec<_> = frames
+            .iter()
+            .map(|frame| gaanim_scene::TriangleMeshData {
+                blend: None,
+                ..frame.clone()
+            })
+            .collect();
+        let (_, _, changes) = round_trip(Tables::default(), &unblended, &[], 7);
+        assert!(size * 4 < changes, "{size} against {changes}");
+    }
+
     #[test]
     fn meshes_and_lines_that_move_store_their_change_and_decode_exactly() {
         let meshes: Vec<_> = (0..40)

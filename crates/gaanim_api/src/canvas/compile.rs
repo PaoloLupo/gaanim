@@ -392,6 +392,7 @@ fn surface_sheet(
         colors: Some(colors),
         material,
         surface: None,
+        blend: None,
     }
 }
 
@@ -11836,6 +11837,7 @@ impl SceneModel {
                     colors,
                     material: None,
                     surface: None,
+                    blend: None,
                 };
                 if builder.morph_mesh_ids.contains(&spec.id) {
                     let mref = builder.spawn_triangle_mesh_data(mesh.clone());
@@ -15405,7 +15407,11 @@ mod tests {
         let at = |app: &mut App, time: f64| {
             app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
             app.update();
-            app.world().get::<TriangleMeshData>(sphere).unwrap().vertices.len()
+            app.world()
+                .get::<TriangleMeshData>(sphere)
+                .unwrap()
+                .vertices
+                .len()
         };
         // Straight into the next segment, then back before the morph and
         // forward again.
