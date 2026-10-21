@@ -136,14 +136,15 @@ scene.play([plane.layer("axes").animate.create(), plane.layer("numbers").animate
 #api-entry(
   name: "CoordinateSpace.coord / CoordinateRef.place",
   kind: "method",
-  desc: [Coordenada simbólica `(x, y)` del espacio. Pásala a `Drawable.at_coordinate` (o a `CoordinateRef.place`) para colocar un objeto como hijo del espacio, que seguirá sus cambios de vista.],
+  signature: "coord(x, y) -> CoordinateRef · place(drawable, *, anchor=None, offset=None) -> Drawable",
+  desc: [Coordenada simbólica `(x, y)` del espacio. Pásala a `Drawable.at_coordinate` (o a `CoordinateRef.place`) para colocar un objeto como hijo del espacio, que seguirá sus cambios de vista. Sin `anchor`, el objeto queda centrado en el dato (su origen va ahí); con un `anchor` (`"left"`, `Anchor.BOTTOM`…), ese punto de su caja va al dato, y `offset` lo mueve luego en unidades de escena, como en `Drawable.place`: `anchor="left", offset=(0.15, 0)` deja una etiqueta justo a la derecha de un punto, sea cual sea su ancho o la escala de los ejes. `Drawable.at_coordinate` admite los mismos `anchor` y `offset`. Un `offset` no finito lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
 >>>scene = Scene(frame=(16, 9))
 plane = scene.viz.cartesian_2d(Axis.linear(-4, 4), Axis.linear(-2, 2))
 peak = scene.geometry.dot(0.1).fill(GOLD).at_coordinate(plane.coord(1, 1.5))
-label = plane.coord(1, 1.8).place(scene.text("máximo", role="label"))
+label = plane.coord(1, 1.5).place(scene.text("máximo", role="label"), anchor="left", offset=(0.15, 0))
 ```
 ]
 

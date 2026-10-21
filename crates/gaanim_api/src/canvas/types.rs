@@ -713,6 +713,13 @@ pub enum SpawnKind {
         points: Vec<[f32; 3]>,
         colors: Option<Vec<Color>>,
     },
+    /// A 3D polyline whose coordinates are reactive sources, redrawn every
+    /// frame from their current values; `colors`, one per point, as in
+    /// `Polyline3D`.
+    ReactivePolyline3D {
+        points: Vec<[gaanim_animation::ScalarSource; 3]>,
+        colors: Option<Vec<Color>>,
+    },
     /// Independent 3D line segments stored in one retained mesh.
     LineSegments3D {
         points: Vec<[f32; 3]>,

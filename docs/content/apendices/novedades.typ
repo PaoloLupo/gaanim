@@ -13,11 +13,13 @@ instalar una versión nueva, sigue
 
 = 0.16.1
 
-Sin publicar. Corrige seis detalles encontrados al hacer un video real: el
+Sin publicar. Corrige detalles encontrados al hacer un video real: el
 rótulo del cero de los ejes con pasos decimales, el giro de la cámara al
-cambiar `up`, el color de `traced_path_3d`, `wipe` dentro de `in_3d`, el
-tamaño de `gaanim export` con solo `--width` y el espaciado de las lecturas.
-`orient_3d` orienta un objeto en 3D dando las direcciones de sus ejes.
+cambiar `up`, el color de `traced_path_3d` y de `polyline_3d`, `wipe` dentro
+de `in_3d`, el tamaño de `gaanim export` con solo `--width` y el espaciado de
+las lecturas. `orient_3d` orienta un objeto en 3D dando las direcciones de sus
+ejes, `polyline_3d` acepta coordenadas reactivas y `place` coloca una etiqueta
+junto a un dato por un ancla.
 
 == Cambios
 
@@ -25,6 +27,13 @@ tamaño de `gaanim export` con solo `--width` y el espaciado de las lecturas.
   objeto dando hacia dónde apuntan sus ejes x e y locales, sin buscar los
   ángulos de `rotate_to_3d`: `orient_3d((0, 0, -1), (-1, 0, 0))` tiende una
   gráfica `in_3d` en el suelo con su eje x hacia −z.
+- `scene.geometry.polyline_3d` acepta en cada coordenada un `Parameter`, un
+  `Computed` o `scene.time`, como `polyline`, y se vuelve a trazar en cada
+  fotograma: una línea 3D que crece o se deforma con los datos.
+- `CoordinateRef.place` y `Drawable.at_coordinate` aceptan `anchor` y
+  `offset`, como `Drawable.place`: `plane.coord(t, pico).place(etiqueta,
+  anchor="left", offset=(0.15, 0))` deja la etiqueta a la derecha del punto,
+  en unidades de escena, sin desplazar la coordenada en unidades de datos.
 - La referencia dice en qué orden se componen los ángulos de `rotate_to_3d`
   (`Rx · Ry · Rz`: primero z, luego y, luego x, sobre los ejes del mundo),
   qué eje mueve `Axis.crossing` (`crossing("min")` en el eje y baja el eje x)
@@ -45,6 +54,9 @@ tamaño de `gaanim export` con solo `--width` y el espaciado de las lecturas.
   estela siempre en blanco. Ahora usa el color del trazo, o el del estilo
   `plot` del tema si no se da, como `polyline_3d`; un `colormap` la sigue
   coloreando en el tiempo.
+- `polyline_3d(..., color=...)` ignoraba el color en una escena con tema: el
+  trazo del estilo `plot` del tema lo tapaba. Ahora el trazo del tema toma ese
+  color y conserva su ancho.
 - `wipe(reveal)`, `animate.wipe()` y `clip` no recortaban un objeto llevado al
   mundo con `in_3d()`: la curva se veía entera desde el inicio. El pase 3D
   recorta ahora sus contornos con la máscara, como en 2D.

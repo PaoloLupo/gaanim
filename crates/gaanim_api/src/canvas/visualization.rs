@@ -1296,11 +1296,25 @@ impl CoordinateSpaceHandle {
 
 impl DrawableHandle {
     pub fn at_coordinate(self, coordinate: CoordinateRef) -> Self {
+        self.at_coordinate_by(coordinate, None, DVec2::ZERO)
+    }
+
+    /// Like [`Self::at_coordinate`], with the point of the drawable's box
+    /// that goes to the coordinate (`None`: its origin) and then `offset`
+    /// further, in scene units, as `Drawable.place` takes them.
+    pub fn at_coordinate_by(
+        self,
+        coordinate: CoordinateRef,
+        anchor: Option<gaanim_layout::Anchor>,
+        offset: DVec2,
+    ) -> Self {
         let mut state = self.state.lock().expect("canvas state poisoned");
         state.active_mut().ops.push(Op::PlaceAtCoordinate {
             space: coordinate.space,
             target: self.id,
             local: coordinate.local,
+            anchor,
+            offset,
         });
         drop(state);
         self
@@ -6473,6 +6487,63 @@ mod tests {
         assert!(
             (positions[0] - positions[2]).length() > 0.1,
             "the view change must move the data point in the scene"
+        );
+    }
+
+    /// `place` with an anchor puts that point of the box on the data point,
+    /// then moves it by an offset in scene units, in a scaled, turned space.
+    #[test]
+    fn coordinates_place_by_an_anchor_and_a_scene_offset() {
+        use bevy::prelude::Schedule;
+        use gaanim_math::GlobalSpatialTransform;
+        use gaanim_scene::prelude::World;
+
+        let mut canvas = SceneModel::new(16.0, 9.0);
+        let space = canvas
+            .coordinate_axes(
+                Axis::linear(-4.0, 4.0).unwrap(),
+                Axis::linear(-3.0, 3.0).unwrap(),
+                Some(10.0),
+                Some(5.0),
+                true,
+            )
+            .unwrap()
+            .scale_to(1.2)
+            .rotate_to(0.2)
+            .move_to(1.0, -0.5);
+        let point = space.coord(2.0, 1.5).unwrap();
+        // Centered on the data point, as before.
+        canvas.circle(0.0371).at_coordinate(point);
+        canvas.rect(0.83, 0.4).at_coordinate_by(
+            point,
+            Some(gaanim_layout::Anchor::Left),
+            DVec2::new(0.5, 0.0),
+        );
+        let mut world = World::new();
+        world.insert_resource(gaanim_timeline::timeline::Timeline::new());
+        world.insert_resource(gaanim_text::font::FontRegistry::new());
+        world.insert_resource(gaanim_text::prelude::TextConfig::default());
+        canvas.compile(&mut world);
+        world.flush();
+        let mut propagation = Schedule::default();
+        propagation.add_systems(gaanim_scene::transform_propagation_system);
+        propagation.run(&mut world);
+        let mut by_width = |width: f64| {
+            world
+                .query::<(gaanim_scene::prelude::Entity, &gaanim_scene::LocalBounds)>()
+                .iter(&world)
+                .find(|(_, bounds)| (bounds.0.width() - width).abs() < 1e-9)
+                .map(|(entity, bounds)| (entity, bounds.0))
+                .expect("compiled shape")
+        };
+        let ((marker, _), (entity, bounds)) = (by_width(0.0742), by_width(0.83));
+        let to_scene = |entity| world.get::<GlobalSpatialTransform>(entity).unwrap().mat4;
+        let data = to_scene(marker).transform_point3(DVec3::ZERO);
+        let left =
+            to_scene(entity).transform_point3(DVec3::new(bounds.min.x, bounds.center().y, 0.0));
+        assert!(
+            (left - (data + DVec3::new(0.5, 0.0, 0.0))).length() < 1e-9,
+            "{left:?} is not 0.5 right of {data:?}"
         );
     }
 

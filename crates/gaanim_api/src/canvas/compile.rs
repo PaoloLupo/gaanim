@@ -98,6 +98,43 @@ fn reactive_polyline_path(
     path
 }
 
+/// The 3D line strip through `points` evaluated at `time`, in `color` or
+/// with `colors` (one per point): a point whose value cannot be read is
+/// left out, with its color.
+fn reactive_polyline_3d_line(
+    points: &[[gaanim_animation::ScalarSource; 3]],
+    colors: Option<&[[f32; 4]]>,
+    color: PenikoColor,
+    time: f64,
+    signal: impl Fn(gaanim_core::ObjectId) -> Option<f64>,
+) -> LineListData {
+    let mut line = LineListData {
+        points: Vec::with_capacity(points.len()),
+        indices: None,
+        strip: true,
+        color,
+        colors: colors.map(|_| Vec::with_capacity(points.len())),
+        revealed: None,
+    };
+    for (index, [x, y, z]) in points.iter().enumerate() {
+        let (Ok(x), Ok(y), Ok(z)) = (
+            x.evaluate(time, &signal),
+            y.evaluate(time, &signal),
+            z.evaluate(time, &signal),
+        ) else {
+            continue;
+        };
+        if !(x.is_finite() && y.is_finite() && z.is_finite()) {
+            continue;
+        }
+        line.points.push([x as f32, y as f32, z as f32]);
+        if let (Some(kept), Some(colors)) = (line.colors.as_mut(), colors) {
+            kept.push(colors[index]);
+        }
+    }
+    line
+}
+
 /// Where source pixel `(x, y)` of the image or video `media` shows in the
 /// scene as authored so far: through its media frame and world transform.
 fn authored_media_point(builder: &SceneBuilder, media: ObjectId, x: f64, y: f64) -> Option<DVec3> {
@@ -6667,6 +6704,8 @@ impl SceneModel {
                     space,
                     target,
                     local,
+                    anchor,
+                    offset,
                 } => {
                     if let (Some(space), Some(target)) =
                         (id_map.get(space).copied(), id_map.get(target).copied())
@@ -6681,10 +6720,30 @@ impl SceneModel {
                             .unwrap_or_default();
                         let inv = view_local.to_affine_2d().inverse();
                         let desired_point = Point::new(local.x, local.y);
-                        let local_point = inv * desired_point;
+                        let mut local_point = inv * desired_point;
+                        // An offset in scene units, in the space's own units.
+                        if *offset != DVec2::ZERO {
+                            let to_space = builder.get_world_transform(space).to_affine_2d();
+                            if to_space.determinant().abs() > 1e-12 {
+                                let [a, b, c, d, _, _] = to_space.inverse().as_coeffs();
+                                local_point += Vec2::new(
+                                    a * offset.x + c * offset.y,
+                                    b * offset.x + d * offset.y,
+                                );
+                            }
+                        }
                         if let Some(state) = builder.states.get_mut(target) {
                             state.transform.translation =
                                 DVec3::new(local_point.x, local_point.y, local.z);
+                            // The anchor's point of the box, not the origin,
+                            // goes to the coordinate.
+                            if let Some(anchor) = anchor {
+                                let point = anchor.get_point(&state.bounds);
+                                let placed =
+                                    state.transform.to_affine_2d() * Point::new(point.x, point.y);
+                                state.transform.translation.x += local_point.x - placed.x;
+                                state.transform.translation.y += local_point.y - placed.y;
+                            }
                             // Preserve any existing rotation/scale from add_to_group (which is identity for dots)
                             // but ensure translation is correct.
                             builder
@@ -11794,6 +11853,85 @@ impl SceneModel {
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
+            SpawnKind::ReactivePolyline3D { points, colors } => {
+                let base_color = line_3d_color(spec);
+                let mut parameter_ids: Vec<gaanim_core::ObjectId> = points
+                    .iter()
+                    .flatten()
+                    .flat_map(|source| source.parameter_ids())
+                    .collect();
+                parameter_ids.sort_unstable();
+                parameter_ids.dedup();
+                let parameters: Vec<(gaanim_core::ObjectId, bevy::prelude::Entity)> = parameter_ids
+                    .into_iter()
+                    .filter_map(|logical| {
+                        let actual = id_map.get(&logical).copied()?;
+                        Some((logical, builder.states.get(actual)?.entity))
+                    })
+                    .collect();
+                let initial: Vec<(gaanim_core::ObjectId, f64)> = parameters
+                    .iter()
+                    .filter_map(|(logical, _)| {
+                        let actual = id_map.get(logical).copied()?;
+                        Some((*logical, builder.float_signals.get(&actual).copied()?))
+                    })
+                    .collect();
+                let colors: Option<Vec<[f32; 4]>> = colors
+                    .as_ref()
+                    .filter(|colors| colors.len() == points.len())
+                    .map(|colors| {
+                        colors
+                            .iter()
+                            .map(|color| {
+                                let rgba = color.to_rgba8();
+                                [rgba.r, rgba.g, rgba.b, rgba.a].map(|c| f32::from(c) / 255.0)
+                            })
+                            .collect()
+                    });
+                let line = reactive_polyline_3d_line(
+                    points,
+                    colors.as_deref(),
+                    base_color,
+                    builder.current_time,
+                    |id| {
+                        initial
+                            .iter()
+                            .find(|(logical, _)| *logical == id)
+                            .map(|(_, value)| *value)
+                    },
+                );
+                let mref =
+                    builder.spawn_line_strip_with_colors(line.points, base_color, line.colors);
+                Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                let changes = !parameters.is_empty()
+                    || points
+                        .iter()
+                        .flatten()
+                        .any(|source| source.depends_on_time());
+                if changes && let Some(state) = builder.states.get(mref.id) {
+                    let points = points.clone();
+                    let regen = ReactiveLineRegen::new(move |world| {
+                        let time = world
+                            .get_resource::<gaanim_animation::PlaybackState>()
+                            .map_or(0.0, |state| state.current_time);
+                        reactive_polyline_3d_line(
+                            &points,
+                            colors.as_deref(),
+                            base_color,
+                            time,
+                            |id| {
+                                let entity =
+                                    parameters.iter().find(|(logical, _)| *logical == id)?.1;
+                                world
+                                    .get::<gaanim_animation::FloatSignal>(entity)
+                                    .map(|signal| signal.value)
+                            },
+                        )
+                    });
+                    builder.commands.entity(state.entity).insert(regen);
+                }
+                mref
+            }
             SpawnKind::LineSegments3D { points, colors } => {
                 let base_color = line_3d_color(spec);
                 let colors = colors.as_ref().map(|colors| {
@@ -16823,6 +16961,41 @@ mod tests {
         let bounds = masks[0].path.bounding_box();
         assert!((bounds.center().x).abs() < 1e-6);
         assert!((bounds.width() - 110.0).abs() < 1e-3);
+    }
+
+    /// A 3D polyline with a parameter in a coordinate is redrawn from it.
+    #[test]
+    fn reactive_3d_polylines_follow_their_coordinates() {
+        let mut canvas = SceneModel::new(640, 360);
+        let lift = canvas.parameter(0.0).unwrap();
+        let color = PenikoColor::from_rgb8(192, 80, 46);
+        canvas
+            .reactive_polyline_3d(
+                vec![
+                    [0.0.into(), lift.source(), 0.0.into()],
+                    [1.0.into(), 0.0.into(), 2.0.into()],
+                ],
+                None,
+            )
+            .stroke(color, 0.05);
+        canvas.wait(0.5);
+        lift.set(2.0).unwrap();
+        canvas.wait(0.5);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        let entity = world
+            .query_filtered::<Entity, With<gaanim_animation::ReactiveLineRegen>>()
+            .single(&world)
+            .unwrap();
+        let mut first_y = |world: &mut World, time: f64| {
+            timeline.seek(world, time);
+            gaanim_animation::reactive_3d_regen_system(world);
+            let line = world.get::<LineListData>(entity).unwrap();
+            assert_eq!(line.color, color);
+            assert_eq!(line.points[1], [1.0, 0.0, 2.0]);
+            line.points[0][1]
+        };
+        assert_eq!(first_y(&mut world, 0.2), 0.0);
+        assert_eq!(first_y(&mut world, 0.8), 2.0);
     }
 
     #[test]

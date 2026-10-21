@@ -1544,8 +1544,8 @@ title.move_to_3d(0, -1.5, 1).rotate_to_3d(-math.pi / 2, 0, 0)
 #api-entry(
   name: "Geometry.polyline_3d",
   kind: "factory",
-  params: ((name: "points", type: "Sequence[tuple[float, float, float]]", default: none, desc: [Al menos dos puntos finitos del mundo.]), (name: "color", type: "Color | None", default: "None", desc: [Color uniforme.]), (name: "colors", type: "Sequence[Color] | None", default: "None", desc: [Un color por punto; tiene prioridad sobre `colormap`.]), (name: "colormap", type: "str | None", default: "None", desc: [Degradado ordenado a lo largo de la línea, por ejemplo `"inferno"`, `"viridis"` o `"plasma"`.])),
-  desc: [Tira de líneas 3D en el espacio del mundo. La lista `colors` debe tener la misma longitud que `points`. Mide en pantalla el ancho de su trazo, `.stroke(color, ancho)` en unidades de la escena, a cualquier profundidad; sin trazo, 2 px de una salida de 1080 px de alto (la misma parte del encuadre a cualquier tamaño).],
+  params: ((name: "points", type: "Sequence[tuple[ScalarSource, ScalarSource, ScalarSource]]", default: none, desc: [Al menos dos puntos del mundo. Una coordenada puede ser un número finito, un `Parameter`, un `Computed` o `scene.time`.]), (name: "color", type: "Color | None", default: "None", desc: [Color uniforme.]), (name: "colors", type: "Sequence[Color] | None", default: "None", desc: [Un color por punto; tiene prioridad sobre `colormap`.]), (name: "colormap", type: "str | None", default: "None", desc: [Degradado ordenado a lo largo de la línea, por ejemplo `"inferno"`, `"viridis"` o `"plasma"`.])),
+  desc: [Tira de líneas 3D en el espacio del mundo. Con coordenadas reactivas, como en `polyline`, la línea se vuelve a trazar en cada fotograma con los valores del momento; un punto cuyo valor no se puede leer queda fuera de ese fotograma, con su color. La lista `colors` debe tener la misma longitud que `points`. Mide en pantalla el ancho de su trazo, `.stroke(color, ancho)` en unidades de la escena, a cualquier profundidad; sin trazo, 2 px de una salida de 1080 px de alto (la misma parte del encuadre a cualquier tamaño).],
 )[
 ```python
 >>>from gaanim import *
@@ -1553,6 +1553,12 @@ title.move_to_3d(0, -1.5, 1).rotate_to_3d(-math.pi / 2, 0, 0)
 >>>scene = Scene(frame=(16, 9))
 points = [(math.cos(t / 8), math.sin(t / 8), t / 40 - 1) for t in range(81)]
 helix = scene.geometry.polyline_3d(points, colormap="inferno")
+# Una tira cuyos puntos suben con un parámetro, uno tras otro.
+lift = scene.viz.parameter(0.0)
+strip = scene.geometry.polyline_3d(
+    [(x, computed(lambda h, x=x: h * (x + 3) / 6, inputs=[lift]), 0) for x in range(-3, 4)]
+)
+scene.play(lift.animate.set(2.0), duration=2)
 ```
 ]
 

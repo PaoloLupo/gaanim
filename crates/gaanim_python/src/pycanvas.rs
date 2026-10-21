@@ -5688,7 +5688,7 @@ impl PyGeometry {
     #[pyo3(signature = (points, color=None, *, colors=None, colormap=None))]
     fn polyline_3d(
         &self,
-        points: Vec<(f64, f64, f64)>,
+        points: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>, Bound<'_, PyAny>)>,
         color: Option<PyColor>,
         colors: Option<Vec<PyColor>>,
         colormap: Option<PyColorMapArg>,
@@ -5699,6 +5699,43 @@ impl PyGeometry {
                 "polyline_3d requires at least 2 points",
             ));
         }
+        let constant = |value: &Bound<'_, PyAny>| {
+            value
+                .extract::<f64>()
+                .ok()
+                .filter(|_| !value.is_instance_of::<pyo3::types::PyBool>())
+        };
+        let fixed: Option<Vec<(f64, f64, f64)>> = points
+            .iter()
+            .map(|(x, y, z)| Some((constant(x)?, constant(y)?, constant(z)?)))
+            .collect();
+        // Signals in the coordinates make a line redrawn every frame.
+        let Some(points) = fixed else {
+            let mut sources = Vec::with_capacity(points.len());
+            for (x, y, z) in points {
+                let mut point = Vec::with_capacity(3);
+                for value in [x, y, z] {
+                    let scalar = crate::visualization::extract_deferred_scalar(value)?;
+                    scalar.validate(&self.inner)?;
+                    point.push(scalar.source);
+                }
+                let [x, y, z]: [gaanim_animation::ScalarSource; 3] =
+                    point.try_into().expect("three coordinates are read");
+                sources.push([x, y, z]);
+            }
+            let per_vertex = polyline_3d_colors(sources.len(), colors, colormap)?;
+            let mut handle = self
+                .inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .reactive_polyline_3d(sources, per_vertex.clone());
+            if per_vertex.is_none()
+                && let Some(color) = color
+            {
+                handle = handle.fill(color.0);
+            }
+            return Ok(PyDrawable(handle));
+        };
         for (x, y, z) in &points {
             if ![x, y, z].iter().all(|v| v.is_finite()) {
                 return Err(pyo3::exceptions::PyValueError::new_err(
@@ -5711,25 +5748,7 @@ impl PyGeometry {
             .map(|(x, y, z)| [*x as f32, *y as f32, *z as f32])
             .collect();
 
-        // Resolve per-vertex colors: explicit list > colormap > uniform color
-        let per_vertex: Option<Vec<gaanim_core::peniko::Color>> = if let Some(cols) = colors {
-            if cols.len() != points.len() {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "colors length {} must match points length {}",
-                    cols.len(),
-                    points.len()
-                )));
-            }
-            Some(cols.into_iter().map(|c| c.0).collect())
-        } else if let Some(map) = colormap {
-            Some(
-                map.0
-                    .colors(points.len())
-                    .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?,
-            )
-        } else {
-            None
-        };
+        let per_vertex = polyline_3d_colors(points.len(), colors, colormap)?;
 
         let handle = if let Some(cols) = per_vertex {
             self.inner
@@ -5755,6 +5774,32 @@ impl PyGeometry {
         // If both per-vertex and uniform color provided, we respect per-vertex.
         Ok(PyDrawable(handle))
     }
+}
+
+/// The colors of a 3D polyline of `count` points, one per point: the
+/// explicit list, which must match, else the colormap's; `None` for one
+/// color.
+fn polyline_3d_colors(
+    count: usize,
+    colors: Option<Vec<PyColor>>,
+    colormap: Option<PyColorMapArg>,
+) -> PyResult<Option<Vec<gaanim_core::peniko::Color>>> {
+    if let Some(colors) = colors {
+        if colors.len() != count {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "colors length {} must match points length {count}",
+                colors.len(),
+            )));
+        }
+        return Ok(Some(colors.into_iter().map(|color| color.0).collect()));
+    }
+    colormap
+        .map(|map| {
+            map.0
+                .colors(count)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))
+        })
+        .transpose()
 }
 
 #[pymethods]

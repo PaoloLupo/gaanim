@@ -788,10 +788,12 @@ impl CanvasTheme {
             && let Some(stroke) = &style.stroke
         {
             // A solid arrow is one color: its outline follows a fill set on
-            // it, or `fill` would recolor only the inside of its head.
+            // it, or `fill` would recolor only the inside of its head. A 3D
+            // line is drawn in one color, which `polyline_3d(color=...)`
+            // gives as its fill.
             let paint = match (
                 &spec.fill,
-                spec.fill_overridden && is_solid_arrow(&spec.kind),
+                spec.fill_overridden && (is_solid_arrow(&spec.kind) || is_line_3d(&spec.kind)),
             ) {
                 (Some(fill), true) => fill.clone(),
                 _ => self.resolve_paint(&stroke.paint)?,
@@ -1062,6 +1064,17 @@ fn merge_text_style(base: &TextStyle, overlay: &TextStyle) -> TextStyle {
     }
 }
 
+/// 3D lines, drawn in one color.
+fn is_line_3d(kind: &SpawnKind) -> bool {
+    matches!(
+        kind,
+        SpawnKind::Polyline3D { .. }
+            | SpawnKind::ReactivePolyline3D { .. }
+            | SpawnKind::LineSegments3D { .. }
+            | SpawnKind::TracedPath3DLine
+    )
+}
+
 /// Arrows drawn as a closed outline around a body and a head.
 fn is_solid_arrow(kind: &SpawnKind) -> bool {
     matches!(
@@ -1125,6 +1138,7 @@ fn spawn_family(kind: &SpawnKind) -> &'static str {
         | SpawnKind::ReactiveParametricSurface3D { .. }
         | SpawnKind::DataMark { .. }
         | SpawnKind::Polyline3D { .. }
+        | SpawnKind::ReactivePolyline3D { .. }
         | SpawnKind::LineSegments3D { .. }
         | SpawnKind::TracedPath3DLine => "plot",
         _ => "component",
@@ -1206,7 +1220,7 @@ pub(crate) fn spawn_name(kind: &SpawnKind) -> &'static str {
         SpawnKind::SurfaceMesh { .. } => "surface",
         SpawnKind::Primitive3D(_) => "primitive_3d",
         SpawnKind::Light3D(_) => "light_3d",
-        SpawnKind::Polyline3D { .. } => "polyline_3d",
+        SpawnKind::Polyline3D { .. } | SpawnKind::ReactivePolyline3D { .. } => "polyline_3d",
         SpawnKind::LineSegments3D { .. } => "line_segments_3d",
         SpawnKind::Text(_) => "text",
         SpawnKind::Typst { .. } => "typst",
@@ -1558,6 +1572,27 @@ mod tests {
         line.fill = Some(accent);
         line.fill_overridden = true;
         assert_eq!(stroke(&line), Brush::Solid(foreground));
+    }
+
+    /// `polyline_3d(color=...)` gives the line its color as a fill: the
+    /// theme's `plot` stroke takes it and keeps its width.
+    #[test]
+    fn a_3d_line_strokes_in_its_fill() {
+        let theme = CanvasTheme::builtin("paper").unwrap();
+        let accent = Brush::Solid(theme.color("accent").unwrap());
+        let mut line = ObjectSpec::new(
+            gaanim_core::ObjectId::from_parts(3, 1),
+            SpawnKind::Polyline3D {
+                points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+                colors: None,
+            },
+        );
+        let themed = theme.resolve_object(&line).unwrap().stroke.unwrap();
+        line.fill = Some(accent.clone());
+        line.fill_overridden = true;
+        let (paint, width) = theme.resolve_object(&line).unwrap().stroke.unwrap();
+        assert_eq!(paint, accent);
+        assert_eq!(width, themed.1);
     }
 
     #[test]

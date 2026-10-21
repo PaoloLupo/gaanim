@@ -4806,8 +4806,24 @@ class Drawable:
     def port(self, name: str) -> AnchorPoint:
         """Return a named reactive endpoint; an unknown name raises KeyError."""
         ...
-    def at_coordinate(self, coordinate: CoordinateRef) -> Drawable:
-        """Place this drawable at a symbolic coordinate owned by a coordinate space."""
+    def at_coordinate(
+        self,
+        coordinate: CoordinateRef,
+        *,
+        anchor: Optional[AnchorName | Anchor] = None,
+        offset: Optional[tuple[float, float]] = None,
+    ) -> Drawable:
+        """Place this drawable at a symbolic coordinate owned by a coordinate space.
+
+        The drawable becomes a child of the space and follows its view. Its
+        origin goes to the coordinate, or with ``anchor`` that point of its
+        box (``"left"`` puts its left edge on the data point); ``offset``
+        then moves it that far in scene units, whatever the axes' scales. A
+        non-finite offset raises ``ValueError``.
+
+        Example:
+            peak.at_coordinate(plane.coord(4.2, 0.3), anchor="left", offset=(0.15, 0))
+        """
         ...
     def move_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Self:
         """Place the drawable at a 3D world-space position.
@@ -8134,7 +8150,25 @@ class Variable(Drawable):
 _ReactiveScalar: TypeAlias = ScalarSource
 
 class CoordinateRef:
-    def place(self, drawable: Drawable) -> Drawable: ...
+    def place(
+        self,
+        drawable: Drawable,
+        *,
+        anchor: Optional[AnchorName | Anchor] = None,
+        offset: Optional[tuple[float, float]] = None,
+    ) -> Drawable:
+        """Place ``drawable`` at this coordinate, as ``Drawable.at_coordinate`` does.
+
+        Without ``anchor`` the drawable is centered on the data point (its
+        origin goes there); with one, that point of its box goes there, and
+        ``offset`` moves it further in scene units: ``anchor="left",
+        offset=(0.15, 0)`` sets a label just right of a point, however wide
+        it is and whatever the axis scale.
+
+        Example:
+            plane.coord(t_max, peak).place(scene.text("max 0.30 g"), anchor="left", offset=(0.15, 0))
+        """
+        ...
 
 class DataTable:
     def __init__(self, columns: Mapping[str, Sequence[float | str | None]] | Any) -> None: ...
@@ -9549,7 +9583,7 @@ class Geometry:
         ...
     def polyline_3d(
         self,
-        points: Sequence[tuple[float, float, float]],
+        points: Sequence[tuple[ScalarSource, ScalarSource, ScalarSource]],
         color: Optional[ColorLike] = None,
         *,
         colors: Optional[Sequence[Color]] = None,
@@ -9564,11 +9598,19 @@ class Geometry:
         in scene units, and without one 2 pixels of a 1080-pixel-tall
         output, the same share of the frame at any output size.
 
+        A coordinate may be a Parameter, Computed or ``scene.time``, as in
+        ``polyline``: the line is then redrawn every frame from the current
+        values. A point whose value cannot be read is left out of that
+        frame, with its color. Fewer than two points or a non-finite fixed
+        coordinate raise ``ValueError``.
+
         Example:
             path = scene.polyline_3d(
                 [(-2, 0, 0), (0, 1, 1), (2, 0, 0)],
                 colormap="viridis",
             )
+            drift = scene.viz.parameter(0.0)
+            strip = scene.geometry.polyline_3d([(x, drift, 0) for x in range(-3, 4)])
         """
         ...
     def bezier(self, start: tuple[float, float], controls: Sequence[tuple[float, float]], end: tuple[float, float]) -> Drawable:

@@ -2508,6 +2508,7 @@ impl SceneModel {
                             SpawnKind::Primitive3D(..)
                                 | SpawnKind::SurfaceMesh { .. }
                                 | SpawnKind::Polyline3D { .. }
+                                | SpawnKind::ReactivePolyline3D { .. }
                                 | SpawnKind::LineSegments3D { .. }
                                 | SpawnKind::TracedPath3DLine
                         )
@@ -3529,6 +3530,7 @@ impl SceneModel {
                     | SpawnKind::Lottie { .. }
                     | SpawnKind::Primitive3D(_)
                     | SpawnKind::Polyline3D { .. }
+                    | SpawnKind::ReactivePolyline3D { .. }
                     | SpawnKind::LineSegments3D { .. }
             )
         }) {
@@ -4431,6 +4433,17 @@ impl SceneModel {
             points,
             colors: Some(colors),
         })
+    }
+
+    /// A 3D polyline whose coordinates are reactive sources, redrawn every
+    /// frame from their values, with one color per point when `colors`
+    /// matches `points` in length.
+    pub fn reactive_polyline_3d(
+        &mut self,
+        points: Vec<[gaanim_animation::ScalarSource; 3]>,
+        colors: Option<Vec<Color>>,
+    ) -> DrawableHandle {
+        self.spawn(SpawnKind::ReactivePolyline3D { points, colors })
     }
 
     pub(crate) fn line_segments_3d_with_colors(
