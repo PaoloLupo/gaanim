@@ -2801,12 +2801,41 @@ impl Anim {
         self.effect(AnimationType::SignalFloat { to: value })
     }
 
+    /// Why this drawable cannot transform into `target`, when either is a
+    /// 3D mesh: meshes morph only into meshes lit as they are.
+    fn mesh_transform_error(
+        &self,
+        target: &super::drawable::DrawableHandle,
+    ) -> Option<&'static str> {
+        let lit = |spec: &ObjectSpec| match &spec.kind {
+            SpawnKind::Primitive3D(mesh) => Some(mesh.material.is_some()),
+            SpawnKind::SurfaceMesh { .. } => Some(false),
+            _ => None,
+        };
+        let source = self
+            .property_spec
+            .as_ref()
+            .and_then(|spec| lit(&spec.lock().expect("object spec poisoned")));
+        let target = lit(&target.spec.lock().expect("object spec poisoned"));
+        match (source, target) {
+            (None, None) => None,
+            (Some(source), Some(target)) if source == target => None,
+            (Some(_), Some(_)) => Some(
+                "a lit 3D mesh transforms only into another lit one: give both a material, or neither",
+            ),
+            _ => Some("a 3D mesh transforms only into another 3D mesh"),
+        }
+    }
+
     pub fn transform_to(
         self,
         target: &super::drawable::DrawableHandle,
     ) -> Result<Self, &'static str> {
         if !self.belongs_to(&target.state) {
             return Err("transform targets must belong to the same Scene");
+        }
+        if let Some(error) = self.mesh_transform_error(target) {
+            return Err(error);
         }
         // Text to text is a structural transition: glyphs keep their own
         // (part) fills while shared semantic parts travel, instead of
@@ -2898,6 +2927,9 @@ impl Anim {
     ) -> Result<Self, &'static str> {
         if !self.belongs_to(&target.state) {
             return Err("transform targets must belong to the same Scene");
+        }
+        if let Some(error) = self.mesh_transform_error(target) {
+            return Err(error);
         }
         Ok(self.effect(AnimationType::ReplacementTransform { target: target.id }))
     }

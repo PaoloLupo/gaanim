@@ -11,6 +11,34 @@ indica también qué tienes que ajustar en tus escenas al actualizar. Para
 instalar una versión nueva, sigue
 #link("/empezar/instalacion/")[Instalación].
 
+= 0.17.0
+
+Sin publicar. Una malla 3D se transforma en otra con `animate.transform_to`.
+
+== Morph entre mallas 3D
+
+- `a.animate.transform_to(b)` entre dos mallas 3D (primitivas de
+  `scene.geometry`, `mesh`, `extrude` y `revolve`) transforma la malla de `a`
+  en la de `b` mientras `a` va a donde está `b`, con su giro, su tamaño, su
+  material y sus colores; `replacement_transform_to` muestra `b` al final.
+  Antes no cambiaba la malla. Ver
+  #link("/guias/camara-y-3d/#transformar-una-malla-en-otra")[Cámara y 3D].
+- Las dos mallas se muestrean en una rejilla común: por sus coordenadas de
+  textura cuando cubren la malla una sola vez (esfera, toro, plano,
+  `revolve`) y, si no, con rayos desde su centro (cubo, cilindro con tapas,
+  texto extruido). Los puntos se emparejan como menos se mueven, así que los
+  polos de una esfera se abren en el agujero de un toro. Antes y después del
+  morph cada malla se dibuja exacta.
+- Solo cuesta mientras dura: la malla cambia en cada fotograma y el paquete
+  `.gaanim` guarda su cambio. Las escenas sin morph 3D no hacen nada nuevo.
+- Nuevo ejemplo, `3d/morph_3d`.
+
+== Al actualizar
+
+- `transform_to` y `replacement_transform_to` entre una malla 3D y un objeto
+  que no lo es, o entre una malla con material y otra sin él, lanzan
+  `ValueError`. Antes la malla no cambiaba.
+
 = 0.16.1
 
 Sin publicar. Corrige detalles encontrados al hacer un video real: el

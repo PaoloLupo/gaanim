@@ -525,6 +525,11 @@ path = "3d/extrusion.py"
 description = "Text, equations, SVGs, shapes with holes and groups extruded into lit solids, with depth, bevel, tolerance and materials."
 
 [[example]]
+path = "3d/morph_3d.py"
+title = "3D morphs"
+description = "A mesh morphing into another with transform_to: spheres, tori and planes matched by their texture coordinates, cubes, cylinders and cones by rays from their center, and one mesh morphing through three targets in turn."
+
+[[example]]
 path = "3d/shapes_3d.py"
 description = "Tori, arrows between two points, tubes along open, creased and closed paths, flat sheets of text, equations and shapes, and lit lines between points or the drawables they follow."
 

@@ -1193,6 +1193,13 @@ pub struct SceneBuilder<'w, 's, 'a> {
     /// 3D lines between endpoints, which `Create` and `Uncreate` grow and
     /// retract through their progress.
     pub(crate) lines_3d: HashSet<ObjectId>,
+    /// The meshes of the 3D drawables a transform morphs from or into, as
+    /// they are when the transform runs: a morph leaves its source with the
+    /// target's mesh.
+    pub(crate) morph_meshes: HashMap<ObjectId, std::sync::Arc<TriangleMeshData>>,
+    /// Authored ids of the drawables some transform morphs, whose meshes
+    /// compiling them keeps in `morph_meshes`; set before each compile.
+    pub(crate) morph_mesh_ids: HashSet<ObjectId>,
     /// Objects a clip mask cuts: their content may leave their box.
     pub(crate) clipped: HashSet<ObjectId>,
     /// Extra glyph tracking of Text roots set by `tracking(...)`, in scene units.
@@ -1337,6 +1344,7 @@ pub(crate) struct SceneBuilderState {
     arc_slices: HashMap<ObjectId, ArcSliceMark>,
     connectors: HashSet<ObjectId>,
     lines_3d: HashSet<ObjectId>,
+    morph_meshes: HashMap<ObjectId, std::sync::Arc<TriangleMeshData>>,
     clipped: HashSet<ObjectId>,
     text_tracking: HashMap<ObjectId, f64>,
     motion_blur_windows: Vec<(f64, f64, gaanim_renderer::effects::MotionBlur)>,
@@ -1394,6 +1402,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arc_slices: self.arc_slices.clone(),
             connectors: self.connectors.clone(),
             lines_3d: self.lines_3d.clone(),
+            morph_meshes: self.morph_meshes.clone(),
             clipped: self.clipped.clone(),
             text_tracking: self.text_tracking.clone(),
             text_paths: self.text_paths.clone(),
@@ -1452,6 +1461,7 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arc_slices,
             connectors,
             lines_3d,
+            morph_meshes,
             clipped,
             text_tracking,
             text_paths,
@@ -1513,6 +1523,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arc_slices,
             connectors,
             lines_3d,
+            morph_meshes,
+            morph_mesh_ids: HashSet::new(),
             clipped,
             text_tracking,
             text_paths,
@@ -2018,6 +2030,8 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             arc_slices: HashMap::new(),
             connectors: HashSet::new(),
             lines_3d: HashSet::new(),
+            morph_meshes: HashMap::new(),
+            morph_mesh_ids: HashSet::new(),
             clipped: HashSet::new(),
             text_tracking: HashMap::new(),
             text_paths: HashMap::new(),
@@ -4342,7 +4356,13 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
                 state.stroke.style.width = to;
                 PropertyLensSpec::StrokeWidth { from, to }
             }
-            AnimationType::Material3DTo { from, to } => PropertyLensSpec::Material3D { from, to },
+            AnimationType::Material3DTo { from, to } => {
+                // A later morph starts from the material this one ends on.
+                if let Some(mesh) = self.morph_meshes.get_mut(&anim.target) {
+                    std::sync::Arc::make_mut(mesh).material = Some(to);
+                }
+                PropertyLensSpec::Material3D { from, to }
+            }
             AnimationType::MediaFrameTo { from, to } => {
                 let from = self.media_frames.get(&anim.target).copied().unwrap_or(from);
                 self.media_frames.insert(
@@ -5643,6 +5663,22 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
             }
         }
 
+        // Two 3D meshes morph one into the other.
+        if let (Some(from), Some(to)) = (
+            self.morph_meshes.get(&anim.target).cloned(),
+            self.morph_meshes.get(&target).cloned(),
+        ) {
+            self.play_mesh_morph(
+                &anim,
+                target,
+                is_replacement,
+                parent_track,
+                (&source_state, &target_state),
+                (from, to),
+            );
+            return;
+        }
+
         // A hierarchy whose root draws nothing itself (a chart or a group)
         // has no flattened proxy to morph; replace it leaf by leaf instead.
         if is_replacement && source_state.path.elements().is_empty() && source_has_children {
@@ -5968,6 +6004,179 @@ impl<'w, 's, 'a> SceneBuilder<'w, 's, 'a> {
         if !is_replacement && let Some(metrics) = target_text_metrics {
             self.text_metrics.insert(anim.target, metrics);
         }
+    }
+
+    /// Where a transform in 3D leaves its source: the target's place, turn
+    /// and size in the source's parent's frame, about the source's pivot.
+    fn landing_transform_3d(
+        &self,
+        source: &MobjectState,
+        target: ObjectId,
+        target_state: &MobjectState,
+    ) -> SpatialTransform {
+        let local = if source.parent == target_state.parent {
+            target_state.transform.to_mat4()
+        } else {
+            let parent = source
+                .parent
+                .map_or(gaanim_core::glam::DMat4::IDENTITY, |parent| {
+                    self.world_matrix_3d(parent)
+                });
+            parent.inverse() * self.world_matrix_3d(target)
+        };
+        let (scale, rotation, translation) = local.to_scale_rotation_translation();
+        let pivot = source.transform.anchor;
+        SpatialTransform {
+            translation: translation - pivot + rotation * (scale * pivot),
+            rotation,
+            scale,
+            anchor: pivot,
+            ..SpatialTransform::default()
+        }
+    }
+
+    /// A transform between two 3D meshes: the source's mesh morphs into
+    /// the target's (see [`crate::mesh_morph`]) while the source moves,
+    /// turns and grows to the target's place and its material and colors
+    /// blend into the target's. The target is a template and stays hidden,
+    /// but for a replacement, which shows it at the end instead of the
+    /// source.
+    fn play_mesh_morph(
+        &mut self,
+        anim: &AnimationBuilder,
+        target: ObjectId,
+        is_replacement: bool,
+        track: TrackId,
+        (source_state, target_state): (&MobjectState, &MobjectState),
+        (from, to): (
+            std::sync::Arc<TriangleMeshData>,
+            std::sync::Arc<TriangleMeshData>,
+        ),
+    ) {
+        let start = self.current_time + anim.delay.max(0.0);
+        let end = start + anim.duration;
+        let spec = |target, lens, rate_func: &gaanim_math::RateFunc| {
+            ClipPayload::Animation(AnimationSpec {
+                target,
+                lens,
+                rate_func: rate_func.clone(),
+                delay: 0.0,
+                label: None,
+            })
+        };
+        let instant = |target, from: f32, to: f32| {
+            spec(
+                target,
+                PropertyLensSpec::Opacity { from, to },
+                &gaanim_math::RateFunc::Linear,
+            )
+        };
+
+        self.hide_visuals_now(target_state);
+        self.timeline.add_clip(
+            track,
+            start,
+            0.0,
+            instant(target, target_state.opacity, 0.0),
+        );
+
+        let lens = crate::mesh_morph::MeshMorphLens::new(from.clone(), to.clone());
+        self.timeline.add_clip(
+            track,
+            start,
+            anim.duration,
+            ClipPayload::Animation(AnimationSpec {
+                target: anim.target,
+                lens: PropertyLensSpec::Dynamic(gaanim_animation::tween::DynamicLens(
+                    std::sync::Arc::new(lens),
+                )),
+                rate_func: anim.rate_func.clone(),
+                delay: 0.0,
+                label: self.current_label.clone(),
+            }),
+        );
+
+        let landing = self.landing_transform_3d(source_state, target, target_state);
+        let place = [
+            PropertyLensSpec::Translation {
+                from: source_state.transform.translation,
+                to: landing.translation,
+            },
+            PropertyLensSpec::Rotation {
+                from: source_state.transform.rotation,
+                to: landing.rotation,
+            },
+            PropertyLensSpec::Scale {
+                from: source_state.transform.scale,
+                to: landing.scale,
+            },
+        ];
+        for lens in place {
+            self.timeline.add_clip(
+                track,
+                start,
+                anim.duration,
+                spec(anim.target, lens, &anim.rate_func),
+            );
+        }
+        if let (Some(from), Some(to)) = (from.material, to.material)
+            && from != to
+        {
+            self.timeline.add_clip(
+                track,
+                start,
+                anim.duration,
+                spec(
+                    anim.target,
+                    PropertyLensSpec::Material3D { from, to },
+                    &anim.rate_func,
+                ),
+            );
+        }
+        // The color of an unlit mesh without vertex colors is its fill.
+        self.schedule_paint_morph(
+            track,
+            anim.target,
+            (source_state, target_state),
+            start,
+            anim.duration,
+            &anim.rate_func,
+        );
+
+        if is_replacement {
+            let shown = target_state.opacity;
+            self.timeline.add_clip(
+                track,
+                start,
+                anim.duration,
+                spec(
+                    anim.target,
+                    PropertyLensSpec::Opacity {
+                        from: source_state.opacity,
+                        to: shown,
+                    },
+                    &anim.rate_func,
+                ),
+            );
+            self.timeline.add_clip(
+                track,
+                end,
+                0.0,
+                instant(anim.target, source_state.opacity, 0.0),
+            );
+            self.timeline
+                .add_clip(track, end, 0.0, instant(target, 0.0, shown));
+        }
+
+        if let Some(state) = self.states.get_mut(anim.target) {
+            state.transform = landing;
+            state.bounds = target_state.bounds;
+            state.fill = target_state.fill.clone();
+            if is_replacement {
+                state.opacity = 0.0;
+            }
+        }
+        self.morph_meshes.insert(anim.target, to);
     }
 
     /// Schedule the fill and stroke paint clips that morph `target` from the
