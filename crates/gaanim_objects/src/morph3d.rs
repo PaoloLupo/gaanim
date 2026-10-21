@@ -191,14 +191,18 @@ fn sample(mesh: &TriangleMeshData) -> Option<Grid> {
     let normals = vertex_normals(mesh, &positions, &triangles);
     let colors = mesh
         .colors
-        .as_ref()
+        .as_deref()
         .filter(|colors| colors.len() == positions.len());
     let finish = |hits: Vec<Option<Hit>>, sampling| {
         let hits = fill_gaps(hits)?;
         Some(resolve(
             &hits,
             &triangles,
-            (&positions, &normals, colors),
+            Vertices {
+                positions: &positions,
+                normals: &normals,
+                colors,
+            },
             sampling,
         ))
     };
@@ -620,10 +624,21 @@ fn fill_gaps(mut hits: Vec<Option<Hit>>) -> Option<Vec<Hit>> {
     hits.into_iter().collect()
 }
 
+/// What a mesh's vertices hold that its grid samples.
+struct Vertices<'a> {
+    positions: &'a [Vec3],
+    normals: &'a [Vec3],
+    colors: Option<&'a [[f32; 4]]>,
+}
+
 fn resolve(
     hits: &[Hit],
     triangles: &[[usize; 3]],
-    (positions, normals, colors): (&[Vec3], &[Vec3], Option<&Vec<[f32; 4]>>),
+    Vertices {
+        positions,
+        normals,
+        colors,
+    }: Vertices<'_>,
     sampling: Sampling,
 ) -> Grid {
     let blend = |hit: &Hit, values: &dyn Fn(usize) -> Vec3| {
