@@ -2427,7 +2427,7 @@ scene.render()
     (name: "absolute", type: "bool", default: "False", desc: [Las muestras de traslación y de `rotation` son posiciones y ángulos propios (`offset + scale * muestra`), en coordenadas del padre (de la escena para un objeto de primer nivel), en lugar de sumarse a la pose declarada. Útil cuando ya calculaste la trayectoria. Los demás canales ya son absolutos.]),
   ),
   returns: (type: "Drawable", desc: [El mismo objeto.]),
-  desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`), salvo con `absolute=True`; `scale`, `opacity` y `signal` son absolutos. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Antes de ese cursor la serie no toca el canal, que sigue con lo que lo animara antes: un `fade_in` seguido de una serie de `"opacity"` se ve entero. Después de su última muestra mantiene la última. Cada canal es independiente; volver a mover el mismo canal toma el relevo desde el nuevo cursor, o reemplaza la serie declarada en el mismo cursor. `remove_updater()` lo quita. Con `"orientation"` las muestras son orientaciones absolutas, sin `scale` ni `offset`: sirve para un sólido rígido simulado, sea cual sea la convención de ángulos que lo calculó, sin Python en cada fotograma. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],
+  desc: [Mueve el canal como función pura del tiempo, evaluada en Rust, sin llamar a Python en cada fotograma. Los ejes de traslación y `rotation` son relativos a la pose declarada (`base + offset + scale * muestra`), salvo con `absolute=True`; `scale`, `opacity` y `signal` son absolutos. Los tiempos cuentan desde el cursor donde se llama: una serie declarada después de `scene.wait(2.0)` reproduce su muestra `t = 0` a los dos segundos. Antes de ese cursor la serie no toca el canal, que sigue con lo que lo animara antes: un `fade_in` seguido de una serie de `"opacity"` se ve entero. Después de su última muestra mantiene la última. Cada canal es independiente; volver a mover el mismo canal toma el relevo desde el nuevo cursor, o reemplaza la serie declarada en el mismo cursor. `remove_updater()` lo quita. Las traslaciones van en las unidades del padre: en un nodo de un modelo glTF (`part`), en las del archivo, así que el `scale_to` del modelo escala también el movimiento. Con `"orientation"` las muestras son orientaciones absolutas, sin `scale` ni `offset`: sirve para un sólido rígido simulado, sea cual sea la convención de ángulos que lo calculó, sin Python en cada fotograma. `Parameter.drive_from_samples(times, values, *, ...)` hace lo mismo con la señal de un parámetro.],
 )[
 ```python
 >>>import math
@@ -2833,10 +2833,25 @@ perspectiva. Las rotaciones de Euler usan orden XYZ y radianes.
 #api-entry(
   name: "Anim.rotate_to_3d",
   kind: "method",
-  params: ((name: "x, y, z", type: "ScalarSource", default: none, desc: [Orientación de Euler XYZ absoluta, en radianes.]),),
+  params: ((name: "x, y, z", type: "ScalarSource", default: none, desc: [Orientación de Euler XYZ absoluta, en radianes, compuesta como en `Drawable.rotate_to_3d`.]),),
   returns: (type: "Anim", desc: [Giro a una orientación.]),
   none,
 )
+
+#api-entry(
+  name: "Anim.orient_3d",
+  kind: "method",
+  params: ((name: "x_axis, y_axis", type: "tuple[float, float, float]", default: none, desc: [Direcciones del mundo de los ejes x e y locales, como en `Drawable.orient_3d`.]),),
+  returns: (type: "Anim", desc: [Giro por el camino más corto hasta esa orientación.]),
+  desc: [Ejes nulos, no finitos o paralelos lanzan `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+card = scene.geometry.rect(3, 2).in_3d()
+scene.play(card.animate.orient_3d((0, 0, -1), (-1, 0, 0)), duration=1.5)
+```
+]
 
 #api-entry(
   name: "Anim.rotate_by_3d",

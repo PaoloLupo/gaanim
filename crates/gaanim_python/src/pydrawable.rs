@@ -878,6 +878,18 @@ impl PyCanvasAnim {
         source_anim(self, PropertySources::Rotation(values))
     }
 
+    fn orient_3d(&self, x_axis: (f64, f64, f64), y_axis: (f64, f64, f64)) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_native_animation()?;
+        self.require_transformable()?;
+        self.require_property_slot("orient_3d")?;
+        self.inner
+            .clone()
+            .orient_3d(x_axis.into(), y_axis.into())
+            .map(|inner| Self { inner })
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
     fn fade_in(&self) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_native_animation()?;
@@ -2786,6 +2798,20 @@ impl PyDrawable {
         binding_result(self, PropertySources::Rotation(values))
     }
 
+    pub(crate) fn orient_3d_impl(
+        &self,
+        x_axis: (f64, f64, f64),
+        y_axis: (f64, f64, f64),
+    ) -> PyResult<Self> {
+        crate::custom::ensure_authoring_allowed()?;
+        self.require_free_shape("orient_3d")?;
+        self.0
+            .clone()
+            .orient_3d(x_axis.into(), y_axis.into())
+            .map(Self)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
     pub(crate) fn rotate_by_impl(&self, radians: f64) -> PyResult<Self> {
         crate::custom::ensure_authoring_allowed()?;
         self.require_free_shape("rotate_by")?;
@@ -4090,6 +4116,14 @@ impl PyDrawable {
         z: &Bound<'_, PyAny>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let result = slf.borrow().rotate_to_3d_impl(x, y, z);
+        same_drawable(slf, result)
+    }
+    fn orient_3d<'py>(
+        slf: &Bound<'py, Self>,
+        x_axis: (f64, f64, f64),
+        y_axis: (f64, f64, f64),
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let result = slf.borrow().orient_3d_impl(x_axis, y_axis);
         same_drawable(slf, result)
     }
     fn rotate_by<'py>(slf: &Bound<'py, Self>, radians: f64) -> PyResult<Bound<'py, PyAny>> {

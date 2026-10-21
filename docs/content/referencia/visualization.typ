@@ -293,9 +293,14 @@ y = Axis.linear(0, 1).label("valor relativo", position="center")
 #api-entry(
   name: "Axis.crossing",
   kind: "method",
-  desc: [Dónde cruza este eje al otro: `"auto"`, `"zero"`, `"min"`, `"max"` o un valor de datos.],
-  none,
-)
+  desc: [El valor de este eje por el que pasa el otro: `"auto"`, `"zero"`, `"min"`, `"max"` o un valor de datos. Así, `crossing("min")` en el eje y baja el eje x al borde inferior del plano, y en el eje x lleva el eje y al borde izquierdo. `"auto"`, el predeterminado, es el cero si el dominio lo contiene y, si no, el extremo más cercano; un número fuera del dominio se acota a él.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+plane = scene.viz.cartesian_2d(Axis.linear(0, 10), Axis.linear(-60, 60).crossing("min"))
+```
+]
 
 #api-entry(
   name: "Axis.style",

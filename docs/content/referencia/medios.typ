@@ -168,7 +168,7 @@ scene.render()
 #api-entry(
   name: "Drawable.part",
   kind: "method",
-  desc: [Devuelve la parte con ese `id` de un SVG, o el nodo con ese nombre de un modelo glTF, como un `Drawable` propio. Los nombres distinguen mayúsculas; un nombre desconocido lanza `KeyError` con la lista de nombres disponibles, y un objeto sin partes, `ValueError`. El estilo de un grupo llega a todos sus caminos.],
+  desc: [Devuelve la parte con ese `id` de un SVG, o el nodo con ese nombre de un modelo glTF, como un `Drawable` propio. Los nombres distinguen mayúsculas; un nombre desconocido lanza `KeyError` con la lista de nombres disponibles, y un objeto sin partes, `ValueError`. El estilo de un grupo llega a todos sus caminos. Un nodo de glTF se mueve, gira y escala en el marco de su nodo padre, en las unidades del archivo: el `scale_to` del modelo escala también sus movimientos, también los de `drive_from_samples`.],
 )[
 ```python
 >>>from gaanim import *

@@ -18579,6 +18579,34 @@ mod tests {
             .1
     }
 
+    /// `orient_3d` points the local axes where it is told, set or animated.
+    #[test]
+    fn orient_3d_points_the_local_axes_along_the_given_directions() {
+        let mut canvas = SceneModel::new(640, 360);
+        let laid = canvas
+            .rect(2.0, 1.0)
+            .orient_3d(DVec3::NEG_Z, DVec3::NEG_X)
+            .unwrap();
+        let turned = canvas.rect(2.0, 1.0);
+        assert!(turned.clone().orient_3d(DVec3::X, DVec3::X).is_err());
+        canvas.play(vec![
+            turned
+                .animate()
+                .orient_3d(DVec3::Y, DVec3::NEG_X)
+                .unwrap()
+                .duration(1.0),
+        ]);
+        let (mut world, mut timeline) = compiled_world(&canvas);
+        timeline.seek(&mut world, 0.0);
+        let rotation = transform_of(&mut world, &laid).rotation;
+        assert!((rotation * DVec3::X - DVec3::NEG_Z).length() < 1e-9);
+        assert!((rotation * DVec3::Y - DVec3::NEG_X).length() < 1e-9);
+        timeline.seek(&mut world, 1.5);
+        let rotation = transform_of(&mut world, &turned).rotation;
+        assert!((rotation * DVec3::X - DVec3::Y).length() < 1e-9);
+        assert!((rotation * DVec3::Y - DVec3::NEG_X).length() < 1e-9);
+    }
+
     #[test]
     fn a_boolean_keeps_the_look_its_first_operand_had_when_it_was_made() {
         use gaanim_core::peniko::{Brush, Color};

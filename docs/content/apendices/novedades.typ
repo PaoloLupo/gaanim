@@ -17,6 +17,19 @@ Sin publicar. Corrige seis detalles encontrados al hacer un video real: el
 rótulo del cero de los ejes con pasos decimales, el giro de la cámara al
 cambiar `up`, el color de `traced_path_3d`, `wipe` dentro de `in_3d`, el
 tamaño de `gaanim export` con solo `--width` y el espaciado de las lecturas.
+`orient_3d` orienta un objeto en 3D dando las direcciones de sus ejes.
+
+== Cambios
+
+- `Drawable.orient_3d(x_axis, y_axis)` y `.animate.orient_3d(...)` orientan un
+  objeto dando hacia dónde apuntan sus ejes x e y locales, sin buscar los
+  ángulos de `rotate_to_3d`: `orient_3d((0, 0, -1), (-1, 0, 0))` tiende una
+  gráfica `in_3d` en el suelo con su eje x hacia −z.
+- La referencia dice en qué orden se componen los ángulos de `rotate_to_3d`
+  (`Rx · Ry · Rz`: primero z, luego y, luego x, sobre los ejes del mundo),
+  qué eje mueve `Axis.crossing` (`crossing("min")` en el eje y baja el eje x)
+  y que un nodo de glTF se mueve en las unidades del archivo, que escalan con
+  el `scale_to` del modelo.
 
 == Correcciones
 

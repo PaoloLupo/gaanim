@@ -1953,9 +1953,21 @@ class Anim:
     def rotate_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Anim:
         """Target an absolute XYZ Euler orientation in radians.
 
-        Reactive targets are evaluated at the clip start and frozen for this
-        interpolation. An already linked target channel must first be fixed
-        with a numeric setter, or animated through its Parameter.
+        The angles compose as in ``Drawable.rotate_to_3d``. Reactive targets
+        are evaluated at the clip start and frozen for this interpolation. An
+        already linked target channel must first be fixed with a numeric
+        setter, or animated through its Parameter.
+        """
+        ...
+    def orient_3d(self, x_axis: tuple[float, float, float], y_axis: tuple[float, float, float]) -> Anim:
+        """Turn to the orientation that points the local x and y axes along world directions.
+
+        Takes the axes as ``Drawable.orient_3d`` does and turns along the
+        shortest arc. Axes that are zero, not finite or parallel raise
+        ``ValueError``.
+
+        Example:
+            scene.play(card.animate.orient_3d((0, 0, -1), (-1, 0, 0)), duration=1.5)
         """
         ...
     def place(self, target: Zone | Drawable, *, anchor: Optional[AnchorName | Anchor] = None, fit: Optional[Fit] = None, padding: Optional[Padding] = None, offset: Optional[tuple[Length, Length]] = None) -> Anim:
@@ -3759,7 +3771,9 @@ class Drawable:
         """Return a named SVG part, or a node of a glTF model, by its name.
 
         A glTF node without a name is ``node<index>``; a name two nodes share
-        takes ``#<index>`` after it. ``parts()`` lists them.
+        takes ``#<index>`` after it. ``parts()`` lists them. A node moves,
+        turns and scales in the frame of its parent node, in the file's
+        units: ``scale_to`` on the model scales its moves too.
 
         Example:
             head = wolf.part("Head")
@@ -4954,6 +4968,14 @@ class Drawable:
     def rotate_to_3d(self, x: ScalarSource, y: ScalarSource, z: ScalarSource) -> Self:
         """Apply Euler rotation in radians and preserve the specialized handle.
 
+        The angles compose as ``Rx(x) · Ry(y) · Rz(z)`` acting on the
+        drawable's points: it turns ``z`` about the world z axis first, then
+        ``y`` about the world y axis, then ``x`` about the world x axis. A
+        positive angle turns counterclockwise looking down the axis toward
+        the origin, so ``rotate_to_3d(-math.pi / 2, 0, 0)`` lays a 2D drawable
+        on the ground (y up), facing up. ``orient_3d`` sets the same
+        orientation from the directions of its axes instead.
+
         Example:
             label = scene.text("axis").rotate_to_3d(0.0, 0.0, 0.5)
 
@@ -4962,6 +4984,21 @@ class Drawable:
         source replaces it and a numeric setter ends the binding reversibly.
         Sources must belong to this Scene. Animate the source Parameter while
         linked; direct animation or relative writes to this channel error.
+        """
+        ...
+    def orient_3d(self, x_axis: tuple[float, float, float], y_axis: tuple[float, float, float]) -> Self:
+        """Turn the drawable so its local x and y axes point along world directions.
+
+        ``x_axis`` is where its local x axis points and ``y_axis`` where its
+        local y axis points, squared to ``x_axis`` within the plane both
+        span; their lengths do not matter. Its local z axis, the side a 2D
+        drawable faces, ends along ``x_axis × y_axis``. This sets the
+        orientation ``rotate_to_3d`` would, without working out its angles;
+        ``.animate.orient_3d`` turns to it. Axes that are zero, not finite or
+        parallel raise ``ValueError``. Chainable; returns the same handle.
+
+        Example:
+            chart.drawable().in_3d().orient_3d(x_axis=(0, 0, -1), y_axis=(-1, 0, 0))
         """
         ...
     def with_pivot(self, x: float, y: float) -> Self:
@@ -5147,7 +5184,9 @@ class Drawable:
         an independent channel: driving ``"x"`` and then ``"y"`` keeps both,
         while driving the same property again takes over from the new cursor
         (or replaces a series made at the same cursor). Detach with
-        ``remove_updater()``.
+        ``remove_updater()``. Translations are in the units of the drawable's
+        parent: for a node of a glTF model (``part``), the file's units, so
+        the model's ``scale_to`` scales the motion too.
 
         Example:
             times = [i * 0.02 for i in range(len(accel))]
@@ -7061,7 +7100,18 @@ class Axis:
         ``bottom`` are aliases for vertical-axis endpoints.
         """
         ...
-    def crossing(self, value: Literal["auto", "zero", "min", "max", "minimum", "maximum"] | float) -> Axis: ...
+    def crossing(self, value: Literal["auto", "zero", "min", "max", "minimum", "maximum"] | float) -> Axis:
+        """Set the value along this axis where the other axis passes.
+
+        ``"min"`` on the y axis puts the x axis at the bottom of the plane,
+        and on the x axis puts the y axis at its left edge. ``"auto"`` (the
+        default) is zero when the domain holds it, else the end nearest to
+        it; a number is clamped to the domain. Returns a new ``Axis``.
+
+        Example:
+            plane = scene.viz.cartesian_2d(Axis.linear(0, 10), Axis.linear(-60, 60).crossing("min"))
+        """
+        ...
     def style(
         self,
         *,
