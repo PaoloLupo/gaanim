@@ -2444,6 +2444,30 @@ scene.wait(4.0)
 ```
 ]
 
+#api-entry(
+  name: "Scene.drive_from_samples",
+  kind: "method",
+  signature: "drive_from_samples(times, values, property=\"x\", *, targets, interpolation=\"linear\", offset=0.0, absolute=False) -> None",
+  params: (
+    (name: "targets", type: "Sequence[tuple[Drawable, float]]", default: none, desc: [Pares `(objeto, escala)`: cada objeto sigue la serie con su propia escala.]),
+    (name: "times, values, property, interpolation, offset, absolute", type: "—", default: "—", desc: [Como en `Drawable.drive_from_samples`, para `"x"`, `"y"`, `"z"`, `"rotation"`, `"scale"` y `"opacity"`.]),
+  ),
+  desc: [Conduce varios objetos con una misma serie, cada uno con su escala, como si a cada uno se le llamara `drive_from_samples(times, values, property, scale=escala, offset=offset, absolute=absolute)`; pero la serie se valida y se guarda una vez y la comparten todos. Sirve, por ejemplo, para mover los pisos de un edificio con la forma de un modo: un piso por nodo de un modelo glTF, cada uno con su factor. `targets` vacío, la propiedad `"signal"` (usa `Parameter.drive_from_samples`), una escala no finita o una serie inválida lanzan `ValueError`.],
+)[
+```python
+>>>import math
+>>>drift = [0.3 * math.sin(0.2 * i) for i in range(200)]
+from gaanim import Scene
+
+scene = Scene(frame=(16, 9))
+times = [i * 0.02 for i in range(len(drift))]
+floors = [scene.geometry.rect(3, 0.3).move_to(0, -3 + 0.6 * i) for i in range(8)]
+# Cada piso se desplaza con su factor de la forma modal.
+scene.drive_from_samples(times, drift, "x", targets=[(floor, (i + 1) / 8) for i, floor in enumerate(floors)])
+scene.wait(4.0)
+```
+]
+
 Para un ejemplo con varilla, cota y estela, consulta
 `examples/mechanics/simulations.py` en el repositorio de Gaanim.
 

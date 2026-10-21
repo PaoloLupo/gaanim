@@ -11871,6 +11871,32 @@ class Scene:
             scene.play([scene.camera.animate.pan_to(6, 0).duration(3)])
         """
         ...
+    def drive_from_samples(
+        self,
+        times: Sequence[float],
+        values: Sequence[float],
+        property: Literal["x", "y", "z", "rotation", "scale", "opacity"] = "x",
+        *,
+        targets: Sequence[tuple[Drawable, float]],
+        interpolation: Literal["linear", "step"] = "linear",
+        offset: float = 0.0,
+        absolute: bool = False,
+    ) -> None:
+        """Drive several drawables along one sampled series, each at its own scale.
+
+        Each ``(drawable, scale)`` in ``targets`` is driven as
+        ``drawable.drive_from_samples(times, values, property, scale=scale,
+        offset=offset, absolute=absolute)`` would drive it, but the series is
+        checked and kept once and shared by every target: the floors of a
+        building moving with one mode shape, each by its own factor, without
+        copying a long series per floor. Empty ``targets``, the ``"signal"``
+        property, a non-finite scale or an invalid series raise
+        ``ValueError``.
+
+        Example:
+            scene.drive_from_samples(times, drift, "x", targets=[(model.part(f"floor_{i}"), phi[i]) for i in range(8)])
+        """
+        ...
     def z_layers(self, *names: str, default: Optional[str] = None) -> None:
         """Name the scene's draw layers, from the back to the front.
 

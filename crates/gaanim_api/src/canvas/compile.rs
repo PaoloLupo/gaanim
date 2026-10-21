@@ -24885,6 +24885,51 @@ mod tests {
         assert!(driver.base.is_none());
     }
 
+    /// One series drives several drawables, each at its own scale, and is
+    /// kept once.
+    #[test]
+    fn one_series_drives_each_target_at_its_scale() {
+        use gaanim_animation::{SampledInterpolation, SampledProperty};
+
+        let mut canvas = SceneModel::new(640, 360);
+        let low = canvas.rect(1.0, 1.0);
+        let high = canvas.rect(1.0, 1.0);
+        assert!(
+            DrawableHandle::drive_each_from_samples(
+                &[(&low, f64::NAN)],
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                SampledProperty::TranslateX,
+                SampledInterpolation::Linear,
+                0.0,
+                false,
+            )
+            .is_err()
+        );
+        DrawableHandle::drive_each_from_samples(
+            &[(&low, 0.5), (&high, 2.0)],
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            SampledProperty::TranslateX,
+            SampledInterpolation::Linear,
+            0.0,
+            false,
+        )
+        .unwrap();
+        let mut world = compile_canvas_for_layout(canvas);
+        let drivers: Vec<_> = world
+            .query::<&gaanim_animation::SampledSeriesDrivers>()
+            .iter(&world)
+            .map(|drivers| drivers.get(SampledProperty::TranslateX).unwrap().clone())
+            .collect();
+        assert_eq!(drivers.len(), 2);
+        let mut scales: Vec<f64> = drivers.iter().map(|driver| driver.scale).collect();
+        scales.sort_by(f64::total_cmp);
+        assert_eq!(scales, vec![0.5, 2.0]);
+        assert!(Arc::ptr_eq(&drivers[0].values, &drivers[1].values));
+        assert!(Arc::ptr_eq(&drivers[0].times, &drivers[1].times));
+    }
+
     /// Bars of a leaderboard, named after their player, grouped in rank order.
     fn magic_move_board(canvas: &mut SceneModel, rows: &[(&str, f64)]) -> DrawableHandle {
         let bars: Vec<DrawableHandle> = rows

@@ -3147,6 +3147,37 @@ impl DrawableHandle {
         Ok(self.attach_sampled_series(driver))
     }
 
+    /// Drive each of `targets` along one sampled series at its own scale,
+    /// as [`Self::drive_from_samples`] (or, with `absolute`,
+    /// [`Self::drive_absolute_from_samples`]) drives one drawable: the
+    /// times and values are validated and kept once, and shared by every
+    /// target. A non-finite scale is rejected before any target is driven.
+    pub fn drive_each_from_samples(
+        targets: &[(&DrawableHandle, f64)],
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: SampledProperty,
+        interpolation: SampledInterpolation,
+        offset: f64,
+        absolute: bool,
+    ) -> Result<(), InvalidSampledSeries> {
+        if targets.iter().any(|(_, scale)| !scale.is_finite()) {
+            return Err(InvalidSampledSeries);
+        }
+        let mut driver =
+            SampledSeriesDriver::new(times, values, property, interpolation, 1.0, offset)?;
+        if absolute {
+            driver = driver.absolute();
+        }
+        for (target, scale) in targets {
+            target.attach_sampled_series(SampledSeriesDriver {
+                scale: *scale,
+                ..driver.clone()
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) fn attach_sampled_series(&self, driver: SampledSeriesDriver) -> Self {
         let driven = matches!(driver.property, SampledProperty::Signal).then(|| {
             driver

@@ -136,7 +136,7 @@ fn free_channel(
     }
 }
 
-fn parse_sampled_property(value: &str) -> PyResult<gaanim_animation::SampledProperty> {
+pub(crate) fn parse_sampled_property(value: &str) -> PyResult<gaanim_animation::SampledProperty> {
     match value {
         "x" => Ok(gaanim_animation::SampledProperty::TranslateX),
         "y" => Ok(gaanim_animation::SampledProperty::TranslateY),

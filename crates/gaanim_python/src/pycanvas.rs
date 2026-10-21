@@ -7426,6 +7426,53 @@ impl PyScene {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
+    /// Drive several drawables along one sampled series, each at its own
+    /// scale, as `Drawable.drive_from_samples` drives one.
+    #[pyo3(signature = (times, values, property = "x", *, targets, interpolation = "linear", offset = 0.0, absolute = false))]
+    #[allow(clippy::too_many_arguments)]
+    fn drive_from_samples(
+        &self,
+        times: Vec<f64>,
+        values: Vec<f64>,
+        property: &str,
+        targets: Vec<(PyRef<'_, PyDrawable>, f64)>,
+        interpolation: &str,
+        offset: f64,
+        absolute: bool,
+    ) -> PyResult<()> {
+        crate::custom::ensure_authoring_allowed()?;
+        let property = crate::pydrawable::parse_sampled_property(property)?;
+        if matches!(property, gaanim_animation::SampledProperty::Signal) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "property 'signal' drives a Parameter; use Parameter.drive_from_samples",
+            ));
+        }
+        let interpolation = crate::pydrawable::parse_sampled_interpolation(interpolation)?;
+        if targets.is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "targets must name at least one (drawable, scale) pair",
+            ));
+        }
+        let targets: Vec<(&gaanim_api::canvas::DrawableHandle, f64)> = targets
+            .iter()
+            .map(|(target, scale)| (&target.0, *scale))
+            .collect();
+        gaanim_api::canvas::DrawableHandle::drive_each_from_samples(
+            &targets,
+            times,
+            values,
+            property,
+            interpolation,
+            offset,
+            absolute,
+        )
+        .map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err(
+                "drive_from_samples requires non-empty matching times/values, finite values,                  scales and offset, and non-decreasing times",
+            )
+        })
+    }
+
     /// Keep one or more drawables available across future segments.
     #[pyo3(signature = (object, *others))]
     fn persist(&self, object: &PyDrawable, others: &Bound<'_, PyTuple>) -> PyResult<()> {
