@@ -5196,6 +5196,7 @@ impl SceneModel {
                         };
                         const OVERFLOW: &str = "content leaves its box";
                         const OVERLAP: &str = "overlaps the box before it";
+                        const WRAPS: &str = "the row leaves less than a line";
                         // Where to look: the box, the text it holds, and the
                         // segment and time it is laid out at.
                         let at = format!(
@@ -5278,12 +5279,44 @@ impl SceneModel {
                                 }
                             }
                         }
+                        // A row that leaves a text less than one line breaks
+                        // it, which a text that did not choose a width to wrap
+                        // at rarely means: usually the row holds too much.
+                        if matches!(kind, Some(gaanim_layout::LayoutNodeKind::Row { .. })) {
+                            let wrapped: Vec<String> = placed
+                                .iter()
+                                .filter(|(child, bounds, _)| {
+                                    tree.texts.get(child).is_some_and(|text| {
+                                        matches!(text.spec.flow.wrap, StructuredTextWrap::Auto)
+                                    }) && matches!(
+                                        measurer.final_composition(*child, bounds.width()),
+                                        Some(TextComposition::Wrapped { .. })
+                                    )
+                                })
+                                .filter_map(|(child, ..)| layout_text_excerpt(&tree, *child))
+                                .map(|text| format!("\"{text}\""))
+                                .collect();
+                            if let Some(first) = wrapped.first() {
+                                let (which, breaks) = match wrapped.len() {
+                                    1 => (format!("text {first}"), "it breaks"),
+                                    count => (format!("{count} texts, from {first}"), "they break"),
+                                };
+                                reports.push(format!(
+                                    "{} {at}: {WRAPS} to {which}, so {breaks} onto more lines; \
+                                     give the row room (fewer items, a smaller size), or choose \
+                                     the width a text wraps at with wrap=<width>",
+                                    layout_box_path(&tree, layout_snapshots, *container_id),
+                                ));
+                            }
+                        }
                         // Keyed by the box that holds them, so resolving it
                         // again replaces the earlier report.
                         let mut state = diagnostic_state.lock().expect("canvas state poisoned");
                         state.layout_diagnostics.retain(|(owner, message)| {
                             *owner != Some(*source)
-                                || !(message.contains(OVERFLOW) || message.contains(OVERLAP))
+                                || !(message.contains(OVERFLOW)
+                                    || message.contains(OVERLAP)
+                                    || message.contains(WRAPS))
                         });
                         state
                             .layout_diagnostics
@@ -24441,6 +24474,73 @@ mod tests {
                 .all(|message| !message.contains("leaves its box") && !message.contains("overlaps")),
             "they fit in 2.5: {roomy:?}"
         );
+    }
+
+    /// A row too narrow for its texts on one line breaks them, and check
+    /// says so; a row with room, or a text that chose its wrap width, not.
+    #[test]
+    fn check_reports_rows_that_break_their_texts() {
+        let report = |width: f64, wrap: gaanim_text::prelude::TextWrap| {
+            let mut canvas = SceneModel::new(16.0, 9.0);
+            let members: Vec<_> = ["Un sismo", "fuerte"]
+                .into_iter()
+                .map(|word| {
+                    let spec = gaanim_text::prelude::TextSpec::new(
+                        vec![word.into()],
+                        None,
+                        gaanim_text::prelude::TextStyle::default(),
+                        gaanim_text::prelude::TextFlow {
+                            wrap,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    canvas.text_spec(spec)
+                })
+                .collect();
+            let container = canvas.group(&members.iter().collect::<Vec<_>>());
+            for member in &members {
+                member.claim_layout(&container).unwrap();
+            }
+            canvas.reflow_layout(
+                &container,
+                members
+                    .iter()
+                    .map(|member| crate::canvas::LayoutMemberSpec {
+                        id: member.id,
+                        style: gaanim_layout::LayoutItemStyle::default(),
+                    })
+                    .collect(),
+                crate::canvas::LayoutSpec {
+                    kind: gaanim_layout::LayoutNodeKind::Row { wrap: false },
+                    style: gaanim_layout::LayoutStyle {
+                        width: gaanim_layout::SizeRule::Fixed(width),
+                        ..gaanim_layout::LayoutStyle::default()
+                    },
+                    within: LayoutWithin::Safe,
+                },
+                1,
+                None,
+                None,
+                None,
+            );
+            canvas
+                .compiled_layout_diagnostics()
+                .into_iter()
+                .map(|(_, message)| message)
+                .filter(|message| message.contains("leaves less than a line"))
+                .collect::<Vec<_>>()
+        };
+        let auto = gaanim_text::prelude::TextWrap::Auto;
+        let tight = report(1.2, auto);
+        assert_eq!(tight.len(), 1, "{tight:?}");
+        assert!(
+            tight[0].contains("to text \"Un sismo\", so it breaks"),
+            "{tight:?}"
+        );
+        assert!(report(12.0, auto).is_empty());
+        let chosen = report(1.2, gaanim_text::prelude::TextWrap::Width(0.5));
+        assert!(chosen.is_empty(), "{chosen:?}");
     }
 
     /// A row of two rectangles, laid out twice with a play in between.

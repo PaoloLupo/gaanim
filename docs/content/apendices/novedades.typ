@@ -43,6 +43,9 @@ junto a un dato por un ancla.
   `offset`, como `Drawable.place`: `plane.coord(t, pico).place(etiqueta,
   anchor="left", offset=(0.15, 0))` deja la etiqueta a la derecha del punto,
   en unidades de escena, sin desplazar la coordenada en unidades de datos.
+- `gaanim check` avisa de un texto que se sale del área segura en una pausa
+  o al final de un segmento, y de una fila de un layout que parte un texto en
+  varias líneas por falta de ancho, con el texto y dónde.
 - La referencia dice en qué orden se componen los ángulos de `rotate_to_3d`
   (`Rx · Ry · Rz`: primero z, luego y, luego x, sobre los ejes del mundo),
   qué eje mueve `Axis.crossing` (`crossing("min")` en el eje y baja el eje x)
