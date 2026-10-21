@@ -71,7 +71,9 @@ junto a un dato por un ancla.
   color y conserva su ancho.
 - `wipe(reveal)`, `animate.wipe()` y `clip` no recortaban un objeto llevado al
   mundo con `in_3d()`: la curva se veía entera desde el inicio. El pase 3D
-  recorta ahora sus contornos con la máscara, como en 2D.
+  recorta ahora sus contornos con la máscara, como en 2D, y un `wipe` barre
+  el objeto en su propio plano, también si `orient_3d` o `rotate_to_3d` lo
+  giran fuera del plano de la escena.
 - `gaanim export` con solo `--width` (o solo `--height`) dejaba el otro lado
   en 1080 (o 1920) y añadía franjas vacías: una escena 16 × 9 con
   `--width 960` salía de 960 × 1080. Ahora el otro lado sigue la proporción del

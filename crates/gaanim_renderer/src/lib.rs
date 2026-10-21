@@ -63,6 +63,7 @@ impl Plugin for GaanimDerivedGeometryPlugin {
             Update,
             (
                 pipeline::resolve_dynamic_clip_masks_system,
+                in_world::resolve_in_world_wipes_system,
                 pipeline::resolve_dynamic_boolean_system,
                 pipeline::resolve_fill_level_system,
                 pipeline::resolve_vector_outline_system,

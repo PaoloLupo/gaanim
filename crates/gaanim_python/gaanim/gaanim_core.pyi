@@ -4871,8 +4871,9 @@ class Drawable:
         outlines, so its edges stay sharp at any size and meshes in front of
         it hide it pixel by pixel, instead of drawing it above all 3D content.
         It keeps its animations, colors, gradients and strokes: a write, a
-        fade or a color change plays as in 2D, and a ``clip`` or ``wipe``
-        clips it as in 2D. Without a ``material`` it keeps
+        fade or a color change plays as in 2D. A ``wipe`` sweeps across it in
+        its own plane, whichever way it faces; a ``clip`` by another shape
+        clips it while its x and y axes stay in the scene's plane. Without a ``material`` it keeps
         its colors unlit; with one it is lit, and receives shadows, as a
         surface. Either way it casts shadows on lit 3D content, as an opaque
         mesh does, where it is at least half opaque. Its 2D drop shadows,
