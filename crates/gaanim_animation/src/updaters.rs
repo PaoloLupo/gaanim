@@ -1017,6 +1017,22 @@ pub enum TrackingEndpoint {
     /// A pixel of an image's or a video's source, from its top-left corner
     /// with y down, through the media's frame, crop and transforms.
     MediaPixel { entity: Entity, x: f64, y: f64 },
+    /// Where the main camera draws another endpoint on the frame, in the
+    /// units a HUD drawable is placed in (see
+    /// [`gaanim_math::Camera::hud_point`]).
+    Screen(Box<TrackingEndpoint>),
+}
+
+impl TrackingEndpoint {
+    /// Whether this endpoint is, or is built on, a point on the screen.
+    pub fn reads_the_screen(&self) -> bool {
+        match self {
+            Self::Screen(_) => true,
+            Self::Offset { origin, .. } | Self::Polar { origin, .. } => origin.reads_the_screen(),
+            Self::Between { from, to, .. } => from.reads_the_screen() || to.reads_the_screen(),
+            _ => false,
+        }
+    }
 }
 
 /// The scene point that shows source pixel `(x, y)` of the image or video
@@ -2518,6 +2534,14 @@ pub fn resolve_tracking_endpoint(ep: &TrackingEndpoint, world: &World) -> Option
             Some(origin + DVec3::new(radius * angle.cos(), radius * angle.sin(), 0.0))
         }
         TrackingEndpoint::MediaPixel { entity, x, y } => media_pixel_point(*entity, *x, *y, world),
+        TrackingEndpoint::Screen(point) => {
+            let point = resolve_tracking_endpoint(point, world)?;
+            let camera = world
+                .get_resource::<gaanim_math::ResolvedCamera>()
+                .map(|resolved| resolved.camera)
+                .or_else(|| world.get_resource::<gaanim_math::Camera>().copied())?;
+            Some(camera.hud_point(point).extend(0.0))
+        }
     }
 }
 
@@ -2856,13 +2880,26 @@ fn bounds_in_frame(entity: Entity, frame: &DMat4, world: &World) -> Option<gaani
 
 /// Follow arbitrary endpoints after authored transforms and custom updaters.
 pub fn endpoint_follow_system(world: &mut World) {
+    follow_endpoints(world, |_| true);
+}
+
+/// System: drawables that follow a point on the screen
+/// ([`TrackingEndpoint::Screen`]) move where this frame's camera draws it,
+/// once the camera is resolved: [`endpoint_follow_system`] runs before it
+/// and reads the camera of the frame before.
+pub fn screen_follow_system(world: &mut World) {
+    follow_endpoints(world, TrackingEndpoint::reads_the_screen);
+}
+
+/// Place each [`EndpointFollow`] whose endpoint `wanted` accepts.
+fn follow_endpoints(world: &mut World, wanted: impl Fn(&TrackingEndpoint) -> bool) {
     let current_time = world
         .get_resource::<PlaybackState>()
         .map_or(0.0, |state| state.current_time);
     let mut updates = Vec::new();
     let mut query = world.query::<(Entity, &EndpointFollow)>();
     for (entity, follow) in query.iter(world) {
-        if !follow.holds_at(current_time) {
+        if !follow.holds_at(current_time) || !wanted(&follow.endpoint) {
             continue;
         }
         let Some(mut position) = resolve_tracking_endpoint(&follow.endpoint, world) else {
@@ -4651,6 +4688,56 @@ mod tests {
         world.resource_mut::<PlaybackState>().current_time = 2.0;
         endpoint_follow_system(&mut world);
         assert_eq!(at(&world), DVec3::new(4.0, 2.0, 0.0));
+    }
+
+    #[test]
+    fn screen_followers_stay_where_the_resolved_camera_draws_their_point() {
+        let mut world = World::new();
+        world.insert_resource(PlaybackState::default());
+        let mut camera = gaanim_math::Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+        camera.set_perspective(0.8, 0.1, 100.0).unwrap();
+        camera
+            .look_at(DVec3::new(6.0, 4.0, 8.0), DVec3::ZERO, DVec3::Y)
+            .unwrap();
+        world.insert_resource(gaanim_math::ResolvedCamera {
+            camera,
+            viewport: Default::default(),
+        });
+        let point = DVec3::new(1.0, 1.0, 0.0);
+        let screen = TrackingEndpoint::Screen(Box::new(TrackingEndpoint::Static(point)));
+        let label = world
+            .spawn((
+                SpatialTransform::default(),
+                EndpointFollow {
+                    endpoint: TrackingEndpoint::Offset {
+                        origin: Box::new(screen),
+                        dx: 0.0.into(),
+                        dy: 0.5.into(),
+                    },
+                    offset: DVec3::ZERO,
+                    offset_space: FollowOffsetSpace::World,
+                    since: 0.0,
+                },
+            ))
+            .id();
+        let plain = world
+            .spawn((
+                SpatialTransform::default(),
+                EndpointFollow {
+                    endpoint: TrackingEndpoint::Static(point),
+                    offset: DVec3::ZERO,
+                    offset_space: FollowOffsetSpace::World,
+                    since: 0.0,
+                },
+            ))
+            .id();
+        screen_follow_system(&mut world);
+        let at = |entity| world.get::<SpatialTransform>(entity).unwrap().translation;
+        let expected = camera.hud_point(point) + gaanim_core::glam::DVec2::new(0.0, 0.5);
+        assert!((at(label).truncate() - expected).length() < 1e-9);
+        assert!(expected.distance(point.truncate()) > 0.1);
+        // Followers of points in the scene are left to `endpoint_follow_system`.
+        assert_eq!(at(plain), DVec3::ZERO);
     }
 
     #[test]

@@ -1224,6 +1224,9 @@ pub enum CanvasEndpoint {
     /// A source pixel of an image or video, from its top-left corner with y
     /// down, through the media's frame, crop and transforms.
     MediaPixel { object: ObjectId, x: f64, y: f64 },
+    /// Where the main camera draws another endpoint on the frame, in the
+    /// units a HUD drawable is placed in, every frame.
+    Screen(Box<CanvasEndpoint>),
 }
 
 /// Lightweight public reference to a derived, non-rendered endpoint.

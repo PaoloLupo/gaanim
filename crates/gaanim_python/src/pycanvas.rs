@@ -2414,6 +2414,38 @@ impl PyCamera {
         Ok(PyCameraState { inner })
     }
 
+    /// Where a camera in `state` draws the world `point` on the frame, in
+    /// HUD units.
+    fn project(&self, point: (f64, f64, f64), state: &PyCameraState) -> PyResult<(f64, f64)> {
+        crate::custom::ensure_authoring_allowed()?;
+        let point = gaanim_core::glam::DVec3::new(point.0, point.1, point.2);
+        if !point.is_finite() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "point must be finite",
+            ));
+        }
+        let at = self
+            .inner
+            .lock()
+            .expect("scene canvas poisoned")
+            .camera_project(&state.inner, point)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok((at.x, at.y))
+    }
+
+    /// A point that is, every frame, where the main camera draws `target`
+    /// on the frame, in HUD units.
+    fn screen_point(&self, target: &Bound<'_, PyAny>) -> PyResult<PyPointRef> {
+        crate::custom::ensure_authoring_allowed()?;
+        let target = resolve_endpoint_3d(target)?;
+        Ok(PyPointRef(
+            self.inner
+                .lock()
+                .expect("scene canvas poisoned")
+                .camera_screen_point(target),
+        ))
+    }
+
     /// Capture authored camera state at the current timeline cursor.
     fn capture(&self) -> PyResult<PyCameraState> {
         crate::custom::ensure_authoring_allowed()?;

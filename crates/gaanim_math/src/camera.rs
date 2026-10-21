@@ -641,15 +641,7 @@ impl Camera {
         if self.is_flat() {
             return point.truncate();
         }
-        let mut point = point;
-        if let Projection::Perspective { near, .. } = self.projection {
-            let forward = self.rotation * DVec3::NEG_Z;
-            let depth = (point - self.position).dot(forward);
-            if depth < near {
-                point += forward * (near - depth);
-            }
-        }
-        let screen = self.world_to_screen(point);
+        let screen = self.world_to_screen(self.in_front(point));
         let canvas = match self.projection {
             Projection::Perspective { .. } => {
                 let scale = self.pixels_per_unit();
@@ -662,6 +654,34 @@ impl Camera {
         };
         let at = canvas.inverse() * gaanim_core::kurbo::Point::new(screen.x, screen.y);
         DVec2::new(at.x, at.y)
+    }
+
+    /// The point of the frame, in scene units of the unmoved camera with y
+    /// up (where a HUD drawable at that point shows), at which this camera
+    /// draws `point`. A point nearer than a perspective's near plane, or
+    /// behind the eye, is drawn as if it lay on that plane, as
+    /// [`Self::canvas_point`] draws it.
+    pub fn hud_point(&self, point: DVec3) -> DVec2 {
+        let screen = self.world_to_screen(self.in_front(point));
+        let scale = self.pixels_per_unit();
+        DVec2::new(
+            (screen.x - self.viewport_width as f64 * 0.5) / scale,
+            (self.viewport_height as f64 * 0.5 - screen.y) / scale,
+        )
+    }
+
+    /// `point`, moved along the view onto a perspective's near plane when it
+    /// lies nearer than it or behind the eye.
+    fn in_front(&self, point: DVec3) -> DVec3 {
+        let mut point = point;
+        if let Projection::Perspective { near, .. } = self.projection {
+            let forward = self.rotation * DVec3::NEG_Z;
+            let depth = (point - self.position).dot(forward);
+            if depth < near {
+                point += forward * (near - depth);
+            }
+        }
+        point
     }
 
     /// Pan in screen space (pixels scaled to world).
@@ -880,6 +900,45 @@ mod tests {
             cam.projection,
             Projection::Orthographic { zoom: 1.0 }
         ));
+    }
+
+    #[test]
+    fn hud_points_are_where_the_camera_draws_a_point_on_the_frame() {
+        let mut camera = Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+        let near = |a: DVec2, b: DVec2| (a - b).length() < 1e-9;
+        assert!(near(
+            camera.hud_point(DVec3::new(3.0, 2.0, 0.0)),
+            DVec2::new(3.0, 2.0)
+        ));
+        // A camera panned to (2, 0) and zoomed twice draws (2, 0) at the
+        // center and (3, 0) two units right of it.
+        camera.position = DVec3::new(2.0, 0.0, 0.0);
+        camera.target = camera.position;
+        camera.projection = Projection::Orthographic { zoom: 2.0 };
+        assert!(near(
+            camera.hud_point(DVec3::new(2.0, 0.0, 0.0)),
+            DVec2::ZERO
+        ));
+        assert!(near(
+            camera.hud_point(DVec3::new(3.0, 0.0, 0.0)),
+            DVec2::new(2.0, 0.0)
+        ));
+        // A perspective camera draws the point it looks at at the center,
+        // and a point above it higher up.
+        let mut camera = Camera::ortho_2d_frame(16.0, 9.0, 1920, 1080);
+        camera.set_perspective(0.8, 0.1, 100.0).unwrap();
+        camera
+            .look_at(
+                DVec3::new(6.0, 4.0, 8.0),
+                DVec3::new(1.0, 0.0, 0.0),
+                DVec3::Y,
+            )
+            .unwrap();
+        assert!(near(
+            camera.hud_point(DVec3::new(1.0, 0.0, 0.0)),
+            DVec2::ZERO
+        ));
+        assert!(camera.hud_point(DVec3::new(1.0, 1.0, 0.0)).y > 0.1);
     }
 
     #[test]

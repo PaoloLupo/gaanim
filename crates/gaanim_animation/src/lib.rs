@@ -81,10 +81,10 @@ pub use updaters::{
     evaluate_reactive_positions, expire_trace_samples, follow_updater, has_reactive_positions,
     mechanism_binding_system, media_pixel_point, media_region_shape, media_region_system,
     orbit_updater, pulse_updater, resolve_entity_bounds, resolve_tracking_endpoint,
-    resolve_tracking_endpoint_with_offset, rotate_updater, sampled_series_system, seek_updaters,
-    surrounding_rect_system, traced_path_3d_system, traced_path_geometry, traced_path_system,
-    traced_source_position, tracking_angle_system, tracking_line_system,
-    tracking_vector_head_system, tracking_world_to_local, updater_system,
+    resolve_tracking_endpoint_with_offset, rotate_updater, sampled_series_system,
+    screen_follow_system, seek_updaters, surrounding_rect_system, traced_path_3d_system,
+    traced_path_geometry, traced_path_system, traced_source_position, tracking_angle_system,
+    tracking_line_system, tracking_vector_head_system, tracking_world_to_local, updater_system,
 };
 pub use writing::{
     FillDrawProgress, PathReveal, PathSource, PathTrimWindow, WriteTipGlow,
@@ -198,6 +198,14 @@ impl bevy::prelude::Plugin for GaanimAnimationPlugin {
                 curvature_on_curve_system.after(normal_on_curve_system),
             )
                 .in_set(SceneSet::Updaters),
+        );
+        // Drawables that follow a point on the screen move where the camera
+        // of this frame draws it, once that camera is resolved.
+        app.add_systems(
+            Update,
+            updaters::screen_follow_system
+                .after(gaanim_scene::systems::resolve_camera_system)
+                .in_set(SceneSet::Camera),
         );
         // Procedural motion wraps propagation: it is added to the local
         // state just before and removed just after, so only world state

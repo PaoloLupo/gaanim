@@ -30,6 +30,11 @@ junto a un dato por un ancla.
 - `scene.geometry.polyline_3d` acepta en cada coordenada un `Parameter`, un
   `Computed` o `scene.time`, como `polyline`, y se vuelve a trazar en cada
   fotograma: una línea 3D que crece o se deforma con los datos.
+- `scene.camera.project(punto, estado)` dice dónde dibuja un estado de
+  cámara un punto del mundo, en las unidades de los objetos `hud()`, y
+  `scene.camera.screen_point(objetivo)` es un punto que sigue en cada
+  fotograma dónde lo dibuja la cámara: una etiqueta `hud()` que lo sigue con
+  `follow` queda sobre un objeto 3D aunque la cámara se mueva.
 - `CoordinateRef.place` y `Drawable.at_coordinate` aceptan `anchor` y
   `offset`, como `Drawable.place`: `plane.coord(t, pico).place(etiqueta,
   anchor="left", offset=(0.15, 0))` deja la etiqueta a la derecha del punto,

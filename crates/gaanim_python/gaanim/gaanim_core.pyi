@@ -6384,6 +6384,37 @@ class Camera:
     def state_2d(self, center: tuple[float, float] = (0.0, 0.0), zoom: float = 1.0, rotation: float = 0.0) -> CameraState: ...
     def state_3d(self, eye: tuple[float, float, float], target: tuple[float, float, float], up: tuple[float, float, float] = (0.0, 1.0, 0.0), fov_y: float = 0.7853981633974483, near: float = 0.1, far: float = 1000.0) -> CameraState: ...
     def capture(self) -> CameraState: ...
+    def project(self, point: tuple[float, float, float], state: CameraState) -> tuple[float, float]:
+        """Where a camera in ``state`` draws the world ``point`` on the frame.
+
+        The result is in HUD units, the ones ``hud()`` drawables are placed
+        in: scene units of the unmoved camera, from the frame's center, y
+        up. ``scene.text("A").hud().move_to(*scene.camera.project(p, top))``
+        puts a label over ``p`` as seen from ``top``. Only a state from
+        ``state_2d`` or ``state_3d`` is known while the scene is written; a
+        captured or saved one, a state of another scene or a non-finite
+        point raise ``ValueError``. A point behind a perspective camera is
+        drawn on its near plane, toward its side.
+
+        Example:
+            top = scene.camera.state_3d(eye=(0, 20, 0.01), target=(0, 0, 0))
+            x, y = scene.camera.project((2, 0, 1), top)
+        """
+        ...
+    def screen_point(self, target: Endpoint) -> PointRef:
+        """A point that is, every frame, where the main camera draws ``target`` on the frame.
+
+        It is in HUD units, so a HUD drawable that follows it stays over
+        ``target`` however the camera moves, also when it looks at the scene
+        from an angle or in perspective: ``label.hud().follow(
+        scene.camera.screen_point(ball))``. ``target`` is any endpoint, a 3D
+        point or a drawable. A drawable that is not ``hud()`` would place
+        the point in the scene instead, where a moving 2D camera shifts it.
+
+        Example:
+            tag = scene.text("ball").hud().follow(scene.camera.screen_point(ball), offset=(0, 0.6))
+        """
+        ...
     def save(self, name: str) -> CameraState: ...
     def to(self, state: CameraState) -> Camera: ...
     def restore(self, name: str) -> Camera: ...

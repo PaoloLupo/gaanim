@@ -887,6 +887,9 @@ fn compile_tracking_endpoint(
             radius: compile_tracking_scalar(radius, id_map, states),
             angle: compile_tracking_scalar(angle, id_map, states),
         },
+        CanvasEndpoint::Screen(point) => {
+            TrackingEndpoint::Screen(Box::new(compile_tracking_endpoint(point, id_map, states)))
+        }
     }
 }
 

@@ -1857,6 +1857,10 @@ pub enum CameraStateError {
     UnknownName(String),
     #[error("camera states can only be used with their owning Scene")]
     ForeignScene,
+    #[error(
+        "a captured or saved camera state is only known when the scene plays;          project with a state from state_2d or state_3d, or follow camera.screen_point"
+    )]
+    NotAuthored,
 }
 
 impl std::fmt::Debug for CameraConstraintHandle {
@@ -5578,6 +5582,38 @@ impl SceneModel {
     }
 
     /// Animate to a reusable concrete or captured camera state.
+    /// Where a camera in `state` draws the world `point` on the frame, in
+    /// the units a HUD drawable is placed in: scene units of the unmoved
+    /// camera, from the center of the frame, y up. Only a state authored
+    /// with [`Self::camera_state_2d`] or [`Self::camera_state_3d`] is known
+    /// while the scene is written.
+    pub fn camera_project(
+        &self,
+        state_handle: &CameraStateHandle,
+        point: DVec3,
+    ) -> Result<gaanim_core::glam::DVec2, CameraStateError> {
+        if !Arc::ptr_eq(&self.state, &state_handle.state) {
+            return Err(CameraStateError::ForeignScene);
+        }
+        let gaanim_animation::CameraStateSource::Concrete(pose) = state_handle.source else {
+            return Err(CameraStateError::NotAuthored);
+        };
+        let (width, height) = self.frame.preview_pixel_size();
+        let mut camera =
+            gaanim_math::Camera::ortho_2d_frame(self.frame.width, self.frame.height, width, height);
+        camera
+            .apply_pose(pose)
+            .expect("an authored camera state is a valid pose");
+        Ok(camera.hud_point(point))
+    }
+
+    /// The point where the main camera draws `target` on the frame, every
+    /// frame, in the units a HUD drawable is placed in: a HUD drawable that
+    /// follows it stays over `target` however the camera moves.
+    pub fn camera_screen_point(&self, target: CanvasEndpoint) -> PointRef {
+        PointRef(CanvasEndpoint::Screen(Box::new(target)))
+    }
+
     pub fn camera_to(
         &self,
         state_handle: &CameraStateHandle,
@@ -8870,6 +8906,7 @@ fn endpoint_is_valid(point: &CanvasEndpoint, state: &CanvasState) -> bool {
             radius,
             angle,
         } => endpoint_is_valid(origin, state) && scalar(radius) && scalar(angle),
+        CanvasEndpoint::Screen(point) => endpoint_is_valid(point, state),
     }
 }
 
