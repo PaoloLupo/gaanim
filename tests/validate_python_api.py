@@ -1704,6 +1704,36 @@ def validate_gltf_contract(module: object) -> list[str]:
     ):
         if not raises_error(expected_error, operation):
             failures.append(f"a glTF call did not raise {expected_error.__name__}")
+    failures.extend(validate_morph_target_contract(module, scene, assets))
+    return failures
+
+
+def validate_morph_target_contract(module: object, scene: object, assets: Path) -> list[str]:
+    """Name, set and animate the morph targets of the sample ball."""
+    failures: list[str] = []
+    blob = scene.media.gltf(str(assets / "Blob.glb"))
+    if blob.morph_targets() != ("Squash", "Spikes", "Lean"):
+        failures.append(f"the ball's morph targets are {blob.morph_targets()!r}")
+    if blob.part("Blob").morph_targets() != blob.morph_targets():
+        failures.append("a glTF node does not list its mesh's morph targets")
+    if blob.copy().morph_targets() != blob.morph_targets():
+        failures.append("Drawable.copy lost the glTF morph targets")
+    if scene.media.gltf(str(assets / "Wolf.glb")).morph_targets() != ():
+        failures.append("a model without morph targets lists some")
+    if blob.morph("Squash", 0.4).morph("Spikes", 1.5) is not blob:
+        failures.append("Drawable.morph did not return the same drawable")
+    if not isinstance(blob.animate.morph("Lean", -1.0).morph("Squash", 0.0).scale_to(1.2), module.Anim):
+        failures.append("Anim.morph does not combine with other property targets")
+    for expected_error, operation in (
+        (KeyError, lambda: blob.morph("Twist", 1.0)),
+        (KeyError, lambda: blob.animate.morph("Twist", 1.0)),
+        (TypeError, lambda: scene.geometry.cube(1.0).morph("Squash", 1.0)),
+        (TypeError, lambda: scene.geometry.cube(1.0).animate.morph("Squash", 1.0)),
+        (ValueError, lambda: blob.morph("Squash", float("nan"))),
+        (ValueError, lambda: blob.animate.morph("Squash", float("inf"))),
+    ):
+        if not raises_error(expected_error, operation):
+            failures.append(f"a morph target call did not raise {expected_error.__name__}")
     return failures
 
 

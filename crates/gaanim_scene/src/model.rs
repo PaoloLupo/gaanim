@@ -1,6 +1,7 @@
 //! What an imported model's primitives add to plain triangle meshes: a
-//! base-color texture read through the mesh's UVs, how its alpha is read,
-//! whether it shows both faces, and the joints and weights that skin it.
+//! base-color texture read through the mesh's UVs, a normal map, how its
+//! alpha is read, whether it shows both faces, the joints and weights that
+//! skin it, and its morph targets.
 //!
 //! A skinned primitive carries [`MeshSkin`]: the entities of its joints and
 //! their inverse bind matrices. Each frame, after transforms propagate,
@@ -8,6 +9,12 @@
 //! each joint relative to the mesh, which the renderer's vertex shader
 //! blends by the weights. The mesh itself stays uploaded once: only the
 //! palette, some tens of matrices, changes from frame to frame.
+//!
+//! A primitive with morph targets carries [`MorphWeights`], one per target,
+//! which its model's animations or a script write. The renderer uploads the
+//! targets' displacements once and adds them, times their weights, to the
+//! vertices it draws, before the skin moves them: a frame changes only the
+//! weights.
 
 use std::sync::Arc;
 
@@ -62,14 +69,45 @@ pub struct SkinWeights {
     pub weights: Vec<[f32; 4]>,
 }
 
+/// A tangent-space normal map, read through the mesh's UVs: each texel
+/// tilts the surface's normal toward the vertices' tangents and bitangents,
+/// so a flat face shades as if it held the bumps the map was baked from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NormalMap {
+    /// Linear RGBA8 texels, red, green and blue holding x, y and z from -1
+    /// (0) to 1 (255): along the tangent, the bitangent and the normal.
+    pub texture: MeshTexture,
+    /// What x and y are multiplied by: 0 leaves the normals as they are.
+    pub scale: f32,
+    /// A tangent per vertex, pointing where u grows: `w`, 1 or -1, is the
+    /// sign of the bitangent `cross(normal, tangent) * w`, which points up
+    /// the image, where green grows: where v shrinks, since glTF's v runs
+    /// down it.
+    pub tangents: Vec<[f32; 4]>,
+}
+
+/// One morph target of a mesh: where each vertex moves, and how its normal
+/// turns, at a weight of one. A mesh draws its vertices plus each target's
+/// displacements times the target's weight ([`MorphWeights`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MorphTarget {
+    /// A displacement per vertex, in the mesh's coordinates.
+    pub positions: Vec<[f32; 3]>,
+    /// What each vertex's normal gains, before it is normalized.
+    pub normals: Option<Vec<[f32; 3]>>,
+}
+
 /// What an imported model's primitive adds to [`crate::TriangleMeshData`].
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MeshSurface {
     pub texture: Option<MeshTexture>,
+    pub normal_map: Option<NormalMap>,
     pub alpha: AlphaMode,
     /// Shows its back faces too; lit meshes otherwise hide them.
     pub double_sided: bool,
     pub skin: Option<SkinWeights>,
+    /// Its morph targets, each with a displacement per vertex.
+    pub morph_targets: Vec<MorphTarget>,
 }
 
 impl MeshSurface {
@@ -94,6 +132,11 @@ pub struct MeshSkin {
 /// renderer blends by each vertex's weights.
 #[derive(Component, Debug, Clone, Default, PartialEq)]
 pub struct SkinPalette(pub Arc<[[f32; 16]]>);
+
+/// The weights of a mesh's morph targets (see [`MorphTarget`]), one per
+/// target, as its model's animations or a script set them this frame.
+#[derive(Component, Debug, Clone, Default, PartialEq)]
+pub struct MorphWeights(pub Arc<[f32]>);
 
 /// The palette of a mesh at world matrix `mesh` whose joints are at world
 /// matrices `joints` and were bound with `inverse_bind`: each joint's matrix

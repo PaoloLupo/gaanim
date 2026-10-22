@@ -779,7 +779,7 @@ pub fn read_mesh(
         color: r.option(read_color)?,
         colors: r.option(read_points)?,
         material: r.option(read_material)?,
-        surface: r.option(|r| read_surface(r, image))?.map(Arc::new),
+        surface: r.option(|r| read_surface(r, version, image))?.map(Arc::new),
         blend: None,
     })
 }
@@ -801,14 +801,30 @@ fn read_wrap(r: &mut Reader<'_>) -> Result<gaanim_scene::TextureWrap> {
     }
 }
 
+fn write_texture(w: &mut Writer, tables: &mut impl Interner, texture: &gaanim_scene::MeshTexture) {
+    w.var(u64::from(tables.image(&texture.image)));
+    write_wrap(w, texture.wrap[0]);
+    write_wrap(w, texture.wrap[1]);
+    w.bool(texture.nearest);
+}
+
+fn read_texture(
+    r: &mut Reader<'_>,
+    image: &dyn Fn(u32) -> Result<peniko::ImageData>,
+) -> Result<gaanim_scene::MeshTexture> {
+    Ok(gaanim_scene::MeshTexture {
+        image: image(r.u32()?)?,
+        wrap: [read_wrap(r)?, read_wrap(r)?],
+        nearest: r.bool()?,
+    })
+}
+
 /// An imported model's texture (an index into the images table), alpha
-/// mode, sides and skin weights.
+/// mode, sides and skin weights, then (format 11) its normal map, with its
+/// texture in the images table, and its morph targets.
 fn write_surface(w: &mut Writer, tables: &mut impl Interner, surface: &gaanim_scene::MeshSurface) {
     w.option(surface.texture.as_ref(), |w, texture| {
-        w.var(u64::from(tables.image(&texture.image)));
-        write_wrap(w, texture.wrap[0]);
-        write_wrap(w, texture.wrap[1]);
-        w.bool(texture.nearest);
+        write_texture(w, tables, texture)
     });
     match surface.alpha {
         gaanim_scene::AlphaMode::Opaque => w.u8(0),
@@ -828,19 +844,25 @@ fn write_surface(w: &mut Writer, tables: &mut impl Interner, surface: &gaanim_sc
         }
         write_points(w, &skin.weights);
     });
+    w.option(surface.normal_map.as_ref(), |w, map| {
+        write_texture(w, tables, &map.texture);
+        w.f32(map.scale);
+        write_points(w, &map.tangents);
+    });
+    w.len(surface.morph_targets.len());
+    for target in &surface.morph_targets {
+        write_points(w, &target.positions);
+        w.option(target.normals.as_deref(), write_points);
+    }
 }
 
+/// Decode what [`write_surface`] wrote in a bundle of format `version`.
 fn read_surface(
     r: &mut Reader<'_>,
+    version: u32,
     image: &dyn Fn(u32) -> Result<peniko::ImageData>,
 ) -> Result<gaanim_scene::MeshSurface> {
-    let texture = r.option(|r| {
-        Ok(gaanim_scene::MeshTexture {
-            image: image(r.u32()?)?,
-            wrap: [read_wrap(r)?, read_wrap(r)?],
-            nearest: r.bool()?,
-        })
-    })?;
+    let texture = r.option(|r| read_texture(r, image))?;
     let alpha = match r.u8()? {
         0 => gaanim_scene::AlphaMode::Opaque,
         1 => gaanim_scene::AlphaMode::Mask(r.f32()?),
@@ -864,11 +886,38 @@ fn read_surface(
         }
         Ok(gaanim_scene::SkinWeights { joints, weights })
     })?;
+    // Format 11 added normal maps and morph targets.
+    if version < 11 {
+        return Ok(gaanim_scene::MeshSurface {
+            texture,
+            alpha,
+            double_sided,
+            skin,
+            ..Default::default()
+        });
+    }
+    let normal_map = r.option(|r| {
+        Ok(gaanim_scene::NormalMap {
+            texture: read_texture(r, image)?,
+            scale: r.f32()?,
+            tangents: read_points(r)?,
+        })
+    })?;
+    let count = r.len()?;
+    let mut morph_targets = Vec::with_capacity(count.min(1 << 10));
+    for _ in 0..count {
+        morph_targets.push(gaanim_scene::MorphTarget {
+            positions: read_points(r)?,
+            normals: r.option(read_points)?,
+        });
+    }
     Ok(gaanim_scene::MeshSurface {
         texture,
+        normal_map,
         alpha,
         double_sided,
         skin,
+        morph_targets,
     })
 }
 

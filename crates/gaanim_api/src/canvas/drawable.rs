@@ -45,7 +45,36 @@ pub struct DrawableHandle {
     named_parts: Option<Arc<HashMap<String, DrawableHandle>>>,
     /// The animations of an imported glTF model, on its root.
     gltf: Option<Arc<gaanim_objects::gltf::GltfAnimations>>,
+    /// The morph targets of a glTF node's mesh, or of every node of a
+    /// model on its root.
+    morph_targets: Arc<[Arc<GltfMorphTargets>]>,
     style_targets: Arc<Vec<SharedObjectSpec>>,
+}
+
+/// The morph targets of a glTF node's mesh: their names, and the node's
+/// primitives that have them, which take their weights.
+#[derive(Debug)]
+pub(crate) struct GltfMorphTargets {
+    pub(crate) names: Arc<[String]>,
+    pub(crate) primitives: Vec<DrawableHandle>,
+}
+
+impl GltfMorphTargets {
+    /// These targets on the copies of their primitives in `copies`; `None`
+    /// when none was copied.
+    fn remapped(&self, copies: &HashMap<ObjectId, DrawableHandle>) -> Option<Arc<Self>> {
+        let primitives: Vec<DrawableHandle> = self
+            .primitives
+            .iter()
+            .filter_map(|primitive| copies.get(&primitive.id).cloned())
+            .collect();
+        (!primitives.is_empty()).then(|| {
+            Arc::new(Self {
+                names: Arc::clone(&self.names),
+                primitives,
+            })
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -64,6 +93,61 @@ pub enum SvgPartError {
     NotSvg,
     #[error("unknown part '{id}'; available parts: {available}")]
     Unknown { id: String, available: String },
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum MorphTargetError {
+    #[error(
+        "this drawable has no morph targets: only glTF models and nodes whose meshes have them do"
+    )]
+    NoTargets,
+    #[error("unknown morph target '{name}'; available targets: {available}")]
+    Unknown { name: String, available: String },
+    #[error("a morph target's weight must be finite")]
+    InvalidWeight,
+}
+
+/// The primitives among `targets` with a morph target named `name`, each
+/// with its spec and the index of that target among its own.
+pub(crate) fn morph_entries<'a>(
+    targets: &'a [Arc<GltfMorphTargets>],
+    name: &str,
+    weight: f64,
+) -> Result<Vec<(ObjectId, &'a SharedObjectSpec, usize)>, MorphTargetError> {
+    if targets.is_empty() {
+        return Err(MorphTargetError::NoTargets);
+    }
+    if !weight.is_finite() {
+        return Err(MorphTargetError::InvalidWeight);
+    }
+    let entries: Vec<_> = targets
+        .iter()
+        .filter_map(|targets| {
+            let index = targets.names.iter().position(|named| named == name)?;
+            Some(
+                targets
+                    .primitives
+                    .iter()
+                    .map(move |primitive| (primitive.id, &primitive.spec, index)),
+            )
+        })
+        .flatten()
+        .collect();
+    if entries.is_empty() {
+        let mut available: Vec<&str> = Vec::new();
+        for targets in targets {
+            for named in targets.names.iter() {
+                if !available.contains(&named.as_str()) {
+                    available.push(named);
+                }
+            }
+        }
+        return Err(MorphTargetError::Unknown {
+            name: name.to_owned(),
+            available: available.join(", "),
+        });
+    }
+    Ok(entries)
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -560,6 +644,7 @@ impl DrawableHandle {
             segment_idx: self.segment_idx,
             named_parts: None,
             gltf: None,
+            morph_targets: Arc::new([]),
             style_targets: Arc::new(Vec::new()),
         })
     }
@@ -912,6 +997,7 @@ impl DrawableHandle {
             segment_idx,
             named_parts: None,
             gltf: None,
+            morph_targets: Arc::new([]),
             style_targets: Arc::new(Vec::new()),
         }
     }
@@ -1165,6 +1251,57 @@ impl DrawableHandle {
         self
     }
 
+    /// A glTF node, or a model's root, whose mesh's morph targets are
+    /// `targets`.
+    pub(crate) fn with_morph_targets(mut self, targets: Vec<Arc<GltfMorphTargets>>) -> Self {
+        self.morph_targets = targets.into();
+        self
+    }
+
+    /// Set the weight of the morph target `name` of a glTF node's mesh, or
+    /// of every node of a model that has one by that name: 0 shows the mesh
+    /// as modelled, 1 the target in full. Declared, it is the weight the
+    /// mesh starts with; after the declaration, a cut at the cursor.
+    pub fn morph(&self, name: &str, weight: f64) -> Result<Self, MorphTargetError> {
+        let entries = morph_entries(&self.morph_targets, name, weight)?;
+        for (_, spec, index) in &entries {
+            let mut spec = spec.lock().expect("object spec poisoned");
+            if let Some(weights) = &mut spec.morph_weights {
+                let mut changed = weights.to_vec();
+                if let Some(slot) = changed.get_mut(*index) {
+                    *slot = weight as f32;
+                }
+                *weights = changed.into();
+            }
+        }
+        self.push_immediate(
+            self.id,
+            AnimationType::Properties(PropertyAnimation {
+                morph: entries
+                    .iter()
+                    .map(|(primitive, _, index)| (*primitive, *index, weight as f32))
+                    .collect(),
+                ..Default::default()
+            }),
+        );
+        Ok(self.clone())
+    }
+
+    /// The names of the morph targets of a glTF node's mesh, or of all the
+    /// nodes of a model, in the file's order and each once; empty for other
+    /// drawables.
+    pub fn morph_targets(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for targets in self.morph_targets.iter() {
+            for name in targets.names.iter() {
+                if !names.contains(name) {
+                    names.push(name.clone());
+                }
+            }
+        }
+        names
+    }
+
     /// The animations of an imported glTF model, in the file's order, with
     /// their durations in seconds; empty for other drawables.
     pub fn animations(&self) -> Vec<(String, f64)> {
@@ -1295,6 +1432,13 @@ impl DrawableHandle {
                 .collect();
             state.active_mut().ops.extend(clips);
         }
+        let remap = |targets: &[Arc<GltfMorphTargets>]| -> Vec<Arc<GltfMorphTargets>> {
+            targets
+                .iter()
+                .filter_map(|targets| targets.remapped(&copies))
+                .collect()
+        };
+        let copy = copy.with_morph_targets(remap(&self.morph_targets));
         let Some(parts) = &self.named_parts else {
             return copy;
         };
@@ -1311,7 +1455,10 @@ impl DrawableHandle {
                 let part = if part.id == self.id {
                     copy.clone()
                 } else {
-                    copies.get(&part.id)?.clone()
+                    copies
+                        .get(&part.id)?
+                        .clone()
+                        .with_morph_targets(remap(&part.morph_targets))
                 };
                 Some((name.clone(), part))
             })
@@ -2616,6 +2763,7 @@ impl DrawableHandle {
     pub fn animate(&self) -> Anim {
         let active_idx = self.state.lock().expect("canvas state poisoned").active_idx;
         Anim::properties(self.id, self.state.clone(), active_idx, self.spec.clone())
+            .with_morph_targets(Arc::clone(&self.morph_targets))
     }
 
     pub(crate) fn r#move(&self, dx: f64, dy: f64) -> Anim {

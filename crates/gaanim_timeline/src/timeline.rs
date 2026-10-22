@@ -2346,9 +2346,15 @@ impl Timeline {
                 ) {
                     continue;
                 }
-                settled.insert((anim.target, channel), anim);
+                settled.insert((anim.target, channel), (clip.start, anim));
             }
-            for ((target, _), anim) in settled {
+            // In the order they started: channels that write the same
+            // component, such as an imported model's animation and a
+            // `morph` of its primitives, end on the latest.
+            let mut settled: Vec<_> = settled.into_values().collect();
+            settled.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (_, anim) in settled {
+                let target = anim.target;
                 if let Some(&target_entity) = entity_map.get(&target) {
                     let final_t = anim.rate_func.evaluate(1.0);
                     apply_lens_spec(world, target_entity, &anim.lens, final_t, true);

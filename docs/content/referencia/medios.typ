@@ -194,7 +194,8 @@ print(scene.media.svg("assets/robot.svg").parts())
 == Modelos glTF
 
 Modelos 3D en glTF 2.0 (`.gltf` con sus archivos, o `.glb`), con sus
-materiales, texturas, esqueletos y animaciones. El modelo se lee al ejecutar el
+materiales, texturas, mapas de normales, esqueletos, morph targets y
+animaciones. El modelo se lee al ejecutar el
 script y se vuelve contenido 3D normal: un grupo por nodo y una malla
 iluminada por primitiva, que dibuja el mismo pase 3D que las primitivas de
 #link("/referencia/geometria/")[Geometría]. Los paquetes `.gaanim` guardan lo ya
@@ -205,7 +206,7 @@ glTF.
   name: "MediaLibrary.gltf",
   kind: "factory",
   params: ((name: "path", type: "str", default: none, desc: [Archivo `.gltf` o `.glb` local.]), (name: "scene", type: "str | int | None", default: "None", desc: [Escena del archivo por nombre o índice; por defecto, su escena principal.])),
-  desc: [Importa el modelo en las unidades del archivo, con su origen en el origen de la escena: `scale_to` lo lleva a la escala de la escena y `move_to` coloca su origen, que suele estar a los pies. Cada nodo es un `Drawable` en su pose de reposo, alcanzable con `part(nombre)`. Se importan los triángulos, las normales, los colores de vértice, los factores y la textura de color del material metallic-roughness, la emisión, los materiales sin luz (`KHR_materials_unlit`), los modos alfa (opaco, recortado en `alphaCutoff` y mezclado), los materiales de dos caras, los esqueletos de hasta 256 huesos y las animaciones de traslación, rotación y escala de los nodos. Quedan fuera los morph targets, los mapas de normales y de oclusión, las transformaciones de textura, las cámaras y luces del archivo y los contornos de `Material3D.outlined`, que un modelo no dibuja. Las texturas se reducen a 2048 píxeles en su lado mayor. Un archivo que no existe lanza `FileNotFoundError`; una escena desconocida, `ValueError`, y un archivo que no es glTF, `RuntimeError`.],
+  desc: [Importa el modelo en las unidades del archivo, con su origen en el origen de la escena: `scale_to` lo lleva a la escala de la escena y `move_to` coloca su origen, que suele estar a los pies. Cada nodo es un `Drawable` en su pose de reposo, alcanzable con `part(nombre)`. Se importan los triángulos, las normales, los colores de vértice, los factores y la textura de color del material metallic-roughness, la emisión, los materiales sin luz (`KHR_materials_unlit`), los modos alfa (opaco, recortado en `alphaCutoff` y mezclado), los materiales de dos caras, los mapas de normales (con las tangentes del archivo o, si no las trae, las de MikkTSpace), los esqueletos de hasta 256 huesos, los morph targets con sus pesos por defecto y sus nombres (`morph_targets()`, `morph()`) y las animaciones de traslación, rotación y escala de los nodos y de los pesos de sus morph targets. Quedan fuera los mapas de oclusión y de metallic-roughness, las transformaciones de textura, un mapa de normales que se lee con otras coordenadas de textura que la textura de color, las cámaras y luces del archivo y los contornos de `Material3D.outlined`, que un modelo no dibuja. Las texturas se reducen a 2048 píxeles en su lado mayor. Un archivo que no existe lanza `FileNotFoundError`; una escena desconocida, `ValueError`, y un archivo que no es glTF, `RuntimeError`.],
 )[
 ```python
 # show-code: true
@@ -249,6 +250,59 @@ scene.play(wolf.animation("Idle_Eating"))
 scene.launch(wolf.animation("Walk", loop=True, transition=0.4), duration=6)
 scene.play(wolf.animate.shift_by(3, 0), duration=3)
 scene.play(wolf.animation("Run", loop=True, transition=0.3, speed=1.2), duration=2)
+```
+]
+
+Los morph targets son formas alternativas de una malla, las shape keys de
+Blender: cada uno desplaza sus vértices y sus normales, y su peso dice cuánto.
+Con peso 0 la malla se ve como se modeló y con 1, el morph target entero; los
+pesos se suman y pueden pasar de 1 o bajar de 0. El pase 3D sube los morph
+targets una vez y, de un fotograma a otro, solo cambian los pesos.
+
+#api-entry(
+  name: "Drawable.morph_targets",
+  kind: "method",
+  signature: "morph_targets() -> tuple[str, ...]",
+  desc: [Los nombres de los morph targets de la malla de un nodo glTF, o de todos los nodos de un modelo, en el orden del archivo y una vez cada uno. Las shape keys de Blender se exportan con su nombre; un morph target sin nombre es `target<índice>`. Vacío para los demás objetos.],
+)[
+```python
+# hide-code
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+print(scene.media.gltf("assets/Blob.glb").morph_targets())
+```
+]
+
+#api-entry(
+  name: "Drawable.morph",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Nombre del morph target, de `morph_targets()`.]), (name: "weight", type: "float", default: none, desc: [Peso: 0 es la malla modelada y 1, el morph target entero.])),
+  returns: (type: "Self", desc: [El mismo objeto.]),
+  desc: [Fija el peso del morph target `name` de la malla de un nodo glTF, o de cada nodo de un modelo que tenga uno con ese nombre; los demás pesos se quedan como están. Antes de que la escena muestre el modelo, es el peso con el que empieza, en lugar del del archivo; después, un corte en el cursor. Una animación del modelo que mueve los mismos pesos parte de ellos y los fija mientras corre, y un `morph` posterior parte de donde los deja. Un nombre desconocido lanza `KeyError` con la lista de nombres; un objeto sin morph targets, `TypeError`, y un peso no finito, `ValueError`.],
+)[
+```python
+>>>from gaanim import *
+>>>scene = Scene(frame=(16, 9))
+blob = scene.media.gltf("assets/Blob.glb").morph("Squash", 0.4).morph("Spikes", 0.2)
+```
+]
+
+#api-entry(
+  name: "Anim.morph",
+  kind: "method",
+  params: ((name: "name", type: "str", default: none, desc: [Nombre del morph target.]), (name: "weight", type: "float", default: none, desc: [Peso final.])),
+  returns: (type: "Anim", desc: [Peso animado.]),
+  desc: [Anima el peso del morph target `name` desde el que tiene hasta `weight`. Se combina con otros destinos de propiedad y con otros `morph` en el mismo `Anim`; los pesos que no nombra conservan el suyo. Lanza lo mismo que `Drawable.morph`.],
+)[
+```python
+# show-code: true
+from gaanim import Scene
+scene = Scene(frame=(16, 9), background="#0f172a")
+blob = scene.media.gltf("assets/Blob.glb").scale_to(1.6).rotate_to_3d(0.3, 0.4, 0)
+scene.play(blob.animate.morph("Spikes", 1.0).duration(1.2))
+scene.play(blob.animate.morph("Spikes", 0.0).morph("Lean", 1.0).duration(1.2))
+# output: preview.webp
+scene.render()
 ```
 ]
 

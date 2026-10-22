@@ -67,7 +67,7 @@ pub use camera_view::{
 };
 pub use drawable::{
     ClipOptions, DrawableHandle, FragmentSelection, GltfAnimationError, ImagePixelError,
-    InvalidOrientation, InvalidWipe, LayoutOwnershipError, MatchingModeError,
+    InvalidOrientation, InvalidWipe, LayoutOwnershipError, MatchingModeError, MorphTargetError,
     Primitive3DHandleError, RotationAxisError, SvgPartError,
 };
 pub use particles::{

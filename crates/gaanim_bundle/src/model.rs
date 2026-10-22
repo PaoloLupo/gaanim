@@ -359,7 +359,8 @@ fn predict(
 /// The interner a mesh is encoded again with, its texture already in the
 /// images table at `texture`.
 struct Interned {
-    texture: Option<u32>,
+    /// The table index of each of its textures, by the id of its pixels.
+    textures: Vec<(u64, u32)>,
 }
 
 impl codec::Interner for Interned {
@@ -367,8 +368,12 @@ impl codec::Interner for Interned {
         unreachable!("a mesh holds no paths")
     }
 
-    fn image(&mut self, _: &peniko::ImageData) -> u32 {
-        self.texture.expect("the mesh's texture is in the table")
+    fn image(&mut self, image: &peniko::ImageData) -> u32 {
+        self.textures
+            .iter()
+            .find(|(id, _)| *id == image.data.id())
+            .map(|(_, index)| *index)
+            .expect("the mesh's textures are in the table")
     }
 }
 
@@ -661,13 +666,22 @@ impl Tables {
                     None => {
                         let index = self.meshes.len() as u32;
                         let start = self.starts.last().expect("a segment is open").meshes;
-                        // Encoded again, its texture is the one already in the table.
+                        // Encoded again, its textures are those already in
+                        // the table.
+                        let surface = mesh.surface.as_deref();
                         let mut texture = Interned {
-                            texture: mesh
-                                .surface
-                                .as_ref()
-                                .and_then(|surface| surface.texture.as_ref())
-                                .map(|texture| self.image_index(&texture.image)),
+                            textures: surface
+                                .into_iter()
+                                .flat_map(|surface| {
+                                    surface
+                                        .texture
+                                        .iter()
+                                        .chain(surface.normal_map.iter().map(|map| &map.texture))
+                                })
+                                .map(|texture| {
+                                    (texture.image.data.id(), self.image_index(&texture.image))
+                                })
+                                .collect(),
                         };
                         let chain = self
                             .mesh_chains
@@ -1474,8 +1488,17 @@ fn write_three_d(
         .enumerate()
         .filter_map(|(index, source)| source.blur.map(|blur| (index, blur.sigma)))
         .collect();
+    // Then the weights of morphed meshes' targets (format 11): by source,
+    // its weights.
+    let morphs: Vec<(usize, &Arc<[f32]>)> = three_d
+        .sources
+        .iter()
+        .enumerate()
+        .filter_map(|(index, source)| source.morph.as_ref().map(|weights| (index, weights)))
+        .collect();
     // Each section is written when it or a later one holds something.
-    let after_images = !images.is_empty() || !shadows.is_empty() || !blurs.is_empty();
+    let after_blurs = !blurs.is_empty() || !morphs.is_empty();
+    let after_images = !images.is_empty() || !shadows.is_empty() || after_blurs;
     let later = !palettes.is_empty()
         || !glows.is_empty()
         || !views.is_empty()
@@ -1655,7 +1678,7 @@ fn write_three_d(
             }
         }
     }
-    if !shadows.is_empty() || !blurs.is_empty() {
+    if !shadows.is_empty() || after_blurs {
         w.len(shadows.len());
         for (index, shadow) in shadows {
             w.len(index);
@@ -1665,11 +1688,21 @@ fn write_three_d(
             w.f64(shadow.blur_radius);
         }
     }
-    if !blurs.is_empty() {
+    if after_blurs {
         w.len(blurs.len());
         for (index, sigma) in blurs {
             w.len(index);
             w.f64(sigma);
+        }
+    }
+    if !morphs.is_empty() {
+        w.len(morphs.len());
+        for (index, weights) in morphs {
+            w.len(index);
+            w.len(weights.len());
+            for weight in weights.iter() {
+                w.f32(*weight);
+            }
         }
     }
 }
@@ -1733,6 +1766,7 @@ fn read_three_d(
             line_range: None,
             fill: None,
             joints: None,
+            morph: None,
             glow: None,
             shadow: None,
             blur: None,
@@ -1972,6 +2006,20 @@ fn read_three_d(
                 .get_mut(index)
                 .ok_or_else(|| corrupt("a blur of no 3D source"))?
                 .blur = Some(gaanim_renderer::effects::GaussianBlur { sigma });
+        }
+    }
+    if !r.is_empty() {
+        for _ in 0..r.len()? {
+            let index = r.len()?;
+            let count = r.len()?;
+            let mut weights = Vec::with_capacity(count.min(1 << 12));
+            for _ in 0..count {
+                weights.push(r.f32()?);
+            }
+            sources
+                .get_mut(index)
+                .ok_or_else(|| corrupt("morph weights of no 3D source"))?
+                .morph = Some(weights.into());
         }
     }
     for (index, glyphs) in fills {
