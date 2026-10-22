@@ -576,7 +576,7 @@ efectos se aplican a rellenos y trazos, incluidos los degradados.
   name: "Drawable.glow",
   kind: "method",
   params: ((name: "color", type: "Color", default: none, desc: [Color del resplandor.]), (name: "radius", type: "float", default: "0.16", desc: [Radio en unidades de escena.]), (name: "intensity", type: "float", default: "1.0", desc: [Intensidad relativa.])),
-  desc: [Añade un resplandor alrededor del objeto. En un objeto 3D (una primitiva, una superficie, una línea o un modelo glTF), o en el grupo que lo contiene, rodea su silueta visible: las partes que otro objeto tapa no brillan.],
+  desc: [Añade un resplandor alrededor del objeto. En un objeto 3D (una primitiva, una superficie, una línea, un modelo glTF o un objeto con `in_3d`), o en el grupo que lo contiene, rodea su silueta visible: las partes que otro objeto tapa no brillan.],
 )[
 ```python
 # show-code: true
@@ -593,7 +593,7 @@ scene.render()
 #api-entry(
   name: "Drawable.blur",
   kind: "method",
-  desc: [Desenfoque gaussiano de `sigma` unidades de escena; `blur(0)` lo quita. Después del primer `play` o `wait` es un corte en el cursor, como `fill`. Un `sigma` negativo o no finito lanza `ValueError`.],
+  desc: [Desenfoque gaussiano de `sigma` unidades de escena; `blur(0)` lo quita. Después del primer `play` o `wait` es un corte en el cursor, como `fill`. Un objeto 3D desenfocado (o uno con `in_3d`, o el que contiene un grupo desenfocado) se dibuja aparte y su color, desenfocado, queda sobre lo que tiene detrás; lo que tiene delante lo tapa. Un `sigma` negativo o no finito lanza `ValueError`.],
 )[
 ```python
 >>>from gaanim import *
@@ -712,7 +712,7 @@ scene.render()
   name: "Drawable.shadow",
   kind: "method",
   params: ((name: "color", type: "Color", default: none, desc: [Color de la sombra; su alfa escala la opacidad.]), (name: "x / y", type: "float", default: "0.08 / -0.08", desc: [Desplazamiento en unidades de escena.]), (name: "blur", type: "float", default: "0.06", desc: [Desenfoque en unidades de escena.])),
-  desc: [Sombra proyectada desplazada y desenfocada. Una imagen proyecta la sombra de sus píxeles opacos, no la de su rectángulo. En un texto o un grupo, una sombra desenfocada se dibuja una sola vez a partir de la silueta de sus miembros rellenos y debajo de todos, como `drop-shadow` de CSS sobre un grupo: los solapes no se oscurecen y el coste no crece con cada glifo. Los miembros recortados, con mezcla o solo con trazo proyectan la suya. Con `shader_effect`, la sombra se proyecta desde lo que dibuja el efecto, sin importar cuál de los dos se aplique primero (en un texto o un grupo, cuando sus miembros comparten la sombra, como la da su estilo).],
+  desc: [Sombra proyectada desplazada y desenfocada. Una imagen proyecta la sombra de sus píxeles opacos, no la de su rectángulo. En un texto o un grupo, una sombra desenfocada se dibuja una sola vez a partir de la silueta de sus miembros rellenos y debajo de todos, como `drop-shadow` de CSS sobre un grupo: los solapes no se oscurecen y el coste no crece con cada glifo. Los miembros recortados, con mezcla o solo con trazo proyectan la suya. Con `shader_effect`, la sombra se proyecta desde lo que dibuja el efecto, sin importar cuál de los dos se aplique primero (en un texto o un grupo, cuando sus miembros comparten la sombra, como la da su estilo). En un objeto 3D (o uno con `in_3d`, o el que contiene un grupo con sombra), la sombra parte de su silueta visible, desplazada, y la tapa lo que tiene delante.],
 )[
 ```python
 >>>from gaanim import *
@@ -1516,7 +1516,7 @@ chart = scene.geometry.rect(4, 2).in_3d().orient_3d(x_axis=(0, 0, -1), y_axis=(-
 #api-entry(
   name: "Drawable.billboard",
   kind: "method",
-  desc: [Mantiene un objeto 3D orientado hacia la cámara, en su punto 3D y del tamaño de su texto. Útil para etiquetas y marcadores. Lo dibuja el pase 3D, como `in_3d`: las mallas y las líneas 3D que tiene delante lo tapan píxel a píxel. Se acerca a la cámara la mitad de su lado mayor, así que una superficie en la que se apoya no lo corta. Si contiene una imagen, una escena Lottie o un efecto 2D (sombra, brillo, desenfoque, tiza), se dibuja encima del 3D y se desvanece entero mientras una malla opaca queda entre su punto y la cámara.],
+  desc: [Mantiene un objeto 3D orientado hacia la cámara, en su punto 3D y del tamaño de su texto. Útil para etiquetas y marcadores. Lo dibuja el pase 3D, como `in_3d`: las mallas y las líneas 3D que tiene delante lo tapan píxel a píxel. Se acerca a la cámara la mitad de su lado mayor, así que una superficie en la que se apoya no lo corta. Sus imágenes, escenas Lottie, sombras, brillos y desenfoques también los dibuja el pase 3D, como en `in_3d`. Solo uno que contiene tiza se dibuja encima del 3D y se desvanece entero mientras una malla opaca queda entre su punto y la cámara.],
   none,
 )
 
@@ -1526,7 +1526,7 @@ chart = scene.geometry.rect(4, 2).in_3d().orient_3d(x_axis=(0, 0, -1), y_axis=(-
   params: (
     (name: "material", type: "Material3D | None", default: "None", desc: [Con él, el objeto se ilumina y recibe sombras como una superficie; sin él, conserva sus colores sin iluminar.]),
   ),
-  desc: [Coloca el objeto en el mundo 3D: `move_to_3d` y `rotate_to_3d` lo sitúan y lo inclinan bajo la cámara en perspectiva, y las mallas que tiene delante lo tapan píxel a píxel, en vez de dibujarse encima de todo el 3D. El pase 3D lo dibuja a partir de sus contornos, así que los bordes siguen nítidos a cualquier tamaño. Conserva sus animaciones, colores, degradados y trazos: `write`, un fundido o un cambio de color se ven como en 2D. Un `wipe` lo barre en su propio plano, mire hacia donde mire, y un `clip` con otra figura lo recorta mientras sus ejes x e y sigan en el plano de la escena. Proyecta sombra sobre el 3D iluminado, como una malla opaca, donde es al menos medio opaco. Sus sombras paralelas 2D, el brillo, el desenfoque, la tiza, las imágenes y las escenas Lottie se omiten. A diferencia de `billboard`, que mantiene el objeto de frente a la cámara, gira con la escena; `hud` lo fija a la imagen.],
+  desc: [Coloca el objeto en el mundo 3D: `move_to_3d` y `rotate_to_3d` lo sitúan y lo inclinan bajo la cámara en perspectiva, y las mallas que tiene delante lo tapan píxel a píxel, en vez de dibujarse encima de todo el 3D. El pase 3D lo dibuja a partir de sus contornos, así que los bordes siguen nítidos a cualquier tamaño. Conserva sus animaciones, colores, degradados y trazos: `write`, un fundido o un cambio de color se ven como en 2D. Un `wipe` lo barre en su propio plano, mire hacia donde mire, y un `clip` con otra figura lo recorta mientras sus ejes x e y sigan en el plano de la escena. Proyecta sombra sobre el 3D iluminado, como una malla opaca, donde es al menos medio opaco. Una imagen se dibuja en su plano con sus píxeles, y una escena Lottie con los contornos que rellena y traza, al ritmo de la línea de tiempo; en Lottie, los modos de mezcla se dibujan como el normal y una capa translúcida atenúa cada una de sus formas. Su `shadow`, su `glow` y su `blur`, o los de sus partes (como las letras de un texto), los dibuja el pase 3D como en una malla; la tiza se omite. A diferencia de `billboard`, que mantiene el objeto de frente a la cámara, gira con la escena; `hud` lo fija a la imagen.],
 )[
 ```python
 >>>from gaanim import *
