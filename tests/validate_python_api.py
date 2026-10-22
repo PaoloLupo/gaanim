@@ -1591,6 +1591,17 @@ def validate_primitives_3d_contract(module: object) -> list[str]:
         failures.append("Geometry.line_3d accepted an end that is not an endpoint")
     if not isinstance(scene.geometry.line_3d((0, 0, 0), atom).animate.create(), module.Anim):
         failures.append("a 3D line cannot animate its creation")
+    ball, box = scene.geometry.sphere(1.0), scene.geometry.cube(2.0)
+    for morph in (ball.animate.transform_to(box), box.animate.replacement_transform_to(atom)):
+        if not isinstance(morph, module.Anim):
+            failures.append("a 3D mesh cannot transform into another")
+    for target in (scene.geometry.circle(1.0), scene.geometry.surface(lambda x, y: x * y)):
+        try:
+            ball.animate.transform_to(target)
+        except ValueError:
+            pass
+        else:
+            failures.append("a 3D mesh transformed into a drawable that is not one lit as it is")
     return failures
 
 

@@ -392,6 +392,7 @@ fn surface_sheet(
         colors: Some(colors),
         material,
         surface: None,
+        blend: None,
     }
 }
 
@@ -2969,6 +2970,7 @@ impl SceneModel {
         };
         builder.readout_reserves = self.layout_readout_reserves();
         builder.run_time_holds.probed = Arc::clone(&self.camera_hold_probes);
+        builder.morph_mesh_ids = Self::morphed_ids(segments.iter().flat_map(|seg| &seg.ops));
         if let Ok(accent) = self.theme_color("accent") {
             builder.emphasis_color = accent;
         }
@@ -8582,6 +8584,27 @@ impl SceneModel {
         }
     }
 
+    /// Authored ids of the drawables some transform morphs from or into:
+    /// the 3D meshes among them keep their meshes for the morph.
+    fn morphed_ids<'a>(ops: impl Iterator<Item = &'a Op>) -> HashSet<ObjectId> {
+        let mut ids = HashSet::new();
+        for op in ops {
+            let anims: &[AnimationBuilder] = match op {
+                Op::Animate { anim, active: true } => std::slice::from_ref(anim),
+                Op::Play(anims) | Op::Launch(anims) => anims,
+                _ => &[],
+            };
+            for anim in anims {
+                if let AnimationType::Transform { target, .. }
+                | AnimationType::ReplacementTransform { target } = &anim.anim_type
+                {
+                    ids.extend([anim.target, *target]);
+                }
+            }
+        }
+        ids
+    }
+
     fn transform_targets(ops: &[Op]) -> std::collections::HashSet<ObjectId> {
         let mut targets = std::collections::HashSet::new();
         for op in ops {
@@ -11805,12 +11828,24 @@ impl SceneModel {
                         })
                         .collect()
                 });
-                let mref = builder.spawn_triangle_mesh_with_colors(
-                    vertices.clone(),
-                    indices.clone(),
-                    *color,
+                let mesh = TriangleMeshData {
+                    vertices: vertices.clone(),
+                    indices: indices.clone(),
+                    normals: None,
+                    uvs: None,
+                    color: *color,
                     colors,
-                );
+                    material: None,
+                    surface: None,
+                    blend: None,
+                };
+                if builder.morph_mesh_ids.contains(&spec.id) {
+                    let mref = builder.spawn_triangle_mesh_data(mesh.clone());
+                    builder.morph_meshes.insert(mref.id, Arc::new(mesh));
+                    Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
+                    return mref;
+                }
+                let mref = builder.spawn_triangle_mesh_data(mesh);
                 Self::post_apply(builder, mref.id, spec, id_map, frame_bounds);
                 mref
             }
@@ -11823,7 +11858,14 @@ impl SceneModel {
                     Some((mesh, center)) => (mesh, Some(center)),
                     None => (mesh.clone(), None),
                 };
+                let morphed = builder
+                    .morph_mesh_ids
+                    .contains(&spec.id)
+                    .then(|| Arc::new(mesh.clone()));
                 let mref = builder.spawn_triangle_mesh_data(mesh);
+                if let Some(mesh) = morphed {
+                    builder.morph_meshes.insert(mref.id, mesh);
+                }
                 // The mesh is centered on its own origin, so moves, pivots
                 // and `create()` behave as for other primitives.
                 if let Some(center) = center
@@ -15246,6 +15288,156 @@ mod tests {
             near(again.translation, DVec3::new(-0.5, 0.0, 0.0)),
             "{again:?}"
         );
+    }
+
+    #[test]
+    fn a_sphere_morphs_into_a_cube_and_a_torus_where_they_stand_and_seeks_back() {
+        use bevy::prelude::App;
+        use gaanim_scene::{LocalBounds, Material3D, Opacity, TriangleMeshData};
+        let mut canvas = SceneModel::new(1280, 720);
+        let red = Material3D::matte(PenikoColor::from_rgb8(255, 0, 0));
+        let blue = Material3D::matte(PenikoColor::from_rgb8(0, 0, 255));
+        let sphere = canvas.sphere(1.0, 32, 16, red).unwrap();
+        let cube = canvas.cube(2.0, blue).unwrap().move_to_3d(3.0, 0.0, 0.0);
+        let torus = canvas
+            .torus(1.0, 0.4, 32, 16, red)
+            .unwrap()
+            .move_to_3d(0.0, 3.0, 0.0);
+        canvas.play(vec![
+            sphere.animate().transform_to(&cube).unwrap().duration(1.0),
+        ]);
+        canvas.play(vec![
+            sphere.animate().transform_to(&torus).unwrap().duration(1.0),
+        ]);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().keyframes.clear();
+        gaanim_timeline::capture_reload_keyframe(app.world_mut());
+        let (sphere, cube) = (
+            entity_of(app.world_mut(), &sphere),
+            entity_of(app.world_mut(), &cube),
+        );
+        let at = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            let world = app.world();
+            (
+                world
+                    .get::<TriangleMeshData>(sphere)
+                    .unwrap()
+                    .vertices
+                    .len(),
+                world.get::<SpatialTransform>(sphere).unwrap().translation,
+                world.get::<Material3D>(sphere).unwrap().color,
+                world.get::<LocalBounds>(sphere).unwrap().0,
+            )
+        };
+        let grid = (gaanim_objects::morph3d::COLUMNS + 1) * (gaanim_objects::morph3d::ROWS + 1);
+        let near = |a: DVec3, b: DVec3| a.distance(b) < 1e-6;
+
+        // The sphere shows its own mesh until the morph starts.
+        let (vertices, place, _, _) = at(&mut app, 0.0);
+        assert_eq!((vertices, place), (33 * 17, DVec3::ZERO));
+        // Halfway it is the grid, halfway to the cube and between colors,
+        // in the bounds the sphere and the cube share.
+        let (vertices, place, color, bounds) = at(&mut app, 0.5);
+        assert_eq!(vertices, grid);
+        assert!(near(place, DVec3::new(1.5, 0.0, 0.0)), "{place}");
+        let rgba = color.to_rgba8();
+        assert!(rgba.r > 64 && rgba.b > 64, "{rgba:?}");
+        assert!(
+            near(bounds.max, DVec3::ONE) && near(bounds.min, -DVec3::ONE),
+            "{bounds:?}"
+        );
+        // The template stays hidden.
+        assert_eq!(app.world().get::<Opacity>(cube).unwrap().0, 0.0);
+        // Then it is the cube where the cube stands, until the next morph
+        // takes it on to the torus.
+        let (vertices, place, color, _) = at(&mut app, 1.0);
+        assert_eq!(vertices, 24);
+        assert!(near(place, DVec3::new(3.0, 0.0, 0.0)), "{place}");
+        assert_eq!(color.to_rgba8().b, 255);
+        assert_eq!(at(&mut app, 1.5).0, grid);
+        let (vertices, place, _, _) = at(&mut app, 2.0);
+        assert_eq!(vertices, 33 * 17);
+        assert!(near(place, DVec3::new(0.0, 3.0, 0.0)), "{place}");
+        // Seeking back blends again, and before it shows the sphere.
+        assert_eq!(at(&mut app, 0.25).0, grid);
+        assert_eq!(at(&mut app, 0.0), at(&mut app, 0.0));
+        assert_eq!(at(&mut app, 0.0).0, 33 * 17);
+    }
+
+    #[test]
+    fn a_seek_past_a_morph_in_an_earlier_segment_shows_the_mesh_it_ended_on() {
+        use bevy::prelude::App;
+        use gaanim_scene::{Material3D, TriangleMeshData};
+        let mut canvas = SceneModel::new(1280, 720);
+        canvas.segment("morph", None).unwrap();
+        let material = Material3D::default();
+        let sphere = canvas.sphere(1.0, 32, 16, material).unwrap();
+        let cube = canvas.cube(2.0, material).unwrap();
+        canvas.play(vec![
+            sphere.animate().transform_to(&cube).unwrap().duration(1.0),
+        ]);
+        canvas.segment("after", None).unwrap();
+        canvas.wait(2.0);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        let sphere = entity_of(app.world_mut(), &sphere);
+        let at = |app: &mut App, time: f64| {
+            app.world_mut().resource_mut::<Timeline>().seek_request = Some(time);
+            app.update();
+            app.world()
+                .get::<TriangleMeshData>(sphere)
+                .unwrap()
+                .vertices
+                .len()
+        };
+        // Straight into the next segment, then back before the morph and
+        // forward again.
+        assert_eq!(at(&mut app, 2.0), 24);
+        assert_eq!(at(&mut app, 0.0), 33 * 17);
+        assert_eq!(at(&mut app, 2.5), 24);
+    }
+
+    #[test]
+    fn a_3d_mesh_transforms_only_into_a_mesh_lit_as_it_is() {
+        let mut canvas = SceneModel::new(320, 180);
+        let material = gaanim_scene::Material3D::default();
+        let sphere = canvas.sphere(1.0, 16, 8, material).unwrap();
+        let circle = canvas.circle(1.0);
+        let surface = canvas.surface_mesh(
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            vec![0, 1, 2],
+            None,
+        );
+        assert!(sphere.animate().transform_to(&circle).is_err());
+        assert!(circle.animate().transform_to(&sphere).is_err());
+        assert!(sphere.animate().replacement_transform_to(&surface).is_err());
+        let cube = canvas.cube(1.0, material).unwrap();
+        assert!(sphere.animate().transform_to(&cube).is_ok());
+        let square = canvas.square(1.0);
+        assert!(circle.animate().transform_to(&square).is_ok());
     }
 
     #[test]

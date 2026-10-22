@@ -448,6 +448,50 @@ scene.render()
 Los ejes son los de la escena 2D: `x` hacia la derecha, `y` hacia arriba y `z`
 hacia el espectador.
 
+=== Transformar una malla en otra
+
+`animate.transform_to` también transforma una malla 3D en otra: una esfera
+que se infla en un cubo, o que abre sus polos en el agujero de un toro.
+
+```python
+# show-code: true
+from gaanim import BLUE, GOLD, Material3D, Scene
+
+scene = Scene(frame=(16, 9))
+tilt = (0.45, -0.6, 0)
+ball = scene.geometry.sphere(1.7, material=Material3D.matte(BLUE)).rotate_to_3d(*tilt)
+box = scene.geometry.cube(2.8, material=Material3D.matte(GOLD)).rotate_to_3d(*tilt)
+ring = scene.geometry.torus(1.7, 0.65, material=Material3D.matte(BLUE)).rotate_to_3d(0.9, 0, 0)
+scene.play([ball.animate.transform_to(box).duration(1.5)])
+scene.play([ball.animate.transform_to(ring).duration(1.5)])
+# output: preview.webp
+scene.render()
+```
+
+- `ball.animate.transform_to(box)` lleva la malla de `ball` a la de `box`
+  mientras `ball` va a donde está `box`, con su giro, su tamaño y su
+  material. `box` es solo una plantilla y sigue oculta;
+  `replacement_transform_to` la muestra al final en lugar de `ball`.
+- Las dos mallas se muestrean en una misma rejilla de 129 × 97 puntos: por
+  sus coordenadas de textura cuando cubren la malla una sola vez (esfera,
+  toro, plano, perfil de `revolve`) y, si no, con rayos desde el centro de
+  su caja (cubo, cilindro con tapas, `mesh`, texto extruido). Los puntos se
+  emparejan como menos se mueven: un jarrón de `revolve` se redondea en una
+  esfera a lo largo de su perfil, y la esfera se convierte en el cubo punto
+  a punto, a lo largo de cada rayo. Una malla abierta con material, como un
+  plano, oculta las caras que dan la espalda a la cámara mientras se curva,
+  igual que quieta.
+- Antes y después del morph cada malla se dibuja tal cual, así que un cubo
+  conserva sus aristas; durante el morph, sus aristas se ven como un bisel
+  estrecho. Una segunda transformación parte de la última malla:
+  la esfera que se hizo cubo se hace toro desde el cubo.
+- Una malla solo se transforma en otra malla 3D con la misma iluminación:
+  las dos con material o ninguna. Lo demás lanza `ValueError`.
+- Mientras dura el morph, la malla cambia en cada fotograma y se sube de
+  nuevo a la GPU; el paquete `.gaanim` guarda las dos rejillas una vez y, en
+  cada fotograma, solo cuánto avanza entre ellas. Antes y después no cuesta
+  nada.
+
 == Modelos glTF
 
 `scene.media.gltf("modelo.glb")` importa un modelo hecho en Blender u otra

@@ -269,6 +269,9 @@ struct FillBuffers {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Kind {
     Mesh,
+    /// A mesh drawn with an outline, whose source holds the directions the
+    /// outline pushes its vertices out along.
+    OutlinedMesh,
     Lines,
     Fill,
 }
@@ -280,6 +283,7 @@ impl MeshSource {
         self.vertices.hash(&mut hasher);
         self.indices.hash(&mut hasher);
         (self.lines, self.has_colors, self.closed, self.sheet).hash(&mut hasher);
+        self.outline.is_empty().hash(&mut hasher);
         if let Some(model) = &self.model {
             model.vertices.hash(&mut hasher);
             model
@@ -316,6 +320,7 @@ impl MeshSource {
             && self.has_colors == other.has_colors
             && self.closed == other.closed
             && self.sheet == other.sheet
+            && self.outline.is_empty() == other.outline.is_empty()
             && self.vertices == other.vertices
             && self.indices == other.indices
             && match (&self.fill, &other.fill) {
@@ -344,13 +349,18 @@ fn encloses(positions: &[DVec3], indices: &[u32], radius: f64) -> bool {
     encloses_places(&weld(positions, radius), indices)
 }
 
+/// A map hashed for speed rather than against collisions an attacker
+/// chooses, for the maps of a mesh's places and edges, which change with
+/// the mesh and are rebuilt whenever it does.
+type FastMap<K, V> = bevy::platform::collections::HashMap<K, V>;
+
 /// The place of each of `positions`, the same for vertices at one place: those
 /// closer than a hundred-thousandth of `radius`, found in their cell of a
 /// grid that fine or in a neighboring one, since two copies of a vertex
 /// computed with different rounding may straddle a cell boundary.
 fn weld(positions: &[DVec3], radius: f64) -> Vec<u32> {
     let step = (radius * 1e-5).max(f64::MIN_POSITIVE);
-    let mut cells: HashMap<[i64; 3], u32> = HashMap::with_capacity(positions.len());
+    let mut cells: FastMap<[i64; 3], u32> = FastMap::with_capacity(positions.len());
     let mut places: Vec<DVec3> = Vec::with_capacity(positions.len());
     let place: Vec<u32> = positions
         .iter()
@@ -376,7 +386,7 @@ fn weld(positions: &[DVec3], radius: f64) -> Vec<u32> {
 /// volume (see [`encloses`]).
 fn encloses_places(place: &[u32], indices: &[u32]) -> bool {
     // Each edge counts +1 one way and -1 the other.
-    let mut edges: HashMap<(u32, u32), i32> = HashMap::with_capacity(indices.len());
+    let mut edges: FastMap<(u32, u32), i32> = FastMap::with_capacity(indices.len());
     for triangle in indices.as_chunks::<3>().0 {
         let [a, b, c] = triangle.map(|index| place[index as usize]);
         for (from, to) in [(a, b), (b, c), (c, a)] {
@@ -431,8 +441,8 @@ fn outline_directions(
     // Each vertex's own normal, from the faces it belongs to.
     let mut own = vec![DVec3::ZERO; positions.len()];
     // The faces at each place, and the faces along each edge between places.
-    let mut at_place: HashMap<u32, Vec<usize>> = HashMap::new();
-    let mut along: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+    let mut at_place: FastMap<u32, Vec<usize>> = FastMap::default();
+    let mut along: FastMap<(u32, u32), Vec<usize>> = FastMap::default();
     for (face, triangle) in triangles.iter().enumerate() {
         for corner in 0..3 {
             let index = triangle[corner] as usize;
@@ -501,8 +511,9 @@ fn outline_directions(
 
 impl MeshSource {
     /// `None` when `mesh` has no triangle; whether it is closed is checked
-    /// when it is `lit`.
-    fn mesh(mesh: &TriangleMeshData, lit: bool) -> Option<Self> {
+    /// when it is `lit`, and the directions its outline pushes it out along
+    /// are found when it is `outlined` too.
+    fn mesh(mesh: &TriangleMeshData, lit: bool, outlined: bool) -> Option<Self> {
         let count = mesh.vertices.len();
         let positions: Vec<DVec3> = mesh
             .vertices
@@ -571,7 +582,7 @@ impl MeshSource {
             // A model's outline would move with its skin: models draw none.
             outline: place
                 .as_ref()
-                .filter(|_| model.is_none())
+                .filter(|_| outlined && model.is_none())
                 .map(|place| outline_directions(&positions, &indices, place, closed))
                 .unwrap_or_default(),
             digest: 0,
@@ -1057,12 +1068,19 @@ impl<'a> GpuMeshes<'a> {
         let [mesh_key, lines_key] = keys;
         let [mesh_keep, lines_keep] = keep;
         let mut taken = (false, false);
+        // Only an outlined mesh's source finds its outline's directions.
+        let outlined = content.material.is_some_and(|material| material.outlined());
+        let kind = if outlined {
+            Kind::OutlinedMesh
+        } else {
+            Kind::Mesh
+        };
         if let Some(mesh) = content.mesh
-            && let Some(source) =
-                self.sources
-                    .get(mesh_key.0, Kind::Mesh, mesh_key.1, mesh_keep, || {
-                        MeshSource::mesh(mesh, content.material.is_some())
-                    })
+            && let Some(source) = self
+                .sources
+                .get(mesh_key.0, kind, mesh_key.1, mesh_keep, || {
+                    MeshSource::mesh(mesh, content.material.is_some(), outlined)
+                })
         {
             let base = content
                 .material
@@ -4568,6 +4586,7 @@ mod tests {
             colors: None,
             material: None,
             surface: None,
+            blend: None,
         }
     }
 
@@ -4586,7 +4605,7 @@ mod tests {
     fn meshes_keep_their_valid_triangles_with_unit_normals() {
         let mut mesh = quad(peniko::Color::WHITE);
         mesh.indices.extend([0, 1, 9]);
-        let source = MeshSource::mesh(&mesh, true).unwrap();
+        let source = MeshSource::mesh(&mesh, true, false).unwrap();
         assert_eq!(source.count, 6);
         assert_eq!(source.vertices.len(), 4 * MESH_VERTEX_BYTES);
         // The first vertex's normal, generated from the faces, faces +z.
@@ -4596,13 +4615,13 @@ mod tests {
             .collect();
         assert_eq!(normal, [0.0, 0.0, 1.0]);
         mesh.indices.clear();
-        assert!(MeshSource::mesh(&mesh, true).is_none());
+        assert!(MeshSource::mesh(&mesh, true, false).is_none());
     }
 
     #[test]
     fn closed_meshes_are_told_apart_from_open_ones() {
         assert!(
-            !MeshSource::mesh(&quad(peniko::Color::WHITE), true)
+            !MeshSource::mesh(&quad(peniko::Color::WHITE), true, false)
                 .unwrap()
                 .closed
         );
@@ -4624,12 +4643,12 @@ mod tests {
             indices: (0..12).collect(),
             ..quad(peniko::Color::WHITE)
         };
-        let solid = MeshSource::mesh(&tetrahedron, true).unwrap();
+        let solid = MeshSource::mesh(&tetrahedron, true, false).unwrap();
         assert!(solid.closed && !solid.sheet);
         // Without a face it is open, and holds nothing.
         let mut open = tetrahedron.clone();
         open.indices.truncate(9);
-        let open = MeshSource::mesh(&open, true).unwrap();
+        let open = MeshSource::mesh(&open, true, false).unwrap();
         assert!(!open.closed && open.sheet);
         // Both sides of a quad, far from the origin, are closed but hold
         // nothing; unlit, it is neither.
@@ -4646,9 +4665,9 @@ mod tests {
             .collect();
         sides.vertices.extend_from_within(..);
         sides.indices.extend(back);
-        let two_sided = MeshSource::mesh(&sides, true).unwrap();
+        let two_sided = MeshSource::mesh(&sides, true, false).unwrap();
         assert!(two_sided.closed && two_sided.sheet);
-        assert!(!MeshSource::mesh(&sides, false).unwrap().sheet);
+        assert!(!MeshSource::mesh(&sides, false, false).unwrap().sheet);
         // Copies of a corner computed with different rounding still meet,
         // even across a cell of the grid that welds them (1e-5 here).
         let mut positions: Vec<DVec3> = tetrahedron
@@ -4692,7 +4711,7 @@ mod tests {
         let mut built = |revision, mesh: &TriangleMeshData| {
             sources
                 .get(7, Kind::Mesh, revision, None, || {
-                    MeshSource::mesh(mesh, true)
+                    MeshSource::mesh(mesh, true, false)
                 })
                 .unwrap()
         };
@@ -5368,9 +5387,17 @@ mod tests {
         assert_eq!(frame.instances.len(), 4 * INSTANCE_BYTES);
         // The three quads alike share one source and sit next to each
         // other, so they draw as one; the other quad draws apart.
-        let alike: Vec<usize> = (0..4)
-            .filter(|index| frame.draws[*index].source.vertices == frame.draws[0].source.vertices)
-            .collect();
+        let alike = (0..4)
+            .map(|reference| -> Vec<usize> {
+                (0..4)
+                    .filter(|index| {
+                        frame.draws[*index].source.vertices
+                            == frame.draws[reference].source.vertices
+                    })
+                    .collect()
+            })
+            .max_by_key(Vec::len)
+            .unwrap();
         assert_eq!(alike.len(), 3);
         assert!(alike.windows(2).all(|pair| pair[1] == pair[0] + 1));
         let [first, .., last] = alike[..] else {
@@ -5405,7 +5432,7 @@ mod tests {
             indices: (0..12).collect(),
             ..quad(peniko::Color::WHITE)
         };
-        let source = MeshSource::mesh(&tetrahedron, true).unwrap();
+        let source = MeshSource::mesh(&tetrahedron, true, true).unwrap();
         assert_eq!(source.outline.len(), 12 * 12);
         let direction = |vertex: usize| -> [f32; 3] {
             std::array::from_fn(|axis| {
@@ -5424,7 +5451,14 @@ mod tests {
         }
         // Unlit meshes have no material to outline them.
         assert!(
-            MeshSource::mesh(&tetrahedron, false)
+            MeshSource::mesh(&tetrahedron, false, true)
+                .unwrap()
+                .outline
+                .is_empty()
+        );
+        // Nor do meshes whose material draws no outline.
+        assert!(
+            MeshSource::mesh(&tetrahedron, true, false)
                 .unwrap()
                 .outline
                 .is_empty()

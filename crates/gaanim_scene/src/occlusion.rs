@@ -333,6 +333,7 @@ mod tests {
             colors: None,
             material: None,
             surface: None,
+            blend: None,
         }
     }
 

@@ -1852,6 +1852,21 @@ class Anim:
         ``.opacity(0)`` still leaves the source visible. To change it while
         morphing, play an ``animate.opacity`` of the same object in the same
         ``play``.
+
+        Between two 3D meshes (``scene.geometry`` primitives, ``mesh``,
+        ``extrude`` and ``revolve`` solids) the source's mesh morphs into the
+        target's while it moves, turns and grows to where the target stands
+        and its material and colors blend into the target's. Both meshes are
+        sampled on one grid of 129 by 97 points: by their texture coordinates
+        when these cover the mesh once (a sphere, a torus, a plane, a revolved
+        profile), otherwise by rays from the center of their bounds (a cube,
+        a capped cylinder, an extruded text). The points pair as they move
+        least, so a sphere's poles open into a torus's hole. Before and after
+        the morph each mesh is drawn exactly as built; an open lit mesh, as a
+        plane, hides the faces it turns away while it bends, as it does at
+        rest. A 3D mesh transforms only into another 3D mesh lit
+        as it is (both with a material, or neither); anything else raises
+        ``ValueError``.
         """
         ...
     def fill_level(self, level: float) -> Anim:

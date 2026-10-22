@@ -166,6 +166,7 @@ fn mesh(
         colors: None,
         material: Some(material),
         surface: None,
+        blend: None,
     }
 }
 
@@ -774,6 +775,7 @@ pub fn custom_mesh(
         colors,
         material: Some(material),
         surface: None,
+        blend: None,
     })
 }
 

@@ -752,6 +752,7 @@ impl Reader<'_> {
                         double_sided: material.double_sided(),
                         skin,
                     })),
+                    blend: None,
                 },
                 material: material.name().map(str::to_owned),
             });

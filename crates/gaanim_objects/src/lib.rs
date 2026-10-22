@@ -4,6 +4,7 @@ pub mod earcut;
 pub mod extrude;
 pub mod gltf;
 pub mod metaballs;
+pub mod morph3d;
 pub mod offset;
 pub mod prelude;
 pub mod primitives;

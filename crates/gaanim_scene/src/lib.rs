@@ -26,7 +26,7 @@ pub use components::{
     GroupMarker, HudOverlay, InWorld3D, LayoutBackdrop, LayoutInspection, LayoutInspectionCell,
     LayoutInspectionFrame, LayoutInspectionKind, LayoutZoneRecord, LayoutZones, Light3D,
     LightKind3D, Lighting3D, LineListData, LineListSource, LocalBounds, Material3D,
-    Material3DError, Mesh3DMarker, MobjectId, ObjectTag, Opacity, ParallaxLayer, Path2D,
+    Material3DError, Mesh3DMarker, MeshBlend, MobjectId, ObjectTag, Opacity, ParallaxLayer, Path2D,
     PathRevealOrder, PathSource, PlaneClip, PlaneFillData, PlaneGlyph, Presence, RasterImage,
     RenderLayer, RenderOrder, SegmentContent, ShapeDeform, StepRate, StrokeBrush, TextAdvance,
     TextBaseline, TriangleMeshData, Visible, WorldBounds, ZLayer, stepped,

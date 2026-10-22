@@ -96,8 +96,11 @@ pub const FORMAT: &str = "gaanim-bundle";
 /// skin weights on meshes, nor the palettes of skinned meshes, nor camera
 /// views that show only their own layers (snapshots of views), and stored
 /// every mesh and line list whole, where version 7 stores one that only
-/// moves its vertices as their change from the last of its drawable.
-pub const VERSION: u32 = 7;
+/// moves its vertices as their change from the last of its drawable;
+/// version 7 (Gaanim 0.16) stored each frame of a 3D morph that way too,
+/// where version 8 stores the two meshes a morph blends once and each
+/// frame as how far between them it lies.
+pub const VERSION: u32 = 8;
 /// Oldest version this build still reads: bundles published in other pages
 /// keep playing when the hosted players move to a newer version.
 pub const OLDEST_READABLE: u32 = 5;
@@ -2374,6 +2377,7 @@ mod tests {
             colors: None,
             material: None,
             surface: None,
+            blend: None,
         });
         let glow = gaanim_renderer::effects::Glow {
             radius: 0.3,
@@ -2466,6 +2470,7 @@ mod tests {
                     ],
                 }),
             })),
+            blend: None,
         });
         let source = |palette: [f32; 16]| gaanim_renderer::pipeline::CapturedThreeDSource {
             entity: bevy::prelude::Entity::from_raw_u32(1).unwrap(),
