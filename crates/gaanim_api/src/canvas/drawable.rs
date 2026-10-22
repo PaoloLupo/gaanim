@@ -2508,6 +2508,7 @@ impl DrawableHandle {
             spec.billboard_shift = Some(gaanim_scene::BillboardShift {
                 offset,
                 anchor: anchor.map(|anchor| anchor.to_offset()),
+                ..Default::default()
             });
         })
     }

@@ -6,13 +6,17 @@ from .gaanim_core import (
     TextStyle, Transition,
 )
 
+SegmentCamera: TypeAlias = Literal["keep", "reset"]
+"""How a segment starts its camera: as the last one left it, or from the 2D view."""
+
 @dataclass(frozen=True, kw_only=True)
 class SectionStep:
     """Content definition. Section opens the segment; build receives the original Scene.
 
     Builders author content and stops, not additional segments. Metadata is
-    forwarded to Scene.segment. Empty names raise ValueError; noncallable
-    builders or templates raise TypeError.
+    forwarded to Scene.segment; a camera of None takes the section's. Empty
+    names and a camera other than "keep" or "reset" raise ValueError;
+    noncallable builders or templates raise TypeError.
     """
     name: str
     build: Callable[[Scene], None]
@@ -20,6 +24,7 @@ class SectionStep:
     notes: str | None = None
     template: Callable[..., Box] | None = None
     background: BackgroundLike | None = None
+    camera: SegmentCamera | None = None
 
 @dataclass(frozen=True)
 class SectionProgress:
@@ -41,8 +46,19 @@ class Section:
     Keys must be unique among instances in a Scene. Segment names include the
     key, visit and ordinal. This helper does not add runtime navigation groups.
     """
-    def __init__(self, key: str, steps: Sequence[SectionStep], *, title: str | None = None) -> None:
-        """Snapshot steps; empty key/steps/title raise ValueError, invalid steps TypeError."""
+    def __init__(
+        self,
+        key: str,
+        steps: Sequence[SectionStep],
+        *,
+        title: str | None = None,
+        camera: SegmentCamera = "keep",
+    ) -> None:
+        """Snapshot steps; camera is how steps that name none start their camera.
+
+        Empty key/steps/title and a camera other than "keep" or "reset" raise
+        ValueError, invalid steps TypeError.
+        """
         ...
     @property
     def key(self) -> str:
@@ -55,6 +71,10 @@ class Section:
     @property
     def steps(self) -> tuple[SectionStep, ...]:
         """Immutable ordered content definitions."""
+        ...
+    @property
+    def camera(self) -> SegmentCamera:
+        """How the steps start their camera unless they say otherwise."""
         ...
     def build(self, scene: Scene, *, on_enter: Callable[[Scene, SectionProgress], None] | None = None) -> tuple[Segment, ...]:
         """Open segment, call on_enter(scene, progress), then run its builder.

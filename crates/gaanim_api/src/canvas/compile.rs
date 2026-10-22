@@ -3926,8 +3926,19 @@ impl SceneModel {
                             .commands
                             .entity(state.entity)
                             .insert((gaanim_scene::Billboard, bevy::prelude::Transform::default()));
-                        if let Some(shift) = spec.billboard_shift {
-                            builder.commands.entity(state.entity).insert(shift);
+                        // A group turns about its pivot, which `move_to_3d`
+                        // puts on its point, and anchors to its members' box.
+                        let point = builder
+                            .group_pivots
+                            .get(&actual.id)
+                            .copied()
+                            .unwrap_or_default();
+                        if spec.billboard_shift.is_some() || point != DVec3::ZERO {
+                            let shift = spec.billboard_shift.unwrap_or_default();
+                            builder
+                                .commands
+                                .entity(state.entity)
+                                .insert(gaanim_scene::BillboardShift { point, ..shift });
                         }
                     }
                     if let Some(depth) = spec.parallax_depth
@@ -22139,6 +22150,60 @@ mod tests {
             let entity = entity_of(app.world_mut(), handle);
             assert!(app.world().get::<gaanim_scene::Billboard>(entity).is_some());
         }
+    }
+
+    /// A billboard group whose member lies off the group's origin puts the
+    /// point of its box that `anchor` names where `move_to_3d` put it, seen
+    /// in perspective from the side, as a lone drawable does.
+    #[test]
+    fn a_billboard_group_puts_its_anchor_where_move_to_3d_puts_it() {
+        let mut canvas = SceneModel::new(1280, 720);
+        let look = canvas.camera_look_at((7.0, 4.0, 9.0), (0.0, 0.0, 0.0), None, 0.0);
+        let perspective = canvas.camera_perspective(0.6, 0.1, 100.0, 0.0);
+        canvas.play(vec![look, perspective]);
+        // Its right edge on the scene's origin.
+        let bar = canvas.rect(5.0, 1.0).move_to(-2.5, 0.0);
+        let group = canvas
+            .group(&[&bar])
+            .move_to_3d(0.0, 0.0, 0.0)
+            .billboard_shifted(
+                gaanim_core::glam::DVec2::ZERO,
+                Some(crate::canvas::Anchor::Right),
+            );
+        canvas.wait(0.5);
+        let mut app = App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins)
+            .add_plugins(gaanim_scene::GaanimScenePlugin)
+            .add_plugins(gaanim_animation::GaanimAnimationPlugin)
+            .add_plugins(gaanim_timeline::GaanimTimelinePlugin)
+            .add_plugins(gaanim_text::GaanimTextPlugin)
+            .add_plugins(gaanim_renderer::GaanimDerivedGeometryPlugin);
+        app.finish();
+        app.cleanup();
+        app.update();
+        crate::runtime::replay_canvas_into(app.world_mut(), canvas);
+        app.update();
+        app.world_mut().resource_mut::<Timeline>().seek_request = Some(0.25);
+        app.update();
+        let group = entity_of(app.world_mut(), &group);
+        let shift = *app
+            .world()
+            .get::<gaanim_scene::BillboardShift>(group)
+            .unwrap();
+        assert_eq!(shift.point, DVec3::new(-2.5, 0.0, 0.0));
+        let camera = app.world().resource::<gaanim_math::ResolvedCamera>().camera;
+        assert!(matches!(
+            camera.projection,
+            gaanim_math::Projection::Perspective { .. }
+        ));
+        let bar = entity_of(app.world_mut(), &bar);
+        let global = app
+            .world()
+            .get::<gaanim_math::GlobalSpatialTransform>(bar)
+            .unwrap();
+        let right = global.affine_2d * gaanim_core::kurbo::Point::new(2.5, 0.0);
+        // The camera looks at the origin: the canvas's middle.
+        assert!(right.to_vec2().hypot() < 1e-6, "right edge at {right:?}");
     }
 
     #[test]

@@ -469,12 +469,15 @@ pub struct Billboard;
 
 /// Where a [`Billboard`] sits around its point on screen: the point of its
 /// box `anchor` names (a normalized point of its local bounds, `None` for
-/// its own origin) on the point, moved by `offset` scene units of the
-/// frame, however far the point is.
+/// `point`) on the point, moved by `offset` scene units of the frame,
+/// however far the point is.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
 pub struct BillboardShift {
     pub offset: gaanim_core::glam::DVec2,
     pub anchor: Option<gaanim_core::glam::DVec2>,
+    /// The local point that lies on the billboard's point, which it turns
+    /// about: its origin, or a group's pivot, where `move_to_3d` puts it.
+    pub point: gaanim_core::glam::DVec3,
 }
 
 impl BillboardShift {
@@ -486,16 +489,16 @@ impl BillboardShift {
         bounds: Option<gaanim_math::Bounds3D>,
         scale: gaanim_core::glam::DVec3,
     ) -> gaanim_core::glam::DVec3 {
-        let anchor =
-            self.anchor
-                .zip(bounds)
-                .map_or(gaanim_core::glam::DVec2::ZERO, |(anchor, bounds)| {
-                    let (center, half) = (bounds.center(), bounds.size() * 0.5);
-                    gaanim_core::glam::DVec2::new(
-                        center.x + half.x * anchor.x,
-                        center.y + half.y * anchor.y,
-                    )
-                });
+        let anchor = self
+            .anchor
+            .zip(bounds)
+            .map_or(self.point.truncate(), |(anchor, bounds)| {
+                let (center, half) = (bounds.center(), bounds.size() * 0.5);
+                gaanim_core::glam::DVec2::new(
+                    center.x + half.x * anchor.x,
+                    center.y + half.y * anchor.y,
+                )
+            });
         let per = |scale: f64| {
             if scale.abs() > 1e-12 {
                 1.0 / scale
